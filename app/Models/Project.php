@@ -45,9 +45,8 @@ class Project extends Model
         return $this->belongsToMany(Vendor::class)->withPivot('client_id')->withTimestamps();
     }
 
-    public function vendor(): BelongsTo
+    public function vendor(): belongsToMany
     {
-        // dd($this);
         //project has one vendor via the project_vendor pivot table
         // return $this->belongsTo(Vendor::class);
         return $this->belongsToMany(Vendor::class)->withPivot('client_id')->withTimestamps();
@@ -70,7 +69,7 @@ class Project extends Model
         return $this->belongsToMany(Client::class, 'project_vendor')->withPivot('vendor_id')->withTimestamps();
     }
 
-    public function client(): HasOneThrough
+    public function client(): belongsToMany
     {
         //project has one client via the project_vendor pivot table client_id
         // return $this->hasOneThrough(Client::class, 'project_vendor_pivot', 'project_id', 'client_id');
