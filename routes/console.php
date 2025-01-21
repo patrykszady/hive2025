@@ -30,12 +30,8 @@ Schedule::call('\App\Http\Controllers\ReceiptController@auto_receipt')->everyTen
 Schedule::call('\App\Http\Controllers\TransactionController@add_category_to_expense')->hourly()->sendOutputTo(storage_path('logs/schedule.log'));
 
 Schedule::call('\App\Http\Controllers\TransactionController@transaction_vendor_bulk_match')->everyTenMinutes()->sendOutputTo(storage_path('logs/schedule.log'));
-// }
 
-//everyMinute();
-//Laravel 10+ requires this
-//https://laravel.com/docs/10.x/upgrade#redis-cache-tags
-Schedule::command('cache:prune-stale-tags')->hourly();
+// Schedule::command('cache:prune-stale-tags')->hourly();
 
 Schedule::command('horizon:snapshot')->everyFiveMinutes();
 // dd(Schedule::events());
