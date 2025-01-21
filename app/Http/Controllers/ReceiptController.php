@@ -1093,7 +1093,8 @@ class ReceiptController extends Controller
         //09/22/2023 EACH FILE SHOULD BE UPLOADED TO ONEDRIVE AND NOT VIA EMAIL!
         //get receipt from email/onedrive
         $company_emails = CompanyEmail::withoutGlobalScopes()->whereNotNull('api_json->user_id')->where('id', 17)->get();
-        foreach ($company_emails as $company_email) {
+        // dd($company_emails);
+        foreach($company_emails as $company_email) {
             $email_vendor = $company_email->vendor;
             $email_vendor_bank_account_ids = $email_vendor->bank_accounts->pluck('id');
 
@@ -1138,14 +1139,14 @@ class ReceiptController extends Controller
                     ->setReturnType(Message::class)
                     ->execute();
             // dd($receipts_emails);
-            foreach ($receipts_emails as $index => $message) {
-                if ($message->getHasAttachments()) {
+            foreach($receipts_emails as $index => $message){
+                if($message->getHasAttachments()){
                     $attachments =
                         $this->ms_graph->createRequest('GET', '/me/messages/'.$message->getId().'/attachments')
                             ->setReturnType(Attachment::class)
                             ->execute();
 
-                    foreach ($attachments as $loop => $attachment_found) {
+                    foreach($attachments as $loop => $attachment_found){
                         //09/22/2023 EACH FILE SHOULD BE UPLOADED TO ONEDRIVE AND NOT VIA EMAIL!
 
                         //if is for testing only...
@@ -1169,7 +1170,7 @@ class ReceiptController extends Controller
                         //pass receipt info from ocr_receipt_extracted to ocr_extract method
                         $ocr_receipt_data = $this->ocr_extract($ocr_receipt_extracted);
 
-                        if (isset($ocr_receipt_data['error']) && $ocr_receipt_data['error'] == true) {
+                        if(isset($ocr_receipt_data['error']) && $ocr_receipt_data['error'] == true){
                             //if error move this single $attachment to a folder for debug...
                             Storage::disk('files')->move('/_temp_ocr/'.$ocr_filename, '/auto_receipts_failed/'.$ocr_filename);
 
@@ -1313,7 +1314,7 @@ class ReceiptController extends Controller
                         $expense_receipt->expense_id = $expense->id;
                         $expense_receipt->receipt_filename = $filename;
                         $expense_receipt->receipt_html = $ocr_receipt_data['content'];
-                        $expense_receipt->receipt_items = json_encode($ocr_receipt_data['fields']);
+                        $expense_receipt->receipt_items = $ocr_receipt_data['fields'];
                         $expense_receipt->save();
 
                         if ($transaction) {
@@ -1890,7 +1891,7 @@ class ReceiptController extends Controller
         }
 
         //ITEMS
-        if (isset($ocr_receipt_extract_prefix['Items'])) {
+        if(isset($ocr_receipt_extract_prefix['Items'])){
             $items = $ocr_receipt_extract_prefix['Items']['valueArray'];
 
             $formatted_items = [];

@@ -79,12 +79,12 @@ return [
             'days' => 30,
         ],
 
-        'nylas_connection_errors' => [
-            'driver' => 'daily',
-            'path' => storage_path('logs/schedule.log'),
-            'level' => 'debug',
-            'days' => 30,
-        ],
+        // 'nylas_connection_errors' => [
+        //     'driver' => 'daily',
+        //     'path' => storage_path('logs/schedule.log'),
+        //     'level' => 'debug',
+        //     'days' => 30,
+        // ],
     ],
 
 ];
