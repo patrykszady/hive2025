@@ -46,13 +46,10 @@ class SendVendorPaymentEmailJob implements ShouldQueue
      */
     public function handle(): void
     {
-        // if (env('APP_ENV') === 'production') {
-        //     Mail::to($this->to_email)
-        //         ->cc([$this->auth_user->vendor->business_email])
-        //         ->send(new VendorPaymentMade($this->vendor, $this->auth_user->vendor, $this->check));
-        // }
-        Mail::to('patryk.szady@live.com')
-        // ->cc([$this->auth_user->vendor->business_email])
-        ->send(new VendorPaymentMade($this->vendor, $this->auth_user->vendor, $this->check));
+        if (env('APP_ENV') === 'production') {
+            Mail::to($this->to_email)
+                ->cc([$this->auth_user->vendor->business_email])
+                ->send(new VendorPaymentMade($this->vendor, $this->auth_user->vendor, $this->check));
+        }
     }
 }
