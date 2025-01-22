@@ -11,7 +11,8 @@ Artisan::command('inspire', function () {
 // only in Production not in Development enviroment ... EVERYTHING EMAIL RELATED GOES HERE
 // if(env('APP_ENV') == 'production'){
 //->timezone('America/Chicago')->between('6:00', '20:00')
-Schedule::call('\App\Http\Controllers\ReceiptController@ms_graph_email_api')->everyTenMinutes()->sendOutputTo(storage_path('logs/schedule.log'), true);
+//->sendOutputTo(storage_path('logs/schedule.log'), true)
+Schedule::call('\App\Http\Controllers\ReceiptController@ms_graph_email_api')->everyTenMinutes();
 Schedule::call('\App\Http\Controllers\LeadController@leads_in_email')->everyTenMinutes()->sendOutputTo(storage_path('logs/schedule.log'));
 Schedule::call('\App\Http\Controllers\TransactionController@plaid_item_status')->hourly()->sendOutputTo(storage_path('logs/schedule.log'));
 Schedule::call('\App\Http\Controllers\TransactionController@plaid_transactions_sync')->hourly()->sendOutputTo(storage_path('logs/schedule.log'));
