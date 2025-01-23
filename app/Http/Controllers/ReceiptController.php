@@ -1895,12 +1895,19 @@ class ReceiptController extends Controller
             $items = $ocr_receipt_extract_prefix['Items']['valueArray'];
 
             $formatted_items = [];
-            foreach ($items as $key => $line_item) {
+            foreach($items as $key => $line_item) {
                 // if($key == 1){
                 // dd($line_item['valueObject']);
                 $formatted_items[$key]['Description'] = $line_item['valueObject']['Description']['valueString'] ?? null;
                 $formatted_items[$key]['ProductCode'] = $line_item['valueObject']['ProductCode']['valueString'] ?? null;
-                $formatted_items[$key]['TotalPrice'] = $line_item['valueObject']['TotalPrice']['valueCurrency']['amount'] ?? null;
+
+                if(isset($line_item['valueObject']['TotalPrice'])){
+                    $formatted_items[$key]['TotalPrice'] = $line_item['valueObject']['TotalPrice']['valueCurrency']['amount'];
+                }elseif(isset($line_item['valueObject']['Amount'])){
+                    $formatted_items[$key]['TotalPrice'] = $line_item['valueObject']['Amount']['valueCurrency']['amount'];
+                }else{
+                    $formatted_items[$key]['TotalPrice'] = NULL;
+                }
 
                 if (isset($line_item['valueObject']['Quantity'])) {
                     $formatted_items[$key]['Quantity'] = $line_item['valueObject']['Quantity']['valueNumber'];
@@ -1909,9 +1916,11 @@ class ReceiptController extends Controller
                 }
 
                 //price each
-                if (isset($line_item['valueObject']['Price'])) {
+                if(isset($line_item['valueObject']['Price'])){
                     $formatted_items[$key]['Price'] = $line_item['valueObject']['Price']['valueCurrency']['amount'];
-                } else {
+                }elseif(isset($line_item['valueObject']['UnitPrice'])){
+                    $formatted_items[$key]['Price'] = $line_item['valueObject']['UnitPrice']['valueCurrency']['amount'];
+                }else{
                     $formatted_items[$key]['Price'] = $formatted_items[$key]['TotalPrice'];
                 }
                 // }
@@ -1948,11 +1957,11 @@ class ReceiptController extends Controller
                 //     }
                 // }
             }
-
-            // dd($formatted_items);
-        } else {
-            $items = null;
+        }else{
+            $formatted_items = null;
         }
+
+        // dd($formatted_items);
 
         //AMOUNT
         if (isset($ocr_receipt_extract_prefix['Total'])) {
