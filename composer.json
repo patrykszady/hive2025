@@ -29,7 +29,7 @@
         "livewire/flux-pro": "^1.0",
         "livewire/livewire": "^3.3",
         "log1x/laravel-webfonts": "^1.0",
-        "microsoft/microsoft-graph": "^2.8",
+        "microsoft/microsoft-graph": "^1.85",
         "nesbot/carbon": "^3.0",
         "nyholm/psr7": "*",
         "opcodesio/log-viewer": "^3.4",
