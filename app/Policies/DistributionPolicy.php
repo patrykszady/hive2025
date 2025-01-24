@@ -17,9 +17,7 @@ class DistributionPolicy
      */
     public function viewAny(User $user): bool
     {
-        if ($user->primary_vendor->pivot->role_id == 1) {
-            return true;
-        }
+        return $user->primary_vendor->pivot->role_id === 1;
     }
 
     /**
@@ -29,9 +27,7 @@ class DistributionPolicy
      */
     public function view(User $user, Distribution $distribution): bool
     {
-        if ($user->primary_vendor->pivot->role_id == 1) {
-            return true;
-        }
+        return $user->primary_vendor->pivot->role_id === 1;
     }
 
     /**

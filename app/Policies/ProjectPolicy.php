@@ -41,9 +41,7 @@ class ProjectPolicy
      */
     public function create(User $user): bool
     {
-        if ($user->primary_vendor->pivot->role_id == 1) {
-            return true;
-        }
+        return $user->primary_vendor->pivot->role_id === 1;
     }
 
     /**
@@ -53,9 +51,7 @@ class ProjectPolicy
      */
     public function update(User $user, Project $project): bool
     {
-        if ($user->primary_vendor->pivot->role_id == 1) {
-            return true;
-        }
+        return $user->primary_vendor->pivot->role_id === 1;
     }
 
     /**

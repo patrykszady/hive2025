@@ -17,9 +17,7 @@ class BankPolicy
      */
     public function viewAny(User $user): bool
     {
-        if ($user->primary_vendor->pivot->role_id == 1) {
-            return true;
-        }
+        return $user->primary_vendor->pivot->role_id === 1;
     }
 
     /**
@@ -29,10 +27,8 @@ class BankPolicy
      */
     public function view(User $user, Bank $bank): bool
     {
-        return true;
-        if ($user->primary_vendor->pivot->role_id == 1) {
-            return true;
-        }
+        // return true;
+        return $user->primary_vendor->pivot->role_id === 1;
     }
 
     /**
@@ -42,9 +38,7 @@ class BankPolicy
      */
     public function create(User $user): bool
     {
-        if ($user->primary_vendor->pivot->role_id == 1) {
-            return true;
-        }
+        return $user->primary_vendor->pivot->role_id === 1;
     }
 
     /**
@@ -54,9 +48,7 @@ class BankPolicy
      */
     public function update(User $user, Bank $bank): bool
     {
-        if ($user->primary_vendor->pivot->role_id == 1) {
-            return true;
-        }
+        return $user->primary_vendor->pivot->role_id === 1;
     }
 
     /**

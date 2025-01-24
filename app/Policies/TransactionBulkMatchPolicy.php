@@ -17,9 +17,7 @@ class TransactionBulkMatchPolicy
      */
     public function viewAny(User $user): bool
     {
-        if ($user->primary_vendor->pivot->role_id == 1) {
-            return true;
-        }
+        return $user->primary_vendor->pivot->role_id === 1;
     }
 
     /**
@@ -39,9 +37,7 @@ class TransactionBulkMatchPolicy
      */
     public function create(User $user): bool
     {
-        if ($user->primary_vendor->pivot->role_id == 1) {
-            return true;
-        }
+        return $user->primary_vendor->pivot->role_id === 1;
     }
 
     /**
@@ -51,9 +47,7 @@ class TransactionBulkMatchPolicy
      */
     public function update(User $user, TransactionBlukMatch $transactionBlukMatch): bool
     {
-        if ($user->primary_vendor->pivot->role_id == 1) {
-            return true;
-        }
+        return $user->primary_vendor->pivot->role_id === 1;
     }
 
     /**

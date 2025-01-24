@@ -18,7 +18,7 @@ use OpenSpout\Common\Entity\Style\Border;
 use OpenSpout\Common\Entity\Style\BorderPart;
 use OpenSpout\Common\Entity\Style\Color;
 use OpenSpout\Common\Entity\Style\Style;
-use Rmunate\Utilities\SpellNumber;
+use Illuminate\Support\Number;
 use Spatie\Browsershot\Browsershot;
 use Spatie\SimpleExcel\SimpleExcelWriter;
 
@@ -208,10 +208,10 @@ class EstimateShow extends Component
         $type = ucwords(strtolower($type));
 
         $estimate_total_words =
-            SpellNumber::value($estimate_total)->locale('en')
-                ->currency('Dollars')
-                ->fraction('cents')
-                ->toMoney();
+            ucwords(
+                Number::spell((int)$estimate_total) . ' dollars and ' .
+                Number::spell((int)(($estimate_total - (int)$estimate_total) * 100)) . ' cents'
+            );
 
         $payments = $estimate->project->payments->where('belongs_to_vendor_id', $estimate->vendor->id);
 

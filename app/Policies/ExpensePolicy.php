@@ -42,9 +42,7 @@ class ExpensePolicy
      */
     public function create(User $user): bool
     {
-        if ($user->primary_vendor->pivot->role_id == 1) {
-            return true;
-        }
+        return $user->primary_vendor->pivot->role_id === 1;
     }
 
     /**
@@ -54,9 +52,7 @@ class ExpensePolicy
      */
     public function update(User $user, Expense $expense): bool
     {
-        if ($user->primary_vendor->pivot->role_id == 1) {
-            return true;
-        }
+        return $user->primary_vendor->pivot->role_id === 1;
     }
 
     /**

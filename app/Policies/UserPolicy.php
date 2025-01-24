@@ -45,9 +45,7 @@ class UserPolicy
      */
     public function create(User $user): bool
     {
-        if ($user->primary_vendor->pivot->role_id == 1) {
-            return true;
-        }
+        return $user->primary_vendor->pivot->role_id === 1;
     }
 
     public function create_team_member(User $user, $vendor_id)

@@ -48,11 +48,7 @@ class TimesheetPolicy
 
     public function viewPayment(User $user)
     {
-        if ($user->primary_vendor->pivot->role_id == 1) {
-            return true;
-        } else {
-            return false;
-        }
+        return $user->primary_vendor->pivot->role_id === 1;
     }
 
     /**
