@@ -93,7 +93,7 @@
                                         '!bg-sky-100' => $day['is_today'] ? true : false,
                                     ])
                                     >
-                                    @foreach($project->tasks()->get() as $task)
+                                    @foreach($project->tasks()->whereNotNull('start_date')->whereNotNull('end_date')->get() as $task)
                                         @if(\Carbon\Carbon::parse($day['database_date'])->between($task->start_date, $task->end_date) && $day['database_date'] !== NULL)
                                             @if(isset($task->options->include_weekend_days) && $day['is_weekend'])
                                                 @if(isset($task->options->include_weekend_days->saturday) && $task->options->include_weekend_days->saturday === true && $day['is_saturday'] === true)

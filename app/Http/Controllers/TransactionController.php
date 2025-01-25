@@ -1834,24 +1834,26 @@ class TransactionController extends Controller
 
             $credit_transactions =
                 Transaction::where('check_id', null)
-                    // ->where('id', 20425)
+                    // ->where('id', 25137)
                     ->where('expense_id', null)
                     ->where('check_number', null)
                     ->where('deposit', null)
                     ->whereNotNull('vendor_id')
                     ->whereDate('transaction_date', '>=', '2022-10-07')
-                    ->whereIn('bank_account_id', $bank_account_ids) //where bank_id_account is a credit card for this user
+                    //where bank_id_account is a credit card for this user
+                    ->whereIn('bank_account_id', $bank_account_ids)
                     ->orderBy('transaction_date', 'ASC')
                     ->get();
+            // dd($credit_transactions);
 
             foreach ($credit_transactions as $credit_transaction) {
                 $debit_transactions =
                     Transaction::where('amount', substr($credit_transaction->amount, 1))
                         ->where('vendor_id', $credit_transaction->vendor_id)
                         ->whereIn('bank_account_id', $vendors_debit_bank_accounts->pluck('id')) //and where bank_type = DEBIT
-                        ->where('expense_id', null)
+                        ->whereNull('expense_id')
                         //->subDays(2)
-                        ->whereBetween('transaction_date', [$credit_transaction->transaction_date, $credit_transaction->transaction_date->addDays(5)])
+                        ->whereBetween('transaction_date', [$credit_transaction->transaction_date, $credit_transaction->transaction_date->addDays(10)])
                         //where what else?
                         ->get();
                 // dd($debit_transactions);
