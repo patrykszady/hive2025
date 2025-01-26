@@ -68,7 +68,7 @@ class ProjectFinances extends Component
 
         Browsershot::html($view)
             ->newHeadless()
-            ->scale(0.8)
+            // ->scale(0.8)
             ->showBrowserHeaderAndFooter()
             ->showBackground()
             // ->headerHtml('Header')

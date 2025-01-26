@@ -39,21 +39,21 @@
                 <x-slot name="search">
                     <flux:select.search placeholder="Search..." />
                 </x-slot>
-                @foreach($vendors as $vendor)
+                @foreach($this->vendors as $vendor)
                     <flux:option value="{{$vendor->id}}">{{$vendor->name}}</flux:option>
                 @endforeach
             </flux:select>
             @if(isset($form->merchant_name))
-                <flux:description><i>{{$form->merchant_name}}</i></flux:description>
+                <flux:description><i class="text-sky-800">{{$form->merchant_name}}</i></flux:description>
             @endif
 
             @if($expense || $form->transaction)
                 @if((is_null($expense->vendor_id) AND isset($form->transaction->plaid_merchant_description)) OR isset($expense->note))
                     @if(isset($form->transaction->plaid_merchant_name))
-                        <flux:description class="!mb-0 !pb-0"><i>Name: {{$form->transaction->plaid_merchant_name}}</i></flux:description>
+                        <flux:description><i class="text-sky-800">Name: {{$form->transaction->plaid_merchant_name}}</i></flux:description>
                     @endif
-                    @if(isset($form->transaction->plaid_merchant_description))
-                        <flux:description><i>Desc: {{$form->transaction->plaid_merchant_description}}</i></flux:description>
+                    @if(isset($form->transaction->plaid_merchant_description) && $form->transaction->plaid_merchant_description != $form->transaction->plaid_merchant_name)
+                        <flux:description><i class="text-sky-800">Desc: {{$form->transaction->plaid_merchant_description}}</i></flux:description>
                     @endif
                 @endif
             @endif
@@ -71,7 +71,7 @@
                     <flux:select wire:model.live="form.project_id" variant="listbox" searchable x-bind:disabled="split" placeholder="Choose project..." >
                         {{-- <flux:option value="" readonly x-text="split ? 'Expense is Split' : 'Select Project'"></flux:option> --}}
 
-                        @foreach($projects as $project)
+                        @foreach($this->projects as $project)
                             <flux:option wire:key="{{$project->id}}" value="{{$project->id}}"><div>{{$project->address}} <br> <i class="font-normal">{{$project->project_name}}</i></div></flux:option>
                         @endforeach
 
@@ -86,11 +86,11 @@
                 </flux:input.group>
                 @if($expense)
                     @if($expense->note)
-                        <flux:description><i>{{$expense->note}}</i></flux:description>
+                        <flux:description><i class="text-sky-800">{{$expense->note}}</i></flux:description>
                     @endif
                     @if($expense->has('receipts'))
                         @if(isset($expense->receipts()->first()->notes))
-                            <flux:description><i>{{$expense->receipts()->first()->notes}}</i></flux:description>
+                            <flux:description><i class="text-sky-800">{{$expense->receipts()->first()->notes}}</i></flux:description>
                         @endif
                     @endif
                 @endif
@@ -128,6 +128,7 @@
         </div>
 
         {{-- CHECK --}}
+        {{-- SHOULD Be a component here --}}
         <div
             x-data="{ open: @entangle('form.paid_by'), project_id: @entangle('form.project_id'), splits: @entangle('splits') }"
             x-show="(project_id || splits) && !open"
@@ -226,5 +227,5 @@
     </form>
 
     {{-- SPLITS MODAL --}}
-    <livewire:expenses.expense-splits-create :projects="$projects" :distributions="$distributions" />
+    <livewire:expenses.expense-splits-create :projects="$this->projects" :distributions="$distributions" />
 </flux:modal>

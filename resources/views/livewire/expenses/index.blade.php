@@ -23,7 +23,7 @@
                     <flux:option value="">ALL VENDORS</flux:option>
                     <flux:option value="0">NO VENDOR</flux:option>
                     <flux:option disabled>---------</flux:option>
-                    @foreach ($vendors as $vendor)
+                    @foreach ($this->vendors as $vendor)
                         <flux:option value="{{$vendor->id}}">{{ $vendor->name }}</flux:option>
                     @endforeach
                 </flux:select>
@@ -37,11 +37,11 @@
                     <flux:option value="NO_PROJECT">NO PROJECT</flux:option>
                     <flux:option value="SPLIT">SPLIT</flux:option>
                     <flux:option disabled>---------</flux:option>
-                    @foreach ($projects as $project)
+                    @foreach ($this->projects as $project)
                         <flux:option value="{{$project->id}}">{{ $project->name }}</flux:option>
                     @endforeach
                     <flux:option disabled>---------</flux:option>
-                    @foreach ($distributions as $distribution)
+                    @foreach ($this->distributions as $distribution)
                         <flux:option value="D:{{$distribution->id}}">{{ $distribution->name }}</flux:option>
                     @endforeach
                 </flux:select>

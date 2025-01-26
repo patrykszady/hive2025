@@ -209,58 +209,10 @@
                                     </div>
                                 </div>
                             @else
-                                <flux:table>
-                                    <flux:columns>
-                                        <flux:column>Desc</flux:column>
-                                        <flux:column>Price</flux:column>
-                                        <flux:column>Qty</flux:column>
-                                        <flux:column>Total</flux:column>
-                                    </flux:columns>
-
-                                    <flux:rows>
-                                        @foreach($expense->receipts()->latest()->first()->receipt_items->items as $line_item)
-                                            <flux:row>
-                                                <flux:cell colspan="4">{{$line_item->Description}}</flux:cell>
-                                            </flux:row>
-                                            <flux:row>
-                                                {{-- 09/28/24 URL TO ITEM --}}
-                                                <flux:cell class="text-right"><i>{{$line_item->ProductCode}}</i></flux:cell>
-                                                <flux:cell>{{money($line_item->Price)}}</flux:cell>
-                                                <flux:cell>{{$line_item->Quantity}}</flux:cell>
-                                                <flux:cell variant="strong">{{money($line_item->TotalPrice)}}</flux:cell>
-                                            </flux:row>
-
-                                        @endforeach
-                                    </flux:rows>
-                                </flux:table>
-
-                                <flux:separator variant="subtle" />
-
-                                <dl class="divide-y divide-gray-100 space-y-3">
-                                    <div class="py-3 grid grid-cols-3 gap-4">
-                                        <dt class="text-sm font-medium text-gray-900 col-start-2 col-span-1 text-right">Subtotal</dt>
-                                        <dd class="text-sm text-gray-700 col-start-3 col-span-1">{{money($expense->receipts()->latest()->first()->receipt_items->subtotal)}}</dd>
-                                    </div>
-
-                                    <div class="py-3 grid grid-cols-3 gap-4">
-                                        <dt class="text-sm font-medium text-gray-900 col-start-2 col-span-1 text-right">Tax</dt>
-                                        <dd class="text-sm text-gray-700 col-start-3 col-span-1">{{money($expense->receipts()->latest()->first()->receipt_items->total_tax)}}</dd>
-                                    </div>
-
-                                    <div class="py-3 grid grid-cols-3 gap-4">
-                                        <dt class="text-sm font-medium text-gray-900 col-start-2 col-span-1 text-right">Total</dt>
-                                        <dd class="text-sm text-gray-700 col-start-3 col-span-1">{{money($expense->receipts()->latest()->first()->receipt_items->total)}}</dd>
-                                    </div>
-                                </dl>
+                                @include('livewire.expenses._receipt')
                             @endif
                         @endif
                     </div>
-
-                    {{-- <div class="space-y-2">
-                        <flux:button variant="primary" class="w-full">Log in</flux:button>
-
-                        <flux:button variant="ghost" class="w-full">Sign up for a new account</flux:button>
-                    </div> --}}
                 </flux:card>
             @endif
         </div>

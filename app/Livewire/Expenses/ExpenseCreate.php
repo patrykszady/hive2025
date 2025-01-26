@@ -39,27 +39,26 @@ class ExpenseCreate extends Component
 
     public $expense_splits = [];
 
-    public $projects = [];
-
-    public $vendors = [];
-    // public $via_vendor_employees = NULL;
-
     protected $listeners = ['resetModal', 'editExpense', 'newExpense', 'createExpenseFromTransaction', 'hasSplits'];
 
     public function mount()
     {
         $this->expense = Expense::make();
-        $this->projects = Project::status(['Active', 'Complete', 'Service Call', 'Service Call Complete'])->sortByDesc('last_status.start_date');
-        $this->vendors = Vendor::orderBy('business_name')->get();
     }
 
-    // #[Computed]
-    // public function vendors()
-    // {
-    //     $vendors = Vendor::orderBy('business_name')->get(['id', 'business_name']);
+    #[Computed]
+    public function vendors()
+    {
+        $vendors = Vendor::orderBy('business_name')->get(['id', 'business_name']);
+        return $vendors;
+    }
 
-    //     return $vendors;
-    // }
+    #[Computed]
+    public function projects()
+    {
+        $projects = Project::status(['Active', 'Complete', 'Service Call', 'Service Call Complete'])->sortByDesc('last_status.start_date');
+        return $projects;
+    }
 
     public function updated($field, $value)
     {
@@ -293,7 +292,6 @@ class ExpenseCreate extends Component
 
         $this->resetModal();
 
-        // dd($this);
         // if($this->form->transaction){
         //     $remove_type = 'transaction';
         // }else{

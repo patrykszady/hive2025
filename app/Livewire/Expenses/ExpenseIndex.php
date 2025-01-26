@@ -24,13 +24,7 @@ class ExpenseIndex extends Component
 
     public $expense_vendor = '';
 
-    public $vendors = [];
-
     public $project = '';
-
-    public $projects = [];
-
-    public $distributions = [];
 
     public $check = '';
 
@@ -85,28 +79,23 @@ class ExpenseIndex extends Component
 
     public function mount()
     {
-        // $transactions = Transaction::where('expense_id', NULL)->where('check_id', NULL)->where('deposit', NULL)->get();
-        // dd($transactions);
         $this->authorize('viewAny', Expense::class);
 
         if (! is_null($this->view)) {
             $this->paginate_number = 5;
         }
 
-        $this->banks = Bank::with('accounts')->get()->groupBy('plaid_ins_id')
-            ->each(function ($banks, $bank_plaid_ins_id) {
-                $this->bank_account_ids[$bank_plaid_ins_id] = [];
-                foreach ($banks as $bank) {
-                    array_push($this->bank_account_ids[$bank_plaid_ins_id], $bank->accounts->pluck('id')->toArray());
-                }
+        // $this->banks = Bank::with('accounts')->get()->groupBy('plaid_ins_id')
+        //     ->each(function ($banks, $bank_plaid_ins_id) {
+        //         $this->bank_account_ids[$bank_plaid_ins_id] = [];
+        //         foreach ($banks as $bank) {
+        //             array_push($this->bank_account_ids[$bank_plaid_ins_id], $bank->accounts->pluck('id')->toArray());
+        //         }
 
-                $this->bank_account_ids[$bank_plaid_ins_id] = array_merge(...$this->bank_account_ids[$bank_plaid_ins_id]);
-            })
-            ->toBase();
+        //         $this->bank_account_ids[$bank_plaid_ins_id] = array_merge(...$this->bank_account_ids[$bank_plaid_ins_id]);
+        //     })
+        //     ->toBase();
 
-        $this->vendors = Vendor::whereHas('expenses')->orWhereHas('transactions')->orderBy('business_name')->get();
-        $this->projects = Project::whereHas('expenses')->orderBy('created_at', 'DESC')->get();
-        $this->distributions = Distribution::all();
     }
 
     public function sort($column)
@@ -117,6 +106,24 @@ class ExpenseIndex extends Component
             $this->sortBy = $column;
             $this->sortDirection = 'asc';
         }
+    }
+
+    #[Computed]
+    public function distributions()
+    {
+        return Distribution::all(['id', 'name']);
+    }
+
+    #[Computed]
+    public function projects()
+    {
+        return Project::whereHas('expenses')->orderBy('created_at', 'DESC')->get();
+    }
+
+    #[Computed]
+    public function vendors()
+    {
+        return Vendor::whereHas('expenses')->orWhereHas('transactions')->orderBy('business_name')->get();
     }
 
     #[Computed]
