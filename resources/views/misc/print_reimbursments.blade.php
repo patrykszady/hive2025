@@ -37,8 +37,8 @@
                     <div style="page-break-before: always;"></div>
 
                     <div class="grid grid-cols-5 gap-4">
-                        <div class="col-span-2">
-                            <flux:card>
+                        <div >
+                            <flux:card class="col-span-2">
                                 <div class="flex justify-between">
                                     <flux:heading>Receipt Info</flux:heading>
                                     <flux:button

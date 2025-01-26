@@ -864,6 +864,7 @@ class ReceiptController extends Controller
                     continue;
                 }
             }
+            // dd($messages);
 
             foreach ($messages as $key => $message) {
                 if (! isset($message->getToRecipients()[0])) {
@@ -901,8 +902,6 @@ class ReceiptController extends Controller
                         //continue... email not a Receipt
                         continue;
                     }
-                } else {
-
                 }
 
                 foreach ($from_email_receipts as $email_receipt) {

@@ -1,322 +1,283 @@
 <!DOCTYPE html>
-<html>
-    <head>
-        <title>{{$title}}</title>
-        <meta charset="utf-8">
-        <!-- Fonts -->
-        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&display=swap">
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
+    {{-- HEAD --}}
+    @include('components.layouts.head')
 
-        <link rel="stylesheet" href="{{ asset('css/app.css') }}">
-    </head>
-
+    {{-- BODY --}}
+    {{--  class="min-h-screen" --}}
     <body>
-        <main class="py-10">
-            <div class="px-4 sm:px-6 md:px-8 break-after-page">
-                <!-- Your content -->
-                <div class="grid max-w-5xl grid-cols-4 gap-4 px-6 mx-auto">
+        <flux:main>
+            {{-- <div style="page-break-before: always;"></div> --}}
+            <div class="break-after-page space-y-4">
+                <div class="grid grid-cols-4 gap-4">
                     {{-- VENDOR DETAILS --}}
-                    <div class="col-span-2">
-                        {{-- <x-cards.wrapper> --}}
-                        <div class="mx-auto">
-                            <div class="overflow-hidden bg-white rounded-lg">
-                                <x-cards.heading>
-                                    <x-slot name="left">
-                                        <h1 class="text-lg">Contractor Details</h1>
-                                    </x-slot>
-                                </x-cards.heading>
-                                <x-cards.body>
-                                    <x-lists.ul>
-                                        <x-lists.search_li
-                                            :basic=true
-                                            :line_title="'Project Contractor'"
-                                            href="{{route('vendors.show', $estimate->vendor)}}"
-                                            :line_data="$estimate->vendor->business_name"
-                                            >
-                                        </x-lists.search_li>
-
-                                        <x-lists.search_li
-                                            :basic=true
-                                            :line_title="'Address'"
-                                            :href_target="'blank'"
-                                            :line_data="$estimate->vendor->full_address"
-                                            >
-                                        </x-lists.search_li>
-                                    </x-lists.ul>
-                                </x-cards.body>
+                    <div class="col-span-2 space-y-4">
+                        <flux:card>
+                            <div class="flex justify-between">
+                                <flux:heading size="lg">Contractor Details</flux:heading>
                             </div>
-                        </div>
+                            <x-lists.ul>
+                                <x-lists.search_li
+                                    :basic=true
+                                    :line_title="'Project Contractor'"
+                                    href="{{route('vendors.show', $estimate->vendor)}}"
+                                    :line_data="$estimate->vendor->business_name"
+                                    >
+                                </x-lists.search_li>
+
+                                <x-lists.search_li
+                                    :basic=true
+                                    :line_title="'Address'"
+                                    :href_target="'blank'"
+                                    :line_data="$estimate->vendor->full_address"
+                                    >
+                                </x-lists.search_li>
+                            </x-lists.ul>
+                        </flux:card>
+                        <flux:card>
+                            <div class="flex justify-between">
+                                <flux:heading size="lg">Homeowner Details</flux:heading>
+                            </div>
+                        </flux:card>
                     </div>
 
-                    {{-- ESTIMATE DETAILS --}}
-                    <div class="col-span-2">
-                        {{-- <x-cards.wrapper> --}}
-                        <div class="mx-auto">
-                            <div class="overflow-hidden bg-white rounded-lg">
-                                <x-cards.heading>
-                                    <x-slot name="left">
-                                        <h1 class="text-lg">{{$type}} Details</h1>
-                                    </x-slot>
-                                </x-cards.heading>
-                                <x-cards.body>
-                                    <x-lists.ul>
-                                        <x-lists.search_li
-                                            :basic=true
-                                            :line_title="'Project Homeowner'"
-                                            href="{{route('clients.show', $estimate->client)}}"
-                                            :line_data="$estimate->client->name"
-                                            >
-                                        </x-lists.search_li>
-
-                                        <x-lists.search_li
-                                            :basic=true
-                                            :line_title="'Project Name'"
-                                            href="{{route('projects.show', $estimate->project->id)}}"
-                                            :line_data="$estimate->project->project_name"
-                                            >
-                                        </x-lists.search_li>
-
-                                        <x-lists.search_li
-                                            :basic=true
-                                            :line_title="'Jobsite Address'"
-                                            href="{{$estimate->project->getAddressMapURI()}}"
-                                            :href_target="'blank'"
-                                            :line_data="$estimate->project->full_address"
-                                            >
-                                        </x-lists.search_li>
-
-                                        <x-lists.search_li
-                                            :basic=true
-                                            :line_title="'Billing Address'"
-                                            :line_data="$estimate->client->full_address"
-                                            >
-                                        </x-lists.search_li>
-
-                                        <x-lists.search_li
-                                            :basic=true
-                                            :line_title="$type"
-                                            :line_data="$estimate->number"
-                                            >
-                                        </x-lists.search_li>
-                                    </x-lists.ul>
-                                </x-cards.body>
+                    {{-- DOCUMENT DETAILS --}}
+                    <div class="col-span-2 space-y-2">
+                        <flux:card>
+                            <div class="flex justify-between">
+                                <flux:heading size="lg">{{$type}} Details</flux:heading>
                             </div>
-                        </div>
+                            <x-lists.ul>
+                                <x-lists.search_li
+                                    :basic=true
+                                    :line_title="'Project Homeowner'"
+                                    href="{{route('clients.show', $estimate->client)}}"
+                                    :line_data="$estimate->client->name"
+                                    >
+                                </x-lists.search_li>
+
+                                <x-lists.search_li
+                                    :basic=true
+                                    :line_title="'Project Name'"
+                                    href="{{route('projects.show', $estimate->project->id)}}"
+                                    :line_data="$estimate->project->project_name"
+                                    >
+                                </x-lists.search_li>
+
+                                <x-lists.search_li
+                                    :basic=true
+                                    :line_title="'Jobsite Address'"
+                                    href="{{$estimate->project->getAddressMapURI()}}"
+                                    :href_target="'blank'"
+                                    :line_data="$estimate->project->full_address"
+                                    >
+                                </x-lists.search_li>
+
+                                <x-lists.search_li
+                                    :basic=true
+                                    :line_title="'Billing Address'"
+                                    :line_data="$estimate->client->full_address"
+                                    >
+                                </x-lists.search_li>
+
+                                <x-lists.search_li
+                                    :basic=true
+                                    :line_title="$type"
+                                    :line_data="$estimate->number"
+                                    >
+                                </x-lists.search_li>
+                            </x-lists.ul>
+                        </flux:card>
                     </div>
                 </div>
 
                 {{-- SECTIONS --}}
                 <div class="col-span-4 space-y-4">
                     @foreach($sections as $index => $section)
-                        <div class="mx-auto">
-                            <div class="overflow-hidden bg-white rounded-lg">
-                                <x-cards.heading>
-                                    {{-- Section Name Update --}}
-                                    <x-slot name="left">
-                                        <form
-                                            class="flex max-w-md mx-auto gap-x-4"
-                                            >
-                                            <label for="section" class="sr-only">Section Name</label>
-                                            <input
-                                                value="{{$section['name']}}"
-                                                id="sections.{{$index}}.name"
-                                                name="sections.{{$index}}.name"
-                                                type="text"
-                                                class="min-w-0 flex-auto rounded-md border-1 bg-white/5 px-3.5 py-2 text-gray-900 sm:text-sm sm:leading-6"
-                                                >
-                                        </form>
-                                    </x-slot>
-                                </x-cards.heading>
-
-                                <x-cards.body>
-                                    {{--  divide-y divide-gray-300 --}}
-                                    <table class="min-w-full">
-                                        <thead class="text-gray-900 border-b border-gray-400">
-                                            <tr>
-                                                {{-- first th --}}
-                                                <th
-                                                    scope="col"
-                                                    class="hidden px-3 py-3.5 text-right text-sm font-semibold text-gray-900 sm:table-cell"
-                                                    >
-                                                </th>
-                                                <th
-                                                    scope="col"
-                                                    class="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-6 sm:w-1/2"
-                                                    >
-                                                    Item
-                                                </th>
-                                                <th
-                                                    scope="col"
-                                                    class="hidden px-3 py-3.5 text-right text-sm font-semibold text-gray-900 sm:table-cell"
-                                                    >
-                                                    Quantity
-                                                </th>
-                                                <th
-                                                    scope="col"
-                                                    class="hidden px-3 py-3.5 text-right text-sm font-semibold text-gray-900 sm:table-cell"
-                                                    >
-                                                    Unit
-                                                </th>
-                                                @if($type != 'Work Order')
-                                                    <th scope="col"
-                                                        class="hidden px-3 py-3.5 text-right text-sm font-semibold text-gray-900 sm:table-cell"
-                                                        >
-                                                        Cost
-                                                    </th>
-                                                    {{-- last th --}}
-                                                    <th
-                                                        scope="col"
-                                                        class="py-3.5 pl-3 pr-4 text-right text-sm font-semibold text-gray-900 sm:pr-6"
-                                                        >
-                                                        Total
-                                                    </th>
-                                                @endif
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            @foreach($estimate->estimate_line_items()->where('section_id', $section->id)->orderBy('order', 'ASC')->get() as $key => $estimate_line_item)
-                                                <tr class="sm:border-b sm:border-gray-400">
-                                                    <td class="hidden px-3 py-5 text-right text-gray-500 align-text-top text-md sm:table-cell bg-gray-50">{{$index + 1}}.{{$estimate_line_item->order + 1}}</td>
-                                                    {{-- first td --}}
-
-                                                    <td class="pl-4 pr-3 text-md max-w-0 sm:pl-6 bg-gray-50">
-                                                        <a
-                                                        {{-- <x-cards.button type="button" wire:click="$dispatchTo('line-items.estimate-line-item-create', 'addToEstimate', { section_id: {{$section['section_id']}} })"> --}}
-                                                            class="cursor-pointer"
-                                                            {{-- {{$estimate_line_item->pivot->id}}, {{$section['section_id']}} --}}
-                                                            {{--  section_id: {{$section['section_id']}},  --}}
-
-                                                            {{-- href="{{route('estimates.show', $estimate->id)}}" --}}
-                                                            >
-                                                            <div class="text-lg font-medium text-gray-900">{{$estimate_line_item->name}}</div>
-                                                            <div class="text-xs font-bold text-indigo-900">{{$estimate_line_item->category}}/{{$estimate_line_item->sub_category}}</div>
-                                                        </a>
-                                                        {{-- @if($estimate_line_item->pivot->notes)
-                                                            <div class="hidden mt-1 italic text-gray-500 sm:table-cell">
-                                                                {{$estimate_line_item->pivot->notes}}
-                                                            </div>
-                                                        @endif --}}
-                                                    </td>
-
-                                                    <td class="hidden px-3 py-5 text-right text-gray-500 align-text-top text-md sm:table-cell bg-gray-50">{{$estimate_line_item->unit_type !== 'no_unit' ? $estimate_line_item->quantity : ''}}</td>
-                                                    <td class="hidden px-3 py-5 text-right text-gray-500 align-text-top text-md sm:table-cell bg-gray-50">{{$estimate_line_item->unit_type !== 'no_unit' ? $estimate_line_item->unit_type : ''}}</td>
-
-                                                    @if($type != 'Work Order')
-                                                        <td class="hidden px-3 py-5 text-right text-gray-500 align-text-top text-md sm:table-cell bg-gray-50">{{$estimate_line_item->unit_type !== 'no_unit' ? money($estimate_line_item->cost) : ''}}</td>
-                                                        {{-- last td --}}
-                                                        <td class="py-5 pl-3 pr-4 text-right text-gray-800 align-text-top text-md sm:pr-6 bg-gray-50">{{money($estimate_line_item->total)}}</td>
-                                                    @endif
-                                                </tr>
-
-                                                <tr class="border-b border-gray-400">
-                                                    {{-- first td --}}
-                                                    <td class="hidden sm:table-cell"></td>
-                                                    <td class="pb-5 pl-4 pr-3 text-md max-w-0 sm:pl-6" colspan="5">
-                                                        <div class="flex flex-col hidden mt-1 sm:block">
-                                                            <span class="text-black">{{$estimate_line_item->desc}}</span>
-                                                            @if($estimate_line_item->notes)
-                                                                <hr>
-                                                                <span class="text-gray-500"><i>{{$estimate_line_item->notes}}</i></span>
-                                                            @endif
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            @endforeach
-                                        </tbody>
-                                    </table>
-                                </x-cards.body>
-
-                                @if($type != 'Work Order')
-                                    <x-cards.footer>
-                                        <button></button>
-                                        <h3>Section Total: {{money($section->total)}}</h3>
-                                    </x-cards.footer>
-                                @endif
+                        <flux:card>
+                            <div class="flex justify-between">
+                                <flux:heading size="lg" class="text-lg font-extrabold">{{$section['name']}}</flux:heading>
                             </div>
-                        </div>
-                    @endforeach
 
-                    {{-- ESTIMATE TOTAL --}}
-                    @if($type != 'Work Order')
-                        <div class="grid max-w-5xl grid-cols-3 gap-4 px-6 mx-auto">
-                            <div class="col-span-2 col-start-2">
-                                <x-cards.heading>
-                                    <x-slot name="left">
-                                        <h1 class="text-lg">{{$type}} Finances</b></h1>
-                                    </x-slot>
-                                </x-cards.heading>
-                                <x-cards.body>
-                                    {{-- wire:loading should just target the Reimbursment search_li not the entire Proejct Finances wrapper--}}
-                                    <x-lists.ul
-                                        {{-- wire:target="print"
-                                        wire:loading.attr="disabled"
-                                        wire:loading.class="opacity-50 text-opacity-40" --}}
-                                        >
-                                        <x-lists.search_li
-                                            :basic=true
-                                            :line_title="'Estimate'"
-                                            :line_data="money($estimate->project->finances['estimate'])"
+                            <table class="min-w-full">
+                                <thead class="text-gray-900 border-b border-gray-400">
+                                    <tr>
+                                        {{-- first th --}}
+                                        <th
+                                            scope="col"
+                                            class="hidden px-3 py-3.5 text-right text-sm font-semibold text-gray-900 sm:table-cell"
                                             >
-                                        </x-lists.search_li>
-
-                                        <x-lists.search_li
-                                            :basic=true
-                                            :line_title="'Change Order'"
-                                            :line_data="money($estimate->project->finances['change_orders'])"
+                                        </th>
+                                        <th
+                                            scope="col"
+                                            class="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-6 sm:w-1/2"
                                             >
-                                        </x-lists.search_li>
-
-                                        @if($estimate->reimbursments)
-                                            <x-lists.search_li
-                                                :basic=true
-                                                :line_title="'Reimbursements'"
-                                                :line_data="money($estimate->reimbursments)"
+                                            Item
+                                        </th>
+                                        <th
+                                            scope="col"
+                                            class="hidden px-3 py-3.5 text-right text-sm font-semibold text-gray-900 sm:table-cell"
+                                            >
+                                            Quantity
+                                        </th>
+                                        <th
+                                            scope="col"
+                                            class="hidden px-3 py-3.5 text-right text-sm font-semibold text-gray-900 sm:table-cell"
+                                            >
+                                            Unit
+                                        </th>
+                                        @if($type != 'Work Order')
+                                            <th scope="col"
+                                                class="hidden px-3 py-3.5 text-right text-sm font-semibold text-gray-900 sm:table-cell"
                                                 >
-                                            </x-lists.search_li>
+                                                Cost
+                                            </th>
+                                            {{-- last th --}}
+                                            <th
+                                                scope="col"
+                                                class="py-3.5 pl-3 pr-4 text-right text-sm font-semibold text-gray-900 sm:pr-6"
+                                                >
+                                                Total
+                                            </th>
                                         @endif
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach($estimate->estimate_line_items()->where('section_id', $section->id)->orderBy('order', 'ASC')->get() as $key => $estimate_line_item)
+                                        <tr class="sm:border-b sm:border-gray-400">
+                                            <td class="hidden px-3 py-5 text-right text-gray-500 align-text-top text-md sm:table-cell bg-gray-50">{{$index + 1}}.{{$estimate_line_item->order + 1}}</td>
+                                            {{-- first td --}}
 
-                                        <x-lists.search_li
-                                            :basic=true
-                                            :bold="TRUE"
-                                            {{-- make gray --}}
-                                            :line_title="'TOTAL ESTIMATE'"
-                                            :line_data="money($estimate_total + $estimate->reimbursments)"
-                                            >
-                                        </x-lists.search_li>
+                                            <td class="pl-4 pr-3 text-md max-w-0 sm:pl-6 bg-gray-50">
+                                                <a
+                                                {{-- <x-cards.button type="button" wire:click="$dispatchTo('line-items.estimate-line-item-create', 'addToEstimate', { section_id: {{$section['section_id']}} })"> --}}
+                                                    class="cursor-pointer"
+                                                    {{-- {{$estimate_line_item->pivot->id}}, {{$section['section_id']}} --}}
+                                                    {{--  section_id: {{$section['section_id']}},  --}}
 
-                                        {{-- @if($estimate->project->payments->isEmpty()) --}}
-                                        @foreach($payments as $payment)
-                                            <x-lists.search_li
-                                                :basic=true
-                                                :line_title="'Payment ' . $payment->reference"
-                                                :line_data="money($payment->amount)"
-                                                >
-                                            </x-lists.search_li>
-                                        @endforeach
+                                                    {{-- href="{{route('estimates.show', $estimate->id)}}" --}}
+                                                    >
+                                                    <div class="text-lg font-medium text-gray-900">{{$estimate_line_item->name}}</div>
+                                                    <div class="text-xs font-bold text-indigo-900">{{$estimate_line_item->category}}/{{$estimate_line_item->sub_category}}</div>
+                                                </a>
+                                                {{-- @if($estimate_line_item->pivot->notes)
+                                                    <div class="hidden mt-1 italic text-gray-500 sm:table-cell">
+                                                        {{$estimate_line_item->pivot->notes}}
+                                                    </div>
+                                                @endif --}}
+                                            </td>
 
-                                        <x-lists.search_li
-                                            :basic=true
-                                            :bold="TRUE"
-                                            {{-- make gray --}}
-                                            :line_title="'TOTAL PAYMENTS'"
-                                            :line_data="money($payments->sum('amount'))"
-                                            >
-                                        </x-lists.search_li>
+                                            <td class="hidden px-3 py-5 text-right text-gray-500 align-text-top text-md sm:table-cell bg-gray-50">{{$estimate_line_item->unit_type !== 'no_unit' ? $estimate_line_item->quantity : ''}}</td>
+                                            <td class="hidden px-3 py-5 text-right text-gray-500 align-text-top text-md sm:table-cell bg-gray-50">{{$estimate_line_item->unit_type !== 'no_unit' ? $estimate_line_item->unit_type : ''}}</td>
 
-                                        <x-lists.search_li
-                                            :basic=true
-                                            :bold="TRUE"
-                                            {{-- make gray --}}
-                                            :line_title="'BALANCE'"
-                                            :line_data="money(($estimate_total + $estimate->reimbursments) - $payments->sum('amount'))"
-                                            >
-                                        </x-lists.search_li>
-                                        {{-- @endif --}}
-                                    </x-lists.ul>
-                                </x-cards.body>
-                            </div>
-                        </div>
-                    @endif
+                                            @if($type != 'Work Order')
+                                                <td class="hidden px-3 py-5 text-right text-gray-500 align-text-top text-md sm:table-cell bg-gray-50">{{$estimate_line_item->unit_type !== 'no_unit' ? money($estimate_line_item->cost) : ''}}</td>
+                                                {{-- last td --}}
+                                                <td class="py-5 pl-3 pr-4 text-right text-gray-800 align-text-top text-md sm:pr-6 bg-gray-50">{{money($estimate_line_item->total)}}</td>
+                                            @endif
+                                        </tr>
+
+                                        <tr class="border-b border-gray-400">
+                                            {{-- first td --}}
+                                            <td class="hidden sm:table-cell"></td>
+                                            <td class="pb-5 pl-4 pr-3 text-md max-w-0 sm:pl-6" colspan="5">
+                                                <div class="flex flex-col hidden mt-1 sm:block">
+                                                    <span class="text-black">{{$estimate_line_item->desc}}</span>
+                                                    @if($estimate_line_item->notes)
+                                                        <hr>
+                                                        <span class="text-gray-500"><i>{{$estimate_line_item->notes}}</i></span>
+                                                    @endif
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+
+                            @if($type != 'Work Order')
+                                <x-cards.footer>
+                                    <button></button>
+                                    <h3>Section Total: {{money($section->total)}}</h3>
+                                </x-cards.footer>
+                            @endif
+                        </flux:card>
+                    @endforeach
                 </div>
+
+                {{-- ESTIMATE TOTAL --}}
+                @if($type != 'Work Order')
+                    <div style="page-break-before: always;"></div>
+                    <div class="grid grid-cols-4 gap-4">
+
+                        <div class="col-span-2 space-y-4">
+                            {{-- PROJECT PAYMENTS --}}
+                            <livewire:payments.payments-index :project="$estimate->project" :view="'projects.show'" />
+                        </div>
+                        <div class="col-span-2">
+                            <flux:card>
+                                <div class="flex justify-between">
+                                    <flux:heading size="lg">{{$type}} Finances</flux:heading>
+                                </div>
+                                {{-- wire:loading should just target the Reimbursment search_li not the entire Proejct Finances wrapper--}}
+                                <x-lists.ul
+                                    {{-- wire:target="print"
+                                    wire:loading.attr="disabled"
+                                    wire:loading.class="opacity-50 text-opacity-40" --}}
+                                    >
+                                    <x-lists.search_li
+                                        :basic=true
+                                        :line_title="'Estimate'"
+                                        :line_data="money($estimate->project->finances['estimate'])"
+                                        >
+                                    </x-lists.search_li>
+
+                                    <x-lists.search_li
+                                        :basic=true
+                                        :line_title="'Change Order'"
+                                        :line_data="money($estimate->project->finances['change_orders'])"
+                                        >
+                                    </x-lists.search_li>
+
+                                    @if($estimate->reimbursments)
+                                        <x-lists.search_li
+                                            :basic=true
+                                            :line_title="'Reimbursements'"
+                                            :line_data="money($estimate->reimbursments)"
+                                            >
+                                        </x-lists.search_li>
+                                    @endif
+
+                                    <x-lists.search_li
+                                        :basic=true
+                                        :bold="TRUE"
+                                        {{-- make gray --}}
+                                        :line_title="'TOTAL ESTIMATE'"
+                                        :line_data="money($estimate_total + $estimate->reimbursments)"
+                                        >
+                                    </x-lists.search_li>
+
+                                    <x-lists.search_li
+                                        :basic=true
+                                        :bold="TRUE"
+                                        {{-- make gray --}}
+                                        :line_title="'TOTAL PAYMENTS'"
+                                        :line_data="'-' . money($payments->sum('amount'))"
+                                        >
+                                    </x-lists.search_li>
+
+                                    <x-lists.search_li
+                                        :basic=true
+                                        :bold="TRUE"
+                                        {{-- make gray --}}
+                                        :line_title="'BALANCE'"
+                                        :line_data="money(($estimate_total + $estimate->reimbursments) - $payments->sum('amount'))"
+                                        >
+                                    </x-lists.search_li>
+                                </x-lists.ul>
+                            </flux:card>
+                        </div>
+                    </div>
+                @endif
 
                 @if($type == 'Estimate')
                     <div style="page-break-before: always;"> </div>
@@ -430,6 +391,6 @@
                     </div>
                 @endif
             </div>
-        </main>
+        </flux:main>
     </body>
 </html>

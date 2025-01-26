@@ -281,6 +281,7 @@ class ExpenseCreate extends Component
         $this->form->delete();
 
         $this->modal('expenses_form_modal')->close();
+
         Flux::toast(
             duration: 5000,
             position: 'top right',
@@ -304,11 +305,7 @@ class ExpenseCreate extends Component
 
         //     $this->dispatch('refreshComponent')->to('expenses.expense-index');
 
-        //     $this->dispatch('notify',
-        //         type: 'success',
-        //         content: 'Transaction Deleted'
-        //     );
-        // }else{
+
         //     $expense = $this->form->delete();
 
         //     $url = url()->previous();
@@ -320,9 +317,7 @@ class ExpenseCreate extends Component
         //     }else{
         //         $this->dispatch('refreshComponent')->to('expenses.expense-index');
 
-        //         $this->dispatch('notify',
-        //             type: 'success',
-        //             content: 'Expense Deleted'
+
         //         );
         //     }
 
@@ -342,6 +337,16 @@ class ExpenseCreate extends Component
         // return $this->dispatch('validateCheck')->to(CheckCreate::class);
         $expense = $this->form->store();
         $this->modal('expenses_form_modal')->close();
+
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Expense Created.',
+            // route / href / wire:click
+            text: '',
+        );
+
         $this->resetModal();
 
         //queue
@@ -354,12 +359,6 @@ class ExpenseCreate extends Component
         // $this->dispatch('refreshComponent')->to('expenses.expense-show');
         // $this->dispatch('refreshComponent')->to('expenses.expense-index');
         // $this->dispatch('refreshComponent')->to('projects.project-show');
-
-        // $this->dispatch('notify',
-        //     type: 'success',
-        //     content: 'Expense Created',
-        //     route: 'expenses/' . $expense->id
-        // );
     }
 
     public function render()
