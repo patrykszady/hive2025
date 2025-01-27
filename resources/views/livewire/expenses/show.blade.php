@@ -46,6 +46,10 @@
                     @if($expense->note)
                         <x-lists.details_item title="Note" detail="{{$expense->note}}" />
                     @endif
+
+                    @if($expense->receipts()->first()->notes)
+                        <x-lists.details_item title="PO" detail="{{$expense->receipts()->first()->notes}}" />
+                    @endif
                 </x-lists.details_list>
 
                 {{-- FOOTER --}}

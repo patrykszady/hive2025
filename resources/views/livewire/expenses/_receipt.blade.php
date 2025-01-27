@@ -22,7 +22,7 @@
 
         <flux:row>
             <flux:cell colspan="3" class="text-right font-medium">Subtotal</flux:cell>
-            <flux:cell>{{money($expense->receipts()->latest()->first()->receipt_items->total)}}</flux:cell>
+            <flux:cell>{{money($expense->receipts()->latest()->first()->receipt_items->subtotal)}}</flux:cell>
         </flux:row>
 
         <flux:row>

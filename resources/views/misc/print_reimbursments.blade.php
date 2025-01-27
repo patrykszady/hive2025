@@ -37,8 +37,8 @@
                     <div style="page-break-before: always;"></div>
 
                     <div class="grid grid-cols-5 gap-4">
-                        <div >
-                            <flux:card class="col-span-2">
+                        <div class="col-span-2">
+                            <flux:card>
                                 <div class="flex justify-between">
                                     <flux:heading>Receipt Info</flux:heading>
                                     <flux:button
@@ -93,7 +93,8 @@
                                         </li>
                                     @endif
 
-                                    @if($expense->receipt->receipt_items->purchase_order || $expense->receipt->receipt_items->handwritten_notes)
+                                    {{-- $expense->receipt->receipt_items->purchase_order || $expense->receipt->receipt_items->handwritten_notes --}}
+                                    @if($expense->receipt->notes)
                                         <li>
                                             <span class="text-gray-500 text-sm">
                                                 Purchase Order

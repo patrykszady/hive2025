@@ -37,7 +37,8 @@
                         {{ $user->full_name }}
                     </flux:cell>
                     <flux:cell>{{ $user->cell_phone }}</flux:cell>
-                    <flux:cell>{{ Str::limit($user->email, 8) }}</flux:cell>
+                    {{-- Str::limit($user->email, 8) --}}
+                    <flux:cell>{{ $user->email }}</flux:cell>
                     @if($view === 'vendors.show')
                         <flux:cell>
                             {{ $user->getVendorRole($vendor->id) }}

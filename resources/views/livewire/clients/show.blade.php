@@ -1,6 +1,5 @@
 <div>
-    <div class="grid max-w-xl grid-cols-4 gap-4 lg:max-w-5xl sm:px-6">
-		{{--  lg:h-32 lg:sticky lg:top-5 --}}
+    <div class="grid grid-cols-4 gap-4 lg:max-w-5xl">
 		<div class="col-span-4 lg:col-span-2">
 			{{-- CLIENT DETAILS --}}
             <x-lists.details_card>
@@ -29,18 +28,15 @@
             </x-lists.details_card>
 		</div>
 
+        {{-- CLIENT USERS --}}
         <div class="col-span-4 lg:col-span-2">
-			{{-- CLIENT USERS --}}
-            {{--  :users="$this->users" --}}
             <livewire:users.users-index :client="$client" :view="'clients.show'"/>
 		</div>
 
         {{-- CLIENT PROJECT --}}
-        {{-- @if(!$client->projects->isEmpty()) --}}
-            <div class="col-span-4 lg:col-span-2">
-                <livewire:projects.projects-index :client="$client" :view="'clients.index'" />
-            </div>
-        {{-- @endif --}}
+        <div class="col-span-4 lg:col-span-2">
+            <livewire:projects.projects-index :client="$client" :view="'clients.index'" />
+        </div>
 	</div>
 
     <livewire:projects.project-create />

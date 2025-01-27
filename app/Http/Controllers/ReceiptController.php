@@ -786,13 +786,12 @@ class ReceiptController extends Controller
     //foreach outlook/microsoft email get and process message...
     public function ms_graph_email_api()
     {
-        //6-28-2023 catch forwarded messages where To is in database table company_emails (forward to KNOWN business company_email FROM ANY email) (oR ViveVersa..)
         $company_emails = CompanyEmail::withoutGlobalScopes()->whereNotNull('api_json->user_id')->get();
         // $messages = app(\App\Http\Controllers\LeadController::class)->ms_graph_auth($company_emails);
 
         foreach ($company_emails as $company_email) {
             //check if access_token is expired, if so get new access_token and refresh_token
-            //13-31-2024 ..should be a Service we can reuse? check
+            //12-31-2024  + 01/26/205..should be a Service we can reuse? check
             try {
                 $guzzle = new Client;
                 $url = 'https://login.microsoftonline.com/'.env('MS_GRAPH_TENANT_ID').'/oauth2/v2.0/token';
@@ -887,13 +886,15 @@ class ReceiptController extends Controller
 
                 if ($from_email_receipts->isEmpty()) {
                     //if Email is Forwaded
+                    //6-28-2023 catch forwarded messages where To is in database table company_emails (forward to KNOWN business company_email FROM ANY email) (oR ViveVersa..)
+                    //06-17-2023 forwarded/redirected emails? if HIVE doesnt find them? let users forward emails
+                    //use $email_to = strtolower($message->getToRecipients()[0]['emailAddress']['address']);
                     $re = '/(From:<\/b> |To:<\/b> )([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/';
                     $string = $message->getBody()->getContent();
-                    // var_dump($string);
-                    // dd();
                     preg_match_all($re, $string, $matches, PREG_SET_ORDER, 0);
+                    // dd($matches);
 
-                    if (isset($matches[0][1]) && isset($matches[0][1])) {
+                    if (isset($matches[0][1])) {
                         $email_from = $matches[0][2];
                         $email_from_domain = substr($email_from, strpos($email_from, '@'));
 
@@ -904,18 +905,19 @@ class ReceiptController extends Controller
                     }
                 }
 
-                foreach ($from_email_receipts as $email_receipt) {
-                    if (strpos($email_subject, $email_receipt->from_subject) !== false) {
-                        $receipt = $email_receipt;
-                    } else {
-                        //continue... email Subject not a Receipt
-                        //move the failed email?
-                        continue;
+                if($from_email_receipts->isNotEmpty()){
+                    foreach ($from_email_receipts as $email_receipt) {
+                        if (strpos($email_subject, $email_receipt->from_subject) !== false) {
+                            $receipt = $email_receipt;
+                        } else {
+                            //continue... email Subject not a Receipt
+                            //move the failed email?
+                            continue;
+                        }
                     }
+                }else{
+                    continue;
                 }
-
-                //06-17-2023 forwarded/redirected emails? if HIVE doesnt find them? let users forward emails
-                //use $email_to = strtolower($message->getToRecipients()[0]['emailAddress']['address']);
 
                 //if is_null $receit, move to add_receipt folder
                 if (! isset($receipt)) {
