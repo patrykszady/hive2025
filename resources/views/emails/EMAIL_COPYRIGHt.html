@@ -1,0 +1,73 @@
+{{-- 7/4/2024 LANG? / per vendor --}}
+
+
+<x-mail::panel>
+{{-- if no check nubmer show Transfer/Zelle or Cash --}}
+Check <b>{{$check_number}}</b><br>
+Check Date <b>{{$check->date->format('m/d/Y')}}</b><br>
+Check Total <b>{{money($check->amount)}}</b><br>
+</x-mail::panel>
+
+<h3>Project Payments:</h3>
+<x-mail::panel>
+@foreach($check->expenses as $expense)
+    <b>{{money($expense->amount)}}</b> | <a href="https://dashboard.hive.contractors/projects/{{$expense->project->id}}">{{$expense->project->name}}</a><br>
+@endforeach
+</x-mail::panel>
+
+<x-mail::subcopy>
+{{$paying_vendor->name}} uses <a href="https://dashboard.hive.contractors/">Hive Contractors</a> to manage projects in one place. <b>Finances, Estimates, Timesheets, Schedules</b>, and so much more. Automatic Expense sorting, One Click Audits, Client and Employee Reimbursements.
+Join <a href="https://dashboard.hive.contractors/">Hive Contractors</a> to connect with {{$paying_vendor->name}} today to manage your construction projects together.<br>
+{{-- Eliminate most phone calls with {{$paying_vendor->name}} by joining <a href="https://dashboard.hive.contractors/">Hive Contractors</a> --}}
+{{-- Don't wake up stressed trying to allocate your Team Members last minute for the day. Hive Planner . Each Team Member, regardless if on Payroll, W9, or DBA, can  --}}
+Call 224-999-3880
+</x-mail::subcopy>
+<x-mail::button :url="'https://dashboard.hive.contractors'">
+Create Your Hive
+</x-mail::button>
+Thanks,<br>
+<a href="https://dashboard.hive.contractors">Hive Contractors</a>
+
+
+{{-- 7/4/2024 LANG? / per vendor --}}
+
+{{-- if no check nubmer show Transfer/Zelle or Cash --}}
+
+{{-- Eliminate most phone calls with {{$paying_vendor->name}} by joining <a href="https://dashboard.hive.contractors/">Hive Contractors</a> --}}
+{{-- Don't wake up stressed trying to allocate your Team Members last minute for the day. Hive Planner . Each Team Member, regardless if on Payroll, W9, or DBA, can  --}}
+
+{{--
+    The only all in one Construction Managment Platform Made by (small)Contractors. For (small)Contractors.
+    Manage Message Settings to adjust what we message you. |
+    Join us Here so you're always up to date on your projects without emails. |
+    Unsubscribe if you don't find these emails helpful.   --}}
+
+{{-- if $vendor->has more than 2 projects YTD...Did you know your revenue from {{$paying_vendor->name}} is {{$vendor->total->YTD}} (last 12 months) ...Join Hive Contractors to Automatically see your bottom line. / Join Hive Contractors to see your Profits   --}}
+{{-- Do you really know your business profits? GS Construction uses Hive Contractors. Join Hive for free (so we can show you how we can eliminate most calls) to connect with {{$paying_vendor->name}} and eliminate stress--}}
+{{-- Are you overwelmed trying to keep up with your Projects? Join Hive and let us help, for free.  --}}
+{{-- Made by (small)Contractors. For (small)Contractors. --}}
+
+{{--
+    The only all in one Construction Managment Platform Made by (small)Contractors. For (small)Contractors.
+    Manage Message Settings to adjust what we message you. |
+    Join us Here so you're always up to date on your projects without emails. |
+    Unsubscribe if you don't find these emails helpful.   --}}
+
+
+    {{$paying_vendor->name}} uses <a href="https://dashboard.hive.contractors/">Hive Contractors</a> to manage projects in one place. <b>Finances, Estimates, Timesheets, Schedules</b>, and so much more. Automatic Expense sorting, One Click Audits, Client and Employee Reimbursements.
+    Join <a href="https://dashboard.hive.contractors/">Hive Contractors</a> to connect with {{$paying_vendor->name}} today to manage your construction projects together.
+    <br>
+    Call 224-999-3880
+
+
+
+    <div style="text-align:justify;">
+        <img src="https://dashboard.hive.contractors/favicon.png" class="logo" alt="Hive Contractors Logo" height="72px">
+        <h1 style="text-align:center;">{{env('APP_NAME')}}</h1>
+        <br>
+        <p style="text-align:center;">{{env('APP_TAGLINE_1')}}</p>
+        </div>
+
+        @lang('All rights reserved.')
+
+<img src="{{env('APP_URL')}}/favicon.png" class="logo" alt="Hive Contractors" height="72px">

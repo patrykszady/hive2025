@@ -1,0 +1,12 @@
+<flux:option value="ALL">All Status</flux:option>
+<flux:option value="Invited">Invited</flux:option>
+<flux:option value="Estimate">Estimate</flux:option>
+<flux:option value="Awaiting Response">Response</flux:option>
+<flux:option value="Project Prep">Prep</flux:option>
+<flux:option value="Scheduled">Scheduled</flux:option>
+<flux:option value="Active">Active</flux:option>
+<flux:option value="Complete">Complete</flux:option>
+<flux:option value="Service Call">Service Call</flux:option>
+<flux:option value="Service Call Complete">Service Call Complete</flux:option>
+<flux:option value="Cancelled">Cancelled</flux:option>
+<flux:option value="VIEW ONLY">VIEW ONLY</flux:option>
