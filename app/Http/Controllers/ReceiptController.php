@@ -1674,7 +1674,6 @@ class ReceiptController extends Controller
         // dd('TOO LATE');
 
         //start OCR
-
         $ch = curl_init();
 
         $azure_api_key = env('AZURE_DI_API_KEY');
