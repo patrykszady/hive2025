@@ -1674,6 +1674,7 @@ class ReceiptController extends Controller
         // dd('TOO LATE');
 
         //start OCR
+
         $ch = curl_init();
 
         $azure_api_key = env('AZURE_DI_API_KEY');
@@ -1697,8 +1698,6 @@ class ReceiptController extends Controller
         preg_match($re, $str, $matches, PREG_OFFSET_CAPTURE, 0);
         // dd($matches);
         $operation_location_id = $matches[0][0];
-
-
 
         //get OCR result
         //&pages=[1]d
