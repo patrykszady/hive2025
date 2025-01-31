@@ -9,7 +9,10 @@
     <flux:rows>
         @foreach($expense->receipts()->latest()->first()->receipt_items->items as $line_item)
             <flux:row>
-                <flux:cell colspan="4" class="!pb-0">{{$line_item->Description}}</flux:cell>
+                <flux:cell colspan="4" class="!pb-0">
+                    {{-- {{$line_item->Description}} --}}
+                    {{$line_item->Description ? Str::limit($line_item->Description, 65) : ''}}
+                </flux:cell>
             </flux:row>
             <flux:row class="!border-none !py-0">
                 {{-- 09/28/24 URL TO ITEM --}}

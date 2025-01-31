@@ -33,7 +33,7 @@
             </flux:card>
 
             @foreach($expenses as $expense)
-                @if(isset($expense->receipt_html))
+                {{-- @if(isset($expense->receipt_html)) --}}
                     <div style="page-break-before: always;"></div>
 
                     <div class="grid grid-cols-5 gap-4">
@@ -41,13 +41,16 @@
                             <flux:card>
                                 <div class="flex justify-between">
                                     <flux:heading>Receipt Info</flux:heading>
-                                    <flux:button
-                                        href="{{ route('expenses.original_receipt', $expense->receipt->receipt_filename) }}"
-                                        target="_blank"
-                                        size="sm"
-                                        >
-                                        Original Receipt
-                                    </flux:button>
+
+                                    @if($expense->receipt->receipt_filename)
+                                        <flux:button
+                                            href="{{ route('expenses.original_receipt', $expense->receipt->receipt_filename) }}"
+                                            target="_blank"
+                                            size="sm"
+                                            >
+                                            Original Receipt
+                                        </flux:button>
+                                    @endif
                                 </div>
 
                                 <ul role="list" class="divide-y divide-gray-20">
@@ -128,7 +131,7 @@
                                         <flux:rows>
                                             @foreach($expense->receipt->receipt_items->items as $item_index => $line_item)
                                                 @php
-                                                    //// $split = $expense->receipt_items && $expense->receipt_items[$item_index]['checkbox'] == true ? false : true;
+                                                    // $split = $expense->receipt_items && $expense->receipt_items[$item_index]['checkbox'] == true ? false : true;
                                                     if($expense->receipt_items){
                                                         if($expense->receipt_items[$item_index]['checkbox'] == false){
                                                             $split = true;
@@ -139,17 +142,20 @@
                                                         $split = false;
                                                     }
 
-                                                    //Home Depot Search
                                                     if($expense->vendor->id === 8){
+                                                        //Home Depot Search
                                                         $search_url = 'https://www.homedepot.com/s/';
                                                     }elseif($expense->vendor->id === 10){
                                                         //Menards Search
                                                         $search_url = 'https://www.menards.com/main/search.html?search=';
+                                                    }elseif($expense->vendor->id === 54){
+                                                        //Amazon Search
+                                                        $search_url = 'https://www.amazon.com/s?k=';
                                                     }else{
                                                         $search_url = false;
                                                     }
-
                                                 @endphp
+
                                                 <flux:row>
                                                     <flux:cell colspan="4" class="!pb-0">
                                                         <span
@@ -157,11 +163,12 @@
                                                                 'text-gray-200 line-through' => $split
                                                             ])
                                                             >
-                                                            {{$line_item->Description ?? ''}}
+                                                            {{$line_item->Description ? Str::limit($line_item->Description, 45) : ''}}
                                                             {{-- {{isset($line_item->Description) ? $line_item->Description : ''}} --}}
                                                         </span>
                                                     </flux:cell>
                                                 </flux:row>
+
                                                 <flux:row class="!border-none !py-0">
                                                     {{-- 09/28/24 URL TO ITEM --}}
                                                     <flux:cell class="text-right">
@@ -237,7 +244,7 @@
                             @endif
                         </div>
                     </div>
-                @endif
+                {{-- @endif --}}
             @endforeach
         </flux:main>
     </body>
