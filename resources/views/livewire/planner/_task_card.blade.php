@@ -24,8 +24,8 @@
             </span>
         @endif
 
-        @if($task->duration > 1)
-            <span class="float-right text-gray-400 mr-2">
+        <span class="float-right text-gray-400 mr-2">
+            @if($task->duration > 1)
                 @if($task->start_date->format('Y-m-d') == $day['database_date'])
                     <flux:icon.chevron-down variant="mini" />
                 @elseif($task->end_date->format('Y-m-d') == $day['database_date'])
@@ -33,8 +33,12 @@
                 @else
                     <flux:icon.chevron-up-down variant="solid" />
                 @endif
-            </span>
-        @endif
+            @else
+                <span x-sort:handle>
+                    <flux:icon.bars-3 variant="mini" />
+                </span>
+            @endif
+        </span>
 
         <br>
         <span class="text-sm font-medium @if(!is_null($task->start_date) ? $task->start_date->format('Y-m-d') == $day['database_date'] : true) text-gray-600 @else text-gray-300 @endif">

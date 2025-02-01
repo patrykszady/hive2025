@@ -45,7 +45,7 @@
         <div class="space-y-2">
             <flux:table :paginate="$this->estimates">
                 <flux:columns>
-                    <flux:column>Estimate #</flux:column>
+                    <flux:column>Estimate</flux:column>
                     <flux:column>Amount</flux:column>
                     <flux:column>Date</flux:column>
                     @if($view === 'estimates.index')

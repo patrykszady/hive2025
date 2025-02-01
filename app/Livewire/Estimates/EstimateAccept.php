@@ -21,13 +21,11 @@ class EstimateAccept extends Component
 
     public $payments_outstanding = 0;
 
-    public $include_reimbursement = false;
+    public $include_reimbursement = true;
 
     public $start_date = null;
 
     public $end_date = null;
-
-    public $modal_show = false;
 
     protected $listeners = ['accept', 'addPayment'];
 
@@ -45,8 +43,8 @@ class EstimateAccept extends Component
 
     public function mount(Estimate $estimate)
     {
-        $this->project = $estimate->project;
         $this->estimate = $estimate;
+        $this->project = $estimate->project;
 
         if (! is_null($this->estimate->reimbursments)) {
             $this->include_reimbursement = true;
@@ -104,7 +102,7 @@ class EstimateAccept extends Component
 
     public function accept()
     {
-        $this->modal_show = true;
+        $this->modal('accept_estimate_modal')->show();
     }
 
     //new estiamte Bid
@@ -156,11 +154,7 @@ class EstimateAccept extends Component
             $estimate = $this->estimate;
             $estimate_options = $this->estimate->options;
 
-            if ($this->include_reimbursement) {
-                $estimate_options['include_reimbursement'] = true;
-            } else {
-                $estimate_options['include_reimbursement'] = false;
-            }
+            $estimate_options['include_reimbursement'] = $this->include_reimbursement;
 
             if ($this->payments->where('amount', '!=', '')->sum('amount') != 0) {
                 $estimate_options['payments'] = $this->payments->toArray();
@@ -193,8 +187,7 @@ class EstimateAccept extends Component
                 }
             }
 
-            $this->modal_show = false;
-
+            $this->modal('accept_estimate_modal')->close();
             $this->dispatch('refreshComponent')->to('estimates.estimate-show');
 
             $this->dispatch('notify',
