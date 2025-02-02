@@ -1038,7 +1038,7 @@ class ReceiptController extends Controller
 
                 //PREVIEWS HTML RECEIPT
                 // print_r($receipt_html_main);
-                // dd();
+                // dd('here');
 
                 //create Expense
                 if (! isset($image_email_url)) {
