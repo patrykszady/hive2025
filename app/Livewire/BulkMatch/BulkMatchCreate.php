@@ -17,7 +17,6 @@ class BulkMatchCreate extends Component
     public BulkMatchForm $form;
 
     public $new_vendor = null;
-    // public $split = FALSE;
 
     public $split = false;
 
@@ -42,6 +41,20 @@ class BulkMatchCreate extends Component
 
     public function updated($field, $value)
     {
+        // if SPLIT true vs false
+        if($field === 'split'){
+            if($this->split === true){
+                $this->bulkSplits();
+                $this->split = true;
+                $this->form->distribution_id = NULL;
+            }else{
+                $this->split = false;
+                $this->bulk_splits = [];
+            }
+        }
+
+        // dd($field, $value);
+
         // if($field == 'form.amount_type' && $value == 'NEW'){
         //     $this->form->amount = NULL;
         //     $this->form->amount_type = 'ANY';
@@ -54,40 +67,32 @@ class BulkMatchCreate extends Component
         //     $this->form->amount_type = 'ANY';
         // }
 
-        if ($field == 'form.vendor_id' && $value != null && ! isset($this->form->match)) {
-            $this->new_vendor = Vendor::findOrFail($value);
-            $this->new_vendor->vendor_transactions =
-                $this->new_vendor->transactions()
-                    ->whereDoesntHave('expense')
-                    ->whereDoesntHave('check')
-                    ->orderBy('amount', 'DESC')
-                    ->get()
-                    ->groupBy('amount')
-                    ->values()
-                //converts to array?
-                    ->toBase();
+        // if ($field == 'form.vendor_id' && $value != null && ! isset($this->form->match)) {
+        //     $this->new_vendor = Vendor::findOrFail($value);
+        //     $this->new_vendor->vendor_transactions =
+        //         $this->new_vendor->transactions()
+        //             ->whereDoesntHave('expense')
+        //             ->whereDoesntHave('check')
+        //             ->orderBy('amount', 'DESC')
+        //             ->get()
+        //             ->groupBy('amount')
+        //             ->values()
+        //         //converts to array?
+        //             ->toBase();
 
-            $this->new_vendor->vendor_expenses =
-                $this->new_vendor->expenses()
-                    ->whereDoesntHave('splits')
-                    ->where('project_id', '0')
-                    ->whereNull('distribution_id')
-                    ->orderBy('amount', 'DESC')
-                    ->get()
-                    ->groupBy('amount')
-                    ->toBase();
-        } elseif ($field == 'form.vendor_id' && $value == null && ! isset($this->form->match)) {
-            $this->new_vendor = null;
-        }
-
-        // if SPLIT checked vs if unchecked
-        // if($field == 'split'){
-        //     if($this->split == TRUE){
-        //         $this->form->distribution_id = NULL;
-        //     }else{
-        //         $this->bulk_splits = [];
-        //     }
+        //     $this->new_vendor->vendor_expenses =
+        //         $this->new_vendor->expenses()
+        //             ->whereDoesntHave('splits')
+        //             ->where('project_id', '0')
+        //             ->whereNull('distribution_id')
+        //             ->orderBy('amount', 'DESC')
+        //             ->get()
+        //             ->groupBy('amount')
+        //             ->toBase();
+        // } elseif ($field == 'form.vendor_id' && $value == null && ! isset($this->form->match)) {
+        //     $this->new_vendor = null;
         // }
+
 
         // $this->validate();
         $this->validateOnly($field);
@@ -130,13 +135,13 @@ class BulkMatchCreate extends Component
 
     public function addSplit()
     {
-        $this->splits_count = $this->splits_count + 1;
+        $this->splits_count = $this->splits_count ++;
         $this->bulk_splits->push(['amount' => null, 'amount_type' => '$', 'distribution_id' => null]);
     }
 
     public function removeSplit($index)
     {
-        $this->splits_count = $this->splits_count - 1;
+        $this->splits_count = $this->splits_count --;
         unset($this->bulk_splits[$index]);
     }
 
@@ -146,10 +151,11 @@ class BulkMatchCreate extends Component
         $this->split = false;
         $this->splits_count = 0;
         $this->bulk_splits = [];
+        // $this->reset();
         $this->form->reset();
 
         $this->view_text = [
-            'card_title' => 'Add New Automatic Bulk Match',
+            'card_title' => 'New Automatic Bulk Match',
             'button_text' => 'Create Bulk Match',
             'form_submit' => 'save',
         ];
@@ -185,9 +191,16 @@ class BulkMatchCreate extends Component
     {
         $this->form->match->delete();
 
-        $this->dispatch('notify',
-            type: 'success',
-            content: 'Match Removed'
+        $this->dispatch('refreshComponent')->to('bulk-match.bulk-match-index');
+        $this->modal('bulk_match_form_modal')->close();
+
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Match Removed',
+            // route / href / wire:click
+            text: '',
         );
     }
 
@@ -196,19 +209,24 @@ class BulkMatchCreate extends Component
         dd('in edit');
         $this->form->update();
         //refresh main component of transactions/bulk_match
-        $this->dispatch('refreshComponent')->to('transactions.bulk-match');
-        $this->showModal = false;
-        $this->dispatch('notify',
-            type: 'success',
-            content: 'Match Updated'
+        $this->dispatch('refreshComponent')->to('bulk-match.bulk-match-index');
+        $this->modal('bulk_match_form_modal')->close();
+
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Match Updated',
+            // route / href / wire:click
+            text: '',
         );
     }
 
     public function save()
     {
         $this->form->store();
-        $this->dispatch('refreshComponent')->to('bulk-match.bulk-match');
 
+        $this->dispatch('refreshComponent')->to('bulk-match.bulk-match-index');
         $this->modal('bulk_match_form_modal')->close();
 
         Flux::toast(
