@@ -21,7 +21,7 @@ class Expense extends Model
     {
         return [
             'date' => 'date:Y-m-d',
-            'deleted_at' => 'date:Y-m-d',
+            // 'deleted_at' => 'date:Y-m-d',
         ];
     }
 
@@ -33,6 +33,14 @@ class Expense extends Model
     //Searchable / Typesense
     public function toSearchableArray(): array
     {
+        // // All model attributes are made searchable
+        // $array = $this->toArray();
+
+        // // Then we add some additional fields
+        // $array['expense_status'] = ! is_null($this->project_id) ? 'Complete' : 'Missing Info';
+
+        // return $array;
+
         // if($this->check()->withoutGlobalScopes()){
         //     if($this->check()->withoutGlobalScopes()->transactions->isNotEmpty()){
         //         if($this->check()->withoutGlobalScopes()->transactions->sum('amount') == $this->check()->withoutGlobalScopes()->amount){

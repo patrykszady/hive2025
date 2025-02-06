@@ -875,13 +875,14 @@ class TransactionController extends Controller
     {
         //if transaction where vendor is being added HAS expense? and expense->vendor is NULL ... add $transaction->vendor as $expense->vendor
         $transaction_bank_accounts = BankAccount::withoutGlobalScopes()->whereNull('deleted_at')->pluck('id')->toArray();
+        //->where('id', 25211)
         $transactions = Transaction::TransactionsSinVendor()->whereIn('bank_account_id', $transaction_bank_accounts)->get()->groupBy('plaid_merchant_name');
         // dd($transactions);
 
         $vendors = Vendor::withoutGlobalScopes()->where('business_type', 'Retail')->get();
 
         foreach ($transactions as $merchant_name => $merchant_transactions) {
-            // dd($merchant_name);
+            // dd($merchant_transactions);
             //find vendor where vendor->business_name is contained in $merchant_name
             // $vendor_match = preg_grep("/^" . $merchant_name . "/i", $vendors->pluck('business_name')->toArray());
 
@@ -905,20 +906,23 @@ class TransactionController extends Controller
         $transactions = Transaction::TransactionsSinVendor()->whereIn('bank_account_id', $transaction_bank_accounts)->get()->groupBy('plaid_merchant_description');
 
         //CHECK VendorTransaction table
-        $vendor_transactions = VendorTransaction::whereNull('deposit_check')->get();
-
+        //where('id', 443)
+        $vendor_transactions = VendorTransaction::whereNull('deposit_check')->orderByRaw('LENGTH(`desc`) ASC')->get();
+        // dd($vendor_transactions);
         foreach ($vendor_transactions as $vendor_transaction) {
             //get all BankAccount where bank_account_id
             //get plaid_inst_id of bank_account_ids on transactions table
 
             //Alter $transactions variable/results based on the if statement below
             foreach ($transactions as $vendor_name => $plaid_name_transactions) {
+                // dd($plaid_name_transactions);
                 $vendor_name = $vendor_name.' '.$plaid_name_transactions->first()->plaid_merchant_name;
                 //decode json on VendorTrasaction Model
                 $preg = json_decode($vendor_transaction->options);
                 preg_match('/'.$vendor_transaction->desc.$preg, $vendor_name, $matches, PREG_UNMATCHED_AS_NULL);
 
                 if (! empty($matches)) {
+                    // dd($vendor_transactions);
                     foreach ($plaid_name_transactions as $key => $transaction) {
                         $transaction->vendor_id = $vendor_transaction->vendor_id;
                         $transaction->save();
