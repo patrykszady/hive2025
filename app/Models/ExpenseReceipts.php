@@ -44,8 +44,12 @@ class ExpenseReceipts extends Model
             $purchase_order = false;
         }
 
-        $notes = array_filter([$handwritten_notes, $purchase_order]);
-        $notes = implode(' | ', $notes);
+        if($handwritten_notes || $purchase_order){
+            $notes = array_filter([$handwritten_notes, $purchase_order]);
+            $notes = implode(' | ', $notes);
+        }else{
+            $notes = false;
+        }
 
         return $notes;
     }
