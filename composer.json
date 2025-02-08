@@ -1,7 +1,7 @@
 {
     "name": "laravel/laravel",
     "type": "project",
-    "description": "The Laravel Framework.",
+    "description": "Best Small Contractor Hive",
     "keywords": [
         "framework",
         "laravel"
@@ -28,7 +28,7 @@
         "livewire/flux-pro": "^1.1",
         "livewire/livewire": "^3.5",
         "log1x/laravel-webfonts": "^1.0",
-        "microsoft/microsoft-graph": "1.*",
+        "meilisearch/meilisearch-php": "^1.12",
         "nesbot/carbon": "^3.0",
         "nyholm/psr7": "*",
         "opcodesio/log-viewer": "^3.4",
@@ -41,12 +41,12 @@
         "spatie/browsershot": "^5.0",
         "spatie/image": "^3.0",
         "spatie/simple-excel": "^3.6",
+        "microsoft/microsoft-graph": "1.*",
         "symfony/dom-crawler": "^7.0",
         "symfony/http-client": "*",
         "symfony/mailgun-mailer": "^7.0",
         "symfony/panther": "^2.1",
         "twilio/sdk": "^6.44",
-        "typesense/typesense-php": "^4.9",
         "vlucas/phpdotenv": "^5.5",
         "zoon/puphpeteer": "^2.2"
     },

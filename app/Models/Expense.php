@@ -21,7 +21,6 @@ class Expense extends Model
     {
         return [
             'date' => 'date:Y-m-d',
-            // 'deleted_at' => 'date:Y-m-d',
         ];
     }
 
@@ -33,13 +32,25 @@ class Expense extends Model
     //Searchable / Typesense
     public function toSearchableArray(): array
     {
-        // // All model attributes are made searchable
-        // $array = $this->toArray();
-
-        // // Then we add some additional fields
+        // All model attributes are made searchable
+        $array = $this->toArray();
+        // Then we add/adjust some additional fields
+        // $array['created_at'] = $this->created_at->timestamp;
+        // $array['updated_at'] = $this->updated_at->timestamp;
+        $array['date'] = $this->date->timestamp;
         // $array['expense_status'] = ! is_null($this->project_id) ? 'Complete' : 'Missing Info';
 
-        // return $array;
+        return $array;
+
+        //ONLY:
+        // return [
+        //     'id' => $this->id,
+        //     'name' => $this->name,
+        //     'email' => $this->email,
+        // ];
+
+
+
 
         // if($this->check()->withoutGlobalScopes()){
         //     if($this->check()->withoutGlobalScopes()->transactions->isNotEmpty()){
@@ -64,21 +75,21 @@ class Expense extends Model
         //     }
         // }
 
-        return array_merge($this->toArray(), [
-            'id' => (string) $this->id,
-            'vendor_id' => (string) $this->vendor_id,
-            'belongs_to_vendor_id' => (string) $this->belongs_to_vendor_id,
-            'project_id' => (string) $this->project_id,
-            'check_id' => (string) $this->check_id,
-            'is_project_id_null' => $this->project_id ? false : true,
-            'distribution_id' => (string) $this->distribution_id,
-            'is_distribution_id_null' => $this->distribution_id ? false : true,
-            'has_splits' => $this->splits->isEmpty() ? false : true,
-            'amount' => $this->amount,
-            'expense_status' => ! is_null($this->project_id) ? 'Complete' : 'Missing Info',
-            'date' => $this->date->format('Y-m-d'),
-            'created_at' => $this->created_at->timestamp,
-        ]);
+        // return array_merge($this->toArray(), [
+        //     'id' => (string) $this->id,
+        //     'vendor_id' => (string) $this->vendor_id,
+        //     'belongs_to_vendor_id' => (string) $this->belongs_to_vendor_id,
+        //     'project_id' => (string) $this->project_id,
+        //     'check_id' => (string) $this->check_id,
+        //     'is_project_id_null' => $this->project_id ? false : true,
+        //     'distribution_id' => (string) $this->distribution_id,
+        //     'is_distribution_id_null' => $this->distribution_id ? false : true,
+        //     'has_splits' => $this->splits->isEmpty() ? false : true,
+        //     'amount' => $this->amount,
+        //     'expense_status' => ! is_null($this->project_id) ? 'Complete' : 'Missing Info',
+        //     'date' => $this->date->format('Y-m-d'),
+        //     'created_at' => $this->created_at->timestamp,
+        // ]);
     }
 
     /**

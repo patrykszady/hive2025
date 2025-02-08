@@ -3,17 +3,17 @@
         <flux:card class="space-y-2 mb-4">
             <div class="flex justify-between">
                 <flux:heading size="lg">Filters</flux:heading>
-                @can('create', App\Models\Expense::class)
+                {{-- @can('create', App\Models\Expense::class)
                     @if($amount && $view == NULL)
                         <flux:button wire:click="$dispatchTo('expenses.expense-create', 'newExpense', { amount: {{$amount}}})">Add New Expense</flux:button>
                     @endif
-                @endcan
+                @endcan --}}
             </div>
 
             <flux:separator variant="subtle" />
 
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <flux:input wire:model.debounce.500ms.live="amount" label="Amount" icon="magnifying-glass" placeholder="123.45" />
+                <flux:input wire:model.live.debounce.300ms="amount" label="Amount" icon="magnifying-glass" placeholder="123.45" />
 
                 <flux:select wire:model.live="expense_vendor" label="Vendor" variant="listbox" searchable placeholder="Choose Vendor...">
                     <x-slot name="search">
@@ -23,7 +23,7 @@
                     <flux:option value="">ALL VENDORS</flux:option>
                     <flux:option value="0">NO VENDOR</flux:option>
                     <flux:option disabled>---------</flux:option>
-                    @foreach ($this->vendors as $vendor)
+                    @foreach ($vendors as $vendor)
                         <flux:option value="{{$vendor->id}}">{{ $vendor->name }}</flux:option>
                     @endforeach
                 </flux:select>
@@ -37,11 +37,11 @@
                     <flux:option value="NO_PROJECT">NO PROJECT</flux:option>
                     <flux:option value="SPLIT">SPLIT</flux:option>
                     <flux:option disabled>---------</flux:option>
-                    @foreach ($this->projects as $project)
+                    @foreach ($projects as $project)
                         <flux:option value="{{$project->id}}">{{ $project->name }}</flux:option>
                     @endforeach
                     <flux:option disabled>---------</flux:option>
-                    @foreach ($this->distributions as $distribution)
+                    @foreach ($distributions as $distribution)
                         <flux:option value="D:{{$distribution->id}}">{{ $distribution->name }}</flux:option>
                     @endforeach
                 </flux:select>
@@ -63,9 +63,9 @@
                         <flux:column >Vendor</flux:column>
                     @endif
 
-                    @if($view != 'projects.show')
+                    {{-- @if($view != 'projects.show')
                         <flux:column>Project</flux:column>
-                    @endif
+                    @endif --}}
                     <flux:column>Status</flux:column>
                 </flux:columns>
 
@@ -73,7 +73,7 @@
                     @foreach ($this->expenses as $expense)
                         <flux:row :key="$expense->id">
                             <flux:cell
-                                wire:click="$dispatchTo('expenses.expense-create', 'editExpense', { expense: {{$expense->id}}})"
+                                {{-- wire:click="$dispatchTo('expenses.expense-create', 'editExpense', { expense: {{$expense->id}}})" --}}
                                 variant="strong"
                                 class="cursor-pointer"
                                 >
@@ -81,9 +81,10 @@
                             </flux:cell>
                             <flux:cell>{{ $expense->date->format('m/d/Y') }}</flux:cell>
                             @if(!in_array($view, ['checks.show', 'vendors.show']))
-                                <flux:cell><a wire:navigate.hover href="{{isset($expense->vendor->id) ? route('vendors.show', $expense->vendor->id) : ''}}">{{Str::limit($expense->vendor->name, 20)}}</a></flux:cell>
+                                {{-- wire:navigate.hover --}}
+                                <flux:cell><a href="{{isset($expense->vendor->id) ? route('vendors.show', $expense->vendor->id) : ''}}">{{Str::limit($expense->vendor->name, 20)}}</a></flux:cell>
                             @endif
-
+{{--
                             @if($view != 'projects.show')
                                 <flux:cell>
                                     @if($expense->project_id)
@@ -92,9 +93,10 @@
                                         {{ Str::limit($expense->project->name, 25) }}
                                     @endif
                                 </flux:cell>
-                            @endif
+                            @endif --}}
                             <flux:cell>
-                                <flux:badge size="sm" :color="$expense->status == 'Complete' ? 'green' : ($expense->status == 'No Transaction' ? 'yellow' : 'red')" inset="top bottom">{{ $expense->status }}</flux:badge>
+                                Status
+                                {{-- <flux:badge size="sm" :color="$expense->status == 'Complete' ? 'green' : ($expense->status == 'No Transaction' ? 'yellow' : 'red')" inset="top bottom">{{ $expense->status }}</flux:badge> --}}
                             </flux:cell>
                         </flux:row>
                     @endforeach
@@ -103,46 +105,7 @@
         </div>
     </flux:card>
 
-    @if($view == NULL)
-        <flux:card class="mt-8 space-y-2">
-            <div>
-                <flux:heading size="lg">Transactions</flux:heading>
-            </div>
-
-            <div class="space-y-6">
-                {{-- wire:loading.class="opacity-50 text-opacity-40" --}}
-                <flux:table>
-                    <flux:columns>
-                        <flux:column>Amount</flux:column>
-                        <flux:column>Date</flux:column>
-                        <flux:column>Vendor</flux:column>
-                        <flux:column>Bank</flux:column>
-                        <flux:column>Account</flux:column>
-                    </flux:columns>
-
-                    <flux:rows>
-                        @foreach ($this->transactions as $transaction)
-                            <flux:row :key="$transaction->id">
-                                <flux:cell
-                                    wire:click="$dispatchTo('expenses.expense-create', 'createExpenseFromTransaction', { transaction: {{$transaction->id}}})"
-                                    class="cursor-pointer"
-                                    variant="strong"
-                                    >
-                                    {{ money($transaction->amount) }}
-                                </flux:cell>
-                                <flux:cell>{{ $transaction->transaction_date->format('m/d/Y') }}</flux:cell>
-                                <flux:cell>{{ Str::limit($transaction->vendor->name != 'No Vendor' ? $transaction->vendor->name : $transaction->plaid_merchant_description, 35)}}</flux:cell>
-                                <flux:cell>{{ $transaction->bank_account->bank->name }}</flux:cell>
-                                <flux:cell>{{ isset($transaction->owner) ? $transaction->owner : $transaction->bank_account->account_number }}</flux:cell>
-                            </flux:row>
-                        @endforeach
-                    </flux:rows>
-                </flux:table>
-            </div>
-        </flux:card>
-    @endif
-
-    <livewire:expenses.expense-create />
+    {{-- <livewire:expenses.expense-create /> --}}
 </div>
 {{--
 
