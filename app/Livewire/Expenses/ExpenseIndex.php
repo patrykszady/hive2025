@@ -15,16 +15,14 @@ use Livewire\Attributes\Title;
 use Livewire\Component;
 use Livewire\WithPagination;
 
-// #[Lazy]
+#[Lazy]
 class ExpenseIndex extends Component
 {
     use AuthorizesRequests, WithPagination;
 
     public $amount = '';
-
-    public $expense_vendor = '';
-
-    public $project = '';
+    public $expense_vendor = null;
+    public $project_id = null;
 
     public $check = '';
 
@@ -53,7 +51,7 @@ class ExpenseIndex extends Component
     protected $queryString = [
         'amount' => ['except' => ''],
         'expense_vendor' => ['except' => ''],
-        // 'project' => ['except' => ''],
+        // 'project_id' => ['except' => ''],
         // 'bank_plaid_ins_id' => ['except' => ''],
         // 'bank_owner' => ['except' => ''],
         // 'status' => ['except' => ''],
@@ -65,18 +63,18 @@ class ExpenseIndex extends Component
         $this->resetPage('transactions-page');
     }
 
-    // public function updated($field, $value)
-    // {
-    //     dd($field, $value);
-    //     // && $value == 'NO_PROJECT'
-    //     // if($field == 'project'){
-    //     //     $this->expense_vendor = NULL;
-    //     // }
+    public function updated($field, $value)
+    {
+        // dd($field, $value);
+        // && $value == 'NO_PROJECT'
+        if($field == 'project_id'){
+            $this->expense_vendor = null;
+        }
 
-    //     // if($field == 'vendor'){
-    //     //     $this->project = NULL;
-    //     // }
-    // }
+        if($field == 'expense_vendor'){
+            $this->project_id = NULL;
+        }
+    }
 
     public function mount()
     {
@@ -111,98 +109,90 @@ class ExpenseIndex extends Component
     }
 
     // #[Computed]
-    // public function distributions()
+    // public function expenses()
     // {
-    //     return Distribution::all(['id', 'name']);
+    //     $expenses =
+    //         Expense::search($this->amount)
+    //             // search($this->amount, function ($meilisearch, $query, $options) {
+    //             //     if ($this->project == 'NO_PROJECT') {
+    //             //         $options['filter'] = 'project_id IS NULL AND distribution_id IS NULL AND has_splits IS false';
+    //             //     } elseif($this->project == 'SPLIT') {
+    //             //         $options['filter'] = 'has_splits IS true';
+    //             //     } elseif(!empty($this->project) && is_numeric($this->project)) {
+    //             //         $options['filter'] = 'project_id IS ' . $this->project;
+    //             //     }
+
+    //             //     return $meilisearch->search($query, $options);
+    //             // })
+
+    //             ->when(!empty($this->expense_vendor) && $this->expense_vendor !== '0', function ($query, $item) {
+    //                 return $query->where('vendor_id', $this->expense_vendor);
+    //             })
+    //             ->when($this->expense_vendor === '0', function ($query, $item) {
+    //                 return $query->where('vendor_id', '0');
+    //             })
+
+    //             // && $this->project != 'NO_PROJECT' && $this->project != 'SPLIT'
+    //             ->when(!empty($this->project) && is_numeric($this->project), function ($query, $item) {
+    //                 return $query->where('project_id', $this->project);
+    //             })
+    //             // //and no splits
+    //             ->when($this->project == 'NO_PROJECT', function ($query, $item) {
+    //                 return
+    //                     $query
+    //                         ->where('is_project_id_null', true)
+    //                         ->where('is_distribution_id_null', true)
+    //                         ->where('has_splits', false);
+    //             })
+    //             ->when($this->project == 'SPLIT', function ($query, $item) {
+    //                 return $query->where('has_splits', true);
+    //             })
+
+    //             ->where('belongs_to_vendor_id', auth()->user()->primary_vendor_id)
+    //             // ->tap(fn ($query) => $this->sortBy ? $query->orderBy($this->sortBy, $this->sortDirection) : $query)
+    //             ->orderBy($this->sortBy, $this->sortDirection)
+    //             // ->when(substr($this->project, 0, 1) == 'D', function ($query) {
+    //             //     return
+    //             //         $query
+    //             //             ->where('is_distribution_id_null', 'false')
+    //             //             ->where('distribution_id', substr($this->project, 2));
+    //             // })
+    //             // ->when(! empty($this->check) && is_numeric($this->check), function ($query, $item) {
+    //             //     return $query->where('check_id', $this->check);
+    //             // })
+    //             // ->whereIn(
+    //             //     'expense_status', ['Complete', 'Missing Info', 'No Project', 'No Transaction']
+    //             // )
+    //             // ->take(10)->get();
+    //             ->paginate($this->paginate_number, pageName: 'expenses-page');
+
+    //     // $expenses->getCollection()->each(function ($expense, $key) {
+    //     //     // if($expense->check){
+    //     //     //     if($expense->check->transactions->isNotEmpty() && $expense->paid_by != NULL){
+    //     //     //         $expense->status = 'Complete';
+    //     //     //     }else{
+    //     //     //         if($expense->transactions->isNotEmpty()){
+    //     //     //             $expense->status = 'Complete';
+    //     //     //         }else{
+    //     //     //             $expense->status = 'No Transaction';
+    //     //     //         }
+    //     //     //     }
+    //     //     // }else
+    //     //     if (($expense->transactions->isNotEmpty() && $expense->project->project_name != 'NO PROJECT') || ($expense->paid_by != null && $expense->project->project_name != 'NO PROJECT')) {
+    //     //         $expense->status = 'Complete';
+    //     //     } else {
+    //     //         if ($expense->project->project_name != 'NO PROJECT' && $expense->transactions->isEmpty()) {
+    //     //             $expense->status = 'No Transaction';
+    //     //         } elseif ($expense->project->project_name == 'NO PROJECT' && ($expense->transactions->isNotEmpty() || $expense->paid_by != null)) {
+    //     //             $expense->status = 'No Project';
+    //     //         } else {
+    //     //             $expense->status = 'Missing Info';
+    //     //         }
+    //     //     }
+    //     // });
+
+    //     return $expenses;
     // }
-
-    // #[Computed]
-    // public function projects()
-    // {
-    //     return Project::whereHas('expenses')->orderBy('created_at', 'DESC')->get();
-    // }
-
-    // #[Computed]
-    // public function vendors()
-    // {
-    //     // /->get(['business_name', 'id'])
-    //     $vendors = Vendor::whereHas('expenses')->orWhereHas('transactions')->orderBy('business_name')->get();
-    //     return $vendors;
-    // }
-
-    #[Computed]
-    public function expenses()
-    {
-        $expenses =
-            Expense::search($this->amount)
-                // ->where('belongs_to_vendor_id', auth()->user()->primary_vendor_id)
-                // ->tap(fn ($query) => $this->sortBy ? $query->orderBy($this->sortBy, $this->sortDirection) : $query)
-                ->orderBy($this->sortBy, $this->sortDirection)
-
-                ->when(! empty($this->expense_vendor) && $this->expense_vendor !== '0', function ($query, $item) {
-                    return $query->where('vendor_id', $this->expense_vendor);
-                })
-                ->when($this->expense_vendor === '0', function ($query, $item) {
-                    return $query->where('vendor_id', '0');
-                })
-
-                // // && $this->project != 'NO_PROJECT' && $this->project != 'SPLIT'
-                // ->when(! empty($this->project) && is_numeric($this->project), function ($query, $item) {
-                //     return $query->where('project_id', $this->project);
-                // })
-                // //and no splits
-                // ->when($this->project == 'NO_PROJECT', function ($query, $item) {
-                //     return
-                //         $query
-                //             ->where('is_project_id_null', 'true')
-                //             ->where('is_distribution_id_null', 'true')
-                //             ->where('has_splits', 'false');
-                // })
-                // ->when($this->project == 'SPLIT', function ($query, $item) {
-                //     return $query->where('has_splits', 'true');
-                // })
-                // ->when(substr($this->project, 0, 1) == 'D', function ($query) {
-                //     return
-                //         $query
-                //             ->where('is_distribution_id_null', 'false')
-                //             ->where('distribution_id', substr($this->project, 2));
-                // })
-                // ->when(! empty($this->check) && is_numeric($this->check), function ($query, $item) {
-                //     return $query->where('check_id', $this->check);
-                // })
-                // ->whereIn(
-                //     'expense_status', ['Complete', 'Missing Info', 'No Project', 'No Transaction']
-                // )
-                // ->take(10)->get();
-                ->paginate($this->paginate_number, pageName: 'expenses-page');
-
-        // $expenses->getCollection()->each(function ($expense, $key) {
-        //     // if($expense->check){
-        //     //     if($expense->check->transactions->isNotEmpty() && $expense->paid_by != NULL){
-        //     //         $expense->status = 'Complete';
-        //     //     }else{
-        //     //         if($expense->transactions->isNotEmpty()){
-        //     //             $expense->status = 'Complete';
-        //     //         }else{
-        //     //             $expense->status = 'No Transaction';
-        //     //         }
-        //     //     }
-        //     // }else
-        //     if (($expense->transactions->isNotEmpty() && $expense->project->project_name != 'NO PROJECT') || ($expense->paid_by != null && $expense->project->project_name != 'NO PROJECT')) {
-        //         $expense->status = 'Complete';
-        //     } else {
-        //         if ($expense->project->project_name != 'NO PROJECT' && $expense->transactions->isEmpty()) {
-        //             $expense->status = 'No Transaction';
-        //         } elseif ($expense->project->project_name == 'NO PROJECT' && ($expense->transactions->isNotEmpty() || $expense->paid_by != null)) {
-        //             $expense->status = 'No Project';
-        //         } else {
-        //             $expense->status = 'Missing Info';
-        //         }
-        //     }
-        // });
-
-        return $expenses;
-    }
 
     // #[Computed]
     // public function transactions()
@@ -236,6 +226,80 @@ class ExpenseIndex extends Component
     {
         $this->authorize('viewAny', Expense::class);
 
-        return view('livewire.expenses.index');
+        $expenses = Expense::
+            // search($this->amount)
+            // "'" . $this->amount . "'"
+            search($this->amount, function ($meilisearch, $query, $options) {
+                $options['matchingStrategy'] = 'all';
+                // ->tap(fn ($query) => $this->sortBy ? $query->orderBy($this->sortBy, $this->sortDirection) : $query)
+                // ->orderBy($this->sortBy, $this->sortDirection)
+                $options['sort'] = [$this->sortBy . ':' . $this->sortDirection];
+
+                if (is_numeric($this->expense_vendor)) {
+                    //filter should be ++ so the latest item doesnt override previous.
+                    $options['filter'] = ['vendor_id = ' . $this->expense_vendor];
+                }
+                // if (is_numeric($this->project)){
+                //     $options['filter'] = 'project_id IS NULL AND distribution_id IS NULL AND has_splits IS false';
+                // }
+
+                return $meilisearch->search($query, $options);
+
+                //     if ($this->project == 'NO_PROJECT') {
+                //         $options['filter'] = 'project_id IS NULL AND distribution_id IS NULL AND has_splits IS false';
+                //     } elseif($this->project == 'SPLIT') {
+                //         $options['filter'] = 'has_splits IS true';
+                //     } elseif(!empty($this->project) && is_numeric($this->project)) {
+                //         $options['filter'] = 'project_id IS ' . $this->project;
+                //     }
+            })
+
+
+            // ->where('belongs_to_vendor_id', auth()->user()->primary_vendor_id)
+
+
+
+            // ->when(!empty($this->expense_vendor) && $this->expense_vendor !== '0', function ($query, $item) {
+            //     return $query->where('vendor_id', $this->expense_vendor);
+            // })
+            // ->when($this->expense_vendor === '0', function ($query, $item) {
+            //     return $query->where('vendor_id', '0');
+            // })
+
+            // && $this->project != 'NO_PROJECT' && $this->project != 'SPLIT'
+            // !empty($this->project_id) &&
+            // ->when(is_numeric($this->project_id), function ($query, $item) {
+            //     return $query->where('project_id', $this->project_id);
+            // })
+            // // //and no splits
+            // ->when($this->project_id === 'NO_PROJECT', function ($query, $item) {
+            //     return
+            //         $query
+            //             ->where('is_project_id_null', true)
+            //             ->where('is_distribution_id_null', true)
+            //             ->where('has_splits', false);
+            // })
+            // ->when($this->project_id === 'SPLIT', function ($query, $item) {
+            //     return $query->where('has_splits', true);
+            // })
+
+            // ->when(substr($this->project, 0, 1) == 'D', function ($query) {
+            //     return
+            //         $query
+            //             ->where('is_distribution_id_null', 'false')
+            //             ->where('distribution_id', substr($this->project, 2));
+            // })
+            // ->when(! empty($this->check) && is_numeric($this->check), function ($query, $item) {
+            //     return $query->where('check_id', $this->check);
+            // })
+            // ->whereIn(
+            //     'expense_status', ['Complete', 'Missing Info', 'No Project', 'No Transaction']
+            // )
+            // ->take(10)->get();
+            ->paginate($this->paginate_number, pageName: 'expenses-page');
+
+        return view('livewire.expenses.index', [
+            'expenses' => $expenses,
+        ]);
     }
 }

@@ -3,17 +3,17 @@
         <flux:card class="space-y-2 mb-4">
             <div class="flex justify-between">
                 <flux:heading size="lg">Filters</flux:heading>
-                {{-- @can('create', App\Models\Expense::class)
+                @can('create', App\Models\Expense::class)
                     @if($amount && $view == NULL)
                         <flux:button wire:click="$dispatchTo('expenses.expense-create', 'newExpense', { amount: {{$amount}}})">Add New Expense</flux:button>
                     @endif
-                @endcan --}}
+                @endcan
             </div>
 
             <flux:separator variant="subtle" />
 
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <flux:input wire:model.live.debounce.300ms="amount" label="Amount" icon="magnifying-glass" placeholder="123.45" />
+                <flux:input wire:model.live.debounce.300ms="amount" label="Amount" icon="magnifying-glass" placeholder="Search Amount" />
 
                 <flux:select wire:model.live="expense_vendor" label="Vendor" variant="listbox" searchable placeholder="Choose Vendor...">
                     <x-slot name="search">
@@ -28,7 +28,7 @@
                     @endforeach
                 </flux:select>
 
-                <flux:select wire:model.live="project" label="Project" variant="listbox" searchable placeholder="Choose Project...">
+                {{-- <flux:select wire:model.live="project_id" label="Project" variant="listbox" searchable placeholder="Choose Project...">
                     <x-slot name="search">
                         <flux:select.search placeholder="Search..." />
                     </x-slot>
@@ -44,7 +44,7 @@
                     @foreach ($distributions as $distribution)
                         <flux:option value="D:{{$distribution->id}}">{{ $distribution->name }}</flux:option>
                     @endforeach
-                </flux:select>
+                </flux:select> --}}
             </div>
         </flux:card>
     @endif
@@ -55,25 +55,33 @@
         </div>
 
         <div class="space-y-2">
-            <flux:table :paginate="$this->expenses" wire:loading.class="opacity-50 text-opacity-40">
+            <flux:table :paginate="$expenses" wire:loading.class="opacity-50 text-opacity-50">
                 <flux:columns>
                     <flux:column>Amount</flux:column>
-                    <flux:column sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')">Date</flux:column>
+                    <flux:column
+                        sortable
+                        :sorted="$sortBy === 'date'"
+                        :direction="$sortDirection"
+                        wire:click="sort('date')"
+                        >
+                        Date
+                    </flux:column>
+
                     @if(!in_array($view, ['checks.show', 'vendors.show']))
                         <flux:column >Vendor</flux:column>
                     @endif
 
-                    {{-- @if($view != 'projects.show')
+                    @if($view != 'projects.show')
                         <flux:column>Project</flux:column>
-                    @endif --}}
+                    @endif
                     <flux:column>Status</flux:column>
                 </flux:columns>
 
                 <flux:rows>
-                    @foreach ($this->expenses as $expense)
+                    @foreach ($expenses as $expense)
                         <flux:row :key="$expense->id">
                             <flux:cell
-                                {{-- wire:click="$dispatchTo('expenses.expense-create', 'editExpense', { expense: {{$expense->id}}})" --}}
+                                wire:click="$dispatchTo('expenses.expense-create', 'editExpense', { expense: {{$expense->id}}})"
                                 variant="strong"
                                 class="cursor-pointer"
                                 >
@@ -81,10 +89,9 @@
                             </flux:cell>
                             <flux:cell>{{ $expense->date->format('m/d/Y') }}</flux:cell>
                             @if(!in_array($view, ['checks.show', 'vendors.show']))
-                                {{-- wire:navigate.hover --}}
                                 <flux:cell><a href="{{isset($expense->vendor->id) ? route('vendors.show', $expense->vendor->id) : ''}}">{{Str::limit($expense->vendor->name, 20)}}</a></flux:cell>
                             @endif
-{{--
+
                             @if($view != 'projects.show')
                                 <flux:cell>
                                     @if($expense->project_id)
@@ -93,9 +100,9 @@
                                         {{ Str::limit($expense->project->name, 25) }}
                                     @endif
                                 </flux:cell>
-                            @endif --}}
+                            @endif
                             <flux:cell>
-                                Status
+                                <flux:badge size="sm" :color="'sky'" inset="top bottom">Status</flux:badge>
                                 {{-- <flux:badge size="sm" :color="$expense->status == 'Complete' ? 'green' : ($expense->status == 'No Transaction' ? 'yellow' : 'red')" inset="top bottom">{{ $expense->status }}</flux:badge> --}}
                             </flux:cell>
                         </flux:row>
@@ -105,7 +112,7 @@
         </div>
     </flux:card>
 
-    {{-- <livewire:expenses.expense-create /> --}}
+    <livewire:expenses.expense-create />
 </div>
 {{--
 

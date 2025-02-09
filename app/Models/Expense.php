@@ -29,7 +29,6 @@ class Expense extends Model
         static::addGlobalScope(new ExpenseScope);
     }
 
-    //Searchable / Typesense
     public function toSearchableArray(): array
     {
         // All model attributes are made searchable
@@ -38,19 +37,6 @@ class Expense extends Model
         // $array['created_at'] = $this->created_at->timestamp;
         // $array['updated_at'] = $this->updated_at->timestamp;
         $array['date'] = $this->date->timestamp;
-        // $array['expense_status'] = ! is_null($this->project_id) ? 'Complete' : 'Missing Info';
-
-        return $array;
-
-        //ONLY:
-        // return [
-        //     'id' => $this->id,
-        //     'name' => $this->name,
-        //     'email' => $this->email,
-        // ];
-
-
-
 
         // if($this->check()->withoutGlobalScopes()){
         //     if($this->check()->withoutGlobalScopes()->transactions->isNotEmpty()){
@@ -62,6 +48,8 @@ class Expense extends Model
         //     }else{
         //         $expense_status = 'No Transaction';
         //     }
+        // }else{
+        //     $expense_status = ''
         // }
         // if(($this->transactions->isNotEmpty() && $this->project->project_name != 'NO PROJECT') || ($this->paid_by != NULL && $this->project->project_name != 'NO PROJECT')){
         //     $expense_status = 'Complete';
@@ -75,13 +63,28 @@ class Expense extends Model
         //     }
         // }
 
+        // $array['is_project_id_null'] = $this->distribution_id ? false : true;
+        // $array['is_distribution_id_null'] = $this->distribution_id ? false : true;
+        $array['has_splits'] = $this->splits->isEmpty() ? false : true;
+
+        $array['expense_status'] = ! is_null($this->project_id) ? 'Complete' : 'Missing Info';
+        return $array;
+
+        //ONLY:
+        // return [
+        //     'id' => $this->id,
+        //     'name' => $this->name,
+        //     'email' => $this->email,
+        // ];
+
+
         // return array_merge($this->toArray(), [
         //     'id' => (string) $this->id,
         //     'vendor_id' => (string) $this->vendor_id,
         //     'belongs_to_vendor_id' => (string) $this->belongs_to_vendor_id,
         //     'project_id' => (string) $this->project_id,
         //     'check_id' => (string) $this->check_id,
-        //     'is_project_id_null' => $this->project_id ? false : true,
+        //     'is_project_id_null' => $this->distribution_id ? false : true,
         //     'distribution_id' => (string) $this->distribution_id,
         //     'is_distribution_id_null' => $this->distribution_id ? false : true,
         //     'has_splits' => $this->splits->isEmpty() ? false : true,
