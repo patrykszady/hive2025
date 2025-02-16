@@ -245,6 +245,7 @@ class ExpenseIndex extends Component
                 }
 
 
+
                 return $meilisearch->search($query, $options);
 
                 //     if ($this->project == 'NO_PROJECT') {
