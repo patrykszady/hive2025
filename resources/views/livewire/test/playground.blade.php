@@ -1,5 +1,5 @@
 <div x-data class="mx-auto max-w-3xl min-h-[16rem] w-full space-y-4">
-    <div x-disclosure class="rounded-lg bg-white shadow">
+    <div x-disclosure class="rounded-lg bg-white shadow-sm">
         <button
             x-disclosure:button
             class="flex w-full items-center justify-between px-6 py-4 text-xl font-bold"
@@ -14,7 +14,7 @@
         </div>
     </div>
 
-    {{-- <div x-disclosure class="rounded-lg bg-white shadow">
+    {{-- <div x-disclosure class="rounded-lg bg-white shadow-sm">
         <button
             x-disclosure:button
             class="flex w-full items-center justify-between px-6 py-4 text-xl font-bold"

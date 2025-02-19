@@ -55,7 +55,7 @@
                 @if($checkbox)
                     <input
                         wire:model.live="{{$checkbox['name']}}.{{$checkbox['id']}}.checkbox"
-                        class="w-4 h-4 mr-2 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                        class="w-4 h-4 mr-2 text-indigo-600 border-gray-300 rounded-sm focus:ring-indigo-500"
                         name="{{$checkbox['name']}}"
                         id="{{$checkbox['name'] .  $checkbox['id']}}"
                         aria-describedby="{{$checkbox['name']}}-description"
@@ -112,7 +112,7 @@
                         @foreach($lineDetails as $line_detail)
                             <p class="flex items-center mt-2 text-sm text-gray-500 sm:mt-0 sm:ml-6">
                                 <svg
-                                    class="flex-shrink-0 mr-1.5 h-5 w-5 text-gray-400"
+                                    class="shrink-0 mr-1.5 h-5 w-5 text-gray-400"
                                     viewBox="0 0 20 20"
                                     fill="currentColor"
                                     aria-hidden="true">

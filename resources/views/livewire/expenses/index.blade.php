@@ -20,11 +20,11 @@
                         <flux:select.search placeholder="Search..." />
                     </x-slot>
 
-                    <flux:option value="">ALL VENDORS</flux:option>
-                    <flux:option value="0">NO VENDOR</flux:option>
-                    <flux:option disabled>---------</flux:option>
+                    <flux:select.option value="">ALL VENDORS</flux:select.option>
+                    <flux:select.option value="0">NO VENDOR</flux:select.option>
+                    <flux:select.option disabled>---------</flux:select.option>
                     @foreach ($vendors as $vendor)
-                        <flux:option value="{{$vendor->id}}">{{ $vendor->name }}</flux:option>
+                        <flux:select.option value="{{$vendor->id}}">{{ $vendor->name }}</flux:select.option>
                     @endforeach
                 </flux:select>
 
@@ -33,16 +33,16 @@
                         <flux:select.search placeholder="Search..." />
                     </x-slot>
 
-                    <flux:option value="">ALL PROJECTS</flux:option>
-                    <flux:option value="NO_PROJECT">NO PROJECT</flux:option>
-                    <flux:option value="SPLIT">SPLIT</flux:option>
-                    <flux:option disabled>---------</flux:option>
+                    <flux:select.option value="">ALL PROJECTS</flux:select.option>
+                    <flux:select.option value="NO_PROJECT">NO PROJECT</flux:select.option>
+                    <flux:select.option value="SPLIT">SPLIT</flux:select.option>
+                    <flux:select.option disabled>---------</flux:select.option>
                     @foreach ($projects as $project)
-                        <flux:option value="{{$project->id}}">{{ $project->name }}</flux:option>
+                        <flux:select.option value="{{$project->id}}"><div>{{$project->address}} <br> <i class="font-normal">{{$project->project_name}}</i></div></flux:select.option>
                     @endforeach
-                    <flux:option disabled>---------</flux:option>
+                    <flux:select.option disabled>---------</flux:select.option>
                     @foreach ($distributions as $distribution)
-                        <flux:option value="D:{{$distribution->id}}">{{ $distribution->name }}</flux:option>
+                        <flux:select.option value="D:{{$distribution->id}}">{{ $distribution->name }}</flux:select.option>
                     @endforeach
                 </flux:select>
             </div>
@@ -56,58 +56,58 @@
 
         <div class="space-y-2">
             <flux:table :paginate="$expenses" wire:loading.class="opacity-50 text-opacity-50">
-                <flux:columns>
-                    <flux:column>Amount</flux:column>
-                    <flux:column
+                <flux:table.columns>
+                    <flux:table.column>Amount</flux:table.column>
+                    <flux:table.column
                         sortable
                         :sorted="$sortBy === 'date'"
                         :direction="$sortDirection"
                         wire:click="sort('date')"
                         >
                         Date
-                    </flux:column>
+                    </flux:table.column>
 
                     @if(!in_array($view, ['checks.show', 'vendors.show']))
-                        <flux:column >Vendor</flux:column>
+                        <flux:table.column >Vendor</flux:table.column>
                     @endif
 
                     @if($view != 'projects.show')
-                        <flux:column>Project</flux:column>
+                        <flux:table.column>Project</flux:table.column>
                     @endif
-                    <flux:column>Status</flux:column>
-                </flux:columns>
+                    <flux:table.column>Status</flux:table.column>
+                </flux:table.columns>
 
-                <flux:rows>
+                <flux:table.rows>
                     @foreach ($expenses as $expense)
-                        <flux:row :key="$expense->id">
-                            <flux:cell
+                        <flux:table.row :key="$expense->id">
+                            <flux:table.cell
                                 wire:click="$dispatchTo('expenses.expense-create', 'editExpense', { expense: {{$expense->id}}})"
                                 variant="strong"
                                 class="cursor-pointer"
                                 >
                                 {{ money($expense->amount) }}
-                            </flux:cell>
-                            <flux:cell>{{ $expense->date->format('m/d/Y') }}</flux:cell>
+                            </flux:table.cell>
+                            <flux:table.cell>{{ $expense->date->format('m/d/Y') }}</flux:table.cell>
                             @if(!in_array($view, ['checks.show', 'vendors.show']))
-                                <flux:cell><a href="{{isset($expense->vendor->id) ? route('vendors.show', $expense->vendor->id) : ''}}">{{Str::limit($expense->vendor->name, 20)}}</a></flux:cell>
+                                <flux:table.cell><a href="{{isset($expense->vendor->id) ? route('vendors.show', $expense->vendor->id) : ''}}">{{Str::limit($expense->vendor->name, 20)}}</a></flux:table.cell>
                             @endif
 
                             @if($view != 'projects.show')
-                                <flux:cell>
+                                <flux:table.cell>
                                     @if($expense->project_id)
                                         <a wire:navigate.hover href="{{route('projects.show', $expense->project->id)}}">{{ Str::limit($expense->project->name, 25) }}</a>
                                     @else
                                         {{ Str::limit($expense->project->name, 25) }}
                                     @endif
-                                </flux:cell>
+                                </flux:table.cell>
                             @endif
-                            <flux:cell>
+                            <flux:table.cell>
                                 <flux:badge size="sm" :color="'sky'" inset="top bottom">Status</flux:badge>
                                 {{-- <flux:badge size="sm" :color="$expense->status == 'Complete' ? 'green' : ($expense->status == 'No Transaction' ? 'yellow' : 'red')" inset="top bottom">{{ $expense->status }}</flux:badge> --}}
-                            </flux:cell>
-                        </flux:row>
+                            </flux:table.cell>
+                        </flux:table.row>
                     @endforeach
-                </flux:rows>
+                </flux:table.rows>
             </flux:table>
         </div>
     </flux:card>
@@ -124,7 +124,7 @@
                     wire:model.live="bank_plaid_ins_id"
                     id="bank_plaid_ins_id"
                     name="bank_plaid_ins_id"
-                    class="block w-full py-2 pl-3 pr-10 mt-1 text-base border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                    class="block w-full py-2 pl-3 pr-10 mt-1 text-base border-gray-300 rounded-md focus:outline-hidden focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
                     <option value="" readonly>All Banks</option>
                     @foreach($banks as $institution_id => $bank)
                         <option value="{{$institution_id}}">{{$bank->first()->name}}</option>
@@ -137,7 +137,7 @@
                         wire:model.live="bank_owner"
                         id="bank_owner"
                         name="bank_owner"
-                        class="block w-full py-2 pl-3 pr-10 mt-1 text-base border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                        class="block w-full py-2 pl-3 pr-10 mt-1 text-base border-gray-300 rounded-md focus:outline-hidden focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
                         <option value="" readonly>All Owners</option>
                         @foreach($bank_owners as $owner)
                             <option value="{{$owner}}">{{$owner}}</option>

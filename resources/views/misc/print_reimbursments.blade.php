@@ -157,7 +157,7 @@
                                                 @endphp
 
                                                 <flux:row>
-                                                    <flux:cell colspan="4" class="!pb-0">
+                                                    <flux:cell colspan="4" class="pb-0!">
                                                         <span
                                                             @class([
                                                                 'text-gray-200 line-through' => $split
@@ -169,7 +169,7 @@
                                                     </flux:cell>
                                                 </flux:row>
 
-                                                <flux:row class="!border-none !py-0">
+                                                <flux:row class="border-none! py-0!">
                                                     {{-- 09/28/24 URL TO ITEM --}}
                                                     <flux:cell class="text-right">
                                                         <i

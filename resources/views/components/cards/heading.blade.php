@@ -50,9 +50,9 @@
             @endif
         </div>
 
-        {{--  10/14/21 only last inside x-card.heading = flex-shrink-0 .. how to do automatically? --}}
+        {{--  10/14/21 only last inside x-card.heading = shrink-0 .. how to do automatically? --}}
         {{-- mt-2 md:mt-0 --}}
-        <div class="flex-shrink-0 md:ml-4">
+        <div class="shrink-0 md:ml-4">
             {{-- 10/14/21 button = new compnent in card or application? --}}
             {{$right ?? ''}}
         </div>

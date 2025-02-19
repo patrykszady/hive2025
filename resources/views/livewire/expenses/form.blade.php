@@ -40,7 +40,7 @@
                     <flux:select.search placeholder="Search..." />
                 </x-slot>
                 @foreach($this->vendors as $vendor)
-                    <flux:option value="{{$vendor->id}}">{{$vendor->name}}</flux:option>
+                    <flux:select.option value="{{$vendor->id}}">{{$vendor->name}}</flux:select.option>
                 @endforeach
             </flux:select>
             @if(isset($form->merchant_name))
@@ -72,13 +72,13 @@
                         {{-- <flux:option value="" readonly x-text="split ? 'Expense is Split' : 'Select Project'"></flux:option> --}}
 
                         @foreach($this->projects as $project)
-                            <flux:option wire:key="{{$project->id}}" value="{{$project->id}}"><div>{{$project->address}} <br> <i class="font-normal">{{$project->project_name}}</i></div></flux:option>
+                            <flux:select.option wire:key="{{$project->id}}" value="{{$project->id}}"><div>{{$project->address}} <br> <i class="font-normal">{{$project->project_name}}</i></div></flux:select.option>
                         @endforeach
 
-                        <flux:option disabled>--------------</flux:option>
+                        <flux:select.option disabled>--------------</flux:select.option>
 
                         @foreach($distributions as $distribution)
-                            <flux:option wire:key="D:{{$distribution->id}}" value="D:{{$distribution->id}}">{{$distribution->name}}</flux:option>
+                            <flux:select.option wire:key="D:{{$distribution->id}}" value="D:{{$distribution->id}}">{{$distribution->name}}</flux:select.option>
                         @endforeach
                     </flux:select>
 
@@ -120,9 +120,9 @@
             x-transition
             >
             <flux:select label="Paid By" wire:model.live="form.paid_by" placeholder="Choose who paid...">
-                <flux:option value="NULL">{{auth()->user()->vendor->name}}</flux:option>
+                <flux:select.option value="NULL">{{auth()->user()->vendor->name}}</flux:select.option>
                 @foreach($employees as $employee)
-                    <flux:option value="{{$employee->id}}">{{$employee->first_name}}</flux:option>
+                    <flux:select.option value="{{$employee->id}}">{{$employee->first_name}}</flux:select.option>
                 @endforeach
             </flux:select>
         </div>
@@ -174,10 +174,10 @@
 
                 <flux:select wire:model.live="form.reimbursment" placeholder="Choose reimbursment...">
                     {{--  x-bind:selected="split == true ? true : false" --}}
-                    <flux:option>None</flux:option>
-                    <flux:option x-bind:disabled="project_completed">Client</flux:option>
+                    <flux:select.option>None</flux:select.option>
+                    <flux:select.option x-bind:disabled="project_completed">Client</flux:select.option>
                     @foreach ($via_vendor_employees as $employee)
-                        <flux:option value="{{$employee->id}}">{{$employee->first_name}}</flux:option>
+                        <flux:select.option value="{{$employee->id}}">{{$employee->first_name}}</flux:select.option>
                     @endforeach
                 </flux:select>
 

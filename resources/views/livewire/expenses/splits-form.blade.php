@@ -19,34 +19,36 @@
                     @endif
                 </div>
 
-                <flux:table>
-                    <flux:columns>
-                        <flux:column></flux:column>
-                        <flux:column>Desc</flux:column>
-                        <flux:column>Price</flux:column>
-                        <flux:column>Qty</flux:column>
-                        <flux:column>Total</flux:column>
-                    </flux:columns>
+                @if ($expense_line_items)
+                    <flux:table>
+                        <flux:table.columns>
+                            <flux:table.column></flux:table.column>
+                            <flux:table.column>Desc</flux:table.column>
+                            <flux:table.column>Price</flux:table.column>
+                            <flux:table.column>Qty</flux:table.column>
+                            <flux:table.column>Total</flux:table.column>
+                        </flux:table.columns>
 
-                    <flux:rows>
-                        @if(!is_array($expense_line_items))
-                            @foreach($expense_line_items->items as $line_item_index => $line_item)
-                                <flux:row class="{{$split['items'] && $split['items'][$line_item_index]['checkbox'] == TRUE ? 'bg-gray-50' : ''}}">
-                                    <flux:cell>
-                                        <flux:checkbox
-                                            wire:model.live="expense_splits.{{$index}}.items.{{$line_item_index}}.checkbox"
-                                            :disabled="isset($line_item->split_index) ? $line_item->split_index != $index : FALSE"
-                                            />
-                                    </flux:cell>
-                                    <flux:cell>{{Str::limit($line_item->Description, 20)}}</flux:cell>
-                                    <flux:cell>{{money($line_item->Price)}}</flux:cell>
-                                    <flux:cell>{{$line_item->Quantity}}</flux:cell>
-                                    <flux:cell variant="strong" class="{{isset($line_item->split_index) ? $line_item->split_index != $index || $line_item->split_index == NULL ? 'text-gray-200' : 'text-gray-500' : 'text-gray-500'}} whitespace-nowrap">{{money($line_item->TotalPrice)}}</flux:cell>
-                                </flux:row>
-                            @endforeach
-                        @endif
-                    </flux:rows>
-                </flux:table>
+                        <flux:table.rows>
+                            @if(!is_array($expense_line_items))
+                                @foreach($expense_line_items->items as $line_item_index => $line_item)
+                                    <flux:table.row class="{{$split['items'] && $split['items'][$line_item_index]['checkbox'] == TRUE ? 'bg-gray-50' : ''}}">
+                                        <flux:table.cell>
+                                            <flux:checkbox
+                                                wire:model.live="expense_splits.{{$index}}.items.{{$line_item_index}}.checkbox"
+                                                :disabled="isset($line_item->split_index) ? $line_item->split_index != $index : FALSE"
+                                                />
+                                        </flux:table.cell>
+                                        <flux:table.cell>{{Str::limit($line_item->Description, 20)}}</flux:table.cell>
+                                        <flux:table.cell>{{money($line_item->Price)}}</flux:table.cell>
+                                        <flux:table.cell>{{$line_item->Quantity}}</flux:table.cell>
+                                        <flux:table.cell variant="strong" class="{{isset($line_item->split_index) ? $line_item->split_index != $index || $line_item->split_index == NULL ? 'text-gray-200' : 'text-gray-500' : 'text-gray-500'}} whitespace-nowrap">{{money($line_item->TotalPrice)}}</flux:table.cell>
+                                    </flux:table.row>
+                                @endforeach
+                            @endif
+                        </flux:table.rows>
+                    </flux:table>
+                @endif
 
                 <flux:separator variant="subtle" />
 
@@ -68,13 +70,13 @@
                     <flux:label>Project</flux:label>
                     <flux:select wire:model.live="expense_splits.{{ $index }}.project_id" variant="listbox" searchable placeholder="Choose project...">
                         @foreach($projects as $project)
-                            <flux:option value="{{$project->id}}"><div>{{$project->address}} <br> <i class="font-normal">{{$project->project_name}}</i></div></flux:option>
+                            <flux:select.option value="{{$project->id}}"><div>{{$project->address}} <br> <i class="font-normal">{{$project->project_name}}</i></div></flux:select.option>
                         @endforeach
 
-                        <flux:option disabled>--------------</flux:option>
+                        <flux:select.option disabled>--------------</flux:select.option>
 
                         @foreach($distributions as $distribution)
-                            <flux:option value="D:{{$distribution->id}}">{{$distribution->name}}</flux:option>
+                            <flux:select.option value="D:{{$distribution->id}}">{{$distribution->name}}</flux:select.option>
                         @endforeach
                     </flux:select>
                     <flux:error name="expense_splits.{{ $index }}.project_id" />

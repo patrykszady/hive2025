@@ -9,7 +9,7 @@
     </div>
 
     <div class="mx-4 mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <div class="px-4 py-8 bg-white shadow sm:rounded-lg sm:px-10">
+        <div class="px-4 py-8 bg-white shadow-sm sm:rounded-lg sm:px-10">
                 {{-- CELL PHONE --}}
                 <div>
                     <label for="user_cell" class="block text-sm font-medium text-gray-700">Cell Phone Number</label>
@@ -24,7 +24,7 @@
                             placeholder="8470004000"
                             required
                             x-bind:disabled="{{isset($user) ? isset($user['id']) || isset($user['cell_phone']) && !$errors->has('user_cell') ? true : false : false}}"
-                            class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-sm appearance-none disabled:opacity-50 focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm"
+                            class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-xs appearance-none disabled:opacity-50 focus:border-indigo-500 focus:outline-hidden focus:ring-indigo-500 sm:text-sm"
                         >
                     </div>
 
@@ -43,7 +43,7 @@
                         <button
                             wire:click="user_cell_confirm"
                             type="button"
-                            class="flex justify-center w-full px-4 py-2 text-sm text-white bg-indigo-600 border border-transparent rounded-md shadow-sm font-small hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                            class="flex justify-center w-full px-4 py-2 text-sm text-white bg-indigo-600 border border-transparent rounded-md shadow-xs font-small hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
                             >
                             Confirm Number
                         </button>
@@ -70,7 +70,7 @@
                                 inputmode="numeric"
                                 placeholder="123456"
                                 required
-                                class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-sm appearance-none focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm"
+                                class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-xs appearance-none focus:border-indigo-500 focus:outline-hidden focus:ring-indigo-500 sm:text-sm"
                             >
                             <span class="text-sm"><i>Enter the 6 digit code we texted you. If you refresh this page you will need to request a new code.</i></span>
                         </div>
@@ -81,7 +81,7 @@
                         <button
                             wire:click="cell_verification_code_confirm"
                             type="button"
-                            class="flex justify-center w-full px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                            class="flex justify-center w-full px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-xs hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
                             >
                             Verify Cell Phone Number
                         </button>
@@ -106,7 +106,7 @@
                                 required
                                 x-bind:disabled="{{$show_name == TRUE || $validate_email == TRUE ? true : false}}"
                                 {{-- x-bind:disabled="{{isset($user) ? isset($user['id']) || isset($user['email']) ? true : false : false}}" --}}
-                                class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-sm appearance-none disabled:opacity-50 focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm"
+                                class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-xs appearance-none disabled:opacity-50 focus:border-indigo-500 focus:outline-hidden focus:ring-indigo-500 sm:text-sm"
                             >
                             <span class="text-sm" x-show="!show_name && !validate_email"><i><b>Personal email</b> NOT your business email.</i></span>
                         </div>
@@ -123,7 +123,7 @@
                             <button
                                 wire:click="user_email"
                                 type="button"
-                                class="flex justify-center w-full px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                                class="flex justify-center w-full px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-xs hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
                                 >
                                 Confirm Email
                             </button>
@@ -149,7 +149,7 @@
                                 type="numeric"
                                 inputmode="numeric"
                                 required
-                                class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-sm appearance-none focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm"
+                                class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-xs appearance-none focus:border-indigo-500 focus:outline-hidden focus:ring-indigo-500 sm:text-sm"
                             >
                             <span class="text-sm"><i>Enter the 6 digit code we emailed you. If you refresh this page you will need to request a new code.</i></span>
                         </div>
@@ -167,7 +167,7 @@
                             <button
                                 wire:click="email_verification_code_confirm"
                                 type="button"
-                                class="flex justify-center w-full px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                                class="flex justify-center w-full px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-xs hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
                                 >
                                 Verify Email
                             </button>
@@ -192,7 +192,7 @@
                                 name="user.first_name"
                                 required
                                 x-bind:disabled="{{isset($user) ? isset($user['id']) ? true : false : false}}"
-                                class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-sm appearance-none disabled:opacity-50 focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm"
+                                class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-xs appearance-none disabled:opacity-50 focus:border-indigo-500 focus:outline-hidden focus:ring-indigo-500 sm:text-sm"
                             >
                         </div>
                         <x-forms.error errorName="user.first_name" />
@@ -207,7 +207,7 @@
                                 name="user.last_name"
                                 required
                                 x-bind:disabled="{{isset($user) ? isset($user['id']) ? true : false : false}}"
-                                class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-sm appearance-none disabled:opacity-50 focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm"
+                                class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-xs appearance-none disabled:opacity-50 focus:border-indigo-500 focus:outline-hidden focus:ring-indigo-500 sm:text-sm"
                             >
                         </div>
                         <x-forms.error errorName="user.last_name" />
@@ -223,7 +223,7 @@
                                 name="password"
                                 type="password"
                                 required
-                                class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-sm appearance-none focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm"
+                                class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-xs appearance-none focus:border-indigo-500 focus:outline-hidden focus:ring-indigo-500 sm:text-sm"
                             >
                         </div>
                         <x-forms.error errorName="password" />
@@ -238,7 +238,7 @@
                                     name="password_confirmation"
                                     type="password"
                                     required
-                                    class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-sm appearance-none focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm"
+                                    class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-xs appearance-none focus:border-indigo-500 focus:outline-hidden focus:ring-indigo-500 sm:text-sm"
                                 >
                             </div>
                         <x-forms.error errorName="password_confirmation" />
@@ -246,7 +246,7 @@
 
                     <button
                         type="submit"
-                        class="flex justify-center w-full px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                        class="flex justify-center w-full px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-xs hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
                         >
                         Register
                     </button>

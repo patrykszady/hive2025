@@ -10,20 +10,20 @@
         </div>
 
         <div class="mx-4 mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-            <div class="px-4 pt-1 pb-4 bg-white shadow sm:rounded-lg sm:px-10">
+            <div class="px-4 pt-1 pb-4 bg-white shadow-sm sm:rounded-lg sm:px-10">
                 <form method="POST" action="{{ route('password.email') }}" class="space-y-6" >
                 @csrf
 
                 <div>
                     <label for="email" class="block text-sm font-medium text-gray-700">Email address</label>
                     <div>
-                    <input id="email" name="email" type="email" autocomplete="email" required class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-sm appearance-none focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm">
+                    <input id="email" name="email" type="email" autocomplete="email" required class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-xs appearance-none focus:border-indigo-500 focus:outline-hidden focus:ring-indigo-500 sm:text-sm">
                     </div>
                     <x-forms.error errorName="email" />
                 </div>
 
                 <div>
-                    <button type="submit" class="flex justify-center w-full px-4 py-2 mt-1 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+                    <button type="submit" class="flex justify-center w-full px-4 py-2 mt-1 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-xs hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
                         Email Password Reset Link
                     </button>
                 </div>
@@ -52,7 +52,7 @@
                         Register Instead
                     </x-misc.hr>
                     <div>
-                        <a href="{{ route('registration') }}" type="button" class="flex justify-center w-full px-4 py-2 mt-6 text-white bg-indigo-600 border border-transparent rounded-md shadow-sm text-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+                        <a href="{{ route('registration') }}" type="button" class="flex justify-center w-full px-4 py-2 mt-6 text-white bg-indigo-600 border border-transparent rounded-md shadow-xs text-md hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
                             Register
                         </a>
                     </div>

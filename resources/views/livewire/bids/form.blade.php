@@ -71,7 +71,7 @@
                 value="true"
                 type="checkbox"
                 x-bind:disabled="{{!$bid->estimate_sections->isEmpty()}}"
-                class="w-4 h-4 ml-2 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                class="w-4 h-4 ml-2 text-indigo-600 border-gray-300 rounded-sm focus:ring-indigo-500"
                 >
         </x-slot>
 

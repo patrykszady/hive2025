@@ -14,7 +14,7 @@
                 <flux:subheading>Choose Bid for each Section.</flux:subheading>
             </div>
 
-            <flux:table class="!p-0 !m-0">
+            <flux:table class="p-0! m-0!">
                 <flux:columns>
                     <flux:column>Section Name</flux:column>
                     <flux:column>Bid</flux:column>
@@ -72,7 +72,7 @@
             </div>
             {{-- List your project progressive payments for the Original Bid of this Estimate. --}}
             <flux:subheading>List Estimate progressive Payments</flux:subheading>
-            <flux:table class="!p-0 !m-0">
+            <flux:table class="p-0! m-0!">
                 <flux:columns>
                     <flux:column>Payment</flux:column>
                     <flux:column>Description</flux:column>

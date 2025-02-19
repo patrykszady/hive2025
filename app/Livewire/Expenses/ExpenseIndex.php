@@ -226,8 +226,6 @@ class ExpenseIndex extends Component
         $this->authorize('viewAny', Expense::class);
 
         $expenses = Expense::
-            // search($this->amount)
-            // "'" . $this->amount . "'"
             search($this->amount, function ($meilisearch, $query, $options) {
                 $options['matchingStrategy'] = 'all';
                 // ->tap(fn ($query) => $this->sortBy ? $query->orderBy($this->sortBy, $this->sortDirection) : $query)
@@ -236,11 +234,11 @@ class ExpenseIndex extends Component
 
                 if (is_numeric($this->expense_vendor)) {
                     //filter should be ++ so the latest item doesnt override previous.
-                    $options['filter'] = ['vendor_id = ' . $this->expense_vendor];
+                    $options['filter'] = 'vendor_id = ' . $this->expense_vendor . ' AND __soft_deleted = 0';
                 }
 
                 if (is_numeric($this->project_id)){
-                    $options['filter'] = 'project_id = ' . $this->project_id;
+                    $options['filter'] = 'project_id = ' . $this->project_id . ' AND __soft_deleted = 0';
                     // $options['filter'] = 'project_id IS NULL AND distribution_id IS NULL AND has_splits IS false';
                 }
 
@@ -254,7 +252,7 @@ class ExpenseIndex extends Component
                 //         $options['filter'] = 'project_id IS ' . $this->project;
                 //     }
             })
-            ->where('__soft_deleted', 0)
+            // ->where('__soft_deleted', 0)
             ->where('belongs_to_vendor_id', auth()->user()->primary_vendor_id)
 
             // ->when(!empty($this->expense_vendor) && $this->expense_vendor !== '0', function ($query, $item) {

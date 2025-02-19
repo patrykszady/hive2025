@@ -42,7 +42,7 @@
             {{ucfirst( $name )}}
         </label>
         <div class="mt-1 sm:mt-0 sm:col-span-2">
-            <div class="max-w-lg flex rounded-md shadow-sm">
+            <div class="max-w-lg flex rounded-md shadow-xs">
                 {{-- if props has hint --}}
                 @if($hint)
                     <span
@@ -56,7 +56,7 @@
                         name="{{ $name }}"
                         id="{{ $name }}" 
                         autocomplete="{{ $name }}"
-                        class="max-w-lg shadow-sm block w-full focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm border border-gray-300 rounded-md hover:bg-gray-50 placeholder-gray-200"
+                        class="max-w-lg shadow-xs block w-full focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm border border-gray-300 rounded-md hover:bg-gray-50 placeholder-gray-200"
                         {{ $attributes() }}
                         >
                     </textarea>

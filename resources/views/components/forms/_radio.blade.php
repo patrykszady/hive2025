@@ -23,7 +23,7 @@
                 x-data="{ option: '{{$option->id}}', vendor_id: @entangle('vendor_id').live }"
                 @click="select(option)"
                 role="none"
-                class="bg-white border rounded-lg shadow-sm px-6 py-4 cursor-pointer sm:flex sm:justify-between focus:outline-none hover:bg-gray-50"
+                class="bg-white border rounded-lg shadow-xs px-6 py-4 cursor-pointer sm:flex sm:justify-between focus:outline-hidden hover:bg-gray-50"
                 :class="{ 'ring-2 ring-indigo-500 bg-gray-100': isSelected(option) }"   
                 >
                 <input 

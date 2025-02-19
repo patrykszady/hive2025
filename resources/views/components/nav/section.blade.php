@@ -7,7 +7,7 @@
 
 @php
     $classes = 'bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900 group w-full flex items-center pl-2 pr-1 py-2
-    text-left text-sm font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500';
+    text-left text-sm font-medium rounded-md focus:outline-hidden focus:ring-2 focus:ring-indigo-500';
 
     if($active) $classes .= ' bg-gray-100 text-gray';
 
@@ -25,7 +25,7 @@
     <!-- Current: "bg-gray-100 text-gray-900", Default: "bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900" -->
     <button @click="open = !open" type="button" class="{{$classes}}" aria-controls="sub-menu-1" aria-expanded="false">
         <!-- Heroicon name: outline/users -->
-        <svg class="mr-3 flex-shrink-0 h-6 w-6 text-gray-400 group-hover:text-gray-500"
+        <svg class="mr-3 shrink-0 h-6 w-6 text-gray-400 group-hover:text-gray-500"
             xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
             <path d="{{$icon}}" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" />
         </svg>
@@ -35,7 +35,7 @@
 
         <!-- Expanded: "text-gray-400 rotate-90", Collapsed: "text-gray-300" -->
 
-        <svg class="text-gray-300 ml-3 flex-shrink-0 h-5 w-5 transform group-hover:text-gray-400 transition-colors ease-in-out duration-150"
+        <svg class="text-gray-300 ml-3 shrink-0 h-5 w-5 transform group-hover:text-gray-400 transition-colors ease-in-out duration-150"
             viewBox="0 0 20 20" aria-hidden="true">
             <path
                 x-show="!open"

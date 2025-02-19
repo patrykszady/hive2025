@@ -8,7 +8,7 @@
         </div>
 
         <div class="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-            <div class="px-4 py-8 bg-white shadow sm:rounded-lg sm:px-10">
+            <div class="px-4 py-8 bg-white shadow-sm sm:rounded-lg sm:px-10">
                 <form method="POST" action="{{ route('password.update') }}" class="space-y-6">
 
                 @csrf
@@ -18,7 +18,7 @@
                 <div>
                     <label for="email" class="block text-sm font-medium text-gray-700">Email address</label>
                     <div class="mt-1">
-                    <input id="email" readonly name="email" type="email" value="{{old('email', $request->email)}}" autocomplete="email" required autofocus class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-sm appearance-none focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm">
+                    <input id="email" readonly name="email" type="email" value="{{old('email', $request->email)}}" autocomplete="email" required autofocus class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-xs appearance-none focus:border-indigo-500 focus:outline-hidden focus:ring-indigo-500 sm:text-sm">
                     </div>
                     <x-forms.error errorName="email" />
                 </div>
@@ -26,7 +26,7 @@
                 <div>
                     <label for="password" class="block text-sm font-medium text-gray-700">New Password</label>
                     <div class="mt-1">
-                    <input id="password" name="password" type="password" required class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-sm appearance-none focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm">
+                    <input id="password" name="password" type="password" required class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-xs appearance-none focus:border-indigo-500 focus:outline-hidden focus:ring-indigo-500 sm:text-sm">
                     </div>
                     <x-forms.error errorName="password" />
                 </div>
@@ -34,13 +34,13 @@
                 <div>
                     <label for="password_confirmation" class="block text-sm font-medium text-gray-700">Password Confirmation</label>
                     <div class="mt-1">
-                    <input id="password_confirmation" name="password_confirmation" type="password" required class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-sm appearance-none focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm">
+                    <input id="password_confirmation" name="password_confirmation" type="password" required class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-xs appearance-none focus:border-indigo-500 focus:outline-hidden focus:ring-indigo-500 sm:text-sm">
                     </div>
                     <x-forms.error errorName="password_confirmation" />
                 </div>
 
                 <div>
-                    <button type="submit" class="flex justify-center w-full px-4 py-2 mt-1 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+                    <button type="submit" class="flex justify-center w-full px-4 py-2 mt-1 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-xs hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
                         Reset Password
                     </button>
                 </div>

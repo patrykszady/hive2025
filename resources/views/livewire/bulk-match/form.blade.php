@@ -42,7 +42,7 @@
                 x-show="vendor_id"
                 x-transition
                 >
-                <flux:card class="!p-2 max-w-2xl">
+                <flux:card class="p-2! max-w-2xl">
                     <div class="flex justify-between">
                         {{-- <a href="{{route('checks.show', $check->id)}}"> --}}
                         <flux:heading>Vendor Transactions</flux:heading>
@@ -115,7 +115,7 @@
                 class="mb-2"
                 >
 
-                <flux:card class="space-y-2 !m-0">
+                <flux:card class="space-y-2 m-0!">
                     {{-- HEADING --}}
                     <div class="flex justify-between">
                         <flux:heading size="lg">Splits</flux:heading>
@@ -125,7 +125,7 @@
                     </div>
 
                     @foreach ($bulk_splits as $index => $split)
-                        <flux:card class="space-y-2 !m-0" wire:key="{{$index}}">
+                        <flux:card class="space-y-2 m-0!" wire:key="{{$index}}">
                             {{-- HEADING --}}
                             <div class="flex justify-between">
                                 <flux:heading size="lg">Split {{$index + 1}}</flux:heading>

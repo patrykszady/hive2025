@@ -96,7 +96,7 @@
                                 id="match_merchant_names.{{ $loop->index }}.bank_specific"
                                 name="match_merchant_names.{{ $loop->index }}.bank_specific"
                                 type="checkbox"
-                                class="w-4 h-4 ml-2 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                                class="w-4 h-4 ml-2 text-indigo-600 border-gray-300 rounded-sm focus:ring-indigo-500"
                             >
                         </x-slot>
                     </x-forms.row>
@@ -111,7 +111,7 @@
                         type="submit"
                         {{-- wire:model.live="match_merchant_names.{{ $key }}"  --}}
                         {{-- x-bind:disabled="expense.project_id" --}}
-                        class="inline-flex justify-center px-4 py-2 ml-3 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-sm disabled:opacity-50 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                        class="inline-flex justify-center px-4 py-2 ml-3 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-xs disabled:opacity-50 hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
                         {{$view_text['button_text']}}
                     </button>
                 </x-slot>
@@ -211,7 +211,7 @@
                                 id="match_merchant_names.{{ $loop->index }}.bank_specific"
                                 name="match_merchant_names.{{ $loop->index }}.bank_specific"
                                 type="checkbox"
-                                class="w-4 h-4 ml-2 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                                class="w-4 h-4 ml-2 text-indigo-600 border-gray-300 rounded-sm focus:ring-indigo-500"
                             >
                         </x-slot>
                     </x-forms.row> --}}
@@ -226,7 +226,7 @@
                         type="submit"
                         {{-- wire:model.live="match_merchant_names.{{ $key }}"  --}}
                         {{-- x-bind:disabled="expense.project_id" --}}
-                        class="inline-flex justify-center px-4 py-2 ml-3 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-sm disabled:opacity-50 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                        class="inline-flex justify-center px-4 py-2 ml-3 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-xs disabled:opacity-50 hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
                         Sync Expenses & Vendors
                     </button>
                 </x-slot>

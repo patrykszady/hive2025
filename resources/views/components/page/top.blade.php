@@ -9,7 +9,7 @@
     {{ $attributes->merge(['class' => 'px-4 pb-5 mx-auto mb-1 sm:px-6 md:flex md:items-center md:justify-between md:space-x-5 lg:px-8 max-w-5xl']) }}>
     <div class="flex items-center space-x-5">
         {{-- LEFT IMAGE --}}
-        {{-- <div class="flex-shrink-0">
+        {{-- <div class="shrink-0">
             <div class="relative">
                 <img class="w-16 h-16 rounded-full"
                     src="https://images.unsplash.com/photo-1463453091185-61582044d556?ixlib=rb-=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=8&w=1024&h=1024&q=80"

@@ -18,13 +18,13 @@
             </div>
         </div>
         @if($error)
-            <flux:subheading class="!text-red-800">
+            <flux:subheading class="text-red-800!">
                 {{$error}}
             </flux:subheading>
         @endif
 
         @foreach($bank->accounts as $account)
-            <flux:card class="space-y-2 !p-2">
+            <flux:card class="space-y-2 p-2!">
                 <div class="flex justify-between">
                     <flux:heading size="lg">{{$account->account_number . ' | ' . $account->type}}</flux:heading>
                     <div>
@@ -43,7 +43,7 @@
                 </div>
 
                 @foreach($account->checks()->whereIn('check_type', ['Transfer', 'Check'])->whereYear('date', '>=', 2024)->whereDoesntHave('transactions')->get() as $check)
-                    <flux:card class="!p-2">
+                    <flux:card class="p-2!">
                         <div class="flex justify-between">
                             <a href="{{route('checks.show', $check->id)}}">
                                 <flux:heading>{{$check->owner}}</flux:heading>

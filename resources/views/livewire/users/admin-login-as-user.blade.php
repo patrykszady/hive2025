@@ -35,14 +35,14 @@
         <x-cards.footer>
             <button
                 type="button"
-                {{-- class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500" --}}
+                {{-- class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-xs hover:bg-gray-50 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500" --}}
                 >
                 {{-- Cancel --}}
             </button>
             <button
                 type="submit"
                 {{-- x-bind:disabled="expense.project_id" --}}
-                class="inline-flex justify-center px-4 py-2 ml-3 text-sm text-white bg-indigo-600 border border-transparent rounded-md shadow-sm disabled:opacity-50 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                class="inline-flex justify-center px-4 py-2 ml-3 text-sm text-white bg-indigo-600 border border-transparent rounded-md shadow-xs disabled:opacity-50 hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
                 {{$view_text['button_text']}}
             </button>
         </x-cards.footer>

@@ -3,7 +3,7 @@
     {{-- no submit button needed if an input exists under form wire:submit="add" --}}
     {{-- <form wire:submit="add">
         <div class="flex gap-2 mb-4">
-            <input wire:model="draft" type="text" class="grow rounded-full shadow shadow-slate-300 px-5 py-3" placeholder="Add next...">
+            <input wire:model="draft" type="text" class="grow rounded-full shadow-sm shadow-slate-300 px-5 py-3" placeholder="Add next...">
         </div>
     </form> --}}
 

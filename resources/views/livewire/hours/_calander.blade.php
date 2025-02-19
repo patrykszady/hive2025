@@ -13,7 +13,7 @@
         <div>S</div>
         <div>S</div>
     </div>
-    <div class="grid grid-cols-7 gap-px mt-2 text-sm bg-gray-200 rounded-lg shadow isolate ring-1 ring-gray-200">
+    <div class="grid grid-cols-7 gap-px mt-2 text-sm bg-gray-200 rounded-lg shadow-sm isolate ring-1 ring-gray-200">
         <!--
             Always include: "py-1.5 hover:bg-gray-100 focus:z-10"
             Top left day, include: "rounded-tl-lg"

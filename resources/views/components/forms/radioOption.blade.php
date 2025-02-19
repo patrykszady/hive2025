@@ -7,7 +7,7 @@
     x-data="{ option: '{{$value}}', {{$model}}: @entangle($model).live }"
     @click="select(option)"
     role="none"
-    class="bg-white border rounded-lg shadow-sm px-6 py-4 cursor-pointer sm:flex sm:justify-between focus:outline-none hover:bg-gray-50"
+    class="bg-white border rounded-lg shadow-xs px-6 py-4 cursor-pointer sm:flex sm:justify-between focus:outline-hidden hover:bg-gray-50"
     :class="{ 'ring-2 ring-indigo-500 bg-gray-100': isSelected(option) }"   
     >
     <input 
@@ -33,7 +33,7 @@
         </div>
         
         <div class="mt-2 flex text-sm sm:mt-0 sm:block sm:ml-4 sm:text-right">
-            <div class="ml-2 flex-shrink-0 flex">
+            <div class="ml-2 shrink-0 flex">
                 <p
                     class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-indigo-100 text-indigo-800">
                     {{ $bubbleMessage }}

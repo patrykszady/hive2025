@@ -37,7 +37,7 @@
                                             name="vendors.{{$vendor_index}}.categories.{{$category_id}}"
                                             type="checkbox"
                                             value="{{$category_id}}"
-                                            class="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-600"
+                                            class="w-4 h-4 text-indigo-600 border-gray-300 rounded-sm focus:ring-indigo-600"
                                             >
                                     </div>
                                     <div class="ml-3 text-sm leading-6">
@@ -61,7 +61,7 @@
                                             name="vendors.{{$vendor_index}}.categories.{{$category_id}}"
                                             type="checkbox"
                                             value="{{$category_id}}"
-                                            class="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-600"
+                                            class="w-4 h-4 text-indigo-600 border-gray-300 rounded-sm focus:ring-indigo-600"
                                             >
                                     </div>
                                     <div class="ml-3 text-sm leading-6">
@@ -111,7 +111,7 @@
                                     name="vendors.{{$vendor_index}}.permanent_category_id"
                                     type="checkbox"
                                     value="{{$category_id}}"
-                                    class="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-600"
+                                    class="w-4 h-4 text-indigo-600 border-gray-300 rounded-sm focus:ring-indigo-600"
                                     >
                             </div>
                             <div class="ml-3 text-sm leading-6">

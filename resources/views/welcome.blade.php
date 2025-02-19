@@ -12,7 +12,7 @@
             <rect width="100%" height="100%" stroke-width="0" fill="url(#0787a7c5-978c-4f66-83c7-11c213f99cb7)" />
         </svg> --}}
         <div class="px-6 pt-10 pb-24 mx-auto max-w-7xl sm:pb-32 lg:flex lg:px-8 lg:py-40">
-            <div class="max-w-2xl mx-auto lg:mx-0 lg:max-w-xl lg:flex-shrink-0 lg:pt-8">
+            <div class="max-w-2xl mx-auto lg:mx-0 lg:max-w-xl lg:shrink-0 lg:pt-8">
                 <a href="{{route('registration')}}">
                     <img class="h-36" src="{{ asset('favicon.png') }}" alt="{{env('APP_NAME')}}">
                 </a>
@@ -44,7 +44,7 @@
                     <b>Made by Contractors. For Contractors.<b>
                 </p>
                 <div class="flex items-center mt-10 gap-x-6">
-                    <a href="{{route('registration')}}" class="rounded-md bg-indigo-600 px-3.5 py-1.5 text-base font-semibold leading-7 text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">
+                    <a href="{{route('registration')}}" class="rounded-md bg-indigo-600 px-3.5 py-1.5 text-base font-semibold leading-7 text-white shadow-xs hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">
                         Create your Hive
                     </a>
                     <a href="{{route('login')}}" class="text-base font-semibold leading-7 text-gray-900">Log in<span aria-hidden="true">→</span></a>
@@ -163,7 +163,7 @@
                         </dl>
                     </div>
                     <div class="mt-8">
-                        <a href="{{route('registration')}}" class="inline-flex rounded-md bg-indigo-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">
+                        <a href="{{route('registration')}}" class="inline-flex rounded-md bg-indigo-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-xs hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">
                             Create you Hive
                         </a>
                     </div>
@@ -210,7 +210,7 @@
             </div>
 
             <div class="max-w-2xl m-10 mx-auto lg:text-center gap-x-6">
-                <a href="{{route('registration')}}" class="px-4 py-3 text-base font-semibold leading-7 text-white bg-indigo-600 rounded-md shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">
+                <a href="{{route('registration')}}" class="px-4 py-3 text-base font-semibold leading-7 text-white bg-indigo-600 rounded-md shadow-xs hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">
                     Create your Hive
                 </a>
             </div>
@@ -301,7 +301,7 @@
                 </p> --}}
                 <div class="flex items-center justify-center mt-10 gap-x-6">
                     <a href="{{route('registration')}}"
-                        class="rounded-md bg-white px-3.5 py-2.5 text-sm font-semibold text-indigo-600 shadow-sm hover:bg-indigo-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">
+                        class="rounded-md bg-white px-3.5 py-2.5 text-sm font-semibold text-indigo-600 shadow-xs hover:bg-indigo-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">
                         Create your Hive
                     </a>
                     <a href="#" class="text-sm font-semibold leading-6 text-white">

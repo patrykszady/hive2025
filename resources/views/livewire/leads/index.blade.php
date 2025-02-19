@@ -35,22 +35,22 @@
 
         <div class="space-y-2">
             <flux:table :paginate="$this->leads">
-                <flux:columns>
-                    <flux:column sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')">Date</flux:column>
-                    <flux:column>User</flux:column>
-                    <flux:column>Status</flux:column>
-                    <flux:column>Last Contact</flux:column>
-                    <flux:column>Origin</flux:column>
-                    <flux:column>Address</flux:column>
+                <flux:table.columns>
+                    <flux:table.column sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')">Date</flux:table.column>
+                    <flux:table.column>User</flux:table.column>
+                    <flux:table.column>Status</flux:table.column>
+                    <flux:table.column>Last Contact</flux:table.column>
+                    <flux:table.column>Origin</flux:table.column>
+                    <flux:table.column>Address</flux:table.column>
                     {{--
                     @if($view === NULL)
                         <flux:column>Payee</flux:column>
                     @endif
                     --}}
-                </flux:columns>
-                <flux:rows>
+                </flux:table.columns>
+                <flux:table.rows>
                     @foreach ($this->leads as $lead)
-                        <flux:row :key="$lead->id">
+                        <flux:table.row :key="$lead->id">
                             {{-- <flux:cell
                                 variant="strong"
                                 class="cursor-pointer"
@@ -59,42 +59,42 @@
                                     {{ money($check->amount) }}
                                 </a>
                             </flux:cell> --}}
-                            <flux:cell
+                            <flux:table.cell
                                 wire:click="$dispatchTo('leads.lead-create', 'editLead', { lead: {{$lead->id}}})"
                                 variant="strong"
                                 class="cursor-pointer"
                                 >
                                 {{ $lead->date->format('m/d/Y') }}
-                            </flux:cell>
+                            </flux:table.cell>
 
-                            <flux:cell>
+                            <flux:table.cell>
                                 {{ $lead->lead_data['name'] }}
-                            </flux:cell>
+                            </flux:table.cell>
 
-                            <flux:cell>
+                            <flux:table.cell>
                                 @if($lead->last_status)
                                     @php
                                         $color = $lead->last_status->title === 'New' ? 'yellow' : (in_array($lead->last_status->title, ['Message 1', 'Message 2', 'Message 3']) ? 'sky' : ($lead->last_status->title === 'Won' ? 'green' : (in_array($lead->last_status->title, ['Lost', "Not a Fit"]) ? 'red' : 'red')));
                                     @endphp
                                     <flux:badge color="{{$color}}">{{ $lead->last_status->title }}</flux:badge>
                                 @endif
-                            </flux:cell>
+                            </flux:table.cell>
 
-                            <flux:cell>
+                            <flux:table.cell>
                                 @if($lead->last_status)
                                     @if(!in_array($lead->last_status->title, ['New', 'Won', 'Lost', 'Not a Fit']))
                                         {{ $lead->last_status->created_at->diffForHumans() }}
                                     @endif
                                 @endif
-                            </flux:cell>
+                            </flux:table.cell>
 
-                            <flux:cell>
+                            <flux:table.cell>
                                 {{ $lead->origin }}
-                            </flux:cell>
+                            </flux:table.cell>
 
-                            <flux:cell>
+                            <flux:table.cell>
                                 {{ $lead->lead_data['address'] }}
-                            </flux:cell>
+                            </flux:table.cell>
 
                             {{-- <flux:cell>{{$check->check_type != 'Check' ? $check->check_type : $check->check_number}}</flux:cell>
 
@@ -104,9 +104,9 @@
                             <flux:cell>
                                 <flux:badge size="sm" :color="$check->status == 'Complete' ? 'green' : ($check->status == 'Missing Transactions' ? 'yellow' : 'red')" inset="top bottom">{{ $check->status }}</flux:badge>
                             </flux:cell> --}}
-                        </flux:row>
+                        </flux:table.row>
                     @endforeach
-                </flux:rows>
+                </flux:table.rows>
             </flux:table>
         </div>
     </flux:card>

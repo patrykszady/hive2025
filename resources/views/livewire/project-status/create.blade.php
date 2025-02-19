@@ -76,7 +76,7 @@
                             <span class="font-medium text-gray-900">Update Project Status</span>
                         </p> --}}
 
-                        <div class="flex max-w-lg -mt-1 rounded-md shadow-sm">
+                        <div class="flex max-w-lg -mt-1 rounded-md shadow-xs">
                             <flux:input.group>
                                 <flux:input wire:model.live="project_status_date" type="date" max="2999-12-31" placeholder="2023-12-31"/>
 

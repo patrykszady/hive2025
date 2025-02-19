@@ -36,15 +36,6 @@
 
     <!-- Styles -->
     @vite(['resources/css/app.css', 'resources/js/app.js'])
-    {{-- <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css"> --}}
-
-    {{-- @lagoonStyles --}}
-    {{-- <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/choices.js/public/assets/styles/choices.min.css" /> --}}
-
-    <!-- Scripts -->
-    {{-- <script src="https://cdn.jsdelivr.net/npm/fullcalendar@5.11.0/main.min.js"></script> --}}
-    {{-- <script src="https://cdn.jsdelivr.net/npm/choices.js/public/assets/scripts/choices.min.js"></script> --}}
-    {{-- <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script> --}}
 
     {{-- ALPINE CORE INCLUDED WITH LIVEWIRE --}}
     <!-- Alpine Plugins -->
@@ -54,7 +45,5 @@
     <script defer src="https://unpkg.com/@nextapps-be/livewire-sortablejs@0.4.0/dist/livewire-sortable.js"></script> --}}
     <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/sort@3.x.x/dist/cdn.min.js"></script>
 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.5.1/dist/chart.min.js"></script>
-    {{-- <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script> --}}
-    @fluxStyles
+    @fluxAppearance
 </head>

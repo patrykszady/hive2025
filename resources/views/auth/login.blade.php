@@ -34,7 +34,7 @@
 	</div>
 
 	<div class="m-4 mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-		<div class="px-4 py-8 bg-white shadow sm:rounded-lg sm:px-10">
+		<div class="px-4 py-8 bg-white shadow-sm sm:rounded-lg sm:px-10">
 			<form method="POST" action="{{ route('login') }}" class="space-y-6" >
 				@csrf
                 @if(session('error'))
@@ -51,7 +51,7 @@
 				<div>
 					<label for="email" class="block text-sm font-medium text-gray-700">Email address</label>
 					<div class="mt-1">
-					<input id="email" name="email" type="email" autocomplete="email" required class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-sm appearance-none focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm">
+					<input id="email" name="email" type="email" autocomplete="email" required class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-xs appearance-none focus:border-indigo-500 focus:outline-hidden focus:ring-indigo-500 sm:text-sm">
 					</div>
 					<x-forms.error errorName="email" />
 				</div>
@@ -59,14 +59,14 @@
 				<div>
 					<label for="password" class="block text-sm font-medium text-gray-700">Password</label>
 					<div class="mt-1">
-					<input id="password" name="password" type="password" autocomplete="current-password" required class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-sm appearance-none focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm">
+					<input id="password" name="password" type="password" autocomplete="current-password" required class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-xs appearance-none focus:border-indigo-500 focus:outline-hidden focus:ring-indigo-500 sm:text-sm">
 					</div>
 					<x-forms.error errorName="password" />
 				</div>
 
 				<div class="flex items-center justify-between">
 					<div class="flex items-center">
-					<input id="remember-me" name="remember-me" type="checkbox" class="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+					<input id="remember-me" name="remember-me" type="checkbox" class="w-4 h-4 text-indigo-600 border-gray-300 rounded-sm focus:ring-indigo-500">
 					<label for="remember-me" class="block ml-2 text-sm text-gray-900">Remember me</label>
 					</div>
 
@@ -76,7 +76,7 @@
 				</div>
 
 				<div>
-					<button id="submit" type="submit" class="flex justify-center w-full px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">Sign in</button>
+					<button id="submit" type="submit" class="flex justify-center w-full px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-xs hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">Sign in</button>
 				</div>
 			</form>
 
@@ -91,7 +91,7 @@
 				</div>
 
 				<div class="mt-3">
-					<a href="{{ route('registration') }}" type="button" class="flex justify-center w-full px-4 py-2 font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-sm text-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+					<a href="{{ route('registration') }}" type="button" class="flex justify-center w-full px-4 py-2 font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-xs text-md hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
 						Register
 					</a>
 				</div>

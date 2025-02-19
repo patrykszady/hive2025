@@ -1,4 +1,4 @@
-<flux:card class="!p-0 overflow-x-scroll !h-[48rem] !bg-gray-100">
+<flux:card class="p-0! overflow-x-scroll h-[48rem]! bg-gray-100!">
     <div class="sticky top-0 flex flex-none">
         <div class="divide-x text-sm leading-6 text-gray-500 grid grid-flow-col auto-cols-max">
             {{-- First. leftmost table column on the first row.  --}}
@@ -6,7 +6,7 @@
 
             @foreach($projects as $project)
                 <div class="w-64 p-2">
-                    <div class="!p-2 flex justify-between hover:bg-gray-100 shadow-xl shadow-gray-100 bg-white rounded-md border border-solid border-gray-300">
+                    <div class="p-2! flex justify-between hover:bg-gray-100 shadow-xl shadow-gray-100 bg-white rounded-md border border-solid border-gray-300">
                         <div>
                             <span class="font-semibold text-gray-800">
                                 <a href="{{route('projects.show', $project->id)}}" target="_blank">{{ Str::limit($project->address, 18) }}</a>
@@ -28,7 +28,7 @@
                                             x-sort:group="tasks"
                                             x-sort:config="{ filter: '.filtered' }"
                                             @class([
-                                                '!p-0 space-y-2 !bg-none',
+                                                'p-0! space-y-2 bg-none!',
                                             ])
                                             >
                                             @foreach($project->tasks()->whereNull('start_date')->whereNull('end_date')->get() as $task)
@@ -60,8 +60,8 @@
                     <div
                         @class([
                             'sticky left-0 -ml-14 w-14 pr-2 text-right text-xs text-gray-800',
-                            '!text-gray-400' => $day['is_weekend'] && !$day['is_today'] ? true : false,
-                            '!text-sky-600' => $day['is_today'] ? true : false,
+                            'text-gray-400!' => $day['is_weekend'] && !$day['is_today'] ? true : false,
+                            'text-sky-600!' => $day['is_today'] ? true : false,
                         ])
                         >
                         <span class="font-semibold">{{strtok($day['formatted_date'], ',')}}</span>
@@ -87,10 +87,10 @@
                                     x-sort:group="tasks"
                                     x-sort:config="{ filter: '.filtered' }"
                                     @class([
-                                        '!min-h-4 !bg-gray-100 border-none space-y-1 !p-0',
+                                        'min-h-4! bg-gray-100! border-none space-y-1 p-0!',
                                         // OR $day['database_date'] === NULL
-                                        '!bg-gray-50' => $day['is_weekend'] ? true : false,
-                                        '!bg-sky-100' => $day['is_today'] ? true : false,
+                                        'bg-gray-50!' => $day['is_weekend'] ? true : false,
+                                        'bg-sky-100!' => $day['is_today'] ? true : false,
                                     ])
                                     >
                                     @foreach($project->tasks()->whereNotNull('start_date')->whereNotNull('end_date')->get() as $task)

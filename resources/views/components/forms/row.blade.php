@@ -69,9 +69,9 @@
             @if($type === 'radio' || $type === 'radiogroup')
                 <div>
             @elseif($hint || $radioHint || $buttonHint)
-                <div class="flex max-w-lg rounded-md shadow-sm">
+                <div class="flex max-w-lg rounded-md shadow-xs">
             @else
-                <div class="rounded-md shadow-sm">
+                <div class="rounded-md shadow-xs">
             @endif
 
                 @if($hint)
@@ -108,7 +108,7 @@
                         type="{{ $type }}"
                         name="{{ $name }}"
                         id="{{ $name }}"
-                        class="{{ $input_classes }} py-2 px-4 border border-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                        class="{{ $input_classes }} py-2 px-4 border border-gray-300 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
                         {{ $attributes() }}
                     >
                 @elseif($type === 'button')
@@ -116,7 +116,7 @@
                         type="button"
                         name="{{ $name }}"
                         id="{{ $name }}"
-                        class="{{ $input_classes }} py-2 px-4 border border-transparent shadow-sm text-sm rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                        class="{{ $input_classes }} py-2 px-4 border border-transparent shadow-xs text-sm rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
                         {{ $attributes() }}
                         >
                         {{ $buttonText }}
@@ -148,7 +148,7 @@
                                 <div class="relative flex items-start">
                                     <div class="flex items-center h-6">
                                         <input id="{{$bank_id}}" aria-describedby="bank-{{$bank_id}}-description" name="{{$name}}" type="checkbox"
-                                            class="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-600">
+                                            class="w-4 h-4 text-indigo-600 border-gray-300 rounded-sm focus:ring-indigo-600">
                                     </div>
                                     <div class="ml-3 text-sm leading-6">
                                         <label for="{{$name}}" class="font-medium text-gray-900">{{$bank->name}}</label>
@@ -213,7 +213,7 @@
                                         <div
                                             x-data="{ option: '{{$key}}' }"
                                             :class="isSelected(option) ? 'border-transparent border-indigo-600 ring-2 ring-indigo-600 bg-gray-50 hover:bg-gray-100' : ''"
-                                            class="relative block px-6 py-4 bg-white border rounded-lg shadow-sm cursor-pointer hover:bg-gray-50 focus:outline-none sm:flex sm:justify-between"
+                                            class="relative block px-6 py-4 bg-white border rounded-lg shadow-xs cursor-pointer hover:bg-gray-50 focus:outline-hidden sm:flex sm:justify-between"
 
                                             @click="select(option), $dispatch('input', option)"
                                             @keydown.enter.stop.prevent="select(option)"
@@ -296,7 +296,7 @@
                                         x-combobox:input
                                         :display-value="item => item?.name"
                                         @change="query = $event.target.value;"
-                                        class="focus:outline-none w-11/12 bg-transparent"
+                                        class="focus:outline-hidden w-11/12 bg-transparent"
                                         placeholder="Select {{$text}}"
                                     />
 
@@ -313,7 +313,7 @@
                                 <div
                                     x-combobox:options
                                     x-cloak
-                                    class="absolute left-0 w-full max-h-60 bg-white mt-1 z-10 origin-top-right shadow-lg overflow-auto border border-gray-200 rounded-md outline-none"
+                                    class="absolute left-0 w-full max-h-60 bg-white mt-1 z-10 origin-top-right shadow-lg overflow-auto border border-gray-200 rounded-md outline-hidden"
                                     x-transition.out.opacity
                                     >
                                     <ul class="divide-y divide-gray-100">

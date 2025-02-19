@@ -9,9 +9,9 @@
 
 @php
     if($button_color == 'white'){
-        $classes = "bg-white py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500";
+        $classes = "bg-white py-2 px-4 border border-gray-300 rounded-md shadow-xs text-sm text-gray-700 hover:bg-gray-50 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500";
     }else{
-        $classes = "relative inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm rounded-md text-white bg-$button_color-600 hover:bg-$button_color-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-$button_color-500";
+        $classes = "relative inline-flex items-center px-4 py-2 border border-transparent shadow-xs text-sm rounded-md text-white bg-$button_color-600 hover:bg-$button_color-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-$button_color-500";
     }
 @endphp
 
