@@ -244,8 +244,6 @@ class ExpenseIndex extends Component
                     // $options['filter'] = 'project_id IS NULL AND distribution_id IS NULL AND has_splits IS false';
                 }
 
-
-
                 return $meilisearch->search($query, $options);
 
                 //     if ($this->project == 'NO_PROJECT') {
