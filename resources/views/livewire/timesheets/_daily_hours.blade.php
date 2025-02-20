@@ -13,19 +13,19 @@
             <flux:accordion.content>
                 <flux:separator variant="subtle"/>
                     <flux:table>
-                        <flux:columns>
-                            <flux:column>Hours</flux:column>
-                            <flux:column>Project</flux:column>
-                        </flux:columns>
+                        <flux:table.columns>
+                            <flux:table.column>Hours</flux:table.column>
+                            <flux:table.column>Project</flux:table.column>
+                        </flux:table.columns>
 
-                        <flux:rows>
+                        <flux:table.rows>
                             @foreach($hours as $project_name => $daily_project)
-                                <flux:row>
-                                    <flux:cell variant="strong">{{$daily_project->hours}}</flux:cell>
-                                    <flux:cell><a wire:navigate.hover href="{{route('projects.show', $daily_project->project->id)}}">{{$daily_project->project->name}}</a></flux:cell>
-                                </flux:row>
+                                <flux:table.row>
+                                    <flux:table.cell variant="strong">{{$daily_project->hours}}</flux:table.cell>
+                                    <flux:table.cell><a wire:navigate.hover href="{{route('projects.show', $daily_project->project->id)}}">{{$daily_project->project->name}}</a></flux:table.cell>
+                                </flux:table.row>
                             @endforeach
-                        </flux:rows>
+                        </flux:table.rows>
                     </flux:table>
             </flux:accordion.content>
         </flux:accordion.item>

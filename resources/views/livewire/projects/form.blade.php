@@ -16,7 +16,7 @@
                 </x-slot>
 
                 @foreach($this->clients as $client)
-                    <flux:option value="{{$client->id}}">{{$client->name}}</flux:option>
+                    <flux:select.option value="{{$client->id}}">{{$client->name}}</flux:select.option>
                 @endforeach
             </flux:select>
         </div>

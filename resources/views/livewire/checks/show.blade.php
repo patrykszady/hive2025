@@ -41,28 +41,28 @@
                     <div class="space-y-6">
                         {{-- wire:loading.class="opacity-50 text-opacity-40" --}}
                         <flux:table>
-                            <flux:columns>
-                                <flux:column>Amount</flux:column>
-                                <flux:column>Date</flux:column>
-                                <flux:column>Bank</flux:column>
-                                <flux:column>Account</flux:column>
-                            </flux:columns>
+                            <flux:table.columns>
+                                <flux:table.column>Amount</flux:table.column>
+                                <flux:table.column>Date</flux:table.column>
+                                <flux:table.column>Bank</flux:table.column>
+                                <flux:table.column>Account</flux:table.column>
+                            </flux:table.columns>
 
-                            <flux:rows>
+                            <flux:table.rows>
                                 @foreach ($check->transactions as $transaction)
-                                    <flux:row :key="$transaction->id">
-                                        <flux:cell variant="strong">
+                                    <flux:table.row :key="$transaction->id">
+                                        <flux:table.cell variant="strong">
                                             {{ money($transaction->amount) }}
-                                        </flux:cell>
-                                        <flux:cell>{{ $transaction->transaction_date->format('m/d/Y') }}</flux:cell>
-                                        <flux:cell>{{ $transaction->bank_account->bank->name }}</flux:cell>
-                                        <flux:cell>{{ $transaction->bank_account->account_number }}</flux:cell>
-                                    </flux:row>
-                                    <flux:row>
-                                        <flux:cell colspan="4" class="text-right"><i>{{ $transaction->plaid_merchant_description }}</i></flux:cell>
-                                    </flux:row>
+                                        </flux:table.cell>
+                                        <flux:table.cell>{{ $transaction->transaction_date->format('m/d/Y') }}</flux:table.cell>
+                                        <flux:table.cell>{{ $transaction->bank_account->bank->name }}</flux:table.cell>
+                                        <flux:table.cell>{{ $transaction->bank_account->account_number }}</flux:table.cell>
+                                    </flux:table.row>
+                                    <flux:table.row>
+                                        <flux:table.cell colspan="4" class="text-right"><i>{{ $transaction->plaid_merchant_description }}</i></flux:table.cell>
+                                    </flux:table.row>
                                 @endforeach
-                            </flux:rows>
+                            </flux:table.rows>
                         </flux:table>
                     </div>
                 </flux:card>
@@ -87,25 +87,25 @@
                             </div>
 
                             <flux:table>
-                                <flux:columns>
-                                    <flux:column>Amount</flux:column>
-                                    <flux:column>Hours</flux:column>
-                                    <flux:column>Project</flux:column>
-                                </flux:columns>
+                                <flux:table.columns>
+                                    <flux:table.column>Amount</flux:table.column>
+                                    <flux:table.column>Hours</flux:table.column>
+                                    <flux:table.column>Project</flux:table.column>
+                                </flux:table.columns>
 
-                                <flux:rows>
+                                <flux:table.rows>
                                     @foreach($weekly_project_timesheets as $key => $project_timesheet)
-                                        <flux:row :key="$project_timesheet->id">
-                                            <flux:cell>
+                                        <flux:table.row :key="$project_timesheet->id">
+                                            <flux:table.cell>
                                                 <a wire:navigate.hover href="{{route('timesheets.show', $project_timesheet->id)}}">{{ money($project_timesheet->amount) }}</a>
-                                            </flux:cell>
-                                            <flux:cell>{{ $project_timesheet->hours }}</flux:cell>
-                                            <flux:cell>
+                                            </flux:table.cell>
+                                            <flux:table.cell>{{ $project_timesheet->hours }}</flux:table.cell>
+                                            <flux:table.cell>
                                                 <a wire:navigate.hover href="{{route('projects.show', $project_timesheet->project->id)}}">{{ Str::limit($project_timesheet->project->name, 25) }}</a>
-                                            </flux:cell>
-                                        </flux:row>
+                                            </flux:table.cell>
+                                        </flux:table.row>
                                     @endforeach
-                                </flux:rows>
+                                </flux:table.rows>
                             </flux:table>
                         </flux:card>
                     @endforeach
@@ -143,25 +143,25 @@
                                 </div> --}}
 
                                 <flux:table>
-                                    <flux:columns>
-                                        <flux:column>Amount</flux:column>
-                                        <flux:column>Hours</flux:column>
-                                        <flux:column>Project</flux:column>
-                                    </flux:columns>
+                                    <flux:table.columns>
+                                        <flux:table.column>Amount</flux:table.column>
+                                        <flux:table.column>Hours</flux:table.column>
+                                        <flux:table.column>Project</flux:table.column>
+                                    </flux:table.columns>
 
-                                    <flux:rows>
+                                    <flux:table.rows>
                                         @foreach($employee_timesheet_week as $key => $employee_timesheet_week_project)
-                                            <flux:row :key="$employee_timesheet_week_project->id">
-                                                <flux:cell>
+                                            <flux:table.row :key="$employee_timesheet_week_project->id">
+                                                <flux:table.cell>
                                                     <a wire:navigate.hover href="{{route('timesheets.show', $employee_timesheet_week_project->id)}}">{{ money($employee_timesheet_week_project->amount) }}</a>
-                                                </flux:cell>
-                                                <flux:cell>{{ $employee_timesheet_week_project->hours }}</flux:cell>
-                                                <flux:cell>
+                                                </flux:table.cell>
+                                                <flux:table.cell>{{ $employee_timesheet_week_project->hours }}</flux:table.cell>
+                                                <flux:table.cell>
                                                     <a wire:navigate.hover href="{{route('projects.show', $employee_timesheet_week_project->project->id)}}">{{ $employee_timesheet_week_project->project->name }}</a>
-                                                </flux:cell>
-                                            </flux:row>
+                                                </flux:table.cell>
+                                            </flux:table.row>
                                         @endforeach
-                                    </flux:rows>
+                                    </flux:table.rows>
                                 </flux:table>
                             </flux:card>
                         @endforeach
@@ -214,25 +214,25 @@
 
                     <div class="space-y-2">
                         <flux:table>
-                            <flux:columns>
-                                <flux:column>Amount</flux:column>
-                                <flux:column>Date</flux:column>
-                                <flux:column>Vendor</flux:column>
-                                <flux:column>Project</flux:column>
-                            </flux:columns>
+                            <flux:table.columns>
+                                <flux:table.column>Amount</flux:table.column>
+                                <flux:table.column>Date</flux:table.column>
+                                <flux:table.column>Vendor</flux:table.column>
+                                <flux:table.column>Project</flux:table.column>
+                            </flux:table.columns>
 
-                            <flux:rows>
+                            <flux:table.rows>
                                 @foreach ($user_paid_expenses as $expense)
-                                    <flux:row :key="$expense->id">
-                                        <flux:cell variant="strong">
+                                    <flux:table.row :key="$expense->id">
+                                        <flux:table.cell variant="strong">
                                             <a wire:navigate.hover href="{{route('expenses.show', $expense->id)}}">{{ money($expense->amount) }}</a>
-                                        </flux:cell>
-                                        <flux:cell>{{ $expense->date->format('m/d/Y') }}</flux:cell>
-                                        <flux:cell><a wire:navigate.hover href="{{route('vendors.show', $expense->vendor->id)}}">{{Str::limit($expense->vendor->name, 20)}}</a></flux:cell>
-                                        <flux:cell><a wire:navigate.hover href="{{$expense->project->name == 'EXPENSE SPLIT' ? '' : route('projects.show', $expense->project->id)}}">{{ Str::limit($expense->project->name, 25) }}</a></flux:cell>
-                                    </flux:row>
+                                        </flux:table.cell>
+                                        <flux:table.cell>{{ $expense->date->format('m/d/Y') }}</flux:table.cell>
+                                        <flux:table.cell><a wire:navigate.hover href="{{route('vendors.show', $expense->vendor->id)}}">{{Str::limit($expense->vendor->name, 20)}}</a></flux:table.cell>
+                                        <flux:table.cell><a wire:navigate.hover href="{{$expense->project->name == 'EXPENSE SPLIT' ? '' : route('projects.show', $expense->project->id)}}">{{ Str::limit($expense->project->name, 25) }}</a></flux:table.cell>
+                                    </flux:table.row>
                                 @endforeach
-                            </flux:rows>
+                            </flux:table.rows>
                         </flux:table>
                     </div>
                 </flux:card>
@@ -250,23 +250,23 @@
 
                     <div class="space-y-2">
                         <flux:table>
-                            <flux:columns>
-                                <flux:column>Amount</flux:column>
-                                <flux:column>Distribution</flux:column>
-                            </flux:columns>
+                            <flux:table.columns>
+                                <flux:table.column>Amount</flux:table.column>
+                                <flux:table.column>Distribution</flux:table.column>
+                            </flux:table.columns>
 
-                            <flux:rows>
+                            <flux:table.rows>
                                 @foreach($user_distributions as $user_distribution_expense)
-                                    <flux:row :key="$user_distribution_expense->id">
-                                        <flux:cell variant="strong">
+                                    <flux:table.row :key="$user_distribution_expense->id">
+                                        <flux:table.cell variant="strong">
                                             <a wire:navigate.hover href="{{route('expenses.show', $user_distribution_expense->id)}}">{{ money($user_distribution_expense->amount) }}</a>
-                                        </flux:cell>
-                                        <flux:cell>
+                                        </flux:table.cell>
+                                        <flux:table.cell>
                                             <a wire:navigate.hover href="{{route('distributions.show', $user_distribution_expense->distribution->id)}}">{{ $user_distribution_expense->distribution->name }}</a>
-                                        </flux:cell>
-                                    </flux:row>
+                                        </flux:table.cell>
+                                    </flux:table.row>
                                 @endforeach
-                            </flux:rows>
+                            </flux:table.rows>
                         </flux:table>
                     </div>
                 </flux:card>
@@ -308,26 +308,26 @@
 
                     <div class="space-y-2">
                         <flux:table>
-                            <flux:columns>
-                                <flux:column>Amount</flux:column>
+                            <flux:table.columns>
+                                <flux:table.column>Amount</flux:table.column>
                                 {{--  sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')" --}}
-                                <flux:column>Date</flux:column>
-                                <flux:column>Team Member</flux:column>
-                                <flux:column>Vendor</flux:column>
-                            </flux:columns>
+                                <flux:table.column>Date</flux:table.column>
+                                <flux:table.column>Team Member</flux:table.column>
+                                <flux:table.column>Vendor</flux:table.column>
+                            </flux:table.columns>
 
-                            <flux:rows>
+                            <flux:table.rows>
                                 @foreach ($user_paid_by_reimbursements as $expense)
-                                    <flux:row :key="$expense->id">
-                                        <flux:cell variant="strong">
+                                    <flux:table.row :key="$expense->id">
+                                        <flux:table.cell variant="strong">
                                             <a wire:navigate.hover href="{{route('expenses.show', $expense->id)}}">{{ money($expense->amount) }}</a>
-                                        </flux:cell>
-                                        <flux:cell>{{ $expense->date->format('m/d/Y') }}</flux:cell>
-                                        <flux:cell>{{ $expense->reimbursment }}</flux:cell>
-                                        <flux:cell><a wire:navigate.hover href="{{route('vendors.show', $expense->vendor->id)}}">{{Str::limit($expense->vendor->name, 20)}}</a></flux:cell>
-                                    </flux:row>
+                                        </flux:table.cell>
+                                        <flux:table.cell>{{ $expense->date->format('m/d/Y') }}</flux:table.cell>
+                                        <flux:table.cell>{{ $expense->reimbursment }}</flux:table.cell>
+                                        <flux:table.cell><a wire:navigate.hover href="{{route('vendors.show', $expense->vendor->id)}}">{{Str::limit($expense->vendor->name, 20)}}</a></flux:table.cell>
+                                    </flux:table.row>
                                 @endforeach
-                            </flux:rows>
+                            </flux:table.rows>
                         </flux:table>
                     </div>
                 </flux:card>

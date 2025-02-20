@@ -8,9 +8,9 @@
 
     <form wire:submit="store" class="grid gap-6">
         <flux:select label="Distribution" wire:model.live="distribution_id" variant="listbox" placeholder="Connect Vendor...">
-            <flux:option value="NO_PROJECT">NO PROJECT</flux:option>
+            <flux:select.option value="NO_PROJECT">NO PROJECT</flux:select.option>
             @foreach($distributions as $distribution)
-                <flux:option value="{{$distribution->id}}">{{$distribution->name}}</flux:option>
+                <flux:select.option value="{{$distribution->id}}">{{$distribution->name}}</flux:select.option>
             @endforeach
         </flux:select>
 

@@ -13,11 +13,11 @@
             <flux:input wire:model.live="business_name" label="Vendor Name" icon="magnifying-glass" placeholder="Search Vendors" />
 
             <flux:select wire:model.live="vendor_type" label="Business Type" wire:model="vendor_type" placeholder="Choose type...">
-                <flux:option value="All">All Vendor Types</flux:option>
-                <flux:option value="Sub">Subcontractor</flux:option>
-                <flux:option value="Retail">Retail</flux:option>
-                <flux:option value="1099">1099/Independent</flux:option>
-                <flux:option value="DBA">DBA</flux:option>
+                <flux:select.option value="All">All Vendor Types</flux:select.option>
+                <flux:select.option value="Sub">Subcontractor</flux:select.option>
+                <flux:select.option value="Retail">Retail</flux:select.option>
+                <flux:select.option value="1099">1099/Independent</flux:select.option>
+                <flux:select.option value="DBA">DBA</flux:select.option>
             </flux:select>
         </div>
     </flux:card>
@@ -29,21 +29,21 @@
 
         <div class="space-y-2">
             <flux:table :paginate="$this->vendors">
-                <flux:columns>
-                    <flux:column sortable :sorted="$sortBy === 'business_name'" :direction="$sortDirection" wire:click="sort('business_name')">Vendor</flux:column>
-                    <flux:column>Type</flux:column>
+                <flux:table.columns>
+                    <flux:table.column sortable :sorted="$sortBy === 'business_name'" :direction="$sortDirection" wire:click="sort('business_name')">Vendor</flux:table.column>
+                    <flux:table.column>Type</flux:table.column>
                     {{-- <flux:column sortable :sorted="$sortBy === 'expense_count'" :direction="$sortDirection" wire:click="sort('expense_count')">Score</flux:column> --}}
-                </flux:columns>
+                </flux:table.columns>
 
-                <flux:rows>
+                <flux:table.rows>
                     @foreach ($this->vendors as $vendor)
-                        <flux:row :key="$vendor->id">
-                            <flux:cell variant="strong"><a wire:navigate.hover href="{{route('vendors.show', $vendor->id)}}">{{$vendor->name}}</a></flux:cell>
-                            <flux:cell><flux:badge color="green" inset="top bottom">{{$vendor->business_type}}</flux:badge></flux:cell>
+                        <flux:table.row :key="$vendor->id">
+                            <flux:table.cell variant="strong"><a wire:navigate.hover href="{{route('vendors.show', $vendor->id)}}">{{$vendor->name}}</a></flux:table.cell>
+                            <flux:table.cell><flux:badge color="green" inset="top bottom">{{$vendor->business_type}}</flux:badge></flux:table.cell>
                             {{-- <flux:cell>{{$vendor->expense_count}}</flux:cell> --}}
-                        </flux:row>
+                        </flux:table.row>
                     @endforeach
-                </flux:rows>
+                </flux:table.rows>
             </flux:table>
 
             {{-- VENDOR FORM MODAL --}}

@@ -16,7 +16,7 @@
                         <flux:select.search placeholder="Search..." />
                     </x-slot>
                     @foreach ($clients as $client)
-                        <flux:option value="{{$client->id}}">{{ $client->name }}</flux:option>
+                        <flux:select.option value="{{$client->id}}">{{ $client->name }}</flux:select.option>
                     @endforeach
                 </flux:select>
 
@@ -37,64 +37,64 @@
 
         <div class="space-y-2">
             <flux:table :paginate="$this->projects">
-                <flux:columns>
-                    <flux:column>Address</flux:column>
+                <flux:table.columns>
+                    <flux:table.column>Address</flux:table.column>
                     @if($view != 'clients.index')
-                        <flux:column>Client</flux:column>
+                        <flux:table.column>Client</flux:table.column>
                     @endif
-                    <flux:column>Name</flux:column>
-                    {{-- <flux:column sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')">Date</flux:column>
+                    <flux:table.column>Name</flux:table.column>
+                    {{-- <flux:table.column sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')">Date</flux:table.column>
                     @if($view != 'checks.show')
-                        <flux:column >Vendor</flux:column>
+                        <flux:table.column >Vendor</flux:table.column>
                     @endif
 
                     @if($view != 'projects.show')
-                        <flux:column>Project</flux:column>
+                        <flux:table.column>Project</flux:table.column>
                     @endif --}}
-                    <flux:column>Status</flux:column>
-                </flux:columns>
+                    <flux:table.column>Status</flux:table.column>
+                </flux:table.columns>
 
-                <flux:rows>
+                <flux:table.rows>
                     @foreach ($this->projects as $project)
-                        <flux:row :key="$project->id">
-                            <flux:cell
+                        <flux:table.row :key="$project->id">
+                            <flux:table.cell
                                 wire:navigate.hover
                                 href="{{route('projects.show', $project->id)}}"
                                 variant="strong"
                                 class="cursor-pointer"
                                 >
                                 {{ $project->address }}
-                            </flux:cell>
+                            </flux:table.cell>
                             @if($view != 'clients.index')
-                                <flux:cell
+                                <flux:table.cell
                                     wire:navigate.hover
                                     href="{{route('clients.show', $project->client->id)}}"
                                     class="cursor-pointer"
                                     >
                                     {{ $project->client->name }}
-                                </flux:cell>
+                                </flux:table.cell>
                             @endif
-                            <flux:cell>{{ $project->project_name }}</flux:cell>
-                            {{-- <flux:cell
+                            <flux:table.cell>{{ $project->project_name }}</flux:table.cell>
+                            {{-- <flux:table.cell
                                 wire:click="$dispatchTo('projects.expense-create', 'editExpense', { expense: {{$project->id}}})"
                                 variant="strong"
                                 class="cursor-pointer"
                                 >
                                 {{ $project->address }}
-                            </flux:cell>
-                            <flux:cell>{{ $expense->date->format('m/d/Y') }}</flux:cell>
+                            </flux:table.cell>
+                            <flux:table.cell>{{ $expense->date->format('m/d/Y') }}</flux:table.cell>
                             @if($view != 'checks.show')
-                                <flux:cell><a wire:navigate.hover href="{{route('vendors.show', $expense->vendor->id)}}">{{Str::limit($expense->vendor->name, 20)}}</a></flux:cell>
+                                <flux:table.cell><a wire:navigate.hover href="{{route('vendors.show', $expense->vendor->id)}}">{{Str::limit($expense->vendor->name, 20)}}</a></flux:table.cell>
                             @endif
                             @if($view != 'projects.show')
-                                <flux:cell>{{ Str::limit($expense->project->name, 25) }}</flux:cell>
+                                <flux:table.cell>{{ Str::limit($expense->project->name, 25) }}</flux:table.cell>
                             @endif --}}
-                            <flux:cell>
-                                <flux:badge size="sm" :color="$project->last_status->title == 'Complete' ? 'green' : ($project->last_status->title == 'Active' ? 'blue' : ($project->last_status->title == 'Cancelled' ? 'red' : 'yellow'))" inset="top bottom">{{ $project->last_status->title }}</flux:badge>
-                            </flux:cell>
-                        </flux:row>
+                            <flux:table.cell>
+                                <flux:badge size="sm" :color="$project->last_status->title == 'Complete' ? 'green' : ($project->last_status->title == 'Active' ? 'blue' : ($project->last_status->title == 'Cantable.celled' ? 'red' : 'yellow'))" inset="top bottom">{{ $project->last_status->title }}</flux:badge>
+                            </flux:table.cell>
+                        </flux:table.row>
                     @endforeach
-                </flux:rows>
+                </flux:table.rows>
             </flux:table>
         </div>
     </flux:card>

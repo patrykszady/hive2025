@@ -26,27 +26,27 @@
     @if(!$vendor_docs->isEmpty())
         <flux:separator variant="subtle" />
         <flux:table>
-            <flux:columns>
+            <flux:table.columns>
                 {{-- sortable :sorted="$sortBy === 'amount'" :direction="$sortDirection" wire:click="sort('amount')"> --}}
-                <flux:column>Type</flux:column>
-                <flux:column>Exp Date</flux:column>
-                <flux:column>Policy #</flux:column>
-            </flux:columns>
+                <flux:table.column>Type</flux:table.column>
+                <flux:table.column>Exp Date</flux:table.column>
+                <flux:table.column>Policy #</flux:table.column>
+            </flux:table.columns>
 
-            <flux:rows>
+            <flux:table.rows>
                 @foreach($vendor_docs as $doc_index => $doc)
-                    <flux:row :key="$doc_index">
-                        <flux:cell variant="strong">{{$doc->first()->type}}</flux:cell>
-                        <flux:cell>
+                    <flux:table.row :key="$doc_index">
+                        <flux:table.cell variant="strong">{{$doc->first()->type}}</flux:table.cell>
+                        <flux:table.cell>
                             <flux:badge size="sm" :color="$doc->first()->expiration_date > today() ? 'green' : 'red'" inset="top bottom">
                                 {{$doc->first()->expiration_date->format('m/d/Y')}}
                             </flux:badge>
-                        </flux:cell>
-                        <flux:cell>{{$doc->first()->number}}</flux:cell>
-                    </flux:row>
+                        </flux:table.cell>
+                        <flux:table.cell>{{$doc->first()->number}}</flux:table.cell>
+                    </flux:table.row>
                     {{-- <flux:badge size="sm" :color="$doc->first()->expiration_date > today() ? 'green' : 'red'" inset="top bottom">{{$doc->first()->expiration_date > today() ? 'Active' : 'Expired'}}</flux:badge> --}}
                 @endforeach
-            </flux:rows>
+            </flux:table.rows>
         </flux:table>
     @endif
 </flux:card>

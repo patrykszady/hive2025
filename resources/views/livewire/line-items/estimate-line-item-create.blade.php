@@ -11,7 +11,7 @@
             >
             <flux:select variant="listbox" wire:model.live="line_item_id" label="Line Item" searchable placeholder="Choose Line Item..." x-bind:disabled="edit_line_item">
                 @foreach($this->line_items as $line_item)
-                    <flux:option value="{{$line_item->id}}"><div>{{$line_item->name}} <br> <i class="font-normal">{{$line_item->category . ' / ' . $line_item->sub_category}}</i></div></flux:option>
+                    <flux:select.option value="{{$line_item->id}}"><div>{{$line_item->name}} <br> <i class="font-normal">{{$line_item->category . ' / ' . $line_item->sub_category}}</i></div></flux:select.option>
                 @endforeach
             </flux:select>
         </div>

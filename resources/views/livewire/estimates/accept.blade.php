@@ -15,38 +15,38 @@
             </div>
 
             <flux:table class="p-0! m-0!">
-                <flux:columns>
-                    <flux:column>Section Name</flux:column>
-                    <flux:column>Bid</flux:column>
-                    <flux:column class="text-right">Amount</flux:column>
-                </flux:columns>
+                <flux:table.columns>
+                    <flux:table.column>Section Name</flux:table.column>
+                    <flux:table.column>Bid</flux:table.column>
+                    <flux:table.column class="text-right">Amount</flux:table.column>
+                </flux:table.columns>
 
-                <flux:rows>
+                <flux:table.rows>
                     @foreach($sections as $index => $section)
-                        <flux:row :key="$index">
-                            <flux:cell class="text-bold">{{$section->name}}</flux:cell>
-                            <flux:cell>
+                        <flux:table.row :key="$index">
+                            <flux:table.cell class="text-bold">{{$section->name}}</flux:table.cell>
+                            <flux:table.cell>
                                 <flux:field size="sm">
                                     <flux:input.group size="sm">
                                         <flux:select wire:model.live="sections.{{$index}}.bid_index" variant="listbox" placeholder="Choose Bid...">
                                             @foreach($bids as $bid_index => $bid)
-                                                <flux:option wire:key="{{$bid_index}}" value="{{$bid_index}}">
+                                                <flux:select.option wire:key="{{$bid_index}}" value="{{$bid_index}}">
                                                     <div>
                                                         {{$bid->name}}
                                                     </div>
-                                                </flux:option>
+                                                </flux:select.option>
                                             @endforeach
                                         </flux:select>
 
                                         <flux:button wire:click="newEstimateBid({{$index}})" icon="plus"><span class="text-thin">Bid</span></flux:button>
                                     </flux:input.group>
                                 </flux:field>
-                            </flux:cell>
+                            </flux:table.cell>
 
-                            <flux:cell class="text-right">{{money($section->total)}}</flux:cell>
-                        </flux:row>
+                            <flux:table.cell class="text-right">{{money($section->total)}}</flux:table.cell>
+                        </flux:table.row>
                     @endforeach
-                </flux:rows>
+                </flux:table.rows>
             </flux:table>
         </flux:card>
 
@@ -73,16 +73,16 @@
             {{-- List your project progressive payments for the Original Bid of this Estimate. --}}
             <flux:subheading>List Estimate progressive Payments</flux:subheading>
             <flux:table class="p-0! m-0!">
-                <flux:columns>
-                    <flux:column>Payment</flux:column>
-                    <flux:column>Description</flux:column>
-                    <flux:column class="text-right">Amount</flux:column>
-                </flux:columns>
+                <flux:table.columns>
+                    <flux:table.column>Payment</flux:table.column>
+                    <flux:table.column>Description</flux:table.column>
+                    <flux:table.column class="text-right">Amount</flux:table.column>
+                </flux:table.columns>
 
-                <flux:rows>
+                <flux:table.rows>
                     @foreach($payments as $index => $payment)
-                        <flux:row :key="$index">
-                            <flux:cell class="text-bold">
+                        <flux:table.row :key="$index">
+                            <flux:table.cell class="text-bold">
                                 Payment {{$index + 1}}
                                 @if($payments->count() > 1)
                                     <flux:button
@@ -93,26 +93,26 @@
                                         Remove
                                     </flux:button>
                                 @endif
-                            </flux:cell>
-                            <flux:cell>
+                            </flux:table.cell>
+                            <flux:table.cell>
                                 <flux:input
                                     size="sm"
                                     wire:model.live="payments.{{$index}}.description"
                                     placeholder="Payment Description {{$index + 1}}"
                                     />
-                            </flux:cell>
+                            </flux:table.cell>
 
-                            <flux:cell class="text-right">
+                            <flux:table.cell class="text-right">
                                 <flux:input
                                     icon="currency-dollar"
                                     size="sm"
                                     wire:model.live="payments.{{$index}}.amount"
                                     placeholder="Amount"
                                     />
-                            </flux:cell>
-                        </flux:row>
+                            </flux:table.cell>
+                        </flux:table.row>
                     @endforeach
-                </flux:rows>
+                </flux:table.rows>
             </flux:table>
             <div class="flex justify-between">
                 <flux:button wire:click="addPayment">Add Payment</flux:button>

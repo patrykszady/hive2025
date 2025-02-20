@@ -7,31 +7,31 @@
     <flux:separator variant="subtle" />
 
     <flux:table>
-        <flux:columns>
-            <flux:column>Vendor</flux:column>
-            <flux:column>Project</flux:column>
-            <flux:column>Details</flux:column>
-        </flux:columns>
+        <flux:table.columns>
+            <flux:table.column>Vendor</flux:table.column>
+            <flux:table.column>Project</flux:table.column>
+            <flux:table.column>Details</flux:table.column>
+        </flux:table.columns>
 
-        <flux:rows>
+        <flux:table.rows>
             @foreach ($vendors as $vendor)
-                <flux:row :key="$vendor->id">
-                    <flux:cell
+                <flux:table.row :key="$vendor->id">
+                    <flux:table.cell
                         wire:click="$dispatchTo('receipt-accounts.receipt-account-vendor-create', 'editReceiptVendor', { vendor_id: {{$vendor->id}} })"
                         variant="strong"
                         class="cursor-pointer"
                         >
                         {{ $vendor->name }}
-                    </flux:cell>
-                    <flux:cell>{{ !isset($vendor->receipt_account) ? '' : ($vendor->receipt_account->distribution_id ? $vendor->receipt_account->distribution->name : 'NO PROJECT') }}</flux:cell>
-                    <flux:cell>
+                    </flux:table.cell>
+                    <flux:table.cell>{{ !isset($vendor->receipt_account) ? '' : ($vendor->receipt_account->distribution_id ? $vendor->receipt_account->distribution->name : 'NO PROJECT') }}</flux:table.cell>
+                    <flux:table.cell>
                         <flux:badge size="sm" :color="$vendor->status == 'Active' ? 'green' : ($vendor->status == 'Disabled' ? 'red' : 'indigo')" inset="top bottom">
                             {{ $vendor->type }}
                         </flux:badge>
-                    </flux:cell>
-                </flux:row>
+                    </flux:table.cell>
+                </flux:table.row>
             @endforeach
-        </flux:rows>
+        </flux:table.rows>
     </flux:table>
 
     <livewire:receipt-accounts.receipt-account-vendor-create :vendors="$vendors"/>

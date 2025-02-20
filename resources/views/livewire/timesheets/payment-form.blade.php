@@ -46,31 +46,31 @@
                                 </div>
 
                                 <flux:table>
-                                    <flux:columns>
-                                        <flux:column></flux:column>
-                                        <flux:column>Amount</flux:column>
-                                        <flux:column>Hours</flux:column>
-                                        <flux:column>Project</flux:column>
-                                    </flux:columns>
+                                    <flux:table.columns>
+                                        <flux:table.column></flux:table.column>
+                                        <flux:table.column>Amount</flux:table.column>
+                                        <flux:table.column>Hours</flux:table.column>
+                                        <flux:table.column>Project</flux:table.column>
+                                    </flux:table.columns>
 
-                                    <flux:rows>
+                                    <flux:table.rows>
                                         @foreach($weekly_project_timesheets as $timesheet_id => $project_timesheet)
-                                            <flux:row :key="$project_timesheet->id">
-                                                <flux:cell>
+                                            <flux:table.row :key="$project_timesheet->id">
+                                                <flux:table.cell>
                                                     <flux:checkbox
                                                         wire:model.live="weekly_timesheets.{{$project_timesheet->id}}.checkbox"
                                                     />
-                                                </flux:cell>
-                                                <flux:cell variant="strong">
+                                                </flux:table.cell>
+                                                <flux:table.cell variant="strong">
                                                     <a wire:navigate.hover href="{{route('timesheets.show', $project_timesheet->id)}}">{{ money($project_timesheet->amount) }}</a>
-                                                </flux:cell>
-                                                <flux:cell>{{ $project_timesheet->hours }}</flux:cell>
-                                                <flux:cell>
+                                                </flux:table.cell>
+                                                <flux:table.cell>{{ $project_timesheet->hours }}</flux:table.cell>
+                                                <flux:table.cell>
                                                     <a wire:navigate.hover href="{{route('projects.show', $project_timesheet->project->id)}}">{{ Str::limit($project_timesheet->project->name, 25) }}</a>
-                                                </flux:cell>
-                                            </flux:row>
+                                                </flux:table.cell>
+                                            </flux:table.row>
                                         @endforeach
-                                    </flux:rows>
+                                    </flux:table.rows>
                                 </flux:table>
                             </flux:card>
                         @endforeach
@@ -94,33 +94,33 @@
                                 </div>
 
                                 <flux:table>
-                                    <flux:columns>
-                                        <flux:column></flux:column>
-                                        <flux:column>Amount</flux:column>
-                                        <flux:column>User</flux:column>
-                                        <flux:column>Hours</flux:column>
-                                        <flux:column>Project</flux:column>
-                                    </flux:columns>
+                                    <flux:table.columns>
+                                        <flux:table.column></flux:table.column>
+                                        <flux:table.column>Amount</flux:table.column>
+                                        <flux:table.column>User</flux:table.column>
+                                        <flux:table.column>Hours</flux:table.column>
+                                        <flux:table.column>Project</flux:table.column>
+                                    </flux:table.columns>
 
-                                    <flux:rows>
+                                    <flux:table.rows>
                                         @foreach($weekly_project_timesheets as $timesheet_id => $project_timesheet)
-                                            <flux:row :key="$project_timesheet->id">
-                                                <flux:cell>
+                                            <flux:table.row :key="$project_timesheet->id">
+                                                <flux:table.cell>
                                                     <flux:checkbox
                                                         wire:model.live="employee_weekly_timesheets.{{$project_timesheet->id}}.checkbox"
                                                     />
-                                                </flux:cell>
-                                                <flux:cell variant="strong">
+                                                </flux:table.cell>
+                                                <flux:table.cell variant="strong">
                                                     <a wire:navigate.hover href="{{route('timesheets.show', $project_timesheet->id)}}">{{ money($project_timesheet->amount) }}</a>
-                                                </flux:cell>
-                                                <flux:cell>{{ $project_timesheet->user->first_name }}</flux:cell>
-                                                <flux:cell>{{ $project_timesheet->hours }}</flux:cell>
-                                                <flux:cell>
+                                                </flux:table.cell>
+                                                <flux:table.cell>{{ $project_timesheet->user->first_name }}</flux:table.cell>
+                                                <flux:table.cell>{{ $project_timesheet->hours }}</flux:table.cell>
+                                                <flux:table.cell>
                                                     <a wire:navigate.hover href="{{route('projects.show', $project_timesheet->project->id)}}">{{ Str::limit($project_timesheet->project->name, 25) }}</a>
-                                                </flux:cell>
-                                            </flux:row>
+                                                </flux:table.cell>
+                                            </flux:table.row>
                                         @endforeach
-                                    </flux:rows>
+                                    </flux:table.rows>
                                 </flux:table>
                             </flux:card>
                         @endforeach
@@ -138,37 +138,37 @@
                         </div>
 
                         <flux:table>
-                            <flux:columns>
-                                <flux:column></flux:column>
-                                <flux:column>Amount</flux:column>
-                                <flux:column>Vendor</flux:column>
-                                <flux:column>Project</flux:column>
-                            </flux:columns>
+                            <flux:table.columns>
+                                <flux:table.column></flux:table.column>
+                                <flux:table.column>Amount</flux:table.column>
+                                <flux:table.column>Vendor</flux:table.column>
+                                <flux:table.column>Project</flux:table.column>
+                            </flux:table.columns>
 
-                            <flux:rows>
+                            <flux:table.rows>
                                 @foreach($user_paid_expenses as $key => $expense)
-                                    <flux:row :key="$expense->id">
-                                        <flux:cell>
+                                    <flux:table.row :key="$expense->id">
+                                        <flux:table.cell>
                                             <flux:checkbox
                                                 wire:model.live="user_paid_expenses.{{$expense->id}}.checkbox"
                                             />
-                                        </flux:cell>
-                                        <flux:cell variant="strong">
+                                        </flux:table.cell>
+                                        <flux:table.cell variant="strong">
                                             <a wire:navigate.hover href="{{route('expenses.show', $expense->id)}}">{{ money($expense->amount) }}</a>
-                                        </flux:cell>
-                                        <flux:cell>
+                                        </flux:table.cell>
+                                        <flux:table.cell>
                                             <a wire:navigate.hover href="{{route('vendors.show', $expense->vendor->id)}}">{{ $expense->vendor->name }}</a>
-                                        </flux:cell>
-                                        <flux:cell>
+                                        </flux:table.cell>
+                                        <flux:table.cell>
                                             @if($expense->project_id)
                                                 <a wire:navigate.hover href="{{route('projects.show', $expense->project->id)}}">{{ Str::limit($expense->project->name, 25) }}</a>
                                             @else
                                                 {{ Str::limit($expense->project->name, 25) }}
                                             @endif
-                                        </flux:cell>
-                                    </flux:row>
+                                        </flux:table.cell>
+                                    </flux:table.row>
                                 @endforeach
-                            </flux:rows>
+                            </flux:table.rows>
                         </flux:table>
                     </flux:card>
                 @endif
@@ -190,33 +190,33 @@
                                 </div>
 
                                 <flux:table>
-                                    <flux:columns>
-                                        <flux:column></flux:column>
-                                        <flux:column>Amount</flux:column>
-                                        <flux:column>User</flux:column>
-                                        <flux:column>Hours</flux:column>
-                                        <flux:column>Project</flux:column>
-                                    </flux:columns>
+                                    <flux:table.columns>
+                                        <flux:table.column></flux:table.column>
+                                        <flux:table.column>Amount</flux:table.column>
+                                        <flux:table.column>User</flux:table.column>
+                                        <flux:table.column>Hours</flux:table.column>
+                                        <flux:table.column>Project</flux:table.column>
+                                    </flux:table.columns>
 
-                                    <flux:rows>
+                                    <flux:table.rows>
                                         @foreach($weekly_project_timesheets as $timesheet_id => $project_timesheet)
-                                            <flux:row :key="$project_timesheet->id">
-                                                <flux:cell>
+                                            <flux:table.row :key="$project_timesheet->id">
+                                                <flux:table.cell>
                                                     <flux:checkbox
                                                         wire:model.live="employee_weekly_timesheets.{{$project_timesheet->id}}.checkbox"
                                                     />
-                                                </flux:cell>
-                                                <flux:cell variant="strong">
+                                                </flux:table.cell>
+                                                <flux:table.cell variant="strong">
                                                     <a wire:navigate.hover href="{{route('timesheets.show', $project_timesheet->id)}}">{{ money($project_timesheet->amount) }}</a>
-                                                </flux:cell>
-                                                <flux:cell>{{ $project_timesheet->user->first_name }}</flux:cell>
-                                                <flux:cell>{{ $project_timesheet->hours }}</flux:cell>
-                                                <flux:cell>
+                                                </flux:table.cell>
+                                                <flux:table.cell>{{ $project_timesheet->user->first_name }}</flux:table.cell>
+                                                <flux:table.cell>{{ $project_timesheet->hours }}</flux:table.cell>
+                                                <flux:table.cell>
                                                     <a wire:navigate.hover href="{{route('projects.show', $project_timesheet->project->id)}}">{{ Str::limit($project_timesheet->project->name, 25) }}</a>
-                                                </flux:cell>
-                                            </flux:row>
+                                                </flux:table.cell>
+                                            </flux:table.row>
                                         @endforeach
-                                    </flux:rows>
+                                    </flux:table.rows>
                                 </flux:table>
                             </flux:card>
                         @endforeach

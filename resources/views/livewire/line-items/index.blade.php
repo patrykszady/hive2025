@@ -9,33 +9,33 @@
 
         <div class="space-y-2">
             <flux:table :paginate="$this->line_items">
-                <flux:columns>
-                    <flux:column>
+                <flux:table.columns>
+                    <flux:table.column>
                         <flux:input wire:model.live="search" icon="magnifying-glass" placeholder="Search ..." />
-                    </flux:column>
-                    <flux:column>Category</flux:column>
-                    <flux:column>Price</flux:column>
-                    <flux:column>Unit</flux:column>
-                </flux:columns>
+                    </flux:table.column>
+                    <flux:table.column>Category</flux:table.column>
+                    <flux:table.column>Price</flux:table.column>
+                    <flux:table.column>Unit</flux:table.column>
+                </flux:table.columns>
 
-                <flux:rows>
+                <flux:table.rows>
                     @foreach($this->line_items as $line_item)
-                        <flux:row :key="$line_item->id">
-                            <flux:cell
+                        <flux:table.row :key="$line_item->id">
+                            <flux:table.cell
                                 wire:click="$dispatchTo('line-items.line-item-create', 'editItem', { line_item: {{$line_item}}})"
                                 variant="strong"
                                 class="cursor-pointer"
                                 >
                                 {{ $line_item->name }}
-                            </flux:cell>
-                            <flux:cell>
+                            </flux:table.cell>
+                            <flux:table.cell>
                                 <flux:badge size="sm" :color="'blue'">{{ $line_item->category }}</flux:badge>
-                            </flux:cell>
-                            <flux:cell>{{ money($line_item->cost) }}</flux:cell>
-                            <flux:cell>{{ $line_item->unit_type }}</flux:cell>
-                        </flux:row>
+                            </flux:table.cell>
+                            <flux:table.cell>{{ money($line_item->cost) }}</flux:table.cell>
+                            <flux:table.cell>{{ $line_item->unit_type }}</flux:table.cell>
+                        </flux:table.row>
                     @endforeach
-                </flux:rows>
+                </flux:table.rows>
             </flux:table>
         </div>
     </flux:card>

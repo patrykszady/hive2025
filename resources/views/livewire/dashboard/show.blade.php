@@ -7,7 +7,6 @@
     {{-- VENDOR TEAM MEMBERS --}}
     <div class="space-y-6 col-span-3 lg:col-start-3 lg:col-span-4">
         <livewire:users.users-index :vendor="$user->vendor" :view="'vendors.show'"/>
-        <livewire:users.team-members :vendor="$user->vendor">
     </div>
 
     {{-- GRAPH --}}

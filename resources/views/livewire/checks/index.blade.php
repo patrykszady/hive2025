@@ -13,9 +13,9 @@
 
                 {{-- 09-28-2024 NEED TYPE AND VENDOR FILTERS --}}
                 <flux:select wire:model.live="bank" label="Bank" placeholder="Select Bank..." variant="listbox" placeholder="Choose Bank...">
-                    <flux:option value="">All Banks</flux:option>
+                    <flux:select.option value="">All Banks</flux:select.option>
                     @foreach ($banks->groupBy('plaid_ins_id') as $bank)
-                        <flux:option value="{{$bank->first()->id}}">{{$bank->first()->name}}</flux:option>
+                        <flux:select.option value="{{$bank->first()->id}}">{{$bank->first()->name}}</flux:select.option>
                     @endforeach
                 </flux:select>
             </div>
@@ -30,41 +30,41 @@
 
         <div class="space-y-2">
             <flux:table :paginate="$this->checks">
-                <flux:columns>
+                <flux:table.columns>
                     {{-- sortable :sorted="$sortBy === 'amount'" :direction="$sortDirection" wire:click="sort('amount')"> --}}
-                    <flux:column>Amount</flux:column>
-                    <flux:column sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')">Date</flux:column>
-                    <flux:column>Check #</flux:column>
-                    <flux:column>Bank</flux:column>
+                    <flux:table.column>Amount</flux:table.column>
+                    <flux:table.column sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')">Date</flux:table.column>
+                    <flux:table.column>Check #</flux:table.column>
+                    <flux:table.column>Bank</flux:table.column>
                     @if($view === NULL)
-                        <flux:column>Payee</flux:column>
+                        <flux:table.column>Payee</flux:table.column>
                     @endif
-                    <flux:column>Status</flux:column>
-                </flux:columns>
+                    <flux:table.column>Status</flux:table.column>
+                </flux:table.columns>
 
-                <flux:rows>
+                <flux:table.rows>
                     @foreach ($this->checks as $check)
-                        <flux:row :key="$check->id">
-                            <flux:cell
+                        <flux:table.row :key="$check->id">
+                            <flux:table.cell
                                 variant="strong"
                                 class="cursor-pointer"
                                 >
                                 <a wire:navigate.hover href="{{route('checks.show', $check->id)}}">
                                     {{ money($check->amount) }}
                                 </a>
-                            </flux:cell>
-                            <flux:cell>{{ $check->date->format('m/d/Y') }}</flux:cell>
-                            <flux:cell>{{$check->check_type != 'Check' ? $check->check_type : $check->check_number}}</flux:cell>
-                            <flux:cell>{{$check->bank_account->bank->name}}</flux:cell>
+                            </flux:table.cell>
+                            <flux:table.cell>{{ $check->date->format('m/d/Y') }}</flux:table.cell>
+                            <flux:table.cell>{{$check->check_type != 'Check' ? $check->check_type : $check->check_number}}</flux:table.cell>
+                            <flux:table.cell>{{$check->bank_account->bank->name}}</flux:table.cell>
                             @if($view === NULL)
-                                <flux:cell>{{$check->owner}}</flux:cell>
+                                <flux:table.cell>{{$check->owner}}</flux:table.cell>
                             @endif
-                            <flux:cell>
+                            <flux:table.cell>
                                 <flux:badge size="sm" :color="$check->status == 'Complete' ? 'green' : ($check->status == 'Missing Transactions' ? 'yellow' : 'red')" inset="top bottom">{{ $check->status }}</flux:badge>
-                            </flux:cell>
-                        </flux:row>
+                            </flux:table.cell>
+                        </flux:table.row>
                     @endforeach
-                </flux:rows>
+                </flux:table.rows>
             </flux:table>
         </div>
     </flux:card>

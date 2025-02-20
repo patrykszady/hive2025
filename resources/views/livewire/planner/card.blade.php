@@ -83,21 +83,21 @@
             {{-- PROJECT --}}
             <flux:select wire:model.live="form.project_id" label="Project" variant="listbox" searchable placeholder="Select project...">
                 @foreach($projects as $project)
-                    <flux:option wire:key="{{$project->id}}" value="{{$project->id}}"><div>{{$project->address}} <br> <i>{{$project->project_name}}</i></div></flux:option>
+                    <flux:select.option wire:key="{{$project->id}}" value="{{$project->id}}"><div>{{$project->address}} <br> <i>{{$project->project_name}}</i></div></flux:select.option>
                 @endforeach
             </flux:select>
 
             {{-- VENDOR --}}
             <flux:select wire:model.live="form.vendor_id" label="Vendor" variant="listbox" searchable placeholder="Select vendor...">
                 @foreach($vendors as $vendor)
-                    <flux:option wire:key="{{$vendor->id}}" value="{{$vendor->id}}">{{$vendor->name}}</flux:option>
+                    <flux:select.option wire:key="{{$vendor->id}}" value="{{$vendor->id}}">{{$vendor->name}}</flux:select.option>
                 @endforeach
             </flux:select>
 
             {{-- USERS --}}
             <flux:select wire:model.live="form.user_id" label="Team Members" variant="listbox" searchable placeholder="Select team member...">
                 @foreach($employees as $employee)
-                    <flux:option wire:key="{{$employee->id}}" value="{{$employee->id}}">{{$employee->first_name}}</flux:option>
+                    <flux:select.option wire:key="{{$employee->id}}" value="{{$employee->id}}">{{$employee->first_name}}</flux:select.option>
                 @endforeach
             </flux:select>
 

@@ -3,7 +3,7 @@
         <div x-data="{ transaction: @entangle('form.transaction') }">
             <flux:select x-bind:disabled="transaction" label="Bank" wire:model.live="form.bank_account_id" placeholder="Choose Bank...">
                 @foreach($bank_accounts as $bank_account)
-                    <flux:option value="{{$bank_account->id}}">{{$bank_account->getNameAndType()}}</flux:option>
+                    <flux:select.option value="{{$bank_account->id}}">{{$bank_account->getNameAndType()}}</flux:select.option>
                 @endforeach
             </flux:select>
             <div
@@ -13,10 +13,10 @@
                 class="mt-2 space-y-2"
                 >
                 <flux:select x-bind:disabled="transaction" label="Type" wire:model.live="form.check_type" placeholder="Choose Payment Type...">
-                    <flux:option value="" readonly>Select Type...</flux:option>
-                    <flux:option value="Check">Check</flux:option>
-                    <flux:option value="Transfer">Transfer</flux:option>
-                    <flux:option value="Cash">Cash</flux:option>
+                    <flux:select.option value="" readonly>Select Type...</flux:select.option>
+                    <flux:select.option value="Check">Check</flux:select.option>
+                    <flux:select.option value="Transfer">Transfer</flux:select.option>
+                    <flux:select.option value="Cash">Cash</flux:select.option>
                 </flux:select>
 
                 <div

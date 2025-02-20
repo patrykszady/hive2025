@@ -11,9 +11,9 @@
     >
     <x-forms.one_line label="Paid By">
         <flux:select wire:model.live="form.paid_by" placeholder="Choose paid by...">
-            <flux:option value="" readonly>{{auth()->user()->vendor->business_name}}</flux:option>
+            <flux:select.option value="" readonly>{{auth()->user()->vendor->business_name}}</flux:select.option>
             @foreach ($employees as $employee)
-                <flux:option value="{{$employee->id}}" x-bind:disabled="disable">{{$employee->first_name}}</flux:option>
+                <flux:select.option value="{{$employee->id}}" x-bind:disabled="disable">{{$employee->first_name}}</flux:select.option>
             @endforeach
         </flux:select>
     </x-forms.one_line>

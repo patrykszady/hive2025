@@ -9,7 +9,7 @@
         {{-- CLIENT --}}
         <flux:select x-bind:disabled="{{$view_text['form_submit'] === 'update'}}" label="Client" wire:model.live="client_id" variant="listbox" searchable placeholder="Choose client...">
             @foreach($this->clients as $client)
-                <flux:option value="{{$client->id}}">{{$client->name}}</flux:option>
+                <flux:select.option value="{{$client->id}}">{{$client->name}}</flux:select.option>
             @endforeach
         </flux:select>
 

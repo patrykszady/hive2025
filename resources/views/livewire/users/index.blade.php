@@ -16,40 +16,40 @@
     <flux:separator variant="subtle" />
 
     <flux:table>
-        <flux:columns>
-            <flux:column>Name</flux:column>
-            <flux:column>Phone</flux:column>
-            <flux:column>Email</flux:column>
+        <flux:table.columns>
+            <flux:table.column>Name</flux:table.column>
+            <flux:table.column>Phone</flux:table.column>
+            <flux:table.column>Email</flux:table.column>
             @if($view === 'vendors.show')
-                <flux:column>Role</flux:column>
+                <flux:table.column>Role</flux:table.column>
             @endif
-        </flux:columns>
+        </flux:table.columns>
 
-        <flux:rows>
+        <flux:table.rows>
             @foreach($users as $user)
-                <flux:row :key="$user->id">
-                    <flux:cell
+                <flux:table.row :key="$user->id">
+                    <flux:table.cell
                         wire:navigate.hover
                         href="{{route('users.show', $user->id)}}"
                         variant="strong"
                         class="cursor-pointer"
                         >
                         {{ $user->full_name }}
-                    </flux:cell>
-                    <flux:cell>{{ $user->cell_phone }}</flux:cell>
+                    </flux:table.cell>
+                    <flux:table.cell>{{ $user->cell_phone }}</flux:table.cell>
                     {{-- Str::limit($user->email, 8) --}}
-                    <flux:cell>{{ $user->email }}</flux:cell>
+                    <flux:table.cell>{{ $user->email }}</flux:table.cell>
                     @if($view === 'vendors.show')
-                        <flux:cell>
+                        <flux:table.cell>
                             {{ $user->getVendorRole($vendor->id) }}
                             {{-- <flux:badge inset="top bottom" color="{{$user->getVendorRole($vendor->id) === 'Admin' ? 'cyan' : 'purple'}}">
                                 {{ $user->getVendorRole($vendor->id) }}
                             </flux:badge> --}}
-                        </flux:cell>
+                        </flux:table.cell>
                     @endif
-                </flux:row>
+                </flux:table.row>
             @endforeach
-        </flux:rows>
+        </flux:table.rows>
     </flux:table>
     <div class="flex space-x-2">
         <flux:spacer />

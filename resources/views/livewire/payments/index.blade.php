@@ -16,45 +16,45 @@
 
         <div class="space-y-2">
             <flux:table :paginate="$this->payments">
-                <flux:columns>
-                    <flux:column>Amount</flux:column>
-                    <flux:column sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')">Date</flux:column>
+                <flux:table.columns>
+                    <flux:table.column>Amount</flux:table.column>
+                    <flux:table.column sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')">Date</flux:table.column>
 
                     @if($view != 'projects.show')
-                        <flux:column>Project</flux:column>
+                        <flux:table.column>Project</flux:table.column>
                     @endif
 
-                    <flux:column>Reference</flux:column>
-                    <flux:column>Status</flux:column>
-                </flux:columns>
+                    <flux:table.column>Reference</flux:table.column>
+                    <flux:table.column>Status</flux:table.column>
+                </flux:table.columns>
 
-                <flux:rows>
+                <flux:table.rows>
                     @foreach ($this->payments as $payment)
-                        <flux:row :key="$payment->id">
-                            <flux:cell
+                        <flux:table.row :key="$payment->id">
+                            <flux:table.cell
                                 wire:click="$dispatchTo('payments.payment-create', 'editPayment', { payment: {{$payment->id}}})"
                                 variant="strong"
                                 class="cursor-pointer"
                                 >
                                 {{ money($payment->amount) }}
-                            </flux:cell>
-                            <flux:cell>{{ $payment->date->format('m/d/Y') }}</flux:cell>
+                            </flux:table.cell>
+                            <flux:table.cell>{{ $payment->date->format('m/d/Y') }}</flux:table.cell>
                             @if($view != 'projects.show')
-                                <flux:cell
+                                <flux:table.cell
                                     wire:navigate.hover
                                     href="{{route('projects.show', $payment->project->id)}}"
                                     class="cursor-pointer"
                                     >
                                     {{ $payment->project->name }}
-                                </flux:cell>
+                                </flux:table.cell>
                             @endif
-                            <flux:cell>{{ $payment->reference }}</flux:cell>
-                            <flux:cell>
+                            <flux:table.cell>{{ $payment->reference }}</flux:table.cell>
+                            <flux:table.cell>
                                 <flux:badge size="sm" :color="$payment->transaction_id != NULL ? 'green' : 'red'" inset="top bottom">{{ $payment->transaction_id != NULL ? 'Complete' : 'Missing Transaction' }}</flux:badge>
-                            </flux:cell>
-                        </flux:row>
+                            </flux:table.cell>
+                        </flux:table.row>
                     @endforeach
-                </flux:rows>
+                </flux:table.rows>
             </flux:table>
         </div>
     </flux:card>

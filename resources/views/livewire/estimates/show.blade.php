@@ -33,7 +33,6 @@
             <flux:separator variant="subtle" />
 
             <livewire:estimates.estimate-accept :estimate="$estimate"/>
-
             <livewire:estimates.estimate-duplicate />
             <livewire:estimates.estimate-combine :client="$estimate->client"/>
 
@@ -126,21 +125,21 @@
                         <flux:accordion.content>
                             <flux:separator variant="subtle"/>
                                 <flux:table>
-                                    <flux:columns>
-                                        <flux:column class="w-6"></flux:column>
-                                        <flux:column class="w-1/3">Item</flux:column>
-                                        <flux:column>Quantity</flux:column>
-                                        <flux:column>Unit</flux:column>
-                                        <flux:column>Cost</flux:column>
-                                        <flux:column>Total</flux:column>
-                                    </flux:columns>
+                                    <flux:table.columns>
+                                        <flux:table.column class="w-6"></flux:table.column>
+                                        <flux:table.column class="w-1/3">Item</flux:table.column>
+                                        <flux:table.column>Quantity</flux:table.column>
+                                        <flux:table.column>Unit</flux:table.column>
+                                        <flux:table.column>Cost</flux:table.column>
+                                        <flux:table.column>Total</flux:table.column>
+                                    </flux:table.columns>
 
-                                    <flux:rows x-sort="$wire.sort($key, $position)">
+                                    <flux:table.rows x-sort="$wire.sort($key, $position)">
                                         @foreach($section->estimate_line_items as $line_item)
                                             <div>
-                                                <flux:row x-sort:item="{{$line_item->id}}" :key="$line_item->id">
-                                                    <flux:cell x-sort:handle>{{$index + 1}}.{{$line_item->order + 1}}</flux:cell>
-                                                    <flux:cell variant="strong">
+                                                <flux:table.row x-sort:item="{{$line_item->id}}" :key="$line_item->id">
+                                                    <flux:table.cell x-sort:handle>{{$index + 1}}.{{$line_item->order + 1}}</flux:table.cell>
+                                                    <flux:table.cell variant="strong">
                                                         <a
                                                             class="cursor-pointer"
                                                             wire:click="$dispatchTo('line-items.estimate-line-item-create', 'editOnEstimate', { estimate_line_item_id: {{$line_item->id}} })"
@@ -149,24 +148,24 @@
                                                         </a>
                                                         <br>
                                                         <i>{{$line_item->category}}@if($line_item->sub_category)/@endif{{$line_item->sub_category}}</i>
-                                                    </flux:cell>
-                                                    <flux:cell>{{$line_item->unit_type !== 'no_unit' ? $line_item->quantity : ''}}</flux:cell>
-                                                    <flux:cell>{{$line_item->unit_type !== 'no_unit' ? $line_item->unit_type : ''}}</flux:cell>
-                                                    <flux:cell>{{$line_item->unit_type !== 'no_unit' ? money($line_item->cost) : ''}}</flux:cell>
-                                                    <flux:cell variant="strong">{{money($line_item->total)}}</flux:cell>
-                                                </flux:row>
-                                                {{-- <flux:row class="w-full">
-                                                    <flux:cell></flux:cell>
-                                                    <flux:cell>
+                                                    </flux:table.cell>
+                                                    <flux:table.cell>{{$line_item->unit_type !== 'no_unit' ? $line_item->quantity : ''}}</flux:table.cell>
+                                                    <flux:table.cell>{{$line_item->unit_type !== 'no_unit' ? $line_item->unit_type : ''}}</flux:table.cell>
+                                                    <flux:table.cell>{{$line_item->unit_type !== 'no_unit' ? money($line_item->cost) : ''}}</flux:table.cell>
+                                                    <flux:table.cell variant="strong">{{money($line_item->total)}}</flux:table.cell>
+                                                </flux:table.row>
+                                                {{-- <flux:table.row class="w-full">
+                                                    <flux:table.cell></flux:table.cell>
+                                                    <flux:table.cell>
                                                         <div class="w-48">
                                                             <p>{!! $line_item->desc !!}</p>
                                                             <p><i>{!! $line_item->notes !!}</i></p>
                                                         </div>
-                                                    </flux:cell>
-                                                </flux:row> --}}
+                                                    </flux:table.cell>
+                                                </flux:table.row> --}}
                                             </div>
                                         @endforeach
-                                    </flux:rows>
+                                    </flux:table.rows>
                                 </flux:table>
                         </flux:accordion.content>
                     </flux:accordion.item>
