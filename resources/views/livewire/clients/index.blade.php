@@ -21,21 +21,21 @@
 
         <div class="space-y-2">
             <flux:table :paginate="$this->clients">
-                <flux:columns>
-                    <flux:column>Name</flux:column>
-                    <flux:column>Address</flux:column>
-                    <flux:column sortable :sorted="$sortBy === 'created_at'" :direction="$sortDirection" wire:click="sort('created_at')">Created</flux:column>
-                </flux:columns>
+                <flux:table.columns>
+                    <flux:table.column>Name</flux:table.column>
+                    <flux:table.column>Address</flux:table.column>
+                    <flux:table.column sortable :sorted="$sortBy === 'created_at'" :direction="$sortDirection" wire:click="sort('created_at')">Created</flux:table.column>
+                </flux:table.columns>
 
-                <flux:rows>
+                <flux:table.rows>
                     @foreach ($this->clients as $client)
-                        <flux:row :key="$client->id">
-                            <flux:cell variant="strong"><a wire:navigate.hover href="{{route('clients.show', $client->id)}}">{{$client->name}}</a></flux:cell>
-                            <flux:cell>{{$client->one_line_address}}</flux:cell>
-                            <flux:cell>{{$client->created_at->format('m/d/Y')}}</flux:cell>
-                        </flux:row>
+                        <flux:table.row :key="$client->id">
+                            <flux:table.cell variant="strong"><a wire:navigate.hover href="{{route('clients.show', $client->id)}}">{{$client->name}}</a></flux:table.cell>
+                            <flux:table.cell>{{$client->one_line_address}}</flux:table.cell>
+                            <flux:table.cell>{{$client->created_at->format('m/d/Y')}}</flux:table.cell>
+                        </flux:table.row>
                     @endforeach
-                </flux:rows>
+                </flux:table.rows>
             </flux:table>
         </div>
     </flux:card>
