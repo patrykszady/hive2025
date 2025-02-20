@@ -271,9 +271,9 @@ class ExpenseCreate extends Component
         );
 
         $this->dispatch('resetSplits')->to('expenses.expense-splits-create');
-        $this->dispatch('refreshComponent')->to('expenses.expense-show');
+        // $this->dispatch('refreshComponent')->to('expenses.expense-show');
         $this->dispatch('refreshComponent')->to('expenses.expense-index');
-        $this->dispatch('refreshComponent')->to('projects.project-show');
+        // $this->dispatch('refreshComponent')->to('projects.project-show');
     }
 
     public function remove()
@@ -291,7 +291,7 @@ class ExpenseCreate extends Component
             text: '',
         );
 
-        $this->resetModal();
+        $this->dispatch('refreshComponent')->to('expenses.expense-index');
 
         // if($this->form->transaction){
         //     $remove_type = 'transaction';
@@ -348,17 +348,12 @@ class ExpenseCreate extends Component
         );
 
         $this->resetModal();
-
         //queue
         // UpdateProjectDistributionsAmount::dispatch($expense->project, $expense->project->distributions->pluck('id')->toArray());
 
         //dispatch and refresh so expenses-new-form removes/refreshes
         //coming from different components expenses-show, expenses-index....
-
-        // $this->dispatch('resetSplits')->to('expenses.expense-splits-create');
-        // $this->dispatch('refreshComponent')->to('expenses.expense-show');
-        // $this->dispatch('refreshComponent')->to('expenses.expense-index');
-        // $this->dispatch('refreshComponent')->to('projects.project-show');
+        $this->dispatch('refreshComponent')->to('expenses.expense-index');
     }
 
     public function render()

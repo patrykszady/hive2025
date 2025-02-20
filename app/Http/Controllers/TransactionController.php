@@ -875,14 +875,12 @@ class TransactionController extends Controller
     {
         //if transaction where vendor is being added HAS expense? and expense->vendor is NULL ... add $transaction->vendor as $expense->vendor
         $transaction_bank_accounts = BankAccount::withoutGlobalScopes()->whereNull('deleted_at')->pluck('id')->toArray();
-        //->where('id', 25211)
+        //->where('id', 25269)
         $transactions = Transaction::TransactionsSinVendor()->whereIn('bank_account_id', $transaction_bank_accounts)->get()->groupBy('plaid_merchant_name');
-        // dd($transactions);
 
         $vendors = Vendor::withoutGlobalScopes()->where('business_type', 'Retail')->get();
 
         foreach ($transactions as $merchant_name => $merchant_transactions) {
-            // dd($merchant_transactions);
             //find vendor where vendor->business_name is contained in $merchant_name
             // $vendor_match = preg_grep("/^" . $merchant_name . "/i", $vendors->pluck('business_name')->toArray());
 
@@ -899,6 +897,19 @@ class TransactionController extends Controller
 
                 if (! $transaction->bank_account->vendor->vendors->contains($transaction->vendor_id)) {
                     $transaction->bank_account->vendor->vendors()->attach($transaction->vendor_id);
+                }
+            }else{
+                $vendor_transaction = VendorTransaction::whereNull('deposit_check')->where('desc', $merchant_name)->orderByRaw('LENGTH(`desc`) ASC')->first();
+
+                if($vendor_transaction){
+                    foreach ($merchant_transactions as $key => $transaction) {
+                        $transaction->vendor_id = $vendor_transaction->vendor_id;
+                        $transaction->save();
+                    }
+
+                    if (! $transaction->bank_account->vendor->vendors->contains($transaction->vendor_id)) {
+                        $transaction->bank_account->vendor->vendors()->attach($transaction->vendor_id);
+                    }
                 }
             }
         }
@@ -922,11 +933,10 @@ class TransactionController extends Controller
                 preg_match('/'.$vendor_transaction->desc.$preg, $vendor_name, $matches, PREG_UNMATCHED_AS_NULL);
 
                 if (! empty($matches)) {
-                    // dd($vendor_transactions);
                     foreach ($plaid_name_transactions as $key => $transaction) {
                         $transaction->vendor_id = $vendor_transaction->vendor_id;
                         $transaction->save();
-                        // dd($transaction);
+
                         if ($transaction->expense) {
                             $expense = $transaction->expense;
                             $expense->vendor_id = $transaction->vendor_id;
