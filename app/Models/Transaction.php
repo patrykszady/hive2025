@@ -36,20 +36,26 @@ class Transaction extends Model
     // //Searchable / Typesense
     public function toSearchableArray(): array
     {
-        return array_merge($this->toArray(), [
-            'id' => (string) $this->id,
-            'amount' => $this->amount,
-            'deposit' => (string) $this->deposit ? ($this->payments->isEmpty() ? 'NO_PAYMENTS' : 'HAS_PAYMENTS') : 'NOT_DEPOSIT',
-            'vendor_id' => (string) $this->vendor_id,
-            'bank_account_id' => (string) $this->bank_account_id,
-            'expense_id' => (string) $this->expense_id,
-            'is_expense_id_null' => $this->expense_id ? false : true,
-            'check_id' => (string) $this->check_id,
-            'is_check_id_null' => $this->check_id ? false : true,
-            'transaction_date' => $this->transaction_date,
-            'posted_date' => $this->posted_date,
-            'created_at' => $this->created_at->timestamp,
-        ]);
+        $array = $this->toArray();
+        $array['transaction_date'] = $this->transaction_date->timestamp;
+        $array['posted_date'] = $this->posted_date ? $this->posted_date->timestamp : null;
+        $array['deposit'] = $this->deposit ? ($this->payments->isEmpty() ? 'NO_PAYMENTS' : 'HAS_PAYMENTS') : 'NOT_DEPOSIT';
+
+        return $array;
+    //     return array_merge($this->toArray(), [
+    //         'id' => (string) $this->id,
+    //         'amount' => $this->amount,
+    //         'deposit' => (string) $this->deposit ? ($this->payments->isEmpty() ? 'NO_PAYMENTS' : 'HAS_PAYMENTS') : 'NOT_DEPOSIT',
+    //         'vendor_id' => (string) $this->vendor_id,
+    //         'bank_account_id' => (string) $this->bank_account_id,
+    //         'expense_id' => (string) $this->expense_id,
+    //         'is_expense_id_null' => $this->expense_id ? false : true,
+    //         'check_id' => (string) $this->check_id,
+    //         'is_check_id_null' => $this->check_id ? false : true,
+    //         'transaction_date' => $this->transaction_date,
+    //         'posted_date' => $this->posted_date,
+    //         'created_at' => $this->created_at->timestamp,
+    //     ]);
     }
 
     /**

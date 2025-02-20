@@ -72,28 +72,28 @@
                     <div class="space-y-6">
                         {{-- wire:loading.class="opacity-50 text-opacity-40" --}}
                         <flux:table>
-                            <flux:columns>
-                                <flux:column>Amount</flux:column>
-                                <flux:column>Date</flux:column>
-                                <flux:column>Bank</flux:column>
-                                <flux:column>Account</flux:column>
-                            </flux:columns>
+                            <flux:table.columns>
+                                <flux:table.column>Amount</flux:table.column>
+                                <flux:table.column>Date</flux:table.column>
+                                <flux:table.column>Bank</flux:table.column>
+                                <flux:table.column>Account</flux:table.column>
+                            </flux:table.columns>
 
-                            <flux:rows>
+                            <flux:table.rows>
                                 @foreach ($expense->transactions as $transaction)
-                                    <flux:row :key="$transaction->id">
-                                        <flux:cell variant="strong">
+                                    <flux:table.row :key="$transaction->id">
+                                        <flux:table.cell variant="strong">
                                             {{ money($transaction->amount) }}
-                                        </flux:cell>
-                                        <flux:cell>{{ $transaction->transaction_date->format('m/d/Y') }}</flux:cell>
-                                        <flux:cell>{{ $transaction->bank_account->bank->name }}</flux:cell>
-                                        <flux:cell>{{ isset($transaction->owner) ? $transaction->owner : $transaction->bank_account->account_number }}</flux:cell>
-                                    </flux:row>
-                                    <flux:row>
-                                        <flux:cell colspan="4" class="text-right">{{ $transaction->vendor->name != 'No Vendor' ? $transaction->vendor->name : $transaction->plaid_merchant_description}}</flux:cell>
-                                    </flux:row>
+                                        </flux:table.cell>
+                                        <flux:table.cell>{{ $transaction->transaction_date->format('m/d/Y') }}</flux:table.cell>
+                                        <flux:table.cell>{{ $transaction->bank_account->bank->name }}</flux:table.cell>
+                                        <flux:table.cell>{{ isset($transaction->owner) ? $transaction->owner : $transaction->bank_account->account_number }}</flux:table.cell>
+                                    </flux:table.row>
+                                    <flux:table.row>
+                                        <flux:table.cell colspan="4" class="text-right">{{ $transaction->vendor->name != 'No Vendor' ? $transaction->vendor->name : $transaction->plaid_merchant_description}}</flux:table.cell>
+                                    </flux:table.row>
                                 @endforeach
-                            </flux:rows>
+                            </flux:table.rows>
                         </flux:table>
                     </div>
                 </flux:card>
@@ -110,27 +110,27 @@
 
                     <div class="space-y-6">
                         <flux:table>
-                            <flux:columns>
-                                <flux:column>Amount</flux:column>
-                                <flux:column>Date</flux:column>
-                                <flux:column>Bank</flux:column>
-                                <flux:column>Account</flux:column>
-                            </flux:columns>
+                            <flux:table.columns>
+                                <flux:table.column>Amount</flux:table.column>
+                                <flux:table.column>Date</flux:table.column>
+                                <flux:table.column>Bank</flux:table.column>
+                                <flux:table.column>Account</flux:table.column>
+                            </flux:table.columns>
 
-                            <flux:rows>
+                            <flux:table.rows>
                                 @foreach ($expense->associated_expenses as $associated_expense)
-                                    <flux:row :key="$associated_expense->id">
-                                        <flux:cell variant="strong">
+                                    <flux:table.row :key="$associated_expense->id">
+                                        <flux:table.cell variant="strong">
                                             <a href="{{route('expenses.show', $associated_expense->id)}}">
                                                 {{ money($associated_expense->amount) }}
                                             </a>
-                                        </flux:cell>
-                                        <flux:cell>{{ $associated_expense->date->format('m/d/Y') }}</flux:cell>
-                                        <flux:cell>{{ !$associated_expense->transactions->isEmpty() ? $associated_expense->transactions()->first()->bank_account->bank->name : '' }}</flux:cell>
-                                        <flux:cell>{{ !$associated_expense->transactions->isEmpty() ? $associated_expense->transactions()->first()->bank_account->account_number : '' }}</flux:cell>
-                                    </flux:row>
+                                        </flux:table.cell>
+                                        <flux:table.cell>{{ $associated_expense->date->format('m/d/Y') }}</flux:table.cell>
+                                        <flux:table.cell>{{ !$associated_expense->transactions->isEmpty() ? $associated_expense->transactions()->first()->bank_account->bank->name : '' }}</flux:table.cell>
+                                        <flux:table.cell>{{ !$associated_expense->transactions->isEmpty() ? $associated_expense->transactions()->first()->bank_account->account_number : '' }}</flux:table.cell>
+                                    </flux:table.row>
                                 @endforeach
-                            </flux:rows>
+                            </flux:table.rows>
                         </flux:table>
                     </div>
                 </flux:card>
@@ -147,29 +147,29 @@
 
                     <div class="space-y-6">
                         <flux:table>
-                            <flux:columns>
-                                <flux:column>Amount</flux:column>
-                                <flux:column>Project</flux:column>
-                                <flux:column>Reimb.</flux:column>
-                            </flux:columns>
+                            <flux:table.columns>
+                                <flux:table.column>Amount</flux:table.column>
+                                <flux:table.column>Project</flux:table.column>
+                                <flux:table.column>Reimb.</flux:table.column>
+                            </flux:table.columns>
 
-                            <flux:rows>
+                            <flux:table.rows>
                                 @foreach($expense->splits as $split)
-                                    <flux:row>
-                                        <flux:cell variant="strong">{{money($split->amount)}}</flux:cell>
+                                    <flux:table.row>
+                                        <flux:table.cell variant="strong">{{money($split->amount)}}</flux:table.cell>
 
-                                        <flux:cell>
+                                        <flux:table.cell>
                                             @if($split->distribution)
                                                 {{$split->distribution->name }}
                                             @else
                                                 <a wire:navigate.hover href="{{route('projects.show', $split->project->id)}}">{{ $split->project->address }}</a>
                                             @endif
-                                        </flux:cell>
+                                        </flux:table.cell>
 
-                                        <flux:cell>{{$split->reimbursment}}</flux:cell>
-                                    </flux:row>
+                                        <flux:table.cell>{{$split->reimbursment}}</flux:table.cell>
+                                    </flux:table.row>
                                 @endforeach
-                            </flux:rows>
+                            </flux:table.rows>
                         </flux:table>
                     </div>
                 </flux:card>

@@ -225,6 +225,39 @@ class ExpenseIndex extends Component
     {
         $this->authorize('viewAny', Expense::class);
 
+        $transactions =
+            Transaction::search($this->amount, function ($meilisearch, $query, $options) {
+                $options['matchingStrategy'] = 'all';
+                $options['sort'] = ['transaction_date:desc'];
+                $options['filter'] = [
+                    'expense_id IS NULL',
+                    'check_id IS NULL',
+                    '__soft_deleted = 0',
+                    'deposit IN ["NOT_DEPOSIT", "NO_PAYMENTS"]'
+                ];
+
+                return $meilisearch->search($query, $options);
+            })
+
+            // ->where('is_expense_id_null', true)
+            // ->where('is_check_id_null', true)
+            // ->where('expense_id', NULL)
+            // ->where('check_id', NULL)
+            // ->whereIn('deposit', ['NOT_DEPOSIT', 'NO_PAYMENTS'])
+            // ->when(! empty($this->expense_vendor) && $this->expense_vendor != '0', function ($query, $item) {
+            //     return $query->where('vendor_id', $this->expense_vendor);
+            // })
+            // ->when($this->expense_vendor == '0', function ($query, $item) {
+            //     return $query->where('vendor_id', '0');
+            // })
+            // ->when(!empty($this->bank_plaid_ins_id), function ($query, $item) {
+            //     return $query->whereIn('bank_account_id', $this->bank_account_ids[$this->bank_plaid_ins_id]);
+            // })
+            // ->when(!empty($this->expense_vendor), function ($query, $item) {
+            //     return $query->where('vendor_id', $this->expense_vendor);
+            // })
+            ->paginate(100, pageName: 'transactions-page');
+
         $expenses = Expense::
             search($this->amount, function ($meilisearch, $query, $options) {
                 $options['matchingStrategy'] = 'all';
@@ -296,6 +329,7 @@ class ExpenseIndex extends Component
 
         return view('livewire.expenses.index', [
             'expenses' => $expenses,
+            'transactions' => $transactions,
         ]);
     }
 }
