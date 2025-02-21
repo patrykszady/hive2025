@@ -8,27 +8,27 @@
         <flux:main>
             <flux:card>
                 <flux:table>
-                    <flux:columns>
-                        <flux:column>Date</flux:column>
-                        <flux:column>Vendor</flux:column>
-                        <flux:column>Amount</flux:column>
-                    </flux:columns>
+                    <flux:table.columns>
+                        <flux:table.column>Date</flux:table.column>
+                        <flux:table.column>Vendor</flux:table.column>
+                        <flux:table.column>Amount</flux:table.column>
+                    </flux:table.columns>
 
-                    <flux:rows>
+                    <flux:table.rows>
                         @foreach($expenses as $key => $expense)
-                            <flux:row>
-                                <flux:cell>{{$expense->date->format('m/d/Y')}}</flux:cell>
-                                <flux:cell>{{$expense->business_name}}</flux:cell>
-                                <flux:cell variant="strong">{{money($expense->amount)}}</flux:cell>
-                            </flux:row>
+                            <flux:table.row>
+                                <flux:table.cell>{{$expense->date->format('m/d/Y')}}</flux:table.cell>
+                                <flux:table.cell>{{$expense->business_name}}</flux:table.cell>
+                                <flux:table.cell variant="strong">{{money($expense->amount)}}</flux:table.cell>
+                            </flux:table.row>
                         @endforeach
-                    </flux:rows>
+                    </flux:table.rows>
 
-                    <flux:row>
-                        <flux:cell></flux:cell>
-                        <flux:cell variant="strong" class="text-right">TOTAL</flux:cell>
-                        <flux:cell variant="strong">{{money($expenses->sum('amount'))}}</flux:cell>
-                    </flux:row>
+                    <flux:table.row>
+                        <flux:table.cell></flux:table.cell>
+                        <flux:table.cell variant="strong" class="text-right">TOTAL</flux:table.cell>
+                        <flux:table.cell variant="strong">{{money($expenses->sum('amount'))}}</flux:table.cell>
+                    </flux:table.row>
                 </flux:table>
             </flux:card>
 
@@ -44,7 +44,7 @@
 
                                     @if($expense->receipt->receipt_filename)
                                         <flux:button
-                                            href="{{ route('expenses.original_receipt', $expense->receipt->receipt_filename) }}"
+                                            href="{{ route('expenses.original_receipt', ['receipts', $expense->receipt->receipt_filename]) }}"
                                             target="_blank"
                                             size="sm"
                                             >
@@ -53,7 +53,7 @@
                                     @endif
                                 </div>
 
-                                <ul role="list" class="divide-y divide-gray-20">
+                                <ul role="list" class="divide-y divide-gray-200">
                                     <li>
                                         <span class="text-gray-500 text-sm">
                                             Vendor
@@ -121,14 +121,14 @@
                                 <flux:card>
                                     {{-- @include('livewire.expenses._receipt') --}}
                                     <flux:table>
-                                        <flux:columns>
-                                            <flux:column>Desc</flux:column>
-                                            <flux:column>Price</flux:column>
-                                            <flux:column>Qty</flux:column>
-                                            <flux:column>Total</flux:column>
-                                        </flux:columns>
+                                        <flux:table.columns>
+                                            <flux:table.column>Desc</flux:table.column>
+                                            <flux:table.column>Price</flux:table.column>
+                                            <flux:table.column>Qty</flux:table.column>
+                                            <flux:table.column>Total</flux:table.column>
+                                        </flux:table.columns>
 
-                                        <flux:rows>
+                                        <flux:table.rows>
                                             @foreach($expense->receipt->receipt_items->items as $item_index => $line_item)
                                                 @php
                                                     // $split = $expense->receipt_items && $expense->receipt_items[$item_index]['checkbox'] == true ? false : true;
@@ -156,8 +156,8 @@
                                                     }
                                                 @endphp
 
-                                                <flux:row>
-                                                    <flux:cell colspan="4" class="pb-0!">
+                                                <flux:table.row>
+                                                    <flux:table.cell colspan="4" class="pb-0!">
                                                         <span
                                                             @class([
                                                                 'text-gray-200 line-through' => $split
@@ -166,12 +166,12 @@
                                                             {{$line_item->Description ? Str::limit($line_item->Description, 45) : ''}}
                                                             {{-- {{isset($line_item->Description) ? $line_item->Description : ''}} --}}
                                                         </span>
-                                                    </flux:cell>
-                                                </flux:row>
+                                                    </flux:table.cell>
+                                                </flux:table.row>
 
-                                                <flux:row class="border-none! py-0!">
+                                                <flux:table.row class="border-none! py-0!">
                                                     {{-- 09/28/24 URL TO ITEM --}}
-                                                    <flux:cell class="text-right">
+                                                    <flux:table.cell class="text-right">
                                                         <i
                                                             @class([
                                                                 'text-gray-200 line-through' => $split,
@@ -184,8 +184,8 @@
                                                                 {{$line_item->ProductCode}}
                                                             @endif
                                                         </i>
-                                                    </flux:cell>
-                                                    <flux:cell>
+                                                    </flux:table.cell>
+                                                    <flux:table.cell>
                                                         <span
                                                             @class([
                                                                 'text-gray-200 line-through' => $split
@@ -193,8 +193,8 @@
                                                             >
                                                             {{money($line_item->Price)}}
                                                         </span>
-                                                    </flux:cell>
-                                                    <flux:cell>
+                                                    </flux:table.cell>
+                                                    <flux:table.cell>
                                                         <span
                                                             @class([
                                                                 'text-gray-200 line-through' => $split
@@ -202,8 +202,8 @@
                                                             >
                                                             {{$line_item->Quantity}}
                                                         </span>
-                                                    </flux:cell>
-                                                    <flux:cell>
+                                                    </flux:table.cell>
+                                                    <flux:table.cell>
                                                         <span
                                                             @class([
                                                                 'text-gray-200 line-through' => $split,
@@ -212,23 +212,23 @@
                                                             >
                                                             {{money($line_item->TotalPrice)}}
                                                         </span>
-                                                    </flux:cell>
-                                                </flux:row>
+                                                    </flux:table.cell>
+                                                </flux:table.row>
                                             @endforeach
 
-                                            <flux:row>
-                                                <flux:cell colspan="3" class="text-right font-semibold">Subtotal</flux:cell>
-                                                <flux:cell>{{money($expense->receipt->receipt_items->total)}}</flux:cell>
-                                            </flux:row>
+                                            <flux:table.row>
+                                                <flux:table.cell colspan="3" class="text-right font-semibold">Subtotal</flux:table.cell>
+                                                <flux:table.cell>{{money($expense->receipt->receipt_items->total)}}</flux:table.cell>
+                                            </flux:table.row>
 
-                                            <flux:row>
-                                                <flux:cell colspan="3" class="text-right font-semibold">Tax</flux:cell>
-                                                <flux:cell>{{money($expense->receipt->receipt_items->total_tax)}}</flux:cell>
-                                            </flux:row>
+                                            <flux:table.row>
+                                                <flux:table.cell colspan="3" class="text-right font-semibold">Tax</flux:table.cell>
+                                                <flux:table.cell>{{money($expense->receipt->receipt_items->total_tax)}}</flux:table.cell>
+                                            </flux:table.row>
 
-                                            <flux:row>
-                                                <flux:cell colspan="3" class="text-right font-semibold">Total</flux:cell>
-                                                <flux:cell>
+                                            <flux:table.row>
+                                                <flux:table.cell colspan="3" class="text-right font-semibold">Total</flux:table.cell>
+                                                <flux:table.cell>
                                                     @if($expense->receipt_items)
                                                         <s>{{money($expense->receipt->receipt_items->total)}}</s>
                                                         <br>
@@ -236,9 +236,9 @@
                                                     @else
                                                         <b>{{money($expense->receipt->receipt_items->total)}}</b>
                                                     @endif
-                                                </flux:cell>
-                                            </flux:row>
-                                        </flux:rows>
+                                                </flux:table.cell>
+                                            </flux:table.row>
+                                        </flux:table.rows>
                                     </flux:table>
                                 </flux:card>
                             @endif
@@ -247,5 +247,7 @@
                 {{-- @endif --}}
             @endforeach
         </flux:main>
+
+        {{-- @fluxScripts --}}
     </body>
 </html>

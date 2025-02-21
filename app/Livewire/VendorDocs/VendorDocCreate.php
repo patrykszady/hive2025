@@ -67,6 +67,7 @@ class VendorDocCreate extends Component
 
             $requesting_vendor = auth()->user()->vendor;
 
+            // dd([$vendor, $requesting_vendor]);
             //send email to agent, vendor, and auth()->vendor() with all $agent_expired_docs
             SendVendorDocRequestEmail::dispatch($agent_expired_docs, $vendor, $requesting_vendor, $agent_email);
 

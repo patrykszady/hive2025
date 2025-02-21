@@ -2088,9 +2088,10 @@ class ReceiptController extends Controller
     //Show full-size receipt to anyone with a link
     // No Middleware or Policies
     //PUBLIC AS FUCK! BE CAREFUL!
-    public function original_receipt($filename)
+    public function original_receipt($folder, $filename)
     {
-        $path = storage_path('files/vendor_docs/'.$filename);
+        $filename = strtolower($filename);
+        $path = storage_path('files/' . $folder . '/'.$filename);
 
         if (File::extension($filename) == 'pdf') {
             $response = Response::make(file_get_contents($path), 200, [

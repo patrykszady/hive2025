@@ -38,6 +38,7 @@ class SendVendorDocRequestEmail implements ShouldQueue
      */
     public function handle(): void
     {
+        // dd([$this->agent_email, $this->vendor->business_email, $this->requesting_vendor->business_email]);
         if (env('APP_ENV') === 'production') {
             Mail::to($this->agent_email)
                 ->cc([$this->vendor->business_email, $this->requesting_vendor->business_email])

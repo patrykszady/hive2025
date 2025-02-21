@@ -261,16 +261,16 @@
         },
         {
             "name": "aws/aws-sdk-php",
-            "version": "3.339.17",
+            "version": "3.339.19",
             "source": {
                 "type": "git",
                 "url": "https://github.com/aws/aws-sdk-php.git",
-                "reference": "6632b63e2696052441894673c0fac882f52c3b92"
+                "reference": "18f05efe983860ad899082e04c13f06ec9fd6e41"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/aws/aws-sdk-php/zipball/6632b63e2696052441894673c0fac882f52c3b92",
-                "reference": "6632b63e2696052441894673c0fac882f52c3b92",
+                "url": "https://api.github.com/repos/aws/aws-sdk-php/zipball/18f05efe983860ad899082e04c13f06ec9fd6e41",
+                "reference": "18f05efe983860ad899082e04c13f06ec9fd6e41",
                 "shasum": ""
             },
             "require": {
@@ -352,9 +352,9 @@
             "support": {
                 "forum": "https://github.com/aws/aws-sdk-php/discussions",
                 "issues": "https://github.com/aws/aws-sdk-php/issues",
-                "source": "https://github.com/aws/aws-sdk-php/tree/3.339.17"
+                "source": "https://github.com/aws/aws-sdk-php/tree/3.339.19"
             },
-            "time": "2025-02-19T19:10:53+00:00"
+            "time": "2025-02-21T19:13:15+00:00"
         },
         {
             "name": "barryvdh/laravel-snappy",
@@ -3481,16 +3481,16 @@
         },
         {
             "name": "livewire/flux",
-            "version": "v2.0.1",
+            "version": "v2.0.2",
             "source": {
                 "type": "git",
                 "url": "https://github.com/livewire/flux.git",
-                "reference": "27f6a21c68be15701e225f48729347ca43528fc9"
+                "reference": "424d88f7e1c68730edc56fd8041568c135c3d8ab"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/livewire/flux/zipball/27f6a21c68be15701e225f48729347ca43528fc9",
-                "reference": "27f6a21c68be15701e225f48729347ca43528fc9",
+                "url": "https://api.github.com/repos/livewire/flux/zipball/424d88f7e1c68730edc56fd8041568c135c3d8ab",
+                "reference": "424d88f7e1c68730edc56fd8041568c135c3d8ab",
                 "shasum": ""
             },
             "require": {
@@ -3538,25 +3538,25 @@
             ],
             "support": {
                 "issues": "https://github.com/livewire/flux/issues",
-                "source": "https://github.com/livewire/flux/tree/v2.0.1"
+                "source": "https://github.com/livewire/flux/tree/v2.0.2"
             },
-            "time": "2025-02-20T02:33:33+00:00"
+            "time": "2025-02-21T13:00:37+00:00"
         },
         {
             "name": "livewire/flux-pro",
-            "version": "2.0.1",
+            "version": "2.0.2",
             "dist": {
                 "type": "zip",
-                "url": "https://composer.fluxui.dev/download/9e4100c6-41e1-440f-a4d9-0aec2b9cd0ef/flux-pro-2.0.1.zip",
-                "reference": "adb0d36d1abf2e454ad55d52d803a3c05d8501ec",
-                "shasum": "7c3c10c13b4e77d160eeabf18e7d0f0ac848dcc0"
+                "url": "https://composer.fluxui.dev/download/9e43e623-b213-4ff1-a6a9-32c9aad82212/flux-pro-2.0.2.zip",
+                "reference": "e6a67a9d1982a34565880b8f7d4aabc17197d6f7",
+                "shasum": "7b9453b5db0a87fc90bceb49196319549ea04fe8"
             },
             "require": {
                 "illuminate/console": "^10.0|^11.0|^12.0",
                 "illuminate/support": "^10.0|^11.0|^12.0",
                 "illuminate/view": "^10.0|^11.0|^12.0",
                 "laravel/prompts": "^0.1.24|^0.2|^0.3",
-                "livewire/flux": "2.0.1|dev-main",
+                "livewire/flux": "2.0.2|dev-main",
                 "livewire/livewire": "^3.5.19",
                 "php": "^8.1",
                 "symfony/console": "^6.0|^7.0"
@@ -3597,7 +3597,7 @@
                 "livewire",
                 "ui"
             ],
-            "time": "2025-02-20T02:57:11+00:00"
+            "time": "2025-02-21T13:30:12+00:00"
         },
         {
             "name": "livewire/livewire",

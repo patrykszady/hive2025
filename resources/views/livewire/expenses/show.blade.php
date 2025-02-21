@@ -190,7 +190,7 @@
                         @foreach($expense->receipts->whereNotNull('receipt_filename') as $original_receipt)
                             {{-- 09-28-2024 ... if one BUTTON ... if multiple buttton + dropdown on the right  --}}
                             <flux:button
-                                href="{{ route('expenses.original_receipt', 'receipts', $original_receipt->receipt_filename) }}"
+                                href="{{ route('expenses.original_receipt', ['receipts', $original_receipt->receipt_filename]) }}"
                                 target="_blank"
                                 >
                                 View Receipt

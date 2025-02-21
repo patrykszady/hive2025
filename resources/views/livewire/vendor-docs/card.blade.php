@@ -36,9 +36,8 @@
                 @foreach($vendor_docs as $doc_index => $doc)
                     <flux:table.row :key="$doc_index">
                         <flux:table.cell variant="strong">
-                            {{-- @dd($doc->first()->doc_filename); --}}
                             <a
-                                href="{{ route('expenses.original_receipt', $doc->first()->doc_filename) }}"
+                                href="{{ route('expenses.original_receipt', ['vendor_docs', $doc->first()->doc_filename]) }}"
                                 target="_blank"
                                 >
                                 {{$doc->first()->type}}
