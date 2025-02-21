@@ -19,3 +19,4 @@ yarn-error.log
 /bootstrap/cache
 meilisearch
 home/forge/meilifiles
+auth.json

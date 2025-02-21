@@ -44,7 +44,6 @@ class VendorDocCreate extends Component
 
     public function requestDocument(Vendor $vendor)
     {
-        // dd('in requestDocument');
         $doc_types = $vendor->vendor_docs()->orderBy('expiration_date', 'DESC')->with('agent')->get()->groupBy('type');
 
         $latest_docs = collect();
@@ -71,10 +70,13 @@ class VendorDocCreate extends Component
             //send email to agent, vendor, and auth()->vendor() with all $agent_expired_docs
             SendVendorDocRequestEmail::dispatch($agent_expired_docs, $vendor, $requesting_vendor, $agent_email);
 
-            $this->dispatch('notify',
-                type: 'success',
-                content: 'Vendor Document Requested'
-                // route: 'expenses/' . $expense->id
+            Flux::toast(
+                duration: 5000,
+                position: 'top right',
+                variant: 'success',
+                heading: 'Insurace Requested',
+                // route / href / wire:click
+                text: '',
             );
         }
     }

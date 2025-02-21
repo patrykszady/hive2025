@@ -2090,7 +2090,7 @@ class ReceiptController extends Controller
     //PUBLIC AS FUCK! BE CAREFUL!
     public function original_receipt($filename)
     {
-        $path = storage_path('files/receipts/'.$filename);
+        $path = storage_path('files/vendor_docs/'.$filename);
 
         if (File::extension($filename) == 'pdf') {
             $response = Response::make(file_get_contents($path), 200, [

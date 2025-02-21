@@ -48,78 +48,59 @@
             <div class="col-span-4 space-y-2 lg:col-span-2">
                 {{-- PAYMENT PROJECTS --}}
                 @foreach($projects->where('show', true) as $project_id => $project)
-                    <flux:card class="space-y-6">
+                    <flux:card class="space-y-2">
                         <div class="flex justify-between">
-                            <div>
-                                <flux:heading size="lg"><a href="{{route('projects.show', $project->id)}}" target="_blank">{{ $project->address }}</a></flux:heading>
-                                <flux:subheading>{{ $project->project_name}}</flux:subheading>
-                            </div>
+                            <flux:heading size="lg"><a href="{{route('projects.show', $project->id)}}" target="_blank">{{ $project->address }}</a></flux:heading>
                             <flux:button.group>
                                 <flux:button size="sm" wire:click="$dispatchTo('bids.bid-create', 'addBids', { vendor: {{$vendor->id}}, project: {{$project->id}} })">Edit Bids</flux:button>
                                 <flux:button size="sm" wire:click="removeProject({{$project_id}})">Remove</flux:button>
                             </flux:button.group>
                         </div>
+                        <flux:subheading>{{ $project->project_name}}</flux:subheading>
 
                         <flux:separator variant="subtle" />
 
-                        {{-- ROWS --}}
-                        <x-cards.body :class="'space-y-2 my-2 pb-2'">
-                            {{-- VENDOR BIDS --}}
-                            <x-forms.row
-                                wire:model.live="projects.{{$project_id}}.vendor_bids_sum"
-                                errorName="projects.{{$project_id}}.vendor_bids_sum"
-                                name="projects.{{$project_id}}.vendor_bids_sum"
-                                text="Total Bids"
-                                type="number"
-                                hint="$"
-                                x-bind:disabled="true"
-                                >
-                            </x-forms.row>
+                        {{-- VENDOR BIDS --}}
+                        <x-forms.one_line label="Total Bids">
+                            <flux:input.group>
+                                <flux:input.group.prefix>$</flux:input.group.prefix>
+                                <flux:input wire:model="projects.{{$project_id}}.vendor_bids_sum" type="number" disabled />
+                                <flux:error name="projects.{{$project_id}}.vendor_bids_sum" />
+                            </flux:input.group>
+                        </x-forms.one_line>
 
-                            {{-- VENDOR PROJECT SUM --}}
-                            <x-forms.row
-                                {{-- 09-05-2023 how to format wire:model.live --}}
-                                wire:model.live="projects.{{$project_id}}.vendor_expenses_sum"
-                                errorName="projects.{{$project_id}}.vendor_expenses_sum"
-                                name="projects.{{$project_id}}.vendor_expenses_sum"
-                                text="Total Paid"
-                                type="number"
-                                hint="$"
-                                x-bind:disabled="true"
-                                >
-                            </x-forms.row>
+                        {{-- VENDOR PROJECT SUM --}}
+                        <x-forms.one_line label="Total Paid">
+                            <flux:input.group>
+                                <flux:input.group.prefix>$</flux:input.group.prefix>
+                                <flux:input wire:model="projects.{{$project_id}}.vendor_expenses_sum" type="number" disabled />
+                                <flux:error name="projects.{{$project_id}}.vendor_expenses_sum" />
+                            </flux:input.group>
+                        </x-forms.one_line>
 
-                            {{-- AMOUNT --}}
-                            <x-forms.row
-                                wire:model.live.debounce.500ms="projects.{{$project_id}}.amount"
-                                errorName="projects.{{$project_id}}.amount"
-                                name="projects.{{$project_id}}.amount"
-                                {{-- x-text="money(payment_projects.{{$index}}.amount)" --}}
-                                text="Amount"
-                                type="number"
-                                hint="$"
-                                textSize="xl"
-                                placeholder="00.00"
-                                inputmode="decimal"
-                                step="0.01"
-                                pattern="[0-9]*"
-                                autofocus
-                                >
-                            </x-forms.row>
+                        {{-- AMOUNT --}}
+                        <x-forms.one_line label="Amount">
+                            <flux:input.group>
+                                <flux:input.group.prefix>$</flux:input.group.prefix>
+                                <flux:input
+                                    wire:model.live.debounce.500ms="projects.{{$project_id}}.amount"
+                                    type="number"
+                                    inputmode="decimal"
+                                    step="0.01"
+                                    pattern="[0-9]*"
+                                    autofocus
+                                />
+                            </flux:input.group>
+                            <flux:error name="projects.{{$project_id}}.amount" />
+                        </x-forms.one_line>
 
-                            {{-- VENDOR PROJECT BALANCE --}}
-                            <x-forms.row
-                                wire:model.live="projects.{{$project_id}}.balance"
-                                errorName="projects.{{$project_id}}.balance"
-                                name="projects.{{$project_id}}.balance"
-                                text="Balance"
-                                type="number"
-                                hint="$"
-                                x-bind:disabled="true"
-                                >
-                            </x-forms.row>
-                            {{-- total paid, bid, balance rows DISABLED --}}
-                        </x-cards.body>
+                        <x-forms.one_line label="Balance">
+                            <flux:input.group>
+                                <flux:input.group.prefix>$</flux:input.group.prefix>
+                                <flux:input wire:model="projects.{{$project_id}}.balance" type="number" disabled />
+                                <flux:error name="projects.{{$project_id}}.balance" />
+                            </flux:input.group>
+                        </x-forms.one_line>
                     </flux:card>
                 @endforeach
 

@@ -2,13 +2,25 @@
 Hello,
 <br>
 On behalf of <b>{{$vendor->business_name}}</b> we are requesting new certificates of insurance for the following policies that have expired. Please contact the insured directly if needed.
+<h3>Insured:</h3>
+<x-mail::panel>
+<b>{{$vendor->business_name}}</b>
+<br>
+{{$vendor->address}}
+@if(!is_null($vendor->address_2))
+<br>
+{{$vendor->address_2}}
+@endif
+<br>
+{{$vendor->city}}, {{$vendor->state}} {{$vendor->zip_code}}
+</x-mail::panel>
 <h3>Expired Policies:</h3>
 <x-mail::panel>
 @foreach($agent_expired_docs as $agent_expired_doc)
-<b>{{$agent_expired_doc->type}}</b> | {{$agent_expired_doc->expiration_date->format('m/d/Y')}}<br>
+<b>{{$agent_expired_doc->type}}</b> | Policy #: <u>{{$agent_expired_doc->number}}</u> | {{$agent_expired_doc->expiration_date->format('m/d/Y')}}<br>
 @endforeach
 </x-mail::panel>
-<h3>Certificate Holder:</h3>
+<h3>Holder:</h3>
 <x-mail::panel>
 <b>{{$requesting_vendor->business_name}}</b>
 <br>

@@ -4,10 +4,7 @@
 		<div class="col-span-4 space-y-4 lg:col-span-2 lg:h-32">
             <flux:card>
                 <div class="flex justify-between">
-                    <div>
-                        <flux:heading size="lg">Daily Hours for {{auth()->user()->first_name}}</flux:heading>
-                        <flux:subheading><i>Pick Date to add or edit Daily Hours for {{auth()->user()->first_name}}</i></flux:subheading>
-                    </div>
+                    <flux:heading size="lg">Daily Hours for {{auth()->user()->first_name}}</flux:heading>
                     <flux:button
                         wire:navigate.hover
                         href="{{route('timesheets.index')}}"
@@ -16,24 +13,33 @@
                         Confirm Timesheets
                     </flux:button>
                 </div>
+                <flux:subheading><i>Pick Date to add or edit Daily Hours for {{auth()->user()->first_name}}</i></flux:subheading>
 
                 <flux:separator variant="subtle" />
 
-                @include('livewire.hours._calander')
+                {{-- @include('livewire.hours._calander') --}}
+                <flux:calendar
+                    wire:model.live="selected_date"
+                    wire:loading.attr="disabled"
+                    max="today"
+                    start-day="1"
+                    :navigation="false"
+                    unavailable="{{$this->days}}"
+                />
 
                 <flux:separator variant="subtle" />
 
                 <div class="space-y-2 mt-2">
-                    <flux:button class="w-full cursor-default"><b>{{$this->selected_date->format('D M jS, Y')}}</b></flux:button>
-                    <flux:button class="w-full cursor-default">Hours | <b>{{$this->hours_count}}</b></flux:button>
-                    <flux:button type="submit" variant="primary" class="w-full">{{$view_text['button_text']}}</flux:button>
+                    <flux:button class="w-full cursor-default" wire:loading.attr="disabled"><b>{{$this->selected_date->format('D M jS, Y')}}</b></flux:button>
+                    <flux:button class="w-full cursor-default" wire:loading.attr="disabled">Hours | <b>{{$this->hours_count}}</b></flux:button>
+                    <flux:button type="submit" variant="primary" class="w-full" wire:loading.attr="disabled">{{$view_text['button_text']}}</flux:button>
                 </div>
 
                 <flux:error name="check_total_min" />
             </flux:card>
 		</div>
 
-		<div class="col-span-4 space-y-2 lg:col-span-2">
+		<div class="col-span-4 space-y-2 lg:col-span-2" wire:loading.class="opacity-50">
             <flux:card class="space-y-2">
                 <flux:heading size="lg">Projects</flux:heading>
                 <flux:separator variant="subtle" />
@@ -50,7 +56,7 @@
                             <div>
                                 <flux:input.group>
                                     <flux:input.group.prefix>Hours</flux:input.group.prefix>
-                                    <flux:input wire:model.live="form.projects.{{$index}}.hours" type="number" inputmode="decimal" step="0.25" />
+                                    <flux:input wire:model.live="form.projects.{{$index}}.hours" type="number" inputmode="decimal" step="0.25" min="0.25" />
                                 </flux:input.group>
                                 @if(!empty($day_project_tasks[$index]))
                                     @foreach($day_project_tasks[$index] as $task)

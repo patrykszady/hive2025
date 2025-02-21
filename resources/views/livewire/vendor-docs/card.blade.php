@@ -11,20 +11,19 @@
         @can('create', App\Models\User::class)
             <div class="space-x-2">
                 {{-- if any docs are expired.. policy? --}}
-                @if(isset($vendor->expired_docs))
-                    <flux:button.group>
-                        <flux:button size="sm" wire:click="$dispatchTo('vendor-docs.vendor-doc-create', 'addDocument', { vendor: {{$vendor->id}} })">Add</flux:button>
-                        <flux:button size="sm" wire:click="$dispatchTo('vendor-docs.vendor-doc-create', 'requestDocument', { vendor: {{$vendor->id}} })">Request</flux:button>
-                    </flux:button.group>
-                @else
+                <flux:button.group>
                     <flux:button size="sm" wire:click="$dispatchTo('vendor-docs.vendor-doc-create', 'addDocument', { vendor: {{$vendor->id}} })">Add</flux:button>
-                @endif
+                    @if(isset($vendor->expired_docs))
+                        <flux:button size="sm" wire:click="$dispatchTo('vendor-docs.vendor-doc-create', 'requestDocument', { vendor: {{$vendor->id}} })">Request</flux:button>
+                    @endif
+                </flux:button.group>
             </div>
         @endcan
     </div>
 
     @if(!$vendor_docs->isEmpty())
         <flux:separator variant="subtle" />
+
         <flux:table>
             <flux:table.columns>
                 {{-- sortable :sorted="$sortBy === 'amount'" :direction="$sortDirection" wire:click="sort('amount')"> --}}
@@ -36,7 +35,15 @@
             <flux:table.rows>
                 @foreach($vendor_docs as $doc_index => $doc)
                     <flux:table.row :key="$doc_index">
-                        <flux:table.cell variant="strong">{{$doc->first()->type}}</flux:table.cell>
+                        <flux:table.cell variant="strong">
+                            {{-- @dd($doc->first()->doc_filename); --}}
+                            <a
+                                href="{{ route('expenses.original_receipt', $doc->first()->doc_filename) }}"
+                                target="_blank"
+                                >
+                                {{$doc->first()->type}}
+                            </a>
+                        </flux:table.cell>
                         <flux:table.cell>
                             <flux:badge size="sm" :color="$doc->first()->expiration_date > today() ? 'green' : 'red'" inset="top bottom">
                                 {{$doc->first()->expiration_date->format('m/d/Y')}}

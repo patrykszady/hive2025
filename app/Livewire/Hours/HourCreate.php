@@ -7,9 +7,11 @@ use App\Models\Hour;
 use App\Models\Project;
 use App\Models\Task;
 use App\Models\Timesheet;
-use Carbon\Carbon;
+
+use Illuminate\Support\Carbon;
 use Carbon\CarbonInterval;
 use Carbon\CarbonPeriod;
+
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
@@ -18,14 +20,12 @@ class HourCreate extends Component
     public HourForm $form;
 
     public $projects = [];
-
     public $other_projects = [];
-
+    public Carbon $selected_date;
     public $days = [];
 
-    public $hours_count_store = 0;
 
-    public $selected_date = null;
+    public $hours_count_store = 0;
 
     public $day_index = null;
 
@@ -39,20 +39,22 @@ class HourCreate extends Component
         'form_submit' => 'save',
     ];
 
-    protected $listeners = ['refreshComponent' => '$refresh', 'selectedDate'];
+    protected $listeners = ['refreshComponent' => '$refresh'];
 
     public function rules()
     {
         return [
+            'selected_date' => 'nullable',
             'new_project_id' => 'nullable',
         ];
     }
 
     public function mount()
     {
-        $this->selectedDate(today()->format('Y-m-d'));
-        $this->other_projects = Project::whereNotIn('id', $this->projects->pluck('id'))->orderBy('created_at', 'DESC')->get();
+        // $this->selected_date = now();
+        $this->selectedDate(today());
 
+        // $this->other_projects = Project::whereNotIn('id', $this->projects->pluck('id'))->orderBy('created_at', 'DESC')->get();
         $confirmed_weeks =
             Timesheet::orderBy('date', 'DESC')
                 ->where('user_id', auth()->user()->id)
@@ -76,20 +78,36 @@ class HourCreate extends Component
             $confirmed_week_days[] = null;
         }
 
-        $this->days = collect();
-        foreach ($this->getDays() as $day) {
-            $user_day_hours = Hour::where('user_id', auth()->user()->id)->where('date', $day->format('Y-m-d'))->get();
+        $this->days = implode(',', $confirmed_week_days);
 
-            $this->days->push(collect([
-                'format' => $day->format('Y-m-d'),
-                'day' => $day->format('d'),
-                'month' => $day->format('m'),
-                'has_hours' => $user_day_hours->isEmpty() ? false : true,
-                'confirmed_date' => in_array($day->format('Y-m-d'), $confirmed_week_days) ? true : false,
-            ]));
-        }
-
+        // $this->projects = Project::status(['Active', 'Service Call']);
         $this->form->setProjects($this->projects->toArray());
+        // dd($this->days);
+        // dd($confirmed_week_days);
+
+        // $this->days = collect();
+        // foreach ($this->getDays() as $day) {
+        //     $user_day_hours = Hour::where('user_id', auth()->user()->id)->where('date', $day->format('Y-m-d'))->get();
+
+        //     $this->days->push(collect([
+        //         'format' => $day->format('Y-m-d'),
+        //         'day' => $day->format('d'),
+        //         'month' => $day->format('m'),
+        //         'has_hours' => $user_day_hours->isEmpty() ? false : true,
+        //         'confirmed_date' => in_array($day->format('Y-m-d'), $confirmed_week_days) ? true : false,
+        //     ]));
+        // }
+    }
+
+    public function updatedSelectedDate($value)
+    {
+        if($value){
+            // $this->selected_date = $value;
+            $this->selectedDate($value);
+            $this->validate();
+        }else{
+            $this->selectedDate(today());
+        }
     }
 
     public function updated()
@@ -104,14 +122,14 @@ class HourCreate extends Component
         return $this->hours_count_store;
     }
 
-    public function getDays()
-    {
-        return new \DatePeriod(
-            Carbon::parse('3 weeks ago')->startOfWeek(Carbon::MONDAY),
-            CarbonInterval::day(),
-            Carbon::parse('1 week')->startOfWeek(Carbon::MONDAY)->next('Week')
-        );
-    }
+    // public function getDays()
+    // {
+    //     return new \DatePeriod(
+    //         Carbon::parse('3 weeks ago')->startOfWeek(Carbon::MONDAY),
+    //         CarbonInterval::day(),
+    //         Carbon::parse('1 week')->startOfWeek(Carbon::MONDAY)->next('Week')
+    //     );
+    // }
 
     public function selectedDate($date, $day_index = null)
     {
@@ -125,7 +143,8 @@ class HourCreate extends Component
         }
 
         //if current User doesnt have any hours for this date let them add new project, if they do let them edit if not yet paid (or timesheet created)
-        $this->selected_date = Carbon::parse($date);
+        $this->selected_date = $date;
+
         $user_day_hours = Hour::where('user_id', auth()->user()->id)->where('date', $this->selected_date->format('Y-m-d'))->get();
         $projects = Project::status(['Active', 'Service Call']);
         $planner_projects_day =
@@ -154,9 +173,9 @@ class HourCreate extends Component
                         }
                     });
             }])
-                ->get()
-                ->sortBy([['last_status.title', 'asc'], ['last_status.start_date', 'desc']])
-                ->keyBy('id');
+            ->get()
+            ->sortBy([['last_status.title', 'asc'], ['last_status.start_date', 'desc']])
+            ->keyBy('id');
 
         foreach ($this->day_project_tasks as $project_id => $project_tasks) {
             foreach ($project_tasks as $task_id => $task) {
@@ -198,8 +217,6 @@ class HourCreate extends Component
         }
 
         $this->form->setProjects($this->projects->toArray());
-        // dd(collect($this->form->projects));
-        // dd($this->form->projects[250]->hours);
     }
 
     public function add_project()
@@ -225,7 +242,7 @@ class HourCreate extends Component
             $this->addError('hours_count', 'Daily Hours need at least one entry.');
         } else {
             $this->form->store();
-            $this->selectedDate($this->selected_date->format('Y-m-d'), $this->day_index);
+            $this->selectedDate($this->selected_date, $this->day_index);
             $this->dispatch('notify',
                 type: 'success',
                 content: 'Hours Created'
@@ -242,7 +259,7 @@ class HourCreate extends Component
         //     $this->selectedDate($this->selected_date->format('Y-m-d'), $this->day_index);
         // }
         $this->form->update();
-        $this->selectedDate($this->selected_date->format('Y-m-d'), $this->day_index);
+        $this->selectedDate($this->selected_date, $this->day_index);
 
         $this->dispatch('notify',
             type: 'success',
