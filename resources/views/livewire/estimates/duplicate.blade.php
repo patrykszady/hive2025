@@ -1,66 +1,36 @@
-<x-modals.modal>
-    <form wire:submit="save">
-        {{-- HEADER --}}
-        <x-cards.heading>
-            <x-slot name="left">
-                <h1>Duplicate This Estimate</h1>
-            </x-slot>
-        </x-cards.heading>
+<flux:modal name="estimate_duplicate_modal">
+    <div class="flex justify-between space-y-2">
+        <flux:heading size="lg">Duplicate This Estimate</flux:heading>
+    </div>
 
-        {{-- ROWS --}}
-        <x-cards.body :class="'space-y-4 my-4'">
-            {{-- CLIENT ID --}}
-            <x-forms.row
-                wire:model.live="client_id"
-                errorName="client_id"
-                name="client_id"
-                text="Client"
-                type="dropdown"
-                >
-                <option value="" readonly>Select Client</option>
-                @foreach ($clients as $client)
-                    <option value="{{$client->id}}">{{$client->name}}</option>
+    <flux:separator variant="subtle" class="mb-2" />
+
+    <form wire:submit="save" class="space-y-2">
+        <flux:select label="Client" wire:model.live="client_id" variant="listbox" searchable placeholder="Choose client...">
+            @foreach($this->clients as $client)
+                <flux:select.option value="{{$client->id}}" wire:key="{{$client->id}}">{{$client->name}}</flux:select.option>
+            @endforeach
+        </flux:select>
+        <div
+            x-show="$wire.client_id"
+            x-transition
+            >
+            <flux:select label="Project" wire:model.live="project_id" variant="listbox" searchable placeholder="Choose project...">
+                @foreach($client_projects as $client_project)
+                    <flux:select.option value="{{$client_project->id}}" wire:key="{{$client_project->id}}">{{$client_project->project_name}}</flux:select.option>
                 @endforeach
-            </x-forms.row>
+            </flux:select>
+        </div>
 
+        {{-- FOOTER --}}
+        <div
+            x-show="$wire.project_id"
+            x-transition
+            class="flex space-x-2 sticky bottom-0"
+            >
+            <flux:spacer />
 
-            {{-- CLIENT PROJECTS --}}
-            <div
-                x-data="{ client: @entangle('client_id') }"
-                x-show="client"
-                x-transition
-                class="my-4 space-y-4"
-                >
-                <x-forms.row
-                    wire:model.live="project_id"
-                    errorName="project_id"
-                    name="project_id"
-                    text="Project"
-                    type="dropdown"
-                    >
-                    <option value="" readonly>Select Project</option>
-                    @foreach ($client_projects as $client_project)
-                        <option value="{{$client_project->id}}">{{$client_project->project_name}}</option>
-                    @endforeach
-                </x-forms.row>
-            </div>
-        </x-cards.body>
-
-        <x-cards.footer>
-            <button
-                {{-- wire:click="$emitTo('expenses.expenses-new-form', 'resetModal')" --}}
-                type="button"
-                x-on:click="open = false"
-                class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-xs hover:bg-gray-50 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                >
-                Cancel
-            </button>
-            <button
-                type="submit"
-                class="inline-flex items-center px-4 py-2 ml-3 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-xs disabled:opacity-50 hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                >
-                Duplicate
-            </button>
-        </x-cards.footer>
+            <flux:button type="submit" variant="primary">Duplicate</flux:button>
+        </div>
     </form>
-</x-modals.modal>
+</flux:modal>

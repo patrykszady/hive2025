@@ -3,9 +3,9 @@
     <form wire:submit="{{$view_text['form_submit']}}">
         <x-cards.heading>
             <x-slot name="left">
-                    <h1>
-                        {{$view_text['card_title']}}
-                    </h1>
+                <h1>
+                    {{$view_text['card_title']}}
+                </h1>
             </x-slot>
 
             <x-slot name="right">

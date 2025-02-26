@@ -93,8 +93,8 @@ class PaymentCreate extends Component
                 return $query->where('title', '=', 'Active');
             });
         })
-            ->orderBy('created_at', 'DESC')
-            ->get();
+        ->orderBy('created_at', 'DESC')
+        ->get();
     }
 
     public function getClientPaymentSumProperty()

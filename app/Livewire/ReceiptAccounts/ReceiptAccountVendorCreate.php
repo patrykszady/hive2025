@@ -2,22 +2,33 @@
 
 namespace App\Livewire\ReceiptAccounts;
 
+use App\Livewire\Forms\BulkMatchForm;
 use App\Models\Distribution;
-use App\Models\ReceiptAccount;
+use App\Models\Expense;
+use App\Models\Transaction;
 use App\Models\Vendor;
+
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+
+use Flux;
+use Livewire\Attributes\Computed;
 use Livewire\Component;
 
 class ReceiptAccountVendorCreate extends Component
 {
+    use AuthorizesRequests;
     protected $listeners = ['refreshComponent' => '$refresh', 'editReceiptVendor'];
 
-    public $distributions = [];
+    public BulkMatchForm $form;
+    public $distributions = []; //coming from ReceiptAccountsIndex
 
     public $distribution_id = null;
 
-    public $vendors = [];
+    // public $vendors = [];
 
-    public $vendor = null;
+    public Vendor $vendor;
+
+    //$this->form->setMatch($match);
 
     protected function rules()
     {
@@ -27,14 +38,11 @@ class ReceiptAccountVendorCreate extends Component
         ];
     }
 
-    public function mount()
+    public function editReceiptVendor(Vendor $vendor)
     {
-        $this->distributions = Distribution::all();
-    }
-
-    public function editReceiptVendor($vendor_id)
-    {
-        $this->vendor = Vendor::with(['receipts', 'receipt_account'])->find($vendor_id);
+        $this->vendor = $vendor;
+        // $this->vendor = Vendor::with(['receipts', 'receipt_account'])->find($vendor_id);
+        // dd($this->vendor->transactions_bulk_match);
 
         if (isset($this->vendor->receipt_account)) {
             $receipt_account = $this->vendor->receipt_account;
@@ -48,7 +56,7 @@ class ReceiptAccountVendorCreate extends Component
         }
 
         // $this->vendor->logged_in = $this->vendor->receipt_account && $this->vendor->receipt_account->options ? ($this->vendor->receipt_account->options['access_token'] ? true : false) : false;
-        $this->vendor->logged_in = isset($this->vendor->receipt_account->options) ? (isset($this->vendor->receipt_account->options['errors']) ? false : true) : false;
+        // $this->vendor->logged_in = isset($this->vendor->receipt_account->options) ? (isset($this->vendor->receipt_account->options['errors']) ? false : true) : false;
 
         $this->modal('receipt_account_vendor_form_modal')->show();
     }
@@ -89,13 +97,12 @@ class ReceiptAccountVendorCreate extends Component
         }
 
         $this->modal('receipt_account_vendor_form_modal')->close();
-
         $this->dispatch('refreshComponent')->to('receipt-accounts.receipt-accounts-index');
 
-        $this->dispatch('notify',
-            type: 'success',
-            content: 'Receipt Account Connected'
-        );
+        // $this->dispatch('notify',
+        //     type: 'success',
+        //     content: 'Receipt Account Connected'
+        // );
     }
 
     public function render()

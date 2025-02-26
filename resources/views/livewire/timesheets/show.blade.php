@@ -26,39 +26,39 @@
 
             <div class="space-y-2">
                 <flux:table>
-                    <flux:columns>
-                        <flux:column>Amount</flux:column>
-                        <flux:column>Hours</flux:column>
-                        <flux:column>Project</flux:column>
-                        <flux:column>Payment</flux:column>
-                        <flux:column>Status</flux:column>
-                    </flux:columns>
+                    <flux:table.columns>
+                        <flux:table.column>Amount</flux:table.column>
+                        <flux:table.column>Hours</flux:table.column>
+                        <flux:table.column>Project</flux:table.column>
+                        <flux:table.column>Payment</flux:table.column>
+                        <flux:table.column>Status</flux:table.column>
+                    </flux:table.columns>
 
-                    <flux:rows>
+                    <flux:table.rows>
                         @foreach($weekly_hours as $timesheet)
-                            <flux:row :key="$timesheet->id">
-                                <flux:cell variant="strong">
+                            <flux:table.row :key="$timesheet->id">
+                                <flux:table.cell variant="strong">
                                     <a wire:navigate.hover href="{{$timesheet->check ? route('checks.show', $timesheet->check->id) : (!$timesheet->check && $timesheet->check_id ? '' : (auth()->user()->primary_vendor->pivot->role_id == 1 ? route('timesheets.payment', $timesheet->user_id) : ''))}}">{{ money($timesheet->amount) }}</a>
-                                </flux:cell>
-                                <flux:cell>{{ $timesheet->hours}}</flux:cell>
-                                <flux:cell>
+                                </flux:table.cell>
+                                <flux:table.cell>{{ $timesheet->hours}}</flux:table.cell>
+                                <flux:table.cell>
                                     <a wire:navigate.hover href="{{route('projects.show', $timesheet->project->id)}}">{{ Str::limit($timesheet->project->name, 15) }}</a>
-                                </flux:cell>
+                                </flux:table.cell>
 
                                 @if($timesheet->check)
-                                    <flux:cell>{{ $timesheet->check && $timesheet->check_id ? $timesheet->check->check_type != 'Check' ? $timesheet->check->check_type . ' #' . $timesheet->check->id : $timesheet->check->check_number : '' }}</flux:cell>
+                                    <flux:table.cell>{{ $timesheet->check && $timesheet->check_id ? $timesheet->check->check_type != 'Check' ? $timesheet->check->check_type . ' #' . $timesheet->check->id : $timesheet->check->check_number : '' }}</flux:table.cell>
                                 @elseif(!$timesheet->check && $timesheet->check_id && !$timesheet->vendor_id)
-                                    <flux:cell>Paid By</flux:cell>
+                                    <flux:table.cell>Paid By</flux:table.cell>
                                 @else
-                                    <flux:cell></flux:cell>
+                                    <flux:table.cell></flux:table.cell>
                                 @endif
 
-                                <flux:cell>
+                                <flux:table.cell>
                                     <flux:badge size="sm" :color="$timesheet->paid_by || $timesheet->check_id ? 'green' : 'yellow'" inset="top bottom">{{ $timesheet->paid_by ? 'Paid By' : ($timesheet->check_id ? 'Paid' : (auth()->user()->primary_vendor->pivot->role_id == 1 ? 'Pay' : 'Not Paid')) }}</flux:badge>
-                                </flux:cell>
-                            </flux:row>
+                                </flux:table.cell>
+                            </flux:table.row>
                         @endforeach
-                    </flux:rows>
+                    </flux:table.rows>
                 </flux:table>
             </div>
         </flux:card>

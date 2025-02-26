@@ -242,7 +242,6 @@ class BulkMatchCreate extends Component
     public function render()
     {
         $this->authorize('viewAny', TransactionBulkMatch::class);
-
         return view('livewire.bulk-match.form');
     }
 }

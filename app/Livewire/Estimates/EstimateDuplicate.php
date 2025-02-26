@@ -4,21 +4,23 @@ namespace App\Livewire\Estimates;
 
 use App\Models\Client;
 use App\Models\Estimate;
+
+use Flux;
+
 use Livewire\Component;
+use Livewire\Attributes\Computed;
 
 class EstimateDuplicate extends Component
 {
     public Estimate $estimate;
 
-    public $clients = [];
+    // public $clients = [];
 
     public $client_projects = [];
 
     public $client_id = null;
 
     public $project_id = null;
-
-    public $modal_show = false;
 
     protected $listeners = ['duplicateModal'];
 
@@ -30,15 +32,11 @@ class EstimateDuplicate extends Component
         ];
     }
 
-    public function mount()
-    {
-        $this->clients = Client::orderBy('created_at', 'DESC')->get();
-    }
-
     public function updated($field, $value)
     {
         if ($field == 'client_id') {
             if ($value) {
+                $this->project_id = null;
                 $client = $this->clients->where('id', $value)->first();
                 $this->client_projects = $client->projects;
             } else {
@@ -52,7 +50,13 @@ class EstimateDuplicate extends Component
     public function duplicateModal(Estimate $estimate)
     {
         $this->estimate = $estimate;
-        $this->modal_show = true;
+        $this->modal('estimate_duplicate_modal')->show();
+    }
+
+    #[Computed]
+    public function clients()
+    {
+        return Client::orderBy('created_at', 'DESC')->get();
     }
 
     public function save()
@@ -81,11 +85,19 @@ class EstimateDuplicate extends Component
             }
         }
 
-        $this->dispatch('notify',
-            type: 'success',
-            content: 'Estimate Duplicated',
-            route: 'estimates/'.$new_estimate->id
+        $this->modal('estimate_duplicate_modal')->close();
+
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Estimate Duplicated',
+            // route / href / wire:click
+            // route: 'estimates/'.$new_estimate->id,
+            text: '',
         );
+
+        return redirect()->route('projects.show', ['project' => $this->project_id]);
     }
 
     public function render()

@@ -8,27 +8,27 @@
     <flux:separator variant="subtle" class="my-2" />
 
     <flux:table>
-        <flux:columns>
-            <flux:column>Vendor</flux:column>
-            <flux:column>Distribution</flux:column>
-            <flux:column>Amount</flux:column>
-        </flux:columns>
+        <flux:table.columns>
+            <flux:table.column>Vendor</flux:table.column>
+            <flux:table.column>Distribution</flux:table.column>
+            <flux:table.column>Amount</flux:table.column>
+        </flux:table.columns>
 
-        <flux:rows>
+        <flux:table.rows>
             @foreach($bulk_matches as $match)
-                <flux:row :key="$match->vendor->id">
-                    <flux:cell
+                <flux:table.row :key="$match->vendor->id">
+                    <flux:table.cell
                         wire:click="$dispatchTo('bulk-match.bulk-match-create', 'updateMatch', { match: {{$match->id}} })"
                         variant="strong"
                         class="cursor-pointer"
                         >
                         {{ $match->vendor->name }}
-                    </flux:cell>
-                    <flux:cell>{{ $match->distribution ? $match->distribution->name : 'SPLIT' }}</flux:cell>
-                    <flux:cell>{{ $match->amount != NULL ? $match->options['amount_type'] . $match->amount : 'Any Amount' }}</flux:cell>
-                </flux:row>
+                    </flux:table.cell>
+                    <flux:table.cell>{{ $match->distribution ? $match->distribution->name : 'SPLIT' }}</flux:table.cell>
+                    <flux:table.cell>{{ $match->amount != NULL ? $match->options['amount_type'] . $match->amount : 'Any Amount' }}</flux:table.cell>
+                </flux:table.row>
             @endforeach
-        </flux:rows>
+        </flux:table.rows>
     </flux:table>
 
     {{--  :distributions="$distributions" :vendors="$bulk_matches->unique('vendor.id')->pluck('vendor.id')" --}}

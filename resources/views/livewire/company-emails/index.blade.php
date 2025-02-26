@@ -10,7 +10,7 @@
                 Add Email Account
             </flux:button>
         </div>
-        <flux:subheading>Email accounts you use to recieve digital receipts from merchants.</flux:subheading>
+        <flux:subheading>Email accounts you use to recieve digital receipts from vendors.</flux:subheading>
 
         <flux:separator variant="subtle" />
         {{-- <a href="{{route('nylas_login')}}" type="button"

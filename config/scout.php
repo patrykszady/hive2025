@@ -139,7 +139,7 @@ return [
         'index-settings' => [
             Expense::class => [
                 // 'is_project_id_null', 'is_distribution_id_null',
-                'filterableAttributes'=> ['vendor_id', 'project_id', 'distribution_id', 'has_splits', 'belongs_to_vendor_id', 'expense_status'],
+                'filterableAttributes'=> ['vendor_id', 'project_id', 'distribution_id', 'check_id', 'has_splits', 'belongs_to_vendor_id', 'expense_status'],
                 'sortableAttributes' => ['date'],
                 'searchableAttributes' => ['amount'],
                 'typoTolerance' => ['enabled' => false],

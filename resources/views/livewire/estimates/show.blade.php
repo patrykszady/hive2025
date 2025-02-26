@@ -11,7 +11,7 @@
                     <flux:menu>
                         <flux:menu.item wire:click="$dispatchTo('estimates.estimate-accept', 'accept')">Finalize Estimate</flux:menu.item>
                         <flux:menu.item wire:click="$dispatchTo('estimates.estimate-duplicate', 'duplicateModal', { estimate: {{$estimate->id}} })">Duplicate Estimate</flux:menu.item>
-                        <flux:menu.item wire:click="$dispatchTo('estimates.estimate-combine', 'combineModal', { existing_estimate_id: {{$estimate->id}} })">Copy to Estimate</flux:menu.item>
+                        {{-- <flux:menu.item wire:click="$dispatchTo('estimates.estimate-combine', 'combineModal', { existing_estimate_id: {{$estimate->id}} })">Copy to Estimate</flux:menu.item> --}}
 
                         <flux:menu.separator />
 
@@ -34,7 +34,7 @@
 
             <livewire:estimates.estimate-accept :estimate="$estimate"/>
             <livewire:estimates.estimate-duplicate />
-            <livewire:estimates.estimate-combine :client="$estimate->client"/>
+            {{-- <livewire:estimates.estimate-combine :client="$estimate->client"/> --}}
 
             {{-- DETAILS --}}
             <x-lists.details_list>

@@ -17,11 +17,6 @@ class CheckShow extends Component
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 
-    public function mount()
-    {
-        // dd($this);
-    }
-
     #[Title('Check')]
     public function render()
     {

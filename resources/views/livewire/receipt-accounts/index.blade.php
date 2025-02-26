@@ -17,7 +17,7 @@
             @foreach ($vendors as $vendor)
                 <flux:table.row :key="$vendor->id">
                     <flux:table.cell
-                        wire:click="$dispatchTo('receipt-accounts.receipt-account-vendor-create', 'editReceiptVendor', { vendor_id: {{$vendor->id}} })"
+                        wire:click="$dispatchTo('receipt-accounts.receipt-account-vendor-create', 'editReceiptVendor', { vendor: {{$vendor}} })"
                         variant="strong"
                         class="cursor-pointer"
                         >
@@ -34,5 +34,6 @@
         </flux:table.rows>
     </flux:table>
 
-    <livewire:receipt-accounts.receipt-account-vendor-create :vendors="$vendors"/>
+    {{-- :vendors="$vendors" --}}
+    <livewire:receipt-accounts.receipt-account-vendor-create :distributions="$distributions"/>
 </flux:card>

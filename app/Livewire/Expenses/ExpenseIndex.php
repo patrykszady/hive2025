@@ -239,6 +239,7 @@ class ExpenseIndex extends Component
                 return $meilisearch->search($query, $options);
             })
 
+
             // ->where('is_expense_id_null', true)
             // ->where('is_check_id_null', true)
             // ->where('expense_id', NULL)
@@ -275,6 +276,10 @@ class ExpenseIndex extends Component
                     // $options['filter'] = 'project_id IS NULL AND distribution_id IS NULL AND has_splits IS false';
                 }
 
+                if (is_numeric($this->check)) {
+                    $options['filter'] = 'check_id = ' . $this->check . ' AND __soft_deleted = 0';
+                }
+
                 return $meilisearch->search($query, $options);
 
                 //     if ($this->project == 'NO_PROJECT') {
@@ -285,6 +290,9 @@ class ExpenseIndex extends Component
                 //         $options['filter'] = 'project_id IS ' . $this->project;
                 //     }
             })
+            // ->when(! empty($this->check) && is_numeric($this->check), function ($query, $item) {
+            //     return $query->where('check_id', $this->check);
+            // })
             // ->where('__soft_deleted', 0)
             ->where('belongs_to_vendor_id', auth()->user()->primary_vendor_id)
 

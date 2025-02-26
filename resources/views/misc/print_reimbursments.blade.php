@@ -163,8 +163,8 @@
                                                                 'text-gray-200 line-through' => $split
                                                             ])
                                                             >
-                                                            {{$line_item->Description ? Str::limit($line_item->Description, 45) : ''}}
-                                                            {{-- {{isset($line_item->Description) ? $line_item->Description : ''}} --}}
+                                                            {{-- {{$line_item->Description ?? Str::limit($line_item->Description, 45) : ''}} --}}
+                                                            {{isset($line_item->Description) ? Str::limit($line_item->Description, 45) : ''}}
                                                         </span>
                                                     </flux:table.cell>
                                                 </flux:table.row>

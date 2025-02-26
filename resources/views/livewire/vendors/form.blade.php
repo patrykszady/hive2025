@@ -1,4 +1,4 @@
-<flux:modal name="vendors_form_modal" class="space-y-2 min-w-2xl">
+<flux:modal name="vendors_form_modal" class="space-y-2">
     <div class="flex justify-between">
         <flux:heading size="lg">{{$view_text['card_title']}}</flux:heading>
     </div>
@@ -170,7 +170,8 @@
                         x-transition
                         class="my-4 space-y-4"
                         >
-                        @include('components.forms._address_form', ['model' => 'vendor'])
+                        {{-- @include('components.forms._address_form', ['model' => 'vendor']) --}}
+                        <livewire:address.address-create />
 
                         <flux:input
                             wire:model.live.debounce.500ms="form.business_email"
@@ -182,7 +183,8 @@
                         <flux:input
                             wire:model.live.debounce.500ms="form.business_phone"
                             label="Business Phone"
-                            type="numeric"
+                            type="phone"
+                            mask="(999) 999-9999"
                             placeholder="Business Phone"
                         />
                     </div>

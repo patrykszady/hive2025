@@ -10,9 +10,9 @@
             {{-- HEADING --}}
             <div class="flex justify-between">
                 <flux:heading size="lg">Estimate Sections</flux:heading>
-                {{-- Select which Bid each Section belongs to. --}}
-                <flux:subheading>Choose Bid for each Section.</flux:subheading>
             </div>
+            {{-- Select which Bid each Section belongs to. --}}
+            <flux:subheading>Choose Bid for each Section.</flux:subheading>
 
             <flux:table class="p-0! m-0!">
                 <flux:table.columns>

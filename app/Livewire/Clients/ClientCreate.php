@@ -33,9 +33,9 @@ class ClientCreate extends Component
         'form_submit' => 'save',
     ];
 
-    public $address = NULL;
-    public $address_selection = NULL;
-    public $addresses = [];
+    // public $address = NULL;
+    // public $address_selection = NULL;
+    // public $addresses = [];
 
     public $team_member = false;
 
@@ -44,53 +44,47 @@ class ClientCreate extends Component
     public function rules()
     {
         return [
-            'address' => 'nullable',
-            'address_selection' => 'nullable',
+            // 'address' => 'nullable',
+            // 'address_selection' => 'nullable',
             // 'user.full_name' => 'nullable',
             // 'client.name' => 'nullable',
         ];
     }
 
-    // #[Computed]
-    // public function expenses()
-    // {
-
-    // }
-
     public function updated($field, $value)
     {
-        if ($field === 'address'){
-            $response = \GoogleMaps::load('geocoding')
-                ->setParam(['address' => $value])
-                ->get();
+        // if ($field === 'address'){
+        //     $response = \GoogleMaps::load('geocoding')
+        //         ->setParam(['address' => $value])
+        //         ->get();
 
-            $result = collect(json_decode($response))->toArray();
+        //     $result = collect(json_decode($response))->toArray();
 
-            if(!empty($result)){
-                $this->addresses = $result['results'];
-            }
-        }
+        //     if(!empty($result)){
+        //         $this->addresses = $result['results'];
+        //     }
+        // }
 
-        if ($field === 'address_selection'){
-            $address = collect($this->addresses[$value]->address_components);
-            // Define the types you want to filter by
-            $typesToFilter = ['street_number', 'route', 'locality', 'administrative_area_level_1', 'postal_code'];
+        // if ($field === 'address_selection'){
+        //     $address = collect($this->addresses[$value]->address_components);
+        //     // Define the types you want to filter by
+        //     $typesToFilter = ['street_number', 'route', 'locality', 'administrative_area_level_1', 'postal_code'];
 
-            $address_array = [];
+        //     $address_array = [];
 
-            $address->each(function ($item) use ($typesToFilter, &$address_array) {
-                foreach ($item->types as $type) {
-                    if (in_array($type, $typesToFilter)) {
-                        $address_array[$type] = $item->short_name;
-                    }
-                }
-            });
+        //     $address->each(function ($item) use ($typesToFilter, &$address_array) {
+        //         foreach ($item->types as $type) {
+        //             if (in_array($type, $typesToFilter)) {
+        //                 $address_array[$type] = $item->short_name;
+        //             }
+        //         }
+        //     });
 
-            $this->form->address = $address_array['street_number'] . ' ' . $address_array['route'];
-            $this->form->city = $address_array['locality'];
-            $this->form->state = $address_array['administrative_area_level_1'];
-            $this->form->zip_code = $address_array['postal_code'];
-        }
+        //     $this->form->address = $address_array['street_number'] . ' ' . $address_array['route'];
+        //     $this->form->city = $address_array['locality'];
+        //     $this->form->state = $address_array['administrative_area_level_1'];
+        //     $this->form->zip_code = $address_array['postal_code'];
+        // }
 
         if ($this->user_client_id != 'NEW') {
             if (is_null($this->user_client_id)) {
