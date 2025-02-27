@@ -239,7 +239,6 @@ class ExpenseIndex extends Component
                 return $meilisearch->search($query, $options);
             })
 
-
             // ->where('is_expense_id_null', true)
             // ->where('is_check_id_null', true)
             // ->where('expense_id', NULL)

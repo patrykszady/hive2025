@@ -10,7 +10,6 @@ use Illuminate\Database\Eloquent\Relations\Pivot;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class EstimateLineItem extends Pivot
-    // class EstimateLineItem extends Model
 {
     use HasFactory, SoftDeletes, Sortable;
 

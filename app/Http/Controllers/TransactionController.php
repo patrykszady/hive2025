@@ -140,6 +140,7 @@ class TransactionController extends Controller
 
     public function plaid_statements_list()
     {
+        dd('in plaid_statements_list');
         try {
             $client = new Client;
             $response = $client->post('https://'.env('PLAID_ENV').'.plaid.com/statements/list', [

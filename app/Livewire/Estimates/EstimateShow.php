@@ -6,19 +6,23 @@ use App\Jobs\SendInitialEstimateEmail;
 use App\Livewire\Projects\ProjectFinances;
 use App\Models\Estimate;
 use App\Models\EstimateLineItem;
+use App\Models\EstimateSection;
 // use App\Livewire\Estimates\EstimatesIndex;
 
-use App\Models\EstimateSection;
 use Flux;
+
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\Response;
 use Livewire\Attributes\Title;
 use Livewire\Component;
+
 use OpenSpout\Common\Entity\Style\Border;
 use OpenSpout\Common\Entity\Style\BorderPart;
 use OpenSpout\Common\Entity\Style\Color;
 use OpenSpout\Common\Entity\Style\Style;
+
 use Illuminate\Support\Number;
+
 use Spatie\Browsershot\Browsershot;
 use Spatie\SimpleExcel\SimpleExcelWriter;
 
@@ -36,13 +40,14 @@ class EstimateShow extends Component
     {
         return [
             'sections.*.name' => 'required',
-            'sections.*.items_rearrange' => 'nullable',
+            // 'sections.*.items_rearrange' => 'nullable',
         ];
     }
 
     public function mount()
     {
         $this->sections =
+            //$this->estimate->estimate_sections()->orderBy('order', 'ASC')->get();
             $this->estimate->estimate_sections;
         // ->each(function ($item, $key) {
         //     $item->items_rearrange = FALSE;
@@ -66,7 +71,7 @@ class EstimateShow extends Component
     {
         return EstimateSection::create([
             'estimate_id' => $this->estimate->id,
-            'index' => $this->sections->isEmpty() ? 0 : $this->sections->max('index') + 1,
+            'index' => $this->sections->isEmpty() ? 0 : $this->sections->max('order') + 1,
             'name' => $name,
             'total' => 0.00,
             'deleted_at' => null,
@@ -231,7 +236,14 @@ class EstimateShow extends Component
         return [$location, $title_file];
     }
 
-    public function sort($key, $position)
+    public function sort_sections($key, $position)
+    {
+        $section = EstimateSection::findOrFail($key);
+        $section->move($position);
+        $this->estimate_refresh();
+    }
+
+    public function sort_line_item($key, $position)
     {
         $line_item = EstimateLineItem::findOrFail($key);
         $line_item->move($position);

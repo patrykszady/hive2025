@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Traits\Sortable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -10,9 +11,14 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 class EstimateSection extends Model
 {
-    use HasFactory, SoftDeletes;
+    use HasFactory, SoftDeletes, Sortable;
 
-    protected $fillable = ['estimate_id', 'index', 'name', 'total', 'bid_id', 'created_at', 'updated_at', 'deleted_at'];
+    protected $fillable = ['estimate_id', 'order', 'name', 'total', 'bid_id', 'created_at', 'updated_at', 'deleted_at'];
+
+    protected function scopeSortable($query, $section)
+    {
+        return $section->estimate->estimate_sections();
+    }
 
     public function estimate(): BelongsTo
     {
