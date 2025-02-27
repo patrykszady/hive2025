@@ -29,7 +29,7 @@ class PaymentsIndex extends Component
         if (isset($this->project)) {
             $payments =
                 $this->project->payments()->tap(fn ($query) => $this->sortBy ? $query->orderBy($this->sortBy, $this->sortDirection) : $query)
-                    ->paginate(10);
+                    ->paginate(25);
             // Payment::where('project_id', $this->project->id)->tap(fn ($query) => $this->sortBy ? $query->orderBy($this->sortBy, $this->sortDirection) : $query)
             // ->paginate(10);
 
@@ -37,7 +37,7 @@ class PaymentsIndex extends Component
         } else {
             $payments =
                 Payment::tap(fn ($query) => $this->sortBy ? $query->orderBy($this->sortBy, $this->sortDirection) : $query)
-                    ->paginate(25);
+                    ->paginate(15);
         }
 
         return $payments;
