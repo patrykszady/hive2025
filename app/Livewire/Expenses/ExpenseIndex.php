@@ -24,6 +24,7 @@ class ExpenseIndex extends Component
     public $expense_vendor = null;
     public $project_id = null;
 
+    public $expense_statuses = [];
     public $check = '';
 
     public $bank_plaid_ins_id = '';
@@ -165,30 +166,30 @@ class ExpenseIndex extends Component
     //             // ->take(10)->get();
     //             ->paginate($this->paginate_number, pageName: 'expenses-page');
 
-    //     // $expenses->getCollection()->each(function ($expense, $key) {
-    //     //     // if($expense->check){
-    //     //     //     if($expense->check->transactions->isNotEmpty() && $expense->paid_by != NULL){
-    //     //     //         $expense->status = 'Complete';
-    //     //     //     }else{
-    //     //     //         if($expense->transactions->isNotEmpty()){
-    //     //     //             $expense->status = 'Complete';
-    //     //     //         }else{
-    //     //     //             $expense->status = 'No Transaction';
-    //     //     //         }
-    //     //     //     }
-    //     //     // }else
-    //     //     if (($expense->transactions->isNotEmpty() && $expense->project->project_name != 'NO PROJECT') || ($expense->paid_by != null && $expense->project->project_name != 'NO PROJECT')) {
-    //     //         $expense->status = 'Complete';
-    //     //     } else {
-    //     //         if ($expense->project->project_name != 'NO PROJECT' && $expense->transactions->isEmpty()) {
-    //     //             $expense->status = 'No Transaction';
-    //     //         } elseif ($expense->project->project_name == 'NO PROJECT' && ($expense->transactions->isNotEmpty() || $expense->paid_by != null)) {
-    //     //             $expense->status = 'No Project';
-    //     //         } else {
-    //     //             $expense->status = 'Missing Info';
-    //     //         }
-    //     //     }
-    //     // });
+        // $expenses->getCollection()->each(function ($expense, $key) {
+        //     // if($expense->check){
+        //     //     if($expense->check->transactions->isNotEmpty() && $expense->paid_by != NULL){
+        //     //         $expense->status = 'Complete';
+        //     //     }else{
+        //     //         if($expense->transactions->isNotEmpty()){
+        //     //             $expense->status = 'Complete';
+        //     //         }else{
+        //     //             $expense->status = 'No Transaction';
+        //     //         }
+        //     //     }
+        //     // }else
+        //     if (($expense->transactions->isNotEmpty() && $expense->project->project_name != 'NO PROJECT') || ($expense->paid_by != null && $expense->project->project_name != 'NO PROJECT')) {
+        //         $expense->status = 'Complete';
+        //     } else {
+        //         if ($expense->project->project_name != 'NO PROJECT' && $expense->transactions->isEmpty()) {
+        //             $expense->status = 'No Transaction';
+        //         } elseif ($expense->project->project_name == 'NO PROJECT' && ($expense->transactions->isNotEmpty() || $expense->paid_by != null)) {
+        //             $expense->status = 'No Project';
+        //         } else {
+        //             $expense->status = 'Missing Info';
+        //         }
+        //     }
+        // });
 
     //     return $expenses;
     // }
@@ -333,6 +334,8 @@ class ExpenseIndex extends Component
             // )
             // ->take(10)->get();
             ->paginate($this->paginate_number, pageName: 'expenses-page');
+
+            // dd($expenses->first()->expense_status);
 
         return view('livewire.expenses.index', [
             'expenses' => $expenses,

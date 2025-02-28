@@ -12,7 +12,7 @@
 
             <flux:separator variant="subtle" />
 
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
                 <flux:input wire:model.live.debounce.300ms="amount" label="Amount" icon="magnifying-glass" placeholder="Search Amount" />
 
                 <flux:select wire:model.live="expense_vendor" label="Vendor" variant="listbox" searchable placeholder="Choose Vendor...">
@@ -45,6 +45,11 @@
                         <flux:select.option value="D:{{$distribution->id}}">{{ $distribution->name }}</flux:select.option>
                     @endforeach
                 </flux:select>
+
+                {{-- <flux:select variant="listbox" label="Status" multiple placeholder="Choose status..." wire:model.live="expense_statuses">
+                    <flux:select.option><flux:badge color="green">Complete</flux:badge></flux:select.option>
+                    <flux:select.option><flux:badge color="red">No Project</flux:badge></flux:select.option>
+                </flux:select> --}}
             </div>
         </flux:card>
     @endif
@@ -102,8 +107,7 @@
                                 </flux:table.cell>
                             @endif
                             <flux:table.cell>
-                                <flux:badge size="sm" :color="'sky'" inset="top bottom">Status</flux:badge>
-                                {{-- <flux:badge size="sm" :color="$expense->status == 'Complete' ? 'green' : ($expense->status == 'No Transaction' ? 'yellow' : 'red')" inset="top bottom">{{ $expense->status }}</flux:badge> --}}
+                                <flux:badge size="sm" color="{{$expense->status_color}}" inset="top bottom">{{$expense->status}}</flux:badge>
                             </flux:table.cell>
                         </flux:table.row>
                     @endforeach

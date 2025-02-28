@@ -34,8 +34,6 @@ class Expense extends Model
         // All model attributes are made searchable
         $array = $this->toArray();
         // Then we add/adjust some additional fields
-        // $array['created_at'] = $this->created_at->timestamp;
-        // $array['updated_at'] = $this->updated_at->timestamp;
         $array['date'] = $this->date->timestamp;
 
         // if($this->check()->withoutGlobalScopes()){
@@ -66,7 +64,6 @@ class Expense extends Model
         // $array['is_project_id_null'] = $this->distribution_id ? false : true;
         // $array['is_distribution_id_null'] = $this->distribution_id ? false : true;
         $array['has_splits'] = $this->splits->isEmpty() ? false : true;
-
         $array['expense_status'] = ! is_null($this->project_id) ? 'Complete' : 'Missing Info';
         return $array;
 
@@ -76,7 +73,6 @@ class Expense extends Model
         //     'name' => $this->name,
         //     'email' => $this->email,
         // ];
-
 
         // return array_merge($this->toArray(), [
         //     'id' => (string) $this->id,
@@ -175,7 +171,6 @@ class Expense extends Model
 
     public function associated(): HasMany
     {
-        // dd('in Expense.php associated() function');
         return $this->hasMany(Expense::class, 'id', 'parent_expense_id');
     }
 
@@ -199,6 +194,33 @@ class Expense extends Model
     {
         return Attribute::make(
             get: fn ($value) => is_numeric($value) ? User::findOrFail($value)->first_name : $value,
+        );
+    }
+
+    protected function status(): Attribute
+    {
+        //['Complete', 'Missing Info', 'No Project', 'No Transaction']
+        if (($this->transactions->isNotEmpty() && $this->project->project_name != 'NO PROJECT') || ($this->paid_by != null && $this->project->project_name != 'NO PROJECT')) {
+            $status = 'Complete';
+        } else {
+            if ($this->project->project_name != 'NO PROJECT' && $this->transactions->isEmpty()) {
+                $status = 'No Transaction';
+            } elseif ($this->project->project_name == 'NO PROJECT' && ($this->transactions->isNotEmpty() || $this->paid_by != null)) {
+                $status = 'No Project';
+            } else {
+                $status = 'Missing Info';
+            }
+        }
+
+        return Attribute::make(
+            get: fn ($value) => $status,
+        );
+    }
+
+    protected function statusColor(): Attribute
+    {
+        return Attribute::make(
+            get: fn ($value) => $this->status === 'Complete' ? 'green' : ($this->status === 'No Transaction' ? 'yellow' : ($this->status === 'No Project' ? 'red' : 'amber')),
         );
     }
 }
