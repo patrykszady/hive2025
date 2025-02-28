@@ -1483,10 +1483,11 @@ class ReceiptController extends Controller
                 whereNull('deleted_at')->
                 where('amount', $amount)->
                 where('invoice', $invoice)->
-                whereBetween('date', [Carbon::create($date)->subDay(), Carbon::create($date)->addDays(4)])->
+                where('date', $date)->
+                // whereBetween('date', [Carbon::create($date)->subDay(), Carbon::create($date)->addDays(4)])->
                 get();
 
-        if (! $duplicates->isEmpty()) {
+        if ($duplicates->isNotEmpty()) {
             // 1-22-2023! WHAT IF THERE IS MULTIPLE?! -- diff in days!
             $duplicate_expense = $duplicates->first();
 
