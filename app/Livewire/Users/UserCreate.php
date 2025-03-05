@@ -7,11 +7,14 @@ use App\Livewire\Clients\ClientsShow;
 use App\Livewire\Dashboard\DashboardShow;
 use App\Livewire\Forms\UserForm;
 use App\Livewire\Vendors\VendorCreate;
+
 use App\Models\Client;
 // use App\Livewire\Users\TeamMembers;
 use App\Models\User;
 use App\Models\Vendor;
+
 use Flux;
+use removeMember;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Component;
 
@@ -53,14 +56,14 @@ class UserCreate extends Component
         ];
     }
 
-    public function mount()
-    {
-        // dd($this);
-        // if($this->form->user->id){
-        //     $this->via_vendors = $this->form->user->vendors()->where('business_type', '!=', 'Sub')->get();
-        //     dd($this->via_vendors);
-        // }
-    }
+    // public function mount()
+    // {
+    //     // dd($this);
+    //     // if($this->form->user->id){
+    //     //     $this->via_vendors = $this->form->user->vendors()->where('business_type', '!=', 'Sub')->get();
+    //     //     dd($this->via_vendors);
+    //     // }
+    // }
 
     public function updated($field, $value)
     {
@@ -221,6 +224,7 @@ class UserCreate extends Component
     public function removeMember(User $user)
     {
         // 2-7-22 need REMOVAL MODAL to confirm
+            // 2-28-2025 - kind of have in the blade view with wire:confirm.prompt
         $user->vendor->users()->wherePivot('is_employed', '1')
             ->updateExistingPivot($user->id, [
                 'end_date' => today()->format('Y-m-d'),
@@ -233,9 +237,13 @@ class UserCreate extends Component
 
         $this->redirect(DashboardShow::class, navigate: true);
         //6-1-2024 set blurry background...
-        $this->dispatch('notify',
-            type: 'success',
-            content: $user->first_name.' Removed.'
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'User Removed.',
+            // route / href / wire:click
+            text: '',
         );
     }
 

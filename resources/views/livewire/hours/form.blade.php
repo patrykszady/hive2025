@@ -17,13 +17,13 @@
 
                 <flux:separator variant="subtle" />
 
-                {{-- @include('livewire.hours._calander') --}}
                 <flux:calendar
                     wire:model.live="selected_date"
                     wire:loading.attr="disabled"
                     max="today"
                     start-day="1"
-                    :navigation="false"
+                    {{-- :navigation="false" --}}
+                    with-today
                     unavailable="{{$this->days}}"
                 />
 

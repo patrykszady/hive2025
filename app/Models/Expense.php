@@ -64,7 +64,8 @@ class Expense extends Model
         // $array['is_project_id_null'] = $this->distribution_id ? false : true;
         // $array['is_distribution_id_null'] = $this->distribution_id ? false : true;
         $array['has_splits'] = $this->splits->isEmpty() ? false : true;
-        $array['expense_status'] = ! is_null($this->project_id) ? 'Complete' : 'Missing Info';
+        // ! is_null($this->project_id) ? 'Complete' : 'Missing Info';
+        $array['expense_status'] = 'Complete';
         return $array;
 
         //ONLY:

@@ -59,20 +59,22 @@ class UserShow extends Component
                 Check::where('user_id', $this->user->id)
                     ->whereYear('date', $this->year)
                     ->where('belongs_to_vendor_id', $this->user->this_vendor->id)
-                    // ->pluck('id');
+                    // ->pluck('amount');
                     // ->get();
                     ->sum('amount');
+                    // $this->checks_written = $this->checks_written - 68.82;
 
+            // dd($this->checks_written);
             //Member Extra Payments
             // if doesnt have a distribution
-            if (! $user_distribution) {
-                $this->user_checks =
-                    Check::where('user_id', $this->user->id)
-                        ->whereYear('date', $this->year)
-                        ->whereDoesntHave('timesheets')
-                        ->where('belongs_to_vendor_id', $this->user->this_vendor->id)
-                        ->sum('amount');
-            }
+            // if (! $user_distribution) {
+            //     $this->user_checks =
+            //         Check::where('user_id', $this->user->id)
+            //             ->whereYear('date', $this->year)
+            //             ->whereDoesntHave('timesheets')
+            //             ->where('belongs_to_vendor_id', $this->user->this_vendor->id)
+            //             ->sum('amount');
+            // }
 
             //where check->date is $this->year
             $this->timesheets_paid =
@@ -84,15 +86,15 @@ class UserShow extends Component
                     })
                     // ->get();
                     ->sum('amount');
-
             // dd($this->timesheets_paid);
+
             if ($user_distribution) {
                 $this->distribution_checks =
                     Expense::where('distribution_id', $user_distribution)
                         // ->whereNotNull('check_id')
                         // ->whereYear('date', $this->year)
                         ->whereHas('check', function ($query) use ($year) {
-                            return $query->whereYear('date', $year);
+                            return $query->whereYear('date', $this->year);
                         })
                         ->sum('amount');
             } else {
@@ -148,8 +150,8 @@ class UserShow extends Component
                 $this->distribution_expenses = 0.00;
             }
 
-            // dd($this->checks_written - ($this->timesheets_paid + $this->distribution_checks) - ($this->timesheets_paid_others + $this->expenses_paid));
-            $this->difference = round($this->checks_written - $this->timesheets_paid - $this->distribution_checks - $this->user_checks - $this->timesheets_paid_others - $this->expenses_paid, 2);
+            // - $this->user_checks
+            $this->difference = round($this->checks_written - $this->timesheets_paid - $this->distribution_checks - $this->timesheets_paid_others - $this->expenses_paid, 2);
         }
     }
 

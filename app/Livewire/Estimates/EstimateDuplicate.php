@@ -7,6 +7,8 @@ use App\Models\Estimate;
 
 use Flux;
 
+use App\Livewire\Projects\ProjectShow;
+
 use Livewire\Component;
 use Livewire\Attributes\Computed;
 
@@ -87,8 +89,11 @@ class EstimateDuplicate extends Component
 
         $this->modal('estimate_duplicate_modal')->close();
 
+        // return redirect()->route('projects.show', ['project' => $this->project_id]);
+        $this->redirect(ProjectShow::class, navigate: true);
+
         Flux::toast(
-            duration: 5000,
+            duration: 10000,
             position: 'top right',
             variant: 'success',
             heading: 'Estimate Duplicated',
@@ -96,8 +101,6 @@ class EstimateDuplicate extends Component
             // route: 'estimates/'.$new_estimate->id,
             text: '',
         );
-
-        return redirect()->route('projects.show', ['project' => $this->project_id]);
     }
 
     public function render()

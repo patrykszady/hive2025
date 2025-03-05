@@ -58,7 +58,7 @@ class HourCreate extends Component
         $confirmed_weeks =
             Timesheet::orderBy('date', 'DESC')
                 ->where('user_id', auth()->user()->id)
-                ->where('date', '>', today()->subWeeks(4))
+                ->where('date', '>', today()->subWeeks(8))
                 ->get()
                 ->groupBy('date');
 

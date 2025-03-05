@@ -10,11 +10,11 @@
     </div>
 
     {{-- GRAPH --}}
-    @if($user->primary_vendor->pivot->role_id == 1)
+    {{-- @if($user->primary_vendor->pivot->role_id == 1)
         <div class="space-y-6 col-span-3 lg:col-start-1 lg:col-span-6">
-            {{-- <livewire:sheets.sheet-monthly /> --}}
+            <livewire:sheets.sheet-monthly />
         </div>
-    @endif
+    @endif --}}
     <livewire:users.user-create />
     <livewire:clients.client-create />
 </div>
