@@ -240,10 +240,6 @@ class ExpenseIndex extends Component
                 return $meilisearch->search($query, $options);
             })
 
-            // ->where('is_expense_id_null', true)
-            // ->where('is_check_id_null', true)
-            // ->where('expense_id', NULL)
-            // ->where('check_id', NULL)
             // ->whereIn('deposit', ['NOT_DEPOSIT', 'NO_PAYMENTS'])
             // ->when(! empty($this->expense_vendor) && $this->expense_vendor != '0', function ($query, $item) {
             //     return $query->where('vendor_id', $this->expense_vendor);
@@ -274,6 +270,12 @@ class ExpenseIndex extends Component
                 if (is_numeric($this->project_id)){
                     $options['filter'] = 'project_id = ' . $this->project_id . ' AND __soft_deleted = 0';
                     // $options['filter'] = 'project_id IS NULL AND distribution_id IS NULL AND has_splits IS false';
+                }elseif ($this->project_id === 'NO_PROJECT'){
+                    $options['filter'] = 'project_id IS NULL' . ' AND distribution_id IS NULL' . ' AND has_splits = false' . ' AND __soft_deleted = 0';
+                }elseif ($this->project_id === 'SPLIT'){
+                    $options['filter'] = 'has_splits = true' . ' AND __soft_deleted = 0';
+                }elseif (substr($this->project_id, 0, 1) == 'D'){
+                    $options['filter'] = 'distribution_id = ' . substr($this->project_id, 2) . ' AND __soft_deleted = 0';
                 }
 
                 if (is_numeric($this->check)) {
@@ -281,14 +283,6 @@ class ExpenseIndex extends Component
                 }
 
                 return $meilisearch->search($query, $options);
-
-                //     if ($this->project == 'NO_PROJECT') {
-                //         $options['filter'] = 'project_id IS NULL AND distribution_id IS NULL AND has_splits IS false';
-                //     } elseif($this->project == 'SPLIT') {
-                //         $options['filter'] = 'has_splits IS true';
-                //     } elseif(!empty($this->project) && is_numeric($this->project)) {
-                //         $options['filter'] = 'project_id IS ' . $this->project;
-                //     }
             })
             // ->when(! empty($this->check) && is_numeric($this->check), function ($query, $item) {
             //     return $query->where('check_id', $this->check);
@@ -334,8 +328,6 @@ class ExpenseIndex extends Component
             // )
             // ->take(10)->get();
             ->paginate($this->paginate_number, pageName: 'expenses-page');
-
-            // dd($expenses->first()->expense_status);
 
         return view('livewire.expenses.index', [
             'expenses' => $expenses,

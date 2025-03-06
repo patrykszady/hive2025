@@ -60,7 +60,6 @@
                             </flux:button.group>
                         </div>
 
-
                         <flux:separator variant="subtle" />
 
                         {{-- VENDOR BIDS --}}
