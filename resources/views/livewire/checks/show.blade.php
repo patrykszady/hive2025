@@ -28,7 +28,7 @@
                         <x-lists.details_item title="Bank" detail="{{$check->bank_account->getNameAndType()}}" />
                     @endif
 
-                    <x-lists.details_item title="{{$check->check_type === 'Check' ? 'Check Number' : ($check->check_type === 'Transfer' ? 'Transfer ID' : ($check->check_type === 'Cash' ? 'Chas ID' : ''))}}" detail="{{$check->check_number}}" />
+                    <x-lists.details_item title="{{$check->check_type === 'Check' ? 'Check Number' : ($check->check_type === 'Transfer' ? 'Transfer ID' : ($check->check_type === 'Cash' ? 'Cash ID' : ''))}}" detail="{{$check->check_number}}" />
                 </x-lists.details_list>
             </x-lists.details_card>
 

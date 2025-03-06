@@ -3,7 +3,7 @@
         <div class="grid max-w-xl grid-cols-4 gap-4 xl:relative lg:max-w-5xl sm:px-6">
             <div class="col-span-4 space-y-4 lg:col-span-2 lg:h-32 lg:sticky lg:top-5">
                 <flux:card>
-                    <flux:heading size="lg">Vendor Payment</flux:heading>
+                    <flux:heading size="lg">{{$vendor->name}} Payment</flux:heading>
                     <flux:subheading><i>Choose Projects to add for {{$vendor->name}} in this Payment</i></flux:subheading>
                     <flux:separator variant="subtle" />
                     <x-cards.body :class="'space-y-2 my-2'">
@@ -34,7 +34,7 @@
                                 <flux:select.search placeholder="Search..." />
                             </x-slot>
 
-                            @foreach($projects as $project)
+                            @foreach($projects->where('disabled', false) as $project)
                                 <flux:select.option value="{{$project->id}}"><div>{{$project->address}} <br> <i class="font-normal">{{$project->project_name}}</i></div></flux:select.option>
                             @endforeach
                         </flux:select>
@@ -47,16 +47,19 @@
             </div>
             <div class="col-span-4 space-y-2 lg:col-span-2">
                 {{-- PAYMENT PROJECTS --}}
-                @foreach($projects->where('show', true) as $project_id => $project)
-                    <flux:card class="space-y-2">
+                @foreach($projects->where('show', true)->sortBy('order') as $project_id => $project)
+                    <flux:card class="space-y-2" wire:key="{{$project_id}}">
                         <div class="flex justify-between">
-                            <flux:heading size="lg"><a href="{{route('projects.show', $project->id)}}" target="_blank">{{ $project->address }}</a></flux:heading>
+                            <div>
+                                <flux:heading size="lg"><a href="{{route('projects.show', $project->id)}}" target="_blank">{{ $project->address }}</a></flux:heading>
+                                <flux:subheading>{{ $project->project_name}}</flux:subheading>
+                            </div>
                             <flux:button.group>
                                 <flux:button size="sm" wire:click="$dispatchTo('bids.bid-create', 'addBids', { vendor: {{$vendor->id}}, project: {{$project->id}} })">Edit Bids</flux:button>
                                 <flux:button size="sm" wire:click="removeProject({{$project_id}})">Remove</flux:button>
                             </flux:button.group>
                         </div>
-                        <flux:subheading>{{ $project->project_name}}</flux:subheading>
+
 
                         <flux:separator variant="subtle" />
 
@@ -87,6 +90,7 @@
                                     type="number"
                                     inputmode="decimal"
                                     step="0.01"
+                                    min="0.00"
                                     pattern="[0-9]*"
                                     autofocus
                                 />

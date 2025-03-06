@@ -17,7 +17,7 @@ class UserShow extends Component
 
     public User $user;
 
-    public $year = 2023;
+    public $year = 2024;
 
     public $timesheets_paid = 0;
 

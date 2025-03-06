@@ -32,7 +32,7 @@ class VendorPaymentCreate extends Component
 
     public $bank_accounts = [];
 
-    public $payment_projects = [];
+    public $payment_projects_count = 0;
 
     public $saved_expenses = [];
 
@@ -50,6 +50,8 @@ class VendorPaymentCreate extends Component
     {
         return [
             'project_id' => 'required',
+            'projects.*.order' => 'nullable',
+            'projects.*.disabled' => 'nullable',
             'projects.*.show' => 'nullable',
             'projects.*.vendor_expenses_sum' => 'nullable',
             'projects.*.vendor_bids_sum' => 'nullable',
@@ -76,6 +78,7 @@ class VendorPaymentCreate extends Component
                     $item->show = false;
                     $item->name = $item->name;
                     $item->disabled = false;
+                    $item->order = 0;
                 })
                 ->keyBy('id');
 
@@ -89,7 +92,6 @@ class VendorPaymentCreate extends Component
 
     public function updated($field, $value)
     {
-        // dd($field, $value);
         if ($field == 'form.bank_account_id') {
             $this->form->check_type = null;
             $this->form->check_number = null;
@@ -142,10 +144,12 @@ class VendorPaymentCreate extends Component
         $project = $this->projects[$this->project_id];
         $project->show = true;
         $project->disabled = true;
+        $project->order = $this->payment_projects_count++;
         $project->vendor_expenses_sum = $project->expenses()->where('vendor_id', $this->vendor->id)->sum('amount');
         $project->vendor_bids_sum = $project->bids()->vendorBids($this->vendor->id)->sum('amount');
         $project->balance = $project->vendor_bids_sum - $project->vendor_expenses_sum;
 
+        // dd($this->projects);
         // $this->projects->reload();
         $this->project_id = '';
     }
@@ -153,7 +157,7 @@ class VendorPaymentCreate extends Component
     public function updateProjectBids($project_id)
     {
         $project = $this->projects[$project_id];
-        $project['vendor_bids_sum'] = Project::findOrFail($project_id)->bids()->vendorBids($this->vendor->id)->sum('amount');
+        $project['vendor_bids_sum'] = $project->bids()->vendorBids($this->vendor->id)->sum('amount');
 
         $this->updateProjectBalance($project_id);
     }
@@ -168,7 +172,7 @@ class VendorPaymentCreate extends Component
 
         $total_paid = $this->projects[$project_id]->vendor_expenses_sum;
         $bids_amount = $this->projects[$project_id]->vendor_bids_sum;
-        $balance = ($bids_amount - $total_paid) - $amount;
+        $balance = round (($bids_amount - $total_paid) - $amount, 2);
 
         $this->projects[$project_id]->balance = $balance;
     }
@@ -178,6 +182,7 @@ class VendorPaymentCreate extends Component
         $project = $this->projects[$project_id_to_remove];
         $project->show = false;
         $project->amount = null;
+        $project->disabled = false;
 
         $this->project_id = '';
     }
