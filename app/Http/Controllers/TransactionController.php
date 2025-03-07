@@ -100,7 +100,7 @@ class TransactionController extends Controller
             //convert array into JSON
             $data = json_encode($data);
             //initialize session
-            $ch = curl_init('https://'.env('PLAID_ENV').'.plaid.com/item/get');
+            $ch = curl_init('https://'.env('PLAID_ENV').'.plaid.com/statements/list');
             //set options
             curl_setopt($ch, CURLOPT_HTTPHEADER, [
                 'Content-Type: application/json',
@@ -114,6 +114,8 @@ class TransactionController extends Controller
             curl_close($ch);
 
             $result = array_merge(json_decode($exchangeToken, true), $balances);
+
+            // dd($result);
 
             if (isset($result['item']['error'])) {
                 $error = ['error' => $result['item']['error']];
@@ -140,7 +142,6 @@ class TransactionController extends Controller
 
     public function plaid_statements_list()
     {
-        dd('in plaid_statements_list');
         try {
             $client = new Client;
             $response = $client->post('https://'.env('PLAID_ENV').'.plaid.com/statements/list', [
@@ -150,7 +151,7 @@ class TransactionController extends Controller
                 'json' => [
                     'client_id' => env('PLAID_CLIENT_ID'),
                     'secret' => env('PLAID_SECRET'),
-                    'access_token' => 'access-production-b19234d9-d3d1-475f-9a02-7db2c88259a5',
+                    'access_token' => 'access-production-ee3181e2-45b1-430a-a202-8d881aa1ff7c',
                 ],
             ]);
         } catch (RequestException $e) {
@@ -166,6 +167,7 @@ class TransactionController extends Controller
         }
 
         $body = $response->getBody()->getContents();
+        dd($response);
         $statement_id = json_decode($body, true)['accounts'][0]['statements'][1]['statement_id'];
 
         $client = new Client;
@@ -297,6 +299,8 @@ class TransactionController extends Controller
 
         $result = json_decode($result, true);
 
+        // dd(collect($result['added'])->where('amount', '9.77'));
+
         $bank_account_ids = $bank_accounts->where('bank_id', $bank->id)->pluck('id')->toArray();
 
         if ($result['transactions_update_status'] == 'HISTORICAL_UPDATE_COMPLETE') {
@@ -420,9 +424,11 @@ class TransactionController extends Controller
                     $transaction = Transaction::whereDate('transaction_date', '>=', '2023-01-01')->where('plaid_transaction_id', $new_transaction['pending_transaction_id'])->first();
                 } elseif (Transaction::whereDate('transaction_date', '>=', '2023-01-01')->whereNotNull('plaid_transaction_id')->where('plaid_transaction_id', $new_transaction['transaction_id'])->get()->isNotEmpty()) {
                     $transaction = Transaction::whereDate('transaction_date', '>=', '2023-01-01')->where('plaid_transaction_id', $new_transaction['transaction_id'])->first();
+                //same bank, different bank_account_id
+                } elseif (Transaction::whereDate('transaction_date', $new_transaction['authorized_date'])->where('amount', $new_transaction['amount'])->whereNotNull('plaid_transaction_id')->whereNot('plaid_transaction_id', $new_transaction['transaction_id'])->get()->isNotEmpty()) {
+                    $transaction = Transaction::whereDate('transaction_date', $new_transaction['authorized_date'])->where('amount', $new_transaction['amount'])->whereNotNull('plaid_transaction_id')->whereNot('plaid_transaction_id', $new_transaction['transaction_id'])->first();
                 } else {
-                    Log::channel('plaid_adds')->info(['else in line 392ish in TransactionController' => [$new_transaction, $existing_transactions], $result]);
-
+                    Log::channel('plaid_adds')->info(['else in line 392ish in TransactionController' => [$new_transaction], $result]);
                     continue;
                 }
 
@@ -1373,7 +1379,7 @@ class TransactionController extends Controller
                 ->whereNull('expense_id')
                 ->where('check_number', $check_number)
                 //11/23/2024 per hive vendor... checks table foreach bank_account_id
-                ->where('bank_account_id', $check->bank_account_id)
+                ->whereIn('bank_account_id', $check->bank_account_id ? $check->bank_account->bank->accounts->pluck('id') : [NULL])
                 ->whereBetween('transaction_date', [
                     $check->date->subDays(7)->format('Y-m-d'),
                     $check->date->addDays($add_days)->format('Y-m-d'),

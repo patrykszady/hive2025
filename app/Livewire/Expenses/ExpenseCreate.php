@@ -60,6 +60,13 @@ class ExpenseCreate extends Component
         return $projects;
     }
 
+    #[Computed]
+    public function distributions()
+    {
+        $distributions = Distribution::all(['id', 'name']);
+        return $distributions;
+    }
+
     public function updated($field, $value)
     {
         // if SPLIT checked vs if unchecked
@@ -258,9 +265,6 @@ class ExpenseCreate extends Component
         $this->modal('expenses_form_modal')->close();
         // $this->resetModal();
 
-        //queue
-        // UpdateProjectDistributionsAmount::dispatch($expense->project, $expense->project->distributions->pluck('id')->toArray());
-
         Flux::toast(
             duration: 5000,
             position: 'top right',
@@ -271,9 +275,7 @@ class ExpenseCreate extends Component
         );
 
         $this->dispatch('resetSplits')->to('expenses.expense-splits-create');
-        // $this->dispatch('refreshComponent')->to('expenses.expense-show');
         $this->dispatch('refreshComponent')->to('expenses.expense-index');
-        // $this->dispatch('refreshComponent')->to('projects.project-show');
     }
 
     public function remove()
@@ -292,40 +294,6 @@ class ExpenseCreate extends Component
         );
 
         $this->dispatch('refreshComponent')->to('expenses.expense-index');
-
-        // if($this->form->transaction){
-        //     $remove_type = 'transaction';
-        // }else{
-        //     $remove_type = 'expense';
-        // }
-
-        // if($remove_type == 'transaction'){
-        //     $transaction = $this->form->transaction;
-        //     $transaction->delete();
-
-        //     $this->dispatch('refreshComponent')->to('expenses.expense-index');
-
-
-        //     $expense = $this->form->delete();
-
-        //     $url = url()->previous();
-        //     $route = app('router')->getRoutes($url)->match(app('request')->create($url))->getName();
-
-        //     if($route == 'expenses.show'){
-        //         session()->flash('notify', ['success', 'Expense Deleted']);
-        //         $this->redirect(ExpenseIndex::class);
-        //     }else{
-        //         $this->dispatch('refreshComponent')->to('expenses.expense-index');
-
-
-        //         );
-        //     }
-
-        //     //queue
-        //     // UpdateProjectDistributionsAmount::dispatch($this->form->expense->project, $this->form->expense->project->distributions->pluck('id')->toArray());
-        //     // $this->dispatch('refreshComponent')->to('expenses.expense-show');
-        //     $this->dispatch('refreshComponent')->to('expenses.expense-index');
-        // }
     }
 
     public function save()
@@ -351,8 +319,6 @@ class ExpenseCreate extends Component
         //queue
         // UpdateProjectDistributionsAmount::dispatch($expense->project, $expense->project->distributions->pluck('id')->toArray());
 
-        //dispatch and refresh so expenses-new-form removes/refreshes
-        //coming from different components expenses-show, expenses-index....
         $this->dispatch('refreshComponent')->to('expenses.expense-index');
     }
 
@@ -360,7 +326,6 @@ class ExpenseCreate extends Component
     {
         $this->authorize('create', Expense::class);
 
-        $distributions = Distribution::all(['id', 'name']);
         $team_members = auth()->user()->vendor->users()->employed();
         $employees = $team_members->get();
         $via_vendor_employees = $team_members->wherePivotNotNull('via_vendor_id')->get();
@@ -372,7 +337,6 @@ class ExpenseCreate extends Component
                 })->get();
 
         return view('livewire.expenses.form', [
-            'distributions' => $distributions,
             'via_vendor_employees' => $via_vendor_employees,
             'bank_accounts' => $bank_accounts,
             'employees' => $employees,

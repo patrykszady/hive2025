@@ -328,6 +328,8 @@ class ExpenseForm extends Form
                 }
             }
         }
+
+        return;
     }
 
     public function delete()

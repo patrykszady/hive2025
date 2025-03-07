@@ -77,7 +77,7 @@
 
                         <flux:select.option disabled>--------------</flux:select.option>
 
-                        @foreach($distributions as $distribution)
+                        @foreach($this->distributions as $distribution)
                             <flux:select.option wire:key="D:{{$distribution->id}}" value="D:{{$distribution->id}}">{{$distribution->name}}</flux:select.option>
                         @endforeach
                     </flux:select>
@@ -227,5 +227,5 @@
     </form>
 
     {{-- SPLITS MODAL --}}
-    <livewire:expenses.expense-splits-create :projects="$this->projects" :distributions="$distributions" />
+    <livewire:expenses.expense-splits-create :projects="$this->projects" :distributions="$this->distributions" />
 </flux:modal>

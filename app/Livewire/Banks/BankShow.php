@@ -128,8 +128,9 @@ class BankShow extends Component
             'access_token' => $this->bank->plaid_access_token,
         ];
 
-        $data['products'] = ['transactions'];
-        $data['required_if_supported_products'] = ['statements'];
+        $data['products'] = ['transactions', 'statements'];
+        // $data['required_if_supported_products'] = ['statements'];
+        // $data['additional_consented_products'] = ['statements'];
         $data['statements'] = ['start_date' => Carbon::today()->subMonth()->startOfMonth()->format('Y-m-d'), 'end_date' => Carbon::today()->subMonth()->endOfMonth()->format('Y-m-d')];
         //convert array into JSON
         $data = json_encode($data);
@@ -149,7 +150,7 @@ class BankShow extends Component
         curl_close($ch);
 
         $result = json_decode($exchangeToken, true);
-
+        // dd($result);
         //open Plaid Link Modal.
         //script file in banks.show.blade file.
         $this->dispatch('linkTokenUpdate', $result['link_token']);
