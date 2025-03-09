@@ -14,113 +14,59 @@ use App\Models\Transaction;
 use App\Models\TransactionBulkMatch;
 use App\Models\Vendor;
 use App\Models\VendorTransaction;
+
+use App\Services\PlaidService;
+
 use Carbon\Carbon;
+
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
+
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 class TransactionController extends Controller
 {
+    protected $plaidService;
+
+    public function __construct(PlaidService $plaidService)
+    {
+        $this->plaidService = $plaidService;
+    }
+
     //TEST ONLY //FOR DEVELOPER EXECUTION ONLY
     //only needed for test purposes...transactions update from Plaid.com webhooks
     //For use when Plaid API isn't acting as expected and can always be executed manually...
 
     // public function plaid_transactions_scheduled()
-    // {
-    //     $banks = Bank::withoutGlobalScopes()->whereNotNull('plaid_access_token')->get();
+        // {
+        //     $banks = Bank::withoutGlobalScopes()->whereNotNull('plaid_access_token')->get();
 
-    //     foreach($banks as $bank){
-    //         $data = array(
-    //             "client_id" => env('PLAID_CLIENT_ID'),
-    //             "secret" => env('PLAID_SECRET'),
-    //             "access_token" => $bank->plaid_access_token,
-    //             "webhook_type" => 'TRANSACTIONS',
-    //             "webhook_code" => 'DEFAULT_UPDATE', //TRANSACTIONS_REMOVED
-    //             "new_transactions"=> 899
-    //         );
+        //     foreach($banks as $bank){
+        //         $data = array(
+        //             "client_id" => env('PLAID_CLIENT_ID'),
+        //             "secret" => env('PLAID_SECRET'),
+        //             "access_token" => $bank->plaid_access_token,
+        //             "webhook_type" => 'TRANSACTIONS',
+        //             "webhook_code" => 'DEFAULT_UPDATE', //TRANSACTIONS_REMOVED
+        //             "new_transactions"=> 899
+        //         );
 
-    //         $this->plaid_transactions($bank, $data);
-    //     }
-    //     // return Log::channel('plaid_institution_info')->info('finished plaid_transactions_scheduled');
+        //         $this->plaid_transactions($bank, $data);
+        //     }
+        //     // return Log::channel('plaid_institution_info')->info('finished plaid_transactions_scheduled');
     // }
+
     public function plaid_item_status()
     {
         $banks = Bank::withoutGlobalScopes()->whereNotNull('plaid_access_token')->get();
 
         foreach ($banks as $bank) {
-            $today = Carbon::now()->toDateString();
-            //Balances
-            $new_data = [
-                'client_id' => env('PLAID_CLIENT_ID'),
-                'secret' => env('PLAID_SECRET'),
-                'access_token' => $bank->plaid_access_token,
-                'start_date' => $today,
-                'end_date' => $today,
-            ];
-
-            $new_data = json_encode($new_data);
-
-            //initialize session
-            $ch = curl_init('https://'.env('PLAID_ENV').'.plaid.com/transactions/get');
-            //set options
-            curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                'Content-Type: application/json',
-            ]);
-            curl_setopt($ch, CURLOPT_POST, true);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $new_data);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            //execute session
-            $balance_result = curl_exec($ch);
-            //close session
-            curl_close($ch);
-
-            // dd($bank->plaid_options->accounts['0']->balances->available);
-            $balances = json_decode($balance_result, true);
-
-            // if($balances['accounts'][0]['balances']['available'] === $bank->plaid_options->accounts['0']->balances->available){
-            //     $bank->plaid_options->accounts['0']->balances->updated = 'TEST';
-            //     dd($bank);
-            //     $bank->save();
-            // }else{
-            //     $result = array_merge(json_decode(now()->format('Y-m-d'), true), $balances);
-            //     dd($result);
-            //     //add timestamp of when the balance was last changed(now) and update balance avaliable....
-            //     $bank->plaid_options->accounts['0']->available = $balances['accounts'][0]['balances']['available'];
-            //     $bank->plaid_options->accounts['0']->balances->updated = now()->format('Y-m-d');
-            //     $bank->save();
-            // }
-
-            $data = [
-                'client_id' => env('PLAID_CLIENT_ID'),
-                'secret' => env('PLAID_SECRET'),
-                'access_token' => $bank->plaid_access_token,
-                'secret' => env('PLAID_SECRET'),
-            ];
-            //convert array into JSON
-            $data = json_encode($data);
-            //initialize session
-            $ch = curl_init('https://'.env('PLAID_ENV').'.plaid.com/statements/list');
-            //set options
-            curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                'Content-Type: application/json',
-            ]);
-            curl_setopt($ch, CURLOPT_POST, true);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $data);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            //execute session
-            $exchangeToken = curl_exec($ch);
-            //close session
-            curl_close($ch);
-
-            $result = array_merge(json_decode($exchangeToken, true), $balances);
-
-            // dd($result);
+            $accessToken = $bank->plaid_access_token;
+            $result = $this->plaidService->getItem($accessToken);
 
             if (isset($result['item']['error'])) {
                 $error = ['error' => $result['item']['error']];
-            } elseif (empty($result['accounts'])) {
-                $error = ['error' => ['error_code' => 'Account Numbers Changed. Update Bank Account']];
             } else {
                 $last_failed_update = Carbon::parse($result['status']['transactions']['last_failed_update']);
                 $last_successful_update = Carbon::parse($result['status']['transactions']['last_successful_update']);
@@ -135,6 +81,10 @@ class TransactionController extends Controller
                 }
             }
 
+            // elseif (empty($result['accounts'])) {
+            //     $error = ['error' => ['error_code' => 'Account Numbers Changed. Update Bank Account']];
+            // }
+
             $bank->plaid_options = json_encode(array_merge(json_decode(json_encode($bank->plaid_options), true), $error, $result));
             $bank->save();
         }
@@ -142,6 +92,7 @@ class TransactionController extends Controller
 
     public function plaid_statements_list()
     {
+        dd($plaid_statements_list);
         try {
             $client = new Client;
             $response = $client->post('https://'.env('PLAID_ENV').'.plaid.com/statements/list', [
@@ -229,6 +180,7 @@ class TransactionController extends Controller
 
     public function plaid_transactions_refresh()
     {
+        dd('plaid_transactions_refresh')
         $banks = Bank::withoutGlobalScopes()->whereNotNull('plaid_access_token')->get();
 
         foreach ($banks as $bank) {
@@ -259,55 +211,28 @@ class TransactionController extends Controller
 
     public function plaid_transactions_sync()
     {
-        // ->where('id', 21)
+        // ->where('id', 21) //Citi
         $banks = Bank::withoutGlobalScopes()->whereNotNull('plaid_access_token')->get();
-        $bank_accounts = BankAccount::all();
 
         //07-26-2023 if not in error state...
         foreach ($banks as $bank) {
-            $this->plaid_transactions_sync_bank($bank, $bank_accounts);
+            $this->plaid_transactions_sync_bank($bank);
         }
     }
 
-    public function plaid_transactions_sync_bank(Bank $bank, $bank_accounts)
+    public function plaid_transactions_sync_bank(Bank $bank)
     {
-        ini_set('max_execution_time', '48000');
+        $accessToken = $bank->plaid_access_token;
+        $cursor = isset($bank->plaid_options->next_cursor) ? $bank->plaid_options->next_cursor : null;
+        $count = 200;
+        $result = $this->plaidService->syncTransactions($accessToken, $cursor, $count);
 
-        //11/14/2024 Check cursor items for repeats...  11/16/24 ???
-        $new_data = [
-            'client_id' => env('PLAID_CLIENT_ID'),
-            'secret' => env('PLAID_SECRET'),
-            'access_token' => $bank->plaid_access_token,
-            'cursor' => isset($bank->plaid_options->next_cursor) ? $bank->plaid_options->next_cursor : null,
-            'count' => 200,
-        ];
+        $bank_account_ids = $bank->accounts->pluck('id')->toArray();
 
-        $new_data = json_encode($new_data);
-        //initialize session
-        $ch = curl_init('https://'.env('PLAID_ENV').'.plaid.com/transactions/sync');
-        //set options
-        curl_setopt($ch, CURLOPT_HTTPHEADER, [
-            'Content-Type: application/json',
-        ]);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $new_data);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        //execute session
-        $result = curl_exec($ch);
-        //close session
-        curl_close($ch);
-
-        $result = json_decode($result, true);
-
-        // dd(collect($result['added'])->where('amount', '9.77'));
-
-        $bank_account_ids = $bank_accounts->where('bank_id', $bank->id)->pluck('id')->toArray();
-
-        if ($result['transactions_update_status'] == 'HISTORICAL_UPDATE_COMPLETE') {
-            // $transactions_last_date = "2024-11-02";
-            $transactions_last_date = Transaction::whereIn('bank_account_id', $bank_account_ids)->latest()->first()->transaction_date->subWeeks(2)->format('Y-m-d');
-        } else {
-            $transactions_last_date = '2022-01-01';
+        if($result['transactions_update_status'] ?? 'HISTORICAL_UPDATE_COMPLETE') {
+            $transactions_last_date = Transaction::whereIn('bank_account_id', $bank_account_ids)->latest()->first()->transaction_date->subWeeks(4)->format('Y-m-d');
+        }else{
+            $transactions_last_date = '2024-01-01';
         }
 
         if (! empty($result['added']) or ! empty($result['modified']) or ! empty($result['removed']) or isset($result['error_code'])) {
@@ -326,17 +251,11 @@ class TransactionController extends Controller
             $bank->save();
 
             if ($result['has_more'] == true) {
-                $this->plaid_transactions_sync_bank($bank, $bank_accounts, $transactions);
+                $this->plaid_transactions_sync_bank($bank, $bank_accounts);
             }
 
-            // dd($result['added']);
             //ADDED
-            $transactions = collect();
             foreach ($result['added'] as $index => $new_transaction) {
-                // if($index == 5){
-                // $transactions = $transactions->merge(Transaction::where('plaid_transaction_id', $new_transaction['transaction_id'])->pluck('id'));
-                // continue;
-
                 if ($new_transaction['date'] <= $transactions_last_date) {
                     continue;
                 } else {
@@ -346,10 +265,10 @@ class TransactionController extends Controller
                         $transaction = Transaction::where('plaid_transaction_id', $new_transaction['pending_transaction_id'])->first();
                     } elseif (Transaction::whereNotNull('plaid_transaction_id')->where('plaid_transaction_id', $new_transaction['transaction_id'])->get()->isNotEmpty()) {
                         $transaction = Transaction::where('plaid_transaction_id', $new_transaction['transaction_id'])->first();
-                    } elseif (Transaction::whereDate('transaction_date', $new_transaction['date'])->whereNotNull('plaid_transaction_id')->where('owner', $new_transaction['account_owner'])->where('amount', $new_transaction['amount'])->get()->isNotEmpty()) {
+                    } elseif (Transaction::whereDate('posted_date', $new_transaction['date'])->whereNotNull('plaid_transaction_id')->where('owner', $new_transaction['account_owner'])->where('amount', $new_transaction['amount'])->get()->isNotEmpty()) {
                         //11/14/2024 ...used in multiple places on this Controller
                         //->where('plaid_transaction_id', $new_transaction['transaction_id'])
-                        $existing_transactions = Transaction::whereDate('transaction_date', $new_transaction['date'])->whereIn('bank_account_id', $bank_account_ids)->where('owner', $new_transaction['account_owner'])->where('amount', $new_transaction['amount'])->get();
+                        $existing_transactions = Transaction::whereDate('posted_date', $new_transaction['date'])->whereIn('bank_account_id', $bank_account_ids)->where('owner', $new_transaction['account_owner'])->where('amount', $new_transaction['amount'])->get();
                         // dd($existing_transactions);
                         if ($existing_transactions->count() === 1) {
                             $transaction = $existing_transactions->first();
@@ -367,55 +286,9 @@ class TransactionController extends Controller
                         $transaction = new Transaction;
                     }
 
-                    // dd($transaction);
-
-                    //dates
-                    if ($new_transaction['pending'] == true) {
-                        $transaction->posted_date = null;
-                    } else {
-                        $transaction->posted_date = $new_transaction['date'];
-                    }
-
-                    //11/14/2024 ...used in multiple places on this Controller
-                    if ($new_transaction['authorized_date'] == null) {
-                        $transaction->transaction_date = $new_transaction['date'];
-                    } else {
-                        if (isset($transaction->transaction_date)) {
-
-                        } else {
-                            $transaction->transaction_date = $new_transaction['authorized_date'];
-                        }
-                    }
-
-                    //if $transaction['merchant_name'] empty, use $new_transaction['name']
-                    if (isset($new_transaction['merchant_name'])) {
-                        $transaction->plaid_merchant_name = $new_transaction['merchant_name'];
-                    } else {
-                        // $transaction->plaid_merchant_name = $new_transaction['name'];
-                        // $transaction->plaid_merchant_name = NULL;
-                    }
-
-                    $transaction->amount = $new_transaction['amount'];
-                    $transaction->plaid_merchant_description = $new_transaction['name'];
-                    $transaction->plaid_transaction_id = $new_transaction['transaction_id'];
-
-                    // if(!$bank_accounts->where('plaid_account_id', $new_transaction['account_id'])->first()->id){
-                    //     dd($bank_accounts->where('plaid_account_id', $new_transaction['account_id'])->first());
-                    // }
-                    $transaction->bank_account_id = $bank_accounts->where('plaid_account_id', $new_transaction['account_id'])->first()->id;
-                    if ($new_transaction['check_number'] != null) {
-                        $transaction->check_number = $new_transaction['check_number'];
-                    } else {
-                        // $transaction->check_number = NULL;
-                    }
-
-                    $transaction->owner = $new_transaction['account_owner'];
-                    $transaction->details = $new_transaction;
-                    $transaction->save();
+                    $this->plaid_add_transaction($transaction, $new_transaction);
                 }
-                // }
             }
-            // dd($transactions->implode(','));
 
             //MODIFIED
             foreach ($result['modified'] as $new_transaction) {
@@ -511,6 +384,77 @@ class TransactionController extends Controller
         }
     }
 
+    //03-07-2025 use after updating an Item so transactions are in sync between different bank_account_ids for each/same bank
+    public function plaid_transactions_get()
+    {
+        $banks = Bank::withoutGlobalScopes()->whereNotNull('plaid_access_token')->get();
+
+        foreach ($banks as $bank) {
+            $accessToken = $bank->plaid_access_token;
+            $startDate = '2025-01-10';
+            $endDate = '2025-01-31';
+            $result = $this->plaidService->getTransactions($accessToken, $startDate, $endDate);
+
+            $bank_account_ids = $bank->accounts->pluck('id')->toArray();
+            // Process transactions as needed
+            if(isset($result['transactions'])){
+                foreach($result['transactions'] as $new_transaction){
+                    $existing_transaction = Transaction::whereDate('posted_date', $new_transaction['date'])->whereIn('bank_account_id', $bank_account_ids)->where('owner', $new_transaction['account_owner'])->where('amount', $new_transaction['amount'])->first();
+
+                    if($existing_transaction){
+                        continue;
+                    }else{
+                        $existing_transaction = new Transaction;
+                        $this->plaid_add_transaction($existing_transaction, $new_transaction);
+                    }
+                }
+            }
+        }
+    }
+
+    private function plaid_add_transaction($transaction, $new_transaction)
+    {
+        //dates
+        if ($new_transaction['pending'] == true) {
+            $transaction->posted_date = null;
+        } else {
+            $transaction->posted_date = $new_transaction['date'];
+        }
+
+        //11/14/2024 ...used in multiple places on this Controller
+        if ($new_transaction['authorized_date'] == null) {
+            $transaction->transaction_date = $new_transaction['date'];
+        } else {
+            if (isset($transaction->transaction_date)) {
+
+            } else {
+                $transaction->transaction_date = $new_transaction['authorized_date'];
+            }
+        }
+
+        //if $transaction['merchant_name'] empty, use $new_transaction['name']
+        if (isset($new_transaction['merchant_name'])) {
+            $transaction->plaid_merchant_name = $new_transaction['merchant_name'];
+        }
+
+        $transaction->amount = $new_transaction['amount'];
+        $transaction->plaid_merchant_description = $new_transaction['name'];
+        $transaction->plaid_transaction_id = $new_transaction['transaction_id'];
+
+        // if(!$bank_accounts->where('plaid_account_id', $new_transaction['account_id'])->first()->id){
+        //     dd($bank_accounts->where('plaid_account_id', $new_transaction['account_id'])->first());
+        // }
+        $transaction->bank_account_id = BankAccount::where('plaid_account_id', $new_transaction['account_id'])->first()->id;
+        if ($new_transaction['check_number'] != null) {
+            $transaction->check_number = $new_transaction['check_number'];
+        }
+
+        $transaction->owner = $new_transaction['account_owner'];
+        $transaction->details = $new_transaction;
+        $transaction->save();
+    }
+
+
     public function plaid_transactions_enrich()
     {
         ini_set('max_execution_time', '9900000');
@@ -603,172 +547,45 @@ class TransactionController extends Controller
         }
     }
 
-    public function plaid_transactions_get_connect($bank, $count, $offset = 0)
-    {
-        $new_data = [
-            'client_id' => env('PLAID_CLIENT_ID'),
-            'secret' => env('PLAID_SECRET'),
-            //bank access token
-            'access_token' => $bank->plaid_access_token,
-            'options' => [
-                'count' => $count,
-                'offset' => $offset,
-            ],
-        ];
+    // public function plaid_transactions_get_connect($bank, $count, $offset = 0)
+    // {
+        //     $new_data = [
+        //         'client_id' => env('PLAID_CLIENT_ID'),
+        //         'secret' => env('PLAID_SECRET'),
+        //         //bank access token
+        //         'access_token' => $bank->plaid_access_token,
+        //         'options' => [
+        //             'count' => $count,
+        //             'offset' => $offset,
+        //         ],
+        //     ];
 
-        // $start_date = Carbon::parse('2024-01-01')->toDateString();
-        // $nend_date = Carbon::parse('2024-01-05')->toDateString();
-        $start_date = Carbon::now()->subDays(450);
-        $end_date = Carbon::now();
+        //     // $start_date = Carbon::parse('2024-01-01')->toDateString();
+        //     // $nend_date = Carbon::parse('2024-01-05')->toDateString();
+        //     $start_date = Carbon::now()->subDays(450);
+        //     $end_date = Carbon::now();
 
-        $new_data['start_date'] = $start_date->toDateString();
-        $new_data['end_date'] = $end_date->toDateString();
+        //     $new_data['start_date'] = $start_date->toDateString();
+        //     $new_data['end_date'] = $end_date->toDateString();
 
-        $new_data = json_encode($new_data);
+        //     $new_data = json_encode($new_data);
 
-        //initialize session
-        $ch = curl_init('https://'.env('PLAID_ENV').'.plaid.com/transactions/get');
-        //set options
-        curl_setopt($ch, CURLOPT_HTTPHEADER, [
-            'Content-Type: application/json',
-        ]);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $new_data);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        //execute session
-        $result = curl_exec($ch);
-        //close session
-        curl_close($ch);
+        //     //initialize session
+        //     $ch = curl_init('https://'.env('PLAID_ENV').'.plaid.com/transactions/get');
+        //     //set options
+        //     curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        //         'Content-Type: application/json',
+        //     ]);
+        //     curl_setopt($ch, CURLOPT_POST, true);
+        //     curl_setopt($ch, CURLOPT_POSTFIELDS, $new_data);
+        //     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        //     //execute session
+        //     $result = curl_exec($ch);
+        //     //close session
+        //     curl_close($ch);
 
-        return json_decode($result, true);
-    }
-
-    //FOR DEVELOPMENT ONLY DIAGNOSE PLAID TRANSACTIONS
-    //01-04-2024 get Transaction json details going back as far as possible ...
-    public function plaid_transactions_get()
-    {
-        dd('in plaid_transactions_get');
-        ini_set('max_execution_time', '9900000');
-        //foreach access_token / bank
-        $banks = Bank::withoutGlobalScopes()->whereNotNull('plaid_access_token')->where('id', env('BANK_ID'))->get();
-        foreach ($banks as $bank) {
-            $offset = 0;
-            $bank_accounts = $bank->accounts->pluck('id')->toArray();
-            $count = 500;
-            $result = $this->plaid_transactions_get_connect($bank, $count, $offset);
-
-            //if error ... wait... 1 min +
-            //30 requests per Item per minute
-            // //https://plaid.com/docs/errors/rate-limit-exceeded/#transactions_limit
-            if (isset($result['error_code']) && $result['error_code'] == 'TRANSACTIONS_LIMIT') {
-                sleep(85);
-                $result = $this->plaid_transactions_get_connect($bank, $count, $offset);
-            }
-
-            $total_transactions_count = $result['total_transactions'];
-
-            // for($n = 0; $n <= 3335; $n += 500) {
-            //     echo '<p>'. ($n) .'</p>';
-            //     // echo '<p>'. ($n * 2 - 1) .'</p>';
-            // }
-
-            //get date of first and last in array
-            // $start_transaction_date = Carbon::parse($result['transactions'][array_key_first($result['transactions'])]['date'])->subDays(30)->toDateString();
-            // $end_transaction_date = Carbon::parse($result['transactions'][array_key_last($result['transactions'])]['date'])->addDays(30)->toDateString();
-
-            for ($offset = $offset; $offset <= $total_transactions_count; $offset += $count) {
-                $result = $this->plaid_transactions_get_connect($bank, $count, $offset);
-                //if error ... wait... 1 min +
-                //30 requests per Item per minute
-                // //https://plaid.com/docs/errors/rate-limit-exceeded/#transactions_limit
-                if (isset($result['error_code']) && $result['error_code'] == 'TRANSACTIONS_LIMIT') {
-                    sleep(85);
-                    $result = $this->plaid_transactions_get_connect($bank, $count, $offset);
-                }
-
-                $transactions = collect($result['transactions']);
-                // dd($transactions);
-                //DEV ONLY FOR bank_id = 10 / Citi
-                // dd($transactions);
-                // // dd($transactions->where('amount', 50.00)->where('date','2023-07-26'));
-                // // dd($result['transactions'])->where('amount');
-                // //where('id', 20256)->
-                // $transactions_no_plaid_id = Transaction::where('plaid_transaction_id', 'LIKE', 'PLAID_NO_ID_%')->orWhere('plaid_transaction_id', 'LIKE', 'NO_PLAID_TRANS_ID_%')->orWhere('plaid_transaction_id', 'LIKE', 'NO_PLAID_ID_%')->get();
-                // foreach($transactions_no_plaid_id as $transaction_no_plaid_id){
-                //     // dd($transaction_no_plaid_id);
-                //     // dd($transaction_no_plaid_id->posted_date->format('Y-m-d'));
-                //     //find transactuion and change plaid_transaction_id
-                //     $match_no_plaid_id_transactions = $transactions->where('amount', $transaction_no_plaid_id->amount)->where('date', $transaction_no_plaid_id->posted_date->format('Y-m-d'));
-                //     // dd($match_no_plaid_id_transaction->count());
-                //     // dd($match_no_plaid_id_transactions);
-                //     if($match_no_plaid_id_transactions->count() == 1){
-                //         $transaction_no_plaid_id->plaid_transaction_id = $match_no_plaid_id_transactions->first()['transaction_id'];
-                //         $transaction_no_plaid_id->save();
-                //     }elseif($match_no_plaid_id_transactions->count() > 1){
-                //         // foreach($match_no_plaid_id_transactions as $match_no_plaid_id_transaction){
-                //         //     dd($transaction_no_plaid_id);
-                //         //     dd($match_no_plaid_id_transaction);
-                //         // }
-
-                //         $again_count = $match_no_plaid_id_transactions->where('name', trim($transaction_no_plaid_id->plaid_merchant_description));
-
-                //         if($again_count->count() == 1){
-                //             $transaction_no_plaid_id->plaid_transaction_id = $again_count->first()['transaction_id'];
-                //             $transaction_no_plaid_id->save();
-                //         }else{
-                //             // dd( $again_count);
-                //             // if($transactions_no_plaid_id->count() == 1){
-                //             //     dd($again_count->first());
-                //             //     $transaction_no_plaid_id->first()->plaid_transaction_id = $again_count->first()['transaction_id'];
-                //             //     // $again_count->first()->plaid_transaction_id = $match_no_plaid_id_transactions->first()['transaction_id'];
-                //             //     $transaction_no_plaid_id->save();
-                //             // }
-                //         }
-                //         // dd('more than one ... log and error');
-                //     }
-                // }
-                // // dd('done');
-                // // dd(collect($result['transactions'])->where('amount', 98.84));
-
-                // //get date of first and last in array
-
-                $existing_transactions =
-                Transaction::
-                    // whereBetween('transaction_date', [$end_transaction_date, $start_transaction_date])
-                    whereIn('bank_account_id', $bank_accounts);
-
-                foreach ($transactions as $transaction) {
-                    $match_transaction = $existing_transactions->get()->where('plaid_transaction_id', $transaction['transaction_id'])->first();
-                    // $match_transaction = $match_transaction->first();
-
-                    if (is_null($match_transaction)) {
-                        // $date_amount_transactions = $existing_transactions->whereDate('posted_date', $transaction['date'])->where('amount', $transaction['amount'])->get();
-                        // if($date_amount_transactions->count() == 1){
-                        //     $date_amount_transaction = $date_amount_transactions->first();
-                        //     $date_amount_transaction->plaid_transaction_id = $transaction['transaction_id'];
-                        //     $date_amount_transaction->details = $transaction;
-                        //     $date_amount_transaction->timestamps = false;
-                        //     $date_amount_transaction->save();
-                        // }
-                        // continue;
-                        //Log / error / move on / continue;
-                    } elseif (is_null($match_transaction->details)) {
-                        $match_transaction->details = $transaction;
-                        $match_transaction->timestamps = false;
-                        $match_transaction->save();
-                    } else {
-                        // dd($transaction);
-                        // continue;
-                        //Log / error / move on / continue;
-                    }
-                }
-
-                // $offset = $offset + $count;
-            }
-        }
-
-        dd('done');
-    }
+        //     return json_decode($result, true);
+    // }
 
     public function add_category_to_expense()
     {
