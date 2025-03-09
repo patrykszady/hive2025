@@ -180,7 +180,7 @@ class TransactionController extends Controller
 
     public function plaid_transactions_refresh()
     {
-        dd('plaid_transactions_refresh')
+        dd('plaid_transactions_refresh');
         $banks = Bank::withoutGlobalScopes()->whereNotNull('plaid_access_token')->get();
 
         foreach ($banks as $bank) {
