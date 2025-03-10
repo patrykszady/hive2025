@@ -96,20 +96,28 @@
                             <flux:table.rows>
                                 <flux:table.row>
                                     <flux:table.cell><b>Checks Written</b></flux:table.cell>
-                                    <flux:table.cell>{{money($checks_written)}}</flux:table.cell>
+                                    <flux:table.cell>{{money($checks_written->sum('amount'))}}</flux:table.cell>
                                 </flux:table.row>
 
                                 <flux:table.row>
                                     <flux:table.cell>&emsp; Timesheets Paid</flux:table.cell>
-                                    <flux:table.cell>{{money($timesheets_paid)}}</flux:table.cell>
+                                    <flux:table.cell>{{money($timesheets_paid->sum('amount'))}}</flux:table.cell>
                                 </flux:table.row>
 
-                                @if($distribution_checks != 0)
-                                    <flux:table.row>
-                                        <flux:table.cell>&emsp; Distribution Checks</flux:table.cell>
-                                        <flux:table.cell>{{money($distribution_checks)}}</flux:table.cell>
-                                    </flux:table.row>
-                                @endif
+                                <flux:table.row>
+                                    <flux:table.cell>&emsp; Timesheets Paid Others</flux:table.cell>
+                                    <flux:table.cell>{{money($timesheets_paid_others->sum('amount'))}}</flux:table.cell>
+                                </flux:table.row>
+
+                                <flux:table.row>
+                                    <flux:table.cell>&emsp; Distribution Checks</flux:table.cell>
+                                    <flux:table.cell>{{money($distribution_checks->sum('amount'))}}</flux:table.cell>
+                                </flux:table.row>
+
+                                <flux:table.row>
+                                    <flux:table.cell><b>Checks Written CHECK DIFF</b></flux:table.cell>
+                                    <flux:table.cell>{{money($checks_written->sum('amount') - ($timesheets_paid->sum('amount') + $timesheets_paid_others->sum('amount') + $distribution_checks->sum('amount')))}}</flux:table.cell>
+                                </flux:table.row>
 
                                 {{-- @if($user_checks != 0)
                                     <flux:table.row>
@@ -117,12 +125,9 @@
                                         <flux:table.cell>{{money($user_checks)}}</flux:table.cell>
                                     </flux:table.row>
                                 @endif --}}
-
+{{--
                                 @if($timesheets_paid_others != 0)
-                                    <flux:table.row>
-                                        <flux:table.cell>&emsp; Timesheets Paid Others</flux:table.cell>
-                                        <flux:table.cell>{{money($timesheets_paid_others)}}</flux:table.cell>
-                                    </flux:table.row>
+
                                 @endif
 
                                 @if($expenses_paid != 0)
@@ -149,17 +154,17 @@
                                         <flux:table.cell>Distribution Expenses</flux:table.cell>
                                         <flux:table.cell>{{money($distribution_expenses)}}</flux:table.cell>
                                     </flux:table.row>
-                                @endif
-
+                                @endif --}}
+{{--
                                 <flux:table.row>
                                     <flux:table.cell>TOTAL FOR USER</flux:table.cell>
                                     <flux:table.cell>{{money($timesheets_paid + $distribution_checks + $distribution_expenses + $timesheets_paid_by)}}</flux:table.cell>
-                                </flux:table.row>
-
+                                </flux:table.row> --}}
+{{--
                                 <flux:table.row>
                                     <flux:table.cell>&emsp; <i>difference</i></flux:table.cell>
                                     <flux:table.cell><i>{{money($difference)}}</i></flux:table.cell>
-                                </flux:table.row>
+                                </flux:table.row> --}}
                             </flux:table.rows>
                         </flux:table>
                     </flux:card>

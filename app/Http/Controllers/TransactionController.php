@@ -391,8 +391,8 @@ class TransactionController extends Controller
 
         foreach ($banks as $bank) {
             $accessToken = $bank->plaid_access_token;
-            $startDate = '2025-01-10';
-            $endDate = '2025-01-31';
+            $startDate = '2025-03-01';
+            $endDate = '2025-03-10';
             $result = $this->plaidService->getTransactions($accessToken, $startDate, $endDate);
 
             $bank_account_ids = $bank->accounts->pluck('id')->toArray();
