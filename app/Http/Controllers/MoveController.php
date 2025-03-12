@@ -38,6 +38,23 @@ class MoveController extends Controller
 {
     public function move()
     {
+        $checks = Check::whereYear('date', 2024)
+                    ->where('belongs_to_vendor_id', 1)
+                    ->with('transactions')
+                    // ->withWhereHas('expenses')
+                    // ->withWhereHas('timesheets')
+                    ->get();
+
+        $wrong_checks = [];
+        foreach ($checks as $check) {
+            if ($check->transactions->sum('amount') == $check->amount ) {
+
+            } else {
+                $wrong_checks[] = $check;
+            }
+        }
+
+        dd($wrong_checks);
         //expenses for past year where expense has transactions but transactions->amount is no equal to $expense->amount
         // $YTD = Carbon::now()->subYear();
         // $expenses = Expense::where('vendor_id', '!=', 8)->where('date', '>=', $YTD)->withWhereHas('transactions')->get();

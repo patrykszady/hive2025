@@ -76,7 +76,7 @@ class Check extends Model
     protected function checkNumber(): Attribute
     {
         return Attribute::make(
-            get: fn ($value) => $this->check_type === 'Check' ? $value : '# '.$this->id,
+            get: fn ($value) => $this->check_type === 'Check' ? $value : $this->id,
         );
         //->shouldCache();
     }

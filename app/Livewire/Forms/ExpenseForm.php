@@ -395,44 +395,50 @@ class ExpenseForm extends Form
             'created_by_user_id' => auth()->user()->id,
         ]);
 
-        //check...
-        if (empty($this->paid_by) && isset($this->bank_account_id)) {
-            if ($expense_details['distribution_id']) {
-                $distribution_user_id = Distribution::findOrFail($expense_details['distribution_id'])->user_id;
-                if ($distribution_user_id != 0) {
-                    $dist_user = $distribution_user_id;
-                } else {
-                    $dist_user = null;
-                }
-            } else {
-                $dist_user = null;
-            }
-
-            $existing_check = Check::where('deleted_at', null)->where('check_type', 'Check')->where('bank_account_id', $this->bank_account_id)->where('check_number', $this->check_number)->where('vendor_id', $this->vendor_id)->first();
-
-            if (isset($existing_check)) {
-                $check = $existing_check;
-                $check->amount = $check->amount + $this->amount;
-                $check->save();
-            } else {
-                $check = Check::create([
-                    'check_type' => $this->check_type,
-                    'check_number' => $this->check_number,
-                    'date' => $this->date,
-                    'bank_account_id' => $this->bank_account_id,
-                    'amount' => $this->amount,
-                    //user_id if expense project = distribution
-                    'user_id' => $dist_user,
-                    'vendor_id' => $this->vendor_id,
-                    'belongs_to_vendor_id' => auth()->user()->primary_vendor_id,
-                    'created_by_user_id' => auth()->user()->id,
-                ]);
-            }
-
-            $this->expense->update([
-                'check_id' => $check->id,
-            ]);
+        $check = $this->expense->check;
+        if($check){
+            $check->vendor_id = $this->vendor_id;
+            $check->save();
         }
+
+        //check...
+        // if (empty($this->paid_by) && isset($this->bank_account_id)) {
+        //     if ($expense_details['distribution_id']) {
+        //         $distribution_user_id = Distribution::findOrFail($expense_details['distribution_id'])->user_id;
+        //         if ($distribution_user_id != 0) {
+        //             $dist_user = $distribution_user_id;
+        //         } else {
+        //             $dist_user = null;
+        //         }
+        //     } else {
+        //         $dist_user = null;
+        //     }
+
+        //     $existing_check = Check::where('deleted_at', null)->where('check_type', 'Check')->where('bank_account_id', $this->bank_account_id)->where('check_number', $this->check_number)->where('vendor_id', $this->vendor_id)->first();
+
+        //     if (isset($existing_check)) {
+        //         $check = $existing_check;
+        //         $check->amount = $check->amount + $this->amount;
+        //         $check->save();
+        //     } else {
+        //         $check = Check::create([
+        //             'check_type' => $this->check_type,
+        //             'check_number' => $this->check_number,
+        //             'date' => $this->date,
+        //             'bank_account_id' => $this->bank_account_id,
+        //             'amount' => $this->amount,
+        //             //user_id if expense project = distribution
+        //             'user_id' => $dist_user,
+        //             'vendor_id' => $this->vendor_id,
+        //             'belongs_to_vendor_id' => auth()->user()->primary_vendor_id,
+        //             'created_by_user_id' => auth()->user()->id,
+        //         ]);
+        //     }
+
+        //     $this->expense->update([
+        //         'check_id' => $check->id,
+        //     ]);
+        // }
 
         $this->save_splits($this->expense);
 
@@ -450,39 +456,39 @@ class ExpenseForm extends Form
         //validate check...
         $expense_details = $this->expenseDetails();
         // dd($this);
-        if (empty($this->paid_by) && isset($this->bank_account_id)) {
-            if ($expense_details['distribution_id']) {
-                $distribution_user_id = Distribution::findOrFail($expense_details['distribution_id'])->user_id;
-                if ($distribution_user_id != 0) {
-                    $dist_user = $distribution_user_id;
-                } else {
-                    $dist_user = null;
-                }
-            } else {
-                $dist_user = null;
-            }
+        // if (empty($this->paid_by) && isset($this->bank_account_id)) {
+        //     if ($expense_details['distribution_id']) {
+        //         $distribution_user_id = Distribution::findOrFail($expense_details['distribution_id'])->user_id;
+        //         if ($distribution_user_id != 0) {
+        //             $dist_user = $distribution_user_id;
+        //         } else {
+        //             $dist_user = null;
+        //         }
+        //     } else {
+        //         $dist_user = null;
+        //     }
 
-            $existing_check = Check::where('deleted_at', null)->where('check_type', 'Check')->where('bank_account_id', $this->bank_account_id)->where('check_number', $this->check_number)->where('vendor_id', $this->vendor_id)->first();
+        //     $existing_check = Check::where('deleted_at', null)->where('bank_account_id', $this->bank_account_id)->where('check_number', $this->check_number)->where('vendor_id', $this->vendor_id)->first();
 
-            if (isset($existing_check)) {
-                $check = $existing_check;
-                $check->amount = $check->amount + $this->amount;
-                $check->save();
-            } else {
-                $check = Check::create([
-                    'check_type' => $this->check_type,
-                    'check_number' => $this->check_number,
-                    'date' => $this->date,
-                    'bank_account_id' => $this->bank_account_id,
-                    'amount' => $this->amount,
-                    //user_id if expense project = distribution
-                    'user_id' => $dist_user,
-                    'vendor_id' => $this->vendor_id,
-                    'belongs_to_vendor_id' => auth()->user()->primary_vendor_id,
-                    'created_by_user_id' => auth()->user()->id,
-                ]);
-            }
-        }
+        //     if (isset($existing_check)) {
+        //         $check = $existing_check;
+        //         $check->amount = $check->amount + $this->amount;
+        //         $check->save();
+        //     } else {
+        //         $check = Check::create([
+        //             'check_type' => $this->check_type,
+        //             'check_number' => $this->check_number,
+        //             'date' => $this->date,
+        //             'bank_account_id' => $this->bank_account_id,
+        //             'amount' => $this->amount,
+        //             //user_id if expense project = distribution
+        //             'user_id' => $dist_user,
+        //             'vendor_id' => $this->vendor_id,
+        //             'belongs_to_vendor_id' => auth()->user()->primary_vendor_id,
+        //             'created_by_user_id' => auth()->user()->id,
+        //         ]);
+        //     }
+        // }
 
         // $expense = Expense::create($this->only(['amount', 'date', 'vendor_id', 'project_id', 'reimbursment', 'invoice', 'note', 'paid_by']));
         $expense = Expense::create([

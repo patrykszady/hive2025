@@ -17,7 +17,7 @@ class UserShow extends Component
 
     public User $user;
 
-    public $year = 2024;
+    public $year = 2023;
 
     public $timesheets_paid = 0;
 
@@ -58,19 +58,19 @@ class UserShow extends Component
                 Check::where('user_id', $this->user->id)
                     ->whereYear('date', $this->year)
                     ->where('belongs_to_vendor_id', $this->user->this_vendor->id)
+                    // ->withWhereHas('expenses')
+                    // ->withWhereHas('timesheets')
                     ->get();
-            // dd($this->checks_written);
 
             $this->timesheets_paid =
-                Timesheet::where('user_id', $this->user->id)
+                Timesheet::
+                    where('user_id', $this->user->id)
                     ->where('vendor_id', $this->user->this_vendor->id)
                     ->whereNull('paid_by')
                     ->whereHas('check', function ($query){
                         return $query->whereYear('date', $this->year);
                     })
                     ->get();
-                    // ->sum('amount');
-            // dd($this->timesheets_paid);
 
             $this->timesheets_paid_others =
                 Timesheet::whereNot('user_id', $this->user->id)
@@ -80,7 +80,6 @@ class UserShow extends Component
                         return $query->whereYear('date', $this->year);
                     })
                     ->get();
-            // dd($this->timesheets_paid_others);
 
             //$this->timesheets_paid->intersect($this->timesheets_paid_others)->all()
 
@@ -107,20 +106,16 @@ class UserShow extends Component
             // dd($paid_by_reimbursment);
             // dd($this->user_checks);
 
-
-
-
             $this->expenses_paid =
                 Expense::where('paid_by', $this->user->id)
                     // ->whereYear('date', $year)
                     // ->whereNotNull('check_id')
-                    ->whereNull('reimbursment')
+                    // ->whereNull('reimbursment')
                     ->whereHas('check', function ($query) {
                         return $query->whereYear('date', $this->year);
                     })
-                    // ->get();
-                    ->sum('amount');
-            // dd($this->expenses_paid);
+                    ->get();
+
             // when(!is_null($user_distribution), function ($query) use ($user_distribution) {
             //     $query->where('distribution_id', $user_distribution);
             // })
@@ -133,21 +128,14 @@ class UserShow extends Component
                     ->whereHas('check', function ($query) {
                         return $query->withoutGlobalScopes()->whereYear('date', $this->year);
                     })
-                    ->sum('amount');
-            //         ->get();
-            // dd($this->timesheets_paid_by);
+                    ->get();
 
-            if ($user_distribution) {
-                $this->distribution_expenses =
+            $this->distribution_expenses =
                 Expense::where('distribution_id', $user_distribution)
                     ->whereNull('check_id')
                     ->whereYear('date', $this->year)
                     // whereHas('transactions') ...transaction_date = $year
-                    // ->get();
-                    ->sum('amount');
-            } else {
-                $this->distribution_expenses = 0.00;
-            }
+                    ->get();
 
             // - $this->user_checks
             // $this->difference = round($this->checks_written - $this->timesheets_paid - $this->distribution_checks - $this->timesheets_paid_others - $this->expenses_paid, 2);

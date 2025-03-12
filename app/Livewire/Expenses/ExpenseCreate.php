@@ -276,6 +276,7 @@ class ExpenseCreate extends Component
 
         $this->dispatch('resetSplits')->to('expenses.expense-splits-create');
         $this->dispatch('refreshComponent')->to('expenses.expense-index');
+        $this->dispatch('refreshComponent')->to('expenses.expense-show');
     }
 
     public function remove()
