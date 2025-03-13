@@ -278,7 +278,7 @@ class TransactionController extends Controller
                             } else {
                                 //LOG
                                 //DiffInDays / Carbon
-                                Log::channel('plaid_adds')->info(['else in line 330ish in TransactionController' => [$new_transaction, $existing_transactions], $result]);
+                                Log::channel('plaid_adds')->info(['else in line 280ish in TransactionController' => [$new_transaction, $existing_transactions], $result]);
                                 // dd($new_transaction, $existing_transactions);
                             }
                         }
@@ -301,7 +301,7 @@ class TransactionController extends Controller
                 } elseif (Transaction::whereDate('transaction_date', $new_transaction['authorized_date'])->where('amount', $new_transaction['amount'])->whereNotNull('plaid_transaction_id')->whereNot('plaid_transaction_id', $new_transaction['transaction_id'])->get()->isNotEmpty()) {
                     $transaction = Transaction::whereDate('transaction_date', $new_transaction['authorized_date'])->where('amount', $new_transaction['amount'])->whereNotNull('plaid_transaction_id')->whereNot('plaid_transaction_id', $new_transaction['transaction_id'])->first();
                 } else {
-                    Log::channel('plaid_adds')->info(['else in line 392ish in TransactionController' => [$new_transaction], $result]);
+                    Log::channel('plaid_adds')->info(['else in line 304ish in TransactionController' => [$new_transaction], $result]);
                     continue;
                 }
 
@@ -355,7 +355,7 @@ class TransactionController extends Controller
                 $transaction->amount = $new_transaction['amount'];
                 $transaction->plaid_merchant_description = $new_transaction['name'];
                 $transaction->plaid_transaction_id = $new_transaction['transaction_id'];
-                $transaction->bank_account_id = $bank_accounts->where('plaid_account_id', $new_transaction['account_id'])->first()->id;
+                $transaction->bank_account_id = $bank->accounts->where('plaid_account_id', $new_transaction['account_id'])->first()->id;
                 $transaction->details = $new_transaction;
                 $transaction->save();
             }
