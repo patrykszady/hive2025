@@ -19,8 +19,21 @@
 
         {{-- WEEKLY GROUPED --}}
         <flux:card class="space-y-2">
-            <div>
+            <div class="flex justify-between">
                 <flux:heading size="lg">Week of <b>{{$timesheet->date->format('m/d/Y')}}</b></flux:heading>
+                @if($not_paid)
+                    <flux:button
+                        wire:click="revert"
+                        size="sm"
+                        variant="danger"
+                        icon="arrow-uturn-left"
+                        >
+                        Revert Timesheet
+                    </flux:button>
+                @endif
+            </div>
+            <div>
+
             </div>
             <flux:separator variant="subtle" />
 
@@ -54,7 +67,7 @@
                                 @endif
 
                                 <flux:table.cell>
-                                    <flux:badge size="sm" :color="$timesheet->paid_by || $timesheet->check_id ? 'green' : 'yellow'" inset="top bottom">{{ $timesheet->paid_by ? 'Paid By' : ($timesheet->check_id ? 'Paid' : (auth()->user()->primary_vendor->pivot->role_id == 1 ? 'Pay' : 'Not Paid')) }}</flux:badge>
+                                    <flux:badge size="sm" :color="$timesheet->status == 'Paid' ? 'green' : 'yellow'" inset="top bottom">{{ $timesheet->status }}</flux:badge>
                                 </flux:table.cell>
                             </flux:table.row>
                         @endforeach

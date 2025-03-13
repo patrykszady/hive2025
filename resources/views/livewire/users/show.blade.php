@@ -122,8 +122,23 @@
                                 </flux:table.row>
 
                                 <flux:table.row>
+                                    <flux:table.cell>&emsp; TOTAL CHECKS FOR USER</flux:table.cell>
+                                    <flux:table.cell>{{money($timesheets_paid->sum('amount') + $distribution_checks->sum('amount'))}}</flux:table.cell>
+                                </flux:table.row>
+
+                                <flux:table.row>
                                     <flux:table.cell>&emsp; Expenses Paid</flux:table.cell>
                                     <flux:table.cell>{{money($expenses_paid->sum('amount'))}}</flux:table.cell>
+                                </flux:table.row>
+
+                                <flux:table.row>
+                                    <flux:table.cell>&emsp; Distribution Expenses</flux:table.cell>
+                                    <flux:table.cell>{{money($distribution_expenses->sum('amount'))}}</flux:table.cell>
+                                </flux:table.row>
+
+                                <flux:table.row>
+                                    <flux:table.cell>&emsp; Member Extra Payments</flux:table.cell>
+                                    <flux:table.cell>{{money($user_checks)}}</flux:table.cell>
                                 </flux:table.row>
 
                                 <flux:table.row>
@@ -131,15 +146,9 @@
                                     <flux:table.cell>{{money($checks_written->sum('amount') - ($timesheets_paid->sum('amount') + $timesheets_paid_others->sum('amount') + $distribution_checks->sum('amount')))}}</flux:table.cell>
                                 </flux:table.row>
 
-                                <flux:table.row>
-                                    <flux:table.cell>Distribution Expenses</flux:table.cell>
-                                    <flux:table.cell>{{money($distribution_expenses->sum('amount'))}}</flux:table.cell>
-                                </flux:table.row>
+
                                 {{-- @if($user_checks != 0)
-                                    <flux:table.row>
-                                        <flux:table.cell>&emsp; Member Extra Payments</flux:table.cell>
-                                        <flux:table.cell>{{money($user_checks)}}</flux:table.cell>
-                                    </flux:table.row>
+
                                 @endif --}}
 {{--
                                 @if($timesheets_paid_others != 0)
@@ -151,17 +160,8 @@
 
                                 @endif
 
-                                <flux:table.row>
-                                    <flux:table.cell>&emsp; TOTAL CHECKS FOR USER</flux:table.cell>
-                                    <flux:table.cell>{{money($timesheets_paid + $distribution_checks)}}</flux:table.cell>
-                                </flux:table.row>
 
-                                @if($timesheets_paid_by != 0)
-                                    <flux:table.row>
-                                        <flux:table.cell>Timesheets Paid By</flux:table.cell>
-                                        <flux:table.cell>{{money($timesheets_paid_by)}}</flux:table.cell>
-                                    </flux:table.row>
-                                @endif
+
 
                                 @if($distribution_expenses != 0)
 

@@ -62,6 +62,7 @@ class UserShow extends Component
                     // ->withWhereHas('timesheets')
                     ->get();
 
+
             $this->timesheets_paid =
                 Timesheet::
                     where('user_id', $this->user->id)
@@ -90,21 +91,6 @@ class UserShow extends Component
                         return $query->whereYear('date', $this->year);
                     })
                     ->get();
-
-
-            //Member Extra Payments
-            // if doesnt have a distribution
-            // if (! $user_distribution) {
-            //     $this->user_checks =
-            //         Check::where('user_id', $this->user->id)
-            //             ->whereYear('date', $this->year)
-            //             ->whereDoesntHave('timesheets')
-            //             ->where('belongs_to_vendor_id', $this->user->this_vendor->id)
-            //             ->sum('amount');
-            // }
-            // $paid_by_reimbursment = Expense::where('paid_by', 2)->where('reimbursment', 212)->sum('amount');
-            // dd($paid_by_reimbursment);
-            // dd($this->user_checks);
 
             $this->expenses_paid =
                 Expense::where('paid_by', $this->user->id)
@@ -136,6 +122,18 @@ class UserShow extends Component
                     ->whereYear('date', $this->year)
                     // whereHas('transactions') ...transaction_date = $year
                     ->get();
+
+            //Member Extra Payments
+            // if doesnt have a distribution
+            if (! $user_distribution) {
+                $this->user_checks =
+                    Check::where('user_id', $this->user->id)
+                        ->whereYear('date', $this->year)
+                        ->whereDoesntHave('timesheets')
+                        ->where('belongs_to_vendor_id', $this->user->this_vendor->id)
+                        ->sum('amount');
+            }
+            // $paid_by_reimbursment = Expense::where('paid_by', 2)->where('reimbursment', 212)->sum('amount');
 
             // - $this->user_checks
             // $this->difference = round($this->checks_written - $this->timesheets_paid - $this->distribution_checks - $this->timesheets_paid_others - $this->expenses_paid, 2);
