@@ -391,15 +391,23 @@ class TransactionController extends Controller
 
         foreach ($banks as $bank) {
             $accessToken = $bank->plaid_access_token;
-            $startDate = '2025-03-01';
-            $endDate = '2025-03-10';
+            $startDate = '2025-01-15';
+            $endDate = '2025-01-31';
             $result = $this->plaidService->getTransactions($accessToken, $startDate, $endDate);
 
             $bank_account_ids = $bank->accounts->pluck('id')->toArray();
             // Process transactions as needed
+            // dd(collect($result['transactions'])->where('amount', 200.00));
             if(isset($result['transactions'])){
-                foreach($result['transactions'] as $new_transaction){
-                    $existing_transaction = Transaction::whereDate('posted_date', $new_transaction['date'])->whereIn('bank_account_id', $bank_account_ids)->where('owner', $new_transaction['account_owner'])->where('amount', $new_transaction['amount'])->first();
+                foreach($result['transactions'] as $index => $new_transaction){
+                    $existing_transaction =
+                        Transaction::
+                            whereDate('posted_date', $new_transaction['date'])
+                            ->whereIn('bank_account_id', $bank_account_ids)
+                            ->where('owner', $new_transaction['account_owner'])
+                            ->where('plaid_merchant_description', $new_transaction['name'])
+                            ->where('amount', $new_transaction['amount'])
+                            ->first();
 
                     if($existing_transaction){
                         continue;
