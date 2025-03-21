@@ -23,6 +23,11 @@ class ReceiptAccount extends Model
         return $this->belongsTo(Vendor::class);
     }
 
+    public function belongs_to_vendor(): BelongsTo
+    {
+        return $this->belongsTo(Vendor::class);
+    }
+
     public function distribution(): BelongsTo
     {
         return $this->belongsTo(Distribution::class);

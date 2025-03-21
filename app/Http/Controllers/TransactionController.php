@@ -12,6 +12,8 @@ use App\Models\ExpenseSplits;
 use App\Models\Payment;
 use App\Models\Transaction;
 use App\Models\TransactionBulkMatch;
+use App\Models\ReceiptAccount;
+
 use App\Models\Vendor;
 use App\Models\VendorTransaction;
 
@@ -1783,6 +1785,126 @@ class TransactionController extends Controller
 
     public function transaction_vendor_bulk_match()
     {
+        $vendor_receipt_accounts = ReceiptAccount::withoutGlobalScopes()->with('vendor')->get()->groupBy('belongs_to_vendor_id');
+
+        foreach($vendor_receipt_accounts as $vendor_id => $receipt_accounts){
+            foreach($receipt_accounts as $receipt_account){
+                $bank_account_ids = $receipt_account->belongs_to_vendor->bank_accounts->pluck('id')->toArray();
+                if($receipt_account->vendor->transactions_bulk_match->isEmpty()){
+                    $transactions =
+                        Transaction::withoutGlobalScopes()
+                            ->whereNull('deleted_at')
+                            ->whereIn('bank_account_id', $bank_account_ids)
+                            ->where('vendor_id', $receipt_account->vendor_id)
+                            ->whereDoesntHave('expense')
+                            ->whereNull('check_number')
+                            ->get();
+
+                    foreach($transactions as $transaction){
+                        //Find Duplicates $expense = $duplicate
+                        //date diff
+                        $duplicate_start_date = $transaction->transaction_date->subDays(1)->format('Y-m-d');
+                        $duplicate_end_date = $transaction->transaction_date->addDays(4)->format('Y-m-d');
+
+                        //find duplicate expenses
+                        $duplicates =
+                            Expense::where('belongs_to_vendor_id', $transaction->bank_account->bank->vendor_id)->
+                                whereNull('deleted_at')->
+                                where('amount', $transaction->amount)->
+                                whereBetween('date', [$duplicate_start_date, $duplicate_end_date])->
+                                get();
+
+                        if ($duplicates->count() >= 1) {
+                            foreach ($duplicates as $duplicate) {
+                                $duplicate->date_diff = $transaction->transaction_date->floatDiffInDays($duplicate->date);
+                            }
+
+                            $expense_duplicate = $duplicates->sortBy('date_diff')->first();
+                            $expense = $expense_duplicate;
+                        } else {
+                            $expense = Expense::create([
+                                'amount' => $transaction->amount,
+                                'date' => $transaction->transaction_date,
+                                'project_id' => null,
+                                //if splits distribution_id = NULL
+                                'distribution_id' => $receipt_account->distribution_id,
+                                'vendor_id' => $receipt_account->vendor_id,
+                                'check_id' => null,
+                                'paid_by' => null,
+                                'belongs_to_vendor_id' => $receipt_account->belongs_to_vendor_id,
+                                'created_by_user_id' => 0,
+                            ]);
+                        }
+
+                        $transaction->expense_id = $expense->id;
+                        $transaction->save();
+                    }
+                }else{
+                    foreach($receipt_account->vendor->transactions_bulk_match as $match){
+                        $transactions =
+                            Transaction::withoutGlobalScopes()
+                                ->whereNull('deleted_at')
+                                ->whereIn('bank_account_id', $bank_account_ids)
+                                ->where('vendor_id', $match->vendor_id)
+                                ->whereDoesntHave('expense')
+                                ->whereNull('check_number')
+                                ->when($match->amount != null, function ($query) use ($match) {
+                                    return $query->where('amount', isset($match->options['amount_type']) ? $match->options['amount_type'] : '=', $match->amount);
+                                })
+                                ->when(isset($match->options['desc']), function ($query) use ($match) {
+                                    return $query->where('plaid_merchant_description', $match->options['desc']);
+                                })
+                                ->get();
+
+                        //create new expense foreach transaction
+                        foreach($transactions as $transaction){
+                            //Find Duplicates $expense = $duplicate
+                            //date diff
+                            $duplicate_start_date = $transaction->transaction_date->subDays(1)->format('Y-m-d');
+                            $duplicate_end_date = $transaction->transaction_date->addDays(4)->format('Y-m-d');
+
+                            //find duplicate expenses
+                            $duplicates =
+                                Expense::where('belongs_to_vendor_id', $transaction->bank_account->bank->vendor_id)->
+                                    whereNull('deleted_at')->
+                                    where('amount', $transaction->amount)->
+                                    whereBetween('date', [$duplicate_start_date, $duplicate_end_date])->
+                                    get();
+
+                            if ($duplicates->count() >= 1) {
+                                foreach ($duplicates as $duplicate) {
+                                    $duplicate->date_diff = $transaction->transaction_date->floatDiffInDays($duplicate->date);
+                                }
+
+                                $expense_duplicate = $duplicates->sortBy('date_diff')->first();
+                                $expense = $expense_duplicate;
+                            } else {
+                                $expense = Expense::create([
+                                    'amount' => $transaction->amount,
+                                    'date' => $transaction->transaction_date,
+                                    'project_id' => null,
+                                    //if splits distribution_id = NULL
+                                    'distribution_id' => $match->distribution_id,
+                                    'vendor_id' => $transaction->vendor_id,
+                                    'check_id' => null,
+                                    'paid_by' => null,
+                                    'belongs_to_vendor_id' => $match->belongs_to_vendor_id,
+                                    'created_by_user_id' => 0,
+                                ]);
+
+                                //splits
+                                $this->transaction_vendor_bulk_match_splits($match, $expense, $transaction->amount);
+                            }
+
+                            $transaction->expense_id = $expense->id;
+                            $transaction->save();
+                        }
+                    }
+                }
+            }
+        }
+
+        dd('too far');
         $matches = TransactionBulkMatch::withoutGlobalScopes()->get();
 
         foreach ($matches as $match) {
@@ -1858,7 +1980,6 @@ class TransactionController extends Controller
                     }
 
                     $expense_duplicate = $duplicates->sortBy('date_diff')->first();
-
                     $expense = $expense_duplicate;
                 } else {
                     $expense = Expense::create([

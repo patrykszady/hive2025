@@ -20,7 +20,7 @@ Schedule::call('\App\Http\Controllers\TransactionController@find_credit_payments
 Schedule::call('\App\Http\Controllers\ReceiptController@auto_receipt')->everyTenMinutes();
 // Schedule::call('\App\Http\Controllers\TransactionController@add_transaction_to_multi_expenses')->everyTenMinutes();
 Schedule::call('\App\Http\Controllers\TransactionController@add_category_to_expense')->hourly();
-// Schedule::call('\App\Http\Controllers\TransactionController@transaction_vendor_bulk_match')->everyTenMinutes();
+Schedule::call('\App\Http\Controllers\TransactionController@transaction_vendor_bulk_match')->everyTenMinutes();
 
 Schedule::command('horizon:snapshot')->everyFiveMinutes();
 // Schedule::command('cache:prune-stale-tags')->hourly();
