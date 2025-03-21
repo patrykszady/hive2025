@@ -2,12 +2,14 @@
 
 namespace App\Livewire\BulkMatch;
 
-// use App\Models\Vendor;
 // use App\Models\Expense;
 // use App\Models\Transaction;
 use App\Models\Distribution;
 use App\Models\TransactionBulkMatch;
+use App\Models\Vendor;
+
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
@@ -34,12 +36,28 @@ class BulkMatchIndex extends Component
     public function mount()
     {
         $this->distributions = Distribution::all();
+        //exclude Vendors that dont/have receipt accounts
+        // $exclude_vendors = Vendor::whereDoesntHave('receipt_accounts')->pluck('id')->toArray();
+        // dd($exclude_vendors);
+        $vendor_ids_to_ignore =
+            Vendor::
+                whereHas('receipt_account')
+                ->orderBy('business_name')
+                ->pluck('id')
+                ->toArray();
+
         $this->bulk_matches =
             TransactionBulkMatch::with(['vendor', 'distribution'])
+                ->whereNotIn('vendor_id', $vendor_ids_to_ignore)
                 ->get()
                 ->sortBy(function ($item, $key) {
                     return $item->vendor->business_name;
                 });
+
+            // Event::whereHas('participants', function ($query) {
+            //     return $query->where('IDUser', '=', 1);
+            //     })->get();
+        // dd($this->bulk_matches);
     }
 
     public function updated($field, $value)
@@ -127,7 +145,7 @@ class BulkMatchIndex extends Component
     #[Title('Bulk Transactions')]
     public function render()
     {
-        $this->authorize('viewAny', TransactionBulkMatch::class);
+        // $this->authorize('viewAny', TransactionBulkMatch::class);
 
         if ($this->vendor) {
             //transactions groupBy amount

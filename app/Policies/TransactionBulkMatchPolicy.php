@@ -2,7 +2,7 @@
 
 namespace App\Policies;
 
-use App\Models\TransactionBlukMatch;
+use App\Models\TransactionBulkMatch;
 use App\Models\User;
 use Illuminate\Auth\Access\HandlesAuthorization;
 
@@ -25,7 +25,7 @@ class TransactionBulkMatchPolicy
      *
      * @return \Illuminate\Auth\Access\Response|bool
      */
-    public function view(User $user, TransactionBlukMatch $transactionBlukMatch): bool
+    public function view(User $user, TransactionBulkMatch $transactionBulkMatch): bool
     {
         // return false;
     }
@@ -45,7 +45,7 @@ class TransactionBulkMatchPolicy
      *
      * @return \Illuminate\Auth\Access\Response|bool
      */
-    public function update(User $user, TransactionBlukMatch $transactionBlukMatch): bool
+    public function update(User $user, TransactionBulkMatch $transactionBulkMatch): bool
     {
         return $user->primary_vendor->pivot->role_id === 1;
     }
@@ -55,7 +55,7 @@ class TransactionBulkMatchPolicy
      *
      * @return \Illuminate\Auth\Access\Response|bool
      */
-    public function delete(User $user, TransactionBlukMatch $transactionBlukMatch): bool
+    public function delete(User $user, TransactionBulkMatch $transactionBulkMatch): bool
     {
         //
     }
@@ -65,7 +65,7 @@ class TransactionBulkMatchPolicy
      *
      * @return \Illuminate\Auth\Access\Response|bool
      */
-    public function restore(User $user, TransactionBlukMatch $transactionBlukMatch): bool
+    public function restore(User $user, TransactionBulkMatch $transactionBulkMatch): bool
     {
         //
     }
@@ -75,7 +75,7 @@ class TransactionBulkMatchPolicy
      *
      * @return \Illuminate\Auth\Access\Response|bool
      */
-    public function forceDelete(User $user, TransactionBlukMatch $transactionBlukMatch): bool
+    public function forceDelete(User $user, TransactionBulkMatch $transactionBulkMatch): bool
     {
         //
     }

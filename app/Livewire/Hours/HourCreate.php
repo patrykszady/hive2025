@@ -12,7 +12,10 @@ use Illuminate\Support\Carbon;
 use Carbon\CarbonInterval;
 use Carbon\CarbonPeriod;
 
+use Flux;
+
 use Livewire\Attributes\Title;
+use Livewire\Attributes\Computed;
 use Livewire\Component;
 
 class HourCreate extends Component
@@ -20,7 +23,7 @@ class HourCreate extends Component
     public HourForm $form;
 
     public $projects = [];
-    public $other_projects = [];
+    // public $other_projects = [];
     public Carbon $selected_date;
     public $days = [];
 
@@ -51,10 +54,8 @@ class HourCreate extends Component
 
     public function mount()
     {
-        // $this->selected_date = now();
         $this->selectedDate(today());
 
-        // $this->other_projects = Project::whereNotIn('id', $this->projects->pluck('id'))->orderBy('created_at', 'DESC')->get();
         $confirmed_weeks =
             Timesheet::orderBy('date', 'DESC')
                 ->where('user_id', auth()->user()->id)
@@ -82,32 +83,23 @@ class HourCreate extends Component
 
         // $this->projects = Project::status(['Active', 'Service Call']);
         $this->form->setProjects($this->projects->toArray());
-        // dd($this->days);
-        // dd($confirmed_week_days);
-
-        // $this->days = collect();
-        // foreach ($this->getDays() as $day) {
-        //     $user_day_hours = Hour::where('user_id', auth()->user()->id)->where('date', $day->format('Y-m-d'))->get();
-
-        //     $this->days->push(collect([
-        //         'format' => $day->format('Y-m-d'),
-        //         'day' => $day->format('d'),
-        //         'month' => $day->format('m'),
-        //         'has_hours' => $user_day_hours->isEmpty() ? false : true,
-        //         'confirmed_date' => in_array($day->format('Y-m-d'), $confirmed_week_days) ? true : false,
-        //     ]));
-        // }
     }
 
     public function updatedSelectedDate($value)
     {
         if($value){
-            // $this->selected_date = $value;
             $this->selectedDate($value);
             $this->validate();
         }else{
             $this->selectedDate(today());
         }
+    }
+
+    #[Computed]
+    public function other_projects()
+    {
+        $other_projects = Project::whereNotIn('id', $this->projects->pluck('id'))->whereYear('created_at', '>=', Carbon::now()->subYears(3)->year)->orderBy('created_at', 'DESC')->get();
+        return $other_projects;
     }
 
     public function updated()
@@ -121,15 +113,6 @@ class HourCreate extends Component
 
         return $this->hours_count_store;
     }
-
-    // public function getDays()
-    // {
-    //     return new \DatePeriod(
-    //         Carbon::parse('3 weeks ago')->startOfWeek(Carbon::MONDAY),
-    //         CarbonInterval::day(),
-    //         Carbon::parse('1 week')->startOfWeek(Carbon::MONDAY)->next('Week')
-    //     );
-    // }
 
     public function selectedDate($date, $day_index = null)
     {
@@ -188,7 +171,6 @@ class HourCreate extends Component
             }
         }
 
-        // dd($this->day_project_tasks);
         $this->resetValidation();
 
         if ($user_day_hours->isEmpty()) {
@@ -243,27 +225,30 @@ class HourCreate extends Component
         } else {
             $this->form->store();
             $this->selectedDate($this->selected_date, $this->day_index);
-            $this->dispatch('notify',
-                type: 'success',
-                content: 'Hours Created'
+
+            Flux::toast(
+                duration: 5000,
+                position: 'top right',
+                variant: 'success',
+                heading: 'Hours Added',
+                // route / href / wire:click
+                text: '',
             );
         }
     }
 
     public function edit()
     {
-        // if($this->hours_count_store == 0){
-        //     $this->addError('hours_count', 'Daily Hours need at least one entry.');
-        // }else{
-        //     $this->form->update();
-        //     $this->selectedDate($this->selected_date->format('Y-m-d'), $this->day_index);
-        // }
         $this->form->update();
         $this->selectedDate($this->selected_date, $this->day_index);
 
-        $this->dispatch('notify',
-            type: 'success',
-            content: 'Hours Updated'
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Hours Updated',
+            // route / href / wire:click
+            text: '',
         );
     }
 

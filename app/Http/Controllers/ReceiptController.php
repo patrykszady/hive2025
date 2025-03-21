@@ -483,8 +483,8 @@ class ReceiptController extends Controller
 
             // //FOR TESTING ONLY
             //INDIVIDUAL ORDER
-            // $path = '/reports/2021-01-08/orders/113-5551823-8417801/';
-
+            $path = '/reports/2021-01-08/orders/113-2420373-2571468/';
+            // $path = '/reports/2021-01-08/orders/';
             // $params = array(
             //     'includeCharges' => 'true',
             //     'includeLineItems' => 'true',
@@ -504,11 +504,13 @@ class ReceiptController extends Controller
 
             // dd($result);
 
-            $path = '/reports/2021-01-08/orders/';
+
 
             //7-17-2023 find last amazon expenses date
             // '2023-10-14', '2023-10-14'
+            // $dates = CarbonPeriod::create(Carbon::today()->subDays(14)->setTimezone('UTC'), Carbon::today()->setTimezone('UTC'));
             $dates = CarbonPeriod::create(Carbon::today()->subDays(14)->setTimezone('UTC'), Carbon::today()->setTimezone('UTC'));
+
             foreach ($dates as $date) {
                 $today = $date;
 
@@ -531,6 +533,7 @@ class ReceiptController extends Controller
                 $orders = collect(json_decode($response->getBody()->getContents(), true)['orders']);
 
                 foreach ($orders as $orders_key => $order) {
+                    dd($orders);
                     $order_date = Carbon::parse($order['orderDate'])->setTimezone('America/Chicago')->format('Y-m-d');
 
                     //check for expense duplicates
@@ -1091,9 +1094,9 @@ class ReceiptController extends Controller
     public function auto_receipt()
     {
         //09/22/2023 EACH FILE SHOULD BE UPLOADED TO ONEDRIVE AND NOT VIA EMAIL!
-        //get receipt from email/onedrive
+        //get receipts from email/onedrive
         $company_emails = CompanyEmail::withoutGlobalScopes()->whereNotNull('api_json->user_id')->where('id', 17)->get();
-        // dd($company_emails);
+
         foreach($company_emails as $company_email) {
             $email_vendor = $company_email->vendor;
             $email_vendor_bank_account_ids = $email_vendor->bank_accounts->pluck('id');

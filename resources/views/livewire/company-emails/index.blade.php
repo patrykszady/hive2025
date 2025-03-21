@@ -27,6 +27,7 @@
         </a> --}}
 
         {{-- DETAILS --}}
+        {{-- 03-13-2025 should be a flux table without header row --}}
         <x-lists.details_list>
             {{-- @can('update', $project) --}}
                 @foreach($email_accounts as $email)
@@ -50,6 +51,7 @@
             {{-- @endcan --}}
         </x-lists.details_list>
     </flux:card>
+
     @if(request()->routeIs('company_emails.index'))
         <livewire:receipt-accounts.receipt-accounts-index />
     @endif

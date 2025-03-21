@@ -83,9 +83,13 @@ class EstimateShow extends Component
         $this->create_new_section();
         $this->estimate_refresh();
 
-        $this->dispatch('notify',
-            type: 'success',
-            content: 'Section Added'
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Section Added',
+            // route / href / wire:click
+            text: 'Section '.$section->name . ' Added',
         );
     }
 
@@ -102,7 +106,7 @@ class EstimateShow extends Component
         $this->estimate_refresh();
 
         Flux::toast(
-            duration: 10000,
+            duration: 5000,
             position: 'top right',
             variant: 'success',
             heading: 'Section Removed',

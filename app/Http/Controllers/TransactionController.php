@@ -211,10 +211,9 @@ class TransactionController extends Controller
 
     public function plaid_transactions_sync()
     {
-        // ->where('id', 21) //Citi
         $banks = Bank::withoutGlobalScopes()->whereNotNull('plaid_access_token')->get();
 
-        //07-26-2023 if not in error state...
+        //if not in error state...
         foreach ($banks as $bank) {
             $this->plaid_transactions_sync_bank($bank);
         }
@@ -232,7 +231,7 @@ class TransactionController extends Controller
         if($result['transactions_update_status'] ?? 'HISTORICAL_UPDATE_COMPLETE') {
             $transactions_last_date = Transaction::whereIn('bank_account_id', $bank_account_ids)->latest()->first()->transaction_date->subWeeks(4)->format('Y-m-d');
         }else{
-            $transactions_last_date = '2024-01-01';
+            $transactions_last_date = '2025-01-01';
         }
 
         if (! empty($result['added']) or ! empty($result['modified']) or ! empty($result['removed']) or isset($result['error_code'])) {
@@ -259,7 +258,6 @@ class TransactionController extends Controller
                 if ($new_transaction['date'] <= $transactions_last_date) {
                     continue;
                 } else {
-                    // dd($new_transaction, Transaction::whereDate('transaction_date', '>=', '2023-01-01')->whereDate('transaction_date', $new_transaction['date'])->whereNotNull('plaid_transaction_id')->where('owner', $new_transaction['account_owner'])->where('amount', $new_transaction['amount'])->get());
                     //make sure transaction_id does not exist yet.. if it does..update..
                     if (Transaction::whereNotNull('plaid_transaction_id')->where('plaid_transaction_id', $new_transaction['pending_transaction_id'])->get()->isNotEmpty()) {
                         $transaction = Transaction::where('plaid_transaction_id', $new_transaction['pending_transaction_id'])->first();
@@ -269,7 +267,7 @@ class TransactionController extends Controller
                         //11/14/2024 ...used in multiple places on this Controller
                         //->where('plaid_transaction_id', $new_transaction['transaction_id'])
                         $existing_transactions = Transaction::whereDate('posted_date', $new_transaction['date'])->whereIn('bank_account_id', $bank_account_ids)->where('owner', $new_transaction['account_owner'])->where('amount', $new_transaction['amount'])->get();
-                        // dd($existing_transactions);
+
                         if ($existing_transactions->count() === 1) {
                             $transaction = $existing_transactions->first();
                         } else {
@@ -279,7 +277,6 @@ class TransactionController extends Controller
                                 //LOG
                                 //DiffInDays / Carbon
                                 Log::channel('plaid_adds')->info(['else in line 280ish in TransactionController' => [$new_transaction, $existing_transactions], $result]);
-                                // dd($new_transaction, $existing_transactions);
                             }
                         }
                     } else {
@@ -365,7 +362,6 @@ class TransactionController extends Controller
                 //make sure transaction_id does not exist yet.. if it does..update..
                 $transaction = Transaction::whereDate('transaction_date', '>=', '2023-01-01')->whereNotNull('plaid_transaction_id')->where('plaid_transaction_id', $old_transaction['transaction_id'])->first();
 
-                //11-16-2024
                 if (! is_null($transaction)) {
                     //transaction has payments ...disassociate
                     $transaction->payments()->get()->each(function ($payment) {
@@ -397,7 +393,7 @@ class TransactionController extends Controller
 
             $bank_account_ids = $bank->accounts->pluck('id')->toArray();
             // Process transactions as needed
-            // dd(collect($result['transactions'])->where('amount', 200.00));
+
             if(isset($result['transactions'])){
                 foreach($result['transactions'] as $index => $new_transaction){
                     $existing_transaction =
@@ -1787,7 +1783,6 @@ class TransactionController extends Controller
 
     public function transaction_vendor_bulk_match()
     {
-        //->where('id', 42)
         $matches = TransactionBulkMatch::withoutGlobalScopes()->get();
 
         foreach ($matches as $match) {
