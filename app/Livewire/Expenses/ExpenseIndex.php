@@ -234,13 +234,15 @@ class ExpenseIndex extends Component
                     'expense_id IS NULL',
                     'check_id IS NULL',
                     '__soft_deleted = 0',
-                    'deposit IN ["NOT_DEPOSIT", "NO_PAYMENTS"]'
+                    'deposit IN ["NOT_DEPOSIT", "NO_PAYMENTS"]',
+                    is_numeric($this->expense_vendor) ? 'vendor_id = ' . $this->expense_vendor : '',
                 ];
 
                 return $meilisearch->search($query, $options);
             })
 
-            // ->whereIn('deposit', ['NOT_DEPOSIT', 'NO_PAYMENTS'])
+            ->where('belongs_to_vendor_id', auth()->user()->primary_vendor_id)
+
             // ->when(! empty($this->expense_vendor) && $this->expense_vendor != '0', function ($query, $item) {
             //     return $query->where('vendor_id', $this->expense_vendor);
             // })
@@ -287,9 +289,9 @@ class ExpenseIndex extends Component
             // ->when(! empty($this->check) && is_numeric($this->check), function ($query, $item) {
             //     return $query->where('check_id', $this->check);
             // })
-            // ->where('__soft_deleted', 0)
-            ->where('belongs_to_vendor_id', auth()->user()->primary_vendor_id)
 
+            ->where('belongs_to_vendor_id', auth()->user()->primary_vendor_id)
+            ->paginate($this->paginate_number, pageName: 'expenses-page');
             // ->when(!empty($this->expense_vendor) && $this->expense_vendor !== '0', function ($query, $item) {
             //     return $query->where('vendor_id', $this->expense_vendor);
             // })
@@ -327,7 +329,7 @@ class ExpenseIndex extends Component
             //     'expense_status', ['Complete', 'Missing Info', 'No Project', 'No Transaction']
             // )
             // ->take(10)->get();
-            ->paginate($this->paginate_number, pageName: 'expenses-page');
+
 
         return view('livewire.expenses.index', [
             'expenses' => $expenses,

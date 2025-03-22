@@ -148,7 +148,7 @@ return [
             ],
 
             Transaction::class => [
-                'filterableAttributes'=> ['deposit', 'transaction_date', 'posted_date', 'expense_id', 'check_id'],
+                'filterableAttributes'=> ['vendor_id', 'deposit', 'transaction_date', 'posted_date', 'expense_id', 'check_id'],
                 'sortableAttributes' => ['transaction_date'],
                 'searchableAttributes' => ['amount'],
                 'typoTolerance' => ['enabled' => false],

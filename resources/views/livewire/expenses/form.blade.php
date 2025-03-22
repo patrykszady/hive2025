@@ -15,7 +15,8 @@
             >
             <flux:input
                 wire:model.live.debounce.500ms="form.amount"
-                x-bind:disabled="save_form == 'save' || expense_transactions"
+                {{--  || expense_transactions --}}
+                x-bind:disabled="save_form == 'save'"
                 label="Amount"
                 type="number"
                 size="lg"
