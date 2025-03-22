@@ -72,9 +72,11 @@ class MatchVendor extends Component
 
     public function store_expense_vendors()
     {
+        // dd('in store_expense_vendors');
         // $this->authorize('create', Expense::class);
         $this->validate();
 
+        // dd($this->match_expense_merchant_names);
         foreach ($this->match_expense_merchant_names as $key => $vendor_match) {
             if ($vendor_match['vendor_id'] == 'NEW') {
                 //new Retail Vendor
@@ -111,7 +113,6 @@ class MatchVendor extends Component
             }
         }
 
-        //add vendor to expense ...
         //6-8-2022 run in a queue?
         app(\App\Http\Controllers\TransactionController::class)->add_transaction_to_expenses_sin_vendor();
 
@@ -120,8 +121,8 @@ class MatchVendor extends Component
 
     public function store()
     {
-        $this->validate();
         // $this->authorize('create', Expense::class);
+        $this->validate();
 
         foreach ($this->match_merchant_names as $key => $vendor_match) {
             if ($vendor_match['vendor_id'] == 'NEW') {

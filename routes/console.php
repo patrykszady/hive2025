@@ -4,7 +4,7 @@ use Illuminate\Support\Facades\Schedule;
 
 //->timezone('America/Chicago')->between('6:00', '20:00')
 //->sendOutputTo(storage_path('logs/schedule.log'), true)
-// Schedule::call('\App\Http\Controllers\ReceiptController@ms_graph_email_api')->everyTenMinutes();
+Schedule::call('\App\Http\Controllers\ReceiptController@ms_graph_email_api')->everyTenMinutes();
 Schedule::call('\App\Http\Controllers\LeadController@leads_in_email')->everyTenMinutes();
 Schedule::call('\App\Http\Controllers\TransactionController@plaid_item_status')->hourly();
 Schedule::call('\App\Http\Controllers\TransactionController@plaid_transactions_sync')->hourly();

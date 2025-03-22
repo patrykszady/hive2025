@@ -1557,14 +1557,12 @@ class TransactionController extends Controller
     public function add_transaction_to_expenses_sin_vendor()
     {
         $expenses = Expense::with('receipts')->where('vendor_id', 0)->get();
-
         $vendor_desc = VendorTransaction::all();
+
         foreach ($expenses as $expense) {
             $receipt = $expense->receipts()->latest()->first();
             if (isset($receipt->receipt_items->merchant_name)) {
                 $merchant_name = $receipt->receipt_items->merchant_name;
-                // $vendor = $vendor_desc->where('desc', 'LIKE', '%' . $merchant_name . '%')->first();
-                // dd($vendor);
                 $vendor = $vendor_desc->where('desc', $merchant_name)->first();
 
                 if ($vendor) {
