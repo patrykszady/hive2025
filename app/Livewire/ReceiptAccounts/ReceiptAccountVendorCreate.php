@@ -9,6 +9,9 @@ use App\Models\Expense;
 use App\Models\Transaction;
 use App\Models\TransactionBulkMatch;
 use App\Models\Vendor;
+use App\Http\Controllers\TransactionController;
+
+use App\Jobs\TransactionVendorBulkMatchJob;
 
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 
@@ -219,6 +222,9 @@ class ReceiptAccountVendorCreate extends Component
             // route / href / wire:click
             text: '',
         );
+
+        //queue TransactionController@transaction_vendor_bulk_match
+        TransactionVendorBulkMatchJob::dispatch();
     }
 
     public function render()
