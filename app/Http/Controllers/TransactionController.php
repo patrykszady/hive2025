@@ -1904,104 +1904,103 @@ class TransactionController extends Controller
             }
         }
 
-        dd('too far');
-        $matches = TransactionBulkMatch::withoutGlobalScopes()->get();
+        // $matches = TransactionBulkMatch::withoutGlobalScopes()->get();
 
-        foreach ($matches as $match) {
-            //get vendor back accounts..
-            $bank_account_ids = $match->belongs_to_vendor->bank_accounts->pluck('id')->toArray();
-            // dd($match);
-            $transactions =
-                Transaction::withoutGlobalScopes()
-                    ->whereNull('deleted_at')
-                    ->whereIn('bank_account_id', $bank_account_ids)
-                    ->where('vendor_id', $match->vendor_id)
-                    ->whereDoesntHave('expense')
-                    ->whereNull('check_number')
-                    // ->where('id', 21390)
-                    // ->whereNotNull('posted_date')
-                    //today()->subDays(3)
-                    // ->where('posted_date', '<=', today()->format('Y-m-d'))
-                    ->when($match->amount != null, function ($query) use ($match) {
-                        return $query->where('amount', isset($match->options['amount_type']) ? $match->options['amount_type'] : '=', $match->amount);
-                    })
-                    ->when(isset($match->options['desc']), function ($query) use ($match) {
-                        return $query->where('plaid_merchant_description', $match->options['desc']);
-                    })
-                    ->get();
-            // dd($transactions);
-            $expenses =
-                Expense::withoutGlobalScopes()
-                    ->whereNull('deleted_at')
-                    ->where('vendor_id', $match->vendor_id)
-                    //repetative?
-                    ->where('belongs_to_vendor_id', $match->belongs_to_vendor_id)
-                    ->where('project_id', null)
-                    ->where('distribution_id', null)
-                    ->when($match->amount != null, function ($query) use ($match) {
-                        return $query->where('amount', isset($match->options['amount_type']) ? $match->options['amount_type'] : '=', $match->amount);
-                    })
-                    ->get();
-            // dd($expenses);
+        // foreach ($matches as $match) {
+        //     //get vendor back accounts..
+        //     $bank_account_ids = $match->belongs_to_vendor->bank_accounts->pluck('id')->toArray();
+        //     // dd($match);
+        //     $transactions =
+        //         Transaction::withoutGlobalScopes()
+        //             ->whereNull('deleted_at')
+        //             ->whereIn('bank_account_id', $bank_account_ids)
+        //             ->where('vendor_id', $match->vendor_id)
+        //             ->whereDoesntHave('expense')
+        //             ->whereNull('check_number')
+        //             // ->where('id', 21390)
+        //             // ->whereNotNull('posted_date')
+        //             //today()->subDays(3)
+        //             // ->where('posted_date', '<=', today()->format('Y-m-d'))
+        //             ->when($match->amount != null, function ($query) use ($match) {
+        //                 return $query->where('amount', isset($match->options['amount_type']) ? $match->options['amount_type'] : '=', $match->amount);
+        //             })
+        //             ->when(isset($match->options['desc']), function ($query) use ($match) {
+        //                 return $query->where('plaid_merchant_description', $match->options['desc']);
+        //             })
+        //             ->get();
+        //     // dd($transactions);
+        //     $expenses =
+        //         Expense::withoutGlobalScopes()
+        //             ->whereNull('deleted_at')
+        //             ->where('vendor_id', $match->vendor_id)
+        //             //repetative?
+        //             ->where('belongs_to_vendor_id', $match->belongs_to_vendor_id)
+        //             ->where('project_id', null)
+        //             ->where('distribution_id', null)
+        //             ->when($match->amount != null, function ($query) use ($match) {
+        //                 return $query->where('amount', isset($match->options['amount_type']) ? $match->options['amount_type'] : '=', $match->amount);
+        //             })
+        //             ->get();
+        //     // dd($expenses);
 
-            //set project to existing expenses where $expense->project = NO PROJECT (e.g. email receipt linked with transaction before Project was assigned to transaction).
-            foreach ($expenses as $expense) {
-                $expense->update([
-                    'project_id' => null,
-                    //if splits distribution_id = NULL
-                    'distribution_id' => $match->distribution_id,
-                    'created_by_user_id' => 0,
-                ]);
+        //     //set project to existing expenses where $expense->project = NO PROJECT (e.g. email receipt linked with transaction before Project was assigned to transaction).
+        //     foreach ($expenses as $expense) {
+        //         $expense->update([
+        //             'project_id' => null,
+        //             //if splits distribution_id = NULL
+        //             'distribution_id' => $match->distribution_id,
+        //             'created_by_user_id' => 0,
+        //         ]);
 
-                //splits
-                if ($expense->splits()->count() == 0) {
-                    $this->transaction_vendor_bulk_match_splits($match, $expense, $expense['amount']);
-                }
-            }
+        //         //splits
+        //         if ($expense->splits()->count() == 0) {
+        //             $this->transaction_vendor_bulk_match_splits($match, $expense, $expense['amount']);
+        //         }
+        //     }
 
-            //create new expense foreach transaction
-            foreach ($transactions as $transaction) {
-                //Find Duplicates $expense = $duplicate
-                //date diff
-                $duplicate_start_date = $transaction->transaction_date->subDays(1)->format('Y-m-d');
-                $duplicate_end_date = $transaction->transaction_date->addDays(4)->format('Y-m-d');
+        //     //create new expense foreach transaction
+        //     foreach ($transactions as $transaction) {
+        //         //Find Duplicates $expense = $duplicate
+        //         //date diff
+        //         $duplicate_start_date = $transaction->transaction_date->subDays(1)->format('Y-m-d');
+        //         $duplicate_end_date = $transaction->transaction_date->addDays(4)->format('Y-m-d');
 
-                //find duplicate expenses
-                $duplicates =
-                    Expense::where('belongs_to_vendor_id', $transaction->bank_account->bank->vendor_id)->
-                        whereNull('deleted_at')->
-                        where('amount', $transaction->amount)->
-                        whereBetween('date', [$duplicate_start_date, $duplicate_end_date])->
-                        get();
+        //         //find duplicate expenses
+        //         $duplicates =
+        //             Expense::where('belongs_to_vendor_id', $transaction->bank_account->bank->vendor_id)->
+        //                 whereNull('deleted_at')->
+        //                 where('amount', $transaction->amount)->
+        //                 whereBetween('date', [$duplicate_start_date, $duplicate_end_date])->
+        //                 get();
 
-                if ($duplicates->count() >= 1) {
-                    foreach ($duplicates as $duplicate) {
-                        $duplicate->date_diff = $transaction->transaction_date->floatDiffInDays($duplicate->date);
-                    }
+        //         if ($duplicates->count() >= 1) {
+        //             foreach ($duplicates as $duplicate) {
+        //                 $duplicate->date_diff = $transaction->transaction_date->floatDiffInDays($duplicate->date);
+        //             }
 
-                    $expense_duplicate = $duplicates->sortBy('date_diff')->first();
-                    $expense = $expense_duplicate;
-                } else {
-                    $expense = Expense::create([
-                        'amount' => $transaction->amount,
-                        'date' => $transaction->transaction_date,
-                        'project_id' => null,
-                        //if splits distribution_id = NULL
-                        'distribution_id' => $match->distribution_id,
-                        'vendor_id' => $transaction->vendor_id,
-                        'check_id' => null,
-                        'paid_by' => null,
-                        'belongs_to_vendor_id' => $match->belongs_to_vendor_id,
-                        'created_by_user_id' => 0,
-                    ]);
+        //             $expense_duplicate = $duplicates->sortBy('date_diff')->first();
+        //             $expense = $expense_duplicate;
+        //         } else {
+        //             $expense = Expense::create([
+        //                 'amount' => $transaction->amount,
+        //                 'date' => $transaction->transaction_date,
+        //                 'project_id' => null,
+        //                 //if splits distribution_id = NULL
+        //                 'distribution_id' => $match->distribution_id,
+        //                 'vendor_id' => $transaction->vendor_id,
+        //                 'check_id' => null,
+        //                 'paid_by' => null,
+        //                 'belongs_to_vendor_id' => $match->belongs_to_vendor_id,
+        //                 'created_by_user_id' => 0,
+        //             ]);
 
-                    //splits
-                    // $this->transaction_vendor_bulk_match_splits($match, $expense, $transaction['amount']);
-                }
+        //             //splits
+        //             // $this->transaction_vendor_bulk_match_splits($match, $expense, $transaction['amount']);
+        //         }
 
-                $transaction->expense_id = $expense->id;
-                $transaction->save();
-            }
-        }
+        //         $transaction->expense_id = $expense->id;
+        //         $transaction->save();
+        //     }
+        // }
     }
 }
