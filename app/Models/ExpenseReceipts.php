@@ -31,25 +31,17 @@ class ExpenseReceipts extends Model
 
     public function getNotesAttribute($value)
     {
-        if (! empty($this->receipt_items->handwritten_notes)) {
-            $handwritten_notes = $this->receipt_items->handwritten_notes;
-            $handwritten_notes = implode(' | ', $handwritten_notes);
-        } else {
-            $handwritten_notes = false;
-        }
+        // Normalize handwritten_notes and purchase_order as arrays
+        $handwritten_notes = isset($this->receipt_items->handwritten_notes)
+            ? (array) $this->receipt_items->handwritten_notes
+            : [];
 
-        if (isset($this->receipt_items->purchase_order)) {
-            $purchase_order = $this->receipt_items->purchase_order;
-        } else {
-            $purchase_order = false;
-        }
+        $purchase_order = isset($this->receipt_items->purchase_order)
+            ? (array) $this->receipt_items->purchase_order
+            : [];
 
-        if($handwritten_notes || $purchase_order){
-            $notes = array_filter([$handwritten_notes, $purchase_order]);
-            $notes = implode(' | ', $notes);
-        }else{
-            $notes = false;
-        }
+        // Combine, filter, and implode the notes
+        $notes = implode(' | ', array_filter(array_merge($handwritten_notes, $purchase_order)));
 
         return $notes;
     }
