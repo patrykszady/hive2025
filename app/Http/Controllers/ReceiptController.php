@@ -1049,6 +1049,8 @@ class ReceiptController extends Controller
 
                 $move_type = $this->create_expense_from_email($company_email, $message, $receipt_account, $receipt, $receipt_html_main, $email_date, $image_email_url);
 
+                // testt only
+
                 //move message here...
                 if ($move_type == 'duplicate') {
                     //move to duplicate folder
