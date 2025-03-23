@@ -72,6 +72,13 @@ return [
             'days' => 30,
         ],
 
+        'ms_message_error_folder' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/ms_message_error_folder.log'),
+            'level' => 'debug',
+            'days' => 30,
+        ],
+
         'plaid_transaction_removal' => [
             'driver' => 'single',
             'path' => storage_path('logs/plaid_transaction_removal.log'),

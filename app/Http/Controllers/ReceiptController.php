@@ -1040,7 +1040,7 @@ class ReceiptController extends Controller
 
                 //PREVIEWS HTML RECEIPT
                 // print_r($receipt_html_main);
-                // dd('here');
+                // dd();
 
                 //create Expense
                 if (! isset($image_email_url)) {
@@ -1063,8 +1063,6 @@ class ReceiptController extends Controller
 
                     continue;
                 } elseif ($move_type == 'error') {
-                    // Log::channel('ms_form_amount_not_found')->info($ocr_receipt_extract_prefix);
-
                     $this->ms_graph->createRequest('POST', '/users/'.$company_email->api_json['user_id'].'/messages/'.$message->getId().'/move')
                         ->attachBody(
                             [
@@ -1072,6 +1070,8 @@ class ReceiptController extends Controller
                             ]
                         )
                         ->execute();
+
+                    Log::channel('ms_message_error_folder')->error((array) $message);
 
                     continue;
                 } else {
@@ -1410,7 +1410,6 @@ class ReceiptController extends Controller
         //ocr the file
         $document_model = $receipt->options['document_model'];
         $ocr_receipt_extracted = $this->azure_receipts($ocr_path, $doc_type, $document_model);
-
         //pass receipt info to ocr_extract method
         $ocr_receipt_data = $this->ocr_extract($ocr_receipt_extracted, null, 'email');
         // dd($ocr_receipt_data);
@@ -1851,10 +1850,6 @@ class ReceiptController extends Controller
             $transaction_date = null;
         }
 
-        // if(is_null($transaction_date)){
-        //     $this->
-        // }
-
         //change year
         if ($transaction_date != null) {
             //if transaction date has letters
@@ -1965,9 +1960,8 @@ class ReceiptController extends Controller
             $formatted_items = null;
         }
 
-        // dd($formatted_items);
-
         //AMOUNT
+        $amount = NULL;
         if (isset($ocr_receipt_extract_prefix['Total'])) {
             $amount = $ocr_receipt_extract_prefix['Total']['valueCurrency']['amount'];
         } elseif (isset($ocr_receipt_extract_prefix['InvoiceTotal'])) {
@@ -1978,21 +1972,14 @@ class ReceiptController extends Controller
             if (! $key_value_pairs->where('key.content', 'Authorized Amount:')->isEmpty()) {
                 $amount = $key_value_pairs->where('key.content', 'Authorized Amount:')->first()->value->content;
             }
-            //ONLY if coming from ExpensesNewForm, allow $amount above to be empty. ONLY
         } else {
             //if coming from ExpensesNewForm, allow $amount above to be empty.
             if (! is_null($expense_amount)) {
                 $amount = $expense_amount;
-            } else {
-                $ocr_receipt_data = [
-                    'error' => true,
-                ];
-
-                return $ocr_receipt_data;
             }
         }
 
-        if (! isset($amount) && is_null($subtotal)) {
+        if ($amount === NULL && is_null($subtotal)) {
             $ocr_receipt_data = [
                 'error' => true,
             ];
@@ -2002,10 +1989,15 @@ class ReceiptController extends Controller
             if (is_array($amount)) {
                 $amount = $amount[0];
             } else {
-                if ($amount == 0 && ! is_null($subtotal)) {
-                    $amount = $subtotal;
-                }
+                if ($amount == NULL && (!is_null($subtotal) && !is_null($total_tax))) {
+                    $amount = $subtotal + $total_tax;
+                }else{
+                    $ocr_receipt_data = [
+                        'error' => true,
+                    ];
 
+                    return $ocr_receipt_data;
+                }
                 // if(!is_null($tip_amount)){
                 //     dd([$amount, $ocr_receipt_extract_prefix]);
                 // }
