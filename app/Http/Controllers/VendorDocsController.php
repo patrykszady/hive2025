@@ -49,11 +49,12 @@ class VendorDocsController extends Controller
     //Show full-size receipt to anyone with a link
     // No Middleware or Policies
     //PUBLIC AS FUCK! BE CAREFUL!
+    //Also on ReceiptController->original_receipt
     public function document($filename)
     {
         $path = storage_path('files/vendor_docs/'.$filename);
 
-        if (File::extension($filename) == 'pdf') {
+        if (strtolower(File::extension($filename)) === 'pdf') {
             $response = Response::make(file_get_contents($path), 200, [
                 'Content-Type' => 'application/pdf',
             ]);

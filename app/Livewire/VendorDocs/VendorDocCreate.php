@@ -87,7 +87,8 @@ class VendorDocCreate extends Component
         //validate, file must be pdf, jpg, png
         $this->validate();
         // $this->authorize('update', $this->expense);
-        $doc_type = $this->doc_file->getClientOriginalExtension();
+        $doc_type = strtolower($this->doc_file->getClientOriginalExtension());
+
         $ocr_filename = $this->vendor->id.'-'.auth()->user()->vendor->id.'-'.date('Y-m-d-H-i-s').'.'.$doc_type;
         $file_location = 'files/vendor_docs/'.$ocr_filename;
         //save file for this->vendor

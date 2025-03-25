@@ -1482,7 +1482,7 @@ class ReceiptController extends Controller
                 where('vendor_id', $receipt->vendor_id)->
                 whereNull('deleted_at')->
                 where('amount', $amount)->
-                where('invoice', $invoice)->
+                // where('invoice', $invoice)->
                 where('date', $date)->
                 // whereBetween('date', [Carbon::create($date)->subDay(), Carbon::create($date)->addDays(4)])->
                 get();
@@ -2089,7 +2089,7 @@ class ReceiptController extends Controller
         $filename = strtolower($filename);
         $path = storage_path('files/' . $folder . '/'.$filename);
 
-        if (File::extension($filename) == 'pdf') {
+        if (strtolower(File::extension($filename)) === 'pdf') {
             $response = Response::make(file_get_contents($path), 200, [
                 'Content-Type' => 'application/pdf',
             ]);
@@ -2104,7 +2104,7 @@ class ReceiptController extends Controller
     {
         $path = storage_path('files/_temp_ocr/'.$filename);
 
-        if (File::extension($filename) == 'pdf') {
+        if (strtolower(File::extension($filename)) === 'pdf') {
             $response = Response::make(file_get_contents($path), 200, [
                 'Content-Type' => 'application/pdf',
             ]);
