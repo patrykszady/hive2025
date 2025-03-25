@@ -956,6 +956,7 @@ class ReceiptController extends Controller
 
                 //remove images
                 //ONLY IF {"receipt_image_regex":}  is NOT set
+                $image_email_url = null;
                 if (! isset($receipt->options['receipt_image_regex'])) {
                     $string = preg_replace("/<img[^>]+\>/i", '', $string);
                 } else {
@@ -969,7 +970,10 @@ class ReceiptController extends Controller
 
                     //6-27-2023 error if cant find
                 }
-
+                //create Expense
+                // if (! isset($image_email_url)) {
+                //     $image_email_url = null;
+                // }
                 // SHOW HTML RENDERED
                 // print_r($string);
                 // dd();
@@ -1042,16 +1046,8 @@ class ReceiptController extends Controller
                 // print_r($receipt_html_main);
                 // dd();
 
-                //create Expense
-                if (! isset($image_email_url)) {
-                    $image_email_url = null;
-                }
-
-                $move_type = $this->create_expense_from_email($company_email, $message, $receipt_account, $receipt, $receipt_html_main, $email_date, $image_email_url);
-
-                // testt only
-
                 //move message here...
+                $move_type = $this->create_expense_from_email($company_email, $message, $receipt_account, $receipt, $receipt_html_main, $email_date, $image_email_url);
                 if ($move_type == 'duplicate') {
                     //move to duplicate folder
                     $this->ms_graph->createRequest('POST', '/users/'.$company_email->api_json['user_id'].'/messages/'.$message->getId().'/move')
@@ -1412,9 +1408,9 @@ class ReceiptController extends Controller
         //ocr the file
         $document_model = $receipt->options['document_model'];
         $ocr_receipt_extracted = $this->azure_receipts($ocr_path, $doc_type, $document_model);
+
         //pass receipt info to ocr_extract method
         $ocr_receipt_data = $this->ocr_extract($ocr_receipt_extracted, null, 'email');
-        // dd($ocr_receipt_data);
 
         if (isset($ocr_receipt_data['error'])) {
             $move_type = 'error';
@@ -1991,15 +1987,17 @@ class ReceiptController extends Controller
             if (is_array($amount)) {
                 $amount = $amount[0];
             } else {
-                if ($amount == NULL && (!is_null($subtotal) && !is_null($total_tax))) {
+                if ($amount === NULL && (!is_null($subtotal) && !is_null($total_tax))) {
                     $amount = $subtotal + $total_tax;
-                }else{
-                    $ocr_receipt_data = [
-                        'error' => true,
-                    ];
-
-                    return $ocr_receipt_data;
                 }
+
+                // else{
+                //     $ocr_receipt_data = [
+                //         'error' => true,
+                //     ];
+
+                //     return $ocr_receipt_data;
+                // }
                 // if(!is_null($tip_amount)){
                 //     dd([$amount, $ocr_receipt_extract_prefix]);
                 // }

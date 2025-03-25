@@ -1,5 +1,5 @@
-<div class="max-w-2xl">
-    <flux:card class="space-y-2">
+<div class="max-w-4xl space-y-2">
+    <flux:card>
         <div class="flex justify-between">
             <flux:heading size="lg">Client Filters</flux:heading>
             @can('create', App\Models\Client::class)
@@ -14,13 +14,11 @@
         </div>
     </flux:card>
 
-    <flux:card class="mt-4 space-y-2">
-        <div>
-            <flux:heading size="lg">Clients</flux:heading>
-        </div>
+    <flux:card>
+        <flux:heading size="lg">Clients</flux:heading>
 
-        <div class="space-y-2">
-            <flux:table :paginate="$this->clients">
+        <div>
+            <flux:table :paginate="$this->clients" wire:loading.class="opacity-50 text-opacity-50">
                 <flux:table.columns>
                     <flux:table.column>Name</flux:table.column>
                     <flux:table.column>Address</flux:table.column>

@@ -10,6 +10,7 @@ use App\Models\LineItem;
 use App\Models\Project;
 use App\Models\UserVendor;
 use App\Models\Vendor;
+
 use App\Observers\BidObserver;
 use App\Observers\ClientObserver;
 use App\Observers\EstimateLineItemObserver;
@@ -18,6 +19,7 @@ use App\Observers\LineItemObserver;
 use App\Observers\ProjectObserver;
 use App\Observers\UserVendorObserver;
 use App\Observers\VendorObserver;
+
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -42,7 +44,10 @@ class AppServiceProvider extends ServiceProvider
     /**
      * Register any application services.
      */
-    public function register(): void {}
+    public function register(): void
+    {
+
+    }
 
     /**
      * Bootstrap any application services.

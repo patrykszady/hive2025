@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Scopes\ProjectScope;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -117,9 +118,13 @@ class Project extends Model
         return $this->hasOne(ProjectStatus::class)->orderBy('start_date', 'DESC')->latest();
     }
 
+    public function last_complete_status(): HasOne
+    {
+        return $this->hasOne(ProjectStatus::class)->where('title', 'Complete')->orderBy('start_date', 'DESC')->latest();
+    }
+
     public function scopeStatus($query, $status)
     {
-        // dd($status);
         return $query->with('last_status')->get()->whereIn('last_status.title', $status);
     }
 

@@ -1,27 +1,31 @@
 {{-- PROJECT DETAILS --}}
-<x-lists.details_card>
-    {{-- HEADING --}}
-    <x-slot:heading>
-        <div>
-            <flux:heading size="lg" class="mb-0">Distributions</flux:heading>
-            <flux:subheading class="mb-0">Split Project profits between shareholders.</flux:subheading>
-        </div>
-
+<flux:card>
+    <div class="flex justify-between">
+        <flux:heading size="lg">Distributions</flux:heading>
         <flux:button
             size="sm"
             wire:click="$dispatchTo('distributions.distribution-create', 'newDistribution')"
             >
             Add New
         </flux:button>
-    </x-slot>
+    </div>
 
-    {{-- DETAILS --}}
-    <x-lists.details_list>
-        @foreach($distributions as $distribution)
-            {{--  . money($distribution->balances->balance) --}}
-            <x-lists.details_item title="{{$distribution->name}}" detail="{{$registration == TRUE ? '' : 'Balance: '}}" href="{{$registration == TRUE ? '' : route('distributions.show', $distribution->id)}}" />
-        @endforeach
-    </x-lists.details_list>
+    <flux:subheading class="m-0">Split Project profits between shareholders.</flux:subheading>
 
-    <livewire:distributions.distribution-create />
-</x-lists.details_card>
+    <div class="space-y-2">
+        <flux:table>
+            <flux:table.columns>
+                <flux:table.column>Distribution</flux:table.column>
+            </flux:table.columns>
+
+            <flux:table.rows>
+                @foreach ($this->distributions as $distribution)
+                    <flux:table.row :key="$distribution->id">
+                        {{-- detail="{{$registration == TRUE ? '' : 'Balance: '}}" href="{{$registration == TRUE ? '' : route('distributions.show', $distribution->id)}}"  --}}
+                        <flux:table.cell>{{ $distribution->name }}</flux:table.cell>
+                    </flux:table.row>
+                @endforeach
+            </flux:table.rows>
+        </flux:table>
+    </div>
+</flux:card>

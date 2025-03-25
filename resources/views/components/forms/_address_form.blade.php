@@ -1,15 +1,15 @@
-<flux:select wire:model.live="address_selection" variant="combobox" :filter="false">
+{{-- <flux:select wire:model.live="address_selection" variant="combobox" :filter="false">
     <x-slot name="input">
         <flux:select.input wire:model.live.debounce.500ms="address" placeholder="Address..."/>
     </x-slot>
 
-    {{-- @foreach ($addresses as $key => $address)
-        <flux:option value="{{$key}}" wire:key="{{$key}}">{{$address->formatted_address}}</flux:option>
-    @endforeach --}}
+    @foreach ($addresses as $key => $address)
+        <flux:select.option value="{{$key}}" wire:key="{{$key}}">{{$address->formatted_address}}</flux:select.option>
+    @endforeach
 </flux:select>
 
 <flux:fieldset>
-    {{-- <flux:legend>Address</flux:legend> --}}
+    <flux:legend>Address</flux:legend>
     <div class="space-y-2">
         <div class="grid grid-cols-2 gap-4">
             <flux:input wire:model.live.debounce.500ms="form.address" label="Street Address" placeholder="123 Main St" />
@@ -22,4 +22,4 @@
             <flux:input wire:model.live.debounce.500ms="form.zip_code" label="Zip Code" maxlength="5" minlength="5" placeholder="60640" />
         </div>
     </div>
-</flux:fieldset>
+</flux:fieldset> --}}

@@ -5,12 +5,12 @@ namespace App\Livewire\Clients;
 use App\Models\Client;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
-// use Livewire\Attributes\Lazy;
+use Livewire\Attributes\Lazy;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 use Livewire\WithPagination;
 
-// #[Lazy]
+#[Lazy]
 class ClientsIndex extends Component
 {
     use AuthorizesRequests, WithPagination;
@@ -38,9 +38,6 @@ class ClientsIndex extends Component
     {
         if ($this->sortBy === $column) {
             $this->sortDirection = $this->sortDirection === 'asc' ? 'desc' : 'asc';
-        } else {
-            $this->sortBy = $column;
-            $this->sortDirection = 'asc';
         }
     }
 

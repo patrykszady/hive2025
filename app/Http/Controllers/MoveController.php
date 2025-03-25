@@ -28,6 +28,7 @@ use App\Models\Transaction;
 use App\Models\User;
 use App\Models\Vendor;
 use Carbon\Carbon;
+
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -38,6 +39,7 @@ class MoveController extends Controller
 {
     public function move()
     {
+        dd('in move');
         $checks = Check::whereYear('date', 2024)
                     ->where('belongs_to_vendor_id', 1)
                     ->with('transactions')

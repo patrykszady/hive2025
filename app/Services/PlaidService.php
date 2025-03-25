@@ -75,6 +75,4 @@ class PlaidService
             return ['error' => $e->getMessage()];
         }
     }
-
-
 }

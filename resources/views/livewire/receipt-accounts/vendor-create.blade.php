@@ -83,6 +83,7 @@
                                 {{-- x-bind:placeholder="$wire.get('transactions_bulk_matches.{{ $index }}.split')" --}}
                                 placeholder="Choose distribution..."
                                 >
+                                {{-- <flux:select.option value="" disabled>{{$match->split === true ? 'Match is Split' : 'Choose distribution...'}}</flux:select.option> --}}
 
                                 @foreach($this->distributions as $distribution)
                                     <flux:select.option value="{{$distribution->id}}">{{$distribution->name}}</flux:select.option>

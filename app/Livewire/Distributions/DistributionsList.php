@@ -5,23 +5,19 @@ namespace App\Livewire\Distributions;
 use App\Models\Distribution;
 use Livewire\Component;
 
+use Livewire\Attributes\Computed;
+
 class DistributionsList extends Component
 {
-    protected $listeners = ['refreshComponent' => '$refresh', 'refreshForce'];
-
-    public $distributions = [];
+    //refreshForce
+    protected $listeners = ['refreshComponent' => '$refresh'];
 
     public $registration = false;
 
-    public function mount()
+    #[Computed]
+    public function distributions()
     {
-        $this->distributions = Distribution::all();
-    }
-
-    public function refreshForce()
-    {
-        $this->mount();
-        $this->render();
+        return Distribution::all();
     }
 
     public function render()

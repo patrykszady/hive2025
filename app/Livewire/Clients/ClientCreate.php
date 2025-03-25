@@ -5,6 +5,9 @@ namespace App\Livewire\Clients;
 use App\Livewire\Forms\ClientForm;
 use App\Models\Client;
 use App\Models\User;
+
+use App\Services\GooglePlacesService;
+
 use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
@@ -33,71 +36,65 @@ class ClientCreate extends Component
         'form_submit' => 'save',
     ];
 
-    // public $address = NULL;
-    // public $address_selection = NULL;
-    // public $addresses = [];
+    public $address_query = '';
+    public $address_suggestions = [];
+    public $address_selection = '';
 
     public $team_member = false;
 
-    protected $listeners = ['addUser', 'resetModal', 'editClient', 'newClient'];
+    protected $listeners = ['addUser', 'editClient', 'newClient'];
+    protected $googlePlacesService;
 
     public function rules()
     {
         return [
-            // 'address' => 'nullable',
-            // 'address_selection' => 'nullable',
+            'address_query' => 'nullable',
+            'address_selection' => 'nullable',
             // 'user.full_name' => 'nullable',
             // 'client.name' => 'nullable',
         ];
     }
 
-    public function updated($field, $value)
+    //boot instead of public function mount(GooglePlacesService $googlePlacesService)
+    //so that protected $googlePlacesService can be initialized
+    public function boot(GooglePlacesService $googlePlacesService)
     {
-        // if ($field === 'address'){
-        //     $response = \GoogleMaps::load('geocoding')
-        //         ->setParam(['address' => $value])
-        //         ->get();
-
-        //     $result = collect(json_decode($response))->toArray();
-
-        //     if(!empty($result)){
-        //         $this->addresses = $result['results'];
-        //     }
-        // }
-
-        // if ($field === 'address_selection'){
-        //     $address = collect($this->addresses[$value]->address_components);
-        //     // Define the types you want to filter by
-        //     $typesToFilter = ['street_number', 'route', 'locality', 'administrative_area_level_1', 'postal_code'];
-
-        //     $address_array = [];
-
-        //     $address->each(function ($item) use ($typesToFilter, &$address_array) {
-        //         foreach ($item->types as $type) {
-        //             if (in_array($type, $typesToFilter)) {
-        //                 $address_array[$type] = $item->short_name;
-        //             }
-        //         }
-        //     });
-
-        //     $this->form->address = $address_array['street_number'] . ' ' . $address_array['route'];
-        //     $this->form->city = $address_array['locality'];
-        //     $this->form->state = $address_array['administrative_area_level_1'];
-        //     $this->form->zip_code = $address_array['postal_code'];
-        // }
-
-        if ($this->user_client_id != 'NEW') {
-            if (is_null($this->user_client_id)) {
-                $this->view_text['button_text'] = 'Update Client';
-            } else {
-                $this->view_text['button_text'] = 'View Existing Client';
-            }
-        } else {
-            $this->view_text['button_text'] = 'Create Client';
-        }
-
-        $this->validateOnly($field);
+        $this->googlePlacesService = $googlePlacesService; // Properly initialize the service
     }
+
+    public function updatedAddressQuery($value)
+    {
+        $this->address_suggestions = $this->googlePlacesService->getAutocompleteSuggestions($this->address_query);
+    }
+
+    public function updatedAddressSelection($value)
+    {
+        $address_parts = $this->googlePlacesService->getPlaceDetails($this->address_selection);
+        $this->form->address = $address_parts['street_number'] . ' ' . $address_parts['route'];
+        $this->form->city = $address_parts['locality'];
+        $this->form->state = $address_parts['administrative_area_level_1'];
+        $this->form->zip_code = $address_parts['postal_code'];
+
+        //reset public properties
+        $this->address_selection = '';
+        $this->address_query = '';
+        $this->address_suggestions = [];
+    }
+
+    // public function updated($field, $value)
+    // {
+    //     // if ($this->user_client_id != 'NEW') {
+    //     //     if (is_null($this->user_client_id)) {
+    //     //         $this->view_text['button_text'] = 'Update Client';
+    //     //     } else {
+    //     //         $this->view_text['button_text'] = 'View Existing Client';
+    //     //     }
+    //     // } else {
+    //     //     $this->view_text['button_text'] = 'Create Client';
+    //     // }
+
+        // $this->validateOnly($field);
+    // }
 
     public function addUser(User $user, $client_id)
     {
@@ -145,15 +142,6 @@ class ClientCreate extends Component
         // $this->address = TRUE;
     }
 
-    // // Everthing in top pulbic should be reset here
-    // public function resetModal()
-    // {
-
-    //     // $this->client = Client::make();
-    //     // $this->user = NULL;
-    //     // $this->address = NULL;
-    // }
-
     // public function add_user_to_client()
     // {
     //     //ADD USER TO CLIENT
@@ -177,8 +165,6 @@ class ClientCreate extends Component
     public function editClient(Client $client)
     {
         // dd('in editClient');
-        // $this->resetModal();
-
         $this->client = $client;
 
         // if(!$expense->splits->isEmpty()){
@@ -220,7 +206,6 @@ class ClientCreate extends Component
 
     public function save()
     {
-        // dd($this);
         //if existing Client ... redirect to that with Livewire.navigate
         if (is_numeric($this->user_client_id)) {
             $this->modal('client_form_modal')->close();
