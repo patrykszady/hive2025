@@ -533,7 +533,6 @@ class ReceiptController extends Controller
                 $orders = collect(json_decode($response->getBody()->getContents(), true)['orders']);
 
                 foreach ($orders as $orders_key => $order) {
-                    dd($orders);
                     $order_date = Carbon::parse($order['orderDate'])->setTimezone('America/Chicago')->format('Y-m-d');
 
                     //check for expense duplicates

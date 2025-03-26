@@ -1784,16 +1784,27 @@ class TransactionController extends Controller
     public function transaction_vendor_bulk_match()
     {
         $vendor_receipt_accounts = ReceiptAccount::withoutGlobalScopes()->with('vendor')->get()->groupBy('belongs_to_vendor_id');
-        //dont create if receiptaccount has receipts (email/api receipt capture)
+
         foreach($vendor_receipt_accounts as $vendor_id => $receipt_accounts){
+            // Retrieve the bank_account_ids once for the vendor
+            $bank_account_ids = $receipt_accounts->first()->belongs_to_vendor->bank_accounts->pluck('id')->toArray();
+
             foreach($receipt_accounts as $receipt_account){
-                $bank_account_ids = $receipt_account->belongs_to_vendor->bank_accounts->pluck('id')->toArray();
+                //dont create if receiptaccount has receipts (email/api receipt capture)
+                // if($receipt_account->vendor->receipts->isNotEmpty()){
+                //     continue;
+                // }
+
                 if($receipt_account->vendor->transactions_bulk_match->isEmpty()){
+                    //$receipt_account->vendor = $vendor
+                    //$receipt_account->belongs_to_vendor_id = belongs_to_vendor_id
+
                     $transactions =
                         Transaction::withoutGlobalScopes()
                             ->whereNull('deleted_at')
                             ->whereIn('bank_account_id', $bank_account_ids)
-                            ->where('vendor_id', $receipt_account->vendor_id)
+                            ->where('vendor_id', $receipt_account->vendor->id)
+                            //when $receipt_account->vendor->receipts->isNotEmpty()
                             ->whereDoesntHave('expense')
                             ->whereNull('check_number')
                             ->get();
