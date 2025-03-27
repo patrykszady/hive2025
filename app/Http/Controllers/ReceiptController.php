@@ -423,6 +423,7 @@ class ReceiptController extends Controller
         ini_set('max_execution_time', '4800');
 
         $receipt_accounts = ReceiptAccount::withoutGlobalScopes()->where('vendor_id', 54)->whereNotNull('options->refresh_token')->get();
+
         //Initialize the Credentials object.
         //access token and secret from AWS
         $credentials = new \Aws\Credentials\Credentials(env('AMAZON_AWS_ACCESS_TOKEN'), env('AMAZON_AWS_SECRET_TOKEN'));
@@ -483,8 +484,8 @@ class ReceiptController extends Controller
 
             // //FOR TESTING ONLY
             //INDIVIDUAL ORDER
-            $path = '/reports/2021-01-08/orders/113-2420373-2571468/';
-            // $path = '/reports/2021-01-08/orders/';
+            // $path = '/reports/2021-01-08/orders/113-2420373-2571468/';
+            $path = '/reports/2021-01-08/orders/';
             // $params = array(
             //     'includeCharges' => 'true',
             //     'includeLineItems' => 'true',
@@ -503,8 +504,6 @@ class ReceiptController extends Controller
             // $result = collect(json_decode($response->getBody()->getContents(), true));
 
             // dd($result);
-
-
 
             //7-17-2023 find last amazon expenses date
             // '2023-10-14', '2023-10-14'
