@@ -4,6 +4,8 @@ namespace App\Models;
 
 use App\Models\Scopes\EstimateScope;
 use Carbon\Carbon;
+
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -54,22 +56,14 @@ class Estimate extends Model
         return $this->belongsTo(Vendor::class, 'belongs_to_vendor_id');
     }
 
-    // public function getSectionsAttribute($value)
-    // {
-    //     // dd($value);
-    //     //where not removed
-    //     $sections = collect(json_decode($value, true));
-    //     return $sections->where('deleted', '!=', true);
-    //     // dd($sections->where('deleted', '!=', true));
-    //     // foreach($sections as $section){
-    //     //     if(isset($section['deleted'])){
-    //     //         continue;
-    //     //     }else{
-    //     //         // $sections
-    //     //     }
-    //     // }
-    //     // return json_decode($value, true);
-    // }
+    // Define the 'status' accessor
+    protected function status(): Attribute
+    {
+        return Attribute::make(
+            get: fn () => is_null($this->deleted_at) ? 'Active' : 'Disabled'
+        );
+    }
+
 
     public function getClientAttribute()
     {

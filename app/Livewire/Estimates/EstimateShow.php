@@ -7,7 +7,7 @@ use App\Livewire\Projects\ProjectFinances;
 use App\Models\Estimate;
 use App\Models\EstimateLineItem;
 use App\Models\EstimateSection;
-// use App\Livewire\Estimates\EstimatesIndex;
+use App\Livewire\Estimates\EstimatesIndex;
 
 use Flux;
 
@@ -46,12 +46,7 @@ class EstimateShow extends Component
 
     public function mount()
     {
-        $this->sections =
-            //$this->estimate->estimate_sections()->orderBy('order', 'ASC')->get();
-            $this->estimate->estimate_sections;
-        // ->each(function ($item, $key) {
-        //     $item->items_rearrange = FALSE;
-        // });
+        $this->sections = $this->estimate->estimate_sections;
 
         //11-1-2023 MOVE to EstiamteCreate
         //start with one section and an ADD card/button for line items
@@ -111,7 +106,7 @@ class EstimateShow extends Component
             variant: 'success',
             heading: 'Section Removed',
             // route / href / wire:click
-            text: 'Section '.$section->name,
+            text: 'Section Removed',
         );
 
         //dispatch to refresh on project finances
@@ -138,15 +133,10 @@ class EstimateShow extends Component
         );
     }
 
-    // public function itemsRearrange($section_index)
+    // public function disableEstimate()
     // {
-    //     $section = $this->sections[$section_index];
-
-    //     if($section->items_rearrange == FALSE){
-    //         $section->items_rearrange = TRUE;
-    //     }else{
-    //         $section->items_rearrange = FALSE;
-    //     }
+    //     $this->dispatch('disableEstimate', ['estimate' => $this->estimate->id])->to(EstimatesIndex::class);
+    //     // $this->dispatch('estimates.estimates-index', 'disableEstimate', ['estimate' => $this->estimate->id]);
     // }
 
     public function sectionDuplicate($section_index)
@@ -311,24 +301,6 @@ class EstimateShow extends Component
         ]);
 
         //2024-12-25 disappearing toast when the above downloads
-    }
-
-    public function deleteEstimate()
-    {
-        $this->estimate->delete();
-
-        Flux::toast(
-            duration: 10000,
-            position: 'top right',
-            variant: 'success',
-            heading: 'Estimate Removed',
-            // route / href / wire:click
-            text: '',
-        );
-
-        //2024-12-25 dispatch to EstimatesIndex deleteEstimate
-        // $this->dispatch('deleteEstimate')->to(EstimatesIndex::class);
-        $this->redirectRoute('projects.show', ['project' => $this->estimate->project->id]);
     }
 
     #[Title('Estimate')]

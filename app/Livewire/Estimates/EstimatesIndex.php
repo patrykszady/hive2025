@@ -3,6 +3,8 @@
 namespace App\Livewire\Estimates;
 
 use App\Models\Estimate;
+use App\Models\Project;
+
 use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
@@ -16,46 +18,56 @@ class EstimatesIndex extends Component
 
     public $view = 'estimates.index';
 
-    public $project = null;
+    public Project $project;
 
-    protected $listeners = ['refreshComponent' => '$refresh'];
+    protected $listeners = ['refreshComponent' => '$refresh', 'disableEstimate'];
 
     #[Computed]
     public function estimates()
     {
-        $project_id = $this->project ? $this->project->id : null;
+        $project_id = $this->project?->id;
 
-        $estimates = Estimate::withTrashed()
-            ->when($this->project != null, function ($query) use ($project_id) {
-                //order by date Active first, then removed (seperate)
-                return $query->where('project_id', $project_id)->orderBy('deleted_at', 'ASC');
+        return Estimate::withTrashed()
+            ->when($project_id, function ($query) use ($project_id) {
+                $query->where('project_id', $project_id);
             })
-            ->orderBy('created_at', 'DESC')
+            ->orderBy('deleted_at') // Active first
+            ->orderByDesc('created_at') // Latest created_at next
             ->paginate(10);
-
-        $estimates->getCollection()->each(function ($estimate, $key) {
-            if (is_null($estimate->deleted_at)) {
-                $estimate->status = 'Active';
-            } else {
-                $estimate->status = 'Removed';
-            }
-        });
-
-        return $estimates;
     }
 
-    //also on EstimateShow
-    public function deleteEstimate(Estimate $estimate)
+    public function disableEstimate(Estimate $estimate)
     {
-        // $this->estimate = $estimate;
         $estimate->delete();
+
+        if ($this->view === 'estimates.show') {
+            $this->dispatch('navigate', route('projects.show', ['project' => $estimate->project->id]));
+        }
 
         Flux::toast(
             duration: 5000,
             position: 'top right',
             variant: 'success',
-            heading: 'Estimate Removed',
+            heading: 'Estimate Disabled',
             // route / href / wire:click
+            text: '',
+        );
+    }
+
+    public function removeEstimate($estimate_id)
+    {
+        $estimate = Estimate::withTrashed()->with(['estimate_sections', 'estimate_line_items'])->findOrFail($estimate_id);
+
+        $estimate->estimate_line_items()->forceDelete();
+        $estimate->estimate_sections()->forceDelete();
+
+        $estimate->forceDelete();
+
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Estimate Deleted',
             text: '',
         );
     }

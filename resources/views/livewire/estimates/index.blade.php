@@ -4,26 +4,6 @@
             <div class="flex justify-between">
                 <flux:heading size="lg">Filters</flux:heading>
             </div>
-            {{-- NEW PROJECT MODAL --}}
-            {{-- <livewire:projects.project-create :$clients />
-            <flux:separator variant="subtle" />
-
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <flux:input wire:model.live="project_name_search" label="Project" icon="magnifying-glass" placeholder="Search projects..." />
-
-                <flux:select wire:model.live="client_id" label="Client" variant="listbox" searchable placeholder="All Clients...">
-                    <x-slot name="search">
-                        <flux:select.search placeholder="Search..." />
-                    </x-slot>
-                    @foreach ($clients as $client)
-                        <flux:select.option value="{{$client->id}}">{{ $client->name }}</flux:select.option>
-                    @endforeach
-                </flux:select>
-
-                <flux:select wire:model.live="project_status_title" label="Status" placeholder="Status...">
-                    @include('livewire.projects._status_options')
-                </flux:select> --}}
-            {{-- </div> --}}
         </flux:card>
     @endif
 
@@ -53,15 +33,6 @@
                     @endif
                     <flux:table.column>Status</flux:table.column>
                     <flux:table.column></flux:table.column>
-
-                    {{-- <flux:table.column sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')">Date</flux:table.column>
-                    @if($view != 'checks.show')
-                        <flux:table.column >Vendor</flux:table.column>
-                    @endif
-
-                    @if($view != 'projects.show')
-                        <flux:table.column>Project</flux:table.column>
-                    @endif --}}
                 </flux:table.columns>
 
                 <flux:table.rows>
@@ -109,8 +80,13 @@
                                 <flux:table.cell>{{ Str::limit($expense->project->name, 25) }}</flux:table.cell>
                             @endif --}}
                             <flux:table.cell>
-                                {{-- :color="$estimate->project->last_status->title == 'Complete' ? 'green' : ($estimate->project->last_status->title == 'Active' ? 'blue' : ($estimate->project->last_status->title == 'Cancelled' ? 'red' : 'yellow'))" --}}
-                                <flux:badge size="sm" :color="$estimate->status === 'Active' ? 'green' : 'red'" inset="top bottom">{{$estimate->status}}</flux:badge>
+                                <flux:badge
+                                    size="sm"
+                                    :color="$estimate->status === 'Active' ? 'green' : 'red'"
+                                    inset="top bottom"
+                                    >
+                                    {{$estimate->status}}
+                                </flux:badge>
                             </flux:table.cell>
 
                             <flux:table.cell>
@@ -122,10 +98,10 @@
                                     <flux:menu>
                                         @if($estimate->status === 'Active')
                                             <flux:menu.item href="{{route('estimates.show', $estimate->id)}}">Open</flux:menu.item>
-                                            {{-- wire:click="$dispatchTo('projects.project-show', 'deleteEstimate', { estimate_id: {{$expense}} })"  --}}
-                                            <flux:menu.item wire:click="deleteEstimate({{$estimate->id}})" variant="danger">Delete</flux:menu.item>
+                                            <flux:menu.item wire:click="disableEstimate({{ $estimate->id }})" variant="danger">Disable</flux:menu.item>
                                         @else
-                                            <flux:menu.item wire:click="activateEstimate({{$estimate->id}})">Restore</flux:menu.item>
+                                            <flux:menu.item wire:click="activateEstimate({{ $estimate->id }})">Restore</flux:menu.item>
+                                            <flux:menu.item wire:click="removeEstimate({{ $estimate->id }})" variant="danger">Delete</flux:menu.item>
                                         @endif
                                     </flux:menu>
                                 </flux:dropdown>

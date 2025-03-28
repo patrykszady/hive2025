@@ -133,7 +133,7 @@
             <flux:sidebar.toggle class="lg:hidden" icon="bars-2" inset="left" />
         </flux:header>
 
-        <flux:main>
+        <flux:main x-data @navigate.window="Livewire.navigate($event.detail)">
             {{ $slot }}
         </flux:main>
 
