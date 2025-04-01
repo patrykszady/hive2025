@@ -16,6 +16,8 @@ class DistributionsIndex extends Component
     #[Title('Distributions')]
     public function render()
     {
+        $this->authorize('viewAny', Distribution::class);
+
         return view('livewire.distributions.index');
     }
 }

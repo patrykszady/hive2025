@@ -10,6 +10,8 @@
         </flux:button>
     </div>
 
+    <livewire:distributions.distribution-create />
+
     <flux:subheading class="m-0">Split Project profits between shareholders.</flux:subheading>
 
     <div class="space-y-2">

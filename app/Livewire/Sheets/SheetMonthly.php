@@ -84,9 +84,16 @@ class SheetMonthly extends Component
                 ->toBase();
 
         foreach ($period as $month) {
+            if (isset($monthly_expenses[$month->format('M y')])) {
+                // Access the array key safely
+                $this_year_payments = $monthly_payments[$month->format('M y')]->sum('amount');
+            }else{
+                $this_year_payments = 0;
+            }
+
             $this->months[] = [
                 'month_year' => $month->format('M y'),
-                'this_year_payments' => $monthly_payments[$month->format('M y')]->sum('amount'),
+                'this_year_payments' => $this_year_payments,
                 'last_year_payments' => $last_year_payments[$month->format('M y')]->sum('amount'),
                 //$this->months[$month]['monthly_total_expenses'] = (isset($this_month['monthly_expenses']) ? $this_month['monthly_expenses']->sum('amount') : '0.00') + (isset($this_month['monthly_timesheets']) ? $this_month['monthly_timesheets']->sum('amount') : '0.00');
                 // 'monthly_total_expenses' =>

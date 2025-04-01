@@ -12,7 +12,7 @@
         {{-- TEAM MEMBER --}}
         <flux:select label="Team Member" wire:model.live="form.user_id" variant="listbox" placeholder="Select User...">
             @foreach ($form->users as $user)
-                <flux:option value="{{$user->id}}">{{$user->full_name}}</flux:option>
+                <flux:select.option value="{{$user->id}}">{{$user->full_name}}</flux:select.option>
             @endforeach
         </flux:select>
 

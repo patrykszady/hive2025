@@ -19,6 +19,16 @@ class UserPolicy
     }
 
     /**
+     * Determine whether the user can create something based on their role ID.
+     *
+     * @return bool
+     */
+    public function hasAdminRole(User $user): bool
+    {
+        return $user->primary_vendor->pivot->role_id === 1;
+    }
+
+    /**
      * Determine whether the user can view any models.
      *
      * @return \Illuminate\Auth\Access\Response|bool
@@ -45,12 +55,12 @@ class UserPolicy
      */
     public function create(User $user): bool
     {
-        return $user->primary_vendor->pivot->role_id === 1;
+        return false;
     }
 
-    public function create_team_member(User $user, $vendor_id)
+    public function create_team_member(User $user, $vendor_id): bool
     {
-        if ($user->primary_vendor->pivot->role_id == 1 && in_array($user->vendor->business_type, ['Sub', 'DBA']) && $user->vendor->id == $vendor_id) {
+        if ($this->hasAdminRole($user) && in_array($user->vendor->business_type, ['Sub', 'DBA']) && $user->vendor->id == $vendor_id) {
             return true;
         }
     }
@@ -78,11 +88,7 @@ class UserPolicy
         if ($user->id == $model->id) {
             return true;
         } else {
-            if ($user->primary_vendor->pivot->role_id == 1) {
-                return true;
-            } else {
-                return false;
-            }
+            return $this->hasAdminRole($user);
         }
     }
 

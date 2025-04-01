@@ -6,13 +6,24 @@
     {{-- BODY --}}
     <body class="min-h-screen bg-gray-100 dark:bg-zinc-800">
         <flux:sidebar sticky stashable class="bg-zinc-50 dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-700">
-            <flux:sidebar.toggle class="lg:hidden" icon="x-mark" />
-            <flux:brand href="{{route('dashboard')}}" logo="{{ asset('favicon.png') }}" name="{{ env('APP_NAME') }}" />
+            <div class="flex justify-between">
+                <flux:sidebar.toggle class="lg:hidden -mr-8 border" icon="x-mark"/>
+
+                @php
+                    $isVendorRoute = Route::is(['vendor_selection', 'vendor_registration']);
+                    $href = $isVendorRoute ? null : route('dashboard'); // Set href for non-vendor routes
+                    $logo = asset('favicon.png'); // Logo remains the same
+                    $name = $isVendorRoute ? env('APP_NAME') : auth()->user()->vendor->name; // Automatically decoded via model accessor
+                @endphp
+
+                <!-- For lg or larger screens: Show flux:brand with logo and name -->
+                <flux:brand class="hidden lg:flex" href="{{ $href }}" logo="{{ $logo }}" name="{!! $name !!}" />
+
+                <!-- For smaller screens: Show flux:brand with name only -->
+                <flux:brand class="lg:hidden" href="{{ $href }}" name="{!! $name !!}" />
+            </div>
 
             @if(!Route::is(['vendor_selection', 'vendor_registration']))
-                {{-- <flux:input as="button" variant="filled" placeholder="Search..." icon="magnifying-glass" /> --}}
-                <flux:heading href="{{route('dashboard')}}" class="mt-0 pt-0 mb-0 pb-0">{!! auth()->user()->vendor->name !!}</flux:heading>
-                {{-- <flux:brand href="{{route('dashboard')}}" name="{!! auth()->user()->vendor->name !!}" /> --}}
                 <flux:navlist variant="outline">
                     {{-- BANK ERRORS --}}
                     @can('viewAny', App\Models\Bank::class)
@@ -51,12 +62,13 @@
                         </flux:badge>
                     @endif
 
-                    <flux:separator class="m-2" />
-
+                    {{-- NAVIGATION --}}
                     <flux:navlist.item wire:navigate.hover icon="home" href="/dashboard">Home</flux:navlist.item>
+
                     @can('viewAny', App\Models\Lead::class)
                         <flux:navlist.item wire:navigate.hover icon="magnifying-glass-plus" href="/leads">Leads</flux:navlist.item>
                     @endcan
+
                     <flux:navlist.item wire:navigate.hover icon="folder" href="/projects">Projects</flux:navlist.item>
                     <flux:navlist.item icon="calendar" href="/planner">Planner</flux:navlist.item>
 
@@ -111,8 +123,7 @@
             </flux:navlist>
 
             <flux:dropdown position="top" align="left">
-                <flux:profile name="{{auth()->user()->full_name}}" />
-
+                <flux:profile name="{{auth()->user()->full_name}}" avatar:color="indigo" />
                 <flux:menu>
                     <flux:menu.item href="{{route('vendor_selection')}}">Switch Account</flux:menu.item>
                     @can('admin_login_as_user', App\Models\User::class)
@@ -129,8 +140,8 @@
             </flux:dropdown>
         </flux:sidebar>
 
-        <flux:header class="lg:hidden">
-            <flux:sidebar.toggle class="lg:hidden" icon="bars-2" inset="left" />
+        <flux:header class="lg:hidden -mb-16" sticky>
+            <flux:sidebar.toggle class="lg:hidden border" icon="bars-2" inset="left" />
         </flux:header>
 
         <flux:main x-data @navigate.window="Livewire.navigate($event.detail)">

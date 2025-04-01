@@ -5,6 +5,7 @@
         <flux:heading size="lg" class="mb-0">Project Finances</flux:heading>
         <flux:button
             wire:click="$dispatchTo('bids.bid-create', 'addBids', { vendor: {{auth()->user()->vendor->id}}, project: {{$project->id}} })"
+            size="sm"
             >
             Edit Bid
         </flux:button>
@@ -15,35 +16,50 @@
     <flux:separator variant="subtle" />
 
     {{-- DETAILS --}}
-    {{-- wire:loading should just target the Reimbursment search_li not the entire Proejct Finances card--}}
-    <x-lists.details_list
-        {{-- wire:loading
-        wire:target="print_reimbursements" --}}
-        {{-- wire:loading.attr="disabled"
-        wire:loading.class="opacity-50 text-opacity-40" --}}
-        >
+    <flux:table>
+        <flux:table.rows>
+            <flux:table.row>
+                <flux:table.cell >Estimate</flux:table.cell>
+                <flux:table.cell>{{money($finances['estimate'])}}</flux:table.cell>
+            </flux:table.row>
+            <flux:table.row>
+                <flux:table.cell>Change Order</flux:table.cell>
+                <flux:table.cell>{{money($finances['change_orders'])}}</flux:table.cell>
+            </flux:table.row>
+            <flux:table.row>
+                <flux:table.cell>Reimbursements</flux:table.cell>
+                <flux:table.cell><a wire:click="print_reimbursements">{{money($finances['reimbursments'])}}</a></flux:table.cell>
+            </flux:table.row>
+            <flux:table.row>
+                <flux:table.cell variant="strong">TOTAL PROJECT</flux:table.cell>
+                <flux:table.cell variant="strong">{{money($finances['total_project'])}}</flux:table.cell>
+            </flux:table.row>
+            <flux:table.row>
+                <flux:table.cell>Expenses</flux:table.cell>
+                <flux:table.cell>{{money($finances['expenses'])}}</flux:table.cell>
+            </flux:table.row>
+            <flux:table.row>
+                <flux:table.cell>Timesheets</flux:table.cell>
+                <flux:table.cell>{{money($finances['timesheets'])}}</flux:table.cell>
+            </flux:table.row>
+            <flux:table.row>
+                <flux:table.cell variant="strong">TOTAL COST</flux:table.cell>
+                <flux:table.cell variant="strong">{{money($finances['total_cost'])}}</flux:table.cell>
+            </flux:table.row>
+            <flux:table.row>
+                <flux:table.cell>Payments</flux:table.cell>
+                <flux:table.cell>{{money($finances['payments'])}}</flux:table.cell>
+            </flux:table.row>
 
-        <x-lists.details_item title="Estimate" detail="{{money($finances['estimate'])}}" />
-        <x-lists.details_item title="Change Order" detail="{{money($finances['change_orders'])}}" />
+            @if(in_array($this->project->last_status->title, ['Complete',  'Service Call', 'Service Call Complete']))
+                <flux:table.cell variant="strong">PROFIT</flux:table.cell>
+                <flux:table.cell variant="strong">{{money($finances['profit'])}}</flux:table.cell>
+            @endif
 
-        <x-lists.details_item
-            title="Reimbursements"
-            detail="{{money($finances['reimbursments'])}}"
-            wire:click="print_reimbursements"
-        />
-
-        {{-- <livewire:projects.project-show :project="$project" /> --}}
-
-        <x-lists.details_item title="TOTAL PROJECT" detail="{{money($finances['total_project'])}}" />
-        <x-lists.details_item title="Expenses" detail="{{money($finances['expenses'])}}" />
-        <x-lists.details_item title="Timesheets" detail="{{money($finances['timesheets'])}}" />
-        <x-lists.details_item title="TOTAL COST" detail="{{money($finances['total_cost'])}}" />
-        <x-lists.details_item title="Payments" detail="{{money($finances['payments'])}}" />
-
-        @if(in_array($this->project->last_status->title, ['Complete',  'Service Call', 'Service Call Complete']))
-            <x-lists.details_item title="PROFIT" detail="{{money($finances['profit'])}}" />
-        @endif
-
-        <x-lists.details_item title="Balance" detail="{{money($finances['balance'])}}" />
-    </x-lists.details_list>
+            <flux:table.row>
+                <flux:table.cell>Balance</flux:table.cell>
+                <flux:table.cell>{{money($finances['balance'])}}</flux:table.cell>
+            </flux:table.row>
+        </flux:table.rows>
+    </flux:table>
 </flux:card>

@@ -9,11 +9,10 @@ class VendorDetails extends Component
 {
     public Vendor $vendor;
 
+    //im suign $view for this in the app so change?
     public $registration = false;
-    // public $accordian = 'CLOSED';
 
-    //'refreshComponent' => '$refresh',
-    protected $listeners = ['refresh'];
+    protected $listeners = ['refreshComponent' => '$refresh'];
 
     public function refresh()
     {

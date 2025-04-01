@@ -4,6 +4,7 @@ namespace App\Livewire\Distributions;
 
 use App\Livewire\Forms\DistributionForm;
 use App\Models\Distribution;
+use Flux;
 use Livewire\Component;
 
 class DistributionCreate extends Component
@@ -36,25 +37,24 @@ class DistributionCreate extends Component
             $user_first_name = $this->form->users->where('id', $value)->first()->first_name;
             $this->form->name = $user_first_name.' - Home';
         }
-
-        // $this->validateOnly($field);
     }
 
     public function save()
     {
-        // $this->form->validate();
         $distribution = $this->form->store();
 
-        //12-30-23 why not just refreshComponent => $refresh
-        $this->dispatch('refreshForce')->to('distributions.distributions-list');
-        $this->modal('distribution_form_modal')->close();
+        $this->dispatch('refreshComponent')->to('distributions.distributions-list');
 
-        $this->dispatch('notify',
-            type: 'success',
-            content: 'Distribution Created',
-            route: 'distributions/'.$distribution->id
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Distribution Created.',
+            // route / href / wire:click
+            text: 'Distribution ' . $distribution->name . ' created successfully.',
         );
 
+        $this->modal('distribution_form_modal')->close();
         $this->form->reset();
     }
 

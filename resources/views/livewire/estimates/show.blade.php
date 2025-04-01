@@ -23,8 +23,7 @@
 
                         <flux:menu.item wire:click="export_csv">Export Excel Estimate</flux:menu.item>
 
-                        <flux:menu.separator />
-
+                        {{-- <flux:menu.separator /> --}}
                         {{-- <flux:menu.item wire:click="disableEstimate"  variant="danger">Disable Estimate</flux:menu.item> --}}
                     </flux:menu>
                 </flux:dropdown>

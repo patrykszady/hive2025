@@ -197,7 +197,7 @@ class Vendor extends Model
         if (is_null($this->business_name)) {
             return 'NO VENDOR';
         } else {
-            return $this->business_name;
+            return html_entity_decode($this->business_name);
         }
     }
 
@@ -205,16 +205,16 @@ class Vendor extends Model
     {
         if (is_null($this->business_name)) {
             return 'NO VENDOR';
-        } elseif ($this->biz_type == 4 and ! is_null($this->users()->first())) {
-            $name = $this->users()->first()->first_name.' '.$this->users()->first()->last_name;
-
-            return $name;
-        } else {
-            //delete. INC, DBA..and if it's too long
-            $name = explode(',', $this->business_name);
-
-            return $name[0];
         }
+
+        if ($this->biz_type == 4 && $this->users()->exists()) {
+            $user = $this->users()->first();
+            return html_entity_decode($user->first_name . ' ' . $user->last_name);
+        }
+
+        // Extract first part before ',' if available
+        $nameParts = explode(',', $this->business_name);
+        return html_entity_decode(trim($nameParts[0]));
     }
 
     public function getAddressMapURI()
@@ -228,17 +228,4 @@ class Vendor extends Model
     {
         return $query->withoutGlobalScopes()->where('business_type', 'Sub')->where('registration->registered', true);
     }
-
-    // public function setBusinessName($value)
-    // {
-    //     // dd($value);
-    //     $this->attributes['business_name'] = ucwords($value);
-    // }
-
-    // public function businessName(): Attribute
-    // {
-    //     return Attribute::make(
-    //         set: fn ($value) => ucwords($value),
-    //     );
-    // }
 }

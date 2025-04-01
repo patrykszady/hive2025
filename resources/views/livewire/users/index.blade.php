@@ -64,4 +64,5 @@
             </flux:button>
         </div>
     </div>
+    <livewire:users.user-create />
 </flux:card>
