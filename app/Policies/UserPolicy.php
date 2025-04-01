@@ -60,9 +60,7 @@ class UserPolicy
 
     public function create_team_member(User $user, $vendor_id): bool
     {
-        if ($this->hasAdminRole($user) && in_array($user->vendor->business_type, ['Sub', 'DBA']) && $user->vendor->id == $vendor_id) {
-            return true;
-        }
+        return $this->hasAdminRole($user) && in_array($user->vendor->business_type, ['Sub', 'DBA']) && $user->vendor->id == $vendor_id;
     }
 
     public function create_client_member(User $user, Client $client)
