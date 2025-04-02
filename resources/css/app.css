@@ -8,8 +8,8 @@
 @source '../../vendor/livewire/flux/stubs/**/*.blade.php';
 @source '../../resources/views/**/*.blade.php';
 
-/* Re-assign Flux's gray of choice... */
 @theme {
+    /* Re-assign Flux's gray of choice... */
     --color-zinc-50: var(--color-gray-50);
     --color-zinc-100: var(--color-gray-100);
     --color-zinc-200: var(--color-gray-200);
@@ -21,12 +21,10 @@
     --color-zinc-800: var(--color-gray-800);
     --color-zinc-900: var(--color-gray-900);
     --color-zinc-950: var(--color-gray-950);
-}
-
-@theme {
     --color-accent: var(--color-sky-600);
     --color-accent-content: var(--color-sky-600);
     --color-accent-foreground: var(--color-white);
+    --font-sans: Inter, sans-serif;
 }
 
 @layer theme {

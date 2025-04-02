@@ -84,7 +84,7 @@ class EstimateShow extends Component
             variant: 'success',
             heading: 'Section Added',
             // route / href / wire:click
-            text: 'Section '.$section->name . ' Added',
+            text: 'Section Added',
         );
     }
 
