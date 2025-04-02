@@ -19,21 +19,6 @@ class ProjectForm extends Form
     #[Rule('required|min:3', as: 'Project Name')]
     public $project_name = null;
 
-    #[Rule('required|min:3')]
-    public $address = null;
-
-    #[Rule('nullable|min:2')]
-    public $address_2 = null;
-
-    #[Rule('required|min:3')]
-    public $city = null;
-
-    #[Rule('required|min:2|max:2')]
-    public $state = null;
-
-    #[Rule('required|digits:5', as: 'zip code')]
-    public $zip_code = null;
-
     #[Rule('required', as: 'Address')]
     public $project_existing_address = null;
 
@@ -45,11 +30,11 @@ class ProjectForm extends Form
         $this->project_name = $project->project_name;
         $this->project_existing_address = 'NEW';
 
-        $this->address = $project->address;
-        $this->address_2 = $project->address_2;
-        $this->city = $project->city;
-        $this->state = $project->state;
-        $this->zip_code = $project->zip_code;
+        $this->component->address_1 = $project->address;
+        $this->component->address_2 = $project->address_2;
+        $this->component->city = $project->city;
+        $this->component->state = $project->state;
+        $this->component->zip_code = $project->zip_code;
     }
 
     public function update()
@@ -59,11 +44,11 @@ class ProjectForm extends Form
         $this->project->update([
             'project_name' => $this->project_name,
             // 'client_id' => $this->client_id,
-            'address' => $this->address,
-            'address_2' => $this->address_2,
-            'city' => $this->city,
-            'state' => $this->state,
-            'zip_code' => $this->zip_code,
+            'address' => $this->component->address_1,
+            'address_2' => $this->component->address_2,
+            'city' => $this->component->city,
+            'state' => $this->component->state,
+            'zip_code' => $this->component->zip_code,
         ]);
 
         return $this->project;
@@ -73,11 +58,11 @@ class ProjectForm extends Form
     {
         if ($this->project_existing_address == 'CLIENT_PROJECT') {
             $client_address = $this->component->client_addresses->first();
-            $this->address = $client_address['address'];
-            $this->address_2 = $client_address['address_2'];
-            $this->city = $client_address['city'];
-            $this->state = $client_address['state'];
-            $this->zip_code = $client_address['zip_code'];
+            $this->component->address_1 = $client_address['address'];
+            $this->component->address_2 = $client_address['address_2'];
+            $this->component->city = $client_address['city'];
+            $this->component->state = $client_address['state'];
+            $this->component->zip_code = $client_address['zip_code'];
         }
 
         $this->validate();
@@ -85,11 +70,11 @@ class ProjectForm extends Form
         return Project::create([
             'project_name' => $this->project_name,
             'client_id' => $this->client_id,
-            'address' => $this->address,
-            'address_2' => $this->address_2,
-            'city' => $this->city,
-            'state' => $this->state,
-            'zip_code' => $this->zip_code,
+            'address' => $this->component->address_1,
+            'address_2' => $this->component->address_2,
+            'city' => $this->component->city,
+            'state' => $this->component->state,
+            'zip_code' => $this->component->zip_code,
         ]);
     }
 }

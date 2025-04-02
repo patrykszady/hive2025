@@ -67,7 +67,9 @@
                 x-transition
                 class="my-4 space-y-4"
                 >
-                {{-- @include('components.forms._address_form', ['model' => 'form']) --}}
+
+                {{-- ADDRESS --}}
+                @include('components.forms._address_form', ['address_suggestions' => $address_suggestions])
             </div>
 
             {{-- PROJECT NAME --}}

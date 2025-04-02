@@ -3,16 +3,21 @@
 namespace App\Livewire\Projects;
 
 use App\Livewire\Forms\ProjectForm;
+use App\Services\GooglePlacesService;
+use App\Traits\HandlesAddresses;
+
 use App\Models\Client;
 use App\Models\Project;
+
+use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+
 use Livewire\Attributes\Computed;
-// use Illuminate\Support\Facades\Validator;
 use Livewire\Component;
 
 class ProjectCreate extends Component
 {
-    use AuthorizesRequests;
+    use AuthorizesRequests, HandlesAddresses;
 
     public ProjectForm $form;
 
@@ -29,11 +34,15 @@ class ProjectCreate extends Component
     ];
 
     protected $listeners = ['newProject', 'editProject'];
+    protected $googlePlacesService;
+
+    public function boot(GooglePlacesService $googlePlacesService)
+    {
+        $this->bootHandlesAddresses($googlePlacesService);
+    }
 
     public function updated($field, $value)
     {
-        // dd($field, $value);
-        $this->validateOnly($field);
         if ($field == 'form.client_id') {
             if ($value) {
                 $this->resetAddress();
@@ -81,6 +90,8 @@ class ProjectCreate extends Component
                 $this->resetAddress();
             }
         }
+
+        $this->validateOnly($field);
     }
 
     #[Computed]
