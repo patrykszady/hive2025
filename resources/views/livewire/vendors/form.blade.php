@@ -164,13 +164,15 @@
 
                     {{-- ADDRESS / BUSINESS EMAIL AND PHONE--}}
                     <div
-                        x-data="{business_type: @entangle('form.business_type'), address: @entangle('address') }"
+                        x-data="{business_type: @entangle('form.business_type'), address: @entangle('address_isset') }"
                         x-show="(business_type == 'Sub' || business_type == '1099' || business_type == 'DBA') && address"
                         x-transition
                         class="my-4 space-y-4"
                         >
                         {{-- @include('components.forms._address_form', ['model' => 'vendor']) --}}
-                        <livewire:address.address-create />
+                        {{-- <livewire:address.address-create /> --}}
+                        {{-- ADDRESS --}}
+                        @include('components.forms._address_form', ['address_suggestions' => $address_suggestions])
 
                         <flux:input
                             wire:model.live.debounce.500ms="form.business_email"
@@ -193,7 +195,7 @@
 
         {{-- FOOTER --}}
         <div
-            x-data="{business_name_text: @entangle('business_name_text'), business_type: @entangle('form.business_type'), zip_code: @entangle('form.zip_code')}"
+            x-data="{business_name_text: @entangle('business_name_text'), business_type: @entangle('form.business_type'), zip_code: @entangle('zip_code')}"
             x-show="business_name_text && business_type"
             x-transition
             >

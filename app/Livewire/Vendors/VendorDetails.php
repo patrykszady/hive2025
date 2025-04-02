@@ -14,11 +14,11 @@ class VendorDetails extends Component
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 
-    public function refresh()
-    {
-        $this->registration = false;
-        $this->render();
-    }
+    // public function refresh()
+    // {
+    //     $this->registration = false;
+    //     $this->render();
+    // }
 
     public function render()
     {

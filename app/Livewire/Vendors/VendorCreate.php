@@ -3,15 +3,21 @@
 namespace App\Livewire\Vendors;
 
 use App\Livewire\Forms\VendorForm;
+use App\Services\GooglePlacesService;
+use App\Traits\HandlesAddresses;
+
 use App\Models\User;
 use App\Models\Vendor;
+
 use Flux;
+
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+
 use Livewire\Component;
 
 class VendorCreate extends Component
 {
-    use AuthorizesRequests;
+    use AuthorizesRequests, HandlesAddresses;
 
     public VendorForm $form;
 
@@ -29,7 +35,7 @@ class VendorCreate extends Component
 
     public $via_vendor = null;
 
-    public $address = null;
+    public $address_isset = null;
 
     public $team_member = '';
 
@@ -58,6 +64,14 @@ class VendorCreate extends Component
             'resetModal',
             'viaVendor',
         ];
+
+    protected $googlePlacesService;
+
+    //so that protected $googlePlacesService can be initialized
+    public function boot(GooglePlacesService $googlePlacesService)
+    {
+        $this->bootHandlesAddresses($googlePlacesService);
+    }
 
     public function mount()
     {
@@ -127,7 +141,7 @@ class VendorCreate extends Component
         $this->form->user_role = 1;
 
         $this->user_vendors = $this->user->vendors()->unique()->get();
-        $this->address = true;
+        $this->address_isset = true;
 
         $this->via_vendor = true;
 
@@ -145,7 +159,7 @@ class VendorCreate extends Component
         $this->business_name_text = $vendor->business_name;
         $this->open_vendor_form = true;
         if ($this->vendor->business_type != 'Retail') {
-            $this->address = true;
+            $this->address_isset = true;
         }
 
         $this->view_text = [
@@ -189,17 +203,17 @@ class VendorCreate extends Component
         if ($field == 'vendor.business_type') {
             if (in_array($this->vendor->business_type, ['Sub', '1099', 'DBA'])) {
                 if (isset($this->user->id)) {
-                    $this->address = true;
+                    $this->address_isset = true;
                 }
                 // $this->user = $this->user;
                 // }elseif($this->vendor->business_type == 'Retail'){
                 //     $this->user = NULL;
             } elseif ($this->vendor->business_type == 'Retail') {
                 $this->user = null;
-                $this->address = null;
+                $this->address_isset = null;
                 $this->user_vendors = null;
             } else {
-                $this->address = null;
+                $this->address_isset = null;
             }
         }
     }
@@ -213,7 +227,7 @@ class VendorCreate extends Component
         $this->business_name_text = null;
         $this->modal('vendors_form_modal')->show();
         $this->user = null;
-        $this->address = null;
+        $this->address_isset = null;
         $this->user_vendors = null;
         $this->vendor_id = null;
         $this->user_vendor_id = null;
@@ -261,22 +275,24 @@ class VendorCreate extends Component
         $this->form->user_role = $user_info['role'];
 
         $this->user_vendors = $this->user->vendors()->get()->unique('id');
-        $this->address = true;
+        $this->address_isset = true;
     }
 
     public function edit()
     {
-        dd($this);
         $vendor = $this->form->update();
 
         $this->modal('vendors_form_modal')->close();
-
         $this->dispatch('refreshComponent')->to('vendors.vendor-details');
 
-        $this->dispatch('notify',
-            type: 'success',
-            content: 'Vendor Updated',
-            route: 'vendors/'.$vendor->id
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Vendor Updated.',
+            // route / href / wire:click
+            // route: 'vendors/'.$vendor->id
+            text: '',
         );
     }
 

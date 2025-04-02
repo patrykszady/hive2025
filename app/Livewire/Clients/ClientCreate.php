@@ -2,21 +2,23 @@
 
 namespace App\Livewire\Clients;
 
-use App\Livewire\Forms\ClientForm;
 use App\Models\Client;
 use App\Models\User;
 
+use App\Livewire\Forms\ClientForm;
 use App\Services\GooglePlacesService;
+use App\Traits\HandlesAddresses;
 
 use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
 class ClientCreate extends Component
 {
-    use AuthorizesRequests;
+    use AuthorizesRequests, HandlesAddresses;
 
     public ClientForm $form;
 
@@ -36,49 +38,16 @@ class ClientCreate extends Component
         'form_submit' => 'save',
     ];
 
-    public $address_query = '';
-    public $address_suggestions = [];
-    public $address_selection = '';
-
     public $team_member = false;
 
     protected $listeners = ['addUser', 'editClient', 'newClient'];
     protected $googlePlacesService;
 
-    public function rules()
-    {
-        return [
-            'address_query' => 'nullable',
-            'address_selection' => 'nullable',
-            // 'user.full_name' => 'nullable',
-            // 'client.name' => 'nullable',
-        ];
-    }
-
     //boot instead of public function mount(GooglePlacesService $googlePlacesService)
     //so that protected $googlePlacesService can be initialized
     public function boot(GooglePlacesService $googlePlacesService)
     {
-        $this->googlePlacesService = $googlePlacesService; // Properly initialize the service
-    }
-
-    public function updatedAddressQuery($value)
-    {
-        $this->address_suggestions = $this->googlePlacesService->getAutocompleteSuggestions($this->address_query);
-    }
-
-    public function updatedAddressSelection($value)
-    {
-        $address_parts = $this->googlePlacesService->getPlaceDetails($this->address_selection);
-        $this->form->address = $address_parts['street_number'] . ' ' . $address_parts['route'];
-        $this->form->city = $address_parts['locality'];
-        $this->form->state = $address_parts['administrative_area_level_1'];
-        $this->form->zip_code = $address_parts['postal_code'];
-
-        //reset public properties
-        $this->address_selection = '';
-        $this->address_query = '';
-        $this->address_suggestions = [];
+        $this->bootHandlesAddresses($googlePlacesService);
     }
 
     // public function updated($field, $value)
