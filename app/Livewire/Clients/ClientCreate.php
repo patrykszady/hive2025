@@ -50,21 +50,6 @@ class ClientCreate extends Component
         $this->bootHandlesAddresses($googlePlacesService);
     }
 
-    // public function updated($field, $value)
-    // {
-    //     // if ($this->user_client_id != 'NEW') {
-    //     //     if (is_null($this->user_client_id)) {
-    //     //         $this->view_text['button_text'] = 'Update Client';
-    //     //     } else {
-    //     //         $this->view_text['button_text'] = 'View Existing Client';
-    //     //     }
-    //     // } else {
-    //     //     $this->view_text['button_text'] = 'Create Client';
-    //     // }
-
-        // $this->validateOnly($field);
-    // }
-
     public function addUser(User $user, $client_id)
     {
         if (is_numeric($client_id)) {
@@ -133,13 +118,7 @@ class ClientCreate extends Component
 
     public function editClient(Client $client)
     {
-        // dd('in editClient');
         $this->client = $client;
-
-        // if(!$expense->splits->isEmpty()){
-        //     $this->hasSplits($expense->splits);
-        // }
-
         $this->form->setClient($this->client);
 
         $this->view_text = [
@@ -147,7 +126,6 @@ class ClientCreate extends Component
             'button_text' => 'Update',
             'form_submit' => 'edit',
         ];
-        // $this->form->setExpense($expense);
 
         // $this->view_text = [
         //     'card_title' => 'Update Expense',

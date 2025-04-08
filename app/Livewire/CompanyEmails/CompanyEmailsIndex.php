@@ -20,13 +20,15 @@ class CompanyEmailsIndex extends Component
     public function mount()
     {
         $this->email_accounts =
-            CompanyEmail::all()->each(function ($email, $key) {
-                if (is_null($email->api_json['errors'])) {
-                    $email->status = 'Connected';
-                } else {
-                    $email->status = 'Error';
-                }
-            });
+        CompanyEmail::all();
+        // $this->email_accounts =
+        //     CompanyEmail::all()->each(function ($email, $key) {
+        //         if (is_null($email->api_json['errors'])) {
+        //             $email->status = 'Connected';
+        //         } else {
+        //             $email->status = 'Error';
+        //         }
+        //     });
     }
 
     #[Title('Email Accounts')]

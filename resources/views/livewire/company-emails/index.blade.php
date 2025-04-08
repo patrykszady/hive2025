@@ -3,16 +3,20 @@
     <flux:card>
         <div class="flex justify-between">
             <flux:heading size="lg">Company Email Accounts</flux:heading>
-            <flux:button
-                {{-- wire:click="$dispatchTo('projects.project-create', 'editProject', { project: {{$project->id}}})" --}}
+            {{-- <flux:button
                 size="sm"
                 >
                 Add Email Account
-            </flux:button>
+            </flux:button> --}}
+
+            <a href="{{route('company-email.login')}}" type="button">
+                Add Email Account
+            </a>
         </div>
         <flux:subheading>Email accounts you use to recieve digital receipts from vendors.</flux:subheading>
 
         <flux:separator variant="subtle" />
+
         {{-- <a href="{{route('nylas_login')}}" type="button"
             class="inline-flex justify-center px-4 py-2 text-sm text-white bg-indigo-600 border border-transparent rounded-md shadow-xs hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
             Add Email Account
@@ -52,7 +56,7 @@
         </x-lists.details_list>
     </flux:card>
 
-    @if(request()->routeIs('company_emails.index'))
+    {{-- @if(request()->routeIs('company_emails.index'))
         <livewire:receipt-accounts.receipt-accounts-index />
-    @endif
+    @endif --}}
 </div>

@@ -37,7 +37,7 @@ trait HandlesAddresses
     public function updatedAddressQuery($value)
     {
         if (strlen($value) < 3) {
-            $this->address_suggestions = [];
+            $this->address_suggestions = []; // Prevents unnecessary API calls
             return;
         }
 
@@ -46,17 +46,24 @@ trait HandlesAddresses
 
     public function updatedAddressSelection($value)
     {
+        // Return early if there is no valid value
+        if (empty($value)) {
+            return; // No API call is made when value is empty
+        }
+
+        // Fetch address details using the provided place_id
         $address_details = $this->googlePlacesService->getPlaceDetails($value);
 
         if ($address_details) {
-            $this->address_1 = $address_details['street_number'] . ' ' . $address_details['route'];
-            $this->city = $address_details['locality'];
-            $this->state = $address_details['administrative_area_level_1'];
-            $this->zip_code = $address_details['postal_code'];
+            $this->address_1 = ($address_details['street_number'] ?? '') . ' ' . ($address_details['route'] ?? '');
+            $this->city = $address_details['locality'] ?? null;
+            $this->state = $address_details['administrative_area_level_1'] ?? null;
+            $this->zip_code = $address_details['postal_code'] ?? null;
         }
 
-        $this->address_selection = NULL;
-        $this->address_query = NULL;
+        // Clear only address suggestions after processing
+        $this->address_selection = null;
+        $this->address_query = null;
         $this->address_suggestions = [];
     }
 }

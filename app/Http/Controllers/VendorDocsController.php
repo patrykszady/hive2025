@@ -2,13 +2,78 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\NylasService;
+
+use App\Traits\ProcessesVendorDocs;
+
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
+
 use File;
+use Response;
+use Exception;
+
 use Ilovepdf\Ilovepdf;
 use Intervention\Image\Facades\Image;
-use Response;
 
 class VendorDocsController extends Controller
 {
+    private $nylasService;
+    use ProcessesVendorDocs;
+
+    /**
+     * Inject the NylasService into the controller.
+     */
+    public function __construct(NylasService $nylasService)
+    {
+        $this->nylasService = $nylasService;
+    }
+
+    public function fetchMessagesFromInsuranceMailbox()
+    {
+        // Fetch grant ID from environment variable
+        $grantId = env('HIVE_INSURANCE_GRANT_ID');
+
+        // Define query parameters for the Nylas API
+        $queryParams = [
+            'limit' => 100, // Fetch up to 100 messages
+            'in' => 'inbox', // Specify the inbox folder
+        ];
+
+        // Fetch messages using the NylasService
+        $messages = $this->nylasService->getMessages($queryParams, $grantId);
+
+        // Filter messages with attachments
+        foreach ($messages['data'] as $message) {
+            $attachments = [];
+            if (!empty($message['attachments'])) {
+                $attachments = array_merge($attachments, $message['attachments']);
+
+                // Process attachments
+                foreach ($attachments as $attachment) {
+                    $messageId = $message['id']; // Ensure you fetch the corresponding message ID
+                    $attachmentContent = $this->nylasService->downloadAttachment($attachment['id'], $grantId, $messageId);
+                    $docType = pathinfo($attachment['filename'], PATHINFO_EXTENSION);
+                    $tempFilePath = "temp_vendor_docs/attachment_{$attachment['id']}.{$docType}";
+
+                    // Store the file temporarily
+                    Storage::disk('files')->put($tempFilePath, $attachmentContent);
+
+                    // Process the document
+                    $this->handleVendorDocProcessing(
+                        $tempFilePath,
+                        $docType,
+                        null, // Placeholder for $vendorId
+                        null, // Placeholder for $belongsToVendorId
+                        $messageId,
+                        $grantId
+                    );
+                }
+            }
+        }
+    }
+
     public function audit_docs_pdf($files)
     {
         $filename = 'audit-'.auth()->user()->vendor->id.'-'.date('Y-m-d-h-m-s');

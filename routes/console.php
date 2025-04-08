@@ -22,6 +22,8 @@ Schedule::call('\App\Http\Controllers\ReceiptController@auto_receipt')->everyTen
 Schedule::call('\App\Http\Controllers\TransactionController@add_category_to_expense')->hourly();
 Schedule::call('\App\Http\Controllers\TransactionController@transaction_vendor_bulk_match')->everyTenMinutes();
 
+Schedule::call('\App\Http\Controllers\VendorDocsController@fetchMessagesFromInsuranceMailbox')->everyTenMinutes();
+
 Schedule::command('horizon:snapshot')->everyFiveMinutes();
 // Schedule::command('cache:prune-stale-tags')->hourly();
 // dd(Schedule::events());

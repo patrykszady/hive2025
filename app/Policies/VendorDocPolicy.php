@@ -28,7 +28,7 @@ class VendorDocPolicy
      */
     public function create(User $user): bool
     {
-        //
+        return $user->primary_vendor->pivot->role_id === 1;
     }
 
     /**

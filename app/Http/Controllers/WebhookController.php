@@ -9,6 +9,22 @@ use Illuminate\Support\Facades\Log;
 
 class WebhookController extends Controller
 {
+    public function verify(Request $request)
+    {
+        // Check if the 'challenge' query parameter exists
+        $challenge = $request->query('challenge');
+
+        if ($challenge) {
+            // Return the exact value of the challenge with plain text content type
+            return response($challenge, 200)->header('Content-Type', 'text/plain');
+        }
+
+        Log::error("Nylas email receipt " . $request->all());
+        return response(200)->header('Content-Type', 'text/plain');
+        // // Respond with a 400 error if 'challenge' is missing
+        // return response('Bad Request', 400)->header('Content-Type', 'text/plain');
+    }
+
     public function angi_webhook(Request $request)
     {
         $data = json_decode($request->getContent(), true);

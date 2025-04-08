@@ -8,7 +8,7 @@
             @endif
         </flux:heading>
 
-        @can('create', App\Models\User::class)
+        @can('create', App\Models\VendorDoc::class)
             <div class="space-x-2">
                 {{-- if any docs are expired.. policy? --}}
                 <flux:button.group>

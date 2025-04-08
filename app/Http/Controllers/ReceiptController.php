@@ -34,9 +34,6 @@ use setasign\Fpdi\Fpdi;
 use Spatie\Browsershot\Browsershot;
 use Symfony\Component\DomCrawler\Crawler;
 
-// use Storage;
-// use Response;
-
 class ReceiptController extends Controller
 {
     public function verifyWorkersComp()
@@ -118,210 +115,6 @@ class ReceiptController extends Controller
         ])->getBody()->getContents();
 
         return $result = json_decode($result, true);
-    }
-
-    public function nylas_errors($error)
-    {
-        Log::channel('nylas_connection_errors')->error($error, [auth()->user()->first(), auth()->user()->vendor]);
-
-        if ($error['error_code'] == 'exists') {
-            $error_message = $error['error_description'];
-        } else {
-            $error_message = 'There was an error connecting. Please try again and if issue continues contact us with error #'.$error['error_code'].' "'.$error['error_description'].'"';
-        }
-
-        session()->flash('error', $error_message);
-
-        if (auth()->user()->vendor->registration['registered'] == false) {
-            return redirect(route('vendor_registration', auth()->user()->vendor));
-        } else {
-            return redirect(route('company_emails.index'));
-        }
-    }
-
-    public function nylas_login()
-    {
-        $url = 'https://api.us.nylas.com/v3/connect/auth';
-        $params = [
-            'client_id' => env('NYLAS_CLIENT_ID'),
-            'redirect_uri' => env('NYLAS_REDIRECT_URI'),
-            'response_type' => 'code',
-            'access_type' => 'online',
-        ];
-
-        header('Location: '.$url.'?'.http_build_query($params));
-    }
-
-    public function nylas_auth_response()
-    {
-        if (isset(request()->query()['error'])) {
-            $error = request()->query();
-
-            return $this->nylas_errors($error);
-        } else {
-            $code = request()->query()['code'];
-
-            try {
-                $guzzle = new Client;
-                $url = 'https://api.us.nylas.com/v3/connect/token';
-                $nylas_account =
-                    json_decode($guzzle->post($url, [
-                        'form_params' => [
-                            'client_id' => env('NYLAS_CLIENT_ID'),
-                            'client_secret' => env('NYLAS_API_KEY'),
-                            'grant_type' => 'authorization_code',
-                            'code' => $code,
-                            'redirect_uri' => env('NYLAS_REDIRECT_URI'),
-                            'code_verifier' => 'nylas',
-                        ],
-                    ])
-                        ->getBody()
-                        ->getContents()
-                    );
-            } catch (RequestException $e) {
-                if ($e->hasResponse()) {
-                    $response = $e->getResponse();
-                    $responseBody = $response->getBody()->getContents();
-                    $error = $responseBody;
-                } else {
-                    $error = $e->getMessage();
-                }
-                $error = json_decode($error, true);
-
-                return $this->nylas_errors($error);
-            }
-
-            $existing_company_email = CompanyEmail::withoutGlobalScopes()->where('email', $nylas_account->email)->first();
-
-            if ($existing_company_email) {
-                $error = [
-                    'error_code' => 'exists',
-                    'error_description' => 'Email '.$nylas_account->email.' already connected.',
-                ];
-
-                return $this->nylas_errors($error);
-            } else {
-                //create or confirm existance of HIVE folder in mailbox...
-                //HIVE_CONTRACTORS_RECEIPTS
-                //grant_id = nylas mailbox ID
-                $grant_id = $nylas_account->grant_id;
-                $url_endpoint = $grant_id.'/folders';
-                sleep(1);
-                $result = $this->nylas_get_api($url_endpoint);
-                // $trash_folder = collect($result['data'])->where('name', 'Deleted Items')->first();
-                // ->where('parent_id', '!=', $trash_folder['id'])
-                $hive_email_folder = collect($result['data'])->where('name', 'HIVE_CONTRACTORS_RECEIPTS')->first();
-
-                //create HIVE_CONTRACTORS_RECEIPTS and subfolders
-                $guzzle = new Client;
-                $url = 'https://api.us.nylas.com/v3/grants/'.$grant_id.'/folders';
-
-                //CREATE PARENT HIVE MAILBOX FOLDER
-                try {
-                    $result = $guzzle->post($url, [
-                        'headers' => [
-                            'Content-Type' => 'application/json',
-                            'Accept' => 'application/json',
-                            'Authorization' => 'Bearer '.env('NYLAS_API_KEY'),
-                        ],
-                        'json' => [
-                            'name' => 'HIVE_CONTRACTORS_RECEIPTS',
-                        ],
-                    ])->getBody()->getContents();
-
-                    $result = json_decode($result, true);
-                    $mailbox_hive_folders['hive_folder'] = $result['data']['id'];
-                } catch (RequestException $e) {
-                    if ($e->hasResponse()) {
-                        $response = $e->getResponse();
-                        $responseBody = $response->getBody()->getContents();
-                        $error = $responseBody;
-                    } else {
-                        $error = $e->getMessage();
-                    }
-                    $error = json_decode($error, true);
-                    //if 409 / conflict / folder already exists .. continue
-                    if (in_array(($error['error']['provider_error']['error']['code'] ?? null), ['ErrorFolderExists', '409'])) {
-                        $url_endpoint = $grant_id.'/folders';
-                        $hive_email_folder = $this->nylas_get_api($url_endpoint);
-
-                        $mailbox_hive_folders['hive_folder'] = collect($hive_email_folder['data'])->where('name', 'HIVE_CONTRACTORS_RECEIPTS')->first()['id'];
-                    } else {
-                        $this->nylas_errors($error);
-                    }
-                }
-
-                //$mailbox_hive_folders['hive_folder'] MUST BE SET BY NOW
-                //LOG ERROR otherwise
-
-                //create sub-HIVE folders in HIVE_CONTRACTORS_RECEIPTS mailbox...
-                $sub_folders = ['Saved', 'Duplicate', 'Error', 'Add', 'Retry', 'Test', 'LEADS'];
-                foreach ($sub_folders as $folder) {
-                    //CREATE CHILD HIVE MAILBOX FOLDER $folder
-                    try {
-                        $result = $guzzle->post($url, [
-                            'headers' => [
-                                'Content-Type' => 'application/json',
-                                'Accept' => 'application/json',
-                                'Authorization' => 'Bearer '.env('NYLAS_API_KEY'),
-                            ],
-                            'json' => [
-                                'name' => $nylas_account->provider == 'microsoft' ? $folder : 'HIVE_CONTRACTORS_RECEIPTS/'.$folder,
-                                'parent_id' => $nylas_account->provider == 'microsoft' ? $mailbox_hive_folders['hive_folder'] : null,
-                            ],
-                        ])->getBody()->getContents();
-
-                        $result = json_decode($result, true);
-                        $mailbox_hive_folders['hive_folder_'.strtolower($folder)] = $result['data']['id'];
-                    } catch (RequestException $e) {
-                        if ($e->hasResponse()) {
-                            $response = $e->getResponse();
-                            $responseBody = $response->getBody()->getContents();
-                            $error = $responseBody;
-                        } else {
-                            $error = $e->getMessage();
-                        }
-                        $error = json_decode($error, true);
-                        //if 409 / conflict / folder already exists .. continue
-                        if (in_array(($error['error']['provider_error']['error']['code'] ?? null), ['ErrorFolderExists', '409'])) {
-                            if ($nylas_account->provider == 'microsoft') {
-                                $url_endpoint = $grant_id.'/folders?parent_id='.$mailbox_hive_folders['hive_folder'];
-                                $child_folders = $this->nylas_get_api($url_endpoint);
-
-                                $mailbox_hive_folders['hive_folder_'.strtolower($folder)] = collect($child_folders['data'])->where('name', $folder)->first()['id'];
-                            } else {
-                                $url_endpoint = $grant_id.'/folders';
-                                $hive_email_folder = $this->nylas_get_api($url_endpoint);
-
-                                $mailbox_hive_folders['hive_folder_'.strtolower($folder)] = collect($hive_email_folder['data'])->where('name', 'HIVE_CONTRACTORS_RECEIPTS/'.$folder)->first()['id'];
-                            }
-                        } else {
-                            $this->nylas_errors($error);
-                        }
-                    }
-                }
-
-                $api_data = [
-                    'provider' => $nylas_account->provider,
-                    'grant_id' => $grant_id,
-                ];
-
-                $api_data = array_merge($api_data, $mailbox_hive_folders);
-
-                //6-8-2023 Unique only
-                CompanyEmail::create([
-                    'email' => $nylas_account->email,
-                    'vendor_id' => auth()->user()->vendor->id,
-                    'api_json' => $api_data,
-                ]);
-
-                if (auth()->user()->vendor->registration['registered'] == false) {
-                    return redirect(route('vendor_registration', auth()->user()->vendor));
-                } else {
-                    return redirect(route('company_emails.index'));
-                }
-            }
-        }
     }
 
     public function nylas_read_email_receipts()
@@ -1568,56 +1361,9 @@ class ReceiptController extends Controller
         return $document_model;
     }
 
-    public function azure_docs_api($file_location, $document_model, $doc_type)
+    //4/7/2025 IS THIS STILL USED?
+    public function azure_docs_api($file_location, $doc_type)
     {
-        // $result = AzureDI::make()->analyzeDocument('https://raw.githubusercontent.com/Azure-Samples/cognitive-services-REST-api-samples/master/curl/form-recognizer/rest-api/receipt.png');
-
-        // dd(response()->json($result));
-        // $endpoint = 'https://hive20251name.cognitiveservices.azure.com/documentintelligence/documentModels/prebuilt-receipt:analyze?api-version=2024-11-30';
-        // $apiKey = '5JcYKZ5a8D5YHlKnj783TWHgml7ZnjtlLWfxTiHASpHtvbt8fiOYJQQJ99BAACYeBjFXJ3w3AAALACOGN2aU';
-        // $documentUrl = 'https://raw.githubusercontent.com/Azure-Samples/cognitive-services-REST-api-samples/master/curl/form-recognizer/rest-api/receipt.png';
-
-        // $ch = curl_init();
-
-        // curl_setopt($ch, CURLOPT_URL, $endpoint);
-        // curl_setopt($ch, CURLOPT_POST, 1);
-        // curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(['urlSource' => $documentUrl]));
-        // curl_setopt($ch, CURLOPT_HTTPHEADER, [
-        //     'Content-Type: application/json',
-        //     'Ocp-Apim-Subscription-Key: ' . $apiKey,
-        // ]);
-        // curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-        // $response = curl_exec($ch);
-
-        // if (curl_errno($ch)) {
-        //     echo 'Error:' . curl_error($ch);
-        // } else {
-        //     echo $response;
-        // }
-
-        // curl_close($ch);
-
-        // dd();
-
-        // $response = Http::withHeaders([
-        //     'Content-Type' => 'application/json',
-        //     'Ocp-Apim-Subscription-Key' => '5JcYKZ5a8D5YHlKnj783TWHgml7ZnjtlLWfxTiHASpHtvbt8fiOYJQQJ99BAACYeBjFXJ3w3AAALACOGN2aU',
-        // ])->post('https://hive20251name.cognitiveservices.azure.com/documentintelligence/documentModels/prebuilt-receipt:analyze?api-version=2024-11-30', [
-        //     'urlSource' => 'https://raw.githubusercontent.com/Azure-Samples/cognitive-services-REST-api-samples/master/curl/form-recognizer/rest-api/receipt.png',
-        // ]);
-
-        // echo $response->body();
-        // dd();
-
-        // $file = file_get_contents(storage_path($file_location));
-
-        // // Assuming the package has a method to analyze documents
-        // $result = AzureDI::make()->analyzeDocument($file);
-
-        // dd(response()->json($result));
-        // return response()->json($result);
-        // dd($file_location, $document_model, $doc_type);
         //['jpg', 'jpeg] ?
         if (strtolower($doc_type) == 'jpg') {
             $doc_content_type = 'Content-Type: image/jpeg';
@@ -1629,53 +1375,15 @@ class ReceiptController extends Controller
             //Should never be here. VendorDocCreate validates: file must be pdf, jpg, png
         }
 
-        $file = file_get_contents(storage_path($file_location));
-
-        // $endpoint = 'https://hive20251name.cognitiveservices.azure.com';
-        // $subscriptionKey = '5JcYKZ5a8D5YHlKnj783TWHgml7ZnjtlLWfxTiHASpHtvbt8fiOYJQQJ99BAACYeBjFXJ3w3AAALACOGN2aU';
-        // $receiptPath = 'https://raw.githubusercontent.com/Azure-Samples/cognitive-services-REST-api-samples/master/curl/form-recognizer/rest-api/receipt.png';
-
-        // $client = new Client();
-        // $headers = [
-        //     'Content-Type' => 'application/octet-stream',
-        //     'Ocp-Apim-Subscription-Key' => $subscriptionKey,
-        // ];
-
-        // try {
-        //     // Submit the receipt for analysis
-        //     $postResponse = $client->post($endpoint, [
-        //         'headers' => $headers,
-        //         'body' => fopen($receiptPath, 'r'),
-        //     ]);
-
-        //     $operationLocation = $postResponse->getHeader('Operation-Location')[0];
-
-        //     // Polling the GET request to check the status
-        //     do {
-        //         $getResponse = $client->get($operationLocation, [
-        //             'headers' => [
-        //                 'Ocp-Apim-Subscription-Key' => $subscriptionKey,
-        //             ],
-        //         ]);
-        //         $result = json_decode($getResponse->getBody(), true);
-        //         sleep(5); // Wait for 5 seconds before checking again
-        //     } while ($result['status'] !== 'succeeded');
-
-        //     // Output the results
-        //     echo json_encode($result, JSON_PRETTY_PRINT);
-        // } catch (ClientException $e) {
-        //     echo 'Error: ' . $e->getMessage();
-        //     echo 'Status Code: ' . $e->getResponse()->getStatusCode();
-        //     echo 'Response Body: ' . $e->getResponse()->getBody()->getContents();
-        // }
-
-        // dd('TOO LATE');
+        $file = Storage::disk('files')->get($file_location);
 
         //start OCR
         $ch = curl_init();
 
         $azure_api_key = env('AZURE_DI_API_KEY');
         $azure_api_version = env('AZURE_DI_VERSION');
+        $document_model = env('AZURE_CUSTOM_MODEL_COI');
+
         curl_setopt($ch, CURLOPT_URL, 'https://'.env('AZURE_DI_ENDPOINT').'/documentintelligence/documentModels/'.$document_model.':analyze?api-version='.$azure_api_version.'&features=queryFields&queryFields=PurchaseOrder');
         curl_setopt($ch, CURLOPT_POSTFIELDS, $file);
         curl_setopt($ch, CURLOPT_POST, true);
@@ -1709,7 +1417,6 @@ class ReceiptController extends Controller
             $result = exec('curl -v -X GET "https://'.$uri);
             $result = json_decode($result, true);
         }
-        // dd($result);
 
         return $result;
     }
@@ -2111,16 +1818,5 @@ class ReceiptController extends Controller
         }
 
         return $response;
-    }
-
-    //01-18-2023 transitioning all to $this->azure_receipts
-    //06-21-2022 USING BOTH NEW_OCR AND OCR_SPACE.. why?.
-    public function new_ocr_status()
-    {
-        //public function new_ocr($ocr_filename)
-        //ocr_space($ocr_filename)
-
-        //Show OCR left before buying more
-        dd(exec('curl http://api.newocr.com/v1/key/status?key='.env('NEW_OCR_API')));
     }
 }

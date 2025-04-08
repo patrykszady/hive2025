@@ -113,75 +113,8 @@ class GooglePlacesService
 
         } catch (RequestException $e) {
             // Log the error and return an empty array
-            Log::error("Google Place Details API Error: " . $e->getMessage());
+            Log::channel('google_places')->error("Google Place Details API Error: " . $e->getMessage());
             return [];
         }
     }
 }
-
-
-
-// use GoogleMaps;
-// public function geocodeWithCustomFormat($address, $hardcodedZip = 60070)
-// {
-//     // Step 1: Geocode the hardcoded ZIP code to get the state/region
-//     $zipCodeResult = GoogleMaps::load('geocoding')
-//         ->setParam(['address' => $hardcodedZip])
-//         ->get();
-
-//     $zipCodeData = json_decode($zipCodeResult, true);
-//     $zipCodeRegion = 'us';
-
-//     // Extract the "state" or "administrative_area_level_1" from the results
-//     foreach ($zipCodeData['results'][0]['address_components'] as $component) {
-//         if (in_array('administrative_area_level_1', $component['types'])) {
-//             $zipCodeRegion = $component['short_name']; // Example: "IL" for Illinois
-//             break;
-//         }
-//     }
-
-//     // Step 2: Geocode the input address with the region bias
-//     $geocodeResult = GoogleMaps::load('geocoding')
-//         ->setParam([
-//             'address' => $address,
-//             'region' => $zipCodeRegion // Apply region bias based on the ZIP code
-//         ])
-//         ->get();
-
-//     $geocodeData = json_decode($geocodeResult, true);
-//     $results = $geocodeData['results'];
-
-//     // Step 3: Format the result string
-//     $formattedAddresses = array_map(function ($result) {
-//         $result['formatted_address'] = $this->formatAddress($result['address_components']);
-//         return $result;
-//     }, $results);
-
-//     return $formattedAddresses;
-// }
-
-// public function formatAddress($addressComponents)
-// {
-//     $street = $city = $state = $zip = '';
-
-//     foreach ($addressComponents as $component) {
-//         if (in_array('street_number', $component['types'])) {
-//             $street = $component['long_name'];
-//         }
-//         if (in_array('route', $component['types'])) {
-//             $street .= ' ' . $component['short_name'];
-//         }
-//         if (in_array('locality', $component['types'])) {
-//             $city = $component['long_name'];
-//         }
-//         if (in_array('administrative_area_level_1', $component['types'])) {
-//             $state = $component['short_name']; // Use state abbreviation
-//         }
-//         if (in_array('postal_code', $component['types'])) {
-//             $zip = $component['long_name'];
-//         }
-//     }
-
-//     // Combine components into the desired format
-//     return "{$street}, {$city}, {$state} {$zip}";
-// }

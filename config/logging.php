@@ -1,7 +1,6 @@
 <?php
 
 return [
-
     'channels' => [
         'move_channel' => [
             'driver' => 'single',
@@ -86,12 +85,19 @@ return [
             'days' => 30,
         ],
 
-        // 'nylas_connection_errors' => [
-        //     'driver' => 'daily',
-        //     'path' => storage_path('logs/schedule.log'),
-        //     'level' => 'debug',
-        //     'days' => 30,
-        // ],
+        'vendor_docs' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/vendor_docs.log'),
+            'level' => 'debug',
+            'days' => 30,
+        ],
+
+        'google_places' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/vendor_docs.log'),
+            'level' => 'debug',
+            'days' => 30,
+        ],
     ],
 
 ];

@@ -2,23 +2,25 @@
 
 namespace App\Livewire\VendorDocs;
 
-use App\Jobs\SendVendorDocRequestEmail;
-use App\Models\Agent;
 use App\Models\Vendor;
-use App\Models\VendorDoc;
+
+use App\Jobs\SendVendorDocRequestEmail;
+
+use App\Traits\ProcessesVendorDocs;
+
 use Flux;
+
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+
 use Livewire\Component;
 use Livewire\WithFileUploads;
 
 class VendorDocCreate extends Component
 {
-    use AuthorizesRequests, WithFileUploads;
+    use AuthorizesRequests, WithFileUploads, ProcessesVendorDocs;
 
     public Vendor $vendor;
-
-    // public VendorDoc $vendor_doc;
-    public $doc_file = null;
+    public $doc_file;
 
     protected $listeners = ['addDocument', 'requestDocument', 'downloadDocuments'];
 
@@ -84,137 +86,21 @@ class VendorDocCreate extends Component
 
     public function store()
     {
-        //validate, file must be pdf, jpg, png
-        $this->validate();
-        // $this->authorize('update', $this->expense);
-        $doc_type = strtolower($this->doc_file->getClientOriginalExtension());
+        $docType = strtolower($this->doc_file->getClientOriginalExtension());
+        $tempFilePath = "temp_vendor_docs/{$this->doc_file->getClientOriginalName()}";
 
-        $ocr_filename = $this->vendor->id.'-'.auth()->user()->vendor->id.'-'.date('Y-m-d-H-i-s').'.'.$doc_type;
-        $file_location = 'files/vendor_docs/'.$ocr_filename;
-        //save file for this->vendor
-        $this->doc_file->storeAs('vendor_docs', $ocr_filename, 'files');
-        $document_model = env('AZURE_CUSTOM_MODEL_COI');
+        // Store the uploaded file temporarily
+        $this->doc_file->storeAs('temp_vendor_docs', $this->doc_file->getClientOriginalName(), 'files');
 
-        //send to form recogrnizer
-        $insurance_info = app(\App\Http\Controllers\ReceiptController::class)->azure_docs_api($file_location, $document_model, $doc_type);
-        $insurance_info = $insurance_info['analyzeResult']['documents'][0]['fields'];
+        // Process the documenthandleVendorDocProcessing
+        $this->handleVendorDocProcessing(
+            $tempFilePath,
+            $docType,
+            $this->vendor->id,
+            auth()->user()->vendor->id
+        );
 
-        //save/update Agent from the certificate
-        if (isset($insurance_info['agent_email']['valueString'])) {
-            $agent = Agent::where('email', $insurance_info['agent_email']['valueString'])->first();
-
-            if (is_null($agent)) {
-                $agent = Agent::create([
-                    'name' => isset($insurance_info['agent_name']['valueString']) ? $insurance_info['agent_name']['valueString'] : null,
-                    'business_name' => isset($insurance_info['agent_agency']['valueString']) ? $insurance_info['agent_agency']['valueString'] : null,
-                    'address' => isset($insurance_info['agent_agency_address']['valueString']) ? $insurance_info['agent_agency_address']['valueString'] : null,
-                    'phone' => isset($insurance_info['agent_phone']['content']) ? $insurance_info['agent_phone']['content'] : null,
-                    'email' => isset($insurance_info['agent_email']['valueString']) ? $insurance_info['agent_email']['valueString'] : null,
-                ]);
-            }
-        }
-
-        foreach ($insurance_info['general_multi']['valueArray'] as $general_policy) {
-            $general_policy_object = $general_policy['valueObject'];
-            $general_policy_object['number'] = $general_policy_object['general_policy_number']['valueString'];
-            $general_policy_object['eff'] = $general_policy_object['general_eff']['valueDate'];
-            $general_policy_object['exp'] = $general_policy_object['general_exp']['valueDate'];
-
-            //check if exists, if exists, continue and dont save again
-            $vendor_doc = VendorDoc::where('number', $general_policy_object['number'])
-                ->where('expiration_date', $general_policy_object['exp'])->first();
-
-            if (is_null($vendor_doc)) {
-                $vendor_doc = VendorDoc::create([
-                    'type' => 'general',
-                    'vendor_id' => $this->vendor->id,
-                    'effective_date' => $general_policy_object['eff'],
-                    'expiration_date' => $general_policy_object['exp'],
-                    'number' => $general_policy_object['number'],
-                    'belongs_to_vendor_id' => auth()->user()->vendor->id,
-                    'doc_filename' => $ocr_filename,
-                ]);
-
-                //link agent and insurance
-                if (isset($agent)) {
-                    $vendor_doc->agent_id = $agent->id;
-                    $vendor_doc->save();
-                }
-            }
-        }
-
-        foreach ($insurance_info['workers_multi']['valueArray'] as $workers_policy) {
-            $workers_policy_object = $workers_policy['valueObject'];
-            $workers_policy_object['number'] = $workers_policy_object['workers_policy_number']['valueString'];
-            $workers_policy_object['eff'] = $workers_policy_object['workers_eff']['valueDate'];
-            $workers_policy_object['exp'] = $workers_policy_object['workers_exp']['valueDate'];
-
-            //check if exists, if exists, continue and dont save again
-            $vendor_doc = VendorDoc::where('number', $workers_policy_object['number'])
-                ->where('expiration_date', $workers_policy_object['exp'])->first();
-
-            if (is_null($vendor_doc)) {
-                $vendor_doc = VendorDoc::create([
-                    'type' => 'workers',
-                    'vendor_id' => $this->vendor->id,
-                    'effective_date' => $workers_policy_object['eff'],
-                    'expiration_date' => $workers_policy_object['exp'],
-                    'number' => $workers_policy_object['number'],
-                    'belongs_to_vendor_id' => auth()->user()->vendor->id,
-                    'doc_filename' => $ocr_filename,
-                ]);
-
-                //link agent and insurance
-                if (isset($agent)) {
-                    $vendor_doc->agent_id = $agent->id;
-                    $vendor_doc->save();
-                }
-            }
-        }
-
-        //error ... already exists
-        //create vendor_doc for each $insurance_info
-        // $vendor_docs = [];
-        // if(isset($insurance_info['general_policy_number']['valueString'])){
-        //     //check if exists
-        //     $vendor_doc = VendorDoc::where('number', $insurance_info['general_policy_number']['valueString'])
-        //         ->where('expiration_date', $insurance_info['general_exp']['valueDate'])->first();
-
-        //     if(is_null($vendor_doc)){
-        //         $vendor_docs[] = 'general';
-        //     }
-        // }
-
-        // if(isset($insurance_info['workers_policy_number']['valueString'])){
-        //     if(str_replace(' ', '', $insurance_info['workers_policy_number']['valueString']) != 'N/A'){
-        //         //check if exists
-        //         $vendor_doc = VendorDoc::where('number', $insurance_info['workers_policy_number']['valueString'])
-        //             ->where('expiration_date', $insurance_info['workers_exp']['valueDate'])->first();
-
-        //         if(is_null($vendor_doc)){
-        //             $vendor_docs[] = 'workers';
-        //         }
-        //     }
-        // }
-
-        // foreach($vendor_docs as $vendor_doc){
-        //     $vendor_doc = VendorDoc::create([
-        //         'type' => $vendor_doc,
-        //         'vendor_id' => $this->vendor->id,
-        //         'effective_date' => $insurance_info[$vendor_doc . '_eff']['valueDate'],
-        //         'expiration_date' => $insurance_info[$vendor_doc . '_exp']['valueDate'],
-        //         'number' => $insurance_info[$vendor_doc . '_policy_number']['valueString'],
-        //         'belongs_to_vendor_id' => auth()->user()->vendor->id,
-        //         'doc_filename' => $ocr_filename
-        //     ]);
-
-        //     //link agent and insurance
-        //     if(isset($agent)){
-        //         $vendor_doc->agent_id = $agent->id;
-        //         $vendor_doc->save();
-        //     }
-        // }
-
+        // Reset input and notify the user
         $this->modal('vendor_doc_form_modal')->close();
         $this->doc_file = null;
 

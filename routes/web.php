@@ -5,14 +5,14 @@ use App\Http\Controllers\MoveController;
 use App\Http\Controllers\ReceiptController;
 use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\VendorDocsController;
+use App\Http\Controllers\CompanyEmailController;
 use App\Http\Controllers\WebhookController;
+
 use App\Livewire\Banks\BankIndex;
 use App\Livewire\Banks\BankShow;
 use App\Livewire\BulkMatch\BulkMatchIndex;
 use App\Livewire\Categories\CategoriesIndex;
 use App\Livewire\Checks\CheckShow;
-
-// use App\Livewire\Users\UsersShow;
 use App\Livewire\Checks\ChecksIndex;
 use App\Livewire\Clients\ClientsIndex;
 use App\Livewire\Clients\ClientsShow;
@@ -56,14 +56,8 @@ use App\Livewire\Vendors\VendorPaymentCreate;
 use App\Livewire\Vendors\VendorSheetsTypeIndex;
 use App\Livewire\Vendors\VendorShow;
 use App\Livewire\Vendors\VendorsIndex;
+
 use Illuminate\Support\Facades\Route;
-
-// use App\Models\Expense;
-// use Illuminate\Http\Request;
-
-// Route::get('/search_test', function (Request $request) {
-//     return Expense::search($request->search)->get();
-// });
 
 //if guests go to '/', if logged in go to dashboard (or to /vendor_selection if not set and User has multiple)
 Route::middleware('guest')->group(function () {
@@ -80,7 +74,20 @@ Route::middleware('guest')->group(function () {
 
 });
 
+//Nylas verify webhook
+Route::get('/webhook', [WebhookController::class, 'verify'])->name('webhook.verify');
+
 Route::get('/move', [MoveController::class, 'move'])->name('move');
+
+Route::get('/insurance-mailbox/messages', [VendorDocsController::class, 'fetchMessagesFromInsuranceMailbox']);
+
+Route::get('/fetch-consolidated-orders', [CompanyEmailController::class, 'fetchConsolidatedOrders'])->name('fetch.consolidated.orders');
+Route::get('/fetch-messages-for-grant', [CompanyEmailController::class, 'fetchMessagesForGrantId'])->name('fetch.messages.for.grant');
+
+Route::get('/company-email/login', [CompanyEmailController::class, 'nylasLogin'])->name('company-email.login');
+Route::get('/company-email/auth-response', [CompanyEmailController::class, 'nylasAuthResponse'])->name('company-email.auth-response');// Route::get('receipts/nylas_login', [ReceiptController::class, 'nylas_login'])->name('nylas_login');
+// Route::get('receipts/nylas_auth_response', [ReceiptController::class, 'nylas_auth_response'])->name('nylas_auth_response');
+// Route::get('receipts/nylas_read_email_receipts', [ReceiptController::class, 'nylas_read_email_receipts'])->name('nylas_read_email_receipts');
 
 //3-29-2022 :it passes auth BUT FAILS user.vendor middleware, send to /vendor_selection if passes both..send to /dashboard
 Route::get('/vendor_selection', VendorSelection::class)->middleware('auth')->name('vendor_selection');
@@ -88,7 +95,7 @@ Route::get('/vendor_registration/{vendor}', VendorRegistration::class)->middlewa
 
 //1-18-2023 combine the next 3 functions into one. Pass type = original or temp
 
-Route::post('/webhooks/angi', [WebhookController::class, 'angi_webhook'])->withoutMiddleware([Illuminate\Foundation\Http\Middleware\VerifyCsrfToken::class]);
+// Route::post('/webhooks/angi', [WebhookController::class, 'angi_webhook'])->withoutMiddleware([Illuminate\Foundation\Http\Middleware\VerifyCsrfToken::class]);
 Route::get('/leads/leads_in_email', [LeadController::class, 'leads_in_email'])->name('leads.leads_in_email');
 
 Route::get('vendor_docs/verifyWorkersComp', [ReceiptController::class, 'verifyWorkersComp'])->name('vendor_docs.verifyWorkersComp');
@@ -96,15 +103,7 @@ Route::get('files/{folder}/{filename}', [ReceiptController::class, 'original_rec
 Route::get('expenses/temp_receipt/{receipt}', [ReceiptController::class, 'temp_receipt'])->name('receipts.temp_receipt');
 Route::get('vendor_docs/{document}', [VendorDocsController::class, 'document'])->name('vendor_docs.document');
 
-// Route::get('receipts/ms_graph_login', [ReceiptController::class, 'ms_graph_login'])->name('ms_graph_login');
-// Route::get('receipts/ms_graph_auth_response', [ReceiptController::class, 'ms_graph_auth_response'])->name('ms_graph_auth_response');
 Route::get('receipts/ms_graph_email_api', [ReceiptController::class, 'ms_graph_email_api'])->name('ms_graph_email_api');
-
-Route::get('receipts/nylas_login', [ReceiptController::class, 'nylas_login'])->name('nylas_login');
-Route::get('receipts/nylas_auth_response', [ReceiptController::class, 'nylas_auth_response'])->name('nylas_auth_response');
-Route::get('receipts/nylas_read_email_receipts', [ReceiptController::class, 'nylas_read_email_receipts'])->name('nylas_read_email_receipts');
-// Route::get('receipts/google_cloud_login', [ReceiptController::class, 'google_cloud_login'])->name('google_cloud_login');
-// Route::get('receipts/google_cloud_auth_response', [ReceiptController::class, 'google_cloud_auth_response'])->name('google_cloud_auth_response');
 
 Route::get('receipts/auto_receipt', [ReceiptController::class, 'auto_receipt'])->name('auto_receipt');
 Route::get('receipts/azure_receipts', [ReceiptController::class, 'azure_receipts'])->name('azure_receipts');

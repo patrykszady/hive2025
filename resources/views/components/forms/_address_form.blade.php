@@ -4,9 +4,13 @@
         <flux:select.input wire:model.live.debounce.300ms="address_query" placeholder="Address..."/>
     </x-slot>
 
-    @foreach ($address_suggestions as $address_suggestion)
-        <flux:select.option value="{{$address_suggestion['place_id']}}" :key="$address_suggestion['place_id']">{{$address_suggestion['description']}}</flux:select.option>
-    @endforeach
+    @if(!empty($address_query))
+        @foreach ($address_suggestions as $address_suggestion)
+            <flux:select.option value="{{$address_suggestion['place_id']}}" :key="$address_suggestion['place_id']">
+                {{$address_suggestion['description']}}
+            </flux:select.option>
+        @endforeach
+    @endif
 </flux:select>
 
 <div x-show="$wire.address_1">
