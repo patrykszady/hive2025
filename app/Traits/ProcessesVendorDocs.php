@@ -9,7 +9,7 @@ use App\Models\VendorDoc;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
-use Log;
+use Illuminate\Support\Facades\Log;
 
 trait ProcessesVendorDocs
 {
@@ -138,7 +138,7 @@ trait ProcessesVendorDocs
             $expirationDate = $policyObject["{$type}_exp"]['valueDate'];
 
             // Check if the policy already exists.
-            $vendorDoc = VendorDoc::where([
+            $vendorDoc = VendorDoc::withoutGlobalScopes()->where([
                 'number'                 => $policyNumber,
                 'expiration_date'        => $expirationDate,
                 'type'                   => $type,
@@ -148,7 +148,7 @@ trait ProcessesVendorDocs
 
             if (!$vendorDoc) {
                 // Create the new VendorDoc record using the common file reference.
-                $vendorDoc = VendorDoc::create([
+                $vendorDoc = VendorDoc::withoutGlobalScopes()->create([
                     'type'                 => $type,
                     'vendor_id'            => $vendorId,
                     'effective_date'       => $effectiveDate,
@@ -194,7 +194,7 @@ trait ProcessesVendorDocs
         $highestSimilarity = 0;
 
         // Fetch IDs and business names from the database
-        $businessNames = Vendor::withoutGLobalScopes()->select('id', 'business_name')->get();
+        $businessNames = Vendor::withoutGlobalScopes()->select('id', 'business_name')->get();
 
         foreach ($businessNames as $entry) {
             // Normalize the database business name
