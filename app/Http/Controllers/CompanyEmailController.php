@@ -155,23 +155,17 @@ class CompanyEmailController extends Controller
 
             // Define query parameters for the Nylas API
             $queryParams = [
-                'limit' => 5, // Fetch 5 messages
-                'in' => 'inbox', // Fetch messages from the inbox
+                'limit' => 99, // Fetch 5 messages
+                'in' => 'inbox', // Fetch messages from the inbox,
+                'from' => 'HomeDepot@order.homedepot.com',
+                'subject' => 'Your Electronic Receipt',
             ];
 
             // Fetch messages using the NylasService
             $messages = $this->nylasService->getMessages($queryParams, $grantId);
-
-            dd( $messages);
-            // Append the result along with company email info
-            $results[] = [
-                'email_id' => $companyEmail->id,
-                'grant_id' => $grantId,
-                'messages' => $messages, // Include the fetched messages
-            ];
         }
 
-        dd($results); // Debugging: dump the results
+        dd($messages); // Debugging: dump the results
         // Return the results as a JSON response
         return response()->json([
             'success' => true,
