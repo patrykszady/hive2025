@@ -201,7 +201,7 @@ class CompanyEmailController extends Controller
                 $dateEmail = Carbon::parse($message['date'])->setTimezone('America/Chicago')->format('Y-m-d H:i:s');
 
                 // Check if the 'from' email and 'subject' match any receipt
-                $receipt = $receipts->where('receipt_type', '!=', 5)->first(function ($receipt) use ($fromEmail, $subject) {
+                $receipt = $receipts->where('receipt_type', '!=', 0)->first(function ($receipt) use ($fromEmail, $subject) {
                     return strcasecmp($receipt->from_address, $fromEmail) === 0
                         && stripos($subject, $receipt->from_subject) !== false; // Check if "Sale" appears in the subject
                 });
@@ -218,7 +218,7 @@ class CompanyEmailController extends Controller
                     $date = trim($dateMatch[1] ?? '');
                     $dateEmail = Carbon::parse($date)->setTimezone('America/Chicago')->format('Y-m-d H:i:s');
 
-                    $receipt = $receipts->where('receipt_type', '!=', 5)->first(function ($receipt) use ($fromEmail, $subject) {
+                    $receipt = $receipts->where('receipt_type', '!=', 0)->first(function ($receipt) use ($fromEmail, $subject) {
                         return strcasecmp($receipt->from_address, $fromEmail) === 0
                             && stripos($subject, $receipt->from_subject) !== false; // Check if "Sale" appears in the subject
                     });
