@@ -162,33 +162,46 @@ class CompanyEmailController extends Controller
         foreach ($companyEmails as $companyEmail) {
             $grantId = $companyEmail->grant_id; // Extract the grant_id
 
-            // Define the folders to query based on the environment
-            $folders = env('APP_ENV') === 'production'
-                ? ['inbox', $companyEmail->api_json['folders']['Retry']] // Include production folders
-                : [$companyEmail->api_json['folders']['Test']];          // Include test folders in non-production
+            // // Define the folders to query based on the environment
+            // $folders = env('APP_ENV') !== 'production'
+            //     ? ['inbox', $companyEmail->api_json['folders']['Retry']] // Include production folders
+            //     : [$companyEmail->api_json['folders']['Test']];          // Include test folders in non-production
 
-            $allMessages = []; // Array to store all messages
-            foreach ($folders as $folder) {
-                // Define query parameters for the Nylas API
-                $queryParams = [
-                    'limit' => 99,       // Fetch a limited number of messages
-                    'in' => $folder,     // Specify the folder to filter messages from
-                ];
+            // $allMessages = []; // Array to store all messages
+            // foreach ($folders as $folder) {
+            //     // Define query parameters for the Nylas API
+            //     $queryParams = [
+            //         'limit' => 99,       // Fetch a limited number of messages
+            //         'in' => $folder,     // Specify the folder to filter messages from
+            //     ];
 
-                // Fetch messages from the current folder using the NylasService
-                $messages = $this->nylasService->getMessages($queryParams, $grantId);
+            //     // Fetch messages from the current folder using the NylasService
+            //     $messages = $this->nylasService->getMessages($queryParams, $grantId);
 
-                // Merge messages from the current folder into the combined array
-                $allMessages = array_merge($allMessages, $messages ?? []);
-            }
+            //     // Merge messages from the current folder into the combined array
+            //     $allMessages = array_merge($allMessages, $messages);
+            // }
 
-            foreach($allMessages['data'] as $message) {
+            // dd($allMessages); // Debugging: dump all messages
+
+
+            // Define query parameters for the Nylas API
+            $queryParams = [
+                'limit' => 99,       // Fetch a limited number of messages
+                'in' => 'inbox',     // Specify the folder to filter messages from
+            ];
+
+            // Fetch messages from the current folder using the NylasService
+            $messages = $this->nylasService->getMessages($queryParams, $grantId);
+
+            foreach($messages['data'] as $message) {
+                $messageId = $message['id'];
                 $fromEmail = $message['from'][0]['email'];
                 $subject = $message['subject'];
                 $dateEmail = Carbon::parse($message['date'])->setTimezone('America/Chicago')->format('Y-m-d H:i:s');
 
                 // Check if the 'from' email and 'subject' match any receipt
-                $receipt = $receipts->first(function ($receipt) use ($fromEmail, $subject) {
+                $receipt = $receipts->where('receipt_type', '!=', 5)->first(function ($receipt) use ($fromEmail, $subject) {
                     return strcasecmp($receipt->from_address, $fromEmail) === 0
                         && stripos($subject, $receipt->from_subject) !== false; // Check if "Sale" appears in the subject
                 });
@@ -205,7 +218,7 @@ class CompanyEmailController extends Controller
                     $date = trim($dateMatch[1] ?? '');
                     $dateEmail = Carbon::parse($date)->setTimezone('America/Chicago')->format('Y-m-d H:i:s');
 
-                    $receipt = $receipts->first(function ($receipt) use ($fromEmail, $subject) {
+                    $receipt = $receipts->where('receipt_type', '!=', 5)->first(function ($receipt) use ($fromEmail, $subject) {
                         return strcasecmp($receipt->from_address, $fromEmail) === 0
                             && stripos($subject, $receipt->from_subject) !== false; // Check if "Sale" appears in the subject
                     });
@@ -213,10 +226,9 @@ class CompanyEmailController extends Controller
 
                 if(is_null($receipt)) {
                     // No matching receipt found, skip to the next message
-                    $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['ERROR'], $grantId);
+                    // $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['ERROR'], $grantId);
                     continue;
                 }elseif ($receipt) {
-                    $messageId = $message['id'];
                     $toEmail = $message['to'][0]['email'];
                     $string = $message['body'];
 
@@ -327,7 +339,6 @@ class CompanyEmailController extends Controller
                         $ocr_filename = date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '.jpg';
                         $location = storage_path($ocr_path = 'files/_temp_ocr/' . $ocr_filename);
                     }
-
 
                     $document_model = $receipt->options['document_model'];
                     //ocr the file
