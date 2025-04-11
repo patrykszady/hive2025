@@ -163,26 +163,28 @@ class CompanyEmailController extends Controller
             $grantId = $companyEmail->grant_id; // Extract the grant_id
 
             // Define the folders to query based on the environment
-            $folders = env('APP_ENV') === 'production'
-                ? ['inbox', $companyEmail->api_json['folders']['Retry']] // Include production folders
-                : [$companyEmail->api_json['folders']['Test']];          // Include test folders in non-production
+            // $folders = env('APP_ENV') !== 'production'
+            //     ? ['inbox', $companyEmail->api_json['folders']['Retry']] // Include production folders
+            //     : [$companyEmail->api_json['folders']['Test']];          // Include test folders in non-production
 
-            $allMessages = []; // Array to store all messages
-            foreach ($folders as $folder) {
-                // Define query parameters for the Nylas API
-                $queryParams = [
-                    'limit' => 99,       // Fetch a limited number of messages
-                    'in' => $folder,     // Specify the folder to filter messages from
-                ];
+            // $allMessages = []; // Array to store all messages
 
-                // Fetch messages from the current folder using the NylasService
-                $messages = $this->nylasService->getMessages($queryParams, $grantId);
+            // foreach ($folders as $folder) {
+            //     // Define query parameters for the Nylas API
 
-                // Merge messages from the current folder into the combined array
-                $allMessages = array_merge($allMessages, $messages);
-            }
 
-            foreach($allMessages['data'] as $message) {
+            //     // Merge messages from the current folder into the combined array
+            //     $allMessages = array_merge($allMessages, $messages);
+            // }
+            $queryParams = [
+                'limit' => 99,       // Fetch a limited number of messages
+                'in' => 'inbox',     // Specify the folder to filter messages from
+            ];
+
+            // Fetch messages from the current folder using the NylasService
+            $messages = $this->nylasService->getMessages($queryParams, $grantId);
+
+            foreach($messages['data'] as $message) {
                 $fromEmail = $message['from'][0]['email'];
                 $subject = $message['subject'];
                 $dateEmail = Carbon::parse($message['date'])->setTimezone('America/Chicago')->format('Y-m-d H:i:s');
