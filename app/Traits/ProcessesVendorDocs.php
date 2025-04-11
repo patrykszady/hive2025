@@ -116,7 +116,8 @@ trait ProcessesVendorDocs
     {
         // Perform OCR and return extracted data
         //4/7/2025 MOVE TO A SERVICE?
-        return app(\App\Http\Controllers\ReceiptController::class)->azure_docs_api($filePath, $docType)['analyzeResult']['documents'][0]['fields'];
+        $document_model = env('AZURE_CUSTOM_MODEL_COI');
+        return app(\App\Http\Controllers\ReceiptController::class)->azure_docs_api($filePath, $document_model, $docType)['analyzeResult']['documents'][0]['fields'];
     }
 
     private function processPolicies(

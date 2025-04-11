@@ -585,7 +585,7 @@ class ReceiptController extends Controller
 
         foreach ($company_emails as $company_email) {
             //check if access_token is expired, if so get new access_token and refresh_token
-            //12-31-2024  + 01/26/205..should be a Service we can reuse? check
+            //12-31-2024  + 01/26/2025..should be a Service we can reuse? check
             try {
                 $guzzle = new Client;
                 $url = 'https://login.microsoftonline.com/'.env('MS_GRAPH_TENANT_ID').'/oauth2/v2.0/token';
@@ -741,6 +741,7 @@ class ReceiptController extends Controller
 
                     continue;
                 }
+
 
                 //getContent = HTML or TEXT
                 $string = $message->getBody()->getContent();
@@ -1361,8 +1362,7 @@ class ReceiptController extends Controller
         return $document_model;
     }
 
-    //4/7/2025 IS THIS STILL USED?
-    public function azure_docs_api($file_location, $doc_type)
+    public function azure_docs_api($file_location, $document_model, $doc_type)
     {
         //['jpg', 'jpeg] ?
         if (strtolower($doc_type) == 'jpg') {
@@ -1375,14 +1375,13 @@ class ReceiptController extends Controller
             //Should never be here. VendorDocCreate validates: file must be pdf, jpg, png
         }
 
-        $file = Storage::disk('files')->get($file_location);
-
+        // $file = Storage::disk('files')->get($file_location);
+        $file = file_get_contents(storage_path($file_location));
         //start OCR
         $ch = curl_init();
 
         $azure_api_key = env('AZURE_DI_API_KEY');
         $azure_api_version = env('AZURE_DI_VERSION');
-        $document_model = env('AZURE_CUSTOM_MODEL_COI');
 
         curl_setopt($ch, CURLOPT_URL, 'https://'.env('AZURE_DI_ENDPOINT').'/documentintelligence/documentModels/'.$document_model.':analyze?api-version='.$azure_api_version.'&features=queryFields&queryFields=PurchaseOrder');
         curl_setopt($ch, CURLOPT_POSTFIELDS, $file);
@@ -1409,6 +1408,7 @@ class ReceiptController extends Controller
         $uri = env('AZURE_DI_ENDPOINT').'/documentintelligence/documentModels/'.$document_model.'/analyzeResults/'.$operation_location_id.'?api-version='.$azure_api_version.'" -H "Ocp-Apim-Subscription-Key: '.$azure_api_key.'"';
         $result = exec('curl -v -X GET "https://'.$uri);
         $result = json_decode($result, true);
+
         //2024-12-25 ..if $result is error...LOG and inform user
 
         //wait but go as soon as done.

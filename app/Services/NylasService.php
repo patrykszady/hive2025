@@ -222,12 +222,18 @@ class NylasService
     public function getMessages(array $queryParams = [], string $grantId): ?array
     {
         try {
+            // Base URL for Nylas API to fetch messages with included headers
             $url = "https://api.us.nylas.com/v3/grants/{$grantId}/messages";
 
+            // Append query parameters to the URL if provided
             if (!empty($queryParams)) {
                 $url .= '?' . http_build_query($queryParams);
             }
 
+            // Add the specific 'fields' parameter to include headers
+            $url .= (empty($queryParams) ? '?' : '&') . 'fields=include_headers';
+
+            // Perform the HTTP GET request using the HTTP client
             $response = $this->httpClient->get($url, [
                 'headers' => [
                     'Authorization' => 'Bearer ' . env('NYLAS_API_KEY'),
@@ -236,8 +242,10 @@ class NylasService
                 ],
             ]);
 
+            // Decode the response body into an associative array
             return json_decode($response->getBody(), true);
         } catch (Exception $e) {
+            // Log the error with Grant ID and the exception message
             Log::error("Error fetching messages for Grant ID {$grantId}: " . $e->getMessage());
             return null;
         }
