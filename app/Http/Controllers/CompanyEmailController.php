@@ -514,11 +514,11 @@ class CompanyEmailController extends Controller
                         $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)
                             ->ocr_extract($ocr_receipt_extracted);
 
-                        if(isset($ocr_receipt_data['error']) || $ocr_receipt_data['error'] == true){
-                            //if error move this single $attachment to a folder for debug...
-                            Storage::disk('files')->move('/_temp_ocr/'.$ocr_filename, '/auto_receipts_failed/'.$ocr_filename);
-                            continue;
-                        }
+                        // if(isset($ocr_receipt_data['error']) || $ocr_receipt_data['error'] == true){
+                        //     //if error move this single $attachment to a folder for debug...
+                        //     Storage::disk('files')->move('/_temp_ocr/'.$ocr_filename, '/auto_receipts_failed/'.$ocr_filename);
+                        //     continue;
+                        // }
 
                         // Set up the transaction date range.
                         $start_date = Carbon::parse($ocr_receipt_data['fields']['transaction_date'])

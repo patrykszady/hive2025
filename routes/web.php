@@ -81,11 +81,13 @@ Route::get('/move', [MoveController::class, 'move'])->name('move');
 
 Route::get('/insurance-mailbox/messages', [VendorDocsController::class, 'fetchMessagesFromInsuranceMailbox']);
 
-if(env('APP_ENV') !== 'production'){
-    Route::get('/fetch-auto-receipts', [CompanyEmailController::class, 'fetchAutoReceipts'])->name('fetch.auto.receipts');
-    Route::get('/fetch-consolidated-orders', [CompanyEmailController::class, 'fetchConsolidatedOrders'])->name('fetch.consolidated.orders');
-    Route::get('/fetch-messages-for-grant', [CompanyEmailController::class, 'fetchMessagesForGrantId'])->name('fetch.messages.for.grant');}
+Route::get('/fetch-auto-receipts', [CompanyEmailController::class, 'fetchAutoReceipts'])->name('fetch.auto.receipts');
+Route::get('/fetch-consolidated-orders', [CompanyEmailController::class, 'fetchConsolidatedOrders'])->name('fetch.consolidated.orders');
+Route::get('/fetch-messages-for-grant', [CompanyEmailController::class, 'fetchMessagesForGrantId'])->name('fetch.messages.for.grant')
 
+if(env('APP_ENV') !== 'production'){
+
+}
 
 Route::get('/company-email/login', [CompanyEmailController::class, 'nylasLogin'])->name('company-email.login');
 Route::get('/company-email/auth-response', [CompanyEmailController::class, 'nylasAuthResponse'])->name('company-email.auth-response');// Route::get('receipts/nylas_login', [ReceiptController::class, 'nylas_login'])->name('nylas_login');
