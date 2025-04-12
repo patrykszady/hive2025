@@ -20,16 +20,17 @@
             </div> --}}
         </div>
 
-        @foreach($vendor_users as $user)
-            <flux:card class="hover:bg-sky-100 hover:border-sky-300">
-                <div class="flex justify-between">
-                    <a href="{{route('timesheets.payment', $user->id)}}">
-                        <flux:heading>Pay {{$user->first_name}}</flux:heading>
-                        {{-- <flux:subheading>{{$check->check_type . ' ' . $check->check_number . ' ' . $check->date->format('m/d/Y')}}</flux:subheading> --}}
-                    </a>
-                    <a href="{{route('timesheets.payment', $user->id)}}" class="text-sky-800"><b>{{money($user->total)}}</b></a>
-                </div>
-            </flux:card>
-        @endforeach
+        <div class="space-y-2">
+            @foreach($vendor_users as $user)
+                <a href="{{route('timesheets.payment', $user->id)}}" class="block">
+                    <flux:card class="hover:bg-sky-100 hover:border-sky-300">
+                        <div class="flex justify-between">
+                            <flux:heading>Pay {{$user->first_name}}</flux:heading>
+                            <b class="text-sky-800">{{money($user->total)}}</b>
+                        </div>
+                    </flux:card>
+                </a>
+            @endforeach
+        </div>
     </flux:card>
 </div>

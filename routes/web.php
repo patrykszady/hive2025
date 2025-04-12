@@ -79,16 +79,15 @@ Route::get('/webhook', [WebhookController::class, 'verify'])->name('webhook.veri
 
 Route::get('/move', [MoveController::class, 'move'])->name('move');
 
-Route::get('/insurance-mailbox/messages', [VendorDocsController::class, 'fetchMessagesFromInsuranceMailbox']);
-
-Route::get('/fetch-auto-receipts', [CompanyEmailController::class, 'fetchAutoReceipts'])->name('fetch.auto.receipts');
-Route::get('/fetch-consolidated-orders', [CompanyEmailController::class, 'fetchConsolidatedOrders'])->name('fetch.consolidated.orders');
-Route::get('/fetch-messages-for-grant', [CompanyEmailController::class, 'fetchMessagesForGrantId'])->name('fetch.messages.for.grant');
+if(env('APP_ENV') === 'local') {
+    Route::get('/insurance-mailbox/messages', [VendorDocsController::class, 'fetchMessagesFromInsuranceMailbox']);
+    Route::get('/fetch-auto-receipts', [CompanyEmailController::class, 'fetchAutoReceipts'])->name('fetch.auto.receipts');
+    Route::get('/fetch-consolidated-orders', [CompanyEmailController::class, 'fetchConsolidatedOrders'])->name('fetch.consolidated.orders');
+    Route::get('/fetch-messages-for-grant', [CompanyEmailController::class, 'fetchMessagesForGrantId'])->name('fetch.messages.for.grant');
+}
 
 Route::get('/company-email/login', [CompanyEmailController::class, 'nylasLogin'])->name('company-email.login');
-Route::get('/company-email/auth-response', [CompanyEmailController::class, 'nylasAuthResponse'])->name('company-email.auth-response');// Route::get('receipts/nylas_login', [ReceiptController::class, 'nylas_login'])->name('nylas_login');
-// Route::get('receipts/nylas_auth_response', [ReceiptController::class, 'nylas_auth_response'])->name('nylas_auth_response');
-// Route::get('receipts/nylas_read_email_receipts', [ReceiptController::class, 'nylas_read_email_receipts'])->name('nylas_read_email_receipts');
+Route::get('/company-email/auth-response', [CompanyEmailController::class, 'nylasAuthResponse'])->name('company-email.auth-response');
 
 //3-29-2022 :it passes auth BUT FAILS user.vendor middleware, send to /vendor_selection if passes both..send to /dashboard
 Route::get('/vendor_selection', VendorSelection::class)->middleware('auth')->name('vendor_selection');

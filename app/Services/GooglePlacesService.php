@@ -19,9 +19,6 @@ class GooglePlacesService
 
     /**
      * Fetch autocomplete suggestions from Google Places API.
-     *
-     * @param string $input
-     * @return array
      */
     public function getAutocompleteSuggestions($input)
     {
@@ -60,9 +57,6 @@ class GooglePlacesService
 
     /**
      * Fetch detailed place information using Place ID.
-     *
-     * @param string $placeId
-     * @return array
      */
     public function getPlaceDetails($placeId)
     {

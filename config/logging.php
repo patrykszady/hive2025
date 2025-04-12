@@ -2,24 +2,17 @@
 
 return [
     'channels' => [
+        'schedule' => [
+            'driver' => 'daily',
+            'path'   => storage_path('logs/schedule.log'),
+            'level'  => 'info',
+            'days'   => 14, // or however many you want to keep
+        ],
+
         'move_channel' => [
             'driver' => 'single',
             'path' => storage_path('logs/move_channel.log'),
             'level' => 'debug',
-        ],
-
-        'hd_rebates' => [
-            'driver' => 'daily',
-            'path' => storage_path('logs/hd_rebates.log'),
-            'level' => 'debug',
-            'days' => 30,
-        ],
-
-        'hd_rebates_errors' => [
-            'driver' => 'daily',
-            'path' => storage_path('logs/hd_rebates_errors.log'),
-            'level' => 'debug',
-            'days' => 30,
         ],
 
         'company_emails_login_error' => [

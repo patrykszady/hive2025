@@ -39,7 +39,15 @@ class MoveController extends Controller
 {
     public function move()
     {
-        dd('in move');
+        $expenses = Expense::where('vendor_id', 10)
+        ->whereHas('receipts', function ($query) {
+            $query->where(function ($q) {
+                $q->whereRaw("CAST(receipt_items->>'$.total' AS DECIMAL(10,2)) != amount");
+            });
+        })
+        ->get();
+
+        dd($expenses);
         $checks = Check::whereYear('date', 2024)
                     ->where('belongs_to_vendor_id', 1)
                     ->with('transactions')

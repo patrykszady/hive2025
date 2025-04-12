@@ -5,14 +5,25 @@ namespace App\Traits;
 use App\Models\Agent;
 use App\Models\Vendor;
 use App\Models\VendorDoc;
-
+use App\Services\GooglePlacesService;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-
 use Illuminate\Support\Facades\Log;
+use Searchy;
 
 trait ProcessesVendorDocs
 {
+    protected $googlePlacesService;
+
+    protected function getGooglePlacesService()
+    {
+        if (!$this->googlePlacesService) {
+            // Now we can instantiate it directly since it's imported.
+            $this->googlePlacesService = new GooglePlacesService();
+        }
+        return $this->googlePlacesService;
+    }
+
     public function handleVendorDocProcessing(
         $filePath,
         $docType,
@@ -21,30 +32,23 @@ trait ProcessesVendorDocs
         $messageId = null,
         $grantId = null
     ) {
-        // 1. Extract data via OCR
+        // 1. Extract OCR data.
         $insuranceInfo = $this->extractDataFromFile($filePath, $docType);
 
-        // 2. Always run matchBusinessNameAndReturnId to calculate IDs
-        $calculatedVendorId = $this->matchBusinessNameAndReturnId($insuranceInfo['insured_name']['valueString']);
-        $calculatedBelongsToVendorId = $this->matchBusinessNameAndReturnId($insuranceInfo['holder_name']['valueString']);
+        // 2 & 3. Resolve vendor IDs based on OCR for insured and holder.
+        $calculatedVendorId = $this->resolveVendorId($insuranceInfo, 'insured_name', 'insured_address');
+        $calculatedBelongsToVendorId = $this->resolveVendorId($insuranceInfo, 'holder_name', 'holder_address');
 
-        // 3. If explicit IDs are provided, log a warning if they don't match the calculated ones
-        if ($vendorId) {
-            if ($vendorId != $calculatedVendorId) {
-                Log::warning("VendorDocCreate: Provided vendorId ($vendorId) does not match calculated vendorId ($calculatedVendorId).");
-            }
-        }
-        if ($belongsToVendorId) {
-            if ($belongsToVendorId != $calculatedBelongsToVendorId) {
-                Log::warning("VendorDocCreate: Provided belongsToVendorId ($belongsToVendorId) does not match calculated vendorId ($calculatedBelongsToVendorId).");
-            }
+        // 4. If explicit IDs were provided and they don't match the calculated values, stop processing.
+        if (($vendorId && $vendorId != $calculatedVendorId) || ($belongsToVendorId && $belongsToVendorId != $calculatedBelongsToVendorId)) {
+            return false;
         }
 
-        // 4. Decide which values to use.
+        // 5. Decide which IDs to use.
         $matchedVendorId = $calculatedVendorId ?: $vendorId;
         $matchedBelongsToVendorId = $calculatedBelongsToVendorId ?: $belongsToVendorId;
 
-        // 5. For email-based processing, move the email based on matching results.
+        // 6. For email-based processing, move email based on matching results.
         if (isset($messageId) && isset($grantId)) {
             $this->moveEmailBasedOnMatchingResults(
                 $messageId,
@@ -54,12 +58,12 @@ trait ProcessesVendorDocs
             );
         }
 
-        // 6. If either vendor ID is still missing, stop further processing.
+        // 7. Stop further processing if either vendor ID is missing.
         if (is_null($matchedVendorId) || is_null($matchedBelongsToVendorId)) {
             return false;
         }
 
-        // 7. Process and/or create the Agent record if OCR returned agent details.
+        // 8. Process/create the Agent record if OCR returned agent details.
         $agent = null;
         if (
             isset($insuranceInfo['agent_email']['valueString']) &&
@@ -76,14 +80,12 @@ trait ProcessesVendorDocs
             );
         }
 
-        // 8. Create a single permanent file name and new storage path.
+        // 9. Create a permanent file name and new storage path.
         $fileName = "{$matchedBelongsToVendorId}-{$matchedVendorId}-" . now()->format('Y-m-d-H-i-s') . ".{$docType}";
         $newFilePath = "vendor_docs/{$fileName}";
-
-        // Move from temporary storage (temp_vendor_docs) to permanent storage.
         Storage::disk('files')->move($filePath, $newFilePath);
 
-        // 9. Process both policy types in a single loop.
+        // 10. Process policy types in a loop.
         $policyTypes = [
             ['policyKey' => 'general_multi', 'type' => 'general'],
             ['policyKey' => 'workers_multi', 'type' => 'workers'],
@@ -95,18 +97,18 @@ trait ProcessesVendorDocs
                 $insuranceInfo,
                 $policy['policyKey'],
                 $policy['type'],
-                $newFilePath,   // Permanent file location (moved file)
-                $fileName,      // The file name to save in the database
+                $newFilePath,   // Permanent storage location.
+                $fileName,      // File name saved in DB.
                 $matchedVendorId,
                 $matchedBelongsToVendorId,
-                $agent          // Pass the agent (if any) for association
+                $agent          // Associate agent if available.
             );
             if ($result === true) {
                 $newPolicyCreated = true;
             }
         }
 
-        // 10. If no new vendorDoc was created (i.e. duplicate), delete the permanent file.
+        // 11. If no new vendorDoc was created (i.e. duplicate), delete the permanent file.
         if (!$newPolicyCreated) {
             Storage::disk('files')->delete($newFilePath);
         }
@@ -114,10 +116,20 @@ trait ProcessesVendorDocs
 
     private function extractDataFromFile($filePath, $docType)
     {
-        // Perform OCR and return extracted data
-        //4/7/2025 MOVE TO A SERVICE?
         $document_model = env('AZURE_CUSTOM_MODEL_COI');
-        return app(\App\Http\Controllers\ReceiptController::class)->azure_docs_api($filePath, $document_model, $docType)['analyzeResult']['documents'][0]['fields'];
+        $result = app(\App\Http\Controllers\ReceiptController::class)
+            ->azure_docs_api($filePath, $document_model, $docType)['analyzeResult']['documents'][0]['fields'];
+        return $result;
+    }
+
+    //Resolve the vendor ID by name with a fallback to address.
+    protected function resolveVendorId(array $insuranceInfo, $nameKey, $addressKey)
+    {
+        $calculatedId = $this->matchBusinessNameAndReturnId($insuranceInfo[$nameKey]['valueString'] ?? '');
+        if (empty($calculatedId) && isset($insuranceInfo[$addressKey]['valueString'])) {
+            $calculatedId = $this->fallbackToAddress($insuranceInfo[$addressKey]['valueString']);
+        }
+        return $calculatedId;
     }
 
     private function processPolicies(
@@ -132,100 +144,165 @@ trait ProcessesVendorDocs
     ) {
         $newPolicyCreated = false;
 
+        // Check if 'valueArray' exists AND is a non-empty array.
+        if (empty($insuranceInfo[$policyKey]['valueArray']) || !is_array($insuranceInfo[$policyKey]['valueArray'])) {
+            Log::warning("processPolicies: Missing or invalid 'valueArray' for policy key: ", [$insuranceInfo]);
+            return $newPolicyCreated;
+        }
+
         foreach ($insuranceInfo[$policyKey]['valueArray'] as $policy) {
+            if (!isset($policy['valueObject'])) {
+                Log::warning("processPolicies: Missing 'valueObject' in policy item for key: ", [$insuranceInfo]);
+                continue;
+            }
+
             $policyObject = $policy['valueObject'];
-            $policyNumber = $policyObject["{$type}_policy_number"]['valueString'];
-            $effectiveDate = $policyObject["{$type}_eff"]['valueDate'];
-            $expirationDate = $policyObject["{$type}_exp"]['valueDate'];
+            $policyNumber = $policyObject["{$type}_policy_number"]['valueString'] ?? null;
+            $effectiveDate = $policyObject["{$type}_eff"]['valueDate'] ?? null;
+            $expirationDate = $policyObject["{$type}_exp"]['valueDate'] ?? null;
 
-            // Check if the policy already exists.
-            $vendorDoc = VendorDoc::withoutGlobalScopes()->where([
-                'number'                 => $policyNumber,
-                'expiration_date'        => $expirationDate,
-                'type'                   => $type,
-                'vendor_id'              => $vendorId,
-                'belongs_to_vendor_id'   => $belongsToVendorId,
-            ])->first();
+            // Ensure required fields are present.
+            if (!$policyNumber || !$effectiveDate || !$expirationDate) {
+                Log::warning("processPolicies: Incomplete policy data for key: ", [$insuranceInfo]);
+                continue;
+            }
 
-            if (!$vendorDoc) {
-                // Create the new VendorDoc record using the common file reference.
-                $vendorDoc = VendorDoc::withoutGlobalScopes()->create([
-                    'type'                 => $type,
-                    'vendor_id'            => $vendorId,
-                    'effective_date'       => $effectiveDate,
-                    'expiration_date'      => $expirationDate,
-                    'number'               => $policyNumber,
-                    'belongs_to_vendor_id' => $belongsToVendorId,
-                    'doc_filename'         => $docFileName,
-                ]);
+            $vendorDoc = VendorDoc::withoutGlobalScopes()->firstOrCreate(
+                [
+                    'number'                 => $policyNumber,
+                    'expiration_date'        => $expirationDate,
+                    'type'                   => $type,
+                    'vendor_id'              => $vendorId,
+                    'belongs_to_vendor_id'   => $belongsToVendorId,
+                ],
+                [
+                    'effective_date'         => $effectiveDate,
+                    'doc_filename'           => $docFileName,
+                ]
+            );
 
-                // Associate the Agent if provided.
-                if ($agent) {
-                    $vendorDoc->agent()->associate($agent);
-                    $vendorDoc->save();
-                }
+            if ($vendorDoc->wasRecentlyCreated && $agent) {
+                $vendorDoc->agent()->associate($agent);
+                $vendorDoc->save();
+            }
+
+            if ($vendorDoc->wasRecentlyCreated) {
                 $newPolicyCreated = true;
             }
         }
-
         return $newPolicyCreated;
     }
 
+    //Move emails based on matching results.
     private function moveEmailBasedOnMatchingResults($messageId, $grantId, $matchedVendorId, $matchedBelongsToVendorId)
     {
         $manualAddFolderId = 'AAMkADlmZDViM2ZhLWZkYjUtNGVlZC1iNzRhLTRjMzhmMjQ0MmNmOAAuAAAAAABj7uvVHKHMQqSEZ0xJa9c1AQCwrDriHLtHRZNuXjKXm1MrAAG9ITvDAAA=';
         $processedFolderId = 'AAMkADlmZDViM2ZhLWZkYjUtNGVlZC1iNzRhLTRjMzhmMjQ0MmNmOAAuAAAAAABj7uvVHKHMQqSEZ0xJa9c1AQCwrDriHLtHRZNuXjKXm1MrAAG2_4hNAAA=';
         $failedFolderId = 'AAMkADlmZDViM2ZhLWZkYjUtNGVlZC1iNzRhLTRjMzhmMjQ0MmNmOAAuAAAAAABj7uvVHKHMQqSEZ0xJa9c1AQCwrDriHLtHRZNuXjKXm1MrAAG9ITvBAAA=';
 
-        // If either matching value is missing, move email to MANUAL ADD folder.
         if (is_null($matchedVendorId) || is_null($matchedBelongsToVendorId)) {
             $this->nylasService->moveEmailToFolder($messageId, $manualAddFolderId, $grantId);
         } else {
-            // Otherwise, move it to the processed folder.
             $this->nylasService->moveEmailToFolder($messageId, $processedFolderId, $grantId);
         }
     }
 
+    /**
+     * Use Searchy to match a vendor by the business name.
+     * The input value is normalized via normalizeBusinessName.
+     */
     public function matchBusinessNameAndReturnId($valueString)
     {
-        // Normalize the input string
-        $normalizedValue = $this->normalizeBusinessName($valueString);
+        $normalizedQuery = $this->normalizeBusinessName($valueString);
 
-        $bestMatchId = null;
-        $highestSimilarity = 0;
+        $results = Searchy::search('vendors')
+            ->fields('business_name')
+            ->query($normalizedQuery)
+            ->get();
 
-        // Fetch IDs and business names from the database
-        $businessNames = Vendor::withoutGlobalScopes()->select('id', 'business_name')->get();
-
-        foreach ($businessNames as $entry) {
-            // Normalize the database business name
-            $normalizedBusinessName = $this->normalizeBusinessName($entry->business_name);
-
-            // Compute similarity using a combination of Levenshtein distance and word overlap
-            $levenshteinDistance = levenshtein($normalizedValue, $normalizedBusinessName);
-            $inputWords = explode(' ', $normalizedValue);
-            $dbWords = explode(' ', $normalizedBusinessName);
-            $wordOverlap = count(array_intersect($inputWords, $dbWords)) / max(count($inputWords), 1);
-
-            // Calculate a combined similarity score
-            $similarityScore = ($wordOverlap * 150) - $levenshteinDistance;
-
-            // Only consider results with very high similarity
-            if ($similarityScore > 80 && $similarityScore > $highestSimilarity) { // Adjust threshold
-                $bestMatchId = $entry->id;
-                $highestSimilarity = $similarityScore;
-            }
+        if ($results->isNotEmpty()) {
+            return $results->first()->id;
         }
-
-        return $bestMatchId;
+        return null;
     }
 
+    /**
+     * Normalize a business name string.
+     */
     public function normalizeBusinessName($value)
     {
         return Str::of($value)
             ->trim()
-            ->replace(['.', ',', '&', 'Inc', 'Co', 'DBA', '\\'], '') // Remove punctuation, special characters, and suffixes
-            ->replace('  ', ' ') // Remove extra spaces
-            ->lower(); // Convert to lowercase
+            ->replace(['.', ',', '&', 'Inc', 'Co', 'DBA', '\\'], '')
+            ->replaceMatches('/\s+/', ' ')
+            ->lower()
+            ->__toString();
+    }
+
+    /**
+     * Fallback method: Match vendor by comparing addresses.
+     * This method uses GooglePlacesService to process and parse an OCR address
+     * and builds a composite address string, then compares it against vendor records.
+     */
+    public function fallbackToAddress($addressString)
+    {
+        // Use the lazy-loaded GooglePlacesService.
+        $googleService = $this->getGooglePlacesService();
+
+        // Get autocomplete suggestions from Google Places.
+        $suggestions = $googleService->getAutocompleteSuggestions($addressString);
+        if (empty($suggestions)) {
+            return null;
+        }
+
+        // Automatically take the first suggestion as the best match.
+        $placeId = $suggestions[0]['place_id'] ?? null;
+        if (!$placeId) {
+            return null;
+        }
+
+        // Get detailed place information.
+        $parsedAddress = $googleService->getPlaceDetails($placeId);
+        if (empty($parsedAddress)) {
+            return null;
+        }
+
+        // Ensure all required address components are available.
+        if (
+            !isset($parsedAddress['street_number'],
+                   $parsedAddress['route'],
+                   $parsedAddress['locality'],
+                   $parsedAddress['administrative_area_level_1'],
+                   $parsedAddress['postal_code'])
+        ) {
+            return null;
+        }
+
+        // Build a composite address string.
+        $composite = trim($parsedAddress['street_number'] . ' ' . $parsedAddress['route']) . ', ' .
+                     trim($parsedAddress['locality']) . ', ' .
+                     trim($parsedAddress['administrative_area_level_1']) . ' ' .
+                     trim($parsedAddress['postal_code']);
+
+        // Normalize the composite address.
+        $normalizedComposite = $this->normalizeBusinessName($composite);
+
+        // Loop through vendors to find the best matching composite address.
+        $vendors = Vendor::withoutGlobalScopes()->get();
+        $bestMatchId = null;
+        $highestSim = 0;
+        foreach ($vendors as $vendor) {
+            $vendorComposite = trim(
+                $vendor->address . ' ' . $vendor->city . ', ' . $vendor->state . ' ' . $vendor->zip_code
+            );
+            $normalizedVendorComposite = $this->normalizeBusinessName($vendorComposite);
+            similar_text($normalizedVendorComposite, $normalizedComposite, $percent);
+            if ($percent > $highestSim && $percent > 80) { // 80% threshold (adjust if needed)
+                $highestSim = $percent;
+                $bestMatchId = $vendor->id;
+            }
+        }
+
+        return $bestMatchId;
     }
 }

@@ -22,9 +22,6 @@ class VendorDocsController extends Controller
     private $nylasService;
     use ProcessesVendorDocs;
 
-    /**
-     * Inject the NylasService into the controller.
-     */
     public function __construct(NylasService $nylasService)
     {
         $this->nylasService = $nylasService;
@@ -37,7 +34,7 @@ class VendorDocsController extends Controller
 
         // Define query parameters for the Nylas API
         $queryParams = [
-            'limit' => 100, // Fetch up to 100 messages
+            'limit' => 10, // Fetch up to 100 messages
             'in' => 'inbox', // Specify the inbox folder
         ];
 
