@@ -881,250 +881,6 @@ class ReceiptController extends Controller
         }
     }
 
-    public function auto_receipt()
-    {
-        //09/22/2023 EACH FILE SHOULD BE UPLOADED TO ONEDRIVE AND NOT VIA EMAIL!
-        //get receipts from email/onedrive
-        $company_emails = CompanyEmail::withoutGlobalScopes()->whereNotNull('api_json->user_id')->where('id', 17)->get();
-
-        foreach($company_emails as $company_email) {
-            $email_vendor = $company_email->vendor;
-            $email_vendor_bank_account_ids = $email_vendor->bank_accounts->pluck('id');
-
-            //check if access_token is expired, if so get new access_token and refresh_token
-            $guzzle = new Client;
-            $url = 'https://login.microsoftonline.com/'.env('MS_GRAPH_TENANT_ID').'/oauth2/v2.0/token';
-            $email_account_tokens = json_decode($guzzle->post($url, [
-                'form_params' => [
-                    'client_id' => env('MS_GRAPH_CLIENT_ID'),
-                    'scope' => env('MS_GRAPH_USER_SCOPES'),
-                    'refresh_token' => $company_email->api_json['refresh_token'],
-                    'redirect_uri' => env('MS_GRAPH_REDIRECT_URI'),
-                    'grant_type' => 'refresh_token',
-                    'client_secret' => env('MS_GRAPH_SECRET_ID'),
-                ],
-            ])->getBody()->getContents());
-
-            //json
-            $api_data = $company_email->api_json;
-            $api_data['access_token'] = $email_account_tokens->access_token;
-            $api_data['refresh_token'] = $email_account_tokens->refresh_token;
-
-            $company_email->update([
-                'api_json' => $api_data,
-            ]);
-
-            $this->ms_graph = new Graph;
-            $this->ms_graph->setAccessToken($company_email->api_json['access_token']);
-
-            // $receipt_folder = $this->ms_graph->createRequest("GET", "/me/drive/root/children")
-            //     ->addHeaders(["Content-Type" => "application/json"])
-            //     ->setReturnType(DriveItem::class)
-            //     ->execute();
-
-            // dd($receipt_folder);
-
-            //6-12-2023 6-27-2023 exclude ones already read ... save $message->getId() to a database...
-            $receipts_emails =
-                $this->ms_graph
-                    ->createCollectionRequest('GET',
-                        "/me/mailFolders/inbox/messages?filter=from/emailAddress/address eq 'noreply@print.epsonconnect.com' and subject eq 'Receipt Scans'")
-                    ->setReturnType(Message::class)
-                    ->execute();
-            // dd($receipts_emails);
-            foreach($receipts_emails as $index => $message){
-                if($message->getHasAttachments()){
-                    $attachments =
-                        $this->ms_graph->createRequest('GET', '/me/messages/'.$message->getId().'/attachments')
-                            ->setReturnType(Attachment::class)
-                            ->execute();
-
-                    foreach($attachments as $loop => $attachment_found){
-                        //09/22/2023 EACH FILE SHOULD BE UPLOADED TO ONEDRIVE AND NOT VIA EMAIL!
-
-                        //if is for testing only...
-                        // if($loop == 1){
-                        $attachment = $attachment_found;
-                        // $result = AzureDI::make()->analyzeDocument($attachment);
-
-                        // dd(response()->json($result->getPathname()));
-                        // return response()->json($result);
-                        // https://github.com/blue-hex/laravel-azure-di
-                        $doc_type = 'pdf';
-                        $ocr_filename = date('Y-m-d-H-i-s').'-'.rand(10, 99).'.'.$doc_type;
-                        $content_bytes = array_values((array) $attachment)[0]['contentBytes'];
-                        $contents = base64_decode($content_bytes);
-                        Storage::disk('files')->put('/_temp_ocr/'.$ocr_filename, $contents);
-
-                        $ocr_path = 'files/_temp_ocr/'.$ocr_filename;
-
-                        $document_model = $this->azure_document_model($doc_type, $ocr_path);
-                        $ocr_receipt_extracted = $this->azure_receipts($ocr_path, $doc_type, $document_model);
-                        //pass receipt info from ocr_receipt_extracted to ocr_extract method
-                        $ocr_receipt_data = $this->ocr_extract($ocr_receipt_extracted);
-
-                        if(isset($ocr_receipt_data['error']) && $ocr_receipt_data['error'] == true){
-                            //if error move this single $attachment to a folder for debug...
-                            Storage::disk('files')->move('/_temp_ocr/'.$ocr_filename, '/auto_receipts_failed/'.$ocr_filename);
-
-                            continue;
-                        }
-
-                        // match Vendor to MerchantName ... MerchantName = transaction_description ...
-                        $start_date = Carbon::parse($ocr_receipt_data['fields']['transaction_date'])->subDays(4)->format('Y-m-d');
-                        $end_date = Carbon::parse($ocr_receipt_data['fields']['transaction_date'])->addDays(5)->format('Y-m-d');
-
-                        //find existing transaction
-                        $transactions =
-                            Transaction::whereIn('bank_account_id', $email_vendor_bank_account_ids)
-                                ->whereNull('expense_id')
-                                ->whereNull('check_number')
-                                ->whereNull('deposit')
-                                ->where('amount', $ocr_receipt_data['fields']['total'])
-                                ->whereBetween('transaction_date', [$start_date, $end_date])
-                                ->get();
-
-                        //create expense with or without Vendor_id and attach receipt
-                        if ($transactions->count() == 1) {
-                            //create expense with $transaction->vendor_id and associate with this transaction
-                            $transaction = $transactions->first();
-                            // 12/13/23 WHYY if greather than ??
-                        } elseif ($transactions->count() > 1) {
-                            $transaction = null;
-
-                            //find amount in string .. like partial receipts / multiple transactions per expense
-                        } else {
-                            //no merchant ... filter
-                            $exisitng_transactions =
-                                Transaction::whereIn('bank_account_id', $email_vendor_bank_account_ids)
-                                    ->whereNull('expense_id')
-                                    ->whereNull('check_number')
-                                    ->whereNull('deposit')
-                                    // ->where('amount', $ocr_receipt_data['fields']['total'])
-                                    ->whereBetween('transaction_date', [$start_date, $end_date])
-                                    ->get();
-
-                            $vendor_found_transactions = collect();
-                            $receipt_merchant_name = explode(',', $ocr_receipt_data['fields']['merchant_name'])[0];
-
-                            foreach ($exisitng_transactions as $exisitng_transaction) {
-                                //either by vendor or by amount found in receipt scan text
-                                if (strpos($exisitng_transaction->plaid_merchant_name, $receipt_merchant_name) !== false) {
-                                    //add this to vendor_found_transactions
-                                    $vendor_found_transactions->push($exisitng_transaction);
-                                }
-                            }
-
-                            if (! $vendor_found_transactions->isEmpty()) {
-                                //closest date dateDiff
-                                foreach ($vendor_found_transactions as $vendor_found_transaction) {
-                                    $str = $ocr_receipt_data['content'];
-                                    $re = '/\\D'.str_replace('.', "\.", trim($vendor_found_transaction->amount, '-')).'/m';
-                                    preg_match($re, $str, $matches, PREG_OFFSET_CAPTURE, 0);
-
-                                    if (! empty($matches)) {
-                                        $transaction = $vendor_found_transaction;
-                                        $ocr_receipt_data['fields']['total'] = $transaction->amount;
-                                    }
-                                }
-
-                                if (! isset($transaction)) {
-                                    $transaction = null;
-                                }
-
-                                $vendor = null;
-                            } else {
-                                //find vendor that matches merchant_name
-                                $transaction = null;
-                                $vendor = Vendor::withoutGlobalScopes()->where('business_type', 'Retail')->where('business_name', 'LIKE', $receipt_merchant_name)->first();
-                            }
-                        }
-
-                        $duplicate_start_date = Carbon::parse($ocr_receipt_data['fields']['transaction_date'])->subDays(1)->format('Y-m-d');
-                        $duplicate_end_date = Carbon::parse($ocr_receipt_data['fields']['transaction_date'])->addDays(4)->format('Y-m-d');
-                        //find duplicate expenses
-                        $duplicates =
-                            Expense::where('belongs_to_vendor_id', $email_vendor->id)->
-                                //08-02-2023 when merchant name/ vendor_id isset... check vendor_id on expense table otherwise dont
-                                // where('vendor_id', $receipt->vendor_id)->
-                                with('receipts')->
-                                whereNull('deleted_at')->
-                                where('amount', $ocr_receipt_data['fields']['total'])->
-                                //where Not 0.00
-                                where('amount', '!=', '0.00')->
-                                whereBetween('date', [$duplicate_start_date, $duplicate_end_date])->
-                                get();
-                        // if 1 duplicate attach expense_receipt info
-                        if ($duplicates->count() >= 1) {
-                            foreach ($duplicates as $duplicate) {
-                                $duplicate->date_diff = Carbon::parse($ocr_receipt_data['fields']['transaction_date'])->floatDiffInDays($duplicate->date);
-                            }
-                            //create expense and associate with this transaction
-                            $expense_duplicate = $duplicates->sortBy('date_diff')->first();
-
-                            // if receipt_html exactly the same dont add new ExpenseReceipt
-                            if (isset($expense_duplicate->receipts()->latest()->first()->receipt_html)) {
-                                if ($expense_duplicate->receipts()->latest()->first()->receipt_html != $ocr_receipt_data['content']) {
-                                    //12/13/23 $expense should be new?
-                                    $expense = $expense_duplicate;
-                                } else {
-                                    continue;
-                                }
-                            } else {
-                                $expense = $expense_duplicate;
-                            }
-                        } elseif ($duplicates->isEmpty()) {
-                            if ($transaction) {
-                                if ($transaction->vendor_id) {
-                                    $transaction_vendor_id = $transaction->vendor_id;
-                                } else {
-                                    $transaction_vendor_id = null;
-                                }
-                            } else {
-                                $transaction_vendor_id = null;
-                            }
-
-                            $expense_vendor_id = ! is_null($transaction_vendor_id) ? $transaction_vendor_id : (isset($vendor) ? $vendor->id : 0);
-
-                            $expense = Expense::create([
-                                'amount' => $ocr_receipt_data['fields']['total'],
-                                'date' => $ocr_receipt_data['fields']['transaction_date'],
-                                'project_id' => null,
-                                'distribution_id' => null,
-                                'vendor_id' => $expense_vendor_id,
-                                'check_id' => null,
-                                'paid_by' => null,
-                                'belongs_to_vendor_id' => $email_vendor->id,
-                                'created_by_user_id' => 0,
-                                'invoice' => $ocr_receipt_data['fields']['invoice_number'] ? $ocr_receipt_data['fields']['invoice_number'] : null,
-                            ]);
-                        }
-
-                        $filename = $expense->id.'-'.date('Y-m-d-H-i-s').'.'.$doc_type;
-
-                        //SAVE expense_receipt_data for each attachment
-                        $expense_receipt = new ExpenseReceipts;
-                        $expense_receipt->expense_id = $expense->id;
-                        $expense_receipt->receipt_filename = $filename;
-                        $expense_receipt->receipt_html = $ocr_receipt_data['content'];
-                        $expense_receipt->receipt_items = $ocr_receipt_data['fields'];
-                        $expense_receipt->save();
-
-                        if ($transaction) {
-                            $transaction->expense_id = $expense->id;
-                            $transaction->save();
-                        }
-
-                        Storage::disk('files')->copy('/_temp_ocr/'.$ocr_filename, '/receipts/'.$filename);
-                        // } //if loop
-                    }
-                }
-                //Delete/move email
-                $this->ms_graph->createRequest('DELETE', '/users/'.$company_email->api_json['user_id'].'/messages/'.$message->getId())->execute();
-            }
-        }
-    }
-
     public function create_expense_from_email($company_email, $message, $receipt_account, $receipt, $receipt_html_main, $email_date, $image_email_url = null)
     {
         $message_type = array_values((array) $message->getBody()->getContentType())[0];
@@ -1383,7 +1139,7 @@ class ReceiptController extends Controller
         $azure_api_key = env('AZURE_DI_API_KEY');
         $azure_api_version = env('AZURE_DI_VERSION');
 
-        curl_setopt($ch, CURLOPT_URL, 'https://'.env('AZURE_DI_ENDPOINT').'/documentintelligence/documentModels/'.$document_model.':analyze?api-version='.$azure_api_version.'&features=queryFields&queryFields=PurchaseOrder');
+        curl_setopt($ch, CURLOPT_URL, 'https://'.env('AZURE_DI_ENDPOINT').'/documentintelligence/documentModels/'.$document_model.':analyze?api-version='.$azure_api_version.'&features=queryFields&queryFields=PurchaseOrder,JobName');
         curl_setopt($ch, CURLOPT_POSTFIELDS, $file);
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
@@ -1508,8 +1264,15 @@ class ReceiptController extends Controller
             $invoice_number = null;
         }
 
-        //PO NUMBER
-        $purchase_order_number = $ocr_receipt_extract_prefix['PurchaseOrder']['valueString'] ?? null;
+        //PO NUMBER / JOB NAME
+        $purchaseOrder = trim($ocr_receipt_extract_prefix['PurchaseOrder']['valueString'] ?? '');
+        $jobName       = trim($ocr_receipt_extract_prefix['JobName']['valueString'] ?? '');
+
+        $values = array_filter([$purchaseOrder, $jobName], function ($value) {
+            return $value !== '';
+        });
+
+        $purchase_order_number = count($values) > 1 ? implode(', ', $values) : implode('', $values);
 
         //TOTAL TAX
         if (isset($ocr_receipt_extract_prefix['TotalTax'])) {
@@ -1567,7 +1330,7 @@ class ReceiptController extends Controller
 
             $transaction_date = $transaction_date->format('Y-m-d');
         } else {
-            //if coming from creating email, allow $transaction_date to be NULL. if from auto_receipts, send error
+            //if coming from creating email, allow $transaction_date to be NULL.
 
             //if coming from UPDATE EXPENSE ... allow.... otherwire deny.
             // if($email == NULL){

@@ -5,8 +5,10 @@ namespace App\Http\Controllers;
 use App\Models\CompanyEmail;
 use App\Models\Expense;
 use App\Models\ExpenseReceipts;
+use App\Models\Transaction;
 use App\Models\Receipt;
 use App\Models\ReceiptAccount;
+use App\Models\Vendor;
 
 use App\Services\NylasService;
 use App\Services\AzureDocumentService;
@@ -19,18 +21,20 @@ use Carbon\Carbon;
 use Spatie\Browsershot\Browsershot;
 use Intervention\Image\Facades\Image;
 
+use Exception;
+
 class CompanyEmailController extends Controller
 {
     private $nylasService;
     protected $azureDocumentService;
 
-
     /**
      * Inject the NylasService into the controller.
      */
-    public function __construct(NylasService $nylasService)
+    public function __construct(NylasService $nylasService, AzureDocumentService $azureDocumentService)
     {
         $this->nylasService = $nylasService;
+        $this->azureDocumentService = $azureDocumentService;
     }
 
     /**
@@ -43,7 +47,7 @@ class CompanyEmailController extends Controller
         try {
             $authUrl = $this->nylasService->getAuthUrl();
             return redirect($authUrl['authentication_url']);
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             Log::error(["Failed to retrieve Nylas authentication URL: ", $e->getMessage()]);
             return redirect()->back()->withErrors(['error' => 'Unable to initiate authentication with Nylas.']);
         }
@@ -162,39 +166,28 @@ class CompanyEmailController extends Controller
         foreach ($companyEmails as $companyEmail) {
             $grantId = $companyEmail->grant_id; // Extract the grant_id
 
-            // // Define the folders to query based on the environment
-            // $folders = env('APP_ENV') !== 'production'
-            //     ? ['inbox', $companyEmail->api_json['folders']['Retry']] // Include production folders
-            //     : [$companyEmail->api_json['folders']['Test']];          // Include test folders in non-production
+            // Define the folders to query based on the environment.
+            $folders = env('APP_ENV') === 'production'
+                ? ['inbox', $companyEmail->api_json['folders']['Retry']] // For non-production, use both inbox and retry folder.
+                : [$companyEmail->api_json['folders']['Test']];           // For production, use the test folder.
 
-            // $allMessages = []; // Array to store all messages
-            // foreach ($folders as $folder) {
-            //     // Define query parameters for the Nylas API
-            //     $queryParams = [
-            //         'limit' => 99,       // Fetch a limited number of messages
-            //         'in' => $folder,     // Specify the folder to filter messages from
-            //     ];
+            $allMessages = []; // Array to store all messages
 
-            //     // Fetch messages from the current folder using the NylasService
-            //     $messages = $this->nylasService->getMessages($queryParams, $grantId);
+            foreach ($folders as $folder) {
+                // Define query parameters for the Nylas API.
+                $queryParams = [
+                    'limit' => 45,      // Fetch a limited number of messages.
+                    'in'    => $folder, // Specify the folder to filter messages from.
+                ];
 
-            //     // Merge messages from the current folder into the combined array
-            //     $allMessages = array_merge($allMessages, $messages);
-            // }
+                // Fetch messages for the current folder.
+                $messages = $this->nylasService->getMessages($queryParams, $grantId);
 
-            // dd($allMessages); // Debugging: dump all messages
+                // Merge messages from the current folder.
+                $allMessages = array_merge($allMessages, $messages['data'] ?? []);
+            }
 
-
-            // Define query parameters for the Nylas API
-            $queryParams = [
-                'limit' => 99,       // Fetch a limited number of messages
-                'in' => 'inbox',     // Specify the folder to filter messages from
-            ];
-
-            // Fetch messages from the current folder using the NylasService
-            $messages = $this->nylasService->getMessages($queryParams, $grantId);
-
-            foreach($messages['data'] as $message) {
+            foreach($allMessages as $message) {
                 $messageId = $message['id'];
                 $fromEmail = $message['from'][0]['email'];
                 $subject = $message['subject'];
@@ -239,7 +232,7 @@ class CompanyEmailController extends Controller
                     $image_email_url = null;
                     if (isset($receipt->options['receipt_image_regex'])) {
                         preg_match($receipt->options['receipt_image_regex'], $string, $matches);
-                        $image_email_url = $matches[1][0] ?? null;
+                        $image_email_url = $matches[1] ?? null;
                     } else {
                         $string = preg_replace("/<img[^>]+\>/i", '', $string);
                     }
@@ -334,10 +327,9 @@ class CompanyEmailController extends Controller
                         }
                     } else {
                         $doc_type = 'jpg';
-                        Image::make($image_email_url)->save($location);
-
                         $ocr_filename = date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '.jpg';
                         $location = storage_path($ocr_path = 'files/_temp_ocr/' . $ocr_filename);
+                        Image::make($image_email_url)->save($location);
                     }
 
                     $document_model = $receipt->options['document_model'];
@@ -468,10 +460,203 @@ class CompanyEmailController extends Controller
         }
     }
 
+    public function fetchAutoReceipts()
+    {
+        // Fetch company emails with the specified conditions.
+        $company_emails = CompanyEmail::withoutGlobalScopes()
+            ->whereNotNull('grant_id')
+            ->where('id', 31)
+            ->get();
+
+        foreach ($company_emails as $company_email) {
+            $grantId = $company_email->grant_id;
+            $email_vendor = $company_email->vendor;
+            $email_vendor_bank_account_ids = $email_vendor->bank_accounts->pluck('id');
+
+            $queryParams = [
+                'limit'   => 40,
+                'in'      => 'inbox',
+                'from'    => 'noreply@print.epsonconnect.com',
+                'subject' => 'Receipt Scans',
+            ];
+
+            // Fetch messages for the company email.
+            $messages = $this->nylasService->getMessages($queryParams, $grantId);
+
+            foreach ($messages['data'] as $message) {
+                $messageId = $message['id'];
+
+                if (!empty($message['attachments'])) {
+                    foreach ($message['attachments'] as $attachment) {
+                        $doc_type = 'pdf';
+
+                        // Generate a unique filename and create the temporary file path.
+                        $ocr_filename = date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '.pdf';
+                        //$ocr_path = 'files/_temp_ocr/'.$ocr_filename;
+                        $ocr_path = '_temp_ocr/' . $ocr_filename;
+
+                        // Download the attachment content.
+                        $attachmentContent = $this->nylasService->downloadAttachment(
+                            $attachment['id'],
+                            $grantId,
+                            $messageId
+                        );
+
+                        // Save the attachment to the 'files' disk under _temp_ocr.
+                        Storage::disk('files')->put($ocr_path, $attachmentContent);
+
+                        // Get the document model from AzureDocumentService.
+                        $document_model = $this->azureDocumentService->getDocumentModel($ocr_path, $doc_type);
+
+                        // Process the attachment using ReceiptController.
+                        $ocr_receipt_extracted = app(\App\Http\Controllers\ReceiptController::class)
+                            ->azure_receipts('files/' . $ocr_path, $doc_type, $document_model);
+                        $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)
+                            ->ocr_extract($ocr_receipt_extracted);
+
+                        if(isset($ocr_receipt_data['error']) || $ocr_receipt_data['error'] == true){
+                            //if error move this single $attachment to a folder for debug...
+                            Storage::disk('files')->move('/_temp_ocr/'.$ocr_filename, '/auto_receipts_failed/'.$ocr_filename);
+                            continue;
+                        }
+
+                        // Set up the transaction date range.
+                        $start_date = Carbon::parse($ocr_receipt_data['fields']['transaction_date'])
+                            ->subDays(4)
+                            ->format('Y-m-d');
+                        $end_date = Carbon::parse($ocr_receipt_data['fields']['transaction_date'])
+                            ->addDays(5)
+                            ->format('Y-m-d');
+
+                        // Find matching transactions.
+                        $transactions = Transaction::whereIn('bank_account_id', $email_vendor_bank_account_ids)
+                            ->whereNull('expense_id')
+                            ->whereNull('check_number')
+                            ->whereNull('deposit')
+                            ->where('amount', $ocr_receipt_data['fields']['total'])
+                            ->whereBetween('transaction_date', [$start_date, $end_date])
+                            ->get();
+
+                        if ($transactions->count() === 1) {
+                            $transaction = $transactions->first();
+                        } elseif ($transactions->count() > 1) {
+                            // For ambiguous cases with multiple transactions.
+                            $transaction = null;
+                        } else {
+                            $transaction = null;
+                        }
+
+                        // Duplicate expense checking.
+                        $duplicate_start_date = Carbon::parse($ocr_receipt_data['fields']['transaction_date'])
+                            ->subDays(1)
+                            ->format('Y-m-d');
+                        $duplicate_end_date = Carbon::parse($ocr_receipt_data['fields']['transaction_date'])
+                            ->addDays(4)
+                            ->format('Y-m-d');
+
+                        $duplicates = Expense::where('belongs_to_vendor_id', $email_vendor->id)
+                            ->with('receipts')
+                            ->whereNull('deleted_at')
+                            ->where('amount', $ocr_receipt_data['fields']['total'])
+                            ->where('amount', '!=', '0.00')
+                            ->whereBetween('date', [$duplicate_start_date, $duplicate_end_date])
+                            ->get();
+
+                        if ($duplicates->count() >= 1) {
+                            foreach ($duplicates as $duplicate) {
+                                $duplicate->date_diff = Carbon::parse($ocr_receipt_data['fields']['transaction_date'])
+                                    ->floatDiffInDays($duplicate->date);
+                            }
+                            $expense_duplicate = $duplicates->sortBy('date_diff')->first();
+
+                            // If the latest receipt HTML is different, update; otherwise, skip.
+                            if (isset($expense_duplicate->receipts()->latest()->first()->receipt_html)) {
+                                if ($expense_duplicate->receipts()->latest()->first()->receipt_html != $ocr_receipt_data['content']) {
+                                    $expense = $expense_duplicate;
+                                } else {
+                                    continue; // Skip if the receipt is an exact duplicate.
+                                }
+                            } else {
+                                $expense = $expense_duplicate;
+                            }
+                        } elseif ($duplicates->isEmpty()) {
+                            // Use fuzzy matching to determine vendor in the "no duplicate" branch.
+                            $transaction_vendor_id = $transaction ? ($transaction->vendor_id ?? null) : null;
+
+                            $ocrVendorName = $ocr_receipt_data['fields']['merchant_name'];
+                            $vendors = Vendor::withoutGlobalScopes()->get();
+                            $matchedVendor = $this->fuzzyMatchVendor($ocrVendorName, $vendors, 70.0);
+                            $fuzzyVendorId = $matchedVendor ? $matchedVendor->id : 0;
+
+                            // Use the transaction vendor if available, otherwise use the fuzzy match.
+                            $expense_vendor_id = $transaction_vendor_id ?? $fuzzyVendorId;
+
+                            $expense = Expense::create([
+                                'amount'               => $ocr_receipt_data['fields']['total'],
+                                'date'                 => $ocr_receipt_data['fields']['transaction_date'],
+                                'project_id'           => null,
+                                'distribution_id'      => null,
+                                'vendor_id'            => $expense_vendor_id,
+                                'check_id'             => null,
+                                'paid_by'              => null,
+                                'belongs_to_vendor_id' => $email_vendor->id,
+                                'created_by_user_id'   => 0,
+                                'invoice'              => $ocr_receipt_data['fields']['invoice_number'] ?: null,
+                            ]);
+                        } else {
+                            // Fallback branch for ambiguous situations.
+                            $transaction = null;
+                            $ocrVendorName = $ocr_receipt_data['fields']['merchant_name'];
+                            $vendors = Vendor::withoutGlobalScopes()->get();
+                            $matchedVendor = $this->fuzzyMatchVendor($ocrVendorName, $vendors, 70.0);
+
+                            // Optionally fallback to a plain LIKE if fuzzy matching fails.
+                            if (!$matchedVendor) {
+                                $matchedVendor = Vendor::withoutGlobalScopes()
+                                    ->where('business_type', 'Retail')
+                                    ->where('business_name', 'LIKE', $ocrVendorName)
+                                    ->first();
+                            }
+
+                            $vendorId = $matchedVendor ? $matchedVendor->id : 0;
+
+                            $expense = Expense::create([
+                                'amount'               => $ocr_receipt_data['fields']['total'],
+                                'date'                 => $ocr_receipt_data['fields']['transaction_date'],
+                                'project_id'           => null,
+                                'distribution_id'      => null,
+                                'vendor_id'            => $vendorId,
+                                'check_id'             => null,
+                                'paid_by'              => null,
+                                'belongs_to_vendor_id' => $email_vendor->id,
+                                'created_by_user_id'   => 0,
+                                'invoice'              => $ocr_receipt_data['fields']['invoice_number'] ?: null,
+                            ]);
+                        }
+
+                        // Finally, save the expense receipt (this method moves the file from _temp_ocr to receipts).
+                        $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename);
+                    } // end foreach attachment
+
+                    // After processing all attachments for the message, move the email to the SCANS folder.
+                    $this->nylasService->moveEmailToFolder(
+                        $messageId,
+                        $company_email->api_json['folders']['SCANS'],
+                        $grantId
+                    );
+                    continue;
+                }
+            }
+        }
+    }
+
     public function saveExpenseReceipt($expense_id, $ocr_receipt_data, $ocr_filename)
     {
-        $filename = $expense_id.'-'.$ocr_filename;
+        $filename = $expense_id . '-' . $ocr_filename;
+        $sourcePath = '_temp_ocr/' . $ocr_filename;
+        $destinationPath = 'receipts/' . $filename;
 
+        // Save expense receipt data to the database
         $expense_receipt = new ExpenseReceipts;
         $expense_receipt->expense_id = $expense_id;
         $expense_receipt->receipt_filename = $filename;
@@ -479,7 +664,43 @@ class CompanyEmailController extends Controller
         $expense_receipt->receipt_items = $ocr_receipt_data['fields'];
         $expense_receipt->save();
 
-        //move _temp_ocr file to /files/receipts
-        Storage::disk('files')->move('/_temp_ocr/'.$ocr_filename, '/receipts/'.$filename);
+        // Perform the move operation with fallback to copy-delete
+        if (Storage::disk('files')->move($sourcePath, $destinationPath)) {
+            Log::info("File moved successfully.");
+        } else {
+            if (Storage::disk('files')->copy($sourcePath, $destinationPath)) {
+                Storage::disk('files')->delete($sourcePath);
+            }
+        }
+    }
+
+    public function fuzzyMatchVendor($ocrName, $vendors, $threshold = 70.0)
+    {
+        // Normalize by converting to lowercase and removing punctuation,
+        // but retain spaces so we can be word sensitive.
+        $ocrNormalized = preg_replace('/[^\w\s]+/', '', strtolower($ocrName)); // e.g. "menards mount pros"
+
+        $bestVendor = null;
+        $bestScore = 0;
+
+        foreach ($vendors as $vendor) {
+            // Normalize the vendor name similarly.
+            $normalizedVendor = preg_replace('/[^\w\s]+/', '', strtolower($vendor->business_name));
+
+            // Look for an immediate substring match.
+            if (stripos($ocrNormalized, $normalizedVendor) !== false) {
+                return $vendor;
+            }
+
+            // If not an immediate match, calculate similarity.
+            similar_text($ocrNormalized, $normalizedVendor, $percent);
+            if ($percent > $bestScore) {
+                $bestScore = $percent;
+                $bestVendor = $vendor;
+            }
+        }
+
+        // Return the best match only if it meets the threshold.
+        return ($bestScore >= $threshold) ? $bestVendor : null;
     }
 }

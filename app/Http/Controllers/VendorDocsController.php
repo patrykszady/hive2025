@@ -55,7 +55,7 @@ class VendorDocsController extends Controller
                     $messageId = $message['id']; // Ensure you fetch the corresponding message ID
                     $attachmentContent = $this->nylasService->downloadAttachment($attachment['id'], $grantId, $messageId);
                     $docType = pathinfo($attachment['filename'], PATHINFO_EXTENSION);
-                    $tempFilePath = "temp_vendor_docs/attachment_{$attachment['id']}.{$docType}";
+                    $tempFilePath = "_temp_vendor_docs/attachment_{$attachment['id']}.{$docType}";
 
                     // Store the file temporarily
                     Storage::disk('files')->put($tempFilePath, $attachmentContent);

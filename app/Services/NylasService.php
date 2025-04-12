@@ -81,7 +81,7 @@ class NylasService
     public function ensureFoldersExist(string $grantId, ?string $parentId = null): array
     {
         $createdFolders = [];
-        $subFolders = ['Saved', 'Duplicate', 'Error', 'Add', 'Retry', 'Test', 'LEADS'];
+        $subFolders = ['Saved', 'Duplicate', 'Error', 'Add', 'Retry', 'Test', 'LEADS', 'SCANS'];
 
         foreach ($subFolders as $folderName) {
             // Check if the folder exists

@@ -29,7 +29,6 @@
         "livewire/livewire": "^3.6",
         "log1x/laravel-webfonts": "^1.0",
         "meilisearch/meilisearch-php": "^1.12",
-        "microsoft/microsoft-graph": "1.*",
         "nesbot/carbon": "^3.0",
         "nyholm/psr7": "*",
         "opcodesio/log-viewer": "^3.4",

@@ -3,6 +3,11 @@
 namespace App\Services;
 
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
+
+use setasign\Fpdi\Fpdi;
+
+use Exception;
 
 class AzureDocumentService
 {
@@ -25,13 +30,13 @@ class AzureDocumentService
         // Determine the Content-Type header based on file type.
         $contentType = $this->getContentType($docType);
         if (!$contentType) {
-            throw new \Exception("Unsupported document type: {$docType}");
+            throw new Exception("Unsupported document type: {$docType}");
         }
 
         // Start analysis and retrieve the operation ID.
         $operationId = $this->startAnalysis($documentModel, $fileContent, $contentType);
         if (!$operationId) {
-            throw new \Exception("Failed to retrieve operation ID from Azure response.");
+            throw new Exception("Failed to retrieve operation ID from Azure response.");
         }
 
         // Poll for the results until the analysis is completed.
@@ -107,5 +112,40 @@ class AzureDocumentService
         }
 
         return $result;
+    }
+
+    public function getDocumentModel($file_path, $doc_type)
+    {
+        // Default to 'prebuilt-invoice'
+        $document_model = 'prebuilt-invoice';
+
+        try {
+            // Ensure the path works with the 'files' disk
+            $full_file_path = Storage::disk('files')->path($file_path);
+
+            // Check if the file exists
+            if (!file_exists($full_file_path)) {
+                throw new Exception("File not found at path: " . $full_file_path);
+            }
+
+            if ($doc_type === 'pdf') {
+                $pdf = new Fpdi();
+                $pdf->setSourceFile($full_file_path);
+                $pageId = $pdf->importPage(1);
+
+                $width = $pdf->getTemplateSize($pageId)['width'];
+
+                // Adjust document model based on width
+                if ($width < 180) {
+                    $document_model = 'prebuilt-receipt';
+                }
+            }
+        } catch (\Exception $e) {
+            // Log the error and retain default model
+            Log::error("Error in getDocumentModel: " . $e->getMessage());
+        }
+
+        // Return the determined or default document model
+        return $document_model;
     }
 }

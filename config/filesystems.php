@@ -1,7 +1,6 @@
 <?php
 
 return [
-
     'disks' => [
         'local' => [
             'driver' => 'local',
@@ -15,5 +14,4 @@ return [
             'visibility' => 'public',
         ],
     ],
-
 ];
