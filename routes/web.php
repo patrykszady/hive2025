@@ -85,10 +85,6 @@ Route::get('/fetch-auto-receipts', [CompanyEmailController::class, 'fetchAutoRec
 Route::get('/fetch-consolidated-orders', [CompanyEmailController::class, 'fetchConsolidatedOrders'])->name('fetch.consolidated.orders');
 Route::get('/fetch-messages-for-grant', [CompanyEmailController::class, 'fetchMessagesForGrantId'])->name('fetch.messages.for.grant');
 
-if(env('APP_ENV') !== 'production'){
-
-}
-
 Route::get('/company-email/login', [CompanyEmailController::class, 'nylasLogin'])->name('company-email.login');
 Route::get('/company-email/auth-response', [CompanyEmailController::class, 'nylasAuthResponse'])->name('company-email.auth-response');// Route::get('receipts/nylas_login', [ReceiptController::class, 'nylas_login'])->name('nylas_login');
 // Route::get('receipts/nylas_auth_response', [ReceiptController::class, 'nylas_auth_response'])->name('nylas_auth_response');
