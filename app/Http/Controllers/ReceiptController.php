@@ -525,260 +525,46 @@ class ReceiptController extends Controller
     public function ms_graph_email_api()
     {
         foreach ($company_emails as $company_email) {
-                //move message here...
-                $move_type = $this->create_expense_from_email($company_email, $message, $receipt_account, $receipt, $receipt_html_main, $email_date, $image_email_url);
-                if ($move_type == 'duplicate') {
-                    //move to duplicate folder
-                    $this->ms_graph->createRequest('POST', '/users/'.$company_email->api_json['user_id'].'/messages/'.$message->getId().'/move')
-                        ->attachBody(
-                            [
-                                //1-17-2023 or is send to "receipts@hive.contractors? .. Remove...
-                                'destinationId' => $company_email->api_json['hive_folder_duplicate'],
-                            ]
-                        )
-                        ->execute();
+            //move message here...
+            $move_type = $this->create_expense_from_email($company_email, $message, $receipt_account, $receipt, $receipt_html_main, $email_date, $image_email_url);
+            if ($move_type == 'duplicate') {
+                //move to duplicate folder
+                $this->ms_graph->createRequest('POST', '/users/'.$company_email->api_json['user_id'].'/messages/'.$message->getId().'/move')
+                    ->attachBody(
+                        [
+                            //1-17-2023 or is send to "receipts@hive.contractors? .. Remove...
+                            'destinationId' => $company_email->api_json['hive_folder_duplicate'],
+                        ]
+                    )
+                    ->execute();
 
-                    continue;
-                } elseif ($move_type == 'error') {
-                    $this->ms_graph->createRequest('POST', '/users/'.$company_email->api_json['user_id'].'/messages/'.$message->getId().'/move')
-                        ->attachBody(
-                            [
-                                'destinationId' => $company_email->api_json['hive_folder_error'],
-                            ]
-                        )
-                        ->execute();
+                continue;
+            } elseif ($move_type == 'error') {
+                $this->ms_graph->createRequest('POST', '/users/'.$company_email->api_json['user_id'].'/messages/'.$message->getId().'/move')
+                    ->attachBody(
+                        [
+                            'destinationId' => $company_email->api_json['hive_folder_error'],
+                        ]
+                    )
+                    ->execute();
 
-                    Log::channel('ms_message_error_folder')->error((array) $message);
+                Log::channel('ms_message_error_folder')->error((array) $message);
 
-                    continue;
-                } else {
-                    //move email to Saved folder
-                    $this->ms_graph->createRequest('POST', '/users/'.$company_email->api_json['user_id'].'/messages/'.$message->getId().'/move')
-                        ->attachBody(
-                            [
-                                //1-17-2023 or is send to "receipts@hive.contractors? .. Remove...
-                                'destinationId' => $company_email->api_json['hive_folder_saved'],
-                            ]
-                        )
-                        ->execute();
-
-                    continue;
-                }
-            } //foreach messages
-        }
-    }
-
-    public function create_expense_from_email($company_email, $message, $receipt_account, $receipt, $receipt_html_main, $email_date, $image_email_url = null)
-    {
-        $message_type = array_values((array) $message->getBody()->getContentType())[0];
-
-        if (! isset($receipt->options['receipt_image_regex']) && ! isset($receipt->options['pdf_html'])) {
-            $doc_type = 'pdf';
-            $ocr_filename = date('Y-m-d-H-i-s').'-'.rand(10, 99).'.pdf';
-
-            $view = view('misc.create_pdf_receipt', compact(['receipt_html_main', 'message_type']))->render();
-            $ocr_path = 'files/_temp_ocr/'.$ocr_filename;
-            $location = storage_path('files/_temp_ocr/'.$ocr_filename);
-
-            Browsershot::html($view)
-                ->newHeadless()
-                ->format('A4')
-                // ->margins($top, $right, $bottom, $left)
-                ->margins(20, 0, 20, 20)
-                ->save($location);
-        } elseif (isset($receipt->options['pdf_html'])) {
-            $doc_type = 'pdf';
-            //if no email text, use pdf as html_receipt
-            //use first attachment
-            if ($message->getHasAttachments()) {
-                $attachments =
-                    $this->ms_graph->createRequest('GET', '/me/messages/'.$message->getId().'/attachments')
-                        ->setReturnType(Attachment::class)
-                        ->execute();
-                foreach ($attachments as $loop => $attachment_found) {
-                    if (isset($receipt->options['attachment_name'])) {
-                        $re = '/'.$receipt->options['attachment_name'].'/';
-                        $str = $attachment_found->getName();
-                        preg_match($re, $str, $matches, PREG_OFFSET_CAPTURE, 0);
-
-                        if (! empty($matches)) {
-                            $attachment = $attachment_found;
-                            break;
-                        } else {
-                            if (array_key_last($attachments) == $loop) {
-                                $attachment = $attachments[0];
-                            } else {
-                                continue;
-                            }
-                        }
-                    } else {
-                        $attachment = $attachment_found;
-                    }
-                }
-
-                $ocr_filename = date('Y-m-d-H-i-s').'-'.rand(10, 99).'.pdf';
-                $content_bytes = array_values((array) $attachment)[0]['contentBytes'];
-                //file decoded
-                $contents = base64_decode($content_bytes);
-                Storage::disk('files')->put('/_temp_ocr/'.$ocr_filename, $contents);
-
-                $ocr_path = 'files/_temp_ocr/'.$ocr_filename;
-                $location = storage_path($ocr_path);
+                continue;
             } else {
-                //move to add_receipt_info folder, no attachment in email. need attachment when isset($receipt->options['pdf_html'])
-                $move_type = 'error';
+                //move email to Saved folder
+                $this->ms_graph->createRequest('POST', '/users/'.$company_email->api_json['user_id'].'/messages/'.$message->getId().'/move')
+                    ->attachBody(
+                        [
+                            //1-17-2023 or is send to "receipts@hive.contractors? .. Remove...
+                            'destinationId' => $company_email->api_json['hive_folder_saved'],
+                        ]
+                    )
+                    ->execute();
 
-                return $move_type;
+                continue;
             }
-        } else {
-            //image / jpg OR png
-            $ocr_filename = date('Y-m-d-H-i-s').'-'.rand(10, 99).'.jpg';
-            $ocr_path = 'files/_temp_ocr/'.$ocr_filename;
-            $location = storage_path($ocr_path);
-
-            Image::make($image_email_url)->save($location);
-            $doc_type = 'jpg';
-        }
-
-        //ocr the file
-        $document_model = $receipt->options['document_model'];
-        $ocr_receipt_extracted = $this->azure_receipts($ocr_path, $doc_type, $document_model);
-
-        //pass receipt info to ocr_extract method
-        $ocr_receipt_data = $this->ocr_extract($ocr_receipt_extracted, null, 'email');
-
-        if (isset($ocr_receipt_data['error'])) {
-            $move_type = 'error';
-
-            return $move_type;
-        } else {
-            //01-26-2023 pass rest of receipt info to ocr_extract method
-            if (! is_null($ocr_receipt_data['fields']['transaction_date'])) {
-                $date = $ocr_receipt_data['fields']['transaction_date'];
-            } else {
-                $date = $email_date;
-            }
-
-            //8-18-23 we can remove this?!
-            if (isset($receipt->options['refund'])) {
-                $amount = '-'.$ocr_receipt_data['fields']['total'];
-            } else {
-                $amount = $ocr_receipt_data['fields']['total'];
-            }
-
-            // receipt number / invoice
-            if (isset($receipt->options['invoice_regex'])) {
-                $re = $receipt->options['invoice_regex'];
-                $str = $ocr_receipt_data['content'];
-
-                preg_match_all($re, $str, $matches, PREG_SET_ORDER, 0);
-
-                if (empty($matches)) {
-                    $invoice = null;
-                } else {
-                    // $receipt_number = str_replace(' ', '', $matches[count($matches) - 1][0]);
-                    $invoice = trim($matches[count($matches) - 1][0]);
-
-                    $ocr_receipt_data['fields']['invoice_number'] = $invoice;
-                }
-            } elseif (isset($ocr_receipt_data['fields']['invoice_number'])) {
-                $invoice = $ocr_receipt_data['fields']['invoice_number'];
-            } else {
-                $invoice = null;
-            }
-
-            // receipt po / purchase order
-            if (isset($receipt->options['po_regex'])) {
-                $re = $receipt->options['po_regex'];
-                $str = $ocr_receipt_data['content'];
-                preg_match($re, $str, $matches);
-
-                if (empty($matches)) {
-                    $purchase_order = null;
-                } else {
-                    $purchase_order = trim($matches[1]);
-                }
-            } elseif (isset($ocr_receipt_data['fields']['purchase_order'])) {
-                $purchase_order = $ocr_receipt_data['fields']['purchase_order'];
-            } else {
-                $purchase_order = null;
-            }
-
-            $ocr_receipt_data['fields']['purchase_order'] = $purchase_order;
-        }
-
-        //FIND duplicates
-        //confirm expense does not yet exist
-        //1-18-2023 | 9/30/2023 NEED TO ACCOUNT FOR SAME VENDOR, AMOUNT, AND DATE being saved multiple of times (accounted for in old $duplicates in $this->dirty_work)
-        //maybe by adding date_TIME to 'date'? or checking time in the expense_receipt_data json?
-
-        $duplicates =
-            Expense::where('belongs_to_vendor_id', $receipt_account->belongs_to_vendor_id)->
-                where('vendor_id', $receipt->vendor_id)->
-                whereNull('deleted_at')->
-                where('amount', $amount)->
-                // where('invoice', $invoice)->
-                where('date', $date)->
-                // whereBetween('date', [Carbon::create($date)->subDay(), Carbon::create($date)->addDays(4)])->
-                get();
-
-        if ($duplicates->isNotEmpty()) {
-            // 1-22-2023! WHAT IF THERE IS MULTIPLE?! -- diff in days!
-            $duplicate_expense = $duplicates->first();
-
-            //ATTACHMENTS
-            $attachments = $this->add_attachments_to_expense($duplicate_expense->id, $message, $ocr_receipt_data, $ocr_filename, $company_email);
-            //add po and add invoice from ocr
-            $duplicate_expense->invoice = $invoice;
-            $duplicate_expense->date = $date;
-            // $duplicate_expense->note = $purchase_order;
-            $duplicate_expense->save();
-
-            //move email receipt to Duplicate folder
-            $move_type = 'duplicate';
-
-            return $move_type;
-        }
-
-        //CREATE NEW Expense
-        //If PO matches a project, use that project
-        if (isset($receipt_account->project_id)) {
-            if ($receipt_account->project_id === 0) {
-                $receipt_account->project_id = null;
-            } else {
-                $receipt_account->project_id = $receipt_account->project_id;
-            }
-
-            $receipt_account->distribution_id = null;
-        } elseif (isset($receipt_account->distribution_id)) {
-            $receipt_account->distribution_id = $receipt_account->distribution_id;
-            $receipt_account->project_id = null;
-        } else {
-            $receipt_account->distribution_id = null;
-            $receipt_account->project_id = null;
-        }
-
-        //SAVE expense
-        $expense = new Expense;
-        $expense->amount = $amount;
-        $expense->reimbursment = null;
-        $expense->project_id = $receipt_account->project_id;
-        $expense->distribution_id = $receipt_account->distribution_id;
-        $expense->created_by_user_id = 0; //automated
-        $expense->date = $date;
-        $expense->invoice = $invoice;
-        $expense->vendor_id = $receipt->vendor_id; //Vendor_id of vendor being Queued
-        $expense->note = null;
-        $expense->belongs_to_vendor_id = $receipt_account->belongs_to_vendor_id;
-        $expense->save();
-
-        //ATTACHMENTS
-        //save ocr data and file/s
-        $attachments = $this->add_attachments_to_expense($expense->id, $message, $ocr_receipt_data, $ocr_filename, $company_email);
-
-        $move_type = 'new';
-
-        return $move_type;
+        } //foreach messages
     }
 
     public function azure_document_model($doc_type, $ocr_path)

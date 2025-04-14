@@ -4,25 +4,27 @@ namespace App\Livewire\Vendors;
 
 use App\Jobs\SendVendorPaymentEmailJob;
 use App\Livewire\Forms\VendorPaymentForm;
+use App\Traits\HandlesChecks;
+
 use App\Models\BankAccount;
 use App\Models\Check;
 use App\Models\Project;
 use App\Models\Vendor;
 use Carbon\Carbon;
+
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
 class VendorPaymentCreate extends Component
 {
-    use AuthorizesRequests;
+    use AuthorizesRequests, HandlesChecks;
 
     public VendorPaymentForm $form;
 
     public Vendor $vendor;
-
-    public $next_check_auto = false;
 
     public $project_id = '';
 
@@ -46,18 +48,21 @@ class VendorPaymentCreate extends Component
 
     protected $listeners = ['updateProjectBids'];
 
-    protected function rules()
+    protected function rules(): array
     {
-        return [
-            'project_id' => 'required',
-            'projects.*.order' => 'nullable',
-            'projects.*.disabled' => 'nullable',
-            'projects.*.show' => 'nullable',
-            'projects.*.vendor_expenses_sum' => 'nullable',
-            'projects.*.vendor_bids_sum' => 'nullable',
-            'projects.*.balance' => 'nullable',
-            'projects.*.amount' => 'required|numeric|min:0.01|regex:/^-?\d+(\.\d{1,2})?$/',
-        ];
+        return $this->componentMergedRules(
+            $this->form->rules(),
+            [
+                'project_id' => 'nullable',
+                'projects.*.order' => 'nullable',
+                'projects.*.disabled' => 'nullable',
+                'projects.*.show' => 'nullable',
+                'projects.*.vendor_expenses_sum' => 'nullable',
+                'projects.*.vendor_bids_sum' => 'nullable',
+                'projects.*.balance' => 'nullable',
+                'projects.*.amount' => 'nullable|numeric|min:0.01|regex:/^-?\d+(\.\d{1,2})?$/',
+            ]
+        );
     }
 
     public function mount()
@@ -92,41 +97,7 @@ class VendorPaymentCreate extends Component
 
     public function updated($field, $value)
     {
-        if ($field == 'form.bank_account_id') {
-            $this->form->check_type = null;
-            $this->form->check_number = null;
-            $this->next_check_auto = false;
-            $this->resetValidation('form.check_number');
-        }
-
-        if ($field == 'form.check_type') {
-            if ($value == 'Check') {
-                $next_check_number = Check::where('bank_account_id', $this->form->bank_account_id)->where('check_type', 'Check')->orderBy('date', 'DESC')->orderBy('created_at', 'DESC')->first()->check_number + 1;
-                $this->form->check_number = $next_check_number;
-                $this->next_check_auto = true;
-            } else {
-                $this->form->check_number = null;
-                $this->next_check_auto = false;
-                $this->resetValidation('form.check_number');
-            }
-        }
-
-        if ($field == 'form.check_number') {
-            $this->next_check_auto = false;
-            $this->validateOnly($field);
-        }
-
-        if (substr($field, 0, 8) == 'projects') {
-            $project_id = preg_replace('/[^0-9]/', '', $field);
-            $this->updateProjectBalance($project_id);
-        }
-
-        $this->validateOnly($field);
-
-        if (in_array($field, ['form.bank_account_id', 'form.paid_by'])) {
-            $this->validateOnly('form.bank_account_id');
-            $this->validateOnly('form.paid_by');
-        }
+        $this->handleChecksUpdated($field, $value);
     }
 
     // #[Computed]
@@ -202,6 +173,7 @@ class VendorPaymentCreate extends Component
         if ($this->getVendorCheckSumProperty() <= 0) {
             return $this->addError('check_total_min', 'Check total needs to be greater than $0 and include at least 1 project.');
         } else {
+            $this->validate();
             $check = $this->form->store();
         }
 

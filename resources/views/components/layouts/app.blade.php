@@ -144,7 +144,7 @@
             <flux:sidebar.toggle class="lg:hidden border" icon="bars-2" inset="left" />
         </flux:header>
 
-        <flux:main x-data @navigate.window="Livewire.navigate($event.detail)">
+        <flux:main x-data @navigate.window="Livewire.navigate($event.detail)" x-cloak>
             {{ $slot }}
         </flux:main>
 

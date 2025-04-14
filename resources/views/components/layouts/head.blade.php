@@ -36,13 +36,14 @@
 
     <!-- Styles -->
     @vite(['resources/css/app.css', 'resources/js/app.js'])
+    <style>
+        [x-cloak] {
+            display: none !important;
+        }
+    </style>
 
     {{-- ALPINE CORE INCLUDED WITH LIVEWIRE --}}
     <!-- Alpine Plugins -->
-    <script defer src="https://unpkg.com/@alpinejs/ui@3.14.1-beta.0/dist/cdn.min.js"></script>
-    {{-- <script defer src="https://unpkg.com/@alpinejs/focus@3.14.1/dist/cdn.min.js"></script> --}}
-    {{-- <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/collapse@3.14.1/dist/cdn.min.js"></script>
-    <script defer src="https://unpkg.com/@nextapps-be/livewire-sortablejs@0.4.0/dist/livewire-sortable.js"></script> --}}
     <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/sort@3.x.x/dist/cdn.min.js"></script>
 
     @fluxAppearance

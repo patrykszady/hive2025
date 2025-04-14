@@ -18,6 +18,8 @@
         "vite": "^6.0.11"
     },
     "dependencies": {
+        "@alpinejs/sort": "^3.14.9",
+        "@alpinejs/ui": "^3.14.9",
         "@nesk/puphpeteer": "^2.0.0",
         "@tailwindcss/vite": "^4.0.7",
         "@zoon/puphpeteer": "github:zoonru/puphpeteer",

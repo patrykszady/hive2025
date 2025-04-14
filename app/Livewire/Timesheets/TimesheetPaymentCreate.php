@@ -4,27 +4,25 @@ namespace App\Livewire\Timesheets;
 
 use App\Livewire\Forms\TimesheetPaymentForm;
 use App\Models\BankAccount;
-use App\Models\Check;
+
 use App\Models\Expense;
 use App\Models\Timesheet;
 use App\Models\User;
 use App\Models\Vendor;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Title;
-// use App\Livewire\Forms\CheckForm;
+
+use App\Traits\HandlesChecks;
 
 use Livewire\Component;
 
 class TimesheetPaymentCreate extends Component
 {
-    use AuthorizesRequests;
+    use AuthorizesRequests, HandlesChecks;
 
     public TimesheetPaymentForm $form;
 
-    // public CheckForm $check_form;
     public User $user;
-
-    public $next_check_auto = false;
 
     public $weekly_timesheets = [];
 
@@ -36,21 +34,21 @@ class TimesheetPaymentCreate extends Component
 
     public $user_paid_by_reimbursements = [];
 
-    public $disable_paid_by = false;
-
     protected $listeners = ['refreshComponent' => '$refresh'];
 
-    protected function rules()
+    protected function rules(): array
     {
-        return [
-            'weekly_timesheets.*.checkbox' => 'nullable',
-            'employee_weekly_timesheets.*.checkbox' => 'nullable',
-            'user_paid_expenses.*.checkbox' => 'nullable',
-            'user_reimbursement_expenses.*.checkbox' => 'nullable',
-            'user_paid_by_reimbursements.*.checkbox' => 'nullable',
-            'user.via_vendor_back' => 'nullable',
-            'user.payee_name' => 'nullable',
-        ];
+        return $this->componentMergedRules(
+            $this->form->rules(),
+            [
+                'weekly_timesheets.*.checkbox'         => 'nullable',
+                'employee_weekly_timesheets.*.checkbox'  => 'nullable',
+                'user_paid_expenses.*.checkbox'          => 'nullable',
+                'user_reimbursement_expenses.*.checkbox' => 'nullable',
+                'user_paid_by_reimbursements.*.checkbox' => 'nullable',
+                // You can also add other top-level rules here if needed.
+            ]
+        );
     }
 
     public function mount()
@@ -165,63 +163,8 @@ class TimesheetPaymentCreate extends Component
 
     public function updated($field, $value)
     {
-        // $this->validate();
-        if ($field == 'form.bank_account_id') {
-            $this->form->check_type = null;
-            $this->form->check_number = null;
-            $this->next_check_auto = false;
-            $this->resetValidation('form.check_number');
-        }
-
-        if ($field == 'form.check_type') {
-            if ($value == 'Check') {
-                $next_check_number = Check::where('bank_account_id', $this->form->bank_account_id)->where('check_type', 'Check')->orderBy('date', 'DESC')->orderBy('created_at', 'DESC')->first()->check_number + 1;
-                $this->form->check_number = $next_check_number;
-                $this->next_check_auto = true;
-            } else {
-                $this->form->check_number = null;
-                $this->next_check_auto = false;
-                $this->resetValidation('form.check_number');
-            }
-        }
-
-        if ($field == 'form.check_number') {
-            $this->next_check_auto = false;
-            $this->validateOnly($field);
-        }
-        // $this->validateOnly('form.bank_account_id');
-        // $this->validateOnly('form.paid_by');
+        $this->handleChecksUpdated($field, $value);
     }
-
-    // public function updated($field, $value)
-    // {
-    //     $this->form->validate();
-    // }
-    // public function updated($field, $value)
-    // {
-    //     //reset check and reference if paid_by or check items are changed.
-    //     //8-24-2022 - this goes with VendorPaymentForm as well.
-    //     if($field == 'check.check_type'){
-    //         if($this->check->check_type == 'Check'){
-    //             $this->check_input = TRUE;
-    //         }else{
-    //             $this->check->check_number = NULL;
-    //             $this->check_input = FALSE;
-    //         }
-    //     }
-
-    //     if($field == 'check.paid_by'){
-    //         if($value == ""){
-    //             $this->check->paid_by = NULL;
-    //         }
-    //         $this->check->bank_account_id = NULL;
-    //         $this->check->check_type = NULL;
-    //         $this->check->check_number = NULL;
-    //         $this->check_input = FALSE;
-    //     }
-
-    //     $this->validateOnly($field);
-    // }
 
     public function getWeeklyTimesheetsTotalProperty()
     {
@@ -255,28 +198,19 @@ class TimesheetPaymentCreate extends Component
         // dd($user_paid_by_reimbursements);
         $total -= $user_paid_by_reimbursements;
 
-        if (in_array('true', $confirm_disable)) {
-            $this->disable_paid_by = true;
-            $this->form->paid_by = null;
-        } else {
-            $this->disable_paid_by = false;
-        }
-
-        // dd($total);
         return $total;
     }
 
     public function save()
     {
-        // dd($this);
         // $this->authorize('create', Expense::class);
 
         //validate Pay User Total Check is greater than $0 / $this->weekly_timesheets has at least one Item in Collection
         if ($this->weekly_timesheets_total == 0) {
             $this->addError('weekly_timesheets_total', 'Payment needs at least one Timesheet');
         } else {
+            $this->validate();
             $redirect_route = $this->form->store();
-            // dd($redirect_route);
 
             if ($redirect_route == 'timesheets') {
                 return redirect()->route('timesheets.payments');
