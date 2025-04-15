@@ -604,8 +604,8 @@ class ReceiptController extends Controller
             //Should never be here. VendorDocCreate validates: file must be pdf, jpg, png
         }
 
-        $file = Storage::disk('files')->get($file_location);
-        // $file = file_get_contents(storage_path($file_location));
+        // $file = Storage::disk('files')->get($file_location);
+        $file = file_get_contents(storage_path($file_location));
         //start OCR
         $ch = curl_init();
 
@@ -637,7 +637,7 @@ class ReceiptController extends Controller
         $uri = env('AZURE_DI_ENDPOINT').'/documentintelligence/documentModels/'.$document_model.'/analyzeResults/'.$operation_location_id.'?api-version='.$azure_api_version.'" -H "Ocp-Apim-Subscription-Key: '.$azure_api_key.'"';
         $result = exec('curl -v -X GET "https://'.$uri);
         $result = json_decode($result, true);
-
+        // dd($result);
         //2024-12-25 ..if $result is error...LOG and inform user
 
         //wait but go as soon as done.
