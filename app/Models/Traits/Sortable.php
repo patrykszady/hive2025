@@ -28,10 +28,9 @@ trait Sortable
 
     public function move($position)
     {
-        // dd($this, $position);
-        // Lottery::odds(2, outOf: 100)
-        //     ->winner(fn () => $this->arrange())
-        //     ->choose();
+        Lottery::odds(2, outOf: 10)
+            ->winner(fn () => $this->arrange())
+            ->choose();
 
         DB::transaction(function () use ($position) {
             $current = $this->order;

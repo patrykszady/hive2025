@@ -5,7 +5,7 @@ return [
         'schedule' => [
             'driver' => 'daily',
             'path'   => storage_path('logs/schedule.log'),
-            'level'  => 'info',
+            'level'  => 'error',
             'days'   => 14, // or however many you want to keep
         ],
 

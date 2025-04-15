@@ -40,7 +40,6 @@ class EstimateShow extends Component
     {
         return [
             'sections.*.name' => 'required',
-            // 'sections.*.items_rearrange' => 'nullable',
         ];
     }
 
@@ -118,8 +117,6 @@ class EstimateShow extends Component
         $section = EstimateSection::findOrFail($this->sections[$section_index]['id']);
         $section->name = $this->sections[$section_index]['name'];
         //ignore 'bid_index' attribute when saving
-        //OR put    // public $items_rearrange; on Model
-        // $section->offsetUnset('items_rearrange');
         $section->save();
         $this->estimate_refresh();
 
