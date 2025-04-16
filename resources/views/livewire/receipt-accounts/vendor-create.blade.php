@@ -1,15 +1,43 @@
 <flux:modal name="receipt_account_vendor_form_modal" class="space-y-2">
     <div>
         <flux:heading size="lg">{{$vendor->name ?? 'NO VENDOR'}}</flux:heading>
-        <flux:subheading>Choose which Distribution all receipts or transactions from {{ $vendor->name ?? 'this vendor' }} should be automatically attached to. Select NO PROJECT if you do not want to assign automatically but still save the expense(will be asked to match project manually) </flux:subheading>
+        <flux:subheading>Choose which Distribution all receipts or transactions from {{ $vendor->name ?? 'this vendor' }} should be automatically attached to. Select NO DISTRIBUTION if you do not want to assign automatically but still save the expense(will be asked to match project manually) </flux:subheading>
     </div>
 
     <flux:separator variant="subtle" />
+    <flux:separator text="Recurring Expenses/Transactions" variant="subtle" />
+
+    <flux:table>
+        <flux:table.rows>
+            @foreach ($vendor_transactions as $amount => $vendor_transactions_amount)
+                <flux:table.row class="border-b-2">
+                    <flux:table.cell variant="strong">
+                        <span>{{ money($amount) }}</span>
+                        <flux:badge color="sky" size="sm" inset="top bottom">
+                            {{ $vendor_transactions_amount['count'] }}
+                        </flux:badge>
+                    </flux:table.cell>
+                </flux:table.row>
+                @foreach($vendor_transactions_amount['distributions_count'] as $distribution_name => $distribution_count)
+                    <!-- Nested row with disabled borders and indented content -->
+                    <flux:table.row class="border-0">
+                        <flux:table.cell class="pl-4">
+                            <flux:badge color="yellow" size="sm" inset="top bottom">
+                                {{ $distribution_count }}
+                            </flux:badge>
+                            <span class="ml-4">{{ $distribution_name }}</span>
+                        </flux:table.cell>
+                    </flux:table.row>
+                @endforeach
+            @endforeach
+        </flux:table.rows>
+    </flux:table>
+
     <flux:separator text="Distribution for all receipts and transactions" variant="subtle" />
 
     <form wire:submit="store" class="grid gap-6">
         <flux:select label="Distribution" wire:model.live="distribution_id" variant="listbox" placeholder="Select Distribution...">
-            <flux:select.option value="NO_PROJECT">NO PROJECT</flux:select.option>
+            <flux:select.option value="NO_PROJECT">NO DISTRIBUTION</flux:select.option>
             @foreach($distributions as $distribution)
                 <flux:select.option value="{{$distribution->id}}">{{$distribution->name}}</flux:select.option>
             @endforeach
@@ -182,7 +210,7 @@
             <div class="flex space-x-2 sticky bottom-0">
                 <flux:spacer />
 
-                <flux:button type="submit" variant="primary">Connect</flux:button>
+                <flux:button type="submit" variant="primary">Add</flux:button>
             </div>
         </div>
     </form>

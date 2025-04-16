@@ -14,21 +14,7 @@
             </a>
         </div>
         <flux:subheading>Email accounts you use to recieve digital receipts from vendors.</flux:subheading>
-
         <flux:separator variant="subtle" />
-
-        {{-- <a href="{{route('nylas_login')}}" type="button"
-            class="inline-flex justify-center px-4 py-2 text-sm text-white bg-indigo-600 border border-transparent rounded-md shadow-xs hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-            Add Email Account
-        </a>
-        <a href="{{route('ms_graph_login')}}" type="button"
-            class="inline-flex justify-center px-4 py-2 text-sm text-white bg-indigo-600 border border-transparent rounded-md shadow-xs hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-            Add Microsoft Email
-        </a>
-        <a href="{{route('google_cloud_login')}}" type="button"
-            class="inline-flex justify-center px-4 py-2 text-sm text-white bg-indigo-600 border border-transparent rounded-md shadow-xs hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-            Add Google Email
-        </a> --}}
 
         {{-- DETAILS --}}
         {{-- 03-13-2025 should be a flux table without header row --}}
@@ -56,7 +42,7 @@
         </x-lists.details_list>
     </flux:card>
 
-    {{-- @if(request()->routeIs('company_emails.index'))
+    @if(request()->routeIs('company_emails.index'))
         <livewire:receipt-accounts.receipt-accounts-index />
-    @endif --}}
+    @endif
 </div>

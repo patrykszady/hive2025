@@ -40,7 +40,7 @@
                         >
                         {{ $vendor->name }}
                     </flux:table.cell>
-                    <flux:table.cell>{{ !isset($vendor->receipt_account) ? '' : ($vendor->receipt_account->distribution_id ? $vendor->receipt_account->distribution->name : 'NO PROJECT') }}</flux:table.cell>
+                    <flux:table.cell>{{ !isset($vendor->receipt_account) ? '' : ($vendor->receipt_account->distribution_id ? $vendor->receipt_account->distribution->name : 'NO DISTRIBUTION') }}</flux:table.cell>
                     <flux:table.cell>
                         {{-- <flux:badge size="sm" :color="$vendor->status == 'Active' ? 'green' : ($vendor->status == 'Disabled' ? 'red' : 'indigo')" inset="top bottom">
                             {{ $vendor->type }}

@@ -26,13 +26,31 @@ class ExpensesAssociated extends Component
     public function addAssociatedExpense(Expense $expense)
     {
         $this->expense = $expense;
-        // associated_expenses
-        $this->expenses =
-            Expense::search($expense->amount)
-                ->orderBy('date', 'desc')
-                ->get()
-                ->whereBetween('date', [$expense->date->subMonths(3), $expense->date->addMonths(3)])
-                ->whereNotIn('id', array_merge(! $expense->associated->isEmpty() ? $expense->associated_expenses->pluck('id')->toArray() : [], [$expense->id]));
+
+        // Build an exclusion list using your existing associated() relation.
+        $excludedIds = $expense->associated()->pluck('id')->toArray();
+        $excludedIds[] = $expense->id;
+
+        $this->expenses = Expense::query()
+            // No eager loading of vendor here since we compare the ID directly.
+            ->whereNotIn('id', $excludedIds)
+            ->where(function ($query) use ($expense) {
+                $query->where(function ($q) use ($expense) {
+                        // Condition A: amount matches and date is within ±3 months.
+                        $q->where('amount', $expense->amount)
+                        ->whereBetween('date', [
+                            $expense->date->copy()->subMonths(3),
+                            $expense->date->copy()->addMonths(3),
+                        ]);
+                    })
+                    ->orWhere(function ($q) use ($expense) {
+                        // Condition B: same calendar date and same vendor.
+                        $q->whereDate('date', $expense->date->toDateString())
+                        ->where('vendor_id', $expense->vendor_id);
+                    });
+            })
+            ->orderBy('date', 'desc')
+            ->get();
 
         $this->modal('associated_expenses_form_modal')->show();
     }

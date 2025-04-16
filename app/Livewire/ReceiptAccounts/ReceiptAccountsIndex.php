@@ -26,9 +26,7 @@ class ReceiptAccountsIndex extends Component
     protected function rules()
     {
         return [
-            'vendor_id' => 'nullable'
-            // // 'receipts_vendor.*.distribution_id' => 'required',
-            // 'vendors.*.receipt_accounts.0.distribution_id' => 'required',
+            'vendor_id' => 'nullable',
         ];
     }
 

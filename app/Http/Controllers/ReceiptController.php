@@ -10,8 +10,10 @@ use App\Models\Receipt;
 use App\Models\ReceiptAccount;
 use App\Models\Transaction;
 use App\Models\Vendor;
+
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
+
 use File;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\ClientException;
@@ -23,12 +25,6 @@ use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use Intervention\Image\Facades\Image;
-use Microsoft\Graph\Graph;
-use Microsoft\Graph\Http;
-use Microsoft\Graph\Model;
-use Microsoft\Graph\Model\Attachment;
-use Microsoft\Graph\Model\MailFolder;
-use Microsoft\Graph\Model\Message;
 use Nesk\Puphpeteer\Puppeteer;
 use setasign\Fpdi\Fpdi;
 use Spatie\Browsershot\Browsershot;
@@ -193,9 +189,7 @@ class ReceiptController extends Controller
                     $receipt_account->options += ['errors' => json_decode($error, true)];
                     $receipt_account->save();
 
-                    //add to $company_email json ('api') errors
                     Log::channel('company_emails_login_error')->error($error);
-
                     continue;
                 }
 
@@ -244,7 +238,6 @@ class ReceiptController extends Controller
 
             //7-17-2023 find last amazon expenses date
             // '2023-10-14', '2023-10-14'
-            // $dates = CarbonPeriod::create(Carbon::today()->subDays(14)->setTimezone('UTC'), Carbon::today()->setTimezone('UTC'));
             $dates = CarbonPeriod::create(Carbon::today()->subDays(14)->setTimezone('UTC'), Carbon::today()->setTimezone('UTC'));
 
             foreach ($dates as $date) {
@@ -519,52 +512,6 @@ class ReceiptController extends Controller
             sleep(1);
             // usleep(500000);
         }
-    }
-
-    //foreach outlook/microsoft email get and process message...
-    public function ms_graph_email_api()
-    {
-        foreach ($company_emails as $company_email) {
-            //move message here...
-            $move_type = $this->create_expense_from_email($company_email, $message, $receipt_account, $receipt, $receipt_html_main, $email_date, $image_email_url);
-            if ($move_type == 'duplicate') {
-                //move to duplicate folder
-                $this->ms_graph->createRequest('POST', '/users/'.$company_email->api_json['user_id'].'/messages/'.$message->getId().'/move')
-                    ->attachBody(
-                        [
-                            //1-17-2023 or is send to "receipts@hive.contractors? .. Remove...
-                            'destinationId' => $company_email->api_json['hive_folder_duplicate'],
-                        ]
-                    )
-                    ->execute();
-
-                continue;
-            } elseif ($move_type == 'error') {
-                $this->ms_graph->createRequest('POST', '/users/'.$company_email->api_json['user_id'].'/messages/'.$message->getId().'/move')
-                    ->attachBody(
-                        [
-                            'destinationId' => $company_email->api_json['hive_folder_error'],
-                        ]
-                    )
-                    ->execute();
-
-                Log::channel('ms_message_error_folder')->error((array) $message);
-
-                continue;
-            } else {
-                //move email to Saved folder
-                $this->ms_graph->createRequest('POST', '/users/'.$company_email->api_json['user_id'].'/messages/'.$message->getId().'/move')
-                    ->attachBody(
-                        [
-                            //1-17-2023 or is send to "receipts@hive.contractors? .. Remove...
-                            'destinationId' => $company_email->api_json['hive_folder_saved'],
-                        ]
-                    )
-                    ->execute();
-
-                continue;
-            }
-        } //foreach messages
     }
 
     public function azure_document_model($doc_type, $ocr_path)
@@ -962,63 +909,6 @@ class ReceiptController extends Controller
         ];
 
         return $ocr_receipt_data;
-    }
-
-    public function add_attachments_to_expense($expense_id, $message, $ocr_receipt_data, $ocr_filename)
-    {
-        $filename = $expense_id.'-'.$ocr_filename;
-
-        if (! is_null($message)) {
-            if ($message->getHasAttachments()) {
-                $attachments =
-                    $this->ms_graph->createRequest('GET', '/me/messages/'.$message->getId().'/attachments')
-                        ->setReturnType(Attachment::class)
-                        ->execute();
-                //Add Email Attachments
-                foreach ($attachments as $key => $attachment) {
-                    if (in_array($attachment->getContentType(), ['application/pdf', 'application/octet-stream'])) {
-                        $filename_attached = $expense_id.'-'.$key.'-'.$ocr_filename;
-                        $content_bytes = array_values((array) $attachment)[0]['contentBytes'];
-                        //file decoded
-                        $contents = base64_decode($content_bytes);
-                        Storage::disk('files')->put('/receipts/'.$filename_attached, $contents);
-
-                        //SAVE expense_receipt_data for each attachment
-                        $expense_receipt = new ExpenseReceipts;
-                        $expense_receipt->expense_id = $expense_id;
-                        $expense_receipt->receipt_filename = $filename_attached;
-                        $expense_receipt->receipt_html = $ocr_receipt_data['content'];
-                        $expense_receipt->receipt_items = $ocr_receipt_data['fields'];
-                        $expense_receipt->save();
-                    }
-                }
-            } else {
-                //use created file from ocr
-                //SAVE expense_receipt_data for each attachment
-                $expense_receipt = new ExpenseReceipts;
-                $expense_receipt->expense_id = $expense_id;
-                $expense_receipt->receipt_filename = $filename;
-                $expense_receipt->receipt_html = $ocr_receipt_data['content'];
-                $expense_receipt->receipt_items = $ocr_receipt_data['fields'];
-                $expense_receipt->save();
-            }
-        } else {
-            //use created file from ocr
-            //SAVE expense_receipt_data for each attachment
-            $expense_receipt = new ExpenseReceipts;
-            $expense_receipt->expense_id = $expense_id;
-            $expense_receipt->receipt_filename = $filename;
-            $expense_receipt->receipt_html = $ocr_receipt_data['content'];
-            $expense_receipt->receipt_items = $ocr_receipt_data['fields'];
-            $expense_receipt->save();
-        }
-
-        //move _temp_ocr file to /files/receipts
-        Storage::disk('files')->move('/_temp_ocr/'.$ocr_filename, '/receipts/'.$filename);
-
-        $complete = true;
-
-        return $complete;
     }
 
     //1-18-2023 combine the next 2 functions into one. Pass type = original or temp

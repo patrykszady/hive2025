@@ -80,10 +80,11 @@ Route::get('/webhook', [WebhookController::class, 'verify'])->name('webhook.veri
 Route::get('/move', [MoveController::class, 'move'])->name('move');
 
 if(env('APP_ENV') === 'local') {
-    Route::get('/insurance-mailbox/messages', [VendorDocsController::class, 'fetchMessagesFromInsuranceMailbox']);
     Route::get('/fetch-auto-receipts', [CompanyEmailController::class, 'fetchAutoReceipts'])->name('fetch.auto.receipts');
     Route::get('/fetch-consolidated-orders', [CompanyEmailController::class, 'fetchConsolidatedOrders'])->name('fetch.consolidated.orders');
     Route::get('/fetch-messages-for-grant', [CompanyEmailController::class, 'fetchMessagesForGrantId'])->name('fetch.messages.for.grant');
+    Route::get('transaction_vendor_bulk_match', [TransactionController::class, 'transaction_vendor_bulk_match'])->name('transaction_vendor_bulk_match');
+    Route::get('/insurance-mailbox/messages', [VendorDocsController::class, 'fetchMessagesFromInsuranceMailbox']);
 }
 
 Route::get('/company-email/login', [CompanyEmailController::class, 'nylasLogin'])->name('company-email.login');
@@ -94,8 +95,6 @@ Route::get('/vendor_selection', VendorSelection::class)->middleware('auth')->nam
 Route::get('/vendor_registration/{vendor}', VendorRegistration::class)->middleware('auth')->name('vendor_registration');
 
 //1-18-2023 combine the next 3 functions into one. Pass type = original or temp
-
-// Route::post('/webhooks/angi', [WebhookController::class, 'angi_webhook'])->withoutMiddleware([Illuminate\Foundation\Http\Middleware\VerifyCsrfToken::class]);
 Route::get('/leads/leads_in_email', [LeadController::class, 'leads_in_email'])->name('leads.leads_in_email');
 
 Route::get('vendor_docs/verifyWorkersComp', [ReceiptController::class, 'verifyWorkersComp'])->name('vendor_docs.verifyWorkersComp');
@@ -103,22 +102,13 @@ Route::get('files/{folder}/{filename}', [ReceiptController::class, 'original_rec
 Route::get('expenses/temp_receipt/{receipt}', [ReceiptController::class, 'temp_receipt'])->name('receipts.temp_receipt');
 Route::get('vendor_docs/{document}', [VendorDocsController::class, 'document'])->name('vendor_docs.document');
 
-Route::get('receipts/ms_graph_email_api', [ReceiptController::class, 'ms_graph_email_api'])->name('ms_graph_email_api');
-
-Route::get('receipts/auto_receipt', [ReceiptController::class, 'auto_receipt'])->name('auto_receipt');
 Route::get('receipts/azure_receipts', [ReceiptController::class, 'azure_receipts'])->name('azure_receipts');
 Route::get('receipts/goutte_crawl', [ReceiptController::class, 'goutte_crawl'])->name('goutte_crawl');
-Route::get('receipts/receipt_email', [ReceiptController::class, 'receipt_email'])->name('receipt_email');
 // Route::get('new_ocr_status', [ReceiptController::class, 'new_ocr_status'])->name('new_ocr_status');
 
 Route::get('projects/reimbursments/print/{project}', [ReceiptController::class, 'printReimbursment'])->name('print_reimbursment');
 
-// Route::middleware('can:admin')->group(function () {
-//     Route::resource('admin/posts', AdminPostController::class)->except('show');
-// });
-
 // Route::get('plaid_transactions_scheduled', [TransactionController::class, 'plaid_transactions_scheduled']);
-Route::get('transaction_vendor_bulk_match', [TransactionController::class, 'transaction_vendor_bulk_match'])->name('transaction_vendor_bulk_match');
 Route::get('plaid_statements_list', [TransactionController::class, 'plaid_statements_list']);
 Route::get('plaid_transactions_refresh', [TransactionController::class, 'plaid_transactions_refresh']);
 Route::get('plaid_transactions_sync', [TransactionController::class, 'plaid_transactions_sync']);
@@ -191,8 +181,6 @@ Route::middleware(['auth', 'user.vendor'])->group(function () {
     Route::get('/vendor_docs', VendorDocsIndex::class)->name('vendor_docs.index');
 
     //LEADS
-    // Route::post('/webhook', [LeadsIndex::class, 'handle']);
-
     Route::get('/leads', LeadsIndex::class)->name('leads.index');
 
     //BANKS

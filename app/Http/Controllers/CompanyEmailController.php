@@ -194,9 +194,10 @@ class CompanyEmailController extends Controller
                 $dateEmail = Carbon::parse($message['date'])->setTimezone('America/Chicago')->format('Y-m-d H:i:s');
 
                 // Check if the 'from' email and 'subject' match any receipt
+                //receipt_type 0 = API
                 $receipt = $receipts->where('receipt_type', '!=', 0)->first(function ($receipt) use ($fromEmail, $subject) {
                     return strcasecmp($receipt->from_address, $fromEmail) === 0
-                        && stripos($subject, $receipt->from_subject) !== false; // Check if "Sale" appears in the subject
+                        && stripos($subject, $receipt->from_subject) !== false;
                 });
 
                 //If null, check if email was forwarded
@@ -211,17 +212,14 @@ class CompanyEmailController extends Controller
                     $date = trim($dateMatch[1] ?? '');
                     $dateEmail = Carbon::parse($date)->setTimezone('America/Chicago')->format('Y-m-d H:i:s');
 
+                    //receipt_type 0 = API
                     $receipt = $receipts->where('receipt_type', '!=', 0)->first(function ($receipt) use ($fromEmail, $subject) {
                         return strcasecmp($receipt->from_address, $fromEmail) === 0
-                            && stripos($subject, $receipt->from_subject) !== false; // Check if "Sale" appears in the subject
+                            && stripos($subject, $receipt->from_subject) !== false;
                     });
                 }
 
-                if(is_null($receipt)) {
-                    // No matching receipt found, skip to the next message
-                    // $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['ERROR'], $grantId);
-                    continue;
-                }elseif ($receipt) {
+                if ($receipt) {
                     $toEmail = $message['to'][0]['email'];
                     $string = $message['body'];
 
@@ -297,29 +295,25 @@ class CompanyEmailController extends Controller
                         ])->render();
 
                         $location = storage_path($ocr_path = 'files/_temp_ocr/' . $ocr_filename);
-
                         Browsershot::html($view)->newHeadless()->format('A4')->margins(20, 0, 20, 20)->save($location);
                     } elseif (isset($receipt->options['pdf_html'])) {
                         $doc_type = 'pdf';
                         if (!empty($message['attachments'])) {
-                            $attachments = $message['attachments'];
+                            $attachment = $message['attachments'][0];
 
-                            // Process attachments
-                            foreach ($attachments as $attachment) {
-                                $ocr_filename = date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '.pdf';
-                                $attachmentContent = $this->nylasService->downloadAttachment($attachment['id'], $grantId, $messageId);
+                            $ocr_filename = date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '.pdf';
+                            $attachmentContent = $this->nylasService->downloadAttachment($attachment['id'], $grantId, $messageId);
 
-                                // $attachment = collect($attachments)->first(function ($attachment_found, $loop) use ($receipt) {
-                                //     if (isset($receipt->options['attachment_name'])) {
-                                //         preg_match('/' . $receipt->options['attachment_name'] . '/', $attachment_found->getName(), $matches);
-                                //         return !empty($matches) || array_key_last($attachments) === $loop;
-                                //     }
-                                //     return true;
-                                // });
+                            // $attachment = collect($attachments)->first(function ($attachment_found, $loop) use ($receipt) {
+                            //     if (isset($receipt->options['attachment_name'])) {
+                            //         preg_match('/' . $receipt->options['attachment_name'] . '/', $attachment_found->getName(), $matches);
+                            //         return !empty($matches) || array_key_last($attachments) === $loop;
+                            //     }
+                            //     return true;
+                            // });
 
-                                Storage::disk('files')->put('/_temp_ocr/' . $ocr_filename, $attachmentContent);
-                                $location = storage_path($ocr_path = 'files/_temp_ocr/' . $ocr_filename);
-                            }
+                            Storage::disk('files')->put('/_temp_ocr/' . $ocr_filename, $attachmentContent);
+                            $location = storage_path($ocr_path = 'files/_temp_ocr/' . $ocr_filename);
                         } else {
                             // No attachments found
                             $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Error'], $grantId);
@@ -327,7 +321,7 @@ class CompanyEmailController extends Controller
                         }
                     } else {
                         $doc_type = 'jpg';
-                        $ocr_filename = date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '.jpg';
+                        $ocr_filename = date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '.' . $doc_type;
                         $location = storage_path($ocr_path = 'files/_temp_ocr/' . $ocr_filename);
                         Image::make($image_email_url)->save($location);
                     }
@@ -424,7 +418,7 @@ class CompanyEmailController extends Controller
                         $duplicate_expense = $duplicates->first();
 
                         //ATTACHMENTS
-                        $this->saveExpenseReceipt($duplicate_expense->id, $ocr_receipt_data, $ocr_filename);
+                        $this->saveExpenseReceipt($duplicate_expense->id, $ocr_receipt_data, $ocr_filename, $message);
 
                         //add po and add invoice from ocr
                         $duplicate_expense->invoice = $invoice;
@@ -450,7 +444,7 @@ class CompanyEmailController extends Controller
                         $expense->save();
 
                         //ATTACHMENTS
-                        $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename);
+                        $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, $message);
 
                         $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Saved'], $grantId);
                         continue;
@@ -474,7 +468,7 @@ class CompanyEmailController extends Controller
             $email_vendor_bank_account_ids = $email_vendor->bank_accounts->pluck('id');
 
             $queryParams = [
-                'limit'   => 40,
+                'limit'   => 99,
                 'in'      => 'inbox',
                 'from'    => 'noreply@print.epsonconnect.com',
                 'subject' => 'Receipt Scans',
@@ -650,8 +644,24 @@ class CompanyEmailController extends Controller
         }
     }
 
-    public function saveExpenseReceipt($expense_id, $ocr_receipt_data, $ocr_filename)
+    public function saveExpenseReceipt($expense_id, $ocr_receipt_data, $ocr_filename, $message = NULL)
     {
+        if($message){
+            if (!empty($message['attachments'])) {
+                $attachment = $message['attachments'][0];
+
+                if($ocr_filename){
+                    $sourcePath = '_temp_ocr/' . $ocr_filename;
+                    Storage::disk('files')->delete($sourcePath);
+                }
+
+                $ocr_filename = date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '.pdf';
+                $attachmentContent = $this->nylasService->downloadAttachment($attachment['id'], $message['grant_id'], $message['id']);
+
+                Storage::disk('files')->put('/_temp_ocr/' . $ocr_filename, $attachmentContent);
+            }
+        }
+
         $filename = $expense_id . '-' . $ocr_filename;
         $sourcePath = '_temp_ocr/' . $ocr_filename;
         $destinationPath = 'receipts/' . $filename;
@@ -666,7 +676,7 @@ class CompanyEmailController extends Controller
 
         // Perform the move operation with fallback to copy-delete
         if (Storage::disk('files')->move($sourcePath, $destinationPath)) {
-            Log::info("File moved successfully.");
+
         } else {
             if (Storage::disk('files')->copy($sourcePath, $destinationPath)) {
                 Storage::disk('files')->delete($sourcePath);

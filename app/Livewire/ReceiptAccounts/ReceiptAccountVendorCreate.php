@@ -26,10 +26,9 @@ class ReceiptAccountVendorCreate extends Component
 
     // public BulkMatchForm $form;
     public $distributions = []; //coming from ReceiptAccountsIndex
-
     public $distribution_id = null;
-
     public $transactions_bulk_matches = []; //collection
+    public $vendor_transactions = [];
 
     public Vendor $vendor;
 
@@ -37,7 +36,6 @@ class ReceiptAccountVendorCreate extends Component
 
     protected function rules()
     {
-
         return [
             'vendor.logged_in' => 'nullable',
             'distribution_id' => 'required',
@@ -57,7 +55,6 @@ class ReceiptAccountVendorCreate extends Component
 
     public function updated($field, $value)
     {
-        // dd($field, $value);
         $this->validateOnly($field);
     }
 
@@ -69,7 +66,6 @@ class ReceiptAccountVendorCreate extends Component
             $this->transactions_bulk_matches[$index]->amount = NULL;
         }
 
-        // dd($field);
         // if (str_contains($field, 'split')) {
         //     // Extract the index of the item being updated
         //     $index = explode('.', $field)[0];
@@ -108,14 +104,44 @@ class ReceiptAccountVendorCreate extends Component
 
     public function editReceiptVendor(Vendor $vendor)
     {
-        $this->vendor = $vendor->load(['receipts', 'receipt_account', 'transactions_bulk_match']);
+        $this->vendor = $vendor->load(['transactions', 'receipts', 'receipt_account', 'transactions_bulk_match']);
+
         $this->transactions_bulk_matches = $this->vendor->transactions_bulk_match;
+
         foreach($this->transactions_bulk_matches as $index => $match){
             if($match->options['splits'] ?? false){
                 $match->splits = collect($match->options['splits']);
                 $match->split = true;
             }
         }
+
+        $this->vendor_transactions = $this->vendor->transactions()
+            ->with(['expense.distribution']) // Eager load only distribution relationships
+            ->get()
+            ->groupBy('amount') // Group by amount
+            ->filter(function ($transactionsGroup) {
+                // Keep groups with at least one transaction without an expense OR at least 2 transactions
+                return $transactionsGroup->contains(function ($transaction) {
+                    return is_null($transaction->expense); // Check for missing expenses
+                }) || $transactionsGroup->count() >= 2; // Or group has at least 2 transactions
+            })
+            ->map(function ($transactionsGroup) {
+                $distributionsCount = $transactionsGroup
+                    ->groupBy(function ($transaction) {
+                        if ($transaction->expense && !is_null($transaction->expense->distribution_id)) {
+                            // Group by distribution name if available
+                            return $transaction->expense->distribution->name ?? 'Unknown Distribution';
+                        }
+                        return 'No Distribution'; // Default grouping for transactions without an expense or distribution
+                    })
+                    ->map->count(); // Count transactions in each distribution group
+
+                return [
+                    'count' => $transactionsGroup->count(),
+                    'distributions_count' => $distributionsCount, // Updated key name
+                ];
+            })
+            ->sortByDesc('count'); // Sort by total count for each amount group
 
         // dd($this->vendor?->receipt_account()?->exists() ?? false);
         $this->distribution_id = NULL;
@@ -230,7 +256,6 @@ class ReceiptAccountVendorCreate extends Component
     public function render()
     {
         $this->authorize('create', TransactionBulkMatch::class);
-
         return view('livewire.receipt-accounts.vendor-create');
     }
 }
