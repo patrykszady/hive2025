@@ -47,7 +47,12 @@
         {{-- USERS --}}
         <flux:select wire:model.live="form.user_id" label="Team Members" variant="listbox" searchable placeholder="Select team member...">
             @foreach($employees as $employee)
-                <flux:select.option wire:key="{{$employee->id}}" value="{{$employee->id}}">{{$employee->first_name}}</flux:select.option>
+                <flux:select.option wire:key="{{$employee->id}}" value="{{$employee->id}}">
+                    <div class="flex items-center gap-2 whitespace-nowrap">
+                        <flux:avatar size="xs" name="{{ $employee->full_name }}" color="auto" color:seed="{{ $employee->id }}"  />
+                        {{$employee->first_name}}
+                    </div>
+                </flux:select.option>
             @endforeach
         </flux:select>
 

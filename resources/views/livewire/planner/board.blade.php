@@ -4,11 +4,15 @@
             <div>
                 <div class="rounded-lg w-64 bg-white my-4">
                     <!-- Sticky Project Header -->
-                    <div class="sticky top-0 bg-white">
+                    <div class="sticky top-0 bg-white z-10">
                         <div class="px-4 py-4 flex justify-between items-start">
                             <div>
-                                <flux:heading><a href="{{route('projects.show', $project->id)}}" target="_blank">{{ $project->address }}</a></flux:heading>
-                                <flux:subheading>{{ $project->project_name }}</flux:subheading>
+                                <flux:heading>
+                                    <a href="{{ route('projects.show', $project->id) }}" target="_blank">
+                                        {{ $project->address }}
+                                    </a>
+                                </flux:heading>
+                                <flux:subheading>{{ $project->client->name }}</flux:subheading>
                             </div>
                             <flux:button
                                 variant="subtle" icon="plus" size="sm"
@@ -21,8 +25,10 @@
                     <div class="flex flex-col gap-2 px-2">
                         @foreach($days as $day)
                             <!-- Sticky Date Header -->
-                            <div class="sticky top-[80px] bg-white border-b border-dashed border-{{ $day->isToday() ? 'sky' : 'gray' }}-300">
-                                <h4 class="text-sm font-semibold px-2 py-1 text-{{ $day->isToday() ? 'sky' : 'gray' }}-300">{{ $day->format('D, M j') }}</h4>
+                            <div class="sticky top-[80px] bg-white border-b border-dashed border-{{ $day->isToday() ? 'indigo' : 'gray' }}-{{!$day->isWeekend() ? '300' : '200'}} z-10">
+                                <h4 class="text-sm font-semibold px-2 py-1 text-{{ $day->isToday() ? 'indigo' : 'gray' }}-{{!$day->isWeekend() ? '500' : '300'}}">
+                                    {{ $day->format('D, M j') }}
+                                </h4>
                             </div>
 
                             <!-- Tasks for the Day -->
@@ -52,5 +58,5 @@
             </div>
         @endforeach
     </div>
-    <livewire:tasks.task-create :projects="$projects" :employees="$employees" :vendors="$vendors"  />
+    <livewire:tasks.task-create :projects="$projects" :employees="$employees" :vendors="$vendors" />
 </div>
