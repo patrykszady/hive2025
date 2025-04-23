@@ -29,7 +29,6 @@ class ProjectShow extends Component
     public function render()
     {
         // $this->authorize('view', $this->project);
-
         return view('livewire.projects.show');
     }
 }

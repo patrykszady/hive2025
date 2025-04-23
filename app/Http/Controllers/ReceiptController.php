@@ -719,8 +719,7 @@ class ReceiptController extends Controller
         } elseif (isset($ocr_receipt_extract_prefix['DepartureDate'])) {
             $transaction_date = $ocr_receipt_extract_prefix['DepartureDate']['valueDate'];
         } elseif (isset($ocr_receipt_extract_prefix['InvoiceDate'])) {
-            $transaction_date = $ocr_receipt_extract_prefix['InvoiceDate']['valueDate'];
-
+            $transaction_date = $ocr_receipt_extract_prefix['InvoiceDate']['valueDate'] ?? null;
             //use analyze options for "Order Date" if no InvoiceDate...
         } elseif (isset($key_value_pairs)) {
             if (! $key_value_pairs->where('key.content', 'Order Date')->isEmpty()) {

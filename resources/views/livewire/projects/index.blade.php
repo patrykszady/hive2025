@@ -75,22 +75,8 @@
                                 </flux:table.cell>
                             @endif
                             <flux:table.cell>{{ $project->project_name }}</flux:table.cell>
-                            {{-- <flux:table.cell
-                                wire:click="$dispatchTo('projects.expense-create', 'editExpense', { expense: {{$project->id}}})"
-                                variant="strong"
-                                class="cursor-pointer"
-                                >
-                                {{ $project->address }}
-                            </flux:table.cell>
-                            <flux:table.cell>{{ $expense->date->format('m/d/Y') }}</flux:table.cell>
-                            @if($view != 'checks.show')
-                                <flux:table.cell><a wire:navigate.hover href="{{route('vendors.show', $expense->vendor->id)}}">{{Str::limit($expense->vendor->name, 20)}}</a></flux:table.cell>
-                            @endif
-                            @if($view != 'projects.show')
-                                <flux:table.cell>{{ Str::limit($expense->project->name, 25) }}</flux:table.cell>
-                            @endif --}}
                             <flux:table.cell>
-                                <flux:badge size="sm" :color="$project->last_status->title == 'Complete' ? 'green' : ($project->last_status->title == 'Active' ? 'blue' : ($project->last_status->title == 'Cantable.celled' ? 'red' : 'yellow'))" inset="top bottom">{{ $project->last_status->title }}</flux:badge>
+                                <flux:badge size="sm" :color="$project->latestStatus->title == 'Complete' ? 'green' : ($project->latestStatus->title == 'Active' ? 'blue' : ($project->latestStatus->title == 'Cancelled' ? 'red' : 'yellow'))" inset="top bottom">{{ $project->latestStatus->title }}</flux:badge>
                             </flux:table.cell>
                         </flux:table.row>
                     @endforeach

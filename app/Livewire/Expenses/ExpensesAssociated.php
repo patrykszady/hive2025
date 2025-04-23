@@ -27,7 +27,6 @@ class ExpensesAssociated extends Component
     {
         $this->expense = $expense;
 
-        // Build an exclusion list using your existing associated() relation.
         $excludedIds = $expense->associated()->pluck('id')->toArray();
         $excludedIds[] = $expense->id;
 
@@ -37,16 +36,19 @@ class ExpensesAssociated extends Component
             ->where(function ($query) use ($expense) {
                 $query->where(function ($q) use ($expense) {
                         // Condition A: amount matches and date is within ±3 months.
-                        $q->where('amount', $expense->amount)
-                        ->whereBetween('date', [
-                            $expense->date->copy()->subMonths(3),
-                            $expense->date->copy()->addMonths(3),
-                        ]);
+                        $q->where(function ($amountQuery) use ($expense) {
+                                $amountQuery->where('amount', $expense->amount)
+                                            ->orWhere('amount', -1 * $expense->amount);
+                            })
+                          ->whereBetween('date', [
+                              $expense->date->copy()->subMonths(3),
+                              $expense->date->copy()->addMonths(3),
+                          ]);
                     })
                     ->orWhere(function ($q) use ($expense) {
                         // Condition B: same calendar date and same vendor.
                         $q->whereDate('date', $expense->date->toDateString())
-                        ->where('vendor_id', $expense->vendor_id);
+                          ->where('vendor_id', $expense->vendor_id);
                     });
             })
             ->orderBy('date', 'desc')

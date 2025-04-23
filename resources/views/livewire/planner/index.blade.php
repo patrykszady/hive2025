@@ -81,7 +81,7 @@
                         @foreach($this->projects as $project)
                             {{-- border-2 border-black --}}
                             {{-- divide-y-4 divide-black --}}
-                            <div class="w-64 p-2 border-b-2">
+                            <div class="w-64 p-2">
                                 <flux:card
                                     x-sort="$wire.sort($key, $position, {{$project->id}}, {{$day_index}})"
                                     x-sort:group="tasks"

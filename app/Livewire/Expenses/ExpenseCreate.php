@@ -56,7 +56,7 @@ class ExpenseCreate extends Component
     #[Computed]
     public function projects()
     {
-        $projects = Project::status(['Active', 'Complete', 'Service Call', 'Service Call Complete'])->sortByDesc('last_status.start_date');
+        $projects = Project::status(['Active', 'Complete', 'Service Call', 'Service Call Complete'])->get();
         return $projects;
     }
 
@@ -86,24 +86,22 @@ class ExpenseCreate extends Component
         }
 
         if ($field == 'form.reimbursment') {
-            // dd($value);
+
             // if($value == NULL){
             //     $this->form->reimbursment = NULL;
             // }elseif($value == 'client_reimbursement'){
             //     // dd('Client');
             //     $this->form->reimbursment = 'client_reimbursement';
             // }
-            // $title = Project::findOrFail($this->form->project_id)->project_status->title;
+
 
             // if($title == 'Complete' && $this->form->reimbursment == 'Client'){
             //     $this->addError('form.reimbursment', 'No Client reimbursment allowed when Project is Complete.');
-            // }
-            // $this->validate();
             $this->validateOnly('form.receipt_file');
         }
 
         if ($field == 'form.project_id' && is_numeric($value)) {
-            $project_title = $this->projects->where('id', $value)->first()->last_status->title;
+            $project_title = $this->projects->where('id', $value)->first()->latestStatus->title;
 
             if ($project_title == 'Complete') {
                 $this->form->project_completed = true;

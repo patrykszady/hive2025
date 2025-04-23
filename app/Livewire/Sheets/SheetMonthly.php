@@ -25,12 +25,13 @@ class SheetMonthly extends Component
 
         $monthly_payments = Payment::whereBetween('date', [$start_date, $end_date])
             ->whereHas('project', fn($query) =>
-                $query->whereHas('last_status', fn($query) =>
-                    $query->where('title', '!=', 'VIEW ONLY')))
-            ->orderBy('date', 'DESC')
+                $query->whereHas('latestStatus', fn($subQuery) =>
+                    $subQuery->where('title', '!=', 'VIEW ONLY') // Exclude projects with latest status title "VIEW ONLY"
+                )
+            )
+            ->orderBy('date', 'DESC') // Sort payments by date descending
             ->get()
-            ->groupBy(fn($payment) => $payment->date->format('M y'))
-            ->toBase();
+            ->groupBy(fn($payment) => $payment->date->format('M y'));
 
         $monthly_expenses = Expense::whereBetween('date', [$start_date, $end_date])
             ->orderBy('date', 'DESC')
@@ -47,12 +48,13 @@ class SheetMonthly extends Component
 
         $last_year_payments = Payment::whereBetween('date', [$start_date->subYear(), $end_date->subYear()])
             ->whereHas('project', fn($query) =>
-                $query->whereHas('last_status', fn($query) =>
-                    $query->where('title', '!=', 'VIEW ONLY')))
-            ->orderBy('date', 'DESC')
+                $query->whereHas('latestStatus', fn($subQuery) =>
+                    $subQuery->where('title', '!=', 'VIEW ONLY') // Exclude projects with latest status title "VIEW ONLY"
+                )
+            )
+            ->orderBy('date', 'DESC') // Sort payments by date descending
             ->get()
-            ->groupBy(fn($payment) => $payment->date->addYear()->format('M y'))
-            ->toBase();
+            ->groupBy(fn($payment) => $payment->date->addYear()->format('M y'));
 
         foreach ($period as $month) {
             $monthKey = $month->format('M y');

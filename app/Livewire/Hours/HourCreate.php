@@ -81,7 +81,6 @@ class HourCreate extends Component
 
         $this->days = implode(',', $confirmed_week_days);
 
-        // $this->projects = Project::status(['Active', 'Service Call']);
         $this->form->setProjects($this->projects->toArray());
     }
 
@@ -128,25 +127,38 @@ class HourCreate extends Component
         //if current User doesnt have any hours for this date let them add new project, if they do let them edit if not yet paid (or timesheet created)
         $this->selected_date = $date;
 
-        $user_day_hours = Hour::where('user_id', auth()->user()->id)->where('date', $this->selected_date->format('Y-m-d'))->get();
-        $projects = Project::status(['Active', 'Service Call']);
-        $planner_projects_day =
-            Task::where('user_id', auth()->user()->id)->whereNotNull('start_date')
-                ->whereNotIn('project_id', $projects->pluck('id')->toArray())
-                ->whereDate('start_date', '>=', $this->selected_date->format('Y-m-d'))
-                ->whereDate('end_date', '<=', $this->selected_date->format('Y-m-d'))
-                ->pluck('project_id')->unique('project_id');
+        $user_day_hours = Hour::where('user_id', auth()->user()->id)
+        ->where('date', $this->selected_date->format('Y-m-d'))
+        ->get();
 
-        $planner_projects_day = Project::whereIn('id', $planner_projects_day)->get();
-        $other_projects = Project::whereIn('id', $user_day_hours->pluck('project_id'))->get();
+        $user_day_hours = Hour::where('user_id', auth()->user()->id)
+        ->where('date', $this->selected_date->format('Y-m-d'))
+        ->get();
 
-        $merged_projects = $projects->merge($other_projects);
-        $merged_projects = $merged_projects->merge($planner_projects_day);
+        $user_day_hours = Hour::where('user_id', auth()->user()->id)
+        ->where('date', $this->selected_date->format('Y-m-d'))
+        ->get();
 
-        $this->projects =
-            Project::whereIn('id', $merged_projects->pluck('id')->toArray())->with(['tasks' => function ($query) {
-                //CarbonPeriod between each task->start and end_date ... if $this->selected_date->format('Y-m-d') is between Carbon Period
-                $query->where('user_id', auth()->user()->id)->whereNotNull('start_date')
+        $projects = Project::status(['Active'])->get(); // Only fetch projects where latest status matches
+
+        $planner_projects_day = Task::where('user_id', auth()->user()->id)
+            ->whereNotNull('start_date')
+            ->whereNotIn('project_id', $projects->pluck('id')->toArray())
+            ->whereDate('start_date', '>=', $this->selected_date->format('Y-m-d'))
+            ->whereDate('end_date', '<=', $this->selected_date->format('Y-m-d'))
+            ->pluck('project_id')
+            ->unique();
+
+        $planner_projects_day = Project::whereIn('id', $planner_projects_day)->get(); // Apply the same filter for planner projects
+
+        $other_projects = Project::whereIn('id', $user_day_hours->pluck('project_id')->unique())->get(); // Apply the same filter for other projects
+
+        $merged_projects = $projects->merge($other_projects)->merge($planner_projects_day);
+
+        $this->projects = Project::whereIn('id', $merged_projects->pluck('id')->toArray())
+            ->with(['tasks' => function ($query) {
+                $query->where('user_id', auth()->user()->id)
+                    ->whereNotNull('start_date')
                     ->each(function ($task) {
                         $task_duration_days = CarbonPeriod::create($task->start_date, $task->end_date);
 
@@ -156,8 +168,12 @@ class HourCreate extends Component
                         }
                     });
             }])
+            ->with('latestStatus') // Load the latest status for sorting
             ->get()
-            ->sortBy([['last_status.title', 'asc'], ['last_status.start_date', 'desc']])
+            ->sortBy([
+                ['latestStatus.title', 'asc'], // Sort by latest status title ascending
+                ['latestStatus.start_date', 'desc'] // Sort by latest status start date descending
+            ])
             ->keyBy('id');
 
         foreach ($this->day_project_tasks as $project_id => $project_tasks) {

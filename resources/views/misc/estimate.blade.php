@@ -206,7 +206,7 @@
 
                 {{-- ESTIMATE TOTAL --}}
                 @if($type != 'Work Order')
-                    @if(!in_array($estimate->project->last_status->title, ['Active', 'Complete', 'Service Call', 'Service Call Complete']))
+                    @if(!in_array($estimate->project->latestStatus->title, ['Active', 'Complete', 'Service Call', 'Service Call Complete']))
                         <div class="flex justify-between">
                             <div></div>
                             <x-lists.ul
@@ -237,7 +237,7 @@
 
                         {{-- PROJECT FINANCES --}}
                         <div class="col-span-2">
-                            @if(in_array($estimate->project->last_status->title, ['Active', 'Complete', 'Service Call', 'Service Call Complete']))
+                            @if(in_array($estimate->project->latestStatus->title, ['Active', 'Complete', 'Service Call', 'Service Call Complete']))
                                 <flux:card>
                                     <div class="flex justify-between">
                                         <flux:heading size="lg">{{$type}} Finances</flux:heading>

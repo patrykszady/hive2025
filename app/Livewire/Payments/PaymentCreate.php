@@ -6,8 +6,11 @@ use App\Livewire\Forms\PaymentForm;
 use App\Models\Client;
 use App\Models\Payment;
 use App\Models\Project;
+
 use Carbon\Carbon;
+
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -20,7 +23,7 @@ class PaymentCreate extends Component
 
     public Payment $payment;
 
-    public $client = null;
+    public Client $client;
 
     public $client_id = null;
 
@@ -58,9 +61,7 @@ class PaymentCreate extends Component
     public function updatedClientId(Client $client)
     {
         $this->client = $client;
-        // $YTD = Carbon::now()->subYear();
-        //->where('projects.created_at', '>=', $YTD)
-        $this->projects = $client->projects()->orderBy('projects.created_at', 'DESC')->status(['Active', 'Complete', 'Service Call', 'Service Call Complete']);
+        $this->projects = $client->projects()->orderBy('projects.created_at', 'DESC')->status(['Active', 'Complete', 'Service Call', 'Service Call Complete'])->get();
     }
 
     public function editPayment(Payment $payment)
@@ -71,7 +72,6 @@ class PaymentCreate extends Component
         $this->updatedClientId($this->client);
         $this->form->setPayment($this->payment);
 
-        // dd($this->projects);
         $this->view_text = [
             'card_title' => 'Update Client Payment',
             'button_text' => 'Update Payment',
@@ -84,16 +84,9 @@ class PaymentCreate extends Component
     #[Computed]
     public function clients()
     {
-        // $YTD = Carbon::now()->subYear();
-
-        // use ($YTD)
         return Client::withWhereHas('projects', function ($query) {
-            //->where('projects.created_at', '>=', $YTD)
-            $query->whereHas('statuses', function ($query) {
-                return $query->where('title', '=', 'Active');
-            });
-        })
-        ->orderBy('created_at', 'DESC')
+            $query->status(['Active', 'Complete', 'Service Call', 'Service Call Complete']); // Use the new scope to filter statuses
+        })->orderBy('created_at', 'DESC') // Order clients by their own created_at date
         ->get();
     }
 

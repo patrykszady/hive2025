@@ -15,9 +15,7 @@ use Livewire\Component;
 class PlannerIndex extends Component
 {
     public $employees = [];
-
     public $projects = [];
-
     public $vendors = [];
 
     public $days = [];

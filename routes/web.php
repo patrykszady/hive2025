@@ -34,6 +34,7 @@ use App\Livewire\LineItems\LineItemsIndex;
 use App\Livewire\Payments\PaymentCreate;
 use App\Livewire\Payments\PaymentsIndex;
 use App\Livewire\Planner\PlannerIndex;
+use App\Livewire\Planner\BoardIndex;
 use App\Livewire\Projects\ProjectShow;
 use App\Livewire\Projects\ProjectsIndex;
 use App\Livewire\Sheets\SheetShow;
@@ -231,7 +232,7 @@ Route::middleware(['auth', 'user.vendor'])->group(function () {
 
     //PLANNER
     Route::get('/planner', PlannerIndex::class)->name('planner.index');
-
+    Route::get('/planner/board', BoardIndex::class)->name('planner.board');
     //TASKS
     // Route::get('/planner_gantt', Planner::class)->name('planner.index');
     // Route::get('/planner_schedule', PlannerList::class)->name('planner_list.index');

@@ -68,24 +68,21 @@ class VendorPaymentCreate extends Component
     public function mount()
     {
         //09-05-2023 if proejct not active ...add in dropdown
-        // $projects = Project::active()->orderBy('created_at', 'DESC')->get();
-        //whereNotIn('id', $existing_projects)
-
-        $this->projects =
-            Project::where('created_at', '>', Carbon::now()->subYears(2)->format('Y-m-d'))
-                ->status(['Active', 'Complete', 'Service Call', 'Service Call Complete'])
-                ->sortBy([['last_status.title', 'asc'], ['last_status.start_date', 'desc']])
-                // ->with(['expenses' => function ($query) {
-                //     return $query->where('vendor_id', '4');
-                //     }])
-                // ->get()
-                ->each(function ($item, $key) {
-                    $item->show = false;
-                    $item->name = $item->name;
-                    $item->disabled = false;
-                    $item->order = 0;
-                })
-                ->keyBy('id');
+        $this->projects = Project::where('created_at', '>', Carbon::now()->subYears(2)->format('Y-m-d'))
+            ->status(['Active', 'Complete', 'Service Call', 'Service Call Complete']) // Using your scope
+            ->with('latestStatus') // Eager load the latest status for efficiency
+            ->get() // Fetch projects into a collection
+            ->sortBy([
+                ['latestStatus.title', 'asc'], // Sort by title (ascending)
+                ['latestStatus.start_date', 'desc'], // Then by start_date (descending)
+            ])
+            ->each(function ($item) {
+                $item->show = false;
+                $item->name = $item->name;
+                $item->disabled = false;
+                $item->order = 0;
+            })
+            ->keyBy('id');
 
         $this->form->date = today()->format('Y-m-d');
         $this->employees = auth()->user()->vendor->users()->where('is_employed', 1)->get();

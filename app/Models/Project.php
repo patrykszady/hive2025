@@ -66,7 +66,6 @@ class Project extends Model
     public function clients(): BelongsToMany
     {
         //through project_vendor->client_id
-
         return $this->belongsToMany(Client::class, 'project_vendor')->withPivot('vendor_id')->withTimestamps();
     }
 
@@ -113,19 +112,16 @@ class Project extends Model
         return $this->hasMany(ProjectStatus::class);
     }
 
-    public function last_status(): HasOne
+    public function latestStatus(): HasOne
     {
-        return $this->hasOne(ProjectStatus::class)->orderBy('start_date', 'DESC')->latest();
-    }
-
-    public function last_complete_status(): HasOne
-    {
-        return $this->hasOne(ProjectStatus::class)->where('title', 'Complete')->orderBy('start_date', 'DESC')->latest();
+        return $this->hasOne(ProjectStatus::class)->latestOfMany('start_date'); // Automatically picks the latest
     }
 
     public function scopeStatus($query, $status)
     {
-        return $query->with('last_status')->get()->whereIn('last_status.title', $status);
+        return $query->whereHas('latestStatus', function ($q) use ($status) {
+            $q->whereIn('title', $status); // Check if the latest status title is in the given array
+        });
     }
 
     // public function getClientAttribute()
@@ -141,25 +137,6 @@ class Project extends Model
     //     }else{
     //         return Client::findOrFail($vendor->pivot->client_id);
     //     }
-    // }
-
-    // public function getStatusAttribute()
-    // {
-    //     return $this->statuses()->orderBy('created_at', 'DESC')->first();
-    // }
-
-    // public function scopeActive($query)
-    // {
-    //     // dd($query->with('statuses')->get());
-    //     // dd($query->whereHas('statuses')->get());
-    //     // $posts = Post::whereHas('comments', function (Builder $query) {
-    //     //     $query->where('content', 'like', 'code%');
-    //     // })->get();
-
-    //     $query->whereHas('statuses', function($q){
-    //         dd($q->get()->groupBy('project_id'));
-    //         $q->where('start_date', '>=', '2015-01-01');
-    //     })->get();
     // }
 
     public function getFullAddressAttribute()

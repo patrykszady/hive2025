@@ -15,8 +15,7 @@
         <flux:input wire:model.blur="form.title" label="Title" placeholder="Task Title" autofocus/>
 
         {{-- DATES --}}
-        <flux:input wire:model.live="form.start_date" type="date" max="2999-12-31" label="Start Date" />
-        <flux:input wire:model.live="form.end_date" type="date" max="2999-12-31" label="End Date" />
+        <flux:date-picker mode="range" with-today fixed-weeks wire:model.live="form.dates" />
 
         {{-- SAT/SUN INCLUSION --}}
         <flux:fieldset>

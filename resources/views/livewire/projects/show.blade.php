@@ -71,7 +71,7 @@
 
 		@can('update', $project)
             <div class="col-span-4 space-y-4 lg:col-span-2 lg:col-start-3">
-                @if(in_array($this->project->last_status->title, ['Active', 'Complete',  'Service Call', 'Service Call Complete', 'VIEW ONLY']))
+                @if(in_array($this->project->latestStatus->title, ['Active', 'Complete',  'Service Call', 'Service Call Complete', 'VIEW ONLY']))
                     {{-- PROJECT FINANCIALS --}}
                     <livewire:projects.project-finances :project="$project" lazy />
 

@@ -481,7 +481,7 @@ class CompanyEmailController extends Controller
                 $messageId = $message['id'];
 
                 if (!empty($message['attachments'])) {
-                    foreach ($message['attachments'] as $attachment) {
+                    foreach ($message['attachments'] as $attachment_key => $attachment) {
                         $doc_type = 'pdf';
 
                         // Generate a unique filename and create the temporary file path.
@@ -505,14 +505,21 @@ class CompanyEmailController extends Controller
                         // Process the attachment using ReceiptController.
                         $ocr_receipt_extracted = app(\App\Http\Controllers\ReceiptController::class)
                             ->azure_receipts('files/' . $ocr_path, $doc_type, $document_model);
+
                         $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)
                             ->ocr_extract($ocr_receipt_extracted);
 
-                        // if(isset($ocr_receipt_data['error']) || $ocr_receipt_data['error'] == true){
-                        //     //if error move this single $attachment to a folder for debug...
-                        //     Storage::disk('files')->move('/_temp_ocr/'.$ocr_filename, '/auto_receipts_failed/'.$ocr_filename);
-                        //     continue;
-                        // }
+                        if (isset($ocr_receipt_data['error']) && $ocr_receipt_data['error'] === true)
+                        {
+                            //if error move this single $attachment to a folder for debug...
+                            Storage::disk('files')->move('/_temp_ocr/'.$ocr_filename, '/auto_receipts_failed/'.$ocr_filename);
+
+                            if ($attachment_key === array_key_last($message['attachments'])) {
+                                $this->nylasService->moveEmailToFolder($messageId, $company_email->api_json['folders']['Error'], $grantId);
+                            }
+
+                            continue;
+                        }
 
                         // Set up the transaction date range.
                         $start_date = Carbon::parse($ocr_receipt_data['fields']['transaction_date'])

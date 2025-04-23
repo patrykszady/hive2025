@@ -28,7 +28,7 @@
                             </a>
                         </flux:table.cell>
                         <flux:table.cell>{{ money($project->finances['profit']) }}</flux:table.cell>
-                        <flux:table.cell>{{ $project->last_complete_status->start_date->format('F Y') }}</flux:table.cell>
+                        <flux:table.cell>{{ $project->statuses->first()->start_date->format('F Y') }}</flux:table.cell>
                     </flux:table.row>
                 @endforeach
             </flux:table.rows>

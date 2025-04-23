@@ -15,14 +15,10 @@ class TaskForm extends Form
     public $title = null;
 
     // #[Validate('array')]
-    // public $dates = NULL;
     // |date_format:Y-m-d|before_or_equal:end_date')]
+        // #[Validate('nullable|date_format:Y-m-d|after_or_equal:start_date')]
     #[Validate('nullable')]
-    public $start_date = null;
-
-    // #[Validate('nullable|date_format:Y-m-d|after_or_equal:start_date')]
-    #[Validate('nullable')]
-    public $end_date = null;
+    public $dates = null;
 
     #[Validate('required')]
     public $project_id = null;
@@ -59,22 +55,8 @@ class TaskForm extends Form
     public function setTask(Task $task)
     {
         $this->task = $task;
-        // if(!isset($task->start_date)){
-        //     $new_dates = [];
-        // }elseif($task->start_date === $task->end_date OR is_null($task->end_date)){
-        //     $new_dates = [$task->start_date->format('m/d/Y')];
-        // }else{
-        //     $new_dates = [$task->start_date->format('m/d/Y'), $task->end_date->format('m/d/Y')];
-        // }
-        // if(!isset($task->start_date)){
-        //     $new_dates = [];
-        // }else{
-        //     $new_dates = [$task->start_date->format('m/d/Y'), $task->end_date->format('m/d/Y')];
-        // }
-        // $this->dates = $new_dates;
-
-        $this->start_date = $task->start_date ? $task->start_date->format('Y-m-d') : null;
-        $this->end_date = $task->end_date ? $task->end_date->format('Y-m-d') : null;
+        $this->start_date = $task->start_date ? $task->start_date : null;
+        $this->end_date = $task->end_date ? $task->end_date : null;
         $this->include_weekend_days = (array) $task->options->include_weekend_days;
         $this->project_id = $task->project_id;
         $this->order = $task->order;
@@ -84,6 +66,11 @@ class TaskForm extends Form
         $this->title = $task->title;
         $this->notes = $task->notes;
         $this->user_id = $task->user_id;
+
+        $this->dates = [
+            'start' => $task->start_date ? $task->start_date->format('Y-m-d') : null,
+            'end' => $task->end_date ? $task->end_date->format('Y-m-d') : null,
+        ];
     }
 
     public function update()
@@ -92,12 +79,8 @@ class TaskForm extends Form
         $this->validate();
 
         $this->task->update([
-            // 'start_date' => isset($this->dates[0]) ? (!empty($this->dates[0]) ? $this->dates[0] : NULL) : NULL,
-            // 'start_date' => isset($this->dates[0]) ? (!empty($this->dates[0]) ? $this->dates[0] : NULL) : NULL,
-            // // 'end_date' => isset($this->dates[0]) ? (!empty($this->dates[0]) ? $this->dates[0] : NULL) : NULL,
-            // 'end_date' => isset($this->dates[1]) ? $this->dates[1] : (isset($this->dates[0]) ? (!empty($this->dates[0]) ? $this->dates[0] : NULL) : NULL),
-            'start_date' => $this->start_date,
-            'end_date' => $this->end_date,
+            'start_date' => $this->dates['start'],
+            'end_date' => $this->dates['end'],
             'project_id' => $this->project_id,
             'vendor_id' => $this->vendor_id,
             'type' => $this->type,
@@ -118,10 +101,8 @@ class TaskForm extends Form
         $this->validate();
 
         $task = Task::create([
-            'start_date' => $this->start_date,
-            'end_date' => $this->end_date,
-            // 'start_date' => isset($this->dates[0]) ? (!empty($this->dates[0]) ? $this->dates[0] : NULL) : NULL,
-            // 'end_date' => isset($this->dates[0]) ? (!empty($this->dates[0]) ? $this->dates[0] : NULL) : NULL,
+            'start_date' => $this->dates['start'],
+            'end_date' => $this->dates['end'],
             'project_id' => $this->project_id,
             'vendor_id' => $this->vendor_id,
             'type' => $this->type,

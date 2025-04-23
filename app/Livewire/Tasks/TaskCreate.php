@@ -2,9 +2,11 @@
 
 namespace App\Livewire\Tasks;
 
+use App\Models\Task;
 use App\Livewire\Forms\TaskForm;
 use App\Livewire\Planner\PlannerIndex;
-use App\Models\Task;
+use App\Livewire\Planner\BoardIndex;
+
 use Carbon\Carbon;
 use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
@@ -18,9 +20,7 @@ class TaskCreate extends Component
 
     //$projects & $vendors & $employees come from the Planner Component
     public $projects = [];
-
     public $vendors = [];
-
     public $employees = [];
 
     public $view_text = [
@@ -33,9 +33,9 @@ class TaskCreate extends Component
 
     public function updated($field, $value)
     {
-        if (! is_null($this->form->start_date)) {
-            $startDate = Carbon::parse($this->form->start_date);
-            $endDate = Carbon::parse($this->form->end_date);
+        if (! is_null($this->form->dates['start'])) {
+            $startDate = Carbon::parse($this->form->dates['start']);
+            $endDate = Carbon::parse($this->form->dates['end']);
 
             $excludeSaturdays = ! isset($this->form->include_weekend_days['saturday']) || $this->form->include_weekend_days['saturday'] === false;
             $excludeSundays = ! isset($this->form->include_weekend_days['sunday']) || $this->form->include_weekend_days['sunday'] === false;
@@ -85,7 +85,7 @@ class TaskCreate extends Component
         ];
 
         if ($date) {
-            $this->form->dates = [Carbon::parse($date)->format('m/d/Y')];
+            $this->form->dates = [Carbon::parse($date)->format('Y-m-d')];
         } else {
             $this->form->dates = [];
         }
@@ -113,7 +113,7 @@ class TaskCreate extends Component
         $task = $this->form->task;
         $task->delete();
 
-        $this->dispatch('refreshComponent')->to(PlannerIndex::class);
+        $this->dispatch('refreshComponent')->to(BoardIndex::class);
         $this->modal('task_create_form_modal')->close();
 
         Flux::toast(
@@ -148,7 +148,7 @@ class TaskCreate extends Component
     public function save()
     {
         $this->form->store();
-        $this->dispatch('refreshComponent')->to(PlannerIndex::class);
+        $this->dispatch('refreshComponent')->to(BoardIndex::class);
         $this->modal('task_create_form_modal')->close();
 
         Flux::toast(
@@ -164,7 +164,7 @@ class TaskCreate extends Component
     public function edit()
     {
         $this->form->update();
-        $this->dispatch('refreshComponent')->to(PlannerIndex::class);
+        $this->dispatch('refreshComponent')->to(BoardIndex::class);
         $this->modal('task_create_form_modal')->close();
 
         Flux::toast(

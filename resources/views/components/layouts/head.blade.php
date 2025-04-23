@@ -41,6 +41,7 @@
             display: none !important;
         }
     </style>
+    @stack('styles')
 
     {{-- ALPINE CORE INCLUDED WITH LIVEWIRE --}}
     <!-- Alpine Plugins -->

@@ -17,7 +17,7 @@ class ProjectsIndex extends Component
     use AuthorizesRequests, WithPagination;
 
     public $project_name_search = '';
-
+    public $clients = [];
     public $client_id = '';
 
     public $client = null;
@@ -36,6 +36,8 @@ class ProjectsIndex extends Component
     {
         if ($this->client) {
             $this->client_id = $this->client->id;
+        }else{
+            $this->clients = Client::orderBy('created_at', 'DESC')->get();
         }
 
         if ($this->view == true) {
@@ -74,32 +76,26 @@ class ProjectsIndex extends Component
             $client_ids = [];
         }
 
-        return Project::orderBy('created_at', 'DESC')
-            // ->withWhereHas('vendors', function ($query) {
-            //     $query->where('vendor_id', auth()->user()->vendor->id);
-            // })
-            ->where('address', 'like', "%{$this->project_name_search}%")
-            ->when($this->project_status_title != null && $this->project_status_title != 'ALL', function ($query) {
-                return $query->status($this->project_status_title == 'Complete' ? [$this->project_status_title, 'Service Call Complete'] : $this->project_status_title)->sortByDesc('last_status.start_date');
+        return Project::with('latestStatus') // Eager load the latest status for each project
+            ->orderBy('created_at', 'DESC') // Order projects by their created_at date
+            // ->where('address', 'like', "%{$this->project_name_search}%") // Filter by address if provided
+            ->when($this->project_status_title !== null && $this->project_status_title !== 'ALL', function ($query) {
+                $query->whereHas('latestStatus', function ($query) {
+                    $query->whereIn('title', $this->project_status_title === 'Complete'
+                        ? ['Complete', 'Service Call Complete', 'Service Call'] // Include additional statuses for "Complete"
+                        : [$this->project_status_title]); // Filter by other status titles
+                });
             })
-            ->when($this->client != null, function ($query) use ($client_ids) {
-                return $query->whereIn('client_id', $client_ids);
+            ->when($this->client !== null, function ($query) use ($client_ids) {
+                $query->whereIn('client_id', $client_ids); // Filter by client IDs
             })
-            // ->when($this->client_id != NULL, function ($query) {
-            //     return $query->where('client_id', $this->client_id);
-            // })
-            ->paginate(10);
+            ->paginate(20); // Paginate the results
     }
 
     #[Title('Projects')]
     public function render()
     {
         $this->authorize('viewAny', Project::class);
-
-        $clients = Client::orderBy('created_at', 'DESC')->get();
-
-        return view('livewire.projects.index', [
-            'clients' => $clients,
-        ]);
+        return view('livewire.projects.index');
     }
 }

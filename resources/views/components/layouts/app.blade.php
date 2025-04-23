@@ -4,29 +4,30 @@
     @include('components.layouts.head')
 
     {{-- BODY --}}
-    <body class="min-h-screen bg-gray-100 dark:bg-zinc-800">
-        <flux:sidebar sticky stashable class="bg-zinc-50 dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-700">
-            <div class="flex justify-between">
-                <flux:sidebar.toggle class="lg:hidden -mr-8 border" icon="x-mark"/>
+    {{-- $fullscreenClasses prop in render of Planner/Board --}}
+    <body class="{{isset($fullscreenClasses) ? 'h-screen ' : 'min-h-screen '}} bg-gray-100 dark:bg-gray-800">
+        <flux:sidebar sticky stashable class="bg-gray-50 dark:bg-zinc-900 border-r rtl:border-r-0 rtl:border-l border-gray-200 dark:border-gray-700">
+            @php
+                $isVendorRoute = Route::is(['vendor_selection', 'vendor_registration']);
+                $href = $isVendorRoute ? null : route('dashboard'); // Set href for non-vendor routes
+                $logo = asset('favicon.png'); // Logo remains the same
+                $name = $isVendorRoute ? env('APP_NAME') : auth()->user()->vendor->name; // Automatically decoded via model accessor
+            @endphp
 
-                @php
-                    $isVendorRoute = Route::is(['vendor_selection', 'vendor_registration']);
-                    $href = $isVendorRoute ? null : route('dashboard'); // Set href for non-vendor routes
-                    $logo = asset('favicon.png'); // Logo remains the same
-                    $name = $isVendorRoute ? env('APP_NAME') : auth()->user()->vendor->name; // Automatically decoded via model accessor
-                @endphp
+            <flux:sidebar.toggle class="lg:hidden" icon="x-mark" />
 
-                <!-- For lg or larger screens: Show flux:brand with logo and name -->
-                <flux:brand class="hidden lg:flex" href="{{ $href }}" logo="{{ $logo }}" name="{!! $name !!}" />
+            <flux:brand href="{{ $href }}" logo="{{ $logo }}" name="{!! $name !!}" class="px-2 dark:hidden" />
+            {{-- DARK MODE LOGO --}}
+            <flux:brand href="{{ $href }}" logo="{{ $logo }}" name="{!! $name !!}" class="px-2 hidden dark:flex" />
 
-                <!-- For smaller screens: Show flux:brand with name only -->
-                <flux:brand class="lg:hidden" href="{{ $href }}" name="{!! $name !!}" />
-            </div>
+            {{-- <flux:input as="button" variant="filled" placeholder="Search..." icon="magnifying-glass" /> --}}
 
             @if(!Route::is(['vendor_selection', 'vendor_registration']))
                 <flux:navlist variant="outline">
+                    {{-- SYSTEM ERRORS --}}
+
                     {{-- BANK ERRORS --}}
-                    @can('viewAny', App\Models\Bank::class)
+                    {{-- @can('viewAny', App\Models\Bank::class)
                         @if(!auth()->user()->vendor->banks()->whereNotNull('plaid_access_token')->get()->where('plaid_options.error', '!=', FALSE)->isEmpty())
                             <flux:navlist.item wire:navigate.hover icon="building-library" href="/banks">
                                 Banks
@@ -35,7 +36,7 @@
                                 </flux:badge>
                             </flux:navlist.item>
                         @endif
-                    @endcan
+                    @endcan --}}
 
                     {{-- COMPANY EMAILS ERRORS --}}
                     {{-- @if(auth()->user()->vendor->company_emails()->get()->whereNotNull('api_json.errors')->isNotEmpty())
@@ -54,13 +55,13 @@
                     @endif --}}
 
                     {{-- RECEIPT ACCOUNTS ERRORS --}}
-                    @if(auth()->user()->vendor->receipt_accounts()->get()->whereNotNull('options.errors')->isNotEmpty())
+                    {{-- @if(auth()->user()->vendor->receipt_accounts()->get()->whereNotNull('options.errors')->isNotEmpty())
                         <flux:badge variant="solid" color="red" icon="exclamation-triangle" class="mb-4">
                             <a wire:navigate.hover href="/company_emails">
                                 Account Error
                             </a>
                         </flux:badge>
-                    @endif
+                    @endif --}}
 
                     {{-- NAVIGATION --}}
                     <flux:navlist.item wire:navigate.hover icon="home" href="/dashboard">Home</flux:navlist.item>
@@ -70,7 +71,7 @@
                     @endcan
 
                     <flux:navlist.item wire:navigate.hover icon="folder" href="/projects">Projects</flux:navlist.item>
-                    <flux:navlist.item icon="calendar" href="/planner">Planner</flux:navlist.item>
+                    <flux:navlist.item icon="calendar" href="{{ route('planner.board') }}">Planner</flux:navlist.item>
 
                     @canany(['viewAny', 'create'], App\Models\Expense::class)
                         <flux:navlist.group expandable heading="Finances">
@@ -122,8 +123,9 @@
                 <flux:navlist.item wire:navigate.hover icon="information-circle" href="#">Help</flux:navlist.item>
             </flux:navlist>
 
-            <flux:dropdown position="top" align="left">
-                <flux:profile name="{{auth()->user()->full_name}}" avatar:color="indigo" />
+            <flux:dropdown position="top" align="start">
+                <flux:profile avatar:color="indigo" name="{{auth()->user()->full_name}}" />
+
                 <flux:menu>
                     <flux:menu.item href="{{route('vendor_selection')}}">Switch Account</flux:menu.item>
                     @can('admin_login_as_user', App\Models\User::class)
@@ -140,11 +142,17 @@
             </flux:dropdown>
         </flux:sidebar>
 
-        <flux:header class="lg:hidden -mb-16" sticky>
-            <flux:sidebar.toggle class="lg:hidden border" icon="bars-2" inset="left" />
+        <flux:header class="lg:hidden" sticky>
+            <flux:sidebar.toggle class="lg:hidden" icon="bars-2" inset="left" />
         </flux:header>
 
-        <flux:main x-data @navigate.window="Livewire.navigate($event.detail)" x-cloak>
+        <flux:main
+            {{-- x-data
+            @navigate.window="Livewire.navigate($event.detail)"
+            x-cloak --}}
+            {{-- $fullscreenClasses prop in render of Planner/Board --}}
+            :class="$fullscreenClasses ?? null"
+            >
             {{ $slot }}
         </flux:main>
 
