@@ -4,7 +4,7 @@
             <div>
                 <div class="rounded-lg w-64 bg-white my-4">
                     <!-- Sticky Project Header -->
-                    <div class="sticky top-0 bg-white z-10 touch-pan-x">
+                    <div class="sticky top-0 bg-white z-10">
                         <div class="px-4 py-4 flex justify-between items-start">
                             <div>
                                 <flux:heading>
@@ -13,7 +13,10 @@
                                     </a>
                                 </flux:heading>
                                 <flux:subheading>{{ $project->client->name }}</flux:subheading>
-                                <flux:badge size="sm" :color="$project->latestStatus->title == 'Complete' ? 'green' : ($project->latestStatus->title == 'Active' ? 'blue' : ($project->latestStatus->title == 'Cancelled' ? 'red' : 'yellow'))" inset="top bottom">{{ $project->latestStatus->title }}</flux:badge>
+                                <div class="flex items-center justify-start space-x-1">
+                                    <flux:badge size="sm" :color="$project->latestStatus->title == 'Complete' ? 'green' : ($project->latestStatus->title == 'Active' ? 'blue' : ($project->latestStatus->title == 'Cancelled' ? 'red' : 'yellow'))">{{ $project->latestStatus->title }}</flux:badge>
+                                    <flux:text size="sm"><i>{{ $project->latestStatus->start_date->diffForHumans() }}</i></flux:text>
+                                </div>
                             </div>
                             <flux:button
                                 variant="subtle" icon="plus" size="sm"
@@ -23,7 +26,7 @@
                     </div>
 
                     <!-- Tasks for Each Day -->
-                    <div class="flex flex-col gap-2 px-2 touch-pan-y">
+                    <div class="flex flex-col gap-2 px-2">
                         @foreach($days as $day)
                             <!-- Sticky Date Header -->
                             <div class="sticky top-[104px] bg-white border-b border-dashed border-{{ $day->isToday() ? 'indigo' : 'gray' }}-{{!$day->isWeekend() ? '300' : '200'}} z-10">
@@ -34,7 +37,7 @@
 
                             <!-- Tasks for the Day -->
                             <div
-                                class="grid touch-pan-x"
+                                class="grid"
                                 style="grid-template-rows: repeat({{ $maxTasksPerDate[$day->format('Y-m-d')] ?? 1 }}, 70px);"
                                 >
                                 @if (isset($project->grouped_tasks[$day->format('Y-m-d')]))

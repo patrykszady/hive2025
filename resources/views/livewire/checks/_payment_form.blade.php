@@ -38,7 +38,7 @@
                 <flux:select wire:model.live="check_type" placeholder="Choose payment type...">
                     <flux:select.option value="" readonly>Select Payment Type</flux:select.option>
                     <flux:select.option value="Check">Check</flux:select.option>
-                    <flux:select.option value="Transfer">Transfer</flux:select.option>
+                    <flux:select.option value="Zelle">Transfer</flux:select.option>
                     <flux:select.option value="Cash">Cash</flux:select.option>
                 </flux:select>
                 <flux:error name="check_type" />

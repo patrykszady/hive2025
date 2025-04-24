@@ -31,7 +31,7 @@
             >
             <option value="" readonly x-text="'Select Payment Type'"></option>
             <option value="Check" x-text="'Check'"></option>
-            <option value="Transfer" x-text="'Transfer'"></option>
+            <option value="Zelle" x-text="'Transfer'"></option>
             <option value="Cash" x-text="'Cash'"></option>
         </x-forms.row>
 

@@ -33,7 +33,7 @@ class TaskCreate extends Component
 
     public function updated($field, $value)
     {
-        if (! is_null($this->form->dates['start'])) {
+        if (!empty($this->form->dates)) {
             $startDate = Carbon::parse($this->form->dates['start']);
             $endDate = Carbon::parse($this->form->dates['end']);
 
@@ -43,11 +43,9 @@ class TaskCreate extends Component
 
             $this->form->duration = $duration;
         }
-
         // $this->validateOnly($field);
     }
 
-    //Copilot help
     //2024-12-10 SAME ON PlannerIndex
     //count days between dates and ignore weekend days if checkbox true
     public function countDaysBetweenDates($startDate, $endDate, $excludeSaturdays = true, $excludeSundays = true)
