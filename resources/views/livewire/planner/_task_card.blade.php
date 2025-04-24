@@ -10,12 +10,16 @@
         <!-- Task Title and Icon -->
         <flux:heading class="flex items-center gap-1">
             {{$task->title}}
-            <flux:icon
-                name="{{$task->duration <= 1 ? 'bars-3' : ($task->start_date->format('Y-m-d') == $day->format('Y-m-d') ? 'chevron-down' :
-                    ($task->end_date->format('Y-m-d') == $day->format('Y-m-d') ? 'chevron-up' : 'chevron-up-down'))}}"
-                class="ml-auto text-gray-400"
-                variant="micro"
-            />
+            {{--  name="{{$task->duration <= 1 ? 'calendar' : ($task->start_date->format('Y-m-d') == $day->format('Y-m-d') ? 'chevron-down' :
+                    ($task->end_date->format('Y-m-d') == $day->format('Y-m-d') ? 'chevron-up' : 'chevron-up-down'))}}" --}}
+            @if ($task->duration > 1)
+                <flux:icon
+                    name="{{$task->start_date->format('Y-m-d') == $day->format('Y-m-d') ? 'chevron-down' :
+                    ($task->end_date->format('Y-m-d') == $day->format('Y-m-d') ? 'chevron-up' : 'chevron-up-down')}}"
+                    variant="micro"
+                    class="ml-auto text-gray-400"
+                />
+            @endif
         </flux:heading>
 
         <div class="flex items-center gap-1">

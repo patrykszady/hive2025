@@ -126,7 +126,7 @@ class BoardIndex extends Component
             'maxTasksPerDate' => $maxTasksPerDate, // Pass $maxTasksPerDate to the view
         ])->layout('components.layouts.app', [
             //h-full
-            'fullscreenClasses' => 'p-0! lg:p-0! overflow-y-auto',
+            'fullscreenClasses' => 'p-0! lg:p-0! relative overflow-y-auto',
         ]);
     }
 }
