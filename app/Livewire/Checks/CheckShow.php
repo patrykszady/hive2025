@@ -96,7 +96,7 @@ class CheckShow extends Component
             Expense::
                 whereNotNull('paid_by')
                 ->whereNotNull('reimbursment')
-                // ->where('reimbursment', '!=', 'Client')
+                ->where('reimbursment', '!=', 'Client')
                 ->where('check_id', $this->check->id)
                 ->orderBy('date', 'DESC')
                 ->get();

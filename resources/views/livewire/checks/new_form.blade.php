@@ -43,7 +43,7 @@
                 @if(!$form->transaction)
                     <flux:button wire:click="remove" variant="danger">Remove</flux:button>
                 @endif
-                <flux:button type="submit" x-bind:disabled="transaction" variant="primary">{{$view_text['button_text']}}</flux:button>
+                {{-- <flux:button type="submit" x-bind:disabled="transaction" variant="primary">{{$view_text['button_text']}}</flux:button> --}}
             </div>
         </div>
     </form>

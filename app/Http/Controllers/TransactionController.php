@@ -703,67 +703,68 @@ class TransactionController extends Controller
 
     public function add_vendor_to_transactions()
     {
-        //if transaction where vendor is being added HAS expense? and expense->vendor is NULL ... add $transaction->vendor as $expense->vendor
-        $transaction_bank_accounts = BankAccount::withoutGlobalScopes()->whereNull('deleted_at')->pluck('id')->toArray();
-        //->where('id', 25269)
-        $transactions = Transaction::TransactionsSinVendor()->whereIn('bank_account_id', $transaction_bank_accounts)->get()->groupBy('plaid_merchant_name');
+        // Query BankAccount once and load the related Bank
+        $bankAccounts = BankAccount::withoutGlobalScopes()
+            ->whereNull('deleted_at')
+            ->with('bank') // Load the related Bank
+            ->get();
 
+        // Extract BankAccount IDs
+        $bankAccountIds = $bankAccounts->pluck('id')->toArray();
+        // Extract unique plaid_ins_id values from the related Bank
+        $bankInsIds = $bankAccounts->pluck('bank.plaid_ins_id')->unique()->toArray();
+
+        $transactions = Transaction::TransactionsSinVendor()->whereIn('bank_account_id', $bankAccountIds)->get()->groupBy('plaid_merchant_name');
         $vendors = Vendor::withoutGlobalScopes()->where('business_type', 'Retail')->get();
 
         foreach ($transactions as $merchant_name => $merchant_transactions) {
             //find vendor where vendor->business_name is contained in $merchant_name
-            // $vendor_match = preg_grep("/^" . $merchant_name . "/i", $vendors->pluck('business_name')->toArray());
-
-            // dd(Transaction::where('id', 17124)->first()->bank_account->vendor);
+            //CompanyEmailController fuzzyMatchVendor
             $vendor_match = $vendors->where('business_name', $merchant_name)->first();
 
             if ($vendor_match) {
-                foreach ($merchant_transactions as $key => $transaction) {
+                foreach ($merchant_transactions as $transaction) {
                     $transaction->vendor_id = $vendor_match->id;
                     $transaction->save();
                 }
                 //USED IN MULTIPLE OF PLACES MatchVendor@store, ExpesnesForm@createExpenseFromTransaction, below in CHECK VendorTransaction code in this function as well
                 //add vendor if vendor is not part of the currently logged in vendor
-
-                if (! $transaction->bank_account->vendor->vendors->contains($transaction->vendor_id)) {
-                    $transaction->bank_account->vendor->vendors()->attach($transaction->vendor_id);
-                }
+                // if (! $transaction->bank_account->vendor->vendors->contains($transaction->vendor_id)) {
+                //     $transaction->bank_account->vendor->vendors()->attach($transaction->vendor_id);
+                // }
             }else{
-                $vendor_transaction = VendorTransaction::whereNull('deposit_check')->where('desc', $merchant_name)->orderByRaw('LENGTH(`desc`) ASC')->first();
+                continue;
+                // $vendor_transaction = VendorTransaction::whereNull('deposit_check')->where('desc', $merchant_name)->first();
+                // if($vendor_transaction){
+                //     foreach ($merchant_transactions as $key => $transaction) {
+                //         dd(strtolower($transaction->plaid_merchant_description) === strtolower($merchant_name));
+                //         dd($transaction);
+                //         $transaction->vendor_id = $vendor_transaction->vendor_id;
+                //         $transaction->save();
+                //     }
 
-                if($vendor_transaction){
-                    foreach ($merchant_transactions as $key => $transaction) {
-                        $transaction->vendor_id = $vendor_transaction->vendor_id;
-                        $transaction->save();
-                    }
-
-                    if (! $transaction->bank_account->vendor->vendors->contains($transaction->vendor_id)) {
-                        $transaction->bank_account->vendor->vendors()->attach($transaction->vendor_id);
-                    }
-                }
+                    // if (! $transaction->bank_account->vendor->vendors->contains($transaction->vendor_id)) {
+                    //     $transaction->bank_account->vendor->vendors()->attach($transaction->vendor_id);
+                    // }
+                // }
             }
         }
 
-        $transactions = Transaction::TransactionsSinVendor()->whereIn('bank_account_id', $transaction_bank_accounts)->get()->groupBy('plaid_merchant_description');
-
-        //CHECK VendorTransaction table
-        //where('id', 443)
+        $transactions = Transaction::TransactionsSinVendor()->whereIn('bank_account_id', $bankAccountIds)->get()->groupBy('plaid_merchant_description');
         $vendor_transactions = VendorTransaction::whereNull('deposit_check')->orderByRaw('LENGTH(`desc`) ASC')->get();
-        // dd($vendor_transactions);
+
         foreach ($vendor_transactions as $vendor_transaction) {
             //get all BankAccount where bank_account_id
             //get plaid_inst_id of bank_account_ids on transactions table
 
             //Alter $transactions variable/results based on the if statement below
-            foreach ($transactions as $vendor_name => $plaid_name_transactions) {
-                // dd($plaid_name_transactions);
-                $vendor_name = $vendor_name.' '.$plaid_name_transactions->first()->plaid_merchant_name;
+            foreach ($transactions as $merchant_desc => $plaid_name_transactions) {
                 //decode json on VendorTrasaction Model
                 $preg = json_decode($vendor_transaction->options);
-                preg_match('/'.$vendor_transaction->desc.$preg, $vendor_name, $matches, PREG_UNMATCHED_AS_NULL);
+                preg_match('/'.$vendor_transaction->desc.$preg, $merchant_desc, $matches, PREG_UNMATCHED_AS_NULL);
 
                 if (! empty($matches)) {
-                    foreach ($plaid_name_transactions as $key => $transaction) {
+                    foreach ($plaid_name_transactions as $transaction) {
                         $transaction->vendor_id = $vendor_transaction->vendor_id;
                         $transaction->save();
 
@@ -775,9 +776,9 @@ class TransactionController extends Controller
 
                         //USED IN MULTIPLE OF PLACES MatchVendor@store, above in original Vendor find code in this function as well
                         //add vendor if vendor is not part of the currently logged in vendor
-                        if (! $transaction->bank_account->vendor->vendors->contains($transaction->vendor_id)) {
-                            $transaction->bank_account->vendor->vendors()->attach($transaction->vendor_id);
-                        }
+                        // if (! $transaction->bank_account->vendor->vendors->contains($transaction->vendor_id)) {
+                        //     $transaction->bank_account->vendor->vendors()->attach($transaction->vendor_id);
+                        // }
                     }
                 }
             }
