@@ -136,5 +136,4 @@ Schedule::command('horizon:snapshot')
     ->everyFiveMinutes()
     ->appendOutputTo(storage_path('logs/horizon_snapshot-' . date('Y-m-d') . '.log'));
 
-// Example: uncomment if needed
 // Schedule::command('cache:prune-stale-tags')->hourly();

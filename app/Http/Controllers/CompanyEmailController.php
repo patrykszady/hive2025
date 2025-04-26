@@ -187,11 +187,12 @@ class CompanyEmailController extends Controller
                 $allMessages = array_merge($allMessages, $messages['data'] ?? []);
             }
 
+            // dd($allMessages);
             foreach($allMessages as $message) {
                 $messageId = $message['id'];
                 $fromEmail = $message['from'][0]['email'];
                 $subject = $message['subject'];
-                $dateEmail = Carbon::parse($message['date'])->setTimezone('America/Chicago')->format('Y-m-d H:i:s');
+                $dateEmail = Carbon::parse($message['date'])->setTimezone('America/Chicago')->format('Y-m-d');
 
                 // Check if the 'from' email and 'subject' match any receipt
                 //receipt_type 0 = API
@@ -210,7 +211,7 @@ class CompanyEmailController extends Controller
 
                     $fromEmail = trim($fromMatch[1] ?? '');
                     $date = trim($dateMatch[1] ?? '');
-                    $dateEmail = Carbon::parse($date)->setTimezone('America/Chicago')->format('Y-m-d H:i:s');
+                    $dateEmail = Carbon::parse($date)->setTimezone('America/Chicago')->format('Y-m-d');
 
                     //receipt_type 0 = API
                     $receipt = $receipts->where('receipt_type', '!=', 0)->first(function ($receipt) use ($fromEmail, $subject) {
@@ -218,6 +219,8 @@ class CompanyEmailController extends Controller
                             && stripos($subject, $receipt->from_subject) !== false;
                     });
                 }
+
+                // dd($receipt);
 
                 if ($receipt) {
                     $toEmail = $message['to'][0]['email'];

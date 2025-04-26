@@ -37,6 +37,92 @@ class BoardIndex extends Component
 
         $this->employees = auth()->user()->vendor->users()->employed()->get();
     }
+
+    public function sort($key, $position, $project_id, $date_index)
+    {
+        dd($key, $position, $project_id, $date_index);
+        $project = Project::findOrFail($project_id);
+        $task = Task::findOrFail($key);
+
+        if (is_null($this->days[$date_index]['database_date'])) {
+            $start_date = null;
+        } else {
+            $start_date = Carbon::parse($this->days[$date_index]['database_date']);
+        }
+
+        // If this Task does not belong to this Project, Move the task to new project.
+        if ($task->project->isNot($project)) {
+            $task->displace();
+            $task->project()->associate($project);
+        }
+
+        $task->start_date = $start_date;
+        $task_days_count = $task->duration;
+
+        if (in_array($task_days_count, [0, 1])) {
+            $task->end_date = $task->start_date;
+            $task->duration = $task_days_count;
+
+            $options = $task->options;
+            $include_weekends = [];
+            if (! is_null($task->start_date)) {
+                if ($start_date->isSaturday()) {
+                    $include_weekends['saturday'] = true;
+                }
+
+                if ($start_date->isSunday()) {
+                    $include_weekends['sunday'] = true;
+                }
+            }
+
+            $options->include_weekend_days = $include_weekends;
+            $task->options = $options;
+
+            //2024-12-15 SAME ON PlannerCard
+            //if not weekend day/ set true on $task
+            // $excludeSaturdays = !isset($include_weekends['saturday']) || $include_weekends['saturday'] === false;
+            // $excludeSundays = !isset($include_weekends['sunday']) || $include_weekends['sunday'] === false;
+
+            // $startDate = $start_date;
+            // // $daysCount = ($startDate->isSaturday() && $excludeSaturdays === true) || ($startDate->isSunday() && $excludeSundays === true) ? 0 : 1;
+            // $daysCount = $excludeSaturdays == true || $startDate->isSunday() == true ? 0 : 1;
+            // $endDate = $startDate->copy()->addDays($task_days_count - $daysCount);
+
+            // $duration = $this->countDaysBetweenDates($startDate, $endDate, $excludeSaturdays, $excludeSundays);
+
+            // $task->duration = $duration;
+            // $task->start_date = $startDate;
+            // $task->end_date = $endDate;
+        } else {
+            $include_weekends = (array) $task->options->include_weekend_days;
+            $excludeSaturdays = ! isset($include_weekends['saturday']) || $include_weekends['saturday'] === false;
+            $excludeSundays = ! isset($include_weekends['sunday']) || $include_weekends['sunday'] === false;
+
+            $startDate = $start_date;
+            // $daysCount = ($startDate->isSaturday() && $excludeSaturdays === true) || ($startDate->isSunday() && $excludeSundays === true) ? 0 : 1;
+            $daysCount = $excludeSaturdays == true || $startDate->isSunday() == true ? 0 : 1;
+            $endDate = $startDate->copy()->addDays($task_days_count - $daysCount);
+
+            $duration = $this->countDaysBetweenDates($startDate, $endDate, $excludeSaturdays, $excludeSundays);
+
+            $task->duration = $duration;
+            $task->start_date = $startDate;
+            $task->end_date = $endDate;
+        }
+
+        $task->save();
+        $task->move($position);
+
+        Flux::toast(
+            duration: 2000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Task Moved',
+            // route / href / wire:click
+            text: '',
+        );
+    }
+
     public function render()
     {
         // Calculate the days for the current week
@@ -51,16 +137,18 @@ class BoardIndex extends Component
             ->status(['Active', 'Scheduled', 'Service Call', 'Invited'])
             ->get();
 
-        // Group tasks by day for each project, accounting for multi-day tasks
+        // Group tasks by day for each project, and store "No Date" tasks separately
         $this->projects->each(function ($project) use ($days) {
             $groupedTasks = collect($days)->mapWithKeys(function ($day) {
                 return [$day => collect()]; // Initialize empty collections for each day
             });
 
+            $noDateTasks = collect(); // Initialize a collection for "No Date" tasks
+
             $project->tasks()
                 ->orderBy('start_date', 'asc')
                 ->get()
-                ->each(function ($task) use ($groupedTasks) {
+                ->each(function ($task) use ($groupedTasks, $noDateTasks) {
                     if ($task->start_date && $task->end_date) {
                         // Get the range of days the task spans
                         $taskPeriod = CarbonPeriod::create(
@@ -91,10 +179,14 @@ class BoardIndex extends Component
                         if ($groupedTasks->has($formattedDate)) {
                             $groupedTasks[$formattedDate]->push($task);
                         }
+                    } else {
+                        // If the task has no start_date, add it to the "No Date" collection
+                        $noDateTasks->push($task);
                     }
                 });
 
-            $project->setAttribute('grouped_tasks', $groupedTasks);
+            $project->grouped_tasks = $groupedTasks;
+            $project->no_date = $noDateTasks; // Assign "No Date" tasks to a separate attribute
         });
 
         // Calculate the maximum number of tasks for each date across all projects

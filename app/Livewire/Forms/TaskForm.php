@@ -79,8 +79,8 @@ class TaskForm extends Form
         $this->validate();
 
         $this->task->update([
-            'start_date' => $this->dates['start'],
-            'end_date' => $this->dates['end'],
+            'start_date' => $this->dates['start'] ?? NULL,
+            'end_date' => $this->dates['end'] ?? NULL,
             'project_id' => $this->project_id,
             'vendor_id' => $this->vendor_id,
             'type' => $this->type,
@@ -101,8 +101,8 @@ class TaskForm extends Form
         $this->validate();
 
         $task = Task::create([
-            'start_date' => $this->dates['start'],
-            'end_date' => $this->dates['end'],
+            'start_date' => $this->dates['start'] ?? NULL,
+            'end_date' => $this->dates['end'] ?? NULL,
             'project_id' => $this->project_id,
             'vendor_id' => $this->vendor_id,
             'type' => $this->type,

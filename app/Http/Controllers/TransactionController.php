@@ -898,6 +898,7 @@ class TransactionController extends Controller
 
                 $transactions = Transaction::whereIn('bank_account_id', $hive_vendor_bank_account_ids)
                     ->whereNull('expense_id')
+                    ->whereNull('deleted_at')
                     ->where('amount', '!=', '0.00')
                     //03-22 -2023 when negative, ignore vendor_id
                     // ->when(substr($expense->amount, 0, 1) == '-', function ($query) {
@@ -935,7 +936,6 @@ class TransactionController extends Controller
                 } else {
                     $transactions = $transactions->where('amount', '<=', $transaction_amount_outstanding)->where('amount', 'NOT LIKE', '-%')->get();
                 }
-
                 // dd($transactions);
 
                 //finds correct transaction
@@ -1030,64 +1030,8 @@ class TransactionController extends Controller
                         }
                     }
                 } else {
-                    // dd('esle 85646');
-                    // $expenses = Expense::where('vendor_id', $expense->vendor->id)->where('date', $expense->date->format('Y-m-d'))->get();
-                    // $expenses_sum = $expenses->sum('amount');
-                    // // dd($expenses_sum);
-                    // $transactions =
-                    //     Transaction::where('amount', $expenses_sum)
-                    //         ->whereDoesntHave('expense')->get();
-                    //         // ->each(function ($item) use($expense)  {
-                    //         //     $item->date_diff = $expense->date->floatDiffInDays($item->transaction_date);
-                    //         // });
-                    // // dd($transactions);
-
-                    // // dd((float)$transactions->first()->amount);
-                    // dd((float)$transactions->first()->amount == $expenses_sum);
-
-                    // if($transactions->first()->amount == $expenses_sum){
-                    //     dd($transactions->first());
-                    //     // foreach(){
-
-                    //     // }
-                    // }else{
-                    //     dd('else');
-                    // }
-
-                    // //Expnense transaction_id = $transaction->id;
-                    // //these $expenses = Transaction
-                    // dd('in else transactions isEmpty...');
                     //associate Expenses...
                 }
-
-                // if(!$transactions->isEmpty()){
-                //     //floatDiffInDays from old/gsd3 TransactionController not by orderBy above
-                //     foreach($transactions as $transaction){
-                //         // dd(str_replace(".", "\.", $transaction->amount));
-                //         if($transaction->amount == (float) $expense->amount){
-                //             $transaction->expense()->associate($expense);
-                //             $transaction->save();
-
-                //             //03/08/2023 if isset deposit
-                //         }else{
-                //             //03/21/23 vendor has to be the same!!
-                //             if(!$expense->receipts->isEmpty()){
-                //                 //find $transaction->amount in $receipt_text
-                //                 if($expense->vendor_id == $transaction->vendor_id){
-                //                     $str = $expense->receipts->last()->receipt_html;
-                //                     $re = '/\\D' . str_replace(".", "\.", trim($transaction->amount, '-')) . '/m';
-                //                     preg_match($re, $str, $matches, PREG_OFFSET_CAPTURE, 0);
-
-                //                     if(!empty($matches)){
-                //                         // dd($matches);
-                //                         $transaction->expense()->associate($expense);
-                //                         $transaction->save();
-                //                     }
-                //                 }
-                //             }
-                //         }
-                //     }
-                // }
             } //foreach $expenses
         }
     }
@@ -1783,7 +1727,7 @@ class TransactionController extends Controller
 
     public function transaction_vendor_bulk_match()
     {
-        $vendor_receipt_accounts = ReceiptAccount::withoutGlobalScopes()->with('vendor')->get()->groupBy('belongs_to_vendor_id');
+        $vendor_receipt_accounts = ReceiptAccount::withoutGlobalScopes()->with('vendor')->where('id', 46)->get()->groupBy('belongs_to_vendor_id');
 
         foreach($vendor_receipt_accounts as $vendor_id => $receipt_accounts){
             // Retrieve the bank_account_ids once for the vendor
@@ -1795,56 +1739,58 @@ class TransactionController extends Controller
                 //     continue;
                 // }
 
+                //if no bulk matches for this vendor dont create an expense from just a transaction, wait for a bulk match or expense with receipt.
                 if($receipt_account->vendor->transactions_bulk_match->isEmpty()){
-                    $transactions =
-                        Transaction::withoutGlobalScopes()
-                            ->whereNull('deleted_at')
-                            ->whereIn('bank_account_id', $bank_account_ids)
-                            ->where('vendor_id', $receipt_account->vendor->id)
-                            //when $receipt_account->vendor->receipts->isNotEmpty()
-                            ->whereDoesntHave('expense')
-                            ->whereNull('check_number')
-                            ->get();
+                    // $transactions =
+                    //     Transaction::withoutGlobalScopes()
+                    //         ->whereNull('deleted_at')
+                    //         ->whereIn('bank_account_id', $bank_account_ids)
+                    //         ->where('vendor_id', $receipt_account->vendor->id)
+                    //         //when $receipt_account->vendor->receipts->isNotEmpty()
+                    //         ->whereDoesntHave('expense')
+                    //         ->whereNull('check_number')
+                    //         ->get();
+                    // dd($transactions);
 
-                    foreach($transactions as $transaction){
-                        //Find Duplicates $expense = $duplicate
-                        //date diff
-                        $duplicate_start_date = $transaction->transaction_date->subDays(1)->format('Y-m-d');
-                        $duplicate_end_date = $transaction->transaction_date->addDays(4)->format('Y-m-d');
+                    // foreach($transactions as $transaction){
+                    //     //Find Duplicates $expense = $duplicate
+                    //     //date diff
+                    //     $duplicate_start_date = $transaction->transaction_date->subDays(1)->format('Y-m-d');
+                    //     $duplicate_end_date = $transaction->transaction_date->addDays(4)->format('Y-m-d');
 
-                        //find duplicate expenses
-                        $duplicates =
-                            Expense::where('belongs_to_vendor_id', $transaction->bank_account->bank->vendor_id)->
-                                whereNull('deleted_at')->
-                                where('amount', $transaction->amount)->
-                                whereBetween('date', [$duplicate_start_date, $duplicate_end_date])->
-                                get();
+                    //     //find duplicate expenses
+                    //     $duplicates =
+                    //         Expense::where('belongs_to_vendor_id', $transaction->bank_account->bank->vendor_id)->
+                    //             whereNull('deleted_at')->
+                    //             where('amount', $transaction->amount)->
+                    //             whereBetween('date', [$duplicate_start_date, $duplicate_end_date])->
+                    //             get();
 
-                        if ($duplicates->count() >= 1) {
-                            foreach ($duplicates as $duplicate) {
-                                $duplicate->date_diff = $transaction->transaction_date->floatDiffInDays($duplicate->date);
-                            }
+                    //     if ($duplicates->count() >= 1) {
+                    //         foreach ($duplicates as $duplicate) {
+                    //             $duplicate->date_diff = $transaction->transaction_date->floatDiffInDays($duplicate->date);
+                    //         }
 
-                            $expense_duplicate = $duplicates->sortBy('date_diff')->first();
-                            $expense = $expense_duplicate;
-                        } else {
-                            $expense = Expense::create([
-                                'amount' => $transaction->amount,
-                                'date' => $transaction->transaction_date,
-                                'project_id' => null,
-                                //if splits distribution_id = NULL
-                                'distribution_id' => $receipt_account->distribution_id,
-                                'vendor_id' => $receipt_account->vendor_id,
-                                'check_id' => null,
-                                'paid_by' => null,
-                                'belongs_to_vendor_id' => $receipt_account->belongs_to_vendor_id,
-                                'created_by_user_id' => 0,
-                            ]);
-                        }
+                    //         $expense_duplicate = $duplicates->sortBy('date_diff')->first();
+                    //         $expense = $expense_duplicate;
+                    //     } else {
+                    //         $expense = Expense::create([
+                    //             'amount' => $transaction->amount,
+                    //             'date' => $transaction->transaction_date,
+                    //             'project_id' => null,
+                    //             //if splits distribution_id = NULL
+                    //             'distribution_id' => $receipt_account->distribution_id,
+                    //             'vendor_id' => $receipt_account->vendor_id,
+                    //             'check_id' => null,
+                    //             'paid_by' => null,
+                    //             'belongs_to_vendor_id' => $receipt_account->belongs_to_vendor_id,
+                    //             'created_by_user_id' => 0,
+                    //         ]);
+                    //     }
 
-                        $transaction->expense_id = $expense->id;
-                        $transaction->save();
-                    }
+                    //     $transaction->expense_id = $expense->id;
+                    //     $transaction->save();
+                    // }
                 }else{
                     foreach($receipt_account->vendor->transactions_bulk_match as $match){
                         $transactions =

@@ -220,9 +220,10 @@
         <div class="flex space-x-2 sticky bottom-0">
             <flux:spacer />
 
-            @if($form->amount == '0.00' || $form->transaction != NULL || ($form->expense_transactions_sum == FALSE && $form->transaction == NULL && $form->bank_account_id == NULL))
+            {{-- @if($form->amount == '0.00' || $form->transaction != NULL || ($form->expense_transactions_sum == FALSE && $form->transaction == NULL && $form->bank_account_id == NULL))
                 <flux:button wire:click="remove" variant="danger">Remove</flux:button>
-            @endif
+            @endif --}}
+            <flux:button wire:click="remove" variant="danger">Remove</flux:button>
             <flux:button type="submit" variant="primary">{{$view_text['button_text']}}</flux:button>
         </div>
     </form>

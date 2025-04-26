@@ -27,8 +27,18 @@
                 <flux:table.cell>{{money($finances['change_orders'])}}</flux:table.cell>
             </flux:table.row>
             <flux:table.row>
-                <flux:table.cell>Reimbursements</flux:table.cell>
-                <flux:table.cell><a wire:click="print_reimbursements">{{money($finances['reimbursments'])}}</a></flux:table.cell>
+                <flux:table.cell>
+                    Reimbursements
+                    <flux:badge
+                        as="button" icon="arrow-down-on-square" size="lg" color="sky" inset="top bottom"
+                        wire:click="print_reimbursements"
+                        wire:loading.attr="disabled"
+                        wire:loading.class="opacity-50 disabled:pointer-events-none"
+                        >
+                        Download
+                    </flux:badge>
+                </flux:table.cell>
+                <flux:table.cell>{{money($finances['reimbursments'])}}</flux:table.cell>
             </flux:table.row>
             <flux:table.row>
                 <flux:table.cell variant="strong">TOTAL PROJECT</flux:table.cell>

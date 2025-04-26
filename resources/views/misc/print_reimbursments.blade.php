@@ -234,7 +234,14 @@
                                                         <br>
                                                         <b>{{money($expense->amount)}}</b>
                                                     @else
-                                                        <b>{{money($expense->receipt->receipt_items->total)}}</b>
+                                                        @if($expense->amount != $expense->receipt->receipt_items->total)
+                                                            <s>{{money($expense->receipt->receipt_items->total)}}</s>
+                                                            <br>
+                                                            <b>{{money($expense->amount)}}</b>
+                                                        @else
+                                                            <b>{{money($expense->amount)}}</b>
+                                                            {{-- {{money($expense->receipt->receipt_items->total)}}   --}}
+                                                        @endif
                                                     @endif
                                                 </flux:table.cell>
                                             </flux:table.row>

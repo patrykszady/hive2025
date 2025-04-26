@@ -215,13 +215,14 @@ class ExpenseForm extends Form
             $this->project_id = 'D:'.$expense->distribution_id;
         } else {
             $this->project_id = $expense->project_id;
-            //if existing project is not SPLIT
-            if (! is_null($this->project_id) && $this->project_id != 0) {
-                $project_title = $this->component->projects->where('id', $this->project_id)->first()->last_status->title;
-                if ($project_title == 'Complete') {
-                    $this->project_completed = true;
-                }
-            }
+            // dd($this->project_id);
+            // //if existing project is not SPLIT
+            // if (! is_null($this->project_id) && $this->project_id != 0) {
+            //     $project_title = $this->component->projects->where('id', $this->project_id)->first()->last_status->title;
+            //     if ($project_title == 'Complete') {
+            //         $this->project_completed = true;
+            //     }
+            // }
         }
 
         $this->reimbursment = $expense->reimbursment;
@@ -367,6 +368,9 @@ class ExpenseForm extends Form
                 $transaction->expense_id = null;
                 $transaction->save();
             }
+
+            //RECEIPTS
+            $this->expense->receipts()->delete();
 
             $this->expense->delete();
         }
@@ -529,27 +533,13 @@ class ExpenseForm extends Form
 
         $document_model = app(\App\Http\Controllers\ReceiptController::class)->azure_document_model($doc_type, $ocr_path);
 
-        //send to ReceiptController@azure_receipts with $location and $document_model
+        //send to ReceiptController@azure_receipts
         $ocr_receipt_extracted = app(\App\Http\Controllers\ReceiptController::class)->azure_receipts($ocr_path, $doc_type, $document_model);
         //pass receipt info to ocr_extract method
         $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->ocr_extract($ocr_receipt_extracted, $expense_amount);
 
-        if (is_null($ocr_receipt_data['fields']['transaction_date'])) {
-            //send to ReceiptController@azure_receipts with $location and $document_model
-            if ($document_model === 'prebuilt-invoice') {
-                $document_model = 'prebuilt-receipt';
-            } else {
-                $document_model = 'prebuilt-invoice';
-            }
-
-            $ocr_receipt_extracted = app(\App\Http\Controllers\ReceiptController::class)->azure_receipts($ocr_path, $doc_type, $document_model);
-            //pass receipt info to ocr_extract method
-            $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->ocr_extract($ocr_receipt_extracted, $expense_amount);
-        }
-
         //ATTACHMENT
-        //send to ReceiptController@add_attachments_to_expense
-        app(\App\Http\Controllers\ReceiptController::class)->add_attachments_to_expense($expense_id, null, $ocr_receipt_data, $ocr_filename);
+        app(\App\Http\Controllers\CompanyEmailController::class)->saveExpenseReceipt($expense_id, $ocr_receipt_data, $ocr_filename);
 
         $this->receipt_file = null;
     }

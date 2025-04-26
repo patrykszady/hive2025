@@ -25,11 +25,23 @@
                         </div>
                     </div>
 
+                    <!-- No Date Tasks -->
+                    <div class="sticky top-[104px] bg-gray-100 z-10" style="height: 100px; overflow-y: auto;">
+                        <h4 class="text-sm font-semibold px-2 py-1 border-b border-dashed border-gray-300">
+                            No Date
+                        </h4>
+                        <div class="grid">
+                            @foreach ($project->no_date as $task)
+                                @include('livewire.planner._task_card')
+                            @endforeach
+                        </div>
+                    </div>
+
                     <!-- Tasks for Each Day -->
                     <div class="flex flex-col gap-2 px-2">
-                        @foreach($days as $day)
+                        @foreach($days as $day_index => $day)
                             <!-- Sticky Date Header -->
-                            <div class="sticky top-[104px] bg-white border-b border-dashed border-{{ $day->isToday() ? 'indigo' : 'gray' }}-{{!$day->isWeekend() ? '300' : '200'}} z-10">
+                            <div class="sticky top-[204px] bg-white border-b border-dashed border-{{ $day->isToday() ? 'indigo' : 'gray' }}-{{!$day->isWeekend() ? '300' : '200'}} z-10">
                                 <h4 class="text-sm font-semibold px-2 py-1 text-{{ $day->isToday() ? 'indigo' : 'gray' }}-{{!$day->isWeekend() ? '500' : '300'}}">
                                     {{ $day->format('D, M j') }}
                                 </h4>
@@ -39,6 +51,7 @@
                             <div
                                 class="grid"
                                 style="grid-template-rows: repeat({{ $maxTasksPerDate[$day->format('Y-m-d')] ?? 1 }}, 70px);"
+                                x-sort="$wire.sort($key, $position, {{$project->id}}, {{$day_index}})"
                                 >
                                 @if (isset($project->grouped_tasks[$day->format('Y-m-d')]))
                                     @foreach ($project->grouped_tasks[$day->format('Y-m-d')] as $task)

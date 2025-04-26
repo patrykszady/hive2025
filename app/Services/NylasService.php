@@ -176,19 +176,22 @@ class NylasService
         }
     }
 
-    public function moveEmailToFolder($emailId, $folderId, $grantId)
+    public function moveEmailToFolder($messageId, $folderId, $grantId)
     {
         $apiKey = env('NYLAS_API_KEY');
-        $url = "https://api.us.nylas.com/v3/grants/{$grantId}/messages/{$emailId}";
+        $url = "https://api.us.nylas.com/v3/grants/{$grantId}/messages/{$messageId}";
+
         // Build the request body dynamically
         $body = ['folders' => [$folderId]];
 
         $response = Http::withHeaders([
             'Authorization' => "Bearer {$apiKey}",
-        ])->put($url, $body);
+            'Content-Type' => 'application/json'
+        ])->patch($url, $body);
 
         if (!$response->successful()) {
-            throw new Exception('Failed to move email: ' . $response->status());
+            Log::error("Failed to move email: " . $response->body());
+            // throw new Exception('Failed to move email: ' . $response->status());
         }
     }
 
