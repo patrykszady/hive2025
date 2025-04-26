@@ -459,6 +459,7 @@ class ExpenseForm extends Form
         $this->validate();
 
         $expense_details = $this->expenseDetails();
+
         //validate check...
         if (empty($this->paid_by) && isset($this->bank_account_id)) {
             if ($expense_details['distribution_id']) {
@@ -472,7 +473,14 @@ class ExpenseForm extends Form
                 $dist_user = null;
             }
 
-            $existing_check = Check::where('deleted_at', null)->where('bank_account_id', $this->bank_account_id)->where('check_number', $this->check_number)->where('vendor_id', $this->vendor_id)->first();
+            if (!is_null($this->check_number)) {
+                $existing_check = Check::where('deleted_at', null)
+                    ->where('bank_account_id', $this->bank_account_id)
+                    ->where('check_type', $this->check_type)
+                    ->where('check_number', $this->check_number)
+                    ->where('vendor_id', $this->vendor_id)
+                    ->first();
+            }
 
             if (isset($existing_check)) {
                 $check = $existing_check;

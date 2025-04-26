@@ -215,9 +215,9 @@ class ExpenseCreate extends Component
 
         //2/18/2023 if check_number .. expense->vendor_id = GS Construction / logged in vendor?
         if ($transaction->check_number) {
-            if ($transaction->check_number == '1010101') {
+            if ($transaction->check_number === '1010101') {
                 $check_type = 'Transfer';
-            } elseif ($transaction->check_number == '2020202') {
+            } elseif ($transaction->check_number === '2020202') {
                 $check_type = 'Cash';
             } else {
                 $check_type = 'Check';
@@ -227,7 +227,7 @@ class ExpenseCreate extends Component
             $this->form->check_type = $check_type;
 
             //2/18/2023 dont allow changes to $this->check if coming from a transaction...
-            if ($check_type == 'Check') {
+            if ($check_type === 'Check') {
                 $this->form->check_number = $transaction->check_number;
             }
         }

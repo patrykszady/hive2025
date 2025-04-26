@@ -1,3 +1,7 @@
+@props([
+    'disablePaidBy' => false,
+])
+
 {{-- DATE --}}
 <x-forms.one_line label="Date">
     <flux:input wire:model.live="form.date" type="date" />
@@ -5,12 +9,11 @@
 </x-forms.one_line>
 
 {{-- PAID BY --}}
-{{--  x-data="{ disable: @entangle('disable_paid_by') }" --}}
 <x-forms.one_line label="Paid By">
     <flux:select wire:model.live="form.paid_by" placeholder="Choose paid by...">
         <flux:select.option value="" readonly>{{ auth()->user()->vendor->business_name }}</flux:select.option>
         @foreach ($employees as $employee)
-            <flux:select.option value="{{ $employee->id }}" x-bind:disabled="disable">
+            <flux:select.option value="{{ $employee->id }}" :disabled="$disablePaidBy">
                 {{ $employee->first_name }}
             </flux:select.option>
         @endforeach

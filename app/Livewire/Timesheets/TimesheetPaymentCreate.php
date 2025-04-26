@@ -2,19 +2,19 @@
 
 namespace App\Livewire\Timesheets;
 
-use App\Livewire\Forms\TimesheetPaymentForm;
 use App\Models\BankAccount;
-
 use App\Models\Expense;
 use App\Models\Timesheet;
 use App\Models\User;
 use App\Models\Vendor;
+
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
-use Livewire\Attributes\Title;
 
 use App\Traits\HandlesChecks;
 
 use Livewire\Component;
+use Livewire\Attributes\Title;
+use App\Livewire\Forms\TimesheetPaymentForm;
 
 class TimesheetPaymentCreate extends Component
 {
@@ -25,14 +25,11 @@ class TimesheetPaymentCreate extends Component
     public User $user;
 
     public $weekly_timesheets = [];
-
     public $employee_weekly_timesheets = [];
-
     public $user_paid_expenses = [];
-
     public $user_reimbursement_expenses = [];
 
-    public $user_paid_by_reimbursements = [];
+    // public $user_paid_by_reimbursements = [];
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 
@@ -45,7 +42,7 @@ class TimesheetPaymentCreate extends Component
                 'employee_weekly_timesheets.*.checkbox'  => 'nullable',
                 'user_paid_expenses.*.checkbox'          => 'nullable',
                 'user_reimbursement_expenses.*.checkbox' => 'nullable',
-                'user_paid_by_reimbursements.*.checkbox' => 'nullable',
+                // 'user_paid_by_reimbursements.*.checkbox' => 'nullable',
                 // You can also add other top-level rules here if needed.
             ]
         );
@@ -116,27 +113,20 @@ class TimesheetPaymentCreate extends Component
                     $item->checkbox = true;
                 })
                 ->keyBy('id');
-        // dd($this->user_reimbursement_expenses);
 
-        $this->user_paid_by_reimbursements =
-            Expense::where('paid_by', $this->user->id)
-                ->whereNotIn('reimbursment', ['', 'Client'])
-                ->whereNull('check_id')
-                ->orderBy('date', 'DESC')
-                ->get()
-                ->each(function ($item, $key) {
-                    $item->checkbox = true;
-                    // $item->amount = -$item->amount;
-                })
-                ->keyBy('id');
+        // $this->user_paid_by_reimbursements =
+        //     Expense::where('paid_by', $this->user->id)
+        //         ->whereNotIn('reimbursment', ['', 'Client'])
+        //         ->whereNull('check_id')
+        //         ->orderBy('date', 'DESC')
+        //         ->get()
+        //         ->each(function ($item, $key) {
+        //             $item->checkbox = true;
+        //             // $item->amount = -$item->amount;
+        //         })
+        //         ->keyBy('id');
         // dd($this->user_paid_by_reimbursements);
-        // // foreach($this->user_paid_by_reimbursements as $user_paid_by_reimbursement_expense){
-        // //     $user_paid_by_reimbursement_expense->amount = '-' . $user_paid_by_reimbursement_expense->amount;
-        // //     // dd($user_paid_by_reimbursement_expense->amount);
-        // // }
 
-        // // dd($this->user_paid_by_reimbursements);
-        // // dd($this->user_paid_by_reimbursements->first()->reimbursment);
 
         if ($this->weekly_timesheets->isEmpty()) {
             $this->weekly_timesheets = collect();
@@ -154,9 +144,9 @@ class TimesheetPaymentCreate extends Component
             $this->user_reimbursement_expenses = collect();
         }
 
-        if ($this->user_paid_by_reimbursements->isEmpty()) {
-            $this->user_paid_by_reimbursements = collect();
-        }
+        // if ($this->user_paid_by_reimbursements->isEmpty()) {
+        //     $this->user_paid_by_reimbursements = collect();
+        // }
 
         $this->form->setUser($this->user);
     }
@@ -169,45 +159,46 @@ class TimesheetPaymentCreate extends Component
     public function getWeeklyTimesheetsTotalProperty()
     {
         $total = 0;
-        $confirm_disable = [];
+
         //weekly_timesheets
         $total += $this->weekly_timesheets->where('checkbox', true)->sum('amount');
 
         //employee_weekly_timesheets
         $employee_weekly_timesheets_total = $this->employee_weekly_timesheets->where('checkbox', true)->sum('amount');
-        if ($employee_weekly_timesheets_total != '0.00') {
-            $confirm_disable[] = true;
-        }
         $total += $employee_weekly_timesheets_total;
 
         //user_paid_expenses
         $user_paid_expenses_total = $this->user_paid_expenses->where('checkbox', true)->sum('amount');
-        if ($user_paid_expenses_total != '0.00') {
-            $confirm_disable[] = true;
-        }
         $total += $user_paid_expenses_total;
 
         //user_reimbursement_expenses
         $total -= $this->user_reimbursement_expenses->where('checkbox', true)->sum('amount');
 
         // //user_paid_by_reimbursements
-        $user_paid_by_reimbursements = $this->user_paid_by_reimbursements->where('checkbox', true)->sum('amount');
-        if ($user_paid_by_reimbursements != '0.00') {
-            $confirm_disable[] = true;
-        }
+        // $user_paid_by_reimbursements = $this->user_paid_by_reimbursements->where('checkbox', true)->sum('amount');
+        // if ($user_paid_by_reimbursements != '0.00') {
+        //     $confirm_disable[] = true;
+        // }
         // dd($user_paid_by_reimbursements);
-        $total -= $user_paid_by_reimbursements;
+        // $total -= $user_paid_by_reimbursements;
 
         return $total;
     }
 
+    public function getDisablePaidByProperty()
+    {
+        return
+        $this->user_paid_expenses->where('checkbox', true)->isNotEmpty()
+        || $this->user_reimbursement_expenses->where('checkbox', true)->isNotEmpty();
+    }
+
     public function save()
     {
-        // $this->authorize('create', Expense::class);
+        $this->authorize('viewPayment', Timesheet::class);
 
         //validate Pay User Total Check is greater than $0 / $this->weekly_timesheets has at least one Item in Collection
-        if ($this->weekly_timesheets_total == 0) {
-            $this->addError('weekly_timesheets_total', 'Payment needs at least one Timesheet');
+        if ($this->weekly_timesheets_total <= 0) {
+            $this->addError('weekly_timesheets_total', 'Payment needs to be greater than $0.00');
         } else {
             $this->validate();
             $redirect_route = $this->form->store();

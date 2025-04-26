@@ -62,21 +62,11 @@ class CheckShow extends Component
             $employee_timesheets_total[$user_id] = $employee->sum('amount');
         }
 
-        // dd($this->employee_timesheets_total[3]);
-
         $employee_weekly_timesheets =
             Timesheet::where('paid_by', $this->check->user_id)
                 ->where('check_id', $this->check->id)
                 ->get()
                 ->groupBy(['user_id', 'date']);
-
-        $user_paid_expenses =
-            Expense::whereNotNull('paid_by')
-                // where('paid_by', $this->check->user_id)
-                // ->whereNull('reimbursment')
-                ->where('check_id', $this->check->id)
-                ->whereNull('distribution_id')
-                ->get();
 
         $user_distributions =
             Expense::whereNotNull('distribution_id')
@@ -84,33 +74,54 @@ class CheckShow extends Component
                 ->where('check_id', $this->check->id)
                 ->get();
 
-        $user_paid_reimburesements =
-            Expense::
-                // whereNotNull('distribution_id')
-                whereNull('paid_by')
-                ->whereNotNull('reimbursment')
+        // $user_paid_reimburesements =
+        //     Expense::
+        //         // whereNotNull('distribution_id')
+        //         whereNull('paid_by')
+        //         ->whereNotNull('reimbursment')
+        //         ->where('check_id', $this->check->id)
+        //         ->get();
+
+        // $user_paid_by_reimbursements =
+        //     Expense::
+        //         whereNotNull('paid_by')
+        //         ->whereNotNull('reimbursment')
+        //         ->where('reimbursment', '!=', 'Client')
+        //         ->where('check_id', $this->check->id)
+        //         ->orderBy('date', 'DESC')
+        //         ->get();
+
+        $user_paid_expenses =
+            Expense::whereNotNull('paid_by')
+                // where('paid_by', $this->check->user_id)
+                // ->whereNull('reimbursment')
                 ->where('check_id', $this->check->id)
+                // ->whereNull('distribution_id')
                 ->get();
 
-        $user_paid_by_reimbursements =
-            Expense::
-                whereNotNull('paid_by')
-                ->whereNotNull('reimbursment')
-                ->where('reimbursment', '!=', 'Client')
+        $user_reimbursement_expenses = $this->check->user_id
+            ? Expense::where('reimbursment', $this->check->user_id)
+                ->whereNull('paid_by')
                 ->where('check_id', $this->check->id)
                 ->orderBy('date', 'DESC')
-                ->get();
+                ->get()
+                ->keyBy('id')
+            : collect();
 
         return view('livewire.checks.show', [
-            // 'vendor_paid_expenses' => $vendor_paid_expenses,
             'vendor_expenses' => $vendor_expenses,
-            'weekly_timesheets' => $weekly_timesheets,
-            'employee_total_timesheets' => $employee_total_timesheets,
-            'employee_weekly_timesheets' => $employee_weekly_timesheets,
             'user_paid_expenses' => $user_paid_expenses,
+            'user_reimbursement_expenses' => $user_reimbursement_expenses,
+
+        //  // 'vendor_paid_expenses' => $vendor_paid_expenses,
+
+            'weekly_timesheets' => $weekly_timesheets,
+        //     'employee_total_timesheets' => $employee_total_timesheets,
+            'employee_weekly_timesheets' => $employee_weekly_timesheets,
+
             'user_distributions' => $user_distributions,
-            'user_paid_reimburesements' => $user_paid_reimburesements,
-            'user_paid_by_reimbursements' => $user_paid_by_reimbursements,
+        //     'user_paid_reimburesements' => $user_paid_reimburesements,
+        //     'user_paid_by_reimbursements' => $user_paid_by_reimbursements,
         ]);
     }
 }

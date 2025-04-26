@@ -30,6 +30,7 @@ class CheckObserver
         // $check->expenses()->delete();
         $check->expenses()->update(['check_id' => null]);
         $check->timesheets()->update(['check_id' => null]);
+        $check->transactions()->update(['check_id' => null]);
     }
 
     /**

@@ -7,15 +7,13 @@
                     <flux:subheading><i>Create a Payment for {{$form->payee_name}}</i></flux:subheading>
                     <flux:separator variant="subtle" />
                     <x-cards.body :class="'space-y-2 my-2'">
-                        {{-- FORM --}}
-
                         {{-- PAYEE --}}
                         <x-forms.one_line label="Payee">
                             <flux:input wire:model.live="form.payee_name" type="text" disabled />
                             <flux:error name="form.payee_name" />
                         </x-forms.one_line>
 
-                        @include('livewire.checks._payment_form')
+                        @include('livewire.checks._payment_form', ['disablePaidBy' => $this->disablePaidBy])
                     </x-cards.body>
 
                     <flux:separator variant="subtle" />
@@ -81,7 +79,7 @@
                 @if(!$employee_weekly_timesheets->isEmpty())
                     <flux:card class="space-y-2">
                         <div>
-                            <flux:heading size="lg"><b>{{ $user->first_name }}</b> Paid Timesheets</flux:heading>
+                            <flux:heading size="lg"><b>{{ $user->first_name }}</b> Paid Other Timesheets</flux:heading>
                         </div>
 
                         @foreach($this->employee_weekly_timesheets->groupBy('date') as $week_key => $weekly_project_timesheets)
@@ -173,55 +171,51 @@
                     </flux:card>
                 @endif
 
-                {{-- USER REIMBURESEMENT EXPENSES --}}
-                {{-- @if(!$user_reimbursement_expenses->isEmpty())
-                    <flux:card class="space-y-2">
-                        <div>
-                            <flux:heading size="lg"><b>{{ $user->first_name }}</b> Paid Timesheets</flux:heading>
+                {{-- USER REIMBURESEMENT (USER OWNS CASH GS CONSTRUCTION) EXPENSES --}}
+                @if(!$user_reimbursement_expenses->isEmpty())
+                    <flux:card>
+                        <div class="flex justify-between">
+                            <flux:heading size="lg">{{ $user->first_name }}</b> owns for Expenses</flux:heading>
+                            <flux:button disabled>
+                                -{{ money($user_reimbursement_expenses->where('checkbox', true)->sum('amount')) }}
+                            </flux:button>
                         </div>
 
-                        @foreach($this->employee_weekly_timesheets->groupBy('date') as $week_key => $weekly_project_timesheets)
-                            <flux:card>
-                                <div class="flex justify-between">
-                                    <flux:heading size="lg">{{'Week of ' . $weekly_project_timesheets->first()->date->startOfWeek()->toFormattedDateString()}}</flux:heading>
-                                    <flux:button disabled>
-                                        {{ money($weekly_project_timesheets->where('checkbox', true)->sum('amount')) }}
-                                    </flux:button>
-                                </div>
+                        <flux:table>
+                            <flux:table.columns>
+                                <flux:table.column></flux:table.column>
+                                <flux:table.column>Amount</flux:table.column>
+                                <flux:table.column>Vendor</flux:table.column>
+                                <flux:table.column>Project</flux:table.column>
+                            </flux:table.columns>
 
-                                <flux:table>
-                                    <flux:table.columns>
-                                        <flux:table.column></flux:table.column>
-                                        <flux:table.column>Amount</flux:table.column>
-                                        <flux:table.column>User</flux:table.column>
-                                        <flux:table.column>Hours</flux:table.column>
-                                        <flux:table.column>Project</flux:table.column>
-                                    </flux:table.columns>
-
-                                    <flux:table.rows>
-                                        @foreach($weekly_project_timesheets as $timesheet_id => $project_timesheet)
-                                            <flux:table.row :key="$project_timesheet->id">
-                                                <flux:table.cell>
-                                                    <flux:checkbox
-                                                        wire:model.live="employee_weekly_timesheets.{{$project_timesheet->id}}.checkbox"
-                                                    />
-                                                </flux:table.cell>
-                                                <flux:table.cell variant="strong">
-                                                    <a wire:navigate.hover href="{{route('timesheets.show', $project_timesheet->id)}}">{{ money($project_timesheet->amount) }}</a>
-                                                </flux:table.cell>
-                                                <flux:table.cell>{{ $project_timesheet->user->first_name }}</flux:table.cell>
-                                                <flux:table.cell>{{ $project_timesheet->hours }}</flux:table.cell>
-                                                <flux:table.cell>
-                                                    <a wire:navigate.hover href="{{route('projects.show', $project_timesheet->project->id)}}">{{ Str::limit($project_timesheet->project->name, 25) }}</a>
-                                                </flux:table.cell>
-                                            </flux:table.row>
-                                        @endforeach
-                                    </flux:table.rows>
-                                </flux:table>
-                            </flux:card>
-                        @endforeach
+                            <flux:table.rows>
+                                @foreach($user_reimbursement_expenses as $key => $expense)
+                                    <flux:table.row :key="$expense->id">
+                                        <flux:table.cell>
+                                            <flux:checkbox
+                                                wire:model.live="user_reimbursement_expenses.{{$expense->id}}.checkbox"
+                                            />
+                                        </flux:table.cell>
+                                        <flux:table.cell variant="strong">
+                                            <a wire:navigate.hover href="{{route('expenses.show', $expense->id)}}">{{ money($expense->amount) }}</a>
+                                        </flux:table.cell>
+                                        <flux:table.cell>
+                                            <a wire:navigate.hover href="{{route('vendors.show', $expense->vendor->id)}}">{{ $expense->vendor->name }}</a>
+                                        </flux:table.cell>
+                                        <flux:table.cell>
+                                            @if($expense->project_id)
+                                                <a wire:navigate.hover href="{{route('projects.show', $expense->project->id)}}">{{ Str::limit($expense->project->name, 25) }}</a>
+                                            @else
+                                                {{ Str::limit($expense->project->name, 25) }}
+                                            @endif
+                                        </flux:table.cell>
+                                    </flux:table.row>
+                                @endforeach
+                            </flux:table.rows>
+                        </flux:table>
                     </flux:card>
-                @endif --}}
+                @endif
             </div>
         </div>
     </form>

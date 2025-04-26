@@ -40,9 +40,10 @@
             <div class="flex space-x-2 mt-2">
                 <flux:spacer />
 
-                @if(!$form->transaction)
-                    <flux:button wire:click="remove" variant="danger">Remove</flux:button>
-                @endif
+                <flux:button wire:click="remove" variant="danger">Remove</flux:button>
+                {{-- @if(!$form->transaction)
+
+                @endif --}}
                 {{-- <flux:button type="submit" x-bind:disabled="transaction" variant="primary">{{$view_text['button_text']}}</flux:button> --}}
             </div>
         </div>

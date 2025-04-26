@@ -111,13 +111,13 @@ class TimesheetPaymentForm extends Form
         }
 
         //user_paid_by_reimbursements
-        foreach ($this->component->user_paid_by_reimbursements->where('checkbox', 'true') as $expense) {
-            //ignore 'checkbox'
-            $expense->offsetUnset('checkbox');
-            $expense->check_id = isset($check) ? $check->id : null;
-            // $expense->paid_by = isset($check) ? NULL : $this->paid_by;
-            $expense->save();
-        }
+        // foreach ($this->component->user_paid_by_reimbursements->where('checkbox', 'true') as $expense) {
+        //     //ignore 'checkbox'
+        //     $expense->offsetUnset('checkbox');
+        //     $expense->check_id = isset($check) ? $check->id : null;
+        //     // $expense->paid_by = isset($check) ? NULL : $this->paid_by;
+        //     $expense->save();
+        // }
 
         //find Check and create_payment_from_check if via_vendor?
         //06-01-2023 should be done in observer

@@ -17,7 +17,7 @@ class UserShow extends Component
 
     public User $user;
 
-    public $year = 2023;
+    public $year = 2025;
 
     public $timesheets_paid = 0;
 
@@ -91,6 +91,7 @@ class UserShow extends Component
                         return $query->whereYear('date', $this->year);
                     })
                     ->get();
+            // dd($this->distribution_checks);
 
             $this->expenses_paid =
                 Expense::where('paid_by', $this->user->id)

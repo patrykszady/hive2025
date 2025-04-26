@@ -70,7 +70,7 @@
         </div>
 
         <div class="col-span-5 space-y-2 lg:col-span-3">
-            {{-- THIS CHECK USER PAID TIMESHEETS --}}
+            {{-- PAID USER TIMESHEETS --}}
             @if(!$weekly_timesheets->isEmpty())
                 <flux:card class="space-y-2">
                     <div>
@@ -195,7 +195,7 @@
             </x-cards.wrapper>
             @endif --}}
 
-            {{-- THIS CHECK EXPENSES EXPENSES --}}
+            {{-- THIS CHECK VENDOR EXPENSES --}}
             @if(!$vendor_expenses->isEmpty())
                 <div class="col-span-5 lg:col-span-3 lg:col-start-3">
                     <div>{{$vendor_expenses->sum('amount')}}</div>
@@ -230,7 +230,7 @@
                                         </flux:table.cell>
                                         <flux:table.cell>{{ $expense->date->format('m/d/Y') }}</flux:table.cell>
                                         <flux:table.cell><a wire:navigate.hover href="{{route('vendors.show', $expense->vendor->id)}}">{{Str::limit($expense->vendor->name, 20)}}</a></flux:table.cell>
-                                        <flux:table.cell><a wire:navigate.hover href="{{$expense->project->name == 'EXPENSE SPLIT' ? '' : route('projects.show', $expense->project->id)}}">{{ Str::limit($expense->project->name, 25) }}</a></flux:table.cell>
+                                        <flux:table.cell>{{ Str::limit($expense->project->name, 25) }}</flux:table.cell>
                                     </flux:table.row>
                                 @endforeach
                             </flux:table.rows>
@@ -296,7 +296,7 @@
             @endif --}}
 
             {{-- THIS CHECK USER PAID REIMBURESEMENT RECEIPTS FROM ANOTHER EMPLOYEE --}}
-            @if(!$user_paid_by_reimbursements->isEmpty())
+            {{-- @if(!$user_paid_by_reimbursements->isEmpty())
                 <flux:card class="space-y-2">
                     <div class="flex justify-between">
                         <flux:heading size="lg">Paid Other Employee Reimbursements</flux:heading>
@@ -311,7 +311,6 @@
                         <flux:table>
                             <flux:table.columns>
                                 <flux:table.column>Amount</flux:table.column>
-                                {{--  sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')" --}}
                                 <flux:table.column>Date</flux:table.column>
                                 <flux:table.column>Team Member</flux:table.column>
                                 <flux:table.column>Vendor</flux:table.column>
@@ -331,6 +330,46 @@
                             </flux:table.rows>
                         </flux:table>
                     </div>
+                </flux:card>
+            @endif --}}
+
+            {{-- USER REIMBURESEMENT (USER OWNS CASH GS CONSTRUCTION) EXPENSES --}}
+            @if($user_reimbursement_expenses->isNotEmpty())
+                <flux:card>
+                    <div class="flex justify-between">
+                        <flux:heading size="lg">{{$check->owner}}</b> Paid back for these Expenses</flux:heading>
+                        <flux:button disabled>
+                            -{{ money($user_reimbursement_expenses->sum('amount')) }}
+                        </flux:button>
+                    </div>
+
+                    <flux:table>
+                        <flux:table.columns>
+                            <flux:table.column>Amount</flux:table.column>
+                            <flux:table.column>Vendor</flux:table.column>
+                            <flux:table.column>Project</flux:table.column>
+                        </flux:table.columns>
+
+                        <flux:table.rows>
+                            @foreach($user_reimbursement_expenses as $key => $expense)
+                                <flux:table.row :key="$expense->id">
+                                    <flux:table.cell variant="strong">
+                                        <a wire:navigate.hover href="{{route('expenses.show', $expense->id)}}">{{ money($expense->amount) }}</a>
+                                    </flux:table.cell>
+                                    <flux:table.cell>
+                                        <a wire:navigate.hover href="{{route('vendors.show', $expense->vendor->id)}}">{{ $expense->vendor->name }}</a>
+                                    </flux:table.cell>
+                                    <flux:table.cell>
+                                        @if($expense->project_id)
+                                            <a wire:navigate.hover href="{{route('projects.show', $expense->project->id)}}">{{ Str::limit($expense->project->name, 25) }}</a>
+                                        @else
+                                            {{ Str::limit($expense->project->name, 25) }}
+                                        @endif
+                                    </flux:table.cell>
+                                </flux:table.row>
+                            @endforeach
+                        </flux:table.rows>
+                    </flux:table>
                 </flux:card>
             @endif
         </div>
