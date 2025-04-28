@@ -39,6 +39,14 @@ class MoveController extends Controller
 {
     public function move()
     {
+        // Find all checks with 2 or more transactions
+        $checksWithMultipleTransactions = Check::whereHas('transactions', function ($query) {
+            $query->select('check_id')
+                ->groupBy('check_id')
+                ->havingRaw('COUNT(*) >= 2');
+        })->get();
+
+        dd($checksWithMultipleTransactions);
         $expenses = Expense::where('vendor_id', 10)
         ->whereHas('receipts', function ($query) {
             $query->where(function ($q) {

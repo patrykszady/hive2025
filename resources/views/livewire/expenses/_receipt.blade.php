@@ -11,7 +11,7 @@
             <flux:table.row>
                 <flux:table.cell colspan="4" class="pb-0!">
                     {{-- {{$line_item->Description}} --}}
-                    {{$line_item->Description ? Str::limit($line_item->Description, 65) : ''}}
+                    {{isset($line_item->Description) ? Str::limit($line_item->Description, 65) : ''}}
                 </flux:table.cell>
             </flux:table.row>
             <flux:table.row class="border-none! py-0!">

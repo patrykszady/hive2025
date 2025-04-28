@@ -1728,7 +1728,7 @@ class TransactionController extends Controller
 
     public function transaction_vendor_bulk_match()
     {
-        $vendor_receipt_accounts = ReceiptAccount::withoutGlobalScopes()->with('vendor')->where('id', 46)->get()->groupBy('belongs_to_vendor_id');
+        $vendor_receipt_accounts = ReceiptAccount::withoutGlobalScopes()->with('vendor')->get()->groupBy('belongs_to_vendor_id');
 
         foreach($vendor_receipt_accounts as $vendor_id => $receipt_accounts){
             // Retrieve the bank_account_ids once for the vendor

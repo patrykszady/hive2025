@@ -51,7 +51,7 @@
                             <div
                                 class="grid"
                                 style="grid-template-rows: repeat({{ $maxTasksPerDate[$day->format('Y-m-d')] ?? 1 }}, 70px);"
-                                x-sort="$wire.sort($key, $position, {{$project->id}}, {{$day_index}})"
+                                {{-- x-sort="$wire.sort($key, $position, {{$project->id}}, {{$day_index}})" --}}
                                 >
                                 @if (isset($project->grouped_tasks[$day->format('Y-m-d')]))
                                     @foreach ($project->grouped_tasks[$day->format('Y-m-d')] as $task)

@@ -5,21 +5,23 @@
             <flux:card>
                 <div class="flex justify-between">
                     <flux:heading size="lg" class="mb-0">Expense Details</flux:heading>
-                    <flux:button.group>
-                        <flux:button
-                            wire:click="$dispatchTo('expenses.expense-create', 'editExpense', { expense: {{$expense->id}}})"
-                            size="sm"
-                            >
-                            Edit Expense
-                        </flux:button>
-                        <flux:dropdown position="bottom" align="end">
-                            <flux:button icon-trailing="chevron-down" size="sm"></flux:button>
+                    @can('update', $expense)
+                        <flux:button.group>
+                            <flux:button
+                                wire:click="$dispatchTo('expenses.expense-create', 'editExpense', { expense: {{$expense->id}}})"
+                                size="sm"
+                                >
+                                Edit Expense
+                            </flux:button>
+                            <flux:dropdown position="bottom" align="end">
+                                <flux:button icon-trailing="chevron-down" size="sm"></flux:button>
 
-                            <flux:menu>
-                                <flux:menu.item wire:click="$dispatchTo('expenses.expenses-associated', 'addAssociatedExpense', { expense: {{$expense->id}}})">Link Expenses</flux:menu.item>
-                            </flux:menu>
-                        </flux:dropdown>
-                    </flux:button.group>
+                                <flux:menu>
+                                    <flux:menu.item wire:click="$dispatchTo('expenses.expenses-associated', 'addAssociatedExpense', { expense: {{$expense->id}}})">Link Expenses</flux:menu.item>
+                                </flux:menu>
+                            </flux:dropdown>
+                        </flux:button.group>
+                    @endcan
                 </div>
                 <flux:subheading>Expense and related details like Expense Splits and Expense Receipts.</flux:subheading>
 

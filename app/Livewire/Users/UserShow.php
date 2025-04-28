@@ -52,7 +52,7 @@ class UserShow extends Component
         $this->user->this_vendor = $this->user->vendors->where('id', auth()->user()->vendor->id)->first();
 
         if (! is_null($this->user->this_vendor)) {
-            $user_distribution = $this->user->distributions->first() ? $this->user->distributions->first()->id : null;
+            $user_distribution = $this->user->distributions->first()->id ?? null;
 
             $this->checks_written =
                 Check::where('user_id', $this->user->id)
@@ -61,7 +61,6 @@ class UserShow extends Component
                     // ->withWhereHas('expenses')
                     // ->withWhereHas('timesheets')
                     ->get();
-
 
             $this->timesheets_paid =
                 Timesheet::
@@ -84,13 +83,14 @@ class UserShow extends Component
 
             //$this->timesheets_paid->intersect($this->timesheets_paid_others)->all()
 
-            $this->distribution_checks =
-                Expense::where('distribution_id', $user_distribution)
+            $this->distribution_checks = $user_distribution
+                ? Expense::where('distribution_id', $user_distribution)
                     // ->whereNull('reimbursment')
                     ->whereHas('check', function ($query) {
                         return $query->whereYear('date', $this->year);
                     })
-                    ->get();
+                    ->get()
+                : collect();
             // dd($this->distribution_checks);
 
             $this->expenses_paid =
@@ -103,10 +103,6 @@ class UserShow extends Component
                     })
                     ->get();
 
-            // when(!is_null($user_distribution), function ($query) use ($user_distribution) {
-            //     $query->where('distribution_id', $user_distribution);
-            // })
-
             $this->timesheets_paid_by =
                 Timesheet::withoutGlobalScopes()
                     ->where('user_id', $this->user->id)
@@ -117,12 +113,13 @@ class UserShow extends Component
                     })
                     ->get();
 
-            $this->distribution_expenses =
-                Expense::where('distribution_id', $user_distribution)
+            $this->distribution_expenses = $user_distribution
+                ? Expense::where('distribution_id', $user_distribution)
                     ->whereNull('check_id')
                     ->whereYear('date', $this->year)
                     // whereHas('transactions') ...transaction_date = $year
-                    ->get();
+                    ->get()
+                : collect();
 
             //Member Extra Payments
             // if doesnt have a distribution
@@ -139,6 +136,19 @@ class UserShow extends Component
             // - $this->user_checks
             // $this->difference = round($this->checks_written - $this->timesheets_paid - $this->distribution_checks - $this->timesheets_paid_others - $this->expenses_paid, 2);
         }
+    }
+
+    public function getCheckDifference()
+    {
+        return round(
+            round($this->checks_written->sum('amount'), 2) -
+            round($this->timesheets_paid->sum('amount'), 2) -
+            round($this->timesheets_paid_others->sum('amount'), 2) -
+            round($this->timesheets_paid_by->sum('amount'), 2) -
+            round($this->distribution_checks->sum('amount'), 2) -
+            round($this->expenses_paid->sum('amount'), 2),
+            2
+        );
     }
 
     #[Title('User')]
