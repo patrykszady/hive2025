@@ -39,6 +39,21 @@ class MoveController extends Controller
 {
     public function move()
     {
+        $receipts = ExpenseReceipts::whereNotNull('receipt_items') // Ensure receipt_items is not null
+            ->whereRaw("JSON_TYPE(JSON_EXTRACT(receipt_items, '$.total')) = 'OBJECT'") // Check if total is an object
+            ->get();
+
+        dd($receipts);
+
+        $expenses = Expense::whereHas('receipts', function ($query) {
+            $query->whereNotNull('receipt_items') // Filter receipts where receipt_items is not null
+                ->whereNull('receipt_items->total_tax')
+                ->whereNotNull('receipt_items->total')
+                ->whereNull('receipt_items->subtotal');
+        })->pluck('id');
+
+        dd($expenses);
+
         // Find all checks with 2 or more transactions
         $checksWithMultipleTransactions = Check::whereHas('transactions', function ($query) {
             $query->select('check_id')

@@ -430,7 +430,6 @@ class CompanyEmailController extends Controller
 
                         //move email receipt to Duplicate folder
                         $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Duplicate'], $grantId);
-                        continue;
                     }else{
                         //SAVE expense
                         $expense = new Expense;
@@ -450,7 +449,6 @@ class CompanyEmailController extends Controller
                         $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, $message);
 
                         $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Saved'], $grantId);
-                        continue;
                     }
                 }
             }

@@ -72,17 +72,14 @@ class NylasService
 
     /**
      * Ensure all subfolders exist for the given grant ID.
-     *
-     * @param string $grantId
-     * @param array $subFolders
-     * @param string|null $parentId
-     * @return array
      */
     public function ensureFoldersExist(string $grantId, ?string $parentId = null): array
     {
-        $createdFolders = [];
+        $parentFolder = $this->getFolder($grantId, "HIVE_CONTRACTORS_RECEIPTS", $parentId);
+        $parentId = $parentFolder['id'];
         $subFolders = ['Saved', 'Duplicate', 'Error', 'Add', 'Retry', 'Test', 'LEADS', 'SCANS'];
 
+        $createdFolders = [];
         foreach ($subFolders as $folderName) {
             // Check if the folder exists
             $existingFolder = $this->getFolder($grantId, $folderName, $parentId);
@@ -102,11 +99,6 @@ class NylasService
 
     /**
      * Check if a folder already exists within a mailbox.
-     *
-     * @param string $grantId
-     * @param string $folderName
-     * @param string|null $parentId
-     * @return array|null
      */
     public function getFolder(string $grantId, ?string $folderName = null, ?string $parentId = null): ?array
     {
@@ -123,6 +115,7 @@ class NylasService
 
             // Decode the JSON response
             $folders = json_decode($response->getBody(), true);
+            // dd($folders);
 
             // Filter folders by name and parent_id if specified
             $matchedFolder = collect($folders['data'] ?? [])
@@ -141,11 +134,6 @@ class NylasService
 
     /**
      * Create a folder within a mailbox using Nylas' API.
-     *
-     * @param string $grantId
-     * @param string $folderName
-     * @param string|null $parentId
-     * @return array
      */
     private function createFolder(string $grantId, string $folderName, ?string $parentId = null): array
     {

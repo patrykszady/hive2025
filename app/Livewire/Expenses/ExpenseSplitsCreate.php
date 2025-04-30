@@ -13,18 +13,15 @@ class ExpenseSplitsCreate extends Component
     // public ExpenseSplitForm $form;
     public Expense $expense;
 
-    //keep track of expense_splits.*.amount sum
+    //keeps track of expense_splits.*.amount sum
     public $expense_splits = [];
-
     public $expense_line_items = [];
-
     public $splits_count = 0;
-
     public $splits_total = 0;
-
     public $expense_total = 0;
 
-    public $projects;
+    //comes from ExpenseCreate
+    public $projects = [];
 
     public $distributions;
 
@@ -55,12 +52,12 @@ class ExpenseSplitsCreate extends Component
                 $this->expense_line_items->items[$matches[0][1]]->split_index = null;
             }
 
-            //need to account for tax
+
             $items = collect($this->expense_line_items->items);
+            //need to account for tax
             $tax_rate = round($this->expense_line_items->total_tax / $this->expense_line_items->subtotal, 3);
             $tax_rate = 1 + $tax_rate;
-            $expense_total = $this->expense_line_items->total;
-            // dd($items, $this->expense_line_items);
+
             $this->expense_splits->transform(function ($split, $key) use ($items, $tax_rate) {
                 $items_total = $items->where('split_index', $key)->whereNotNull('split_index')->sum('TotalPrice');
                 $total_with_tax = $items_total * $tax_rate;
@@ -68,20 +65,11 @@ class ExpenseSplitsCreate extends Component
                 //if last item without amount? check total...
                 //last one. Adjust a penny $0.01 if $expense->amount != getSplitsSumProperty
                 if ($items->whereNull('split_index')->count() == 0) {
-                    // dd($this->getSplitsSumProperty());
-                    // $difference = $expense_total - ($this->getSplitsSumProperty() + $split['amount']);
                     $split['amount'] = round($total_with_tax, 2);
-                    // $this->splits_total = collect($this->expense_splits)->where('amount', '!=', '')->sum('amount');
-                    // $split['amount'] = $this->getSplitsSumProperty();
-                    // dd($expense_total - $this->getSplitsSumProperty());
-                    // dd($split['amount'] + $this->getSplitsSumProperty());
                     //$this->getSplitsSumProperty()
-                    // $difference = $this->getSplitsSumProperty();
                 } else {
                     $split['amount'] = round($total_with_tax, 2);
                 }
-
-                // dd($split);
 
                 return $split;
             });
@@ -93,19 +81,16 @@ class ExpenseSplitsCreate extends Component
     public function getSplitsSumProperty()
     {
         $this->splits_total = collect($this->expense_splits)->where('amount', '!=', '')->sum('amount');
-
         return round($this->expense_total - $this->splits_total, 2);
     }
 
     public function addSplits($expense)
     {
-        // dd($expense_total, $expense['id']);
         $this->expense = Expense::findOrFail($expense['id']);
         $expense = $this->expense;
 
         $receipt = $expense->receipts()->latest()->first();
 
-        //!is_null($receipt->receipt_items->items
         if (! is_null($receipt) && ! is_null($receipt->receipt_items->items)) {
             $this->expense_line_items = $receipt->receipt_items;
 

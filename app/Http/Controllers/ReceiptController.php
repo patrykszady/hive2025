@@ -539,8 +539,7 @@ class ReceiptController extends Controller
 
     public function azure_docs_api($file_location, $document_model, $doc_type)
     {
-        //['jpg', 'jpeg] ?
-        if (strtolower($doc_type) == 'jpg') {
+        if (in_array(strtolower($doc_type), ['jpg', 'jpeg'])) {
             $doc_content_type = 'Content-Type: image/jpeg';
         } elseif (strtolower($doc_type) == 'pdf') {
             $doc_content_type = 'Content-Type: application/pdf';
@@ -806,39 +805,6 @@ class ReceiptController extends Controller
                 }else{
                     $formatted_items[$key]['Price'] = $formatted_items[$key]['TotalPrice'];
                 }
-                // }
-                // if(isset($line_item['valueObject']['Quantity'])){
-                //     if($key == 1){
-                //         $quantity = $line_item['valueObject']['Quantity']['valueNumber'];
-
-                //         if(isset($line_item['valueObject']['Price']['valueNumber'])){
-                //             $line_item_price = $line_item['valueObject']['Price']['valueNumber'];
-                //         }elseif(isset($line_item['valueObject']['UnitPrice'])){
-                //             $line_item_price = $line_item['valueObject']['UnitPrice']['valueCurrency']['amount'];
-                //         }else{
-                //             $line_item_price = 0;
-                //         }
-
-                //         if(isset($line_item['valueObject']['TotalPrice'])){
-                //             $total_price = $line_item['valueObject']['TotalPrice']['valueCurrency']['amount'];
-                //         }elseif(isset($line_item['valueObject']['Amount'])){
-                //             $total_price = $line_item['valueObject']['Amount']['valueCurrency']['amount'];
-                //         }else{
-                //             $total_price = 0;
-                //         }
-
-                //         if($line_item_price == "0" && $total_price == "0"){
-                //             $items[$key]['valueObject']['TotalPrice']['valueCurrency']['amount'] = "0.00";
-                //         }else{
-                //             if($line_item_price != "0"){
-                //                 $line_item_total = $quantity * $line_item_price;
-                //                 if($line_item_total != $total_price){
-                //                     $items[$key]['valueObject']['TotalPrice']['valueCurrency']['amount'] = $line_item_total;
-                //                 }
-                //             }
-                //         }
-                //     }
-                // }
             }
         }else{
             $formatted_items = null;
@@ -876,18 +842,11 @@ class ReceiptController extends Controller
                 if ($amount === NULL && (!is_null($subtotal) && !is_null($total_tax))) {
                     $amount = $subtotal + $total_tax;
                 }
-
-                // else{
-                //     $ocr_receipt_data = [
-                //         'error' => true,
-                //     ];
-
-                //     return $ocr_receipt_data;
-                // }
-                // if(!is_null($tip_amount)){
-                //     dd([$amount, $ocr_receipt_extract_prefix]);
-                // }
             }
+        }
+
+        if (empty($total_tax) && empty($subtotal) && isset($amount)) {
+            $subtotal = $amount;
         }
 
         $ocr_receipt_data = [

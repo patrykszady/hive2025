@@ -43,20 +43,22 @@ class VendorDocsController extends Controller
 
         // Filter messages with attachments
         foreach ($messages['data'] as $message) {
-            $attachments = [];
             if (!empty($message['attachments'])) {
-                $attachments = array_merge($attachments, $message['attachments']);
+                $attachments = array_filter($message['attachments'], function ($attachment) {
+                    return $attachment['is_inline'] === false;
+                });
 
                 // Process attachments
                 foreach ($attachments as $attachment) {
                     $messageId = $message['id']; // Ensure you fetch the corresponding message ID
                     $attachmentContent = $this->nylasService->downloadAttachment($attachment['id'], $grantId, $messageId);
                     $docType = pathinfo($attachment['filename'], PATHINFO_EXTENSION);
+
                     $tempFilePath = "_temp_vendor_docs/attachment_{$attachment['id']}.{$docType}";
 
                     // Store the file temporarily
                     Storage::disk('files')->put($tempFilePath, $attachmentContent);
-
+                    $tempFilePath = 'files/'.$tempFilePath;
                     // Process the document
                     $this->handleVendorDocProcessing(
                         $tempFilePath,

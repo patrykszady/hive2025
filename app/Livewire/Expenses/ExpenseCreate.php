@@ -23,21 +23,16 @@ class ExpenseCreate extends Component
 
     public ExpenseForm $form;
 
+    public $split = false;
+    public $splits = false;
+    public Expense $expense;
+    public $expense_splits = [];
+
     public $view_text = [
         'card_title' => 'Create Expense',
         'button_text' => 'Create',
         'form_submit' => 'save',
     ];
-
-    public $split = false;
-
-    public $splits = false;
-
-    public Expense $expense;
-
-    public $expense_update = false;
-
-    public $expense_splits = [];
 
     protected $listeners = ['resetModal', 'editExpense', 'newExpense', 'createExpenseFromTransaction', 'hasSplits'];
 
@@ -56,7 +51,23 @@ class ExpenseCreate extends Component
     #[Computed]
     public function projects()
     {
-        $projects = Project::status(['Active', 'Complete', 'Service Call', 'Service Call Complete'])->get();
+        $projects = Project::status(['Active', 'Complete', 'Service Call', 'Service Call Complete'])
+            ->whereHas('statuses', function ($query) {
+                $query->where('title', 'Active');
+            })
+            ->with(['statuses' => function ($query) {
+                $query->where('title', 'Active')->orderBy('start_date', 'desc');
+            }])
+            ->orderByDesc(function ($query) {
+                $query->select('start_date')
+                    ->from('project_status')
+                    ->whereColumn('project_status.project_id', 'projects.id')
+                    ->where('title', 'Active')
+                    ->latest('start_date')
+                    ->limit(1);
+            })
+            ->get();
+
         return $projects;
     }
 
@@ -143,7 +154,6 @@ class ExpenseCreate extends Component
         $this->dispatch('resetSplits')->to('expenses.expense-splits-create');
 
         $this->expense = $expense;
-        $this->expense_update = true;
 
         if (! $expense->splits->isEmpty()) {
             $this->hasSplits($expense->splits);
@@ -168,7 +178,6 @@ class ExpenseCreate extends Component
         $this->split = false;
         $this->splits = false;
         $this->expense_splits = [];
-        $this->expense_update = false;
         // Public functions should be reset here
         // $this->dispatch('resetSplits')->to('expenses.expenses-splits-form');
         // $this->dispatch('refreshComponent')->to('expenses.expenses-splits-form');

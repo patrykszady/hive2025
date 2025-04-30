@@ -198,7 +198,6 @@
             {{-- THIS CHECK VENDOR EXPENSES --}}
             @if(!$vendor_expenses->isEmpty())
                 <div class="col-span-5 lg:col-span-3 lg:col-start-3">
-                    <div>{{$vendor_expenses->sum('amount')}}</div>
                     <livewire:expenses.expense-index :check="$check->id" :view="'checks.show'"/>
                 </div>
             @endif
