@@ -40,6 +40,49 @@ class MoveController extends Controller
     public function move()
     {
         $receipts = ExpenseReceipts::whereNotNull('receipt_items') // Ensure receipt_items is not null
+            ->get()
+            ->filter(function ($receipt) {
+                $totalTax = data_get($receipt->receipt_items, 'total_tax');
+                return is_array($totalTax) || is_object($totalTax); // Check if total_tax is an array or object
+            });
+
+        foreach ($receipts as $receipt) {
+            $receiptItems = $receipt->receipt_items;
+
+            // Check if total_tax is an object or array and has a valueNumber
+            if (isset($receiptItems->total_tax->valueNumber)) {
+                $receiptItems->total_tax = $receiptItems->total_tax->valueNumber; // Update total_tax to valueNumber
+            }elseif (isset($receiptItems->total_tax->valueCurrency)) {
+                $receiptItems->total_tax = $receiptItems->total_tax->valueCurrency->amount; // Update total_tax to valueNumber
+            }
+
+            // Save the updated receipt_items back to the database
+            $receipt->receipt_items = $receiptItems;
+            $receipt->save();
+        }
+
+        $receipts = ExpenseReceipts::whereNotNull('receipt_items') // Ensure receipt_items is not null
+            ->where('receipt_items->total', '!=', 0) // Ensure total is not 0
+            ->where('receipt_items->subtotal', '=', 0) // Ensure subtotal is 0
+            ->where('receipt_items->total_tax', '=', 0) // Ensure total_tax is 0
+            ->get(); // Retrieve the matching receipts
+
+        foreach ($receipts as $receipt) {
+            $receiptItems = $receipt->receipt_items;
+
+            // Update subtotal to the value of total
+            if (isset($receiptItems->total)) {
+                $receiptItems->subtotal = $receiptItems->total;
+            }
+
+            // Save the updated receipt_items back to the database
+            $receipt->receipt_items = $receiptItems;
+            $receipt->save();
+        }
+
+        dd('done');
+
+        $receipts = ExpenseReceipts::whereNotNull('receipt_items') // Ensure receipt_items is not null
             ->whereRaw("JSON_TYPE(JSON_EXTRACT(receipt_items, '$.total')) = 'OBJECT'") // Check if total is an object
             ->get();
 

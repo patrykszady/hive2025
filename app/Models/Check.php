@@ -21,11 +21,7 @@ class Check extends Model
 
     // protected $dates = ['date', 'deleted_at'];
 
-    /**
-     * Get the attributes that should be cast.
-     *
-     * @return array<string, string>
-     */
+    protected $appends = ['amount_difference'];
     protected function casts(): array
     {
         return [
@@ -79,6 +75,11 @@ class Check extends Model
             get: fn ($value) => $this->check_type === 'Check' ? $value : $this->id,
         );
         //->shouldCache();
+    }
+
+    public function getAmountDifferenceAttribute()
+    {
+        return $this->amount - $this->transactions_sum_amount;
     }
 
     public function getOwnerAttribute()

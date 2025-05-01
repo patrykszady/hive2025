@@ -718,9 +718,9 @@ class TransactionController extends Controller
         $vendors = Vendor::withoutGlobalScopes()->where('business_type', 'Retail')->get();
 
         foreach ($transactions as $merchant_name => $merchant_transactions) {
+
             //find vendor where vendor->business_name is contained in $merchant_name
-            //CompanyEmailController fuzzyMatchVendor
-            $vendor_match = $vendors->where('business_name', $merchant_name)->first();
+            $vendor_match = app(\App\Http\Controllers\CompanyEmailController::class)->fuzzyMatchVendor($merchant_name, $vendors);
 
             if ($vendor_match) {
                 foreach ($merchant_transactions as $transaction) {
@@ -1123,7 +1123,6 @@ class TransactionController extends Controller
                 ->whereNull('deleted_at')
                 ->where('date', '>', '2021-01-01')
                 ->orderBy('date', 'DESC')
-                // ->where('id', 3244)
                 ->get();
 
         foreach ($checks as $check) {
@@ -1137,17 +1136,20 @@ class TransactionController extends Controller
                 $check_number = '2020202';
                 $add_days = 14;
             } else {
-                // Log::channel('add_check_id_to_transactions')->info($check);
-                // continue;
+                Log::channel('add_check_id_to_transactions')->info($check);
+                continue;
             }
+
+            $bank_account_ids = $check->bank_account_id ? $check->bank_account->bank->accounts->pluck('id') : NULL;
 
             $transactions = Transaction::withoutGlobalScopes()
                 ->whereNull('deleted_at')
                 ->whereNull('check_id')
                 ->whereNull('expense_id')
                 ->where('check_number', $check_number)
-                //11/23/2024 per hive vendor... checks table foreach bank_account_id
-                ->whereIn('bank_account_id', $check->bank_account_id ? $check->bank_account->bank->accounts->pluck('id') : [NULL])
+                ->when($bank_account_ids, function ($query, $bank_account_ids) {
+                    return $query->whereIn('bank_account_id', $bank_account_ids);
+                })
                 ->whereBetween('transaction_date', [
                     $check->date->subDays(7)->format('Y-m-d'),
                     $check->date->addDays($add_days)->format('Y-m-d'),
@@ -1161,7 +1163,7 @@ class TransactionController extends Controller
             if ($transactions->count() == 1) {
                 $transactions->first()->check()->associate($check)->save();
             } else {
-                if ($check->check_type == 'Transfer') {
+                if ($check->check_type === 'Transfer') {
                     $transactions_by_name = Transaction::withoutGlobalScopes()
                         ->whereNull('deleted_at')
                         // cannot use whereDoesntHave with withoutGlobalScopes
@@ -1169,7 +1171,9 @@ class TransactionController extends Controller
                         ->whereNull('check_id')
                         ->where('check_number', $check_number)
                         //per hive vendor... checks table foreach bank_account_id
-                        ->where('bank_account_id', $check->bank_account_id)
+                        ->when($bank_account_ids, function ($query, $bank_account_ids) {
+                            return $query->whereIn('bank_account_id', $bank_account_ids);
+                        })
                         ->whereBetween('transaction_date', [
                             $check->date->subDays(7)->format('Y-m-d'),
                             $check->date->addDays($add_days)->format('Y-m-d'),
@@ -1216,24 +1220,25 @@ class TransactionController extends Controller
                                     $transaction->check()->associate($check);
                                     $transaction->save();
                                 }
-
-                                // continue;
                             }
                         } else {
                             continue;
                         }
                     }
-                } elseif ($check->check_type == 'Check') {
+                } elseif ($check->check_type === 'Check') {
                     $transactions = Transaction::withoutGlobalScopes()
                         ->whereNull('deleted_at')
                         ->whereNull('check_id')
                         //per hive vendor... checks table foreach bank_account_id
-                        ->where('bank_account_id', $check->bank_account_id)
+                        ->when($bank_account_ids, function ($query, $bank_account_ids) {
+                            return $query->whereIn('bank_account_id', $bank_account_ids);
+                        })
                         ->whereBetween('transaction_date', [
                             $check->date->subDays(90)->format('Y-m-d'),
                             $check->date->addDays($add_days)->format('Y-m-d'),
                         ])
-                        ->where('amount', $check->amount)
+                        ->where('check_number', $check_number)
+                        // ->where('amount', $check->amount)
                         ->orderBy('id', 'DESC')
                         ->get();
 
@@ -1241,157 +1246,109 @@ class TransactionController extends Controller
 
                     foreach ($transactions as $transaction) {
                         //if $check->check_number is inside of $transaction->check_number, associate $check with $transaction
-                        if (strpos($transaction->check_number, $check->check_number) !== false) {
-                            $transaction->check()->associate($check)->save();
-                        }
+                        // if (strpos($transaction->check_number, $check->check_number) !== false) {
+                        //     $transaction->check()->associate($check)->save();
+                        // }
+                        $transaction->check()->associate($check)->save();
                     }
                 }
             }
         }
-    }
 
-    public function REMVOE_FOR_TEXT_ONLY_add_check_id_to_transactions()
-    {
-        dd('REMVOE_FOR_TEXT_ONLY_add_check_id_to_transactions');
-        //NOTES:
-        //using withoutGlobalScopes() in this function. Each of these queries MUST be accompanied by plaid_account_id to make sure vendor-specific data is compared.
-        //1/18/2021 mutated values will break the code. Always $check->getRawOriginal('check') any mutated values....OR work that into Model code. Usually fails if the mudated value logic required Auth::user()
-        $transactions = Transaction::withoutGlobalScopes()->whereNull('deleted_at')->whereNotNull('check_number')->whereNull('check_id')->orderBy('id', 'DESC')->get();
+        $processedData = $this->getProcessedChecks();
+        $processedIds = $processedData['processed_ids'];
+        $lastProcessedId = $processedData['last_processed_id'];
 
-        foreach ($transactions as $transaction) {
-            //bank_account no longer used ? bank_account id 8
-            if (is_null($transaction->bank_account)) {
+        $checks = Check::withoutGlobalScopes()
+            ->where(function ($query) use ($lastProcessedId, $processedIds) {
+                $query->where('id', '>', $lastProcessedId) // Include checks with id > lastProcessedId
+                    ->orWhereIn('id', $processedIds);    // Include previously processed IDs
+            })
+            ->whereHas('transactions') // Ensure the Check has related transactions
+            ->where('date', '>', '2021-01-01')
+            ->withSum('transactions', 'amount') // Calculate the sum of the related transactions' amount
+            ->get()
+            ->filter(function ($check) {
+                return $check->transactions_sum_amount != $check->amount; // Filter in PHP
+            });
+
+        // Process the checks
+        foreach ($checks as $check) {
+            if ($check->check_type == 'Transfer') {
+                $check_number = '1010101';
+                $add_days = 14;
+            } elseif ($check->check_type == 'Check') {
+                $check_number = $check->check_number;
+                $add_days = 180;
+            } elseif ($check->check_type == 'Cash') {
+                $check_number = '2020202';
+                $add_days = 14;
+            } else {
+                Log::channel('add_check_id_to_transactions')->info($check);
                 continue;
             }
 
-            //need a way to match checks and transactions, ignoring amount...opposite of the Else statement below that finds them by amount only.
-            //get all $transaction->plaid_account_ids
-            $plaid_ins_id = Bank::withoutGlobalScopes()->find($transaction->bank_account->bank_id)->plaid_ins_id;
-            $banks = Bank::withoutGlobalScopes()->where('plaid_ins_id', $plaid_ins_id)->pluck('id');
-            $bank_accounts = BankAccount::withoutGlobalScopes()->whereIn('bank_id', $banks)->pluck('id');
+            $bank_account_ids = $check->bank_account_id ? $check->bank_account->bank->accounts->pluck('id') : NULL;
 
-            if ($transaction->check_number == 1010101) {
-                $check_type = 'Transfer';
-            } elseif ($transaction->check_number == 2020202) {
-                $check_type = 'Cash';
-            } else {
-                $check_type = 'Check';
-            }
+            $transactions = Transaction::withoutGlobalScopes()
+                ->whereNull('deleted_at')
+                ->whereNull('check_id')
+                ->whereNull('expense_id')
+                ->whereNull('deposit')
+                //11/23/2024 per hive vendor... checks table foreach bank_account_id
+                // ->whereIn('bank_account_id', $check->bank_account_id ? $check->bank_account->bank->accounts->pluck('id') : [NULL])
+                ->when($bank_account_ids, function ($query, $bank_account_ids) {
+                    return $query->whereIn('bank_account_id', $bank_account_ids);
+                })
+                ->whereBetween('transaction_date', [
+                    $check->date->format('Y-m-d'),
+                    $check->date->addDays($add_days)->format('Y-m-d'),
+                ])
+                ->where('amount', $check->amount_difference)
+                ->get();
 
-            $transaction_checks =
-                Check::withoutGlobalScopes()
-                    ->whereDoesntHave('transactions')
-                    ->whereIn('bank_account_id', $bank_accounts)
-                    ->where('check_type', $check_type)
-                    ->whereBetween('date', [$transaction->transaction_date->subDays(385)->format('Y-m-d'), $transaction->transaction_date->format('Y-m-d')])->get();
-            //match amount first
-            if ($transaction_checks->where('amount', str_replace('-', '', $transaction->amount))) {
-                $transaction_checks = $transaction_checks->where('amount', str_replace('-', '', $transaction->amount));
-            } elseif ($transaction_checks->where('amount', str_replace('-', '', $transaction->amount))->isEmpty()) {
-                $transaction_checks = $transaction_checks->where('check_number', $transaction->check_number);
-            } else {
-                //only if check_type = Check do a check_number constraint
-                if ($check_type == 'Check') {
-                    $transaction_checks = $transaction_checks->where('check_number', $transaction->check_number);
+            if($transactions->isEmpty()){
+                // Add the check ID to the processed IDs
+                //IF NO Transaction found
+                //otherwise, remove the check ID from the processed IDs if it exists and transaction not found
+                $processedIds[] = $check->id;
+                continue;
+            }else{
+                foreach ($transactions as $transaction) {
+                    $transaction->check()->associate($check)->save();
                 }
-                // else{
-                //     $transaction_checks = $transaction_checks->where('amount', str_replace('-','',$transaction->amount));
-                // }
             }
+        }
 
-            if ($transaction_checks->count() == 1) {
-                $check = $transaction_checks->first();
-                // dd($check->amount . ' | ' .$transaction->amount);
-                if (isset($check)) {
-                    $transaction->check()->associate($check);
-                    $transaction->save();
-                } else {
-                    //remove $transaction from $transactions collection
-                    //is this needed?!
-                    // $transactions->forget($key);
-                }
-                $transaction = null;
-            }
+        // Save the processed IDs and the last processed ID
+        if ($checks->isNotEmpty()) {
+            $lastProcessedId = $checks->last()->id;
+        }
+        $this->saveProcessedChecks($processedIds, $lastProcessedId);
+    }
 
-            // else{
+    function getProcessedChecks()
+    {
+        // Check if the file exists
+        if (!Storage::exists('processed_checks.json')) {
+            // Create the file with an empty structure if it doesn't exist
+            Storage::put('processed_checks.json', json_encode(['processed_ids' => [], 'last_processed_id' => 0]));
+        }
 
-            // }
+        // Read and decode the JSON file
+        return json_decode(Storage::get('processed_checks.json'), true);
+    }
 
-            // else{
-            //     continue;
-            // }
+    function saveProcessedChecks(array $processedIds, $lastProcessedId)
+    {
+        // Prepare the data to save
+        $data = [
+            'processed_ids' => $processedIds,
+            'last_processed_id' => $lastProcessedId,
+        ];
 
-            //when Institution/Bank check_number is not same as actual Check/Cliff Construction check_number but same Amount OR is the same (CASE STUDY: check #1737 from Citi / plaid_account_id = 4 ) but returned check happened and even a successful retry happened. All 3 transactions will link to the Check
-            // $similar_check_numbers = collect();
-            // foreach($checks as $check){
-            //     if(strpos((string)$transaction->check_number, (string)$check->getRawOriginal('check_number')) !== false){
-            //         //checks with similar numbers
-            //         $similar_check_numbers[] = $check;
-            //     }
-            // }
-
-            // if($similar_check_numbers->count() == 1){
-            //     $check = $similar_check_numbers->first();
-            // }elseif($similar_check_numbers->count() > 1){
-            //     continue;
-
-            //     // foreach($similar_check_numbers as $check){
-            //     //     $check->date_diff = $transaction->transaction_date->floatDiffInDays($check->date);
-            //     // }
-            //     // //07/03/2021 NO! Can't match if dates are way different
-            //     // $check = $similar_check_numbers->sortBy('date_diff')->first();
-            // }else{
-            //     continue;
-
-            //     // //need a way to match checks and transactions, ignoring amount...opposite of the Else statement below that finds them by amount only.
-            //     // $checks = Check::withoutGlobalScopes()->whereIn('bank_account_id', $bank_accounts)->where('check_number', $transaction->check_number)->whereDoesntHave('transactions')->get();
-            //     // if($checks->count() == 1){
-            //     //     $check = $checks->first();
-            //     // }else{
-            //     //     // //Find by amount only.. BE CAREFUL! NEED MORE TESTS 1/18/2021
-            //     //     continue;
-            //     //     //     //->with('transactions')
-            //     //     // $checks = Check::withoutGlobalScopes()->whereIn('bank_account_id', $bank_accounts)->where('total', str_replace('-','',$transaction->amount))->whereDoesntHave('transactions')->get();
-            //     //     // foreach($checks as $check){
-            //     //     //     $check->date_diff = $transaction->transaction_date->floatDiffInDays($check->date);
-            //     //     // }
-            //     //     // if($checks->count() >= 1){
-            //     //     //     //NO! Can't match if dates are way different (date_diff <= 99 days)..works for all by common amounts $200, $1500 07/03/2021
-            //     //     //     if($checks->sortBy('date_diff')->first()->date_diff <= 7){
-            //     //     //         //if the 7 day constrain doesn't work, add an if statement.. if over 7 days confirm check was created over 14 days ago, then find up to 21 days (for now) and match
-            //     //     //         $check = $checks->sortBy('date_diff')->first();
-            //     //     //         //if check_number does or amount does not match..needs another if?
-            //     //     //         $transaction->check_number = $check->getRawOriginal('check');
-            //     //     //         $transaction->save();
-            //     //     //     }else{
-            //     //     //         if($checks->sortBy('date_diff')->first()->created_at->diffInDays() <= 10){
-            //     //     //             $check = NULL;
-            //     //     //         }else{
-            //     //     //             if($checks->sortBy('date_diff')->first()->date_diff <= 21){
-            //     //     //                 $check = $checks->sortBy('date_diff')->first();
-            //     //     //                 //if check_number does or amount does not match..needs another if?
-            //     //     //                 $transaction->check_number = $check->getRawOriginal('check');
-            //     //     //                 $transaction->save();
-            //     //     //             }else{
-            //     //     //                 $check = NULL;
-            //     //     //             }
-            //     //     //         }
-            //     //     //     }
-            //     //     // }else{
-            //     //     //     $check = NULL;
-            //     //     // }
-            //     // }
-            // }
-
-            // if(isset($check)){
-            //     $transaction->check()->associate($check);
-            //     $transaction->save();
-            // }else{
-            //     //remove $transaction from $transactions collection
-            //     //is this needed?!
-            //     $transactions->forget($key);
-            // }
-        } //transactions foreach
+        // Write the data to the file
+        Storage::put('processed_checks.json', json_encode($data));
     }
 
     public function add_payments_to_transaction()
