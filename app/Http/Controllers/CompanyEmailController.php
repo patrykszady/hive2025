@@ -460,7 +460,6 @@ class CompanyEmailController extends Controller
         // Fetch company emails with the specified conditions.
         $company_emails = CompanyEmail::withoutGlobalScopes()
             ->whereNotNull('grant_id')
-            ->where('id', 31)
             ->get();
 
         foreach ($company_emails as $company_email) {
@@ -508,15 +507,17 @@ class CompanyEmailController extends Controller
                             ->azure_receipts('files/' . $ocr_path, $doc_type, $document_model);
 
                         $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)
-                            ->ocr_extract($ocr_receipt_extracted);
+                            ->ocr_extract($ocr_receipt_extracted, null, true);
 
                         if (isset($ocr_receipt_data['error']) && $ocr_receipt_data['error'] === true)
                         {
                             //if error move this single $attachment to a folder for debug...
-                            Storage::disk('files')->move('/_temp_ocr/'.$ocr_filename, '/auto_receipts_failed/'.$ocr_filename);
+                            // Storage::disk('files')->move('/_temp_ocr/'.$ocr_filename, '/auto_receipts_failed/'.$ocr_filename);
+                            Storage::disk('files')->put('auto_receipts_failed/'. $company_email->vendor_id . '-' .$ocr_filename, $attachmentContent);
+                            Storage::disk('files')->delete($ocr_path);
 
                             if ($attachment_key === array_key_last($message['attachments'])) {
-                                $this->nylasService->moveEmailToFolder($messageId, $company_email->api_json['folders']['Error'], $grantId);
+                                $this->nylasService->moveEmailToFolder($messageId, $company_email->api_json['folders']['SCANS'], $grantId);
                             }
 
                             continue;

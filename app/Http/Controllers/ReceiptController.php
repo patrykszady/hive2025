@@ -557,7 +557,8 @@ class ReceiptController extends Controller
         $azure_api_key = env('AZURE_DI_API_KEY');
         $azure_api_version = env('AZURE_DI_VERSION');
 
-        curl_setopt($ch, CURLOPT_URL, 'https://'.env('AZURE_DI_ENDPOINT').'/documentintelligence/documentModels/'.$document_model.':analyze?api-version='.$azure_api_version.'&features=queryFields&queryFields=PurchaseOrder,JobName');
+        //,JobName
+        curl_setopt($ch, CURLOPT_URL, 'https://'.env('AZURE_DI_ENDPOINT').'/documentintelligence/documentModels/'.$document_model.':analyze?api-version='.$azure_api_version.'&features=queryFields&queryFields=PurchaseOrder');
         curl_setopt($ch, CURLOPT_POSTFIELDS, $file);
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
@@ -678,6 +679,8 @@ class ReceiptController extends Controller
             $invoice_number = $ocr_receipt_extract_prefix['InvoiceId']['valueString'];
         } elseif (isset($ocr_receipt_extract_prefix['invoice_number'])) {
             $invoice_number = $ocr_receipt_extract_prefix['invoice_number'];
+        } elseif (isset($ocr_receipt_extract_prefix['OrderNumber'])) {
+            $invoice_number = $ocr_receipt_extract_prefix['OrderNumber']['valueString'];
         } else {
             $invoice_number = null;
         }
@@ -747,6 +750,11 @@ class ReceiptController extends Controller
 
             $transaction_date = $transaction_date->format('Y-m-d');
         } else {
+            $ocr_receipt_data = [
+                'error' => true,
+            ];
+
+            return $ocr_receipt_data;
             //if coming from creating email, allow $transaction_date to be NULL.
 
             //if coming from UPDATE EXPENSE ... allow.... otherwire deny.
