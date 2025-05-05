@@ -39,6 +39,21 @@ class BankAccount extends Model
         return $this->hasMany(Transaction::class);
     }
 
+    public function scopeLatestCheckingAccounts($query)
+    {
+        return $query->with('bank')
+            ->where('type', 'Checking')
+            ->whereHas('bank', function ($query) {
+                $query->whereNotNull('plaid_access_token');
+            })
+            ->whereIn('id', function ($subQuery) {
+                $subQuery->selectRaw('MAX(id) as id') // Select the latest ID for each bank_id
+                    ->from('bank_accounts')
+                    ->where('type', 'Checking')
+                    ->groupBy('bank_id'); // Group by bank_id to get one account per bank
+            });
+    }
+
     public function getNameAndType()
     {
         return $this->bank->name.' | '.$this->type;

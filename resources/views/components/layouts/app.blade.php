@@ -159,10 +159,9 @@
         </flux:header> --}}
         <div class="fixed top-4 left-6 lg:hidden"><flux:sidebar.toggle icon="bars-2" /></div>
 
-
-        {{-- @persist('toast')
+        @persist('toast')
             <flux:toast />
-        @endpersist --}}
+        @endpersist
 
         @fluxScripts
     </body>

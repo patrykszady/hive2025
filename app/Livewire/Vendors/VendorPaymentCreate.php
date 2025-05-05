@@ -32,13 +32,9 @@ class VendorPaymentCreate extends Component
 
     public $employees = [];
 
-    public $bank_accounts = [];
-
     public $payment_projects_count = 0;
 
     public $saved_expenses = [];
-
-    public $disable_paid_by = false;
 
     public $view_text = [
         'card_title' => 'Create Vendor Payments',
@@ -86,24 +82,12 @@ class VendorPaymentCreate extends Component
 
         $this->form->date = today()->format('Y-m-d');
         $this->employees = auth()->user()->vendor->users()->where('is_employed', 1)->get();
-        $this->bank_accounts = BankAccount::with('bank')->where('type', 'Checking')
-            ->whereHas('bank', function ($query) {
-                return $query->whereNotNull('plaid_access_token');
-            })->get();
     }
 
     public function updated($field, $value)
     {
         $this->handleChecksUpdated($field, $value);
     }
-
-    // #[Computed]
-    // public function projects()
-    // {
-    //     $vendors = Vendor::orderBy('business_name')->get(['id', 'business_name']);
-
-    //     return $vendors;
-    // }
 
     public function addProject()
     {

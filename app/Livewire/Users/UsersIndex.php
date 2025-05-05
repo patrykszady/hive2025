@@ -9,16 +9,12 @@ use Livewire\Component;
 class UsersIndex extends Component
 {
     public Client $client;
-
     public Vendor $vendor;
 
-    public $users = [];
-
     public $view = null;
-
     public $registration = null;
 
-    protected $listeners = ['refreshComponent' => '$refresh', 'refresh'];
+    protected $listeners = ['refreshComponent' => '$refresh'];
 
     public $view_text = [
         'card_title' => 'Users',
@@ -29,19 +25,9 @@ class UsersIndex extends Component
     {
         if ($this->view == 'clients.show') {
             $this->view_text['card_title'] = 'Client Members';
-            $this->users = Client::findOrFail($this->client->id)->users;
         } elseif ($this->view == 'vendors.show') {
             $this->view_text['card_title'] = 'Team Members';
-            $this->users = $this->vendor->users()->employed()->get();
-        } else {
-            dd($this);
         }
-    }
-
-    public function refresh()
-    {
-        $this->registration = false;
-        $this->render();
     }
 
     public function add_user()
@@ -55,6 +41,13 @@ class UsersIndex extends Component
 
     public function render()
     {
-        return view('livewire.users.index');
+        if ($this->view == 'clients.show') {
+            $users = Client::findOrFail($this->client->id)->users;
+        } elseif ($this->view == 'vendors.show') {
+            $users = $this->vendor->users()->employed()->get();
+        }
+        return view('livewire.users.index', [
+            'users' => $users,
+        ]);
     }
 }

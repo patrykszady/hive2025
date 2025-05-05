@@ -27,6 +27,12 @@ class ExpenseCreate extends Component
     public $splits = false;
     public Expense $expense;
     public $expense_splits = [];
+    public $employees = [];
+    public $via_vendor_employees = [];
+    public $bank_accounts = [];
+    public $vendors  = [];
+    public $projects  = [];
+    public $distributions  = [];
 
     public $view_text = [
         'card_title' => 'Create Expense',
@@ -39,19 +45,14 @@ class ExpenseCreate extends Component
     public function mount()
     {
         $this->expense = Expense::make();
-    }
 
-    #[Computed]
-    public function vendors()
-    {
-        $vendors = Vendor::orderBy('business_name')->get(['id', 'business_name']);
-        return $vendors;
-    }
+        $team_members = auth()->user()->vendor->users()->employed();
+        $this->employees = $team_members->get();
+        $this->via_vendor_employees = $team_members->wherePivotNotNull('via_vendor_id')->get();
 
-    #[Computed]
-    public function projects()
-    {
-        $projects = Project::status(['Active', 'Complete', 'Service Call', 'Service Call Complete'])
+        $this->bank_accounts = BankAccount::latestCheckingAccounts()->get();
+        $this->vendors = Vendor::orderBy('business_name')->get(['id', 'business_name']);
+        $this->projects = Project::status(['Active', 'Complete', 'Service Call', 'Service Call Complete'])
             ->whereHas('statuses', function ($query) {
                 $query->where('title', 'Active');
             })
@@ -67,16 +68,45 @@ class ExpenseCreate extends Component
                     ->limit(1);
             })
             ->get();
-
-        return $projects;
+        $this->distributions = Distribution::all(['id', 'name']);
     }
 
-    #[Computed]
-    public function distributions()
-    {
-        $distributions = Distribution::all(['id', 'name']);
-        return $distributions;
-    }
+    // #[Computed]
+    // public function vendors()
+    // {
+    //     $vendors = Vendor::orderBy('business_name')->get(['id', 'business_name']);
+    //     return $vendors;
+    // }
+
+    // #[Computed]
+    // public function projects()
+    // {
+    //     $projects = Project::status(['Active', 'Complete', 'Service Call', 'Service Call Complete'])
+    //         ->whereHas('statuses', function ($query) {
+    //             $query->where('title', 'Active');
+    //         })
+    //         ->with(['statuses' => function ($query) {
+    //             $query->where('title', 'Active')->orderBy('start_date', 'desc');
+    //         }])
+    //         ->orderByDesc(function ($query) {
+    //             $query->select('start_date')
+    //                 ->from('project_status')
+    //                 ->whereColumn('project_status.project_id', 'projects.id')
+    //                 ->where('title', 'Active')
+    //                 ->latest('start_date')
+    //                 ->limit(1);
+    //         })
+    //         ->get();
+
+    //     return $projects;
+    // }
+
+    // #[Computed]
+    // public function distributions()
+    // {
+    //     $distributions = Distribution::all(['id', 'name']);
+    //     return $distributions;
+    // }
 
     public function updated($field, $value)
     {
@@ -333,21 +363,6 @@ class ExpenseCreate extends Component
     public function render()
     {
         $this->authorize('create', Expense::class);
-
-        $team_members = auth()->user()->vendor->users()->employed();
-        $employees = $team_members->get();
-        $via_vendor_employees = $team_members->wherePivotNotNull('via_vendor_id')->get();
-
-        $bank_accounts =
-            BankAccount::with('bank')->where('type', 'Checking')
-                ->whereHas('bank', function ($query) {
-                    return $query->whereNotNull('plaid_access_token');
-                })->get();
-
-        return view('livewire.expenses.form', [
-            'via_vendor_employees' => $via_vendor_employees,
-            'bank_accounts' => $bank_accounts,
-            'employees' => $employees,
-        ]);
+        return view('livewire.expenses.form');
     }
 }

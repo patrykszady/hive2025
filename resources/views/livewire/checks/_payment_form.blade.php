@@ -25,11 +25,10 @@
 <div x-show="!$wire.form.paid_by" x-transition>
     <div>
         <x-forms.one_line label="Bank">
-            <flux:select wire:model.live="bank_account_id" placeholder="Choose bank...">
-                <flux:select.option value="" >Select Bank</flux:select.option>
-                @foreach ($bank_accounts as $bank_account)
+            <flux:select name="bank_account_id" wire:model.live="bank_account_id" placeholder="Choose bank...">
+                @foreach ($this->bank_accounts as $bank_account)
                     <flux:select.option value="{{ $bank_account->id }}">
-                        {{ $bank_account->getNameAndType() }}
+                        {{ $bank_account->bank->name }}
                     </flux:select.option>
                 @endforeach
             </flux:select>
@@ -39,7 +38,6 @@
         <div x-show="$wire.bank_account_id" x-transition class="mt-2 space-y-2">
             <x-forms.one_line label="Payment Type">
                 <flux:select wire:model.live="check_type" placeholder="Choose payment type...">
-                    <flux:select.option value="" readonly>Select Payment Type</flux:select.option>
                     <flux:select.option value="Check">Check</flux:select.option>
                     <flux:select.option value="Transfer">Transfer</flux:select.option>
                     <flux:select.option value="Cash">Cash</flux:select.option>

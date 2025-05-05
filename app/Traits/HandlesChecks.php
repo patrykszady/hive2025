@@ -3,6 +3,7 @@
 namespace App\Traits;
 
 use App\Models\Check;
+use App\Models\BankAccount;
 
 use Illuminate\Validation\Rule;
 
@@ -105,9 +106,16 @@ trait HandlesChecks
         }
     }
 
+    public function getBankAccountsProperty()
+    {
+        return BankAccount::latestCheckingAccounts()->get();
+    }
+
+
     public function autoCheckNumber()
     {
-        $next_check_number = Check::where('bank_account_id', $this->bank_account_id)->where('check_type', 'Check')->orderBy('date', 'DESC')->orderBy('created_at', 'DESC')->first()->check_number + 1;
+        $bank_account_ids = $this->bank_accounts->find($this->bank_account_id)->bank->accounts()->withoutGlobalScopes()->pluck('id')->toArray();
+        $next_check_number = Check::whereIn('bank_account_id', $bank_account_ids)->where('check_type', 'Check')->orderBy('date', 'DESC')->orderBy('created_at', 'DESC')->first()->check_number + 1;
         $this->check_number = $next_check_number;
         $this->next_check_auto = true;
     }

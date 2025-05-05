@@ -7,6 +7,7 @@ use App\Livewire\Clients\ClientsShow;
 use App\Livewire\Dashboard\DashboardShow;
 use App\Livewire\Forms\UserForm;
 use App\Livewire\Vendors\VendorCreate;
+use App\Livewire\Users\UsersIndex;
 
 use App\Models\Client;
 // use App\Livewire\Users\TeamMembers;
@@ -342,16 +343,11 @@ class UserCreate extends Component
         } elseif ($this->model['type'] == 'client') {
             // when creating new Client
             if ($this->model['id'] == 'NEW') {
-                $this->modal('user_form_modal')->close();
                 $this->dispatch('addUser', user: $user->id, client_id: $this->model['id'])->to(ClientCreate::class);
             } else {
-                //add User to this Client
+                //add User to existing/this Client
                 $user->clients()->attach($this->model['id']);
-                $this->client = Client::with('users')->findOrFail($this->model['id']);
-                $this->modal('user_form_modal')->close();
-
-                $this->dispatch('testUsers', client: $this->client->id)->to(UsersIndex::class);
-                $this->dispatch('refreshComponent')->to(ClientsShow::class);
+                $this->dispatch('refreshComponent')->to(UsersIndex::class);
 
                 Flux::toast(
                     duration: 5000,
@@ -362,6 +358,8 @@ class UserCreate extends Component
                     text: '',
                 );
             }
+
+            $this->modal('user_form_modal')->close();
         }
     }
 

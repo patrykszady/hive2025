@@ -134,9 +134,6 @@ class TimesheetPaymentForm extends Form
             }
         }
 
-        // dd($this->component->weekly_timesheets->where('checkbox', 'true')->sum('amount'));
-        // dd($this->component->user_reimbursement_expenses->sum('amount'));
-
         if (isset($check)) {
             $expenses = $check->expenses;
             foreach ($expenses as $expense) {

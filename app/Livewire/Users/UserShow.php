@@ -144,7 +144,6 @@ class UserShow extends Component
             round($this->checks_written->sum('amount'), 2) -
             round($this->timesheets_paid->sum('amount'), 2) -
             round($this->timesheets_paid_others->sum('amount'), 2) -
-            round($this->timesheets_paid_by->sum('amount'), 2) -
             round($this->distribution_checks->sum('amount'), 2) -
             round($this->expenses_paid->sum('amount'), 2),
             2

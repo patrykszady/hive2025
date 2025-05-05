@@ -28,8 +28,8 @@ class TimesheetPaymentCreate extends Component
     public $employee_weekly_timesheets = [];
     public $user_paid_expenses = [];
     public $user_reimbursement_expenses = [];
-
-    // public $user_paid_by_reimbursements = [];
+    public $employees = [];
+    public $view_text = [];
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 
@@ -50,6 +50,14 @@ class TimesheetPaymentCreate extends Component
 
     public function mount()
     {
+        $this->view_text = [
+            'card_title' => 'Create Daily Hours',
+            'button_text' => 'Pay '.$this->user->first_name,
+            'form_submit' => 'save',
+        ];
+
+        $this->employees = auth()->user()->vendor->users()->where('is_employed', 1)->whereNot('users.id', $this->user->id)->get();
+
         $this->user->pivot_user_vendor = $this->user->vendors()->where('vendors.id', auth()->user()->primary_vendor_id)->first()->pivot->via_vendor_id;
 
         if (! is_null($this->user->pivot_user_vendor)) {
@@ -72,11 +80,6 @@ class TimesheetPaymentCreate extends Component
                     $item->checkbox = true;
                 })
                 ->keyBy('id');
-        // ->groupBy(function($data) {
-        //     // ->startOfWeek()->toFormattedDateString()
-        //     return $data->date->format('Y-m-d');
-        // }, true)
-        // ->toBase();
 
         $this->employee_weekly_timesheets =
                 Timesheet::with('user')
@@ -229,25 +232,7 @@ class TimesheetPaymentCreate extends Component
     {
         $this->authorize('viewPayment', Timesheet::class);
 
-        $view_text = [
-            'card_title' => 'Create Daily Hours',
-            'button_text' => 'Pay '.$this->user->first_name,
-            'form_submit' => 'save',
-        ];
-
-        $employees = auth()->user()->vendor->users()->where('is_employed', 1)->whereNot('users.id', $this->user->id)->get();
-
-        //09-05-2023 BankAccount::scopeIsActicce(Checking)
-        $bank_accounts = BankAccount::with('bank')->where('type', 'Checking')
-            ->whereHas('bank', function ($query) {
-                return $query->whereNotNull('plaid_access_token');
-            })->get();
-
         //07/16/2022: what about distributions.. would distributions ever end up here?
-        return view('livewire.timesheets.payment-form', [
-            'view_text' => $view_text,
-            'bank_accounts' => $bank_accounts,
-            'employees' => $employees,
-        ]);
+        return view('livewire.timesheets.payment-form');
     }
 }

@@ -39,7 +39,6 @@
         </div>
 	</div>
 
-    <livewire:projects.project-create />
-    <livewire:users.user-create />
-    <livewire:clients.client-create />
+    {{-- <livewire:projects.project-create />
+    <livewire:clients.client-create /> --}}
 </div>

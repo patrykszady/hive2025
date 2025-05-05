@@ -83,10 +83,10 @@ class ChecksIndex extends Component
         }
 
         if ($this->bank) {
-            $bank_account_id = Bank::findOrFail($this->bank)->plaid_ins_id;
-            $bank_account_ids = Bank::where('plaid_ins_id', $bank_account_id)->pluck('id');
+            $bank_plaid_ins_id = Bank::findOrFail($this->bank)->plaid_ins_id;
+            $bank_ids = Bank::where('plaid_ins_id', $bank_plaid_ins_id)->pluck('id')->toArray();
 
-            $bank_accounts = BankAccount::whereIn('bank_id', $bank_account_ids)->pluck('id')->toArray();
+            $bank_accounts = BankAccount::whereIn('bank_id', $bank_ids)->pluck('id')->toArray();
         } else {
             $bank_accounts = BankAccount::all()->pluck('id')->toArray();
         }
@@ -96,7 +96,7 @@ class ChecksIndex extends Component
         $checks =
             Check::orderBy('date', 'DESC')
                 //distributions
-                ->with(['expenses', 'timesheets', 'bank_account', 'transactions'])
+                ->with(['expenses', 'bank_account', 'transactions'])
                 ->whereIn('bank_account_id', $bank_accounts)
                 ->where('check_type', 'like', "%{$this->check_type}%")
                 ->when($check_number, function ($query) {
@@ -114,7 +114,6 @@ class ChecksIndex extends Component
                 ->paginate($paginate_number);
 
         $checks->getCollection()->each(function ($check, $key) {
-            // dd($check->transactions->sum('amount'));
             if ($check->transactions->sum('amount') == $check->amount) {
                 $check->status = 'Complete';
             } elseif (($check->transactions->isNotEmpty() && $check->transactions->sum('amount') != $check->amount)) {
@@ -131,7 +130,6 @@ class ChecksIndex extends Component
     public function render()
     {
         //$this->authorize('viewAny', Expense::class);
-
         return view('livewire.checks.index', [
         ]);
     }
