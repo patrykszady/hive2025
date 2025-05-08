@@ -238,7 +238,8 @@ class TransactionController extends Controller
     public function plaid_transactions_sync()
     {
         $banks = Bank::withoutGlobalScopes()->whereNotNull('plaid_access_token')->get();
-        //5-8-2025 if not in error state...
+
+        //if not in error state...
         foreach ($banks as $bank) {
             if($bank->plaid_options['error']['error_code'] ?? false){
                 continue;
@@ -276,7 +277,7 @@ class TransactionController extends Controller
             $bank->save();
 
             if ($result['has_more'] == true) {
-                $this->plaid_transactions_sync_bank($bank, $bank_accounts);
+                $this->plaid_transactions_sync_bank($bank);
             }
 
             //ADDED
@@ -895,7 +896,6 @@ class TransactionController extends Controller
                 ->whereNull('deleted_at')
                 ->where('belongs_to_vendor_id', $hive_vendor->id)
                 ->whereNotNull('vendor_id')
-                ->whereId('24477')
                 //where transacitons->sum != $expense(item)->sum  \\ whereNull checked_at (transactions add up to expense)
                 ->whereDate('date', '>=', Carbon::now()->subMonths(3))
                 ->get();

@@ -17,7 +17,7 @@ class Task extends Model
 {
     use HasFactory, SoftDeletes, Sortable;
 
-    protected $fillable = ['title', 'project_id', 'dates', 'start_date', 'end_date', 'duration', 'order', 'options', 'options->include_weekend_days', 'type', 'vendor_id', 'user_id', 'user_ids', 'progress', 'notes', 'belongs_to_vendor_id', 'created_by_user_id', 'created_at', 'updated_at', 'deleted_at'];
+    protected $fillable = ['title', 'project_id', 'dates', 'order', 'options', 'options->include_weekend_days', 'type', 'vendor_id', 'user_id', 'user_ids', 'progress', 'notes', 'belongs_to_vendor_id', 'created_by_user_id', 'created_at', 'updated_at', 'deleted_at'];
 
     /**
      * Get the attributes that should be cast.
@@ -27,8 +27,6 @@ class Task extends Model
     protected function casts(): array
     {
         return [
-            'start_date' => 'date:Y-m-d',
-            'end_date' => 'date:Y-m-d',
             'options' => 'object',
             'dates' => 'array',
             'user_ids' => 'object',
