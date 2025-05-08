@@ -71,7 +71,13 @@ class PlaidService
             ]);
             return json_decode($response->getBody()->getContents(), true);
         } catch (RequestException $e) {
-            // Handle error and retries
+            // Check if the exception has a response
+            if ($e->hasResponse()) {
+                $responseBody = $e->getResponse()->getBody()->getContents();
+                return json_decode($responseBody, true); // Return the full JSON error response
+            }
+
+            // If no response is available, return the exception message
             return ['error' => $e->getMessage()];
         }
     }

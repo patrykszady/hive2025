@@ -14,9 +14,9 @@ class Bank extends Model
 
     protected $fillable = ['name', 'plaid_access_token', 'plaid_item_id', 'vendor_id', 'plaid_ins_id', 'plaid_options', 'created_at', 'updated_at', 'deleted_at'];
 
-    // protected $casts = [
-    //     'plaid_options' => 'array',
-    // ];
+    protected $casts = [
+        'plaid_options' => 'array',
+    ];
 
     protected static function booted()
     {
@@ -38,16 +38,16 @@ class Bank extends Model
     //     return $this->hasManyThrough(Transaction::class, BankAccount::class);
     // }
 
-    public function getPlaidOptionsAttribute($value)
-    {
-        if ($value == null) {
-            $plaid_options = null;
-        } else {
-            $plaid_options = json_decode($value);
-        }
+    // public function getPlaidOptionsAttribute($value)
+    // {
+    //     if ($value == null) {
+    //         $plaid_options = null;
+    //     } else {
+    //         $plaid_options = json_decode($value);
+    //     }
 
-        return $plaid_options;
-    }
+    //     return $plaid_options;
+    // }
 
     // public function getErrorAttribue($value)
     // {

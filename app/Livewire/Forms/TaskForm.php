@@ -14,20 +14,17 @@ class TaskForm extends Form
     #[Validate('required')]
     public $title = null;
 
-    // #[Validate('array')]
-    // |date_format:Y-m-d|before_or_equal:end_date')]
-        // #[Validate('nullable|date_format:Y-m-d|after_or_equal:start_date')]
-    #[Validate('nullable')]
-    public $dates = null;
+    #[Validate('array')]
+    public $dates = []; // Store dates as an array
 
     #[Validate('required')]
     public $project_id = null;
 
     #[Validate('nullable')]
-    public $duration = 0;
+    public $order = null;
 
     #[Validate('nullable')]
-    public $order = null;
+    public $duration = 0;
 
     #[Validate('nullable')]
     public $vendor_id = null;
@@ -41,36 +38,20 @@ class TaskForm extends Form
     #[Validate('nullable')]
     public $notes = null;
 
-    public $include_weekend_days = [];
-
     public ?Task $task;
-
-    public function rules()
-    {
-        return [
-            'include_weekend_days.*' => 'nullable', // multiple checkbox
-        ];
-    }
 
     public function setTask(Task $task)
     {
         $this->task = $task;
-        $this->start_date = $task->start_date ? $task->start_date : null;
-        $this->end_date = $task->end_date ? $task->end_date : null;
-        $this->include_weekend_days = (array) $task->options->include_weekend_days;
+        $this->dates = $task->dates ?? []; // Load dates as an array
         $this->project_id = $task->project_id;
         $this->order = $task->order;
-        $this->duration = $task->duration;
+        $this->duration = count($this->dates); // Calculate duration based on the number of dates
         $this->vendor_id = $task->vendor_id;
         $this->type = $task->type;
         $this->title = $task->title;
         $this->notes = $task->notes;
         $this->user_id = $task->user_id;
-
-        $this->dates = [
-            'start' => $task->start_date ? $task->start_date->format('Y-m-d') : null,
-            'end' => $task->end_date ? $task->end_date->format('Y-m-d') : null,
-        ];
     }
 
     public function update()
@@ -79,16 +60,14 @@ class TaskForm extends Form
         $this->validate();
 
         $this->task->update([
-            'start_date' => $this->dates['start'] ?? NULL,
-            'end_date' => $this->dates['end'] ?? NULL,
+            'dates' => $this->dates, // Save dates as JSON
             'project_id' => $this->project_id,
             'vendor_id' => $this->vendor_id,
             'type' => $this->type,
             'user_id' => $this->user_id,
             'title' => $this->title,
             'notes' => $this->notes,
-            'options->include_weekend_days' => $this->include_weekend_days,
-            'duration' => $this->duration,
+            'duration' => count($this->dates), // Update duration based on the number of dates
             'order' => $this->order,
         ]);
 
@@ -101,17 +80,15 @@ class TaskForm extends Form
         $this->validate();
 
         $task = Task::create([
-            'start_date' => $this->dates['start'] ?? NULL,
-            'end_date' => $this->dates['end'] ?? NULL,
+            'dates' => $this->dates, // Save dates as JSON
             'project_id' => $this->project_id,
             'vendor_id' => $this->vendor_id,
             'type' => $this->type,
             'user_id' => $this->user_id,
             'title' => $this->title,
             'notes' => $this->notes,
-            'options->include_weekend_days' => $this->include_weekend_days,
             'order' => 0,
-            'duration' => $this->duration,
+            'duration' => count($this->dates), // Calculate duration based on the number of dates
         ]);
 
         return $task;

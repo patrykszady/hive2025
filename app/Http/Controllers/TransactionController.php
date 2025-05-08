@@ -36,6 +36,15 @@ class TransactionController extends Controller
         $this->plaidService = $plaidService;
     }
 
+    private function syncBankTransactions(Bank $bank)
+    {
+        $accessToken = $bank->plaid_access_token;
+        $cursor = $bank->plaid_options['next_cursor'] ?? null; // Use null coalescing operator
+        $count = 200;
+
+        return $this->plaidService->syncTransactions($accessToken, $cursor, $count);
+    }
+
     //TEST ONLY //FOR DEVELOPER EXECUTION ONLY
     //only needed for test purposes...transactions update from Plaid.com webhooks
     //For use when Plaid API isn't acting as expected and can always be executed manually...
@@ -77,17 +86,32 @@ class TransactionController extends Controller
                 $difference = ['before' => $difference->invert, 'diff_in_days' => $difference->days];
 
                 if ($difference['before'] === 1 && $difference['diff_in_days'] > 3) {
-                    $error = ['error' => ['error_code' => 'No New Transactions in over 3 days. Please UPDATE BANK.']];
+                    $error = ['error' => ['error_type' => 'ITEM_ERROR', 'error_code' => 'NO_TRANSACTIONS', 'error_message' => 'No New Transactions in over 3 days. Please UPDATE BANK.']];
+                } else {
+                    $error = ['error' => false];
+                }
+            }
+
+            //if error is false, check for errors on the bank transactions
+            if (!$error['error']) {
+                $result_bank_transactions = $this->syncBankTransactions($bank);
+
+                if (isset($result_bank_transactions['error_code'])) {
+                    $error = ['error' => $result_bank_transactions];
+                    $result = [];
                 } else {
                     $error = ['error' => false];
                 }
             }
 
             // elseif (empty($result['accounts'])) {
-            //     $error = ['error' => ['error_code' => 'Account Numbers Changed. Update Bank Account']];
+            //     $error = ['error' => ['error_type' => 'ITEM_ERROR', 'error_code' => 'ACCOUNT_CHANGED', 'error_message' => 'Account Numbers Changed. Update Bank Account']];
+            //     $result = [];
             // }
 
-            $bank->plaid_options = json_encode(array_merge(json_decode(json_encode($bank->plaid_options), true), $error, $result));
+            // dd($result);
+
+            $bank->plaid_options = array_merge($bank->plaid_options ?? [], $error, $result);
             $bank->save();
         }
     }
@@ -214,19 +238,19 @@ class TransactionController extends Controller
     public function plaid_transactions_sync()
     {
         $banks = Bank::withoutGlobalScopes()->whereNotNull('plaid_access_token')->get();
-
-        //if not in error state...
+        //5-8-2025 if not in error state...
         foreach ($banks as $bank) {
-            $this->plaid_transactions_sync_bank($bank);
+            if($bank->plaid_options['error']['error_code'] ?? false){
+                continue;
+            }else{
+                $this->plaid_transactions_sync_bank($bank);
+            }
         }
     }
 
     public function plaid_transactions_sync_bank(Bank $bank)
     {
-        $accessToken = $bank->plaid_access_token;
-        $cursor = isset($bank->plaid_options->next_cursor) ? $bank->plaid_options->next_cursor : null;
-        $count = 200;
-        $result = $this->plaidService->syncTransactions($accessToken, $cursor, $count);
+        $result = $this->syncBankTransactions($bank);
 
         $bank_account_ids = $bank->accounts->pluck('id')->toArray();
 
@@ -236,7 +260,7 @@ class TransactionController extends Controller
             $transactions_last_date = '2025-01-01';
         }
 
-        if (! empty($result['added']) or ! empty($result['modified']) or ! empty($result['removed']) or isset($result['error_code'])) {
+        if (!empty($result['added']) or !empty($result['modified']) or !empty($result['removed']) or isset($result['error_code'])) {
             Log::channel('plaid_adds')->info([[$bank->getAttributes(), $bank->plaid_options], $result]);
         }
 
@@ -248,7 +272,7 @@ class TransactionController extends Controller
                     // "accounts" => $result["accounts"],
                 ];
 
-            $bank->plaid_options = json_encode(array_merge(json_decode(json_encode($bank->plaid_options), true), $add_to_json));
+            $bank->plaid_options = array_merge($bank->plaid_options ?? [], $add_to_json);
             $bank->save();
 
             if ($result['has_more'] == true) {
@@ -513,8 +537,6 @@ class TransactionController extends Controller
                 $array_transactions[$index]['iso_currency_code'] = 'USD';
                 $array_transactions[$index]['date_posted'] = $transaction['posted_date']->format('Y-m-d');
             }
-
-            // dd($array_transactions);
 
             $new_data = [
                 'client_id' => env('PLAID_CLIENT_ID'),

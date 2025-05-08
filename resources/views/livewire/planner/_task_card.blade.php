@@ -10,12 +10,10 @@
         <!-- Task Title and Icon -->
         <flux:heading class="flex items-center gap-1">
             {{$task->title}}
-            {{--  name="{{$task->duration <= 1 ? 'calendar' : ($task->start_date->format('Y-m-d') == $day->format('Y-m-d') ? 'chevron-down' :
-                    ($task->end_date->format('Y-m-d') == $day->format('Y-m-d') ? 'chevron-up' : 'chevron-up-down'))}}" --}}
-            @if ($task->duration > 1)
+            @if (count($task->dates ?? []) > 1)
                 <flux:icon
-                    name="{{$task->start_date->format('Y-m-d') == $day->format('Y-m-d') ? 'chevron-down' :
-                    ($task->end_date->format('Y-m-d') == $day->format('Y-m-d') ? 'chevron-up' : 'chevron-up-down')}}"
+                    name="{{ ($task->dates[0] ?? '') === $day->format('Y-m-d') ? 'chevron-down' :
+                    (($task->dates[count($task->dates ?? []) - 1] ?? '') === $day->format('Y-m-d') ? 'chevron-up' : 'chevron-up-down') }}"
                     variant="micro"
                     class="ml-auto text-gray-400"
                 />

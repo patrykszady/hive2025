@@ -134,6 +134,7 @@ class BoardIndex extends Component
         })->toArray();
 
         $this->projects = Project::query()
+            ->with('tasks')
             ->status(['Active', 'Scheduled', 'Service Call', 'Invited'])
             ->get();
 
@@ -146,41 +147,17 @@ class BoardIndex extends Component
             $noDateTasks = collect(); // Initialize a collection for "No Date" tasks
 
             $project->tasks()
-                ->orderBy('start_date', 'asc')
+                ->orderBy('created_at', 'asc') // Order tasks by creation date
                 ->get()
                 ->each(function ($task) use ($groupedTasks, $noDateTasks) {
-                    if ($task->start_date && $task->end_date) {
-                        // Get the range of days the task spans
-                        $taskPeriod = CarbonPeriod::create(
-                            $task->start_date->format('Y-m-d'),
-                            $task->end_date->format('Y-m-d')
-                        );
-
-                        // Check options for including weekends
-                        $includeSaturday = $task->options->include_weekend_days->saturday ?? false;
-                        $includeSunday = $task->options->include_weekend_days->sunday ?? false;
-
-                        foreach ($taskPeriod as $date) {
-                            $dayOfWeek = $date->dayOfWeek; // 6 = Saturday, 0 = Sunday
-
-                            // Skip weekends if not included in options
-                            if (($dayOfWeek === 6 && !$includeSaturday) || ($dayOfWeek === 0 && !$includeSunday)) {
-                                continue;
+                    if (!empty($task->dates)) {
+                        foreach ($task->dates as $date) {
+                            if ($groupedTasks->has($date)) {
+                                $groupedTasks[$date]->push($task);
                             }
-
-                            $formattedDate = $date->format('Y-m-d');
-                            if ($groupedTasks->has($formattedDate)) {
-                                $groupedTasks[$formattedDate]->push($task);
-                            }
-                        }
-                    } elseif ($task->start_date) {
-                        // If the task only has a start_date, assign it to that day
-                        $formattedDate = $task->start_date->format('Y-m-d');
-                        if ($groupedTasks->has($formattedDate)) {
-                            $groupedTasks[$formattedDate]->push($task);
                         }
                     } else {
-                        // If the task has no start_date, add it to the "No Date" collection
+                        // If the task has no dates, add it to the "No Date" collection
                         $noDateTasks->push($task);
                     }
                 });
@@ -217,7 +194,6 @@ class BoardIndex extends Component
             'days' => $this->days,
             'maxTasksPerDate' => $maxTasksPerDate, // Pass $maxTasksPerDate to the view
         ])->layout('components.layouts.app', [
-            //h-full
             'fullscreenClasses' => 'p-0! lg:p-0! relative overflow-y-auto',
         ]);
     }

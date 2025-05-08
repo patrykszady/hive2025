@@ -34,41 +34,8 @@ class TaskCreate extends Component
     public function updated($field, $value)
     {
         if (!empty($this->form->dates)) {
-            $startDate = Carbon::parse($this->form->dates['start']);
-            $endDate = Carbon::parse($this->form->dates['end']);
-
-            $excludeSaturdays = ! isset($this->form->include_weekend_days['saturday']) || $this->form->include_weekend_days['saturday'] === false;
-            $excludeSundays = ! isset($this->form->include_weekend_days['sunday']) || $this->form->include_weekend_days['sunday'] === false;
-            $duration = $this->countDaysBetweenDates($startDate, $endDate, $excludeSaturdays, $excludeSundays);
-
-            $this->form->duration = $duration;
+            $this->form->duration = count($this->form->dates);
         }
-        // $this->validateOnly($field);
-    }
-
-    //2024-12-10 SAME ON PlannerIndex
-    //count days between dates and ignore weekend days if checkbox true
-    public function countDaysBetweenDates($startDate, $endDate, $excludeSaturdays = true, $excludeSundays = true)
-    {
-        // Include the first day in the count if not saturday or sunday
-        $daysCount = ($startDate->isSaturday() && $excludeSaturdays === true) || ($startDate->isSunday() && $excludeSundays === true) ? 0 : 1;
-
-        // Iterate through each day between the start and end dates
-        $currentDate = $startDate->copy();
-        while ($currentDate->lt($endDate)) {
-            $currentDate->addDay();
-
-            if ($excludeSaturdays && $currentDate->isSaturday()) {
-                continue;
-            }
-            if ($excludeSundays && $currentDate->isSunday()) {
-                continue;
-            }
-
-            $daysCount++;
-        }
-
-        return $daysCount;
     }
 
     public function addTask($project_id, $date = null)
@@ -82,12 +49,7 @@ class TaskCreate extends Component
             'form_submit' => 'save',
         ];
 
-        if ($date) {
-            $this->form->dates = [Carbon::parse($date)->format('Y-m-d')];
-        } else {
-            $this->form->dates = [];
-        }
-
+        $this->form->dates = $date ? [Carbon::parse($date)->format('Y-m-d')] : [];
         $this->form->project_id = $project_id;
         $this->modal('task_create_form_modal')->show();
     }
@@ -124,23 +86,20 @@ class TaskCreate extends Component
         );
     }
 
-    // 5-7-2024 for flatpickr only... anyway to optimize?
-    public function dateschanged($dates)
+    public function edit()
     {
-        $this->form->dates = $dates;
+        $this->form->update();
+        $this->dispatch('refreshComponent')->to(BoardIndex::class);
+        $this->modal('task_create_form_modal')->close();
 
-        if (count($dates) > 1) {
-            $start = Carbon::parse($dates[0]);
-            $end = Carbon::parse($dates[1]);
-
-            $duration = $end->diff($start)->days + 1;
-
-            $this->form->duration = $duration;
-        } elseif (empty($dates[0])) {
-            $this->form->duration = 0;
-        } else {
-            $this->form->duration = 1;
-        }
+        Flux::toast(
+            duration: 3000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Task Updated',
+            // route / href / wire:click
+            text: '',
+        );
     }
 
     public function save()
@@ -154,22 +113,6 @@ class TaskCreate extends Component
             position: 'top right',
             variant: 'success',
             heading: 'Task Created',
-            // route / href / wire:click
-            text: '',
-        );
-    }
-
-    public function edit()
-    {
-        $this->form->update();
-        $this->dispatch('refreshComponent')->to(BoardIndex::class);
-        $this->modal('task_create_form_modal')->close();
-
-        Flux::toast(
-            duration: 3000,
-            position: 'top right',
-            variant: 'success',
-            heading: 'Task Updated',
             // route / href / wire:click
             text: '',
         );

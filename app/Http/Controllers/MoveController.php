@@ -26,8 +26,11 @@ use App\Models\ReceiptAccount;
 use App\Models\Timesheet;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Models\Task;
 use App\Models\Vendor;
+
 use Carbon\Carbon;
+use Carbon\CarbonPeriod;
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -39,6 +42,47 @@ class MoveController extends Controller
 {
     public function move()
     {
+        $tasks = Task::withoutGlobalScopes()->get();
+
+        foreach ($tasks as $task) {
+            if ($task->start_date && $task->end_date) {
+                // Get the range of days the task spans
+                $taskPeriod = CarbonPeriod::create(
+                    $task->start_date->format('Y-m-d'),
+                    $task->end_date->format('Y-m-d')
+                );
+
+                // Check options for including weekends
+                $includeSaturday = $task->options->include_weekend_days->saturday ?? false;
+                $includeSunday = $task->options->include_weekend_days->sunday ?? false;
+
+                $dates = [];
+                foreach ($taskPeriod as $date) {
+                    $dayOfWeek = $date->dayOfWeek; // 6 = Saturday, 0 = Sunday
+
+                    // Skip weekends if not included in options
+                    if (($dayOfWeek === 6 && !$includeSaturday) || ($dayOfWeek === 0 && !$includeSunday)) {
+                        continue;
+                    }
+
+                    $formattedDate = $date->format('Y-m-d');
+                    $dates[] = $formattedDate;
+                }
+            } elseif ($task->start_date) {
+                // If the task only has a start_date, assign it to that day
+                $formattedDate = $task->start_date->format('Y-m-d');
+                $dates = [$formattedDate];
+            }else {
+                // If the task has no start_date, add it to the "No Date" collection
+                $dates = NULL;
+            }
+
+            $task->dates = $dates;
+            $task->save();
+        }
+
+        dd('done with tasks');
+
         $receipts = ExpenseReceipts::whereNotNull('receipt_items') // Ensure receipt_items is not null
             ->get()
             ->filter(function ($receipt) {

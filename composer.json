@@ -20,7 +20,7 @@
         "ilovepdf/ilovepdf-php": "^1.2",
         "intervention/image": "^2.7",
         "itsgoingd/clockwork": "^5.1",
-        "laravel/framework": "^11.38",
+        "laravel/framework": "^12.00",
         "laravel/horizon": "^5.30",
         "laravel/sanctum": "^4.0",
         "laravel/scout": "^10.11",
@@ -48,7 +48,8 @@
         "symfony/panther": "^2.1",
         "twilio/sdk": "^6.44",
         "vlucas/phpdotenv": "^5.5",
-        "zoon/puphpeteer": "^2.2"
+        "zoon/puphpeteer": "^2.2",
+        "pestphp/pest": "^3.0"
     },
     "require-dev": {
         "dbrekelmans/bdi": "^1.0",
@@ -57,7 +58,7 @@
         "laravel/sail": "^1.41",
         "mockery/mockery": "^1.6",
         "nunomaduro/collision": "^8.0",
-        "phpunit/phpunit": "^10.5"
+        "phpunit/phpunit": "^11.0"
     },
     "autoload": {
         "psr-4": {
@@ -98,6 +99,7 @@
         "sort-packages": true,
         "process-timeout": 0,
         "allow-plugins": {
+            "pestphp/pest-plugin": true,
             "php-http/discovery": true,
             "tbachert/spi": true
         }

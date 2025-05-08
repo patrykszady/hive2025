@@ -15,17 +15,7 @@
         <flux:input wire:model.blur="form.title" label="Title" placeholder="Task Title" autofocus/>
 
         {{-- DATES --}}
-        <flux:date-picker mode="range" with-today fixed-weeks wire:model.live="form.dates" />
-
-        {{-- SAT/SUN INCLUSION --}}
-        <flux:fieldset>
-            <flux:legend>Include Weekend</flux:legend>
-
-            <div class="flex gap-4 *:gap-x-2">
-                <flux:checkbox wire:model.live="form.include_weekend_days.saturday" label="Saturday" />
-                <flux:checkbox wire:model.live="form.include_weekend_days.sunday" label="Sunday" />
-            </div>
-        </flux:fieldset>
+        <flux:date-picker with-today fixed-weeks multiple wire:model.live="form.dates" />
 
         {{-- DURATION --}}
         <flux:input wire:model.live="form.duration" label="Duration" text="Duration" name="duration" disabled />
