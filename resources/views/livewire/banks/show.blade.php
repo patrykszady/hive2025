@@ -6,10 +6,15 @@
                     <a href="{{route('banks.show', $bank->id)}}">
                         {{$bank->name}}
                     </a>
-                    <flux:badge color="{{$error == FALSE ? 'green' : 'red'}}">{{$error == FALSE ? 'Connected' : 'Error'}}</flux:badge>
+                    <flux:badge inset="top bottom" color="{{$bank->error == FALSE ? 'green' : 'red'}}">{{$bank->error == FALSE ? 'Connected' : 'Error'}}</flux:badge>
                 </flux:heading>
-            </div>
 
+                @if($bank->error)
+                    <flux:subheading class="text-red-800!">
+                        {{$bank->error['error_code']}}
+                    </flux:subheading>
+                @endif
+            </div>
             <div>
                 @if(!Route::is('banks.index'))
                     <flux:button wire:navigate.hover wire:click="plaid_link_token_update" size="sm">Update Bank Account</flux:button>
@@ -17,43 +22,43 @@
                 <div class="text-xs"><i>{{$bank->updated_at->diffForHumans()}}</i></div>
             </div>
         </div>
-        @if($error)
-            <flux:subheading class="text-red-800!">
-                {{$error}}
-            </flux:subheading>
-        @endif
 
-        @foreach($bank->accounts as $account)
-            <flux:card class="space-y-2 p-2!">
-                <div class="flex justify-between">
-                    <flux:heading size="lg">{{$account->account_number . ' | ' . $account->type}}</flux:heading>
-                    <div>
-                        <flux:button variant="primary" disabled class="float-right">
-                            @php
-                                $balances = collect($bank->plaid_options->accounts)->where('account_id', $account->plaid_account_id)->first();
-                            @endphp
+        @foreach($bank->accounts as $account_number => $account_types)
+            @foreach($account_types as $account_type => $checks)
+                <flux:card class="space-y-2 p-2!">
+                    <div class="flex justify-between">
+                        <flux:heading size="lg">
+                            {{$account_number}}
+                            <flux:badge inset="top bottom" size="sm" color="sky">{{$account_type}}</flux:badge>
+                        </flux:heading>
+                        {{-- <div>
+                            <flux:button variant="primary" disabled class="float-right">
+                                @php
+                                    $balances = collect($bank->plaid_options->accounts)->where('account_id', $account->plaid_account_id)->first();
+                                @endphp
 
-                            @if(isset($balances))
-                                {{money(isset($balances->balances->available) ? $balances->balances->available : $balances->balances->current)}}
-                            @else
-                                "N/A"
-                            @endif
-                        </flux:button>
+                                @if(isset($balances))
+                                    {{money(isset($balances->balances->available) ? $balances->balances->available : $balances->balances->current)}}
+                                @else
+                                    "N/A"
+                                @endif
+                            </flux:button>
+                        </div> --}}
                     </div>
-                </div>
 
-                @foreach($account->checks()->whereIn('check_type', ['Transfer', 'Check'])->whereYear('date', '>=', 2024)->whereDoesntHave('transactions')->get() as $check)
-                    <flux:card class="p-2!">
-                        <div class="flex justify-between">
-                            <a href="{{route('checks.show', $check->id)}}">
-                                <flux:heading>{{$check->owner}}</flux:heading>
-                                <flux:subheading>{{$check->check_type . ' ' . $check->check_number . ' ' . $check->date->format('m/d/Y')}}</flux:subheading>
-                            </a>
-                            <a href="{{route('checks.show', $check->id)}}" class="text-red-800"><b>{{money($check->amount)}}</b></a>
-                        </div>
-                    </flux:card>
-                @endforeach
-            </flux:card>
+                    @foreach($checks as $check)
+                        <flux:card class="p-2!">
+                            <div class="flex justify-between">
+                                <a href="{{route('checks.show', $check->id)}}">
+                                    <flux:heading>{{$check->owner}}</flux:heading>
+                                    <flux:subheading>{{$check->check_type . ' ' . $check->check_number . ' ' . $check->date->format('m/d/Y')}}</flux:subheading>
+                                </a>
+                                <a href="{{route('checks.show', $check->id)}}" class="text-red-800"><b>{{money($check->amount)}}</b></a>
+                            </div>
+                        </flux:card>
+                    @endforeach
+                </flux:card>
+            @endforeach
         @endforeach
     </flux:card>
 

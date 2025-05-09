@@ -15,20 +15,28 @@ class BankShow extends Component
 
     public Bank $bank;
 
-    public $error = null;
-
     protected $listeners = [
         'plaidLinkItemUpdate' => 'plaid_link_item_update',
     ];
 
-    public function mount()
+    public function mount(Bank $bank)
     {
-        // $this->bank = Bank::findOrFail($this->bank);
-        if ($this->bank->plaid_options->error != false) {
-            $this->error = $this->bank->plaid_options->error->error_code;
-        } else {
-            $this->error = false;
-        }
+    $this->bank = $bank->load('accounts');
+
+    // Group accounts by account_number and type, and include checks in the result
+    $this->bank->accounts = $this->bank->accounts
+        ->groupBy('account_number')
+        ->map(function ($accountsByNumber) {
+            return $accountsByNumber->groupBy('type')->map(function ($accountsByType) {
+                return $accountsByType->flatMap(function ($account) {
+                    return $account->checks()
+                        ->whereIn('check_type', ['Transfer', 'Check'])
+                        ->whereYear('date', '>=', 2024)
+                        ->whereDoesntHave('transactions')
+                        ->get();
+                });
+            });
+        });
     }
 
     //plaidLinkItemUpdate
@@ -161,7 +169,6 @@ class BankShow extends Component
     public function render()
     {
         $this->authorize('create', Bank::class);
-
         return view('livewire.banks.show');
     }
 }

@@ -33,33 +33,21 @@ class Bank extends Model
         return $this->hasMany(BankAccount::class);
     }
 
+    // Custom accessor for the "error" attribute
+    public function getErrorAttribute()
+    {
+        // Check if plaid_options['error']['error_code'] exists
+        if ($this->plaid_options['error']['error_code'] ?? false) {
+            return $this->plaid_options['error'];
+        }
+
+        // Return false if no error exists
+        return false;
+    }
+
     // public function transactions()
     // {
     //     return $this->hasManyThrough(Transaction::class, BankAccount::class);
-    // }
-
-    // public function getPlaidOptionsAttribute($value)
-    // {
-    //     if ($value == null) {
-    //         $plaid_options = null;
-    //     } else {
-    //         $plaid_options = json_decode($value);
-    //     }
-
-    //     return $plaid_options;
-    // }
-
-    // public function getErrorAttribue($value)
-    // {
-    //     return 'error';
-    //     dd($this->plaid_options->error);
-    //     if($this->plaid_options->error != FALSE){
-    //         return $this->plaid_options->error->error_code;
-    //     }else{
-    //         return FALSE;
-    //     }
-
-    //     return $error;
     // }
 
     // public function getLastSuccessfulUpdate()

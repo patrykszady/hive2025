@@ -45,6 +45,13 @@ class MoveController extends Controller
         $tasks = Task::withoutGlobalScopes()->get();
 
         foreach ($tasks as $task) {
+            $task->options = NULL;
+            $task->save();
+        }
+
+        dd('done with tasks');
+
+        foreach ($tasks as $task) {
             if ($task->start_date && $task->end_date) {
                 // Get the range of days the task spans
                 $taskPeriod = CarbonPeriod::create(
