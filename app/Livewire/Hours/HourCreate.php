@@ -115,7 +115,7 @@ class HourCreate extends Component
 
     public function selectedDate($date, $day_index = null)
     {
-        if (! is_null($day_index)) {
+        if (!is_null($day_index)) {
             $this->day_index = $day_index;
             $new_date = $this->days[$day_index];
 
@@ -124,64 +124,50 @@ class HourCreate extends Component
             $this->days[$day_index]['has_hours'] = $has_hours;
         }
 
-        //if current User doesnt have any hours for this date let them add new project, if they do let them edit if not yet paid (or timesheet created)
         $this->selected_date = $date;
 
         $user_day_hours = Hour::where('user_id', auth()->user()->id)
-        ->where('date', $this->selected_date->format('Y-m-d'))
-        ->get();
+            ->where('date', $this->selected_date->format('Y-m-d'))
+            ->get();
 
-        $user_day_hours = Hour::where('user_id', auth()->user()->id)
-        ->where('date', $this->selected_date->format('Y-m-d'))
-        ->get();
-
-        $user_day_hours = Hour::where('user_id', auth()->user()->id)
-        ->where('date', $this->selected_date->format('Y-m-d'))
-        ->get();
-
-        $projects = Project::status(['Active'])->get(); // Only fetch projects where latest status matches
+        $projects = Project::status(['Active'])->get();
 
         $planner_projects_day = Task::where('user_id', auth()->user()->id)
-            ->whereNotNull('start_date')
+            ->whereJsonContains('dates', $this->selected_date->format('Y-m-d')) // Use JSON column to filter tasks
             ->whereNotIn('project_id', $projects->pluck('id')->toArray())
-            ->whereDate('start_date', '>=', $this->selected_date->format('Y-m-d'))
-            ->whereDate('end_date', '<=', $this->selected_date->format('Y-m-d'))
             ->pluck('project_id')
             ->unique();
 
-        $planner_projects_day = Project::whereIn('id', $planner_projects_day)->get(); // Apply the same filter for planner projects
+        $planner_projects_day = Project::whereIn('id', $planner_projects_day)->get();
 
-        $other_projects = Project::whereIn('id', $user_day_hours->pluck('project_id')->unique())->get(); // Apply the same filter for other projects
+        $other_projects = Project::whereIn('id', $user_day_hours->pluck('project_id')->unique())->get();
 
         $merged_projects = $projects->merge($other_projects)->merge($planner_projects_day);
 
         $this->projects = Project::whereIn('id', $merged_projects->pluck('id')->toArray())
             ->with(['tasks' => function ($query) {
                 $query->where('user_id', auth()->user()->id)
-                    ->whereNotNull('start_date')
+                    ->whereNotNull('dates') // Ensure tasks have dates
                     ->each(function ($task) {
-                        $task_duration_days = CarbonPeriod::create($task->start_date, $task->end_date);
-
-                        foreach ($task_duration_days as $task_day) {
-                            $this->day_project_tasks[$task->project->id][$task->id]['dates'][] = $task_day->format('Y-m-d');
+                        foreach ($task->dates as $task_date) { // Iterate over the dates array
+                            $this->day_project_tasks[$task->project->id][$task->id]['dates'][] = $task_date;
                             $this->day_project_tasks[$task->project->id][$task->id]['title'] = $task->title;
                         }
                     });
             }])
-            ->with('latestStatus') // Load the latest status for sorting
+            ->with('latestStatus')
             ->get()
             ->sortBy([
-                ['latestStatus.title', 'asc'], // Sort by latest status title ascending
-                ['latestStatus.start_date', 'desc'] // Sort by latest status start date descending
+                ['latestStatus.title', 'asc'],
+                ['latestStatus.start_date', 'desc']
             ])
             ->keyBy('id');
 
         foreach ($this->day_project_tasks as $project_id => $project_tasks) {
             foreach ($project_tasks as $task_id => $task) {
                 if (in_array($this->selected_date->format('Y-m-d'), $task['dates'])) {
-
+                    // Task is valid for the selected date
                 } else {
-                    //remove $task from array
                     unset($this->day_project_tasks[$project_id][$task_id]);
                 }
             }
@@ -196,12 +182,13 @@ class HourCreate extends Component
                 'form_submit' => 'save',
             ];
         } else {
-            //insert hours into the projects_id array
             foreach ($this->projects as $index => $project) {
-                $project_user_date = Hour::where('user_id', auth()->user()->id)->where('date', $date)->where('project_id', $project->id)->get();
-                if ($project_user_date->isEmpty()) {
+                $project_user_date = Hour::where('user_id', auth()->user()->id)
+                    ->where('date', $date)
+                    ->where('project_id', $project->id)
+                    ->get();
 
-                } else {
+                if (!$project_user_date->isEmpty()) {
                     $project->hours = $project_user_date->first()->hours;
                     $project->hour_id = $project_user_date->first()->id;
                 }
