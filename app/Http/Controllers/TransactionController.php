@@ -1489,8 +1489,14 @@ class TransactionController extends Controller
                 if ($vendor) {
                     $expense->vendor_id = $vendor->vendor_id;
                     $expense->save();
+                }else{
+                    $vendors = Vendor::withoutGlobalScopes()->where('business_type', 'Retail')->get();
+                    $vendor_match = app(\App\Http\Controllers\CompanyEmailController::class)->fuzzyMatchVendor($merchant_name, $vendors);
 
-                    continue;
+                    if ($vendor_match) {
+                        $expense->vendor_id = $vendor_match->id;
+                        $expense->save();
+                    }
                 }
             }
 
