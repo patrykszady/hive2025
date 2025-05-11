@@ -340,7 +340,7 @@ class ExpenseCreate extends Component
         if ($this->split == true && empty($this->expense_splits)) {
             return $this->addError('no_splits', 'Splits required if Project is Split');
         }
-        // return $this->dispatch('validateCheck')->to(CheckCreate::class);
+
         $expense = $this->form->store();
         $this->modal('expenses_form_modal')->close();
 

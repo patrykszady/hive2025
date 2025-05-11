@@ -39,7 +39,7 @@ class TransactionController extends Controller
     private function syncBankTransactions(Bank $bank)
     {
         $accessToken = $bank->plaid_access_token;
-        $cursor = $bank->plaid_options['next_cursor'] ?? null; // Use null coalescing operator
+        $cursor = null; // Use null coalescing operator
         $count = 200;
 
         return $this->plaidService->syncTransactions($accessToken, $cursor, $count);
@@ -237,7 +237,7 @@ class TransactionController extends Controller
 
     public function plaid_transactions_sync()
     {
-        $banks = Bank::withoutGlobalScopes()->whereNotNull('plaid_access_token')->get();
+        $banks = Bank::withoutGlobalScopes()->whereNotNull('plaid_access_token')->where('id', 23)->get();
 
         //if not in error state...
         foreach ($banks as $bank) {
@@ -252,6 +252,7 @@ class TransactionController extends Controller
     public function plaid_transactions_sync_bank(Bank $bank)
     {
         $result = $this->syncBankTransactions($bank);
+        dd($result);
 
         $bank_account_ids = $bank->accounts->pluck('id')->toArray();
 

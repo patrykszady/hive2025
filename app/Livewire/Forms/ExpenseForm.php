@@ -521,6 +521,7 @@ class ExpenseForm extends Form
         if ($this->transaction) {
             $this->transaction->check_id = isset($check) ? $check->id : null;
             $this->transaction->expense_id = isset($expense) ? $expense->id : null;
+            $this->transaction->vendor_id = isset($this->vendor_id) ? $this->vendor_id : null;
             $this->transaction->save();
         }
 

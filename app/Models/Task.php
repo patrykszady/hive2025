@@ -17,7 +17,7 @@ class Task extends Model
 {
     use HasFactory, SoftDeletes, Sortable;
 
-    protected $fillable = ['title', 'project_id', 'dates', 'order', 'options', 'options->include_weekend_days', 'type', 'vendor_id', 'user_id', 'user_ids', 'progress', 'notes', 'belongs_to_vendor_id', 'created_by_user_id', 'created_at', 'updated_at', 'deleted_at'];
+    protected $fillable = ['title', 'project_id', 'dates', 'order', 'options', 'type', 'vendor_id', 'user_ids', 'progress', 'notes', 'belongs_to_vendor_id', 'created_by_user_id', 'created_at', 'updated_at', 'deleted_at'];
 
     /**
      * Get the attributes that should be cast.
@@ -29,7 +29,7 @@ class Task extends Model
         return [
             'options' => 'object',
             'dates' => 'array',
-            'user_ids' => 'object',
+            'user_ids' => 'array',
         ];
     }
 
@@ -48,38 +48,15 @@ class Task extends Model
         return $this->belongsTo(Vendor::class);
     }
 
-    public function user(): BelongsTo
+    public function getUsersAttribute()
     {
-        return $this->belongsTo(User::class);
-    }
-
-    protected function userId(): Attribute
-    {
-        return Attribute::make(
-            set: fn ($value) => empty($value) ? null : $value,
-        );
+        return User::whereIn('id', $this->user_ids ?? [])->get();
     }
 
     protected function vendorId(): Attribute
     {
         return Attribute::make(
             set: fn ($value) => empty($value) ? null : $value,
-        );
-    }
-
-    //5/7/2024 should just work because of $casts above
-    protected function startDate(): Attribute
-    {
-        return Attribute::make(
-            set: fn ($value) => $value != null ? Carbon::parse($value)->format('Y-m-d') : null,
-        );
-    }
-
-    //5/7/2024 should just work because of $casts above
-    protected function endDate(): Attribute
-    {
-        return Attribute::make(
-            set: fn ($value) => $value != null ? Carbon::parse($value)->format('Y-m-d') : null,
         );
     }
 }

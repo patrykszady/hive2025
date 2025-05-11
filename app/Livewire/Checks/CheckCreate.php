@@ -26,7 +26,7 @@ class CheckCreate extends Component
     ];
     // public $payment_type = NULL;
 
-    protected $listeners = ['validateCheck', 'editCheck'];
+    protected $listeners = ['editCheck'];
 
     public function mount()
     {
@@ -56,11 +56,6 @@ class CheckCreate extends Component
 
         // $this->validate();
         $this->validateOnly($field);
-    }
-
-    public function validateCheck()
-    {
-        dd('in validateCheck');
     }
 
     public function editCheck(Check $check)

@@ -78,7 +78,6 @@ class BoardIndex extends Component
             $options->include_weekend_days = $include_weekends;
             $task->options = $options;
 
-            //2024-12-15 SAME ON PlannerCard
             //if not weekend day/ set true on $task
             // $excludeSaturdays = !isset($include_weekends['saturday']) || $include_weekends['saturday'] === false;
             // $excludeSundays = !isset($include_weekends['sunday']) || $include_weekends['sunday'] === false;

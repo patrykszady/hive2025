@@ -29,8 +29,8 @@ class TaskForm extends Form
     #[Validate('nullable')]
     public $vendor_id = null;
 
-    #[Validate('nullable')]
-    public $user_id = null;
+    #[Validate('array')]
+    public $user_ids = null;
 
     #[Validate('required')]
     public $type = 'Task';
@@ -51,7 +51,7 @@ class TaskForm extends Form
         $this->type = $task->type;
         $this->title = $task->title;
         $this->notes = $task->notes;
-        $this->user_id = $task->user_id;
+        $this->user_ids = $task->user_ids ?? []; // Load user_ids as an array
     }
 
     public function update()
@@ -64,7 +64,7 @@ class TaskForm extends Form
             'project_id' => $this->project_id,
             'vendor_id' => $this->vendor_id,
             'type' => $this->type,
-            'user_id' => $this->user_id,
+            'user_ids' => $this->user_ids,
             'title' => $this->title,
             'notes' => $this->notes,
             'duration' => count($this->dates), // Update duration based on the number of dates
@@ -84,7 +84,7 @@ class TaskForm extends Form
             'project_id' => $this->project_id,
             'vendor_id' => $this->vendor_id,
             'type' => $this->type,
-            'user_id' => $this->user_id,
+            'user_ids' => $this->user_ids,
             'title' => $this->title,
             'notes' => $this->notes,
             'order' => 0,

@@ -43,9 +43,14 @@
     </style>
     @stack('styles')
 
+    <!-- Java Scripts -->
     {{-- ALPINE CORE INCLUDED WITH LIVEWIRE --}}
     <!-- Alpine Plugins -->
     <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/sort@3.x.x/dist/cdn.min.js"></script>
+
+    <!-- Plaid Link -->
+    <script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+    @vite(['resources/js/app.js'])
 
     @fluxAppearance
 </head>

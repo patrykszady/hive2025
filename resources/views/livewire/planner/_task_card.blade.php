@@ -30,9 +30,12 @@
             @endif
 
             <!-- User Avatar Group in Bottom-Right -->
-            @if($task->user)
+            @if($task->users->count() > 0)
                 <flux:avatar.group class="ml-auto">
-                    <flux:avatar size="xs" name="{{ $task->user->full_name }}" color="auto" color:seed="{{ $task->user->id }}" />
+                    @foreach($task->users as $user)
+                        <flux:avatar size="xs" name="{{ $user->full_name }}" color="auto" color:seed="{{ $user->id }}" />
+                    {{-- <flux:avatar size="xs" name="{{ $task->user->full_name }}" color="auto" color:seed="{{ $task->user->id }}" /> --}}
+                    @endforeach
                 </flux:avatar.group>
             @endif
         </div>

@@ -45,11 +45,19 @@ class MoveController extends Controller
         $tasks = Task::withoutGlobalScopes()->get();
 
         foreach ($tasks as $task) {
-            $task->options = NULL;
-            $task->save();
+            if($task->user_id){
+                $task->user_ids = [$task->user_id];
+                $task->user_id = NULL;
+                $task->save();
+            }
         }
 
         dd('done with tasks');
+
+        foreach ($tasks as $task) {
+            $task->options = NULL;
+            $task->save();
+        }
 
         foreach ($tasks as $task) {
             if ($task->start_date && $task->end_date) {

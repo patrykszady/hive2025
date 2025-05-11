@@ -5,9 +5,18 @@
     "isEntry": true
   },
   "resources/js/app.js": {
-    "file": "assets/app-l0sNRNKZ.js",
+    "file": "assets/app-NRGZY_4E.js",
     "name": "app",
     "src": "resources/js/app.js",
+    "isEntry": true,
+    "imports": [
+      "resources/js/plaid-link.js"
+    ]
+  },
+  "resources/js/plaid-link.js": {
+    "file": "assets/plaid-link-ty1XkTMs.js",
+    "name": "plaid-link",
+    "src": "resources/js/plaid-link.js",
     "isEntry": true
   }
 }

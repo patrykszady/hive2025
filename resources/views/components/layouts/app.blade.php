@@ -142,7 +142,9 @@
             </flux:dropdown>
         </flux:sidebar>
 
-
+        {{-- <flux:header class="lg:hidden" sticky>
+            <flux:sidebar.toggle class="lg:hidden" icon="bars-2" inset="left" />
+        </flux:header> --}}
 
         <flux:main
             {{-- x-data
@@ -154,9 +156,6 @@
             {{ $slot }}
         </flux:main>
 
-        {{-- <flux:header class="lg:hidden" sticky>
-            <flux:sidebar.toggle class="lg:hidden" icon="bars-2" inset="left" />
-        </flux:header> --}}
         <div class="fixed top-4 left-6 lg:hidden"><flux:sidebar.toggle icon="bars-2" /></div>
 
         @persist('toast')
