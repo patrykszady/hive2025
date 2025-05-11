@@ -4,8 +4,11 @@ namespace App\Livewire\Banks;
 
 use App\Models\Bank;
 use App\Services\PlaidService;
+
 use Carbon\Carbon;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\Facades\Log;
+
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;

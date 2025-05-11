@@ -132,11 +132,13 @@ class HourCreate extends Component
 
         $projects = Project::status(['Active'])->get();
 
-        $planner_projects_day = Task::where('user_id', auth()->user()->id)
+        $planner_projects_day = Task::whereJsonContains('user_ids', auth()->user()->id)
             ->whereJsonContains('dates', $this->selected_date->format('Y-m-d')) // Use JSON column to filter tasks
             ->whereNotIn('project_id', $projects->pluck('id')->toArray())
             ->pluck('project_id')
             ->unique();
+
+        // dd($planner_projects_day);
 
         $planner_projects_day = Project::whereIn('id', $planner_projects_day)->get();
 
@@ -146,7 +148,7 @@ class HourCreate extends Component
 
         $this->projects = Project::whereIn('id', $merged_projects->pluck('id')->toArray())
             ->with(['tasks' => function ($query) {
-                $query->where('user_id', auth()->user()->id)
+                $query->whereJsonContains('user_ids', auth()->user()->id)
                     ->whereNotNull('dates') // Ensure tasks have dates
                     ->each(function ($task) {
                         foreach ($task->dates as $task_date) { // Iterate over the dates array

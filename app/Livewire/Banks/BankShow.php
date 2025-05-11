@@ -9,6 +9,7 @@ use App\Services\PlaidService;
 use Carbon\Carbon;
 
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\Facades\Log;
 
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -57,26 +58,14 @@ class BankShow extends Component
             'webhook' => env('PLAID_WEBHOOK'),
             'access_token' => $this->bank->plaid_access_token,
             'products' => ['transactions'],
-            'required_if_supported_products' => ['statements'],
-            'statements' => [
-                'start_date' => Carbon::today()->subMonth()->startOfMonth()->format('Y-m-d'),
-                'end_date' => Carbon::today()->subMonth()->endOfMonth()->format('Y-m-d'),
-            ],
         ];
 
         $result = $plaidService->createLinkToken($data);
 
-        // Ensure the link_token is dispatched correctly
         if (isset($result['link_token'])) {
             $this->dispatch('linkTokenUpdate', [
                 'exchangeToken' => $result['link_token'],
                 'bankId' => $this->bank->id,
-            ]);
-        } else {
-            // Handle the case where the link_token is missing
-            $this->dispatch('toast', [
-                'type' => 'error',
-                'message' => 'Failed to generate Plaid link token.',
             ]);
         }
     }
@@ -89,19 +78,17 @@ class BankShow extends Component
 
         if (isset($result['error']) && $result['error'] === true) {
             // Update the Bank model with the error details
-            $this->bank->plaid_options = json_encode([
-                'error' => true,
-                'error_code' => $result['error_code'],
-                'error_message' => $result['error_message'],
-                'error_body' => $result['error_body'] ?? null,
-            ]);
-            $this->bank->save();
+            $this->handlePlaidError(
+                $result['error'],
+                $bankId
+            );
+
 
             // Display an error message using flux.ui toast
-            $this->dispatch('toast', [
-                'type' => 'error',
-                'message' => 'An error occurred while updating the bank link: ' . $result['error_message'],
-            ]);
+            // $this->dispatch('toast', [
+            //     'type' => 'error',
+            //     'message' => 'An error occurred while updating the bank link: ' . $result['error_message'],
+            // ]);
 
             return;
         }
@@ -112,38 +99,40 @@ class BankShow extends Component
         $this->render();
 
         // Dispatch a success toast
-        $this->dispatch('toast', [
-            'type' => 'success',
-            'message' => 'Bank link updated successfully!',
-        ]);
+        // $this->dispatch('toast', [
+        //     'type' => 'success',
+        //     'message' => 'Bank link updated successfully!',
+        // ]);
 
         $this->dispatch('confirmProcessStep', 'banks_registered')->to('entry.vendor-registration');
     }
 
     //plaidError
-    public function handlePlaidError($errorData)
+    public function handlePlaidError($errorData, $bankId)
     {
         // Find the bank being updated using the bank_id
-        $bank = Bank::find($errorData['bank_id']);
+        $bank = Bank::find($bankId);
 
         if ($bank) {
             // Update the Bank model with the error details
-            $bank->plaid_options = json_encode([
-                'error' => true,
-                'error_type' => $errorData['error_type'],
-                'error_code' => $errorData['error_code'],
-                'error_message' => $errorData['error_message'],
-                'display_message' => $errorData['display_message'],
-                'request_id' => $errorData['request_id'],
-            ]);
+            $bank->plaid_options = [
+                'error' => [
+                    'error' => true,
+                    'error_type' => $errorData['error_type'],
+                    'error_code' => $errorData['error_code'],
+                    'error_message' => $errorData['error_message'],
+                    'display_message' => $errorData['display_message'],
+                    'request_id' => $errorData['request_id'],
+                ]
+            ];
             $bank->save();
         }
 
         // Display an error message using flux.ui toast
-        $this->dispatch('toast', [
-            'type' => 'error',
-            'message' => 'An error occurred while updating the bank: ' . $errorData['error_message'],
-        ]);
+        // $this->dispatch('toast', [
+        //     'type' => 'error',
+        //     'message' => 'An error occurred while updating the bank: ' . $errorData['error_message'],
+        // ]);
     }
 
     #[Title('Bank')]
