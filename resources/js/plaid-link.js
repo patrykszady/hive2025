@@ -40,20 +40,9 @@ function initializePlaidLink(exchangeToken, eventName, bankId = null) {
 
         onExit: function (err, metadata) {
             if (err) {
-                console.error('Plaid API error:', err);
-
                 Livewire.dispatch('plaidError', {
                     errorData: err,
                     bankId: bankId,
-                });
-
-                console.log('Dispatching plaidError event with data:', {
-                    bank_id: bankId,
-                    error_type: err.error_type || 'Unknown',
-                    error_code: err.error_code || 'Unknown',
-                    error_message: err.error_message || 'An unknown error occurred.',
-                    display_message: err.display_message || 'No additional information provided.',
-                    request_id: err.request_id || 'N/A',
                 });
             }
         },

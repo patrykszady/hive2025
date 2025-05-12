@@ -9,7 +9,6 @@ use App\Services\PlaidService;
 use Carbon\Carbon;
 
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
-use Illuminate\Support\Facades\Log;
 
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -24,12 +23,11 @@ class BankShow extends Component
     protected $listeners = [
         'plaidLinkItemUpdate' => 'plaid_link_item_update',
         'plaidError' => 'handlePlaidError',
+        'refreshComponent' => '$refresh',
     ];
 
     public function mount(Bank $bank)
     {
-        // $this->bank = $bank->load('accounts');
-
         // Group accounts by account_number and type, and include checks in the result
         $this->accounts = $this->bank->accounts
             ->groupBy('account_number')
@@ -114,20 +112,30 @@ class BankShow extends Component
         $bank = Bank::find($bankId);
 
         if ($bank) {
-            // Update the Bank model with the error details
-            $bank->plaid_options = [
-                'error' => [
-                    'error' => true,
-                    'error_type' => $errorData['error_type'],
-                    'error_code' => $errorData['error_code'],
-                    'error_message' => $errorData['error_message'],
-                    'display_message' => $errorData['display_message'],
-                    'request_id' => $errorData['request_id'],
-                ]
+            // Retrieve the current plaid_options as an array
+            $plaidOptions = $bank->plaid_options;
+
+            // Ensure plaid_options is an array (in case it's null or not set)
+            if (!is_array($plaidOptions)) {
+                $plaidOptions = [];
+            }
+
+            // Update or create the 'error' key
+            $plaidOptions['error'] = [
+                'error' => true,
+                'error_type' => $errorData['error_type'],
+                'error_code' => $errorData['error_code'],
+                'error_message' => $errorData['error_message'],
+                'display_message' => $errorData['display_message'],
+                'request_id' => $errorData['request_id'],
             ];
+
+            // Assign the updated array back to the plaid_options attribute
+            $bank->plaid_options = $plaidOptions;
             $bank->save();
         }
 
+        $this->bank = $bank;
         // Display an error message using flux.ui toast
         // $this->dispatch('toast', [
         //     'type' => 'error',
