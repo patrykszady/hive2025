@@ -237,7 +237,7 @@ class TransactionController extends Controller
 
     public function plaid_transactions_sync()
     {
-        $banks = Bank::withoutGlobalScopes()->whereNotNull('plaid_access_token')->where('id', 23)->get();
+        $banks = Bank::withoutGlobalScopes()->whereNotNull('plaid_access_token')->get();
 
         //if not in error state...
         foreach ($banks as $bank) {
@@ -252,8 +252,6 @@ class TransactionController extends Controller
     public function plaid_transactions_sync_bank(Bank $bank)
     {
         $result = $this->syncBankTransactions($bank);
-        dd($result);
-
         $bank_account_ids = $bank->accounts->pluck('id')->toArray();
 
         if($result['transactions_update_status'] ?? 'HISTORICAL_UPDATE_COMPLETE') {
