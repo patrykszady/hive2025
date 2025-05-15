@@ -1208,40 +1208,44 @@ class TransactionController extends Controller
                     foreach ($transactions_by_name as $transactions) {
                         //summy
                         //clear array before next foreach statement
-                        if (stristr($transactions[0]['transfer_name'], strtolower($check->user->first_name))) {
+                        if($check->user){
+                            if (stristr($transactions[0]['transfer_name'], strtolower($check->user->first_name))) {
 
-                            $transaction_results = [];
-                            $transaction_ids = $transactions->pluck('id')->toArray();
-                            $transaction_plucked = $transactions->pluck('amount')->toArray();
+                                $transaction_results = [];
+                                $transaction_ids = $transactions->pluck('id')->toArray();
+                                $transaction_plucked = $transactions->pluck('amount')->toArray();
 
-                            $arr = array_values(array_filter($transaction_plucked));
-                            $n = count($arr);
-                            $ids = $transaction_ids;
+                                $arr = array_values(array_filter($transaction_plucked));
+                                $n = count($arr);
+                                $ids = $transaction_ids;
 
-                            $results = collect($this->subsetSums($arr, $n, $ids, 'transaction'))->sortBy('sum');
+                                $results = collect($this->subsetSums($arr, $n, $ids, 'transaction'))->sortBy('sum');
 
-                            foreach ($results as $key => $result) {
-                                $sum = number_format($result['sum'], 2, '.', '');
-                                //this can happen multiple of times.. eg transaction_id 6230
+                                foreach ($results as $key => $result) {
+                                    $sum = number_format($result['sum'], 2, '.', '');
+                                    //this can happen multiple of times.. eg transaction_id 6230
 
-                                //is this Transaction a RETURN CHECK "DEPOSIT"?
-                                if ($sum == $check->amount) {
-                                    $transaction_results = $result;
+                                    //is this Transaction a RETURN CHECK "DEPOSIT"?
+                                    if ($sum == $check->amount) {
+                                        $transaction_results = $result;
+                                    }
                                 }
-                            }
 
-                            // dd($transaction_results);
+                                // dd($transaction_results);
 
-                            if (isset($transaction_results['transactions'])) {
-                                $transaction_results = collect($transaction_results['transactions']);
+                                if (isset($transaction_results['transactions'])) {
+                                    $transaction_results = collect($transaction_results['transactions']);
 
-                                foreach ($transaction_results as $transaction) {
-                                    $transaction = Transaction::findOrFail($transaction['transaction_id']);
-                                    $transaction->check()->associate($check);
-                                    $transaction->save();
+                                    foreach ($transaction_results as $transaction) {
+                                        $transaction = Transaction::findOrFail($transaction['transaction_id']);
+                                        $transaction->check()->associate($check);
+                                        $transaction->save();
+                                    }
                                 }
+                            } else {
+                                continue;
                             }
-                        } else {
+                        }else{
                             continue;
                         }
                     }
