@@ -36,10 +36,10 @@ class TransactionController extends Controller
         $this->plaidService = $plaidService;
     }
 
-    private function syncBankTransactions(Bank $bank)
+    private function syncBankTransactions(Bank $bank, $cursor = null)
     {
         $accessToken = $bank->plaid_access_token;
-        $cursor = null; // Use null coalescing operator
+        $cursor = $cursor ? $bank->plaid_options['next_cursor'] : null;
         $count = 200;
 
         return $this->plaidService->syncTransactions($accessToken, $cursor, $count);
@@ -251,11 +251,11 @@ class TransactionController extends Controller
 
     public function plaid_transactions_sync_bank(Bank $bank)
     {
-        $result = $this->syncBankTransactions($bank);
+        $result = $this->syncBankTransactions($bank, true);
         $bank_account_ids = $bank->accounts->pluck('id')->toArray();
 
         if($result['transactions_update_status'] ?? 'HISTORICAL_UPDATE_COMPLETE') {
-            $transactions_last_date = Transaction::whereIn('bank_account_id', $bank_account_ids)->latest()->first()->transaction_date->subWeeks(4)->format('Y-m-d');
+            $transactions_last_date = Transaction::whereIn('bank_account_id', $bank_account_ids)->latest()->first()->transaction_date->subWeeks(3)->format('Y-m-d');
         }else{
             $transactions_last_date = '2025-01-01';
         }
@@ -266,13 +266,10 @@ class TransactionController extends Controller
 
         //if not in error state...
         if (! array_key_exists('error_code', $result)) {
-            $add_to_json =
-                [
-                    'next_cursor' => $result['next_cursor'],
-                    // "accounts" => $result["accounts"],
-                ];
-
-            $bank->plaid_options = array_merge($bank->plaid_options ?? [], $add_to_json);
+            $plaidOptions = $bank->plaid_options;
+            $plaidOptions['next_cursor'] = $result['next_cursor'];
+            $plaidOptions['accounts'] = $result['accounts'];
+            $bank->plaid_options = $plaidOptions;
             $bank->save();
 
             if ($result['has_more'] == true) {
@@ -409,12 +406,12 @@ class TransactionController extends Controller
     //03-07-2025 use after updating an Item so transactions are in sync between different bank_account_ids for each/same bank
     public function plaid_transactions_get()
     {
-        $banks = Bank::withoutGlobalScopes()->whereNotNull('plaid_access_token')->get();
+        $banks = Bank::withoutGlobalScopes()->whereNotNull('plaid_access_token')->where('id', 23)->get();
 
         foreach ($banks as $bank) {
             $accessToken = $bank->plaid_access_token;
-            $startDate = '2025-02-15';
-            $endDate = '2025-02-27';
+            $startDate = '2025-04-28';
+            $endDate = '2025-05-15';
             $result = $this->plaidService->getTransactions($accessToken, $startDate, $endDate);
 
             $bank_account_ids = $bank->accounts->pluck('id')->toArray();
@@ -474,6 +471,7 @@ class TransactionController extends Controller
         // if(!$bank_accounts->where('plaid_account_id', $new_transaction['account_id'])->first()->id){
         //     dd($bank_accounts->where('plaid_account_id', $new_transaction['account_id'])->first());
         // }
+        // dd($new_transaction['account_id']);
         $transaction->bank_account_id = BankAccount::where('plaid_account_id', $new_transaction['account_id'])->first()->id;
         if ($new_transaction['check_number'] != null) {
             $transaction->check_number = $new_transaction['check_number'];
