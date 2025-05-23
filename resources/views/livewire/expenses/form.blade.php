@@ -121,7 +121,7 @@
             x-transition
             >
             <flux:select label="Paid By" wire:model.live="form.paid_by" placeholder="Choose who paid...">
-                <flux:select.option value="NULL">{{auth()->user()->vendor->name}}</flux:select.option>
+                <flux:select.option value="">{{auth()->user()->vendor->name}}</flux:select.option>
                 @foreach($employees as $employee)
                     <flux:select.option value="{{$employee->id}}">{{$employee->first_name}}</flux:select.option>
                 @endforeach
@@ -175,8 +175,8 @@
 
                 <flux:select wire:model.live="form.reimbursment" placeholder="Choose reimbursment...">
                     {{--  x-bind:selected="split == true ? true : false" --}}
-                    <flux:select.option>None</flux:select.option>
-                    <flux:select.option x-bind:disabled="project_completed">Client</flux:select.option>
+                    <flux:select.option value="">None</flux:select.option>
+                    <flux:select.option x-bind:disabled="project_completed" value="Client">Client</flux:select.option>
                     @foreach ($via_vendor_employees as $employee)
                         <flux:select.option value="{{$employee->id}}">{{$employee->first_name}}</flux:select.option>
                     @endforeach

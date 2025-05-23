@@ -738,7 +738,6 @@ class TransactionController extends Controller
         $vendors = Vendor::withoutGlobalScopes()->where('business_type', 'Retail')->get();
 
         foreach ($transactions as $merchant_name => $merchant_transactions) {
-
             //find vendor where vendor->business_name is contained in $merchant_name
             $vendor_match = app(\App\Http\Controllers\CompanyEmailController::class)->fuzzyMatchVendor($merchant_name, $vendors);
 

@@ -27,16 +27,16 @@ class TimesheetPaymentIndex extends Component
             // dd($user);
 
             $weekly_timesheets =
-            Timesheet::where('user_id', $user->id)
-                ->whereNull('check_id')
-                ->whereNull('paid_by')
-                ->whereNull('deleted_at')
-                ->orderBy('date', 'DESC')
-                ->get()
-                ->each(function ($item, $key) {
-                    $item->checkbox = true;
-                })
-                ->keyBy('id');
+                Timesheet::where('user_id', $user->id)
+                    ->whereNull('check_id')
+                    ->whereNull('paid_by')
+                    ->whereNull('deleted_at')
+                    ->orderBy('date', 'DESC')
+                    ->get()
+                    ->each(function ($item, $key) {
+                        $item->checkbox = true;
+                    })
+                    ->keyBy('id');
             // ->groupBy(function($data) {
             //     // ->startOfWeek()->toFormattedDateString()
             //     return $data->date->format('Y-m-d');
@@ -44,15 +44,15 @@ class TimesheetPaymentIndex extends Component
             // ->toBase();
 
             $employee_weekly_timesheets =
-                    Timesheet::with('user')
-                        ->where('paid_by', $user->id)
-                        ->whereNull('check_id')
-                        ->whereNull('deleted_at')
-                        ->orderBy('date', 'DESC')
-                        ->get()
-                        ->each(function ($item, $key) {
-                            $item->checkbox = true;
-                        })
+                Timesheet::with('user')
+                    ->where('paid_by', $user->id)
+                    ->whereNull('check_id')
+                    ->whereNull('deleted_at')
+                    ->orderBy('date', 'DESC')
+                    ->get()
+                    ->each(function ($item, $key) {
+                        $item->checkbox = true;
+                    })
                         ->keyBy('id');
 
             $user_paid_expenses =
@@ -91,13 +91,12 @@ class TimesheetPaymentIndex extends Component
                         // $item->amount = -$item->amount;
                     })
                     ->keyBy('id');
-            // dd($this->user_paid_by_reimbursements);
+            // dd($weekly_timesheets, $employee_weekly_timesheets, $user_paid_expenses, $user_reimbursement_expenses, $user_paid_by_reimbursements);
             // // foreach($this->user_paid_by_reimbursements as $user_paid_by_reimbursement_expense){
             // //     $user_paid_by_reimbursement_expense->amount = '-' . $user_paid_by_reimbursement_expense->amount;
             // //     // dd($user_paid_by_reimbursement_expense->amount);
             // // }
 
-            // // dd($this->user_paid_by_reimbursements);
             // // dd($this->user_paid_by_reimbursements->first()->reimbursment);
 
             if ($weekly_timesheets->isEmpty()) {
@@ -163,6 +162,8 @@ class TimesheetPaymentIndex extends Component
         //         ->get()
         //         ->groupBy('user_id');
         //         // ->groupBy('date');
+
+        // dd($vendor_users);
 
         return view('livewire.timesheets.payment-index', [
             // 'user_timesheets' => $user_timesheets,

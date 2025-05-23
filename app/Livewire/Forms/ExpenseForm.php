@@ -394,7 +394,7 @@ class ExpenseForm extends Form
             'vendor_id' => $this->vendor_id,
             // 'check_id' => $check_id,
             'paid_by' => empty($this->paid_by) ? null : $this->paid_by,
-            'reimbursment' => $this->reimbursment,
+            'reimbursment' => empty($this->reimbursment) ? null : $this->reimbursment,
             // 'belongs_to_vendor_id' => $vendor->id,
             'created_by_user_id' => auth()->user()->id,
         ]);
@@ -513,7 +513,7 @@ class ExpenseForm extends Form
             'vendor_id' => $this->vendor_id,
             'check_id' => ! isset($check) ? null : $check->id,
             'paid_by' => empty($this->paid_by) ? null : $this->paid_by,
-            'reimbursment' => $this->reimbursment,
+            'reimbursment' => empty($this->reimbursment) ? null : $this->reimbursment,
             'belongs_to_vendor_id' => auth()->user()->vendor->id,
             'created_by_user_id' => auth()->user()->id,
         ]);

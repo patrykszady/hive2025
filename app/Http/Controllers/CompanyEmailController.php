@@ -706,10 +706,10 @@ class CompanyEmailController extends Controller
             // Normalize the vendor name similarly.
             $normalizedVendor = preg_replace('/[^\w\s]+/', '', strtolower($vendor->business_name));
 
-            // Look for an immediate substring match.
-            if (stripos($ocrNormalized, $normalizedVendor) !== false) {
-                return $vendor;
-            }
+            // // Look for an immediate substring match.
+            // if (stripos($ocrNormalized, $normalizedVendor) !== false) {
+            //     return $vendor;
+            // }
 
             // If not an immediate match, calculate similarity.
             similar_text($ocrNormalized, $normalizedVendor, $percent);

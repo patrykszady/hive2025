@@ -298,6 +298,7 @@ class ExpenseCreate extends Component
             return $this->addError('no_splits', 'Splits required if Project is Split');
         }
 
+        // dd($this);
         $expense = $this->form->update();
         $this->modal('expenses_form_modal')->close();
         // $this->resetModal();

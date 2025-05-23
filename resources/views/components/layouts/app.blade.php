@@ -27,7 +27,7 @@
                     {{-- SYSTEM ERRORS --}}
 
                     {{-- BANK ERRORS --}}
-                    {{-- @can('viewAny', App\Models\Bank::class)
+                    @can('viewAny', App\Models\Bank::class)
                         @if(!auth()->user()->vendor->banks()->whereNotNull('plaid_access_token')->get()->where('plaid_options.error', '!=', FALSE)->isEmpty())
                             <flux:navlist.item wire:navigate.hover icon="building-library" href="/banks">
                                 Banks
@@ -35,8 +35,9 @@
                                     Error
                                 </flux:badge>
                             </flux:navlist.item>
+                            <flux:separator class="my-2" />
                         @endif
-                    @endcan --}}
+                    @endcan
 
                     {{-- COMPANY EMAILS ERRORS --}}
                     {{-- @if(auth()->user()->vendor->company_emails()->get()->whereNotNull('api_json.errors')->isNotEmpty())
