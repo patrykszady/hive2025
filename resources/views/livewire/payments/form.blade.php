@@ -7,7 +7,15 @@
 
     <form wire:submit="{{$view_text['form_submit']}}" class="grid gap-6">
         {{-- CLIENT --}}
-        <flux:select x-bind:disabled="{{$view_text['form_submit'] === 'update'}}" label="Client" wire:model.live="client_id" variant="listbox" searchable placeholder="Choose client...">
+        <flux:select
+            label="Client"
+            variant="listbox"
+            searchable
+            placeholder="Choose client..."
+            wire:model.live="client_id"
+            {{-- $wire.view_text['form_submit'] == 'update' --}}
+            x-bind:disabled="$wire.client && $wire.view"
+            >
             @foreach($this->clients as $client)
                 <flux:select.option value="{{$client->id}}">{{$client->name}}</flux:select.option>
             @endforeach

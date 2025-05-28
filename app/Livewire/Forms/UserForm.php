@@ -4,7 +4,9 @@ namespace App\Livewire\Forms;
 
 use App\Models\User;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
-use Livewire\Attributes\Rule;
+use Illuminate\Validation\Rule;
+
+use Livewire\Attributes\Validate;
 use Livewire\Form;
 
 class UserForm extends Form
@@ -13,29 +15,60 @@ class UserForm extends Form
 
     public ?User $user;
 
-    #[Rule('required')]
+    #[Validate('required|min:2')]
     public $first_name = null;
 
-    #[Rule('required')]
+    #[Validate('required|min:2')]
     public $last_name = null;
 
-    #[Rule('required')]
     public $email = null;
 
-    #[Rule('nullable')]
+    #[Validate('nullable')]
     public $role = null;
 
-    #[Rule('required_with:role')]
+    #[Validate('required_with:role')]
     public $hourly_rate = null;
 
-    #[Rule('nullable')]
+    #[Validate('nullable')]
     public $via_vendor = null;
 
-    #[Rule('nullable')]
+    #[Validate('nullable')]
     public $business_type = null;
 
-    #[Rule('nullable')]
+    #[Validate('nullable')]
     public $business_name = null;
+
+    public function rules()
+    {
+        return [
+            'email' => [
+                'required',
+                'email',
+                'min:4',
+                Rule::unique('users', 'email')->ignore($this->user?->id),
+            ],
+            // 'user.role' =>
+            //     Rule::requiredIf(function(){
+            //         if($this->model['type'] == 'vendor'){
+            //             return true;
+            //         }else{
+            //             return false;
+            //         }
+            //     }),
+            // 'user.hourly_rate' =>
+            //     Rule::requiredIf(function(){
+            //         if($this->model['id'] == 'NEW' && $this->model['type'] == 'vendor'){
+            //             return false;
+            //         }elseif($this->model['type'] == 'client'){
+            //             return false;
+            //         }elseif($this->model['id'] == auth()->user()->vendor->id && $this->model['type'] == 'vendor'){
+            //             return true;
+            //         }else{
+            //             return false;
+            //         }
+            //     }),
+        ];
+    }
     // #[Rule('required')]
     // public $cell_phone = NULL;
 
@@ -47,41 +80,6 @@ class UserForm extends Form
     // #[Rule('required|digits:10')]
     // public $cell_phone = NULL;
 
-    // #[Rule('required|min:3', as: 'project name')]
-    // public $project_name = NULL;
-    // protected function rules()
-    // {
-    //     return [
-    //         'user.first_name' => 'required|min:2',
-    //         'user.last_name' => 'required|min:2',
-    //         'user.email' => [
-    //             'required',
-    //             'email',
-    //             'min:6',
-    //             Rule::unique('users', 'email')->ignore($this->user->id),
-    //         ],
-    //         'user.role' =>
-    //             Rule::requiredIf(function(){
-    //                 if($this->model['type'] == 'vendor'){
-    //                     return true;
-    //                 }else{
-    //                     return false;
-    //                 }
-    //             }),
-    //         'user.hourly_rate' =>
-    //             Rule::requiredIf(function(){
-    //                 if($this->model['id'] == 'NEW' && $this->model['type'] == 'vendor'){
-    //                     return false;
-    //                 }elseif($this->model['type'] == 'client'){
-    //                     return false;
-    //                 }elseif($this->model['id'] == auth()->user()->vendor->id && $this->model['type'] == 'vendor'){
-    //                     return true;
-    //                 }else{
-    //                     return false;
-    //                 }
-    //             }),
-    //     ];
-    // }
 
     public function setUser(User $user)
     {
@@ -102,6 +100,20 @@ class UserForm extends Form
             'last_name' => $this->last_name,
             'email' => $this->email,
             'cell_phone' => $this->component->user_cell,
+        ]);
+
+        return $user;
+    }
+
+    public function update()
+    {
+        $this->validate();
+
+        $user = $this->user->update([
+            'first_name' => $this->first_name,
+            'last_name' => $this->last_name,
+            'email' => $this->email,
+            // 'cell_phone' => $this->component->user_cell,
         ]);
 
         return $user;

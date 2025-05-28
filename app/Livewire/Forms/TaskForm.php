@@ -29,7 +29,7 @@ class TaskForm extends Form
     #[Validate('nullable')]
     public $vendor_id = null;
 
-    #[Validate('array')]
+    #[Validate('nullable|array')]
     public $user_ids = null;
 
     #[Validate('required')]

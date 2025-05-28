@@ -37,6 +37,7 @@ class User extends Authenticatable
     protected function casts(): array
     {
         return [
+            'registration' => 'array',
             'email_verified_at' => 'datetime',
         ];
     }
@@ -66,7 +67,17 @@ class User extends Authenticatable
         return $this->vendor->users()->find($this->id);
     }
 
-    //via_vendor
+    public function getIsRegisteredAttribute(): bool
+    {
+        return !!($this->registration['registered'] ?? false);
+    }
+
+    public function getThisVendorAttribute()
+    {
+        $authVendorId = auth()->user()?->vendor?->id;
+        return $this->vendors->where('id', $authVendorId)->first();
+    }
+
     public function via_vendor(): BelongsTo
     {
         return $this->belongsTo(Vendor::class, 'primary_vendor_id')->withoutGlobalScopes();
@@ -127,11 +138,6 @@ class User extends Authenticatable
         }
 
         return $role;
-    }
-
-    public function getRegistrationAttribute($value)
-    {
-        return json_decode($value, true) ?? '';
     }
 
     public function getFullNameAttribute()

@@ -38,7 +38,4 @@
             <livewire:projects.projects-index :client="$client" :view="'clients.index'" />
         </div>
 	</div>
-
-    {{-- <livewire:projects.project-create />
-    <livewire:clients.client-create /> --}}
 </div>

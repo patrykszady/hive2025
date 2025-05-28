@@ -106,12 +106,6 @@ class ProjectCreate extends Component
         $this->resetValidation();
     }
 
-    // public function resetModal()
-    // {
-    //     $this->form->reset();
-    //     $this->resetValidation();
-    // }
-
     public function newProject($client_id)
     {
         $this->existing_client = $this->clients->where('id', $client_id)->first();

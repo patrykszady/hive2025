@@ -1,6 +1,5 @@
 <div>
 	<div class="grid max-w-xl grid-cols-4 gap-4 lg:max-w-5xl sm:px-6">
-		{{--  lg:h-32 lg:sticky lg:top-5 --}}
 		<div class="col-span-4 lg:col-span-2 space-y-4">
 			{{-- PROJECT DETAILS --}}
             <x-lists.details_card>
@@ -53,9 +52,7 @@
                 {{-- PROEJCT LIFESPAN --}}
                 <livewire:project-status.status-create :project="$project" lazy />
             </div>
-        @endcan
 
-        @can('update', $project)
             {{-- @if($project->tasks->count() != 0)
                 <div class="col-span-4 space-y-4">
                     <livewire:tasks.planner :single_project_id="$project->id" />
@@ -67,16 +64,14 @@
                     <livewire:expenses.expense-index :project_id="$project->id" :view="'projects.show'"/>
                 @endif
             </div>
-        @endcan
 
-		@can('update', $project)
             <div class="col-span-4 space-y-4 lg:col-span-2 lg:col-start-3">
                 @if(in_array($this->project->latestStatus->title, ['Active', 'Complete',  'Service Call', 'Service Call Complete', 'VIEW ONLY']))
                     {{-- PROJECT FINANCIALS --}}
                     <livewire:projects.project-finances :project="$project" lazy />
 
                     {{-- PROJECT DISTRIBUTIONS --}}
-                    @if(!$this->project->distributions->isEmpty())
+                    @if($this->project->distributions->isNotEmpty())
                         <flux:card class="space-y-2">
                             {{-- HEADING --}}
                             <div class="flex justify-between">
@@ -101,5 +96,5 @@
 		@endcan
 	</div>
 
-    <livewire:projects.project-create />
+    {{-- <livewire:projects.project-create /> --}}
 </div>

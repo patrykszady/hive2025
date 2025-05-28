@@ -5,9 +5,9 @@
             <div>
                 @can('create', App\Models\Payment::class)
                     @if($view === 'projects.show')
-                        <flux:button wire:click="$dispatchTo('payments.payment-create', 'addProject', { client: {{$project->client->id}}})">Create Payment</flux:button>
+                        <flux:button size="sm" wire:click="$dispatchTo('payments.payment-create', 'addProject', { client: {{$project->client->id}}})">Create Payment</flux:button>
                     @else
-                        <flux:button wire:click="$dispatchTo('payments.payment-create', 'addProject')">Add Payment</flux:button>
+                        <flux:button size="sm" wire:click="$dispatchTo('payments.payment-create', 'addProject')">Add Payment</flux:button>
                     @endif
                     <livewire:payments.payment-create />
                 @endcan

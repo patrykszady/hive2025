@@ -4,8 +4,7 @@
             <div class="flex justify-between">
                 <flux:heading size="lg">Filters</flux:heading>
             </div>
-            {{-- NEW PROJECT MODAL --}}
-            <livewire:projects.project-create :$clients />
+
             <flux:separator variant="subtle" />
 
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -83,5 +82,8 @@
                 </flux:table.rows>
             </flux:table>
         </div>
+
+        {{-- NEW PROJECT MODAL --}}
+        <livewire:projects.project-create />
     </flux:card>
 </div>

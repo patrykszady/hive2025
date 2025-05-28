@@ -3,19 +3,21 @@
 namespace App\Livewire\Users;
 
 use App\Models\User;
+
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
-use Livewire\Attributes\Title;
+
 use Livewire\Component;
 
-class UserShow extends Component
+class UserDetails extends Component
 {
     use AuthorizesRequests;
 
     public User $user;
 
-    #[Title('User')]
+    protected $listeners = ['refreshComponent' => '$refresh'];
+
     public function render()
     {
-        return view('livewire.users.show');
+        return view('livewire.users.details');
     }
 }

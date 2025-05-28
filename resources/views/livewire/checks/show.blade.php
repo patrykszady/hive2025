@@ -70,7 +70,7 @@
         </div>
 
         <div class="col-span-5 space-y-2 lg:col-span-3">
-            {{-- PAID USER TIMESHEETS --}}
+            {{-- USER TIMESHEETS --}}
             @if(!$weekly_timesheets->isEmpty())
                 <flux:card class="space-y-2">
                     <div>
@@ -117,12 +117,12 @@
                 <flux:card class="space-y-2">
                     <div class="flex justify-between">
                         <flux:heading size="lg">Employee Paid Timesheets</flux:heading>
-                        {{-- <flux:button>
-                            {{$employee_weekly_timesheets->sum('amount')}}
-                        </flux:button> --}}
+                        <flux:button>
+                            {{money($employee_weekly_timesheets->flatten(2)->sum('amount'))}}
+                        </flux:button>
                     </div>
 
-                    <flux:separator />
+                    <flux:separator variant="subtle"/>
 
                     @foreach($employee_weekly_timesheets as $user_id => $employee_timesheet_weeks)
                         <div>
@@ -196,14 +196,14 @@
             @endif --}}
 
             {{-- THIS CHECK VENDOR EXPENSES --}}
-            @if(!$vendor_expenses->isEmpty())
+            @if($vendor_expenses->isNotEmpty())
                 <div class="col-span-5 lg:col-span-3 lg:col-start-3">
                     <livewire:expenses.expense-index :check="$check->id" :view="'checks.show'"/>
                 </div>
             @endif
 
             {{-- THIS CHECK USER PAID EXPENSES --}}
-            @if(!$user_paid_expenses->isEmpty())
+            @if($user_paid_expenses->isNotEmpty())
                 <flux:card class="space-y-2">
                     <div class="flex justify-between">
                         <flux:heading size="lg">Paid Expenses</flux:heading>
@@ -239,7 +239,7 @@
             @endif
 
             {{-- THIS CHECK DISTRIBUTIONS --}}
-            @if(!$user_distributions->isEmpty())
+            @if($user_distributions->isNotEmpty())
                 <flux:card class="space-y-2">
                     <div class="flex justify-between">
                         <flux:heading size="lg">Paid Distrbutions</flux:heading>
@@ -273,38 +273,14 @@
             @endif
 
             {{-- THIS CHECK USER PAID REIMBURESEMENT RECEIPTS FROM ANOTHER EMPLOYEE --}}
-            {{-- @if(!$user_paid_reimburesements->isEmpty())
-            <x-cards class="col-span-4 lg:col-span-2 lg:col-start-3">
-                <x-cards.heading>
-                    <x-slot name="left">
-                        <h1>Paid Employee Reimbursements</h1>
-                    </x-slot>
-                </x-cards.heading>
-
-                <x-lists.ul>
-                    @foreach($user_paid_reimburesements as $user_distribution_expense)
-                        <x-lists.search_li
-                            :href="route('expenses.show', $user_distribution_expense)"
-                            :line_title="money($user_distribution_expense->amount)"
-                            :bubble_message="'Reimbursement'"
-                            >
-                        </x-lists.search_li>
-                    @endforeach
-                </x-lists.ul>
-            </x-cards>
-            @endif --}}
-
-            {{-- THIS CHECK USER PAID REIMBURESEMENT RECEIPTS FROM ANOTHER EMPLOYEE --}}
-            {{-- @if(!$user_paid_by_reimbursements->isEmpty())
+            @if($user_paid_by_reimbursements->isNotEmpty())
                 <flux:card class="space-y-2">
                     <div class="flex justify-between">
-                        <flux:heading size="lg">Paid Other Employee Reimbursements</flux:heading>
+                        <flux:heading size="lg">Paid Off Other User Reimbursements</flux:heading>
                         <flux:button disabled>
                             {{ '-' .  money($user_paid_by_reimbursements->sum('amount')) }}
                         </flux:button>
                     </div>
-
-                    <flux:separator variant="subtle" />
 
                     <div class="space-y-2">
                         <flux:table>
@@ -330,13 +306,13 @@
                         </flux:table>
                     </div>
                 </flux:card>
-            @endif --}}
+            @endif
 
-            {{-- USER REIMBURESEMENT (USER OWNS CASH GS CONSTRUCTION) EXPENSES --}}
+            {{-- USER REIMBURESEMENT (USER OWNS VENDOR) EXPENSES --}}
             @if($user_reimbursement_expenses->isNotEmpty())
                 <flux:card>
                     <div class="flex justify-between">
-                        <flux:heading size="lg">{{$check->owner}}</b> Paid back for these Expenses</flux:heading>
+                        <flux:heading size="lg">{{$check->user->first_name}}</b> Paid back these Expenses</flux:heading>
                         <flux:button disabled>
                             -{{ money($user_reimbursement_expenses->sum('amount')) }}
                         </flux:button>

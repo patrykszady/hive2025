@@ -4,6 +4,7 @@ namespace App\Livewire\Projects;
 
 use App\Models\Client;
 use App\Models\Project;
+use App\Models\ProjectStatus;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Lazy;
@@ -77,7 +78,8 @@ class ProjectsIndex extends Component
         }
 
         return Project::with('latestStatus') // Eager load the latest status for each project
-            ->orderBy('created_at', 'DESC') // Order projects by their created_at date
+
+            // ->orderBy('created_at', 'DESC') // Order projects by their created_at date
             // ->where('address', 'like', "%{$this->project_name_search}%") // Filter by address if provided
             ->when($this->project_status_title !== null && $this->project_status_title !== 'ALL', function ($query) {
                 $query->whereHas('latestStatus', function ($query) {
@@ -89,6 +91,14 @@ class ProjectsIndex extends Component
             ->when($this->client !== null, function ($query) use ($client_ids) {
                 $query->whereIn('client_id', $client_ids); // Filter by client IDs
             })
+            // Order by latestStatus.start_date DESC
+            ->orderBy(
+                ProjectStatus::select('start_date')
+                    ->whereColumn('project_id', 'projects.id')
+                    ->latest('start_date')
+                    ->take(1),
+                'desc'
+            )
             ->paginate(20); // Paginate the results
     }
 

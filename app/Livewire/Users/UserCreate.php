@@ -7,10 +7,10 @@ use App\Livewire\Clients\ClientsShow;
 use App\Livewire\Dashboard\DashboardShow;
 use App\Livewire\Forms\UserForm;
 use App\Livewire\Vendors\VendorCreate;
+use App\Livewire\Users\UserDetails;
 use App\Livewire\Users\UsersIndex;
 
 use App\Models\Client;
-// use App\Livewire\Users\TeamMembers;
 use App\Models\User;
 use App\Models\Vendor;
 
@@ -32,23 +32,15 @@ class UserCreate extends Component
     ];
 
     public $model = ['type' => null, 'id' => null];
-
     public $user_cell = false;
-
     public $user_form = false;
+    public $isRegistered = false;
 
-    // public $business_name = NULL;
     public $via_vendor = null;
-
     public $via_vendors = [];
-
     public $via_client = null;
-    // public $client_user_form = NULL;
 
-    // public $user_vendor_id = NULL;
-    // public $user_clients = NULL;
-
-    protected $listeners = ['refreshComponent' => '$refresh', 'newMember', 'removeMember', 'ViaVendorId'];
+    protected $listeners = ['refreshComponent' => '$refresh', 'newMember', 'editMember', 'removeMember', 'ViaVendorId'];
 
     public function rules()
     {
@@ -57,13 +49,12 @@ class UserCreate extends Component
         ];
     }
 
-    // public function mount()
+    // public function mount(User $user)
     // {
-    //     // dd($this);
-    //     // if($this->form->user->id){
-    //     //     $this->via_vendors = $this->form->user->vendors()->where('business_type', '!=', 'Sub')->get();
-    //     //     dd($this->via_vendors);
-    //     // }
+    //     dd($user->isRegistered);
+    //     dd($user->isRegistered);
+    //     $this->user = $user;
+    //     $this->isRegistered = $user->isRegistered;
     // }
 
     public function updated($field, $value)
@@ -98,7 +89,6 @@ class UserCreate extends Component
 
     public function user_cell_find()
     {
-        // $this->form->reset();
         $this->via_vendor = false;
         $this->validateOnly('user_cell');
 
@@ -169,13 +159,11 @@ class UserCreate extends Component
         //     // $this->user_clients = $user->clients()->withoutGlobalScopes()->get();
 
         //     // dd($this->user_clients);
-        //     // $this->client_user_form = TRUE;
         // }else{
         //     dd('in user_cell else');
         //     abort(404);
         // }
 
-        // $this->form->reset();
         $this->resetErrorBag();
         // $this->user_form = TRUE;
     }
@@ -192,8 +180,8 @@ class UserCreate extends Component
     //new Vendor or Client member
     public function newMember($model, $model_id = null)
     {
-        $this->user_cell = false;
-        $this->user_form = false;
+        // $this->user_cell = false;
+        // $this->user_form = false;
 
         //creating new Vendor or Client or adding Team Member/Client User to existing Vendor or Client
         $this->model['type'] = $model;
@@ -222,10 +210,29 @@ class UserCreate extends Component
         $this->modal('user_form_modal')->show();
     }
 
+    public function editMember(User $user)
+    {
+        $this->user_cell = $user->cell_phone;
+        $this->user_form = true;
+        $this->isRegistered = $user->isRegistered;
+
+        // //creating new Vendor or Client or adding Team Member/Client User to existing Vendor or Client
+        $this->model['type'] = 'user';
+        $this->model['id'] = $user->id;
+
+        $this->form->setUser($user);
+
+        $this->view_text['card_title'] = 'Edit User';
+        $this->view_text['button_text'] = 'Update User';
+        $this->view_text['form_submit'] = 'edit';
+
+        $this->modal('user_form_modal')->show();
+    }
+
     public function removeMember(User $user)
     {
         // 2-7-22 need REMOVAL MODAL to confirm
-            // 2-28-2025 - kind of have in the blade view with wire:confirm.prompt
+        // 2-28-2025 - kind of have in the blade view with wire:confirm.prompt
         $user->vendor->users()->wherePivot('is_employed', '1')
             ->updateExistingPivot($user->id, [
                 'end_date' => today()->format('Y-m-d'),
@@ -248,35 +255,6 @@ class UserCreate extends Component
         );
     }
 
-    // Everthing in top pulbic should be reset here
-    // function validateMultiple($fields) {
-    //     $validated = [];
-    //     foreach ($fields as $field) {
-    //         $validatedData = $this->validateOnly($field);
-    //         $validated[key($validatedData)] = current($validatedData);
-    //     }
-
-    //     return $validated;
-    // }
-
-    // public function storeUserSolo()
-    // {
-    //     //validate locally here...
-    //     $this->validateMultiple(['user.first_name', 'user.last_name', 'user.email']);
-
-    //     if(!$this->user->id){
-    //         $this->user = User::create([
-    //             'first_name' => $this->user->first_name,
-    //             'last_name' => $this->user->last_name,
-    //             'cell_phone' => $this->user->cell_phone,
-    //             'email' => $this->user->email
-    //         ]);
-    //     }
-
-    //     $this->user_exists = TRUE;
-    //     $this->via($this->model['type']);
-    // }
-
     public function save_user_only()
     {
         $user = $this->form->store();
@@ -290,11 +268,6 @@ class UserCreate extends Component
         //     $this->via_vendor = TRUE;
         // }
     }
-
-    // public function update()
-    // {
-    //     dd('in update UserCreate');
-    // }
 
     public function save()
     {
@@ -361,6 +334,23 @@ class UserCreate extends Component
 
             $this->modal('user_form_modal')->close();
         }
+    }
+
+    public function edit()
+    {
+        $user = $this->form->update();
+
+        $this->dispatch('refreshComponent')->to(UserDetails::class);
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'User Edited.',
+            // route / href / wire:click
+            text: '',
+        );
+
+        $this->modal('user_form_modal')->close();
     }
 
     public function render()

@@ -9,6 +9,7 @@
         {{-- PHONE --}}
         <flux:input
             wire:model.live.debounce.1000ms="user_cell"
+            x-bind:disabled="$wire.model.type == 'user'"
             label="User Cell Phone"
             type="number"
             size="lg"
@@ -41,31 +42,29 @@
             class="space-y-4"
             >
             <flux:input
-                wire:model.live.debounce.500ms="form.first_name"
-                x-bind:disabled="user"
+                wire:model.live="form.first_name"
+                x-bind:disabled="$wire.model.type != 'user'"
                 label="First Name"
                 type="text"
                 placeholder="First Name"
             />
             <flux:input
-                wire:model.live.debounce.500ms="form.last_name"
-                x-bind:disabled="user"
+                wire:model.live="form.last_name"
+                x-bind:disabled="$wire.model.type != 'user'"
                 label="Last Name"
                 type="text"
                 placeholder="Last Name"
             />
             <flux:input
-                wire:model.live.debounce.500ms="form.email"
-                x-bind:disabled="user"
+                wire:model.live.debounce.250ms="form.email"
+                x-bind:disabled="$wire.model.type != 'user' || $wire.isRegistered"
                 label="Email"
                 placeholder="Email"
             />
 
             {{-- save/create User here if not yet saved --}}
             <div
-                x-data="{ user: @entangle('form.user') }"
-                x-show="!user"
-                x-transition
+                x-show="!$wire.form.user"
                 class="my-4 space-y-4"
                 >
                 <flux:button
@@ -76,10 +75,10 @@
                     Save User
                 </flux:button>
             </div>
+
             {{-- CREATE/ATTACH 1099 / SUB Vendor / PAYROLL --}}
-            {{--10-5-2024  CODE IN form_copy.blade.php --}}
             <div
-            {{-- model_id: @entangle('model.id') --}}
+                {{-- model_id: @entangle('model.id') --}}
                 x-data="{ model_type: @entangle('model.type'), user_form: @entangle('form.user') }"
                 {{--  && model_id == 'NEW' --}}
                 x-show="model_type == 'vendor' && user_form"

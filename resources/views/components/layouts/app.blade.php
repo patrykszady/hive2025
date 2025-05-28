@@ -143,14 +143,10 @@
             </flux:dropdown>
         </flux:sidebar>
 
-        {{-- <flux:header class="lg:hidden" sticky>
-            <flux:sidebar.toggle class="lg:hidden" icon="bars-2" inset="left" />
-        </flux:header> --}}
-
         <flux:main
             {{-- x-data
-            @navigate.window="Livewire.navigate($event.detail)"
             x-cloak --}}
+            {{-- @navigate.window="Livewire.navigate($event.detail)" --}}
             {{-- $fullscreenClasses prop in render of Planner/Board --}}
             :class="$fullscreenClasses ?? null"
             >

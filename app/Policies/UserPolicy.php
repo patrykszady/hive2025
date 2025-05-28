@@ -55,7 +55,7 @@ class UserPolicy
      */
     public function create(User $user): bool
     {
-        return false;
+        return $this->hasAdminRole($user);
     }
 
     public function create_team_member(User $user, $vendor_id): bool
@@ -68,7 +68,7 @@ class UserPolicy
         if ($client->vendor()->exists()) {
             return false;
         } else {
-            if ($user->primary_vendor->pivot->role_id == 1 && in_array($user->vendor->business_type, ['Sub', 'DBA'])) {
+            if ($this->hasAdminRole($user) && in_array($user->vendor->business_type, ['Sub', 'DBA'])) {
                 return true;
             } else {
                 return false;
@@ -117,6 +117,6 @@ class UserPolicy
      */
     public function forceDelete(User $user, User $model): bool
     {
-        //
+        return false;
     }
 }

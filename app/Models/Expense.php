@@ -153,17 +153,25 @@ class Expense extends Model
 
     public function transactions(): HasMany
     {
-        // return $this->hasMany(Transaction::class);
-        if ($this->check) {
-            if ($this->check->transactions) {
-                return $this->check->hasMany(Transaction::class);
-            } else {
-                return $this->hasMany(Transaction::class);
-            }
-        } else {
-            return $this->hasMany(Transaction::class);
-        }
+        return $this->hasMany(Transaction::class);
     }
+
+    // public function getTransactionsAttribute()
+    // {
+    //     // If the expense has its own transactions, return them
+    //     $own = $this->transactions()->get();
+    //     if ($own->isNotEmpty()) {
+    //         return $own;
+    //     }
+
+    //     // If the check exists and has transactions, return those
+    //     if ($this->check && $this->check->transactions()->exists()) {
+    //         return $this->check->transactions;
+    //     }
+
+    //     // Otherwise, return an empty collection
+    //     return collect();
+    // }
 
     public function receipts(): HasMany
     {
@@ -177,10 +185,9 @@ class Expense extends Model
 
     public function getAssociatedExpensesAttribute()
     {
-        // dd($this->associated->isEmpty());
         if ($this->associated->isEmpty()) {
             $associated_check = Expense::where('parent_expense_id', $this->id)->get();
-            // dd($associated_check);
+
             if (! $associated_check->isEmpty()) {
                 return $associated_check;
             } else {
