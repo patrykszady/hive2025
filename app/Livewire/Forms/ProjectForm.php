@@ -63,6 +63,13 @@ class ProjectForm extends Form
             $this->component->city = $client_address['city'];
             $this->component->state = $client_address['state'];
             $this->component->zip_code = $client_address['zip_code'];
+        } elseif(numeric($this->project_existing_address)){
+            $existing_project = Project::findOrFail($this->project_existing_address);
+            $this->component->address_1 = $existing_project->address;
+            $this->component->address_2 = $existing_project->address_2;
+            $this->component->city = $existing_project->city;
+            $this->component->state = $existing_project->state;
+            $this->component->zip_code = $existing_project->zip_code;
         }
 
         $this->validate();

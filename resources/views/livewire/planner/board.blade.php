@@ -1,79 +1,49 @@
-<div>
-    <div class="flex gap-4 m-8">
+<div
+    class="h-full opacity-0"
+    x-data
+    x-init="$nextTick(() => {
+        const todayElement = document.querySelector('[data-today]');
+        if (todayElement) {
+            todayElement.scrollIntoView({ behavior: 'instant', inline: 'start', block: 'nearest' });
+        }
+        // Show content after scroll position is set
+        $el.classList.remove('opacity-0');
+        $el.classList.add('opacity-100');
+    })"
+    >
+    <div class="min-w-max">
+        <!-- Header Row: Dates only, sticky to top -->
+        <div
+            class="grid divide-x divide-gray-300 bg-white border-b border-gray-200 sticky top-0"
+            style="grid-template-columns: repeat({{ count($days) }}, 1fr);"
+            >
+            @foreach ($days as $day)
+                <div class="p-2 text-left text-sm {{ $day->isToday() ? 'font-bold ' : '' }}" @if($day->isToday()) data-today @endif>
+                    {{ $day->format('D, M j') }}
+                </div>
+            @endforeach
+        </div>
+
+        <!-- For each project: project row, then grid of days -->
         @foreach ($projects as $project)
-            <div>
-                <div class="rounded-lg w-64 bg-white my-4">
-                    <!-- Sticky Project Header -->
-                    <div class="sticky top-0 bg-white z-10">
-                        <div class="px-4 py-4 flex justify-between items-start">
-                            <div>
-                                <flux:heading>
-                                    <a href="{{ route('projects.show', $project->id) }}" target="_blank">
-                                        {{ $project->address }}
-                                    </a>
-                                </flux:heading>
-                                <flux:subheading>{{ $project->client->name }}</flux:subheading>
-                                <div class="flex items-center justify-start space-x-1">
-                                    <flux:badge size="sm" :color="$project->latestStatus->title == 'Complete' ? 'green' : ($project->latestStatus->title == 'Active' ? 'blue' : ($project->latestStatus->title == 'Cancelled' ? 'red' : 'yellow'))">{{ $project->latestStatus->title }}</flux:badge>
-                                    <flux:text size="sm"><i>{{ $project->latestStatus->start_date->diffForHumans() }}</i></flux:text>
-                                </div>
-                            </div>
-                            <flux:button
-                                variant="subtle" icon="plus" size="sm"
-                                wire:click="$dispatchTo('tasks.task-create', 'addTask', { project_id: {{$project->id}} })"
-                            />
-                        </div>
-                    </div>
-
-                    <!-- No Date Tasks -->
-                    <div class="sticky top-[104px] bg-gray-100 z-10" style="height: 100px; overflow-y: auto;">
-                        <h4 class="text-sm font-semibold px-2 py-1 border-b border-dashed border-gray-300">
-                            No Date
-                        </h4>
-                        <div class="grid">
-                            @foreach ($project->no_date as $task)
-                                @include('livewire.planner._task_card')
-                            @endforeach
-                        </div>
-                    </div>
-
-                    <!-- Tasks for Each Day -->
-                    <div class="flex flex-col gap-2 px-2">
-                        @foreach($days as $day_index => $day)
-                            <!-- Sticky Date Header -->
-                            <div class="sticky top-[204px] bg-white border-b border-dashed border-{{ $day->isToday() ? 'indigo' : 'gray' }}-{{!$day->isWeekend() ? '300' : '200'}} z-10">
-                                <h4 class="text-sm font-semibold px-2 py-1 text-{{ $day->isToday() ? 'indigo' : 'gray' }}-{{!$day->isWeekend() ? '500' : '300'}}">
-                                    {{ $day->format('D, M j') }}
-                                </h4>
-                            </div>
-
-                            <!-- Tasks for the Day -->
-                            <div
-                                class="grid"
-                                style="grid-template-rows: repeat({{ $maxTasksPerDate[$day->format('Y-m-d')] ?? 1 }}, 70px);"
-                                {{-- x-sort="$wire.sort($key, $position, {{$project->id}}, {{$day_index}})" --}}
-                                >
-                                @if (isset($project->grouped_tasks[$day->format('Y-m-d')]))
-                                    @foreach ($project->grouped_tasks[$day->format('Y-m-d')] as $task)
-                                        @if (isset($task))
-                                            @include('livewire.planner._task_card')
-                                        @else
-                                            <!-- Empty space for null tasks -->
-                                            <div class="bg-transparent border border-transparent p-3"></div>
-                                        @endif
-                                    @endforeach
-                                @endif
-
-                                <!-- Render additional empty divs if tasks are fewer than maxTasksPerDate -->
-                                @for ($i = (isset($project->grouped_tasks[$day->format('Y-m-d')]) ? $project->grouped_tasks[$day->format('Y-m-d')]->count() : 0); $i < ($maxTasksPerDate[$day->format('Y-m-d')] ?? 1); $i++)
-                                    <div class="bg-transparent border border-transparent p-3"></div>
-                                @endfor
+            <!-- Project name row: full width background, sticky project name -->
+            <div class="relative bg-gray-50 border-b border-gray-200 sticky top-[37px]">
+                <div class="p-2 sticky left-0 w-fit bg-gray-50">
+                    {{ $project->address }}
+                </div>
+            </div>
+            <!-- Grid of days for this project -->
+            <div class="grid" style="grid-template-columns: repeat({{ count($days) }}, 1fr); min-height: 48px;">
+                @foreach ($days as $day)
+                    <div class="p-2 border-b border-gray-100 text-left space-y-1">
+                        @foreach ($project->grouped_tasks[$day->format('Y-m-d')] as $task)
+                            <div class="bg-blue-200 rounded px-2 py-1 text-xs">
+                                {{ $task->title }}
                             </div>
                         @endforeach
                     </div>
-                </div>
+                @endforeach
             </div>
         @endforeach
     </div>
-    <livewire:tasks.task-create :projects="$projects" :employees="$employees" :vendors="$vendors" />
 </div>

@@ -184,6 +184,7 @@ class ProjectCreate extends Component
 
     public function save()
     {
+        // dd($this);
         $project = $this->form->store();
 
         //9-1-2023 NOTIFICATIONS when we redirect with Livewire...

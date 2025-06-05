@@ -15,7 +15,7 @@
         <flux:input wire:model.blur="form.title" label="Title" placeholder="Task Title" autofocus/>
 
         {{-- DATES --}}
-        <flux:date-picker with-today fixed-weeks multiple wire:model.live="form.dates" />
+        <flux:date-picker with-today mode="range" wire:model.live="form.dates" />
 
         {{-- DURATION --}}
         <flux:input wire:model.live="form.duration" label="Duration" text="Duration" name="duration" disabled />

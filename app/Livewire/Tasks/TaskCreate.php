@@ -3,11 +3,13 @@
 namespace App\Livewire\Tasks;
 
 use App\Models\Task;
+
 use App\Livewire\Forms\TaskForm;
 use App\Livewire\Planner\PlannerIndex;
-use App\Livewire\Planner\BoardIndex;
+use App\Livewire\Planner\GanttIndex;
 
 use Carbon\Carbon;
+use Carbon\CarbonPeriod;
 use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Component;
@@ -34,7 +36,14 @@ class TaskCreate extends Component
     public function updated($field, $value)
     {
         if (!empty($this->form->dates)) {
-            $this->form->duration = count($this->form->dates);
+            $startDate = $this->form->dates['start']; // Start date
+            $endDate = $this->form->dates['end']; // End date
+
+            // Create a CarbonPeriod instance
+            $period = CarbonPeriod::create($startDate, $endDate);
+
+            // Count the number of days
+            $this->form->duration = iterator_count($period);
         }
     }
 
@@ -73,7 +82,7 @@ class TaskCreate extends Component
         $task = $this->form->task;
         $task->delete();
 
-        $this->dispatch('refreshComponent')->to(BoardIndex::class);
+        $this->dispatch('refreshComponent')->to(GanttIndex::class);
         $this->modal('task_create_form_modal')->close();
 
         Flux::toast(
@@ -89,7 +98,7 @@ class TaskCreate extends Component
     public function edit()
     {
         $this->form->update();
-        $this->dispatch('refreshComponent')->to(BoardIndex::class);
+        $this->dispatch('refreshComponent')->to(GanttIndex::class);
         $this->modal('task_create_form_modal')->close();
 
         Flux::toast(
@@ -105,7 +114,7 @@ class TaskCreate extends Component
     public function save()
     {
         $this->form->store();
-        $this->dispatch('refreshComponent')->to(BoardIndex::class);
+        $this->dispatch('refreshComponent')->to(GanttIndex::class);
         $this->modal('task_create_form_modal')->close();
 
         Flux::toast(

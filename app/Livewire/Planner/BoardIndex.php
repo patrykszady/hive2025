@@ -22,7 +22,7 @@ class BoardIndex extends Component
 
     public function mount()
     {
-        // 12-9-2024 also used in VendorIndex .. needs to be a global scope
+        // 12-9-2024 also used in VendorIndex and GanttIndex.. needs to be a global scope
         $this->vendors = Vendor::whereNot('business_type', 'Retail')
             ->withCount([
                 'expenses',
@@ -40,7 +40,7 @@ class BoardIndex extends Component
 
     public function sort($key, $position, $project_id, $date_index)
     {
-        dd($key, $position, $project_id, $date_index);
+        // dd($key, $position, $project_id, $date_index);
         $project = Project::findOrFail($project_id);
         $task = Task::findOrFail($key);
 

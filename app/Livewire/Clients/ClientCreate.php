@@ -68,14 +68,8 @@ class ClientCreate extends Component
         }
 
         $this->form->setUser($user);
-        // if(is_numeric($team_member)){
-        //     $this->team_member = $team_member;
-
-        //     $this->user = User::findOrFail($this->team_member);
-        // }else{
-        //     //role and hourly here for new vendor?
-        //     $this->team_member = 'index';
-        // }
+        // If you have a UserForm instance, set it there too
+        // $this->userForm->setUser($user); // if you have this
 
         $this->modal('client_form_modal')->show();
     }

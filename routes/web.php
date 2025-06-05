@@ -34,12 +34,14 @@ use App\Livewire\LineItems\LineItemsIndex;
 use App\Livewire\Payments\PaymentCreate;
 use App\Livewire\Payments\PaymentsIndex;
 use App\Livewire\Planner\PlannerIndex;
+use App\Livewire\Planner\GanttIndex;
 use App\Livewire\Planner\BoardIndex;
 use App\Livewire\Projects\ProjectShow;
 use App\Livewire\Projects\ProjectsIndex;
 use App\Livewire\Sheets\SheetShow;
 use App\Livewire\Sheets\SheetsIndex;
 use App\Livewire\Tasks\Planner;
+use App\Livewire\Tasks\PlannerProject;
 use App\Livewire\Tasks\PlannerList;
 use App\Livewire\Test\Playground;
 use App\Livewire\Test\Sorting;
@@ -233,6 +235,8 @@ Route::middleware(['auth', 'user.vendor'])->group(function () {
     //PLANNER
     Route::get('/planner', PlannerIndex::class)->name('planner.index');
     Route::get('/planner/board', BoardIndex::class)->name('planner.board');
+    Route::get('/planner/gantt', GanttIndex::class)->name('planner.gantt');
+    Route::get('/planner/tasks', PlannerProject::class)->name('planner.tasks');
     //TASKS
     // Route::get('/planner_gantt', Planner::class)->name('planner.index');
     // Route::get('/planner_schedule', PlannerList::class)->name('planner_list.index');

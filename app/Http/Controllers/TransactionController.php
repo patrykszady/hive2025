@@ -406,7 +406,7 @@ class TransactionController extends Controller
     //03-07-2025 use after updating an Item so transactions are in sync between different bank_account_ids for each/same bank
     public function plaid_transactions_get()
     {
-        $banks = Bank::withoutGlobalScopes()->whereNotNull('plaid_access_token')->where('id', 23)->get();
+        $banks = Bank::withoutGlobalScopes()->whereNotNull('plaid_access_token')->get();
 
         foreach ($banks as $bank) {
             $accessToken = $bank->plaid_access_token;

@@ -2,7 +2,7 @@
     size="sm"
     class="hover:bg-gray-50 dark:hover:bg-gray-700 p-2! m-1! cursor-pointer w-58 items-center overflow-hidden"
     wire:click="$dispatchTo('tasks.task-create', 'editTask', { task: {{$task->id}} })"
-    {{-- x-sort:item="{{$task->id}}" --}}
+    x-sort:item="{{$task->id}}"
     :key="$task->id"
     >
 

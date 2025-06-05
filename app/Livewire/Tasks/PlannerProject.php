@@ -9,15 +9,20 @@ use Livewire\Component;
 
 class PlannerProject extends Component
 {
-    // public Project $project;
+    public Project $project;
     public $days = [];
-
     public $projects = [];
 
     protected $listeners = ['refresh_planner'];
 
     public function mount()
     {
+        $this->projects =
+            Project::with('tasks')
+            // , 'Scheduled', 'Service Call', 'Invited'
+            ->status(['Active'])
+            ->get();
+
         $project_ids = $this->projects->pluck('id');
 
         $tasks =

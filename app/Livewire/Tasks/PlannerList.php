@@ -58,8 +58,8 @@ class PlannerList extends Component
     public function projects()
     {
         return Project::with('tasks')
-            ->status(['Active', 'Scheduled', 'Service Call', 'Invited'])
-            ->sortBy([['last_status.title', 'asc'], ['last_status.start_date', 'desc']]);
+            ->status(['Active'])
+            ->get();
     }
 
     //render method not needed if view and component follow a convention

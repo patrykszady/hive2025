@@ -43,21 +43,21 @@
             >
             <flux:input
                 wire:model.live="form.first_name"
-                x-bind:disabled="$wire.model.type != 'user'"
+                x-bind:disabled="$wire.model.type != 'user' && $wire.form.user"
                 label="First Name"
                 type="text"
                 placeholder="First Name"
             />
             <flux:input
                 wire:model.live="form.last_name"
-                x-bind:disabled="$wire.model.type != 'user'"
+                x-bind:disabled="$wire.model.type != 'user' && $wire.form.user"
                 label="Last Name"
                 type="text"
                 placeholder="Last Name"
             />
             <flux:input
                 wire:model.live.debounce.250ms="form.email"
-                x-bind:disabled="$wire.model.type != 'user' || $wire.isRegistered"
+                x-bind:disabled="($wire.model.type != 'user' && $wire.form.user) || $wire.isRegistered"
                 label="Email"
                 placeholder="Email"
             />

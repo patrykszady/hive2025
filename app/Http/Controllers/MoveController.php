@@ -44,6 +44,20 @@ class MoveController extends Controller
     {
         $tasks = Task::withoutGlobalScopes()->get();
 
+        foreach($tasks as $task){
+            if (is_array($task->dates) && count($task->dates)) {
+                $sorted = collect($task->dates)->sort()->values();
+                $task->start_date = $sorted->first();
+                $task->end_date = $sorted->last();
+                $task->save();
+            }
+            //  else {
+            //     $task->start_date = null;
+            //     $task->end_date = null;
+            // }
+        }
+
+        dd('done with tasks');
         foreach ($tasks as $task) {
             if($task->user_id){
                 $task->user_ids = [$task->user_id];

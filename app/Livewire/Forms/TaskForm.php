@@ -5,6 +5,9 @@ namespace App\Livewire\Forms;
 use App\Models\Task;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Validate;
+
+use Carbon\CarbonPeriod;
+
 use Livewire\Form;
 
 class TaskForm extends Form
@@ -43,10 +46,21 @@ class TaskForm extends Form
     public function setTask(Task $task)
     {
         $this->task = $task;
-        $this->dates = $task->dates ?? []; // Load dates as an array
+        $this->dates = ['start' => $task->start_date, 'end' => $task->end_date] ?? []; // Load dates as an array
+
+        $startDate = $this->dates['start'] ?? NULL; // Start date
+        $endDate = $this->dates['end'] ?? NULL; // End date
+
+        if(!is_null($startDate) && !is_null($endDate)) {
+            $period = CarbonPeriod::create($startDate, $endDate);
+            $duration = iterator_count($period);
+        }else{
+            $duration = 0;
+        }
+
         $this->project_id = $task->project_id;
         $this->order = $task->order;
-        $this->duration = count($this->dates); // Calculate duration based on the number of dates
+        $this->duration = $duration;
         $this->vendor_id = $task->vendor_id;
         $this->type = $task->type;
         $this->title = $task->title;
@@ -60,14 +74,15 @@ class TaskForm extends Form
         $this->validate();
 
         $this->task->update([
-            'dates' => $this->dates, // Save dates as JSON
+            // 'dates' => $this->dates, // Save dates as JSON
+            'start_date' => $this->dates['start'], // Save start date
+            'end_date' => $this->dates['end'], // Save end date
             'project_id' => $this->project_id,
             'vendor_id' => $this->vendor_id,
             'type' => $this->type,
             'user_ids' => $this->user_ids,
             'title' => $this->title,
             'notes' => $this->notes,
-            'duration' => count($this->dates), // Update duration based on the number of dates
             'order' => $this->order,
         ]);
 
@@ -80,7 +95,9 @@ class TaskForm extends Form
         $this->validate();
 
         $task = Task::create([
-            'dates' => $this->dates, // Save dates as JSON
+            // 'dates' => $this->dates, // Save dates as JSON
+            'start_date' => $this->dates['start'], // Save start date
+            'end_date' => $this->dates['end'], // Save end date
             'project_id' => $this->project_id,
             'vendor_id' => $this->vendor_id,
             'type' => $this->type,
@@ -88,7 +105,6 @@ class TaskForm extends Form
             'title' => $this->title,
             'notes' => $this->notes,
             'order' => 0,
-            'duration' => count($this->dates), // Calculate duration based on the number of dates
         ]);
 
         return $task;

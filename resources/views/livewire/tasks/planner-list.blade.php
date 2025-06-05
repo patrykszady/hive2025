@@ -27,7 +27,7 @@
                     {{-- ACCORDIAN HERE --}}
                     {{-- NO DATE/ NOT SCHEDULE --}}
                     <div class="mt-2">
-                        <livewire:tasks.planner-card :$project :task_date="NULL" :key="$project->id" />
+                        {{-- <livewire:tasks.planner-card :$project :task_date="NULL" :key="$project->id" /> --}}
                     </div>
                 </div>
             @endforeach

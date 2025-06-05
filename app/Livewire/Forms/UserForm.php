@@ -40,35 +40,42 @@ class UserForm extends Form
 
     public function rules()
     {
+        // Don't validate anything if the form hasn't been properly initialized
+        if (!isset($this->user) && empty($this->email) && empty($this->first_name)) {
+            return [];
+        }
+
         return [
             'email' => [
                 'required',
                 'email',
                 'min:4',
-                Rule::unique('users', 'email')->ignore($this->user?->id),
+                // Rule::unique('users', 'email')->ignore($this->user?->id),
             ],
-            // 'user.role' =>
-            //     Rule::requiredIf(function(){
-            //         if($this->model['type'] == 'vendor'){
-            //             return true;
-            //         }else{
-            //             return false;
-            //         }
-            //     }),
-            // 'user.hourly_rate' =>
-            //     Rule::requiredIf(function(){
-            //         if($this->model['id'] == 'NEW' && $this->model['type'] == 'vendor'){
-            //             return false;
-            //         }elseif($this->model['type'] == 'client'){
-            //             return false;
-            //         }elseif($this->model['id'] == auth()->user()->vendor->id && $this->model['type'] == 'vendor'){
-            //             return true;
-            //         }else{
-            //             return false;
-            //         }
-            //     }),
         ];
+
+        // 'user.role' =>
+        //     Rule::requiredIf(function(){
+        //         if($this->model['type'] == 'vendor'){
+        //             return true;
+        //         }else{
+        //             return false;
+        //         }
+        //     }),
+        // 'user.hourly_rate' =>
+        //     Rule::requiredIf(function(){
+        //         if($this->model['id'] == 'NEW' && $this->model['type'] == 'vendor'){
+        //             return false;
+        //         }elseif($this->model['type'] == 'client'){
+        //             return false;
+        //         }elseif($this->model['id'] == auth()->user()->vendor->id && $this->model['type'] == 'vendor'){
+        //             return true;
+        //         }else{
+        //             return false;
+        //         }
+        //     }),
     }
+
     // #[Rule('required')]
     // public $cell_phone = NULL;
 

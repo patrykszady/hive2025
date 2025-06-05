@@ -129,53 +129,9 @@ class UserCreate extends Component
 
         // $this->resetErrorBag();
         $this->user_form = true;
-
-        // if($this->model['type'] == 'vendor'){
-        //     if($this->model['id'] == 'NEW'){
-        //         // $this->form->role = 1; //Admin
-        //         // $this->form->hourly_rate = 0;
-        //     }else{
-        //         if(auth()->user()->vendor->id != $this->model['id']){
-        //             $this->form->role = 2; //Team Member //Admin
-        //             $this->form->hourly_rate = 0;
-        //         }else{
-        //             if($user){
-        //                 $this->via_vendor = TRUE;
-        //                 $this->via_vendors = $this->form->user->vendors()->where('business_type', '!=', 'Sub')->get();
-        //                 $this->form->business_name = $this->form->user->full_name;
-        //             }
-        //         }
-        //     }
-        //     // $this->form->business_name = $this->form->user->full_name;
-        // }elseif($this->model['type'] == 'client'){
-        //     if($this->model['id'] == 'NEW'){
-        //         $this->via_client = TRUE;
-        //         // $this->user->role = 1; //Admin
-        //         // $this->user->hourly_rate = 0; //Admin
-        //     }else{
-        //         $this->via_client = FALSE;
-        //     }
-
-        //     // $this->user_clients = $user->clients()->withoutGlobalScopes()->get();
-
-        //     // dd($this->user_clients);
-        // }else{
-        //     dd('in user_cell else');
-        //     abort(404);
-        // }
-
         $this->resetErrorBag();
         // $this->user_form = TRUE;
     }
-
-    // public function via($model)
-    // {
-    //     if($model == 'vendor'){
-    //         $this->user_vendors = $this->user->vendors()->whereIn('vendors.business_type', ['Sub', '1099', 'DBA'])->wherePivot('is_employed', 1)->get();
-    //     }elseif($model == 'client'){
-    //         $this->user_clients = $this->user->clients()->withoutGlobalScopes()->get();
-    //     }
-    // }
 
     //new Vendor or Client member
     public function newMember($model, $model_id = null)
