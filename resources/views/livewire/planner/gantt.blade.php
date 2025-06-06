@@ -69,7 +69,10 @@
                         if (!this.resizing) return;
 
                         const rect = container.getBoundingClientRect();
-                        const x = e.clientX - rect.left;
+
+                        // Handle both mouse and touch events
+                        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                        const x = clientX - rect.left;
                         const newIndex = Math.floor(x / this.dayWidth);
 
                         if (side === 'left') {
@@ -98,10 +101,13 @@
                         document.body.style.mozUserSelect = '';
                         document.body.style.msUserSelect = '';
 
-                        // Remove event listeners
+                        // Remove event listeners for both mouse and touch
                         document.removeEventListener('mousemove', moveHandler);
                         document.removeEventListener('mouseup', upHandler);
                         document.removeEventListener('mouseleave', upHandler);
+                        document.removeEventListener('touchmove', moveHandler);
+                        document.removeEventListener('touchend', upHandler);
+                        document.removeEventListener('touchcancel', upHandler);
 
                         // Reset resizing state
                         this.resizing = false;
@@ -137,9 +143,13 @@
                         cleanup();
                     };
 
+                    // Add event listeners for both mouse and touch
                     document.addEventListener('mousemove', moveHandler);
                     document.addEventListener('mouseup', upHandler);
                     document.addEventListener('mouseleave', upHandler);
+                    document.addEventListener('touchmove', moveHandler, { passive: false });
+                    document.addEventListener('touchend', upHandler);
+                    document.addEventListener('touchcancel', upHandler);
                 }
             }
         }
@@ -253,6 +263,7 @@
                                     'cursor-not-allowed opacity-20': updating
                                 }"
                                 @mousedown="startResize('left', $event, '{{ $taskStartDate->format('Y-m-d') }}', '{{ $taskEndDate->format('Y-m-d') }}', '{{ $this->days->first()->format('Y-m-d') }}', '{{ $this->days->last()->format('Y-m-d') }}')"
+                                @touchstart="startResize('left', $event, '{{ $taskStartDate->format('Y-m-d') }}', '{{ $taskEndDate->format('Y-m-d') }}', '{{ $this->days->first()->format('Y-m-d') }}', '{{ $this->days->last()->format('Y-m-d') }}')"
                             ></div>
                         @endif
 
@@ -260,7 +271,9 @@
                         <div class="flex-1 relative mx-2 h-full overflow-visible">
                             <flux:card
                                 class="select-none !bg-transparent border-0 shadow-none p-1 my-0 overflow-visible h-full"
-                                wire:click="$dispatchTo('tasks.task-create', 'editTask', { task: {{$task->id}} })"
+                                x-on:click="updating = true; $wire.editTask({{$task->id}})"
+                                @task-modal-opened.window="updating = false"
+                                @task-modal-closed.window="updating = false"
                                 :key="$task->id"
                                 x-bind:class="{
                                     'cursor-pointer': !updating,
@@ -275,6 +288,7 @@
                                             class="flex flex-col gap-1 flex-1 min-w-0"
                                             x-data="{
                                                 isSticky: false,
+                                                stickyMode: 'normal', // 'normal', 'viewport-left', 'task-right'
                                                 init() {
                                                     this.setupSticky();
                                                 },
@@ -284,62 +298,175 @@
 
                                                     if (!container || !taskBar) return;
 
+                                                    let lastMode = 'normal';
+                                                    let debounceTimeout;
+                                                    let isTransitioning = false;
+
                                                     const handleScroll = () => {
+                                                        // Prevent calculations during transitions
+                                                        if (isTransitioning) return;
+
+                                                        // Clear any pending debounce
+                                                        if (debounceTimeout) clearTimeout(debounceTimeout);
+
                                                         const taskBarRect = taskBar.getBoundingClientRect();
                                                         const containerRect = container.getBoundingClientRect();
+                                                        const contentWidth = this.$el.scrollWidth;
 
-                                                        // Task bar has started scrolling off the left edge
-                                                        if (taskBarRect.left < containerRect.left && !this.isSticky) {
-                                                            this.isSticky = true;
-                                                            this.$el.style.position = 'sticky';
-                                                            this.$el.style.left = '8px';
-                                                            this.$el.style.zIndex = '40';
-                                                            this.$el.style.minWidth = '25px';
-                                                            this.$el.style.maxWidth = '150px';
+                                                        // Calculate the visible width of the task bar
+                                                        const visibleLeft = Math.max(taskBarRect.left, containerRect.left);
+                                                        const visibleRight = Math.min(taskBarRect.right, containerRect.right);
+                                                        const visibleTaskWidth = Math.max(0, visibleRight - visibleLeft);
+
+                                                        // Larger thresholds to prevent flickering
+                                                        const scrollThreshold = 15; // Increased from 5px
+                                                        const contentBuffer = 20; // Increased from 10px
+
+                                                        const isScrolledOffLeft = taskBarRect.left < (containerRect.left - scrollThreshold);
+                                                        const isTaskTooNarrow = visibleTaskWidth < (contentWidth + contentBuffer) && visibleTaskWidth > 0;
+
+                                                        // Determine new mode
+                                                        let newMode = 'normal';
+                                                        if (isScrolledOffLeft && !isTaskTooNarrow) {
+                                                            newMode = 'viewport-left';
+                                                        } else if (isTaskTooNarrow) {
+                                                            newMode = 'task-right';
                                                         }
-                                                        // Task bar is back in view
-                                                        else if (taskBarRect.left >= containerRect.left && this.isSticky) {
-                                                            this.isSticky = false;
-                                                            this.$el.style.position = '';
-                                                            this.$el.style.left = '';
-                                                            this.$el.style.zIndex = '';
-                                                            this.$el.style.minWidth = '';
-                                                            this.$el.style.maxWidth = '';
+
+                                                        // Only update if mode has changed and is stable
+                                                        if (newMode !== lastMode) {
+                                                            // Debounce the mode change
+                                                            debounceTimeout = setTimeout(() => {
+                                                                // Double-check the mode is still the same after debounce
+                                                                const recheckTaskBarRect = taskBar.getBoundingClientRect();
+                                                                const recheckContainerRect = container.getBoundingClientRect();
+                                                                const recheckVisibleLeft = Math.max(recheckTaskBarRect.left, recheckContainerRect.left);
+                                                                const recheckVisibleRight = Math.min(recheckTaskBarRect.right, recheckContainerRect.right);
+                                                                const recheckVisibleTaskWidth = Math.max(0, recheckVisibleRight - recheckVisibleLeft);
+
+                                                                const recheckIsScrolledOffLeft = recheckTaskBarRect.left < (recheckContainerRect.left - scrollThreshold);
+                                                                const recheckIsTaskTooNarrow = recheckVisibleTaskWidth < (contentWidth + contentBuffer) && recheckVisibleTaskWidth > 0;
+
+                                                                let recheckMode = 'normal';
+                                                                if (recheckIsScrolledOffLeft && !recheckIsTaskTooNarrow) {
+                                                                    recheckMode = 'viewport-left';
+                                                                } else if (recheckIsTaskTooNarrow) {
+                                                                    recheckMode = 'task-right';
+                                                                }
+
+                                                                // Only apply if mode is still the same after recheck
+                                                                if (recheckMode === newMode && recheckMode !== this.stickyMode) {
+                                                                    isTransitioning = true;
+                                                                    this.stickyMode = recheckMode;
+                                                                    lastMode = recheckMode;
+
+                                                                    if (recheckMode === 'viewport-left') {
+                                                                        this.isSticky = true;
+                                                                        this.$el.style.position = 'sticky';
+                                                                        this.$el.style.left = '0px';
+                                                                        this.$el.style.right = 'auto';
+                                                                        this.$el.style.top = 'auto';
+                                                                        this.$el.style.transform = '';
+                                                                        this.$el.style.zIndex = '25';
+                                                                        this.$el.style.maxWidth = '200px';
+                                                                        this.$el.style.minWidth = 'max-content';
+                                                                    } else if (recheckMode === 'task-right') {
+                                                                        this.isSticky = true;
+                                                                        const leftOffset = recheckVisibleRight - recheckTaskBarRect.left;
+                                                                        this.$el.style.position = 'absolute';
+                                                                        this.$el.style.left = leftOffset + 'px';
+                                                                        this.$el.style.right = 'auto';
+                                                                        this.$el.style.top = '50%';
+                                                                        this.$el.style.transform = 'translateY(-50%)';
+                                                                        this.$el.style.zIndex = '40';
+                                                                        this.$el.style.maxWidth = '180px';
+                                                                        this.$el.style.minWidth = 'max-content';
+                                                                        this.$el.style.textAlign = 'left';
+                                                                    } else {
+                                                                        // Normal mode
+                                                                        this.isSticky = false;
+                                                                        this.$el.style.position = '';
+                                                                        this.$el.style.right = '';
+                                                                        this.$el.style.left = '';
+                                                                        this.$el.style.top = '';
+                                                                        this.$el.style.transform = '';
+                                                                        this.$el.style.zIndex = '';
+                                                                        this.$el.style.maxWidth = '';
+                                                                        this.$el.style.minWidth = '';
+                                                                        this.$el.style.textAlign = '';
+                                                                        this.$el.style.padding = '';
+                                                                        this.$el.style.margin = '';
+                                                                        this.$el.style.backgroundColor = '';
+                                                                        this.$el.style.border = '';
+                                                                        this.$el.style.borderRadius = '';
+                                                                        this.$el.style.boxShadow = '';
+                                                                    }
+                                                                }
+
+                                                                // Allow new transitions after a brief delay
+                                                                setTimeout(() => {
+                                                                    isTransitioning = false;
+                                                                }, 50);
+                                                            }, 100); // Increased debounce delay
                                                         }
                                                     };
 
-                                                    container.addEventListener('scroll', handleScroll);
-                                                    handleScroll(); // Initial check
+                                                    // Throttle scroll events more aggressively
+                                                    let ticking = false;
+                                                    const throttledScroll = () => {
+                                                        if (!ticking && !isTransitioning) {
+                                                            requestAnimationFrame(() => {
+                                                                handleScroll();
+                                                                ticking = false;
+                                                            });
+                                                            ticking = true;
+                                                        }
+                                                    };
+
+                                                    container.addEventListener('scroll', throttledScroll, { passive: true });
+                                                    window.addEventListener('resize', handleScroll);
+
+                                                    // Run immediately and after DOM is ready
+                                                    setTimeout(handleScroll, 50);
+                                                    setTimeout(handleScroll, 200);
 
                                                     this.$el._cleanup = () => {
-                                                        container.removeEventListener('scroll', handleScroll);
+                                                        if (debounceTimeout) clearTimeout(debounceTimeout);
+                                                        container.removeEventListener('scroll', throttledScroll);
+                                                        window.removeEventListener('resize', handleScroll);
                                                     };
                                                 }
                                             }"
                                             x-destroy="$el._cleanup && $el._cleanup()"
-                                        >
+                                            x-bind:class="{
+                                                'text-left': true
+                                            }"
+                                            >
                                             <!-- Task Title -->
                                             <span class="font-medium leading-tight text-sm truncate">
                                                 {{$task->title}}
                                             </span>
 
                                             <!-- Row 2: Vendor -->
-                                            @if($task->vendor)
-                                                <div class="flex items-center gap-2 min-h-0">
+                                            <div class="flex items-center gap-2 min-h-0 h-5">
+                                                @if($task->vendor)
                                                     <flux:avatar size="xs" name="{{ $task->vendor->name }}" color="auto" color:seed="{{ $task->vendor->id }}" class="flex-shrink-0" />
                                                     <flux:text class="text-xs min-w-0 truncate">{{ $task->vendor->name }}</flux:text>
-                                                </div>
-                                            @endif
+                                                @else
+                                                    <!-- Empty space to maintain consistent height -->
+                                                    <div class="h-5"></div>
+                                                @endif
+                                            </div>
                                         </div>
 
                                         <!-- Users floating on top right - these stay fixed -->
-                                        @if($task->users->count() > 0)
+                                        {{-- @if($task->users->count() > 0)
                                             <flux:avatar.group class="ml-auto flex-shrink-0">
                                                 @foreach($task->users as $user)
                                                     <flux:avatar size="xs" name="{{ $user->full_name }}" color="auto" color:seed="{{ $user->id }}" />
                                                 @endforeach
                                             </flux:avatar.group>
-                                        @endif
+                                        @endif --}}
                                     </div>
                                 </div>
                             </flux:card>
@@ -355,6 +482,7 @@
                                     'cursor-not-allowed opacity-20': updating
                                 }"
                                 @mousedown="startResize('right', $event, '{{ $taskStartDate->format('Y-m-d') }}', '{{ $taskEndDate->format('Y-m-d') }}', '{{ $this->days->first()->format('Y-m-d') }}', '{{ $this->days->last()->format('Y-m-d') }}')"
+                                @touchstart="startResize('right', $event, '{{ $taskStartDate->format('Y-m-d') }}', '{{ $taskEndDate->format('Y-m-d') }}', '{{ $this->days->first()->format('Y-m-d') }}', '{{ $this->days->last()->format('Y-m-d') }}')"
                             ></div>
                         @endif
                     </div>

@@ -27,7 +27,6 @@ class HourCreate extends Component
     public Carbon $selected_date;
     public $days = [];
 
-
     public $hours_count_store = 0;
 
     public $day_index = null;
@@ -132,8 +131,12 @@ class HourCreate extends Component
 
         $projects = Project::status(['Active'])->get();
 
+        // Updated to use start_date and end_date instead of JSON dates column
         $planner_projects_day = Task::whereJsonContains('user_ids', auth()->user()->id)
-            ->whereJsonContains('dates', $this->selected_date->format('Y-m-d')) // Use JSON column to filter tasks
+            ->whereNotNull('start_date')
+            ->whereNotNull('end_date')
+            ->where('start_date', '<=', $this->selected_date->format('Y-m-d'))
+            ->where('end_date', '>=', $this->selected_date->format('Y-m-d'))
             ->whereNotIn('project_id', $projects->pluck('id')->toArray())
             ->pluck('project_id')
             ->unique();
@@ -149,13 +152,8 @@ class HourCreate extends Component
         $this->projects = Project::whereIn('id', $merged_projects->pluck('id')->toArray())
             ->with(['tasks' => function ($query) {
                 $query->whereJsonContains('user_ids', auth()->user()->id)
-                    ->whereNotNull('dates') // Ensure tasks have dates
-                    ->each(function ($task) {
-                        foreach ($task->dates as $task_date) { // Iterate over the dates array
-                            $this->day_project_tasks[$task->project->id][$task->id]['dates'][] = $task_date;
-                            $this->day_project_tasks[$task->project->id][$task->id]['title'] = $task->title;
-                        }
-                    });
+                    ->whereNotNull('start_date')
+                    ->whereNotNull('end_date');
             }])
             ->with('latestStatus')
             ->get()
@@ -165,12 +163,24 @@ class HourCreate extends Component
             ])
             ->keyBy('id');
 
-        foreach ($this->day_project_tasks as $project_id => $project_tasks) {
-            foreach ($project_tasks as $task_id => $task) {
-                if (in_array($this->selected_date->format('Y-m-d'), $task['dates'])) {
-                    // Task is valid for the selected date
-                } else {
-                    unset($this->day_project_tasks[$project_id][$task_id]);
+        // Clear the day_project_tasks array
+        $this->day_project_tasks = [];
+
+        // Filter tasks based on start_date and end_date
+        foreach ($this->projects as $project_index => $project) {
+            foreach ($project->tasks as $task) {
+                $task_start = Carbon::parse($task->start_date);
+                $task_end = Carbon::parse($task->end_date);
+                $selected_date = Carbon::parse($this->selected_date);
+
+                // Check if selected date is between start_date and end_date (inclusive)
+                if ($selected_date->between($task_start, $task_end)) {
+                    $this->day_project_tasks[$project_index][] = [
+                        'id' => $task->id,
+                        'title' => $task->title,
+                        'start_date' => $task->start_date,
+                        'end_date' => $task->end_date,
+                    ];
                 }
             }
         }

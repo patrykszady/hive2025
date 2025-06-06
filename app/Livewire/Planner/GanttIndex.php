@@ -89,6 +89,11 @@ class GanttIndex extends Component
         });
     }
 
+    public function editTask($taskId)
+    {
+        $this->dispatch('editTask', task: $taskId)->to('tasks.task-create');
+    }
+
     public function updateTaskDates($taskId, $startIndex, $endIndex)
     {
         $task = Task::find($taskId);

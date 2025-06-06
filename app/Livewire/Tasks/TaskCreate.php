@@ -75,6 +75,9 @@ class TaskCreate extends Component
 
         $this->form->setTask($task);
         $this->modal('task_create_form_modal')->show();
+
+        // Emit event that modal opened successfully
+        $this->dispatch('task-modal-opened');
     }
 
     public function removeTask()
@@ -125,6 +128,15 @@ class TaskCreate extends Component
             // route / href / wire:click
             text: '',
         );
+    }
+
+    // When modal closes
+    public function closeModal()
+    {
+        // Your existing close logic...
+
+        // Emit event that modal closed
+        $this->dispatch('task-modal-closed');
     }
 
     public function render()
