@@ -4,6 +4,7 @@ namespace App\Livewire\Estimates;
 
 use App\Jobs\SendInitialEstimateEmail;
 use App\Livewire\Projects\ProjectFinances;
+
 use App\Models\Estimate;
 use App\Models\EstimateLineItem;
 use App\Models\EstimateSection;
@@ -61,10 +62,10 @@ class EstimateShow extends Component
         $this->sections = $this->estimate->estimate_sections;
     }
 
-    public function create_new_section($name = null)
+    public function create_new_section($name = null, $estimate_id = null)
     {
         return EstimateSection::create([
-            'estimate_id' => $this->estimate->id,
+            'estimate_id' => $this->estimate->id ?? $estimate_id,
             'index' => $this->sections->isEmpty() ? 0 : $this->sections->max('order') + 1,
             'name' => $name,
             'total' => 0.00,

@@ -14,10 +14,16 @@ trait Sortable
         });
 
         static::creating(function ($model) {
-            if (static::sortable($model)->count() === 0) {
+            // Scope by estimate_id for EstimateSection
+            $query = static::query();
+            if (isset($model->estimate_id)) {
+                $query->where('estimate_id', $model->estimate_id);
+            }
+
+            if ($query->count() === 0) {
                 $model->order = 0;
             } else {
-                $model->order = static::sortable($model)->max('order') + 1;
+                $model->order = $query->max('order') + 1;
             }
         });
 

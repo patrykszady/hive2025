@@ -32,4 +32,9 @@ class EstimateLineItem extends Pivot
     {
         return $this->belongsTo(EstimateSection::class);
     }
+
+    public function line_item(): BelongsTo
+    {
+        return $this->belongsTo(LineItem::class);
+    }
 }

@@ -57,8 +57,8 @@ class MoveController extends Controller
             // }
         }
 
-
         dd('done with tasks');
+
         foreach ($tasks as $task) {
             if($task->user_id){
                 $task->user_ids = [$task->user_id];
