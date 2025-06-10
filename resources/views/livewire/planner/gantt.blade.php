@@ -124,9 +124,17 @@
                                 $wire.updateTaskDates(this.taskId, this.startIndex, finalEndIndex)
                                     .then(() => {
                                         this.updating = false;
+                                        // Dispatch custom event to trigger sticky recalculation for ALL tasks
+                                        window.dispatchEvent(new CustomEvent('task-resize-complete', {
+                                            detail: { taskId: this.taskId, updateAll: true }
+                                        }));
                                     })
                                     .catch(() => {
                                         this.updating = false;
+                                        // Dispatch event even on error
+                                        window.dispatchEvent(new CustomEvent('task-resize-complete', {
+                                            detail: { taskId: this.taskId, updateAll: true }
+                                        }));
                                     });
                             } else { // right
                                 const finalStartIndex = actualStartIndex < 0 ? actualStartIndex : this.startIndex;
@@ -134,9 +142,17 @@
                                 $wire.updateTaskDates(this.taskId, finalStartIndex, this.endIndex)
                                     .then(() => {
                                         this.updating = false;
+                                        // Dispatch custom event to trigger sticky recalculation for ALL tasks
+                                        window.dispatchEvent(new CustomEvent('task-resize-complete', {
+                                            detail: { taskId: this.taskId, updateAll: true }
+                                        }));
                                     })
                                     .catch(() => {
                                         this.updating = false;
+                                        // Dispatch event even on error
+                                        window.dispatchEvent(new CustomEvent('task-resize-complete', {
+                                            detail: { taskId: this.taskId, updateAll: true }
+                                        }));
                                     });
                             }
                         }
@@ -155,12 +171,12 @@
         }
     }"
     x-init="$nextTick(() => scrollToToday())"
-    >
+>
 
     <div class="min-w-max relative">
         <!-- Date header - always on top -->
         <div
-            class="sticky top-0 grid bg-white border-b border-gray-200 z-10 h-[49px]"
+            class="sticky top-0 grid bg-white border-b border-gray-200 z-30 h-[49px]"
             style="grid-template-columns: repeat({{ count($this->days) }}, {{ $dayColumnWidth }}px);"
         >
             @foreach ($this->days as $day)
@@ -197,6 +213,12 @@
                 <div class="relative flex items-center h-full">
                     <div class="sticky left-0 px-2 font-semibold text-sm">
                         {{ $project->address }}
+                        <flux:button
+                            wire:click="$dispatchTo('tasks.task-create', 'addTask', { project_id: {{$project->id}} })"
+                            variant="ghost"
+                            size="sm"
+                            icon="plus"
+                        />
                     </div>
                 </div>
             </div>
@@ -231,13 +253,13 @@
 
                     <div
                         wire:key="task-{{ $task->id }}"
-                        class="group absolute bg-white/50 border-blue-500 border-opacity-30 group-hover:border-opacity-50 text-md flex items-center shadow select-none {{ $taskStartDate->isBefore($this->days->first()) ? 'border-r border-t border-b rounded-r' : ($taskEndDate->isAfter($this->days->last()) ? 'border-l border-t border-b rounded-l' : ($taskStartDate->isBefore($this->days->first()) && $taskEndDate->isAfter($this->days->last()) ? 'border-t border-b' : 'border rounded')) }}"
+                        class="group absolute bg-white/50 border-blue-500 border-opacity-30 group-hover:border-opacity-50 text-md flex items-center shadow select-none overflow-visible {{ $taskStartDate->isBefore($this->days->first()) ? 'border-r border-t border-b rounded-r' : ($taskEndDate->isAfter($this->days->last()) ? 'border-l border-t border-b rounded-l' : ($taskStartDate->isBefore($this->days->first()) && $taskEndDate->isAfter($this->days->last()) ? 'border-t border-b' : 'border rounded')) }}"
                         style="left: {{ $leftPosition + 2 }}px; width: {{ $barWidth - 4 }}px; top: {{ $topPosition }}px; height: {{ $taskBarHeight }}px;"
                         title="{{ $task->title }} ({{ $taskStartDate->format('M j') }} - {{ $taskEndDate->format('M j') }})"
                         x-data="taskResize()"
                         x-init="init({{ $task->id }}, {{ $renderStartDayIndex }}, {{ $renderEndDayIndex }})"
                         x-bind:class="{
-                            'shadow-lg z-30': resizing,
+                            'shadow-lg z-15': resizing,
                             '!border-opacity-100': resizing,
                             'animate-pulse': updating,
                             'cursor-pointer hover:bg-gray-100/90': !updating && !resizing,
@@ -256,7 +278,7 @@
                         <!-- Left resize handle -->
                         @if(!$taskStartDate->isBefore($this->days->first()))
                             <div
-                                class="w-2 h-full absolute top-0 left-0 bg-blue-500 opacity-30 group-hover:opacity-50 hover:!opacity-100 rounded-l hover:bg-blue-700"
+                                class="w-2 h-full absolute top-0 left-0 bg-blue-500 opacity-30 group-hover:opacity-50 hover:!opacity-100 rounded-l hover:bg-blue-700 z-15"
                                 x-bind:class="{
                                     'opacity-100 bg-blue-700': resizing,
                                     'cursor-ew-resize': !updating,
@@ -279,194 +301,160 @@
                                     'cursor-pointer': !updating,
                                     'cursor-not-allowed': updating
                                 }"
-                                >
-                                <div class="flex flex-col justify-between h-full gap-1 min-h-0">
-                                    <!-- Row 1: Task Title with Users floating right -->
-                                    <div class="flex items-center justify-between flex-shrink-0">
-                                        <!-- Task Title and Vendor - these will stick together -->
+                            >
+                                <div class="flex flex-col justify-between h-full gap-1 min-h-0 overflow-visible">
+                                    <div class="flex items-center justify-between flex-shrink-0 relative overflow-visible">
+                                        <!-- Task Title and Vendor - smooth sticky behavior -->
                                         <div
-                                            class="flex flex-col gap-1 flex-1 min-w-0"
+                                            class="flex flex-col gap-1 flex-1 min-w-0 relative overflow-visible"
                                             x-data="{
-                                                isSticky: false,
-                                                stickyMode: 'normal', // 'normal', 'viewport-left', 'task-right'
+                                                shouldShowOutside: false,
+                                                stickyOffset: 0,
+
                                                 init() {
-                                                    this.setupSticky();
+                                                    this.$nextTick(() => {
+                                                        this.setupSticky();
+                                                    });
                                                 },
+
                                                 setupSticky() {
                                                     const container = this.$el.closest('.h-full.overflow-auto');
-                                                    const taskBar = this.$el.parentElement.parentElement.parentElement.parentElement.parentElement;
+                                                    let taskBar = this.$el;
 
-                                                    if (!container || !taskBar) return;
+                                                    // Walk up the DOM to find the task bar element
+                                                    while (taskBar && !taskBar.hasAttribute('wire:key')) {
+                                                        taskBar = taskBar.parentElement;
+                                                    }
 
-                                                    let lastMode = 'normal';
-                                                    let debounceTimeout;
-                                                    let isTransitioning = false;
+                                                    if (!container || !taskBar) {
+                                                        return;
+                                                    }
 
-                                                    const handleScroll = () => {
-                                                        // Prevent calculations during transitions
-                                                        if (isTransitioning) return;
-
-                                                        // Clear any pending debounce
-                                                        if (debounceTimeout) clearTimeout(debounceTimeout);
-
+                                                    const updatePosition = () => {
                                                         const taskBarRect = taskBar.getBoundingClientRect();
                                                         const containerRect = container.getBoundingClientRect();
-                                                        const contentWidth = this.$el.scrollWidth;
 
-                                                        // Calculate the visible width of the task bar
+                                                        // Calculate visible area of the task bar
                                                         const visibleLeft = Math.max(taskBarRect.left, containerRect.left);
                                                         const visibleRight = Math.min(taskBarRect.right, containerRect.right);
                                                         const visibleTaskWidth = Math.max(0, visibleRight - visibleLeft);
 
-                                                        // Larger thresholds to prevent flickering
-                                                        const scrollThreshold = 15; // Increased from 5px
-                                                        const contentBuffer = 20; // Increased from 10px
+                                                        // Check if task bar is too narrow (less than 120px) - always show outside
+                                                        if (taskBarRect.width < 120) {
+                                                            this.shouldShowOutside = true;
+                                                            this.stickyOffset = taskBarRect.width + 4;
+                                                            this.$el.style.transform = '';
+                                                            this.$el.style.position = '';
+                                                            this.$el.style.zIndex = '';
+                                                        } else if (taskBarRect.left >= containerRect.left) {
+                                                            // Task is fully visible and wide enough - normal position
+                                                            this.shouldShowOutside = false;
+                                                            this.stickyOffset = 0;
+                                                            this.$el.style.transform = '';
+                                                            this.$el.style.position = '';
+                                                            this.$el.style.zIndex = '';
+                                                        } else if (taskBarRect.right > containerRect.left && visibleTaskWidth >= 120) {
+                                                            // Task is partially off-screen but has enough visible area - stick inside
+                                                            this.shouldShowOutside = false;
+                                                            this.stickyOffset = containerRect.left - taskBarRect.left;
+                                                            this.$el.style.transform = 'translateX(' + this.stickyOffset + 'px)';
+                                                            this.$el.style.position = 'relative';
+                                                            this.$el.style.zIndex = '10';
+                                                        } else {
+                                                            // Task is mostly/completely off-screen - show outside
+                                                            this.shouldShowOutside = true;
 
-                                                        const isScrolledOffLeft = taskBarRect.left < (containerRect.left - scrollThreshold);
-                                                        const isTaskTooNarrow = visibleTaskWidth < (contentWidth + contentBuffer) && visibleTaskWidth > 0;
+                                                            if (taskBarRect.right < containerRect.left) {
+                                                                // Task is completely off-screen
+                                                                this.stickyOffset = taskBarRect.width + 4;
+                                                            } else {
+                                                                // Task is partially visible - position just outside
+                                                                this.stickyOffset = visibleRight - taskBarRect.left + 4;
+                                                            }
 
-                                                        // Determine new mode
-                                                        let newMode = 'normal';
-                                                        if (isScrolledOffLeft && !isTaskTooNarrow) {
-                                                            newMode = 'viewport-left';
-                                                        } else if (isTaskTooNarrow) {
-                                                            newMode = 'task-right';
-                                                        }
-
-                                                        // Only update if mode has changed and is stable
-                                                        if (newMode !== lastMode) {
-                                                            // Debounce the mode change
-                                                            debounceTimeout = setTimeout(() => {
-                                                                // Double-check the mode is still the same after debounce
-                                                                const recheckTaskBarRect = taskBar.getBoundingClientRect();
-                                                                const recheckContainerRect = container.getBoundingClientRect();
-                                                                const recheckVisibleLeft = Math.max(recheckTaskBarRect.left, recheckContainerRect.left);
-                                                                const recheckVisibleRight = Math.min(recheckTaskBarRect.right, recheckContainerRect.right);
-                                                                const recheckVisibleTaskWidth = Math.max(0, recheckVisibleRight - recheckVisibleLeft);
-
-                                                                const recheckIsScrolledOffLeft = recheckTaskBarRect.left < (recheckContainerRect.left - scrollThreshold);
-                                                                const recheckIsTaskTooNarrow = recheckVisibleTaskWidth < (contentWidth + contentBuffer) && recheckVisibleTaskWidth > 0;
-
-                                                                let recheckMode = 'normal';
-                                                                if (recheckIsScrolledOffLeft && !recheckIsTaskTooNarrow) {
-                                                                    recheckMode = 'viewport-left';
-                                                                } else if (recheckIsTaskTooNarrow) {
-                                                                    recheckMode = 'task-right';
-                                                                }
-
-                                                                // Only apply if mode is still the same after recheck
-                                                                if (recheckMode === newMode && recheckMode !== this.stickyMode) {
-                                                                    isTransitioning = true;
-                                                                    this.stickyMode = recheckMode;
-                                                                    lastMode = recheckMode;
-
-                                                                    if (recheckMode === 'viewport-left') {
-                                                                        this.isSticky = true;
-                                                                        this.$el.style.position = 'sticky';
-                                                                        this.$el.style.left = '0px';
-                                                                        this.$el.style.right = 'auto';
-                                                                        this.$el.style.top = 'auto';
-                                                                        this.$el.style.transform = '';
-                                                                        this.$el.style.zIndex = '25';
-                                                                        this.$el.style.maxWidth = '200px';
-                                                                        this.$el.style.minWidth = 'max-content';
-                                                                    } else if (recheckMode === 'task-right') {
-                                                                        this.isSticky = true;
-                                                                        const leftOffset = recheckVisibleRight - recheckTaskBarRect.left;
-                                                                        this.$el.style.position = 'absolute';
-                                                                        this.$el.style.left = leftOffset + 'px';
-                                                                        this.$el.style.right = 'auto';
-                                                                        this.$el.style.top = '50%';
-                                                                        this.$el.style.transform = 'translateY(-50%)';
-                                                                        this.$el.style.zIndex = '40';
-                                                                        this.$el.style.maxWidth = '180px';
-                                                                        this.$el.style.minWidth = 'max-content';
-                                                                        this.$el.style.textAlign = 'left';
-                                                                    } else {
-                                                                        // Normal mode
-                                                                        this.isSticky = false;
-                                                                        this.$el.style.position = '';
-                                                                        this.$el.style.right = '';
-                                                                        this.$el.style.left = '';
-                                                                        this.$el.style.top = '';
-                                                                        this.$el.style.transform = '';
-                                                                        this.$el.style.zIndex = '';
-                                                                        this.$el.style.maxWidth = '';
-                                                                        this.$el.style.minWidth = '';
-                                                                        this.$el.style.textAlign = '';
-                                                                        this.$el.style.padding = '';
-                                                                        this.$el.style.margin = '';
-                                                                        this.$el.style.backgroundColor = '';
-                                                                        this.$el.style.border = '';
-                                                                        this.$el.style.borderRadius = '';
-                                                                        this.$el.style.boxShadow = '';
-                                                                    }
-                                                                }
-
-                                                                // Allow new transitions after a brief delay
-                                                                setTimeout(() => {
-                                                                    isTransitioning = false;
-                                                                }, 50);
-                                                            }, 100); // Increased debounce delay
+                                                            this.$el.style.transform = '';
+                                                            this.$el.style.position = '';
+                                                            this.$el.style.zIndex = '';
                                                         }
                                                     };
 
-                                                    // Throttle scroll events more aggressively
+                                                    // Smooth scroll handler using requestAnimationFrame
                                                     let ticking = false;
-                                                    const throttledScroll = () => {
-                                                        if (!ticking && !isTransitioning) {
+                                                    const handleScroll = () => {
+                                                        if (!ticking) {
                                                             requestAnimationFrame(() => {
-                                                                handleScroll();
+                                                                updatePosition();
                                                                 ticking = false;
                                                             });
                                                             ticking = true;
                                                         }
                                                     };
 
-                                                    container.addEventListener('scroll', throttledScroll, { passive: true });
-                                                    window.addEventListener('resize', handleScroll);
+                                                    // Listen for task resize completion events
+                                                    const handleTaskResizeComplete = (event) => {
+                                                        // Check if this is the task that was resized OR if we should update all tasks
+                                                        const taskId = taskBar.getAttribute('wire:key');
+                                                        if (event.detail.updateAll || taskId === 'task-' + event.detail.taskId) {
+                                                            // Force position update after a short delay to allow DOM to update
+                                                            setTimeout(() => {
+                                                                updatePosition();
+                                                            }, 100);
+                                                        }
+                                                    };
 
-                                                    // Run immediately and after DOM is ready
-                                                    setTimeout(handleScroll, 50);
-                                                    setTimeout(handleScroll, 200);
+                                                    // Listen for modal events and Livewire updates
+                                                    const handleModalAndUpdates = () => {
+                                                        setTimeout(() => {
+                                                            updatePosition();
+                                                        }, 50);
+                                                    };
+
+                                                    container.addEventListener('scroll', handleScroll, { passive: true });
+                                                    window.addEventListener('resize', updatePosition);
+                                                    window.addEventListener('task-resize-complete', handleTaskResizeComplete);
+                                                    window.addEventListener('task-modal-opened', handleModalAndUpdates);
+                                                    window.addEventListener('task-modal-closed', handleModalAndUpdates);
+                                                    document.addEventListener('livewire:updated', handleModalAndUpdates);
+
+                                                    // Initial check
+                                                    setTimeout(updatePosition, 50);
 
                                                     this.$el._cleanup = () => {
-                                                        if (debounceTimeout) clearTimeout(debounceTimeout);
-                                                        container.removeEventListener('scroll', throttledScroll);
-                                                        window.removeEventListener('resize', handleScroll);
+                                                        container.removeEventListener('scroll', handleScroll);
+                                                        window.removeEventListener('resize', updatePosition);
+                                                        window.removeEventListener('task-resize-complete', handleTaskResizeComplete);
+                                                        window.removeEventListener('task-modal-opened', handleModalAndUpdates);
+                                                        window.removeEventListener('task-modal-closed', handleModalAndUpdates);
+                                                        document.removeEventListener('livewire:updated', handleModalAndUpdates);
                                                     };
                                                 }
                                             }"
                                             x-destroy="$el._cleanup && $el._cleanup()"
-                                            x-bind:class="{
-                                                'text-left': true
-                                            }"
+                                        >
+                                            <!-- Content block -->
+                                            <div
+                                                x-bind:class="{
+                                                    'absolute left-0 top-0 z-5': shouldShowOutside,
+                                                    'flex flex-col gap-1': !shouldShowOutside
+                                                }"
+                                                x-bind:style="shouldShowOutside ? 'transform: translateX(' + stickyOffset + 'px); pointer-events: none;' : ''"
                                             >
-                                            <!-- Task Title -->
-                                            <span class="font-medium leading-tight text-sm truncate">
-                                                {{$task->title}}
-                                            </span>
+                                                <!-- Task Title -->
+                                                <span class="font-medium leading-tight text-sm whitespace-nowrap">
+                                                    {{$task->title}}
+                                                </span>
 
-                                            <!-- Row 2: Vendor -->
-                                            <div class="flex items-center gap-2 min-h-0 h-5">
-                                                @if($task->vendor)
-                                                    <flux:avatar size="xs" name="{{ $task->vendor->name }}" color="auto" color:seed="{{ $task->vendor->id }}" class="flex-shrink-0" />
-                                                    <flux:text class="text-xs min-w-0 truncate">{{ $task->vendor->name }}</flux:text>
-                                                @else
-                                                    <!-- Empty space to maintain consistent height -->
-                                                    <div class="h-5"></div>
-                                                @endif
+                                                <!-- Vendor Row -->
+                                                <div class="flex items-center gap-2 min-h-0 h-5">
+                                                    @if($task->vendor)
+                                                        <flux:avatar size="xs" name="{{ $task->vendor->name }}" color="auto" color:seed="{{ $task->vendor->id }}" class="flex-shrink-0" />
+                                                        <flux:text class="text-xs min-w-0 whitespace-nowrap">{{ $task->vendor->name }}</flux:text>
+                                                    @else
+                                                        <div class="h-5"></div>
+                                                    @endif
+                                                </div>
                                             </div>
                                         </div>
-
-                                        <!-- Users floating on top right - these stay fixed -->
-                                        {{-- @if($task->users->count() > 0)
-                                            <flux:avatar.group class="ml-auto flex-shrink-0">
-                                                @foreach($task->users as $user)
-                                                    <flux:avatar size="xs" name="{{ $user->full_name }}" color="auto" color:seed="{{ $user->id }}" />
-                                                @endforeach
-                                            </flux:avatar.group>
-                                        @endif --}}
                                     </div>
                                 </div>
                             </flux:card>
@@ -475,7 +463,7 @@
                         <!-- Right resize handle -->
                         @if(!$taskEndDate->isAfter($this->days->last()))
                             <div
-                                class="w-2 h-full absolute top-0 right-0 bg-blue-500 opacity-30 group-hover:opacity-50 hover:!opacity-100 rounded-r hover:bg-blue-700"
+                                class="w-2 h-full absolute top-0 right-0 bg-blue-500 opacity-30 group-hover:opacity-50 hover:!opacity-100 rounded-r hover:bg-blue-700 z-15"
                                 x-bind:class="{
                                     'opacity-100 bg-blue-700': resizing,
                                     'cursor-ew-resize': !updating,
@@ -493,3 +481,7 @@
 
     <livewire:tasks.task-create :projects="$this->projects" :employees="$employees" :vendors="$vendors"/>
 </div>
+
+
+
+
