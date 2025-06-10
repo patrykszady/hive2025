@@ -171,7 +171,7 @@
         }
     }"
     x-init="$nextTick(() => scrollToToday())"
->
+    >
 
     <div class="min-w-max relative">
         <!-- Date header - always on top -->
@@ -198,7 +198,7 @@
             <!-- Project header - sticks below date header -->
             <div
                 class="sticky top-[49px] relative bg-gray-200 border-b border-gray-200 z-20 h-[40px]"
-            >
+                >
                 <!-- Background grid -->
                 <div
                     class="absolute inset-0 grid"
@@ -211,11 +211,13 @@
 
                 <!-- Project name -->
                 <div class="relative flex items-center h-full">
-                    <div class="sticky left-0 px-2 font-semibold text-sm">
-                        {{ $project->address }}
+                    <div class="sticky left-0 px-2 font-semibold text-sm flex items-center gap-x-2">
+                        <span class="font-semibold text-gray-800">
+                            <a href="{{route('projects.show', $project->id)}}" target="_blank">{{ $project->address }}</a>
+                        </span>
                         <flux:button
                             wire:click="$dispatchTo('tasks.task-create', 'addTask', { project_id: {{$project->id}} })"
-                            variant="ghost"
+                            variant="filled"
                             size="sm"
                             icon="plus"
                         />
@@ -249,11 +251,12 @@
                         $leftPosition = $taskData['leftPosition'];
                         $barWidth = $taskData['barWidth'];
                         $topPosition = $taskIndex * ($taskBarHeight + $taskBarMarginY * 2) + $taskBarMarginY;
+                        $taskTypeColor = $task->type == "Task" ? 'blue' : ($task->type == "Milestone" ? 'indigo' : 'yellow')
                     @endphp
 
                     <div
                         wire:key="task-{{ $task->id }}"
-                        class="group absolute bg-white/50 border-blue-500 border-opacity-30 group-hover:border-opacity-50 text-md flex items-center shadow select-none overflow-visible {{ $taskStartDate->isBefore($this->days->first()) ? 'border-r border-t border-b rounded-r' : ($taskEndDate->isAfter($this->days->last()) ? 'border-l border-t border-b rounded-l' : ($taskStartDate->isBefore($this->days->first()) && $taskEndDate->isAfter($this->days->last()) ? 'border-t border-b' : 'border rounded')) }}"
+                        class="group absolute bg-white/50 border-{{ $taskTypeColor }}-500 border-opacity-30 group-hover:border-opacity-50 text-md flex items-center shadow select-none overflow-visible {{ $taskStartDate->isBefore($this->days->first()) ? 'border-r border-t border-b rounded-r' : ($taskEndDate->isAfter($this->days->last()) ? 'border-l border-t border-b rounded-l' : ($taskStartDate->isBefore($this->days->first()) && $taskEndDate->isAfter($this->days->last()) ? 'border-t border-b' : 'border rounded')) }}"
                         style="left: {{ $leftPosition + 2 }}px; width: {{ $barWidth - 4 }}px; top: {{ $topPosition }}px; height: {{ $taskBarHeight }}px;"
                         title="{{ $task->title }} ({{ $taskStartDate->format('M j') }} - {{ $taskEndDate->format('M j') }})"
                         x-data="taskResize()"
@@ -270,17 +273,17 @@
                         <!-- Loading indicator -->
                         <div
                             x-show="updating"
-                            class="absolute inset-0 bg-blue-100/30 rounded flex items-center justify-center z-40"
+                            class="absolute inset-0 bg-{{ $taskTypeColor }}-100/30 rounded flex items-center justify-center z-40"
                         >
-                            <div class="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                            <div class="w-4 h-4 border-2 border-{{ $taskTypeColor }}-500 border-t-transparent rounded-full animate-spin"></div>
                         </div>
 
                         <!-- Left resize handle -->
                         @if(!$taskStartDate->isBefore($this->days->first()))
                             <div
-                                class="w-2 h-full absolute top-0 left-0 bg-blue-500 opacity-30 group-hover:opacity-50 hover:!opacity-100 rounded-l hover:bg-blue-700 z-15"
+                                class="w-2 h-full absolute top-0 left-0 bg-{{ $taskTypeColor }}-500 opacity-30 group-hover:opacity-50 hover:!opacity-100 rounded-l hover:bg-{{ $taskTypeColor }}-700 z-15"
                                 x-bind:class="{
-                                    'opacity-100 bg-blue-700': resizing,
+                                    'opacity-100 bg-{{ $taskTypeColor }}-700': resizing,
                                     'cursor-ew-resize': !updating,
                                     'cursor-not-allowed opacity-20': updating
                                 }"
@@ -339,8 +342,8 @@
                                                         const visibleRight = Math.min(taskBarRect.right, containerRect.right);
                                                         const visibleTaskWidth = Math.max(0, visibleRight - visibleLeft);
 
-                                                        // Check if task bar is too narrow (less than 120px) - always show outside
-                                                        if (taskBarRect.width < 120) {
+                                                        // Check if task bar is too narrow (less than 100) - always show outside
+                                                        if (taskBarRect.width < 100) {
                                                             this.shouldShowOutside = true;
                                                             this.stickyOffset = taskBarRect.width + 4;
                                                             this.$el.style.transform = '';
@@ -353,7 +356,7 @@
                                                             this.$el.style.transform = '';
                                                             this.$el.style.position = '';
                                                             this.$el.style.zIndex = '';
-                                                        } else if (taskBarRect.right > containerRect.left && visibleTaskWidth >= 120) {
+                                                        } else if (taskBarRect.right > containerRect.left && visibleTaskWidth >= 100) {
                                                             // Task is partially off-screen but has enough visible area - stick inside
                                                             this.shouldShowOutside = false;
                                                             this.stickyOffset = containerRect.left - taskBarRect.left;
@@ -444,13 +447,20 @@
                                                     {{$task->title}}
                                                 </span>
 
-                                                <!-- Vendor Row -->
+                                                <!-- User / Vendor Row -->
                                                 <div class="flex items-center gap-2 min-h-0 h-5">
+                                                    @if($task->users->count() > 0)
+                                                        <flux:avatar.group>
+                                                            @foreach($task->users as $user)
+                                                                <flux:avatar size="xs" name="{{ $user->full_name }}" color="auto" color:seed="{{ $user->id }}" />
+                                                            @endforeach
+                                                        </flux:avatar.group>
+                                                    @endif
                                                     @if($task->vendor)
                                                         <flux:avatar size="xs" name="{{ $task->vendor->name }}" color="auto" color:seed="{{ $task->vendor->id }}" class="flex-shrink-0" />
-                                                        <flux:text class="text-xs min-w-0 whitespace-nowrap">{{ $task->vendor->name }}</flux:text>
-                                                    @else
-                                                        <div class="h-5"></div>
+                                                        <flux:text class="text-xs min-w-0 whitespace-nowrap truncate">{{ $task->vendor->name }}</flux:text>
+                                                        {{-- @else --}}
+                                                        {{-- <div class="h-5"></div> --}}
                                                     @endif
                                                 </div>
                                             </div>
@@ -463,9 +473,9 @@
                         <!-- Right resize handle -->
                         @if(!$taskEndDate->isAfter($this->days->last()))
                             <div
-                                class="w-2 h-full absolute top-0 right-0 bg-blue-500 opacity-30 group-hover:opacity-50 hover:!opacity-100 rounded-r hover:bg-blue-700 z-15"
+                                class="w-2 h-full absolute top-0 right-0 bg-{{ $taskTypeColor }}-500 opacity-30 group-hover:opacity-50 hover:!opacity-100 rounded-r hover:bg-{{ $taskTypeColor }}-700 z-15"
                                 x-bind:class="{
-                                    'opacity-100 bg-blue-700': resizing,
+                                    'opacity-100 bg-{{ $taskTypeColor }}-700': resizing,
                                     'cursor-ew-resize': !updating,
                                     'cursor-not-allowed opacity-20': updating
                                 }"

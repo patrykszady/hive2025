@@ -45,10 +45,8 @@ class MoveController extends Controller
         $tasks = Task::withoutGlobalScopes()->get();
 
         foreach($tasks as $task){
-            if (is_array($task->dates) && count($task->dates)) {
-                $sorted = collect($task->dates)->sort()->values();
-                $task->start_date = $sorted->first();
-                $task->end_date = $sorted->last();
+            if($task->type === "Material"){
+                $task->type = "Milestone";
                 $task->save();
             }
             //  else {

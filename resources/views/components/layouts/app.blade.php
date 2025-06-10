@@ -72,7 +72,7 @@
                     @endcan
 
                     <flux:navlist.item wire:navigate.hover icon="folder" href="/projects">Projects</flux:navlist.item>
-                    <flux:navlist.item icon="calendar" href="{{ route('planner.board') }}">Planner</flux:navlist.item>
+                    <flux:navlist.item icon="calendar" href="{{ route('planner.gantt') }}">Planner</flux:navlist.item>
 
                     @canany(['viewAny', 'create'], App\Models\Expense::class)
                         <flux:navlist.group expandable heading="Finances">
