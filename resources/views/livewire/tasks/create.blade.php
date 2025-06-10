@@ -8,7 +8,7 @@
         <flux:radio.group wire:model="form.type" label="Task Type" variant="segmented">
             <flux:radio value="Task" label="Task" />
             <flux:radio value="Milestone" label="Milestone" />
-            <flux:radio value="Material" label="Material" />
+            {{-- <flux:radio value="Material" label="Material" /> --}}
         </flux:radio.group>
 
         {{-- TITLE --}}

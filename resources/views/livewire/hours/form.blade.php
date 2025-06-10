@@ -22,7 +22,6 @@
                     wire:loading.attr="disabled"
                     max="today"
                     start-day="1"
-                    {{-- :navigation="false" --}}
                     with-today
                     unavailable="{{$this->days}}"
                 />

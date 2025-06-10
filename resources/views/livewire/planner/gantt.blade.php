@@ -211,10 +211,13 @@
 
                 <!-- Project name -->
                 <div class="relative flex items-center h-full">
-                    <div class="sticky left-0 px-2 font-semibold text-sm flex items-center gap-x-2">
-                        <span class="font-semibold text-gray-800">
-                            <a href="{{route('projects.show', $project->id)}}" target="_blank">{{ $project->address }}</a>
-                        </span>
+                    <div class="sticky left-0 px-2 text-sm flex items-center gap-x-4">
+                        <div class="flex flex-col">
+                            <a href="{{route('projects.show', $project->id)}}" target="_blank" class="font-semibold text-gray-800">
+                                {{ $project->address }}
+                            </a>
+                            <span class="text-xs italic text-gray-500">{{ $project->client->name }}</span>
+                        </div>
                         <flux:button
                             wire:click="$dispatchTo('tasks.task-create', 'addTask', { project_id: {{$project->id}} })"
                             variant="filled"
@@ -251,7 +254,7 @@
                         $leftPosition = $taskData['leftPosition'];
                         $barWidth = $taskData['barWidth'];
                         $topPosition = $taskIndex * ($taskBarHeight + $taskBarMarginY * 2) + $taskBarMarginY;
-                        $taskTypeColor = $task->type == "Task" ? 'blue' : ($task->type == "Milestone" ? 'indigo' : 'yellow')
+                        $taskTypeColor = $task->type == "Task" ? 'blue' : ($task->type == "Milestone" ? 'indigo' : '')
                     @endphp
 
                     <div

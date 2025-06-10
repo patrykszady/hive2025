@@ -131,17 +131,11 @@ class HourCreate extends Component
 
         $projects = Project::status(['Active'])->get();
 
-        // Updated to use start_date and end_date instead of JSON dates column
-        $planner_projects_day = Task::whereJsonContains('user_ids', auth()->user()->id)
-            ->whereNotNull('start_date')
-            ->whereNotNull('end_date')
-            ->where('start_date', '<=', $this->selected_date->format('Y-m-d'))
+        // Get projects that have tasks for the selected date (without user filter for now)
+        $planner_projects_day = Task::where('start_date', '<=', $this->selected_date->format('Y-m-d'))
             ->where('end_date', '>=', $this->selected_date->format('Y-m-d'))
-            ->whereNotIn('project_id', $projects->pluck('id')->toArray())
             ->pluck('project_id')
             ->unique();
-
-        // dd($planner_projects_day);
 
         $planner_projects_day = Project::whereIn('id', $planner_projects_day)->get();
 
@@ -149,11 +143,11 @@ class HourCreate extends Component
 
         $merged_projects = $projects->merge($other_projects)->merge($planner_projects_day);
 
+        // Load projects with ALL tasks (we'll filter after)
         $this->projects = Project::whereIn('id', $merged_projects->pluck('id')->toArray())
             ->with(['tasks' => function ($query) {
-                $query->whereJsonContains('user_ids', auth()->user()->id)
-                    ->whereNotNull('start_date')
-                    ->whereNotNull('end_date');
+                $query->where('start_date', '<=', $this->selected_date->format('Y-m-d'))
+                    ->where('end_date', '>=', $this->selected_date->format('Y-m-d'));
             }])
             ->with('latestStatus')
             ->get()
@@ -166,16 +160,14 @@ class HourCreate extends Component
         // Clear the day_project_tasks array
         $this->day_project_tasks = [];
 
-        // Filter tasks based on start_date and end_date
-        foreach ($this->projects as $project_index => $project) {
+        // Now filter tasks for the current user
+        foreach ($this->projects as $project) {
             foreach ($project->tasks as $task) {
-                $task_start = Carbon::parse($task->start_date);
-                $task_end = Carbon::parse($task->end_date);
-                $selected_date = Carbon::parse($this->selected_date);
+                // user_ids should already be an array due to model casting
+                $userIds = $task->user_ids ?? [];
 
-                // Check if selected date is between start_date and end_date (inclusive)
-                if ($selected_date->between($task_start, $task_end)) {
-                    $this->day_project_tasks[$project_index][] = [
+                if (in_array(auth()->user()->id, $userIds) || in_array((string)auth()->user()->id, $userIds)) {
+                    $this->day_project_tasks[$project->id][] = [
                         'id' => $task->id,
                         'title' => $task->title,
                         'start_date' => $task->start_date,
@@ -196,7 +188,7 @@ class HourCreate extends Component
         } else {
             foreach ($this->projects as $index => $project) {
                 $project_user_date = Hour::where('user_id', auth()->user()->id)
-                    ->where('date', $date)
+                    ->where('date', $this->selected_date->format('Y-m-d'))
                     ->where('project_id', $project->id)
                     ->get();
 
