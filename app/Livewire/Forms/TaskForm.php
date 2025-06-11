@@ -75,8 +75,8 @@ class TaskForm extends Form
 
         $this->task->update([
             // 'dates' => $this->dates, // Save dates as JSON
-            'start_date' => $this->dates['start'], // Save start date
-            'end_date' => $this->dates['end'], // Save end date
+            'start_date' => $this->dates['start'] ?? null, // Save start date
+            'end_date' => $this->dates['end'] ?? null, // Save end date
             'project_id' => $this->project_id,
             'vendor_id' => $this->vendor_id,
             'type' => $this->type,
@@ -96,8 +96,8 @@ class TaskForm extends Form
 
         $task = Task::create([
             // 'dates' => $this->dates, // Save dates as JSON
-            'start_date' => $this->dates['start'], // Save start date
-            'end_date' => $this->dates['end'], // Save end date
+            'start_date' => $this->dates['start'] ?? null, // Save start date
+            'end_date' => $this->dates['end'] ?? null, // Save end date
             'project_id' => $this->project_id,
             'vendor_id' => $this->vendor_id,
             'type' => $this->type,

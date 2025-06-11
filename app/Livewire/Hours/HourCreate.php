@@ -53,12 +53,12 @@ class HourCreate extends Component
 
     public function mount()
     {
-        $this->selectedDate(today());
+        $this->selectedDate(Carbon::today(config('app.timezone')));
 
         $confirmed_weeks =
             Timesheet::orderBy('date', 'DESC')
                 ->where('user_id', auth()->user()->id)
-                ->where('date', '>', today()->subWeeks(8))
+                ->where('date', '>', Carbon::today(config('app.timezone'))->subWeeks(8))
                 ->get()
                 ->groupBy('date');
 
@@ -89,7 +89,7 @@ class HourCreate extends Component
             $this->selectedDate($value);
             $this->validate();
         }else{
-            $this->selectedDate(today());
+            $this->selectedDate(Carbon::today(config('app.timezone')));
         }
     }
 
@@ -123,17 +123,21 @@ class HourCreate extends Component
             $this->days[$day_index]['has_hours'] = $has_hours;
         }
 
-        $this->selected_date = $date;
+        // Parse the date in app timezone and keep it as the selected date
+        $this->selected_date = Carbon::parse($date, config('app.timezone'))->startOfDay();
+
+        // Use the date in Y-m-d format for database queries (dates are stored without timezone)
+        $dateForQuery = $this->selected_date->format('Y-m-d');
 
         $user_day_hours = Hour::where('user_id', auth()->user()->id)
-            ->where('date', $this->selected_date->format('Y-m-d'))
+            ->where('date', $dateForQuery)
             ->get();
 
         $projects = Project::status(['Active'])->get();
 
         // Get projects that have tasks for the selected date (without user filter for now)
-        $planner_projects_day = Task::where('start_date', '<=', $this->selected_date->format('Y-m-d'))
-            ->where('end_date', '>=', $this->selected_date->format('Y-m-d'))
+        $planner_projects_day = Task::where('start_date', '<=', $dateForQuery)
+            ->where('end_date', '>=', $dateForQuery)
             ->pluck('project_id')
             ->unique();
 
@@ -145,9 +149,9 @@ class HourCreate extends Component
 
         // Load projects with ALL tasks (we'll filter after)
         $this->projects = Project::whereIn('id', $merged_projects->pluck('id')->toArray())
-            ->with(['tasks' => function ($query) {
-                $query->where('start_date', '<=', $this->selected_date->format('Y-m-d'))
-                    ->where('end_date', '>=', $this->selected_date->format('Y-m-d'));
+            ->with(['tasks' => function ($query) use ($dateForQuery) {
+                $query->where('start_date', '<=', $dateForQuery)
+                    ->where('end_date', '>=', $dateForQuery);
             }])
             ->with('latestStatus')
             ->get()
@@ -188,7 +192,7 @@ class HourCreate extends Component
         } else {
             foreach ($this->projects as $index => $project) {
                 $project_user_date = Hour::where('user_id', auth()->user()->id)
-                    ->where('date', $this->selected_date->format('Y-m-d'))
+                    ->where('date', $dateForQuery)
                     ->where('project_id', $project->id)
                     ->get();
 

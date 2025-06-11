@@ -35,7 +35,7 @@ class TaskCreate extends Component
 
     public function updated($field, $value)
     {
-        if (!empty($this->form->dates)) {
+        if (!empty($this->form->dates['start']) && !empty($this->form->dates['end'])) {
             $startDate = $this->form->dates['start']; // Start date
             $endDate = $this->form->dates['end']; // End date
 

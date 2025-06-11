@@ -63,8 +63,16 @@ class GanttIndex extends Component
     public function projectsData()
     {
         return $this->projects->map(function ($project) {
-            // Get tasks for this project within the date range
+            // Get tasks for this project within the date range (existing logic)
             $projectTasks = $project->tasks;
+
+            // Get tasks without start_date or end_date for this project
+            $unscheduledTasks = Task::where('project_id', $project->id)
+                ->where(function ($query) {
+                    $query->whereNull('start_date')
+                        ->orWhereNull('end_date');
+                })
+                ->get();
 
             // Generate rendered tasks data using your existing method
             $renderedTasks = $projectTasks->map(function ($task) {
@@ -72,18 +80,17 @@ class GanttIndex extends Component
             })->filter()->values(); // Remove null values and reindex
 
             // Calculate the height needed for all tasks in this project
-            $taskCount = $renderedTasks->count(); // Use rendered tasks count
-            $taskBarHeight = 60; // Must match the Blade template
-            $taskBarMarginY = 4; // Must match the Blade template
+            $taskCount = $renderedTasks->count();
+            $taskBarHeight = 60;
+            $taskBarMarginY = 4;
 
             $projectTimelineHeight = ($taskCount * ($taskBarHeight + ($taskBarMarginY * 2))) + $taskBarMarginY;
-
-            // Minimum height to prevent empty projects from being too small
             $projectTimelineHeight = max($projectTimelineHeight, 80);
 
             return [
                 'project' => $project,
                 'renderedTasks' => $renderedTasks,
+                'unscheduledTasks' => $unscheduledTasks, // Add this
                 'projectTimelineHeight' => $projectTimelineHeight
             ];
         });
