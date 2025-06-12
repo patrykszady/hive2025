@@ -203,7 +203,7 @@
                 <div
                     class="absolute inset-0 grid"
                     style="grid-template-columns: repeat({{ count($this->days) }}, {{ $dayColumnWidth }}px);"
-                >
+                    >
                     @foreach ($this->days as $day)
                         <div class="border-r border-gray-200 h-full {{ $day->isToday() && $day->isWeekend() ? 'bg-[conic-gradient(from_45deg,transparent_25%,rgb(59,130,246,0.3)_25%,rgb(59,130,246,0.3)_50%,transparent_50%,transparent_75%,rgb(59,130,246,0.3)_75%)] bg-[length:8px_8px]' : ($day->isToday() ? 'bg-blue-200/80' : ($day->isWeekend() ? 'bg-[conic-gradient(from_45deg,transparent_25%,rgb(0,0,0,0.05)_25%,rgb(0,0,0,0.05)_50%,transparent_50%,transparent_75%,rgb(0,0,0,0.05)_75%)] bg-[length:8px_8px]' : '')) }}"></div>
                     @endforeach
@@ -230,7 +230,7 @@
                 </div>
 
                 <!-- Unscheduled Tasks - Always show row for consistent spacing -->
-                <div class="relative w-full bg-gray-100/50 border-t border-gray-300 h-[36px]">
+                <div class="relative w-full bg-gray-100/50 h-[36px]">
                     <!-- Background grid for consistency -->
                     <div
                         class="absolute inset-0 grid"
@@ -246,26 +246,26 @@
                         <div class="relative flex items-center h-full">
                             <!-- Sticky container for the entire task area -->
                             <div class="sticky left-0 z-30 h-full flex items-center">
-                                <!-- Scrollable tasks area inside the sticky container -->
+                                <!-- Scrollable tasks are a inside the sticky container -->
                                 <div
                                     class="overflow-x-auto flex items-center px-2 py-1 gap-2 h-full"
                                     style="scrollbar-width: thin; scrollbar-color: #9CA3AF #F3F4F6; max-width: 100vw;"
                                     x-data="{ isHovered: false }"
                                     @mouseenter="isHovered = true"
                                     @mouseleave="isHovered = false"
-                                    x-bind:class="{ 'bg-gray-100/80': isHovered }"
-                                >
+                                    {{-- x-bind:class="{ 'bg-gray-100/80': isHovered }" --}}
+                                    >
                                     @foreach($projectData['unscheduledTasks'] as $unscheduledTask)
                                         @php
-                                            $taskTypeColor = $unscheduledTask->type == 'Task' ? 'blue' : ($unscheduledTask->type == 'Milestone' ? 'indigo' : '');
+                                            $taskTypeColor = $unscheduledTask->type === 'Task' ? 'blue' : ($unscheduledTask->type === 'Milestone' ? 'indigo' : 'blue');
                                         @endphp
                                         <flux:badge
                                             size="sm"
                                             variant="outline"
                                             color="{{ $taskTypeColor }}"
-                                            class="flex-shrink-0 cursor-pointer hover:shadow-md transition-shadow whitespace-nowrap"
+                                            class="flex-shrink-0 cursor-pointer hover:border hover:border-{{ $taskTypeColor }}-500 whitespace-nowrap"
                                             wire:click="editTask({{ $unscheduledTask->id }})"
-                                        >
+                                            >
                                             {{ $unscheduledTask->title }}
                                         </flux:badge>
                                     @endforeach
@@ -307,7 +307,7 @@
                         $leftPosition = $taskData['leftPosition'];
                         $barWidth = $taskData['barWidth'];
                         $topPosition = $taskIndex * ($taskBarHeight + $taskBarMarginY * 2) + $taskBarMarginY;
-                        $taskTypeColor = $task->type == "Task" ? 'blue' : ($task->type == "Milestone" ? 'indigo' : '');
+                        $taskTypeColor = $task->type === 'Task' ? 'blue' : ($task->type === 'Milestone' ? 'indigo' : 'blue');
                     @endphp
 
                     <div

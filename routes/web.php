@@ -33,18 +33,12 @@ use App\Livewire\Leads\LeadsIndex;
 use App\Livewire\LineItems\LineItemsIndex;
 use App\Livewire\Payments\PaymentCreate;
 use App\Livewire\Payments\PaymentsIndex;
-use App\Livewire\Planner\PlannerIndex;
 use App\Livewire\Planner\GanttIndex;
-use App\Livewire\Planner\BoardIndex;
+use App\Livewire\Planner\CardsIndex;
 use App\Livewire\Projects\ProjectShow;
 use App\Livewire\Projects\ProjectsIndex;
 use App\Livewire\Sheets\SheetShow;
 use App\Livewire\Sheets\SheetsIndex;
-use App\Livewire\Tasks\Planner;
-use App\Livewire\Tasks\PlannerProject;
-use App\Livewire\Tasks\PlannerList;
-use App\Livewire\Test\Playground;
-use App\Livewire\Test\Sorting;
 use App\Livewire\Timesheets\TimesheetCreate;
 use App\Livewire\Timesheets\TimesheetPaymentCreate;
 use App\Livewire\Timesheets\TimesheetPaymentIndex;
@@ -144,9 +138,6 @@ Route::middleware(['auth', 'user.vendor'])->group(function () {
     //DASHBOARD/ PRIMARY VENDOR
     Route::get('/dashboard', DashboardShow::class)->name('dashboard');
 
-    //TESTS
-    Route::get('/test/playground', Playground::class)->name('test.playground');
-    Route::get('/test/sorting', Sorting::class)->name('test.sorting');
     //USERS
     // Route::get('/users/{user}', UsersShow::class)->name('users.show');
     //Log In As User for Admins (User id # 1 right now only)
@@ -233,13 +224,9 @@ Route::middleware(['auth', 'user.vendor'])->group(function () {
     Route::get('/sheet_show', SheetShow::class)->name('sheets.show');
 
     //PLANNER
-    Route::get('/planner', PlannerIndex::class)->name('planner.index');
-    Route::get('/planner/board', BoardIndex::class)->name('planner.board');
     Route::get('/planner/gantt', GanttIndex::class)->name('planner.gantt');
-    Route::get('/planner/tasks', PlannerProject::class)->name('planner.tasks');
-    //TASKS
-    // Route::get('/planner_gantt', Planner::class)->name('planner.index');
-    // Route::get('/planner_schedule', PlannerList::class)->name('planner_list.index');
+    Route::get('/planner/cards', CardsIndex::class)->name('planner.cards');
+
 });
 
 require __DIR__.'/auth.php';

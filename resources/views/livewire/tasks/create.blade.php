@@ -18,7 +18,7 @@
         <flux:input.group>
             <flux:date-picker with-today mode="range" wire:model.live="form.dates" />
             {{-- DURATION --}}
-            <flux:input.group.suffix>{{$form->duration}} {{$form->duration == 1 ? ' Day' : ' Days'}}</flux:input.group.suffix>
+            <flux:input.group.suffix>{{ $form->duration }} {{ Str::plural('Day', $form->duration) }}</flux:input.group.suffix>
         </flux:input.group>
 
         {{-- PROJECT --}}

@@ -20,6 +20,7 @@ use App\Observers\ProjectObserver;
 use App\Observers\UserVendorObserver;
 use App\Observers\VendorObserver;
 
+use Carbon\Carbon;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -93,6 +94,15 @@ class AppServiceProvider extends ServiceProvider
 
         $this->bootEvent();
         $this->bootRoute();
+
+        // Set Carbon timezone to match app timezone
+        Carbon::setLocale(config('app.locale'));
+
+        // Set default timezone for Carbon
+        date_default_timezone_set(config('app.timezone'));
+
+        // Also set Carbon's timezone
+        Carbon::setTestNow(null);
     }
 
     public function bootEvent()

@@ -3,11 +3,9 @@
 namespace App\Livewire\Tasks;
 
 use App\Models\Task;
-
 use App\Livewire\Forms\TaskForm;
-use App\Livewire\Planner\PlannerIndex;
 use App\Livewire\Planner\GanttIndex;
-
+use App\Livewire\Planner\CardsIndex;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Flux;
@@ -32,6 +30,15 @@ class TaskCreate extends Component
     ];
 
     protected $listeners = ['editTask', 'addTask'];
+
+    /**
+     * Helper method to refresh all planner components
+     */
+    private function refreshPlannerComponents()
+    {
+        $this->dispatch('refreshComponent')->to(GanttIndex::class);
+        $this->dispatch('refreshComponent')->to(CardsIndex::class);
+    }
 
     public function updated($field, $value)
     {
@@ -85,7 +92,7 @@ class TaskCreate extends Component
         $task = $this->form->task;
         $task->delete();
 
-        $this->dispatch('refreshComponent')->to(GanttIndex::class);
+        $this->refreshPlannerComponents();
         $this->modal('task_create_form_modal')->close();
 
         Flux::toast(
@@ -93,7 +100,6 @@ class TaskCreate extends Component
             position: 'top right',
             variant: 'success',
             heading: 'Task Removed',
-            // route / href / wire:click
             text: '',
         );
     }
@@ -101,7 +107,7 @@ class TaskCreate extends Component
     public function edit()
     {
         $this->form->update();
-        $this->dispatch('refreshComponent')->to(GanttIndex::class);
+        $this->refreshPlannerComponents();
         $this->modal('task_create_form_modal')->close();
 
         Flux::toast(
@@ -109,7 +115,6 @@ class TaskCreate extends Component
             position: 'top right',
             variant: 'success',
             heading: 'Task Updated',
-            // route / href / wire:click
             text: '',
         );
     }
@@ -117,7 +122,7 @@ class TaskCreate extends Component
     public function save()
     {
         $this->form->store();
-        $this->dispatch('refreshComponent')->to(GanttIndex::class);
+        $this->refreshPlannerComponents();
         $this->modal('task_create_form_modal')->close();
 
         Flux::toast(
@@ -125,7 +130,6 @@ class TaskCreate extends Component
             position: 'top right',
             variant: 'success',
             heading: 'Task Created',
-            // route / href / wire:click
             text: '',
         );
     }
