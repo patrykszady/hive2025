@@ -21,6 +21,11 @@ class TaskObserver
 
         $task->belongs_to_vendor_id = auth()->user()->vendor->id == $project->belongs_to_vendor_id ? auth()->user()->vendor->id : $project->belongs_to_vendor_id;
         $task->created_by_user_id = auth()->user()->id;
+
+        // Handle options - set to null if empty
+        if (is_array($task->options) && empty($task->options)) {
+            $task->options = null;
+        }
     }
 
     /**
@@ -37,6 +42,11 @@ class TaskObserver
 
         // $task->belongs_to_vendor_id =  auth()->user()->vendor->id == $project->belongs_to_vendor_id ? auth()->user()->vendor->id : $project->belongs_to_vendor_id;
         // $task->created_by_user_id = auth()->user()->id;
+
+        // Handle options - set to null if empty
+        if (is_array($task->options) && empty($task->options)) {
+            $task->options = null;
+        }
     }
 
     /**

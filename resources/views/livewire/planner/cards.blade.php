@@ -41,6 +41,7 @@
                 @php
                     $day = $dayData['day'];
                     $tasks = $dayData['tasks'];
+                    $isWeekend = $day->isWeekend();
                 @endphp
 
                 <!-- Day Row -->
@@ -48,11 +49,11 @@
                     <!-- Day Header - Sticky within isolated context -->
                     <div class="sticky top-[56px] bg-white border-b border-gray-100 px-4 py-2 shadow-sm select-none relative z-[1]">
                         <div class="flex items-center justify-between">
-                            <div class="{{ $day->isToday() ? 'text-blue-600' : 'text-gray-900' }}">
+                            <div class="{{ $day->isToday() ? 'text-blue-600' : ($isWeekend ? 'text-gray-500' : 'text-gray-900') }}">
                                 <h4 class="font-medium text-sm">
                                     {{ $day->format('l') }} <!-- Full day name -->
                                 </h4>
-                                <p class="text-xs {{ $day->isToday() ? 'text-blue-500' : 'text-gray-600' }}">{{ $day->format('M j, Y') }}</p>
+                                <p class="text-xs {{ $day->isToday() ? 'text-blue-500' : ($isWeekend ? 'text-gray-400' : 'text-gray-600') }}">{{ $day->format('M j, Y') }}</p>
                             </div>
                         </div>
                     </div>
@@ -60,15 +61,12 @@
                     <!-- Tasks for this day - Only show if there are tasks -->
                     @if($tasks->count() > 0)
                         <div class="space-y-3 p-4 select-none">
-                            @foreach($tasks as $task)
+                            @foreach($tasks as $taskData)
                                 @php
-                                    $taskTypeColor = $task->type === 'Task' ? 'blue' : ($task->type === 'Milestone' ? 'indigo' : 'blue');
-
-                                    // Calculate which day of the task this is
-                                    $taskStartDate = \Carbon\Carbon::parse($task->start_date);
-                                    $taskEndDate = \Carbon\Carbon::parse($task->end_date);
-                                    $totalDays = $taskStartDate->diffInDays($taskEndDate) + 1;
-                                    $currentDayNumber = $taskStartDate->diffInDays($day) + 1;
+                                    $task = $taskData['task'];
+                                    $taskTypeColor = $taskData['taskTypeColor'];
+                                    $totalDays = $taskData['totalDays'];
+                                    $currentDayNumber = $taskData['currentDayNumber'];
                                 @endphp
 
                                 <!-- Task Card -->
@@ -79,7 +77,7 @@
                                             <a
                                                 href="{{ $task->project->getAddressMapURI() }}"
                                                 target="_blank"
-                                                class="font-medium text-sm text-gray-800 mb-1 block hover:text-blue-600 cursor-pointer flex items-center gap-1 select-none"
+                                                class="truncate font-medium text-sm text-gray-800 mb-1 block hover:text-blue-600 cursor-pointer flex items-center gap-1 select-none"
                                                 >
                                                 <flux:icon.map-pin class="w-3 h-3" />
                                                 {{ $task->project->address }}
@@ -88,7 +86,7 @@
 
                                         <!-- Task Title -->
                                         <div
-                                            class="italic text-sm text-gray-900 mb-2 cursor-pointer hover:text-blue-600 flex items-center gap-1 select-none"
+                                            class="truncate italic text-sm text-gray-900 mb-2 cursor-pointer hover:text-blue-600 flex items-center gap-1 select-none"
                                             wire:click="editTask({{ $task->id }})"
                                             >
                                             <flux:icon.pencil-square class="w-3 h-3" />

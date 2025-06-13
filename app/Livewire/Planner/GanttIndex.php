@@ -163,6 +163,42 @@ class GanttIndex extends Component
         ];
     }
 
+    public function getTaskWeekendExclusions($task, $taskStartDate, $taskEndDate, $barWidth)
+    {
+        // Create a period for the entire task duration
+        $taskPeriod = CarbonPeriod::create($taskStartDate, $taskEndDate);
+        $taskDays = iterator_to_array($taskPeriod);
+        
+        // Only show overlay for the visible portion of the task
+        $visibleTaskDays = [];
+        foreach($taskDays as $taskDay) {
+            // Check if this task day falls within our visible day range
+            if ($taskDay->between($this->days->first(), $this->days->last())) {
+                $isTaskDayWeekend = $taskDay->isWeekend();
+                $isTaskDaySaturday = $taskDay->isSaturday();
+                $isTaskDaySunday = $taskDay->isSunday();
+                
+                // Check if this weekend day is excluded from task options
+                $isExcludedWeekend = false;
+                if ($isTaskDayWeekend) {
+                    if ($isTaskDaySaturday && !($task->options->saturday ?? false)) {
+                        $isExcludedWeekend = true;
+                    }
+                    if ($isTaskDaySunday && !($task->options->sunday ?? false)) {
+                        $isExcludedWeekend = true;
+                    }
+                }
+                
+                $visibleTaskDays[] = [
+                    'isExcludedWeekend' => $isExcludedWeekend,
+                    'segmentWidth' => ($barWidth - 4) / count($taskDays)
+                ];
+            }
+        }
+        
+        return $visibleTaskDays;
+    }
+
     public function render()
     {
         return view('livewire.planner.gantt', [

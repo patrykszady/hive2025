@@ -1,4 +1,3 @@
-{{-- filepath: c:\Users\patry\web\hive\resources\views\livewire\planner\gantt.blade.php --}}
 @php
     $dayColumnWidth = 100;
     $taskBarHeight = 60; // Height of each task bar
@@ -326,12 +325,25 @@
                             'cursor-grabbing': resizing
                         }"
                     >
+
                         <!-- Loading indicator -->
                         <div
                             x-show="updating"
                             class="absolute inset-0 bg-{{ $taskTypeColor }}-100/30 rounded flex items-center justify-center z-40"
                         >
                             <div class="w-4 h-4 border-2 border-{{ $taskTypeColor }}-500 border-t-transparent rounded-full animate-spin"></div>
+                        </div>
+
+                        <!-- Weekend exclusion overlay -->
+                        <div class="absolute inset-0 pointer-events-none">
+                            <div class="h-full flex">
+                                @foreach($this->getTaskWeekendExclusions($task, $taskStartDate, $taskEndDate, $barWidth) as $dayData)
+                                    <div
+                                        class="{{ $dayData['isExcludedWeekend'] ? 'bg-gray-400/30' : '' }}"
+                                        style="width: {{ $dayData['segmentWidth'] }}px;"
+                                    ></div>
+                                @endforeach
+                            </div>
                         </div>
 
                         <!-- Left resize handle -->
@@ -515,8 +527,6 @@
                                                     @if($task->vendor)
                                                         <flux:avatar size="xs" name="{{ $task->vendor->name }}" color="auto" color:seed="{{ $task->vendor->id }}" class="flex-shrink-0" />
                                                         <flux:text class="text-xs min-w-0 whitespace-nowrap truncate">{{ $task->vendor->name }}</flux:text>
-                                                        {{-- @else --}}
-                                                        {{-- <div class="h-5"></div> --}}
                                                     @endif
                                                 </div>
                                             </div>

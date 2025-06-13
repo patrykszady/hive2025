@@ -3,11 +3,11 @@
 
     <flux:separator variant="subtle" />
 
-    <form wire:submit="{{$view_text['form_submit']}}" class="grid gap-6">
+    <form wire:submit="{{$view_text['form_submit']}}" class="grid space-y-2">
         {{-- TYPE --}}
         <flux:radio.group wire:model="form.type" label="Task Type" variant="segmented">
-            <flux:radio value="Task" label="Task" />
-            <flux:radio value="Milestone" label="Milestone" />
+            <flux:radio value="Task" label="Task" class="!text-blue-800" />
+            <flux:radio value="Milestone" label="Milestone" class="!text-indigo-800" />
             {{-- <flux:radio value="Material" label="Material" /> --}}
         </flux:radio.group>
 
@@ -15,11 +15,21 @@
         <flux:input wire:model.blur="form.title" label="Title" placeholder="Task Title" autofocus/>
 
         {{-- DATES --}}
-        <flux:input.group>
+        <flux:input.group label="Dates">
             <flux:date-picker with-today mode="range" wire:model.live="form.dates" />
             {{-- DURATION --}}
-            <flux:input.group.suffix>{{ $form->duration }} {{ Str::plural('Day', $form->duration) }}</flux:input.group.suffix>
+            <flux:input.group.suffix>{{ $this->duration }} {{ Str::plural('Day', $this->duration) }}</flux:input.group.suffix>
         </flux:input.group>
+
+        {{-- OPTIONS --}}
+        <flux:fieldset>
+            <flux:legend>Weekend</flux:legend>
+            <flux:description>Include weekend days.</flux:description>
+            <div class="flex gap-4 *:gap-x-2">
+                <flux:checkbox wire:model.live="form.saturday" value="saturday" label="Saturday" />
+                <flux:checkbox wire:model.live="form.sunday" value="sunday" label="Sunday" />
+            </div>
+        </flux:fieldset>
 
         {{-- PROJECT --}}
         <flux:select wire:model.live="form.project_id" label="Project" variant="listbox" searchable placeholder="Assign project...">

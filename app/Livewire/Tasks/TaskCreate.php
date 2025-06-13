@@ -11,6 +11,7 @@ use Carbon\CarbonPeriod;
 use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Component;
+use Livewire\Attributes\Computed;
 
 class TaskCreate extends Component
 {
@@ -31,6 +32,37 @@ class TaskCreate extends Component
 
     protected $listeners = ['editTask', 'addTask'];
 
+    #[Computed]
+    public function duration()
+    {
+        $startDate = $this->form->dates['start'] ?? null;
+        $endDate = $this->form->dates['end'] ?? null;
+
+        if (is_null($startDate) || is_null($endDate)) {
+            return 0;
+        }
+
+        $period = CarbonPeriod::create($startDate, $endDate);
+        $totalDays = 0;
+
+        foreach ($period as $date) {
+            $isSaturday = $date->isSaturday();
+            $isSunday = $date->isSunday();
+
+            // Include the day if:
+            // - It's a weekday (not Saturday or Sunday)
+            // - It's Saturday and Saturday is enabled
+            // - It's Sunday and Sunday is enabled
+            if ((!$isSaturday && !$isSunday) ||
+                ($isSaturday && $this->form->saturday) ||
+                ($isSunday && $this->form->sunday)) {
+                $totalDays++;
+            }
+        }
+
+        return $totalDays;
+    }
+
     /**
      * Helper method to refresh all planner components
      */
@@ -42,16 +74,8 @@ class TaskCreate extends Component
 
     public function updated($field, $value)
     {
-        if (!empty($this->form->dates['start']) && !empty($this->form->dates['end'])) {
-            $startDate = $this->form->dates['start']; // Start date
-            $endDate = $this->form->dates['end']; // End date
-
-            // Create a CarbonPeriod instance
-            $period = CarbonPeriod::create($startDate, $endDate);
-
-            // Count the number of days
-            $this->form->duration = iterator_count($period);
-        }
+        // No need to manually calculate duration anymore - it's computed automatically
+        // The computed property will handle the weekend-aware calculation
     }
 
     public function addTask($project_id, $date = null)
