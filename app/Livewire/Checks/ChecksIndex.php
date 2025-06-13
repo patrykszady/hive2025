@@ -111,7 +111,7 @@ class ChecksIndex extends Component
                 ->when($this->vendor, function ($query) {
                     return $query->where('vendor_id', $this->vendor);
                 })
-                ->paginate($paginate_number);
+                ->simplePaginate($paginate_number);
 
         $checks->getCollection()->each(function ($check, $key) {
             if ($check->transactions->sum('amount') == $check->amount) {

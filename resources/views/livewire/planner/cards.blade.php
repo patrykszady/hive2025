@@ -1,4 +1,4 @@
-<!-- Single Kanban Card for Employee -->
+<!-- Single Kanban Card -->
 <div class="h-full">
     <flux:card
         class="max-w-lg mx-auto h-full overflow-auto p-0 isolate"
@@ -29,9 +29,9 @@
         }"
         x-init="$nextTick(() => scrollToToday())"
     >
-        <!-- Employee Header - Sticky at top within isolated context -->
+        <!-- Header - Sticky at top within isolated context -->
         <div class="sticky top-0 bg-white relative z-10">
-            <flux:heading size="lg" class="p-4">{{ $employee->first_name }}'s Tasks</flux:heading>
+            <flux:heading size="lg" class="p-4">{{ $headerTitle }}</flux:heading>
             <flux:separator />
         </div>
 
@@ -72,8 +72,8 @@
                                 <!-- Task Card -->
                                 <div class="bg-white border border-l-4 rounded transition-all hover:bg-gray-50 relative select-none {{ $taskTypeColor === 'blue' ? 'border-blue-500 border-l-blue-500' : 'border-indigo-500 border-l-indigo-500' }}">
                                     <div class="p-3">
-                                        <!-- Project Address -->
-                                        @if($task->project)
+                                        <!-- Project Address (show for employee/vendor view, hide for project view) -->
+                                        @if($task->project && $type !== 'project')
                                             <a
                                                 href="{{ $task->project->getAddressMapURI() }}"
                                                 target="_blank"
@@ -95,7 +95,7 @@
 
                                         <!-- Users and Vendor -->
                                         <div class="flex items-center gap-2 min-h-0 h-5 select-none">
-                                            @if($task->users && $task->users->count() > 0)
+                                            @if($task->users && $task->users->count() > 0 && $type !== 'employee')
                                                 <flux:avatar.group size="xs">
                                                     @foreach($task->users as $user)
                                                         <flux:avatar
@@ -108,7 +108,7 @@
                                                 </flux:avatar.group>
                                             @endif
 
-                                            @if($task->vendor)
+                                            @if($task->vendor && $type !== 'vendor')
                                                 <flux:avatar
                                                     size="xs"
                                                     name="{{ $task->vendor->name }}"

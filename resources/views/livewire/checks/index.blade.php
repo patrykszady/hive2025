@@ -28,8 +28,8 @@
         </div>
         <flux:separator variant="subtle" />
 
-        <div class="space-y-2">
-            <flux:table :paginate="$this->checks">
+        <div class="space-y-4">
+            <flux:table>
                 <flux:table.columns>
                     {{-- sortable :sorted="$sortBy === 'amount'" :direction="$sortDirection" wire:click="sort('amount')"> --}}
                     <flux:table.column>Amount</flux:table.column>
@@ -66,6 +66,8 @@
                     @endforeach
                 </flux:table.rows>
             </flux:table>
+
+            <flux:pagination :paginator="$this->checks" />
         </div>
     </flux:card>
 </div>
