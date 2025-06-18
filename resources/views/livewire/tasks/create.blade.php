@@ -16,10 +16,15 @@
 
         {{-- DATES --}}
         <flux:input.group label="Dates">
-            <flux:date-picker with-today mode="range" wire:model.live="form.dates" />
-            {{-- DURATION --}}
+            <flux:date-picker
+                with-today
+                mode="range"
+                wire:model.live="form.dates"
+                :error="$errors->has('form.dates')"
+            />
             <flux:input.group.suffix>{{ $this->duration }} {{ Str::plural('Day', $this->duration) }}</flux:input.group.suffix>
         </flux:input.group>
+        <flux:error name="form.dates" />
 
         {{-- OPTIONS --}}
         <flux:fieldset>
@@ -73,6 +78,11 @@
         {{-- FOOTER --}}
         <div class="flex space-x-2 sticky bottom-0">
             <flux:spacer />
+
+            {{-- Only show duplicate button when editing (not creating) --}}
+            @if($view_text['form_submit'] === 'edit')
+                <flux:button wire:click="duplicateTask" variant="filled">Duplicate</flux:button>
+            @endif
 
             <flux:button wire:click="removeTask" variant="danger">Remove</flux:button>
 

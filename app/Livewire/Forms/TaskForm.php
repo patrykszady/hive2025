@@ -3,20 +3,18 @@
 namespace App\Livewire\Forms;
 
 use App\Models\Task;
-use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Validate;
-
 use Livewire\Form;
 
 class TaskForm extends Form
 {
-    use AuthorizesRequests;
+    public ?Task $task;
 
     #[Validate('required')]
     public $title = null;
 
     #[Validate('array')]
-    public $dates = []; // Store dates as an array
+    public $dates = [];
 
     #[Validate('required')]
     public $project_id = null;
@@ -31,39 +29,51 @@ class TaskForm extends Form
     public $user_ids = null;
 
     #[Validate('required')]
-    public $type = 'Task';
+    public $type = null;
 
     #[Validate('nullable')]
     public $notes = null;
 
-    // Add weekend options
+    #[Validate('nullable|exists:tasks,id')]
+    public $parent_task_id = null;
+
     public $saturday = false;
     public $sunday = false;
-
-    public ?Task $task;
 
     public function setTask(Task $task)
     {
         $this->task = $task;
-        $this->dates = ['start' => $task->start_date, 'end' => $task->end_date] ?? [];
 
+        $this->title = $task->title;
+        $this->dates = [
+            'start' => $task->start_date?->format('Y-m-d'),
+            'end' => $task->end_date?->format('Y-m-d'),
+        ];
         $this->project_id = $task->project_id;
         $this->order = $task->order;
         $this->vendor_id = $task->vendor_id;
+        $this->user_ids = $task->user_ids;
         $this->type = $task->type;
-        $this->title = $task->title;
         $this->notes = $task->notes;
-        $this->user_ids = $task->user_ids ?? [];
+        $this->parent_task_id = $task->parent_task_id;
 
-        // Load weekend options from database
-        $this->saturday = $task->options->saturday ?? false;
-        $this->sunday = $task->options->sunday ?? false;
+        // Set weekend options
+        $this->saturday = $task->options?->saturday ?? false;
+        $this->sunday = $task->options?->sunday ?? false;
     }
 
     public function update()
     {
-        $this->authorize('update', $this->task);
         $this->validate();
+
+        // Custom validation for sibling overlaps
+        $startDate = $this->dates['start'] ?? null;
+        $endDate = $this->dates['end'] ?? null;
+
+        if ($startDate && $endDate && $this->task->wouldOverlapWithSiblings($startDate, $endDate)) {
+            $this->addError('dates', 'This task would overlap with a sibling task.');
+            return false;
+        }
 
         // Prepare options array
         $options = (array) ($this->task->options ?? []);
@@ -82,8 +92,8 @@ class TaskForm extends Form
         }
 
         $this->task->update([
-            'start_date' => $this->dates['start'] ?? null,
-            'end_date' => $this->dates['end'] ?? null,
+            'start_date' => $startDate,
+            'end_date' => $endDate,
             'project_id' => $this->project_id,
             'vendor_id' => $this->vendor_id,
             'type' => $this->type,
@@ -92,6 +102,7 @@ class TaskForm extends Form
             'notes' => $this->notes,
             'order' => $this->order,
             'options' => $options,
+            'parent_task_id' => $this->parent_task_id,
         ]);
 
         return $this->task;
@@ -99,8 +110,25 @@ class TaskForm extends Form
 
     public function store()
     {
-        // $this->authorize('create', Expense::class);
         $this->validate();
+
+        // Custom validation for sibling overlaps
+        $startDate = $this->dates['start'] ?? null;
+        $endDate = $this->dates['end'] ?? null;
+
+        if ($startDate && $endDate && $this->parent_task_id) {
+            $tempTask = new Task([
+                'id' => 0,
+                'project_id' => $this->project_id,
+                'parent_task_id' => $this->parent_task_id,
+            ]);
+
+            if ($tempTask->wouldOverlapWithSiblings($startDate, $endDate)) {
+                // Use 'dates' instead of 'form.dates'
+                $this->addError('dates', 'This task would overlap with a sibling task.');
+                return false;
+            }
+        }
 
         // Prepare options array
         $options = [];
@@ -115,8 +143,8 @@ class TaskForm extends Form
         }
 
         $task = Task::create([
-            'start_date' => $this->dates['start'] ?? null,
-            'end_date' => $this->dates['end'] ?? null,
+            'start_date' => $startDate,
+            'end_date' => $endDate,
             'project_id' => $this->project_id,
             'vendor_id' => $this->vendor_id,
             'type' => $this->type,
@@ -125,6 +153,7 @@ class TaskForm extends Form
             'notes' => $this->notes,
             'order' => 0,
             'options' => $options,
+            'parent_task_id' => $this->parent_task_id,
         ]);
 
         return $task;

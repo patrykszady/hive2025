@@ -3,6 +3,7 @@
 namespace App\Livewire\Planner;
 
 use App\Models\Vendor;
+use App\Models\User;
 use App\Models\Task;
 use App\Models\Project;
 use Flux;
@@ -63,7 +64,7 @@ class GanttIndex extends Component
     public function projectsData()
     {
         return $this->projects->map(function ($project) {
-            // Get tasks for this project within the date range (existing logic)
+            // Get tasks for this project within the date range
             $projectTasks = $project->tasks;
 
             // Get tasks without start_date or end_date for this project
@@ -74,23 +75,42 @@ class GanttIndex extends Component
                 })
                 ->get();
 
-            // Generate rendered tasks data using your existing method
-            $renderedTasks = $projectTasks->map(function ($task) {
+            // Generate rendered tasks data
+            $allRenderedTasks = $projectTasks->map(function ($task) {
                 return $this->calculateTaskData($task);
-            })->filter()->values(); // Remove null values and reindex
+            })->filter()->values();
 
-            // Calculate the height needed for all tasks in this project
-            $taskCount = $renderedTasks->count();
+            // Group tasks by family (parent_task_id or own id if parent/standalone)
+            $groupedTasks = $allRenderedTasks->groupBy(function ($taskData) {
+                $task = $taskData['task'];
+                // Group by parent_id, or use own ID if it's a parent/standalone
+                return $task->parent_task_id ?? $task->id;
+            });
+
+            // Flatten grouped tasks into rows - family members go on same row
+            $taskRows = [];
+            foreach ($groupedTasks as $familyId => $familyTasks) {
+                // Sort siblings by creation date within each family
+                $sortedFamily = $familyTasks->sortBy(function ($taskData) {
+                    return $taskData['task']->created_at;
+                })->values()->toArray();
+
+                $taskRows[] = $sortedFamily;
+            }
+
+            // Calculate the height needed for this project (based on rows, not individual tasks)
+            $rowCount = count($taskRows);
             $taskBarHeight = 60;
             $taskBarMarginY = 4;
 
-            $projectTimelineHeight = ($taskCount * ($taskBarHeight + ($taskBarMarginY * 2))) + $taskBarMarginY;
+            $projectTimelineHeight = ($rowCount * ($taskBarHeight + ($taskBarMarginY * 2))) + $taskBarMarginY;
             $projectTimelineHeight = max($projectTimelineHeight, 80);
 
             return [
                 'project' => $project,
-                'renderedTasks' => $renderedTasks,
-                'unscheduledTasks' => $unscheduledTasks, // Add this
+                'renderedTasks' => $allRenderedTasks, // Keep for compatibility
+                'taskRows' => $taskRows, // New grouped structure
+                'unscheduledTasks' => $unscheduledTasks,
                 'projectTimelineHeight' => $projectTimelineHeight
             ];
         });
@@ -104,34 +124,46 @@ class GanttIndex extends Component
     public function updateTaskDates($taskId, $startIndex, $endIndex)
     {
         $task = Task::find($taskId);
-        if ($task) {
-            // Handle negative start index (task starts before view)
-            if ($startIndex < 0) {
-                $startDate = $this->days->first()->copy()->addDays($startIndex);
-            } else {
-                $startDate = $this->days[$startIndex];
-            }
+        if (!$task) return;
 
-            // Handle end index beyond view (task ends after view)
-            if ($endIndex >= count($this->days)) {
-                $endDate = $this->days->last()->copy()->addDays($endIndex - (count($this->days) - 1));
-            } else {
-                $endDate = $this->days[$endIndex];
-            }
-
-            $task->update([
-                'start_date' => $startDate->format('Y-m-d'),
-                'end_date' => $endDate->format('Y-m-d')
-            ]);
-
-            Flux::toast(
-                duration: 3000,
-                position: 'top right',
-                variant: 'success',
-                heading: 'Task Updated',
-                text: '',
-            );
+        // Calculate new dates
+        if ($startIndex < 0) {
+            $startDate = $this->days->first()->copy()->addDays($startIndex);
+        } else {
+            $startDate = $this->days[$startIndex];
         }
+
+        if ($endIndex >= count($this->days)) {
+            $endDate = $this->days->last()->copy()->addDays($endIndex - (count($this->days) - 1));
+        } else {
+            $endDate = $this->days[$endIndex];
+        }
+
+        // Check for sibling overlaps
+        if ($task->wouldOverlapWithSiblings($startDate, $endDate)) {
+            Flux::toast(
+                duration: 4000,
+                position: 'top right',
+                variant: 'danger',
+                heading: 'Cannot Update Task',
+                text: 'This would overlap with a sibling task.',
+            );
+            return;
+        }
+
+        // Update the task
+        $task->update([
+            'start_date' => $startDate->format('Y-m-d'),
+            'end_date' => $endDate->format('Y-m-d')
+        ]);
+
+        Flux::toast(
+            duration: 3000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Task Updated',
+            text: '',
+        );
     }
 
     private function calculateTaskData($task)
@@ -168,7 +200,7 @@ class GanttIndex extends Component
         // Create a period for the entire task duration
         $taskPeriod = CarbonPeriod::create($taskStartDate, $taskEndDate);
         $taskDays = iterator_to_array($taskPeriod);
-        
+
         // Only show overlay for the visible portion of the task
         $visibleTaskDays = [];
         foreach($taskDays as $taskDay) {
@@ -177,7 +209,7 @@ class GanttIndex extends Component
                 $isTaskDayWeekend = $taskDay->isWeekend();
                 $isTaskDaySaturday = $taskDay->isSaturday();
                 $isTaskDaySunday = $taskDay->isSunday();
-                
+
                 // Check if this weekend day is excluded from task options
                 $isExcludedWeekend = false;
                 if ($isTaskDayWeekend) {
@@ -188,14 +220,14 @@ class GanttIndex extends Component
                         $isExcludedWeekend = true;
                     }
                 }
-                
+
                 $visibleTaskDays[] = [
                     'isExcludedWeekend' => $isExcludedWeekend,
                     'segmentWidth' => ($barWidth - 4) / count($taskDays)
                 ];
             }
         }
-        
+
         return $visibleTaskDays;
     }
 
@@ -204,6 +236,8 @@ class GanttIndex extends Component
         return view('livewire.planner.gantt', [
             'projectsData' => $this->projectsData,
             'days' => $this->days,
+            'employees' => $this->employees,
+            'vendors' => $this->vendors,
         ])->layout('components.layouts.app', [
             'fullscreenClasses' => 'p-0! lg:p-0! relative overflow-auto',
         ]);

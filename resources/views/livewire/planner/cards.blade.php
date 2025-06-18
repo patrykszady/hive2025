@@ -13,14 +13,14 @@
                         // Scroll to yesterday's element with smooth behavior
                         yesterdayElement.scrollIntoView({
                             behavior: 'smooth',
-                            block: 'start',
+                            block: 'center',
                             inline: 'nearest'
                         });
                     } else {
                         // If no previous sibling (today is first day), scroll to today
                         todayElement.scrollIntoView({
                             behavior: 'smooth',
-                            block: 'start',
+                            block: 'center',
                             inline: 'nearest'
                         });
                     }
@@ -35,9 +35,87 @@
             <flux:separator />
         </div>
 
+        <!-- No Date Tasks - Show above dated tasks -->
+        @if($tasksData['noDateTasks']->count() > 0)
+            <div class="bg-gray-50 border-b border-gray-200">
+                <div class="sticky top-[56px] bg-gray-50 border-b border-gray-100 px-4 py-2 shadow-sm select-none relative z-[1]">
+                    <div class="flex items-center justify-between">
+                        <div class="text-gray-700">
+                            <h4 class="font-medium text-sm">Unscheduled Tasks</h4>
+                            <p class="text-xs text-gray-500">No dates assigned</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="space-y-3 p-4 select-none">
+                    @foreach($tasksData['noDateTasks'] as $taskData)
+                        @php
+                            $task = $taskData['task'];
+                            $taskTypeColor = $taskData['taskTypeColor'];
+                        @endphp
+
+                        <!-- Task Card -->
+                        <div class="bg-white border border-l-4 rounded transition-all hover:bg-gray-50 relative select-none {{ $taskTypeColor === 'blue' ? 'border-blue-500 border-l-blue-500' : 'border-indigo-500 border-l-indigo-500' }}">
+                            <div class="p-3">
+                                <!-- Project Address (show for employee/vendor view, hide for project view) -->
+                                @if($task->project && $type !== 'project')
+                                    <a
+                                        href="{{ $task->project->getAddressMapURI() }}"
+                                        target="_blank"
+                                        class="truncate font-medium text-sm text-gray-800 mb-1 block hover:text-blue-600 cursor-pointer flex items-center gap-1 select-none"
+                                        >
+                                        <flux:icon.map-pin class="w-3 h-3" />
+                                        {{ $task->project->address }}
+                                    </a>
+                                @endif
+
+                                <!-- Task Title -->
+                                <div
+                                    class="truncate italic text-sm text-gray-900 mb-2 cursor-pointer hover:text-blue-600 flex items-center gap-1 select-none"
+                                    wire:click="editTask({{ $task->id }})"
+                                    >
+                                    <flux:icon.pencil-square class="w-3 h-3" />
+                                    {{ $task->title }}
+                                </div>
+
+                                <!-- Users and Vendor -->
+                                <div class="flex items-center gap-2 min-h-0 h-5 select-none">
+                                    @if($task->users && $task->users->count() > 0 && $type !== 'employee')
+                                        <flux:avatar.group size="xs">
+                                            @foreach($task->users as $user)
+                                                <flux:avatar
+                                                    size="xs"
+                                                    name="{{ $user->full_name }}"
+                                                    color="auto"
+                                                    color:seed="{{ $user->id }}"
+                                                />
+                                            @endforeach
+                                        </flux:avatar.group>
+                                    @endif
+
+                                    @if($task->vendor && $type !== 'vendor')
+                                        <flux:avatar
+                                            size="xs"
+                                            name="{{ $task->vendor->name }}"
+                                            color="auto"
+                                            color:seed="{{ $task->vendor->id }}"
+                                            class="flex-shrink-0"
+                                        />
+                                        <span class="text-xs min-w-0 whitespace-nowrap truncate text-gray-600">
+                                            {{ $task->vendor->name }}
+                                        </span>
+                                    @endif
+                                </div>
+                            </div>
+                        </div>
+                    @endforeach
+                </div>
+            </div>
+        @endif
+
         <!-- Days as Rows -->
         <div class="divide-y divide-gray-200">
-            @foreach($tasksData as $dayData)
+            @foreach($tasksData['dayTasks'] as $dayData)
                 @php
                     $day = $dayData['day'];
                     $tasks = $dayData['tasks'];
@@ -49,11 +127,11 @@
                     <!-- Day Header - Sticky within isolated context -->
                     <div class="sticky top-[56px] bg-white border-b border-gray-100 px-4 py-2 shadow-sm select-none relative z-[1]">
                         <div class="flex items-center justify-between">
-                            <div class="{{ $day->isToday() ? 'text-blue-600' : ($isWeekend ? 'text-gray-500' : 'text-gray-900') }}">
+                            <div class="{{ $day->isToday() ? 'text-blue-600' : ($isWeekend ? 'text-gray-500 italic' : 'text-gray-900') }}">
                                 <h4 class="font-medium text-sm">
                                     {{ $day->format('l') }} <!-- Full day name -->
                                 </h4>
-                                <p class="text-xs {{ $day->isToday() ? 'text-blue-500' : ($isWeekend ? 'text-gray-400' : 'text-gray-600') }}">{{ $day->format('M j, Y') }}</p>
+                                <p class="text-xs {{ $day->isToday() ? 'text-blue-500' : ($isWeekend ? 'text-gray-400 italic' : 'text-gray-600') }}">{{ $day->format('M j, Y') }}</p>
                             </div>
                         </div>
                     </div>

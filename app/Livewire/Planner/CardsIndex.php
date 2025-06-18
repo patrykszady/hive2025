@@ -75,8 +75,11 @@ class CardsIndex extends Component
         // Get tasks based on type
         $allTasks = $this->getTasksQuery($startDate, $endDate);
 
+        // Get tasks with no dates (separately)
+        $noDateTasks = $this->getNoDateTasksQuery();
+
         // Map tasks to each day
-        return $this->days->map(function ($day) use ($allTasks) {
+        $dayTasksData = $this->days->map(function ($day) use ($allTasks) {
             $dayFormat = $day->format('Y-m-d');
 
             $dayTasks = $allTasks->filter(function ($task) use ($dayFormat, $day) {
@@ -157,6 +160,19 @@ class CardsIndex extends Component
                 'tasks' => $dayTasks,
             ];
         });
+
+        // Add no-date tasks at the beginning
+        return collect([
+            'noDateTasks' => $noDateTasks->map(function ($task) {
+                return [
+                    'task' => $task,
+                    'taskTypeColor' => $task->type === 'Task' ? 'blue' : ($task->type === 'Milestone' ? 'indigo' : 'blue'),
+                    'totalDays' => null,
+                    'currentDayNumber' => null
+                ];
+            }),
+            'dayTasks' => $dayTasksData
+        ]);
     }
 
     private function getTasksQuery($startDate, $endDate)
@@ -164,6 +180,36 @@ class CardsIndex extends Component
         $query = Task::where('start_date', '<=', $endDate->format('Y-m-d'))
             ->where('end_date', '>=', $startDate->format('Y-m-d'))
             ->orderBy('start_date');
+
+        switch ($this->type) {
+            case 'employee':
+                if (!$this->employee) return collect();
+                $query->where(function ($q) {
+                    $q->whereJsonContains('user_ids', $this->employee->id)
+                      ->orWhereJsonContains('user_ids', (string)$this->employee->id);
+                });
+                break;
+
+            case 'project':
+                if (!$this->project) return collect();
+                $query->where('project_id', $this->project->id);
+                break;
+
+            case 'vendor':
+                if (!$this->vendor) return collect();
+                $query->where('vendor_id', $this->vendor->id);
+                break;
+        }
+
+        return $query->get();
+    }
+
+    private function getNoDateTasksQuery()
+    {
+        $query = Task::where(function ($q) {
+            $q->whereNull('start_date')
+              ->orWhereNull('end_date');
+        })->orderBy('created_at');
 
         switch ($this->type) {
             case 'employee':
@@ -197,7 +243,7 @@ class CardsIndex extends Component
             case 'project':
                 return $this->project ? $this->project->address . ' Tasks' : 'Project Tasks';
             case 'vendor':
-                return $this->vendor ? $this->vendor->business_name . ' Tasks' : 'Vendor Tasks';
+                return $this->vendor ? $this->vendor->name . ' Tasks' : 'Vendor Tasks';
             default:
                 return 'Tasks';
         }

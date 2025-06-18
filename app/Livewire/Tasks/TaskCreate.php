@@ -111,6 +111,58 @@ class TaskCreate extends Component
         $this->dispatch('task-modal-opened');
     }
 
+    public function duplicateTask()
+    {
+        // Get the current task data
+        $currentTask = $this->form->task;
+
+        // Close the current modal first
+        $this->modal('task_create_form_modal')->close();
+
+        // Reset the form
+        $this->form->reset();
+        $this->resetErrorBag();
+
+        // Set up for creating a new task
+        $this->view_text = [
+            'card_title' => 'Duplicate Task',
+            'button_text' => 'Create',
+            'form_submit' => 'save',
+        ];
+
+        // Copy all the data except dates
+        $this->form->title = $currentTask->title;
+        $this->form->type = $currentTask->type;
+        $this->form->project_id = $currentTask->project_id;
+        $this->form->vendor_id = $currentTask->vendor_id;
+        $this->form->user_ids = $currentTask->user_ids;
+        $this->form->notes = $currentTask->notes;
+
+        // Copy weekend options if they exist
+        if ($currentTask->options) {
+            $this->form->saturday = $currentTask->options->saturday ?? false;
+            $this->form->sunday = $currentTask->options->sunday ?? false;
+        }
+
+        // Set up parent-child relationship
+        if ($currentTask->parent_task_id) {
+            // If current task is already a child, make duplicate a sibling
+            $this->form->parent_task_id = $currentTask->parent_task_id;
+        } else {
+            // If current task is standalone/parent, make duplicate its child
+            $this->form->parent_task_id = $currentTask->id;
+        }
+
+        // Leave dates empty as requested
+        $this->form->dates = [];
+
+        // Open the modal again with the duplicated data
+        $this->modal('task_create_form_modal')->show();
+
+        // Emit event that modal opened
+        $this->dispatch('task-modal-opened');
+    }
+
     public function removeTask()
     {
         $task = $this->form->task;
@@ -130,7 +182,30 @@ class TaskCreate extends Component
 
     public function edit()
     {
-        $this->form->update();
+        $this->authorize('update', $this->form->task);
+
+        $result = $this->form->update();
+
+        if ($result === false) {
+            \Log::info('Form update failed');
+
+            // The form's errors need to be copied to the component's error bag
+            // Get all errors from the form and add them to the component
+            $formErrors = $this->form->getErrorBag();
+
+            \Log::info('Form error bag contents: ', $formErrors->messages());
+
+            // Add each form error to the component's error bag with 'form.' prefix
+            foreach ($formErrors->messages() as $field => $messages) {
+                foreach ($messages as $message) {
+                    $this->addError("form.{$field}", $message);
+                    \Log::info("Added error: form.{$field} => {$message}");
+                }
+            }
+
+            return; // Don't close modal
+        }
+
         $this->refreshPlannerComponents();
         $this->modal('task_create_form_modal')->close();
 
@@ -156,15 +231,6 @@ class TaskCreate extends Component
             heading: 'Task Created',
             text: '',
         );
-    }
-
-    // When modal closes
-    public function closeModal()
-    {
-        // Your existing close logic...
-
-        // Emit event that modal closed
-        $this->dispatch('task-modal-closed');
     }
 
     public function render()

@@ -295,261 +295,257 @@
                     @endforeach
                 </div>
 
-                <!-- Task bars -->
-                @foreach ($renderedTasks as $taskIndex => $taskData)
-                    @php
-                        $task = $taskData['task'];
-                        $taskStartDate = $taskData['taskStartDate'];
-                        $taskEndDate = $taskData['taskEndDate'];
-                        $renderStartDayIndex = $taskData['renderStartDayIndex'];
-                        $renderEndDayIndex = $taskData['renderEndDayIndex'];
-                        $leftPosition = $taskData['leftPosition'];
-                        $barWidth = $taskData['barWidth'];
-                        $topPosition = $taskIndex * ($taskBarHeight + $taskBarMarginY * 2) + $taskBarMarginY;
-                        $taskTypeColor = $task->type === 'Task' ? 'blue' : ($task->type === 'Milestone' ? 'indigo' : 'blue');
-                    @endphp
+                <!-- Task bars - grouped by family -->
+                @foreach ($projectData['taskRows'] as $rowIndex => $taskRow)
+                    @foreach ($taskRow as $taskIndex => $taskData)
+                        @php
+                            $task = $taskData['task'];
+                            $taskStartDate = $taskData['taskStartDate'];
+                            $taskEndDate = $taskData['taskEndDate'];
+                            $renderStartDayIndex = $taskData['renderStartDayIndex'];
+                            $renderEndDayIndex = $taskData['renderEndDayIndex'];
+                            $leftPosition = $taskData['leftPosition'];
+                            $barWidth = $taskData['barWidth'];
+                            $topPosition = $rowIndex * ($taskBarHeight + $taskBarMarginY * 2) + $taskBarMarginY;
+                            $taskTypeColor = $task->type === 'Task' ? 'blue' : ($task->type === 'Milestone' ? 'indigo' : 'blue');
 
-                    <div
-                        wire:key="task-{{ $task->id }}"
-                        class="group absolute bg-white/50 border-{{ $taskTypeColor }}-500 border-opacity-30 group-hover:border-opacity-50 text-md flex items-center shadow select-none overflow-visible {{ $taskStartDate->isBefore($this->days->first()) ? 'border-r border-t border-b rounded-r' : ($taskEndDate->isAfter($this->days->last()) ? 'border-l border-t border-b rounded-l' : ($taskStartDate->isBefore($this->days->first()) && $taskEndDate->isAfter($this->days->last()) ? 'border-t border-b' : 'border rounded')) }}"
-                        style="left: {{ $leftPosition + 2 }}px; width: {{ $barWidth - 4 }}px; top: {{ $topPosition }}px; height: {{ $taskBarHeight }}px;"
-                        title="{{ $task->title }} ({{ $taskStartDate->format('M j') }} - {{ $taskEndDate->format('M j') }})"
-                        x-data="taskResize()"
-                        x-init="init({{ $task->id }}, {{ $renderStartDayIndex }}, {{ $renderEndDayIndex }})"
-                        x-bind:class="{
-                            'shadow-lg z-15': resizing,
-                            '!border-opacity-100': resizing,
-                            'animate-pulse': updating,
-                            'cursor-pointer hover:bg-gray-100/90': !updating && !resizing,
-                            'cursor-not-allowed': updating,
-                            'cursor-grabbing': resizing
-                        }"
-                    >
+                            // Check if there's a following sibling task that would overlap with text
+                            $hasFollowingSibling = false;
+                            if (isset($taskRow[$taskIndex + 1])) {
+                                $nextTask = $taskRow[$taskIndex + 1];
+                                $nextTaskLeft = $nextTask['leftPosition'];
+                                $currentTaskEnd = $leftPosition + $barWidth;
+                                $titleWidth = strlen($task->title) * 8; // Approximate character width
 
-                        <!-- Loading indicator -->
+                                // If the next task starts close to where this task ends, hide the text
+                                $hasFollowingSibling = ($nextTaskLeft - $currentTaskEnd) < ($titleWidth + 30);
+                            }
+                        @endphp
+
                         <div
-                            x-show="updating"
-                            class="absolute inset-0 bg-{{ $taskTypeColor }}-100/30 rounded flex items-center justify-center z-40"
+                            wire:key="task-{{ $task->id }}"
+                            class="group absolute bg-white/50 border-{{ $taskTypeColor }}-500 border-opacity-30 group-hover:border-opacity-50 text-md flex items-center shadow select-none overflow-visible {{ $taskStartDate->isBefore($this->days->first()) ? 'border-r border-t border-b rounded-r' : ($taskEndDate->isAfter($this->days->last()) ? 'border-l border-t border-b rounded-l' : ($taskStartDate->isBefore($this->days->first()) && $taskEndDate->isAfter($this->days->last()) ? 'border-t border-b' : 'border rounded')) }}"
+                            style="left: {{ $leftPosition + 2 }}px; width: {{ $barWidth - 4 }}px; top: {{ $topPosition }}px; height: {{ $taskBarHeight }}px;"
+                            title="{{ $task->title }} ({{ $taskStartDate->format('M j') }} - {{ $taskEndDate->format('M j') }})"
+                            x-data="taskResize()"
+                            x-init="init({{ $task->id }}, {{ $renderStartDayIndex }}, {{ $renderEndDayIndex }})"
+                            x-bind:class="{
+                                'shadow-lg z-15': resizing,
+                                '!border-opacity-100': resizing,
+                                'animate-pulse': updating,
+                                'cursor-pointer hover:bg-gray-100/90': !updating && !resizing,
+                                'cursor-not-allowed': updating,
+                                'cursor-grabbing': resizing
+                            }"
                         >
-                            <div class="w-4 h-4 border-2 border-{{ $taskTypeColor }}-500 border-t-transparent rounded-full animate-spin"></div>
-                        </div>
 
-                        <!-- Weekend exclusion overlay -->
-                        <div class="absolute inset-0 pointer-events-none">
-                            <div class="h-full flex">
-                                @foreach($this->getTaskWeekendExclusions($task, $taskStartDate, $taskEndDate, $barWidth) as $dayData)
-                                    <div
-                                        class="{{ $dayData['isExcludedWeekend'] ? 'bg-gray-400/30' : '' }}"
-                                        style="width: {{ $dayData['segmentWidth'] }}px;"
-                                    ></div>
-                                @endforeach
-                            </div>
-                        </div>
-
-                        <!-- Left resize handle -->
-                        @if(!$taskStartDate->isBefore($this->days->first()))
+                            <!-- Loading indicator -->
                             <div
-                                class="w-2 h-full absolute top-0 left-0 bg-{{ $taskTypeColor }}-500 opacity-30 group-hover:opacity-50 hover:!opacity-100 rounded-l hover:bg-{{ $taskTypeColor }}-700 z-15"
-                                x-bind:class="{
-                                    'opacity-100 bg-{{ $taskTypeColor }}-700': resizing,
-                                    'cursor-ew-resize': !updating,
-                                    'cursor-not-allowed opacity-20': updating
-                                }"
-                                @mousedown="startResize('left', $event, '{{ $taskStartDate->format('Y-m-d') }}', '{{ $taskEndDate->format('Y-m-d') }}', '{{ $this->days->first()->format('Y-m-d') }}', '{{ $this->days->last()->format('Y-m-d') }}')"
-                                @touchstart="startResize('left', $event, '{{ $taskStartDate->format('Y-m-d') }}', '{{ $taskEndDate->format('Y-m-d') }}', '{{ $this->days->first()->format('Y-m-d') }}', '{{ $this->days->last()->format('Y-m-d') }}')"
-                            ></div>
-                        @endif
-
-                        <!-- Task content -->
-                        <div class="flex-1 relative mx-2 h-full overflow-visible">
-                            <flux:card
-                                class="select-none !bg-transparent border-0 shadow-none p-1 my-0 overflow-visible h-full"
-                                x-on:click="updating = true; $wire.editTask({{$task->id}})"
-                                @task-modal-opened.window="updating = false"
-                                @task-modal-closed.window="updating = false"
-                                :key="$task->id"
-                                x-bind:class="{
-                                    'cursor-pointer': !updating,
-                                    'cursor-not-allowed': updating
-                                }"
+                                x-show="updating"
+                                class="absolute inset-0 bg-{{ $taskTypeColor }}-100/30 rounded flex items-center justify-center z-40"
                             >
-                                <div class="flex flex-col justify-between h-full gap-1 min-h-0 overflow-visible">
-                                    <div class="flex items-center justify-between flex-shrink-0 relative overflow-visible">
-                                        <!-- Task Title and Vendor - smooth sticky behavior -->
+                                <div class="w-4 h-4 border-2 border-{{ $taskTypeColor }}-500 border-t-transparent rounded-full animate-spin"></div>
+                            </div>
+
+                            <!-- Weekend exclusion overlay -->
+                            <div class="absolute inset-0 pointer-events-none">
+                                <div class="h-full flex">
+                                    @foreach($this->getTaskWeekendExclusions($task, $taskStartDate, $taskEndDate, $barWidth) as $dayData)
                                         <div
-                                            class="flex flex-col gap-1 flex-1 min-w-0 relative overflow-visible"
-                                            x-data="{
-                                                shouldShowOutside: false,
-                                                stickyOffset: 0,
+                                            class="{{ $dayData['isExcludedWeekend'] ? 'bg-gray-400/30' : '' }}"
+                                            style="width: {{ $dayData['segmentWidth'] }}px;"
+                                        ></div>
+                                    @endforeach
+                                </div>
+                            </div>
 
-                                                init() {
-                                                    this.$nextTick(() => {
-                                                        this.setupSticky();
-                                                    });
-                                                },
+                            <!-- Left resize handle -->
+                            @if(!$taskStartDate->isBefore($this->days->first()))
+                                <div
+                                    class="w-2 h-full absolute top-0 left-0 bg-{{ $taskTypeColor }}-500 opacity-30 group-hover:opacity-50 hover:!opacity-100 rounded-l hover:bg-{{ $taskTypeColor }}-700 z-15"
+                                    x-bind:class="{
+                                        'opacity-100 bg-{{ $taskTypeColor }}-700': resizing,
+                                        'cursor-ew-resize': !updating,
+                                        'cursor-not-allowed opacity-20': updating
+                                    }"
+                                    @mousedown="startResize('left', $event, '{{ $taskStartDate->format('Y-m-d') }}', '{{ $taskEndDate->format('Y-m-d') }}', '{{ $this->days->first()->format('Y-m-d') }}', '{{ $this->days->last()->format('Y-m-d') }}')"
+                                    @touchstart="startResize('left', $event, '{{ $taskStartDate->format('Y-m-d') }}', '{{ $taskEndDate->format('Y-m-d') }}', '{{ $this->days->first()->format('Y-m-d') }}', '{{ $this->days->last()->format('Y-m-d') }}')"
+                                ></div>
+                            @endif
 
-                                                setupSticky() {
-                                                    const container = this.$el.closest('.h-full.overflow-auto');
-                                                    let taskBar = this.$el;
-
-                                                    // Walk up the DOM to find the task bar element
-                                                    while (taskBar && !taskBar.hasAttribute('wire:key')) {
-                                                        taskBar = taskBar.parentElement;
-                                                    }
-
-                                                    if (!container || !taskBar) {
-                                                        return;
-                                                    }
-
-                                                    const updatePosition = () => {
-                                                        const taskBarRect = taskBar.getBoundingClientRect();
-                                                        const containerRect = container.getBoundingClientRect();
-
-                                                        // Calculate visible area of the task bar
-                                                        const visibleLeft = Math.max(taskBarRect.left, containerRect.left);
-                                                        const visibleRight = Math.min(taskBarRect.right, containerRect.right);
-                                                        const visibleTaskWidth = Math.max(0, visibleRight - visibleLeft);
-
-                                                        // Check if task bar is too narrow (less than 100) - always show outside
-                                                        if (taskBarRect.width < 100) {
-                                                            this.shouldShowOutside = true;
-                                                            this.stickyOffset = taskBarRect.width + 4;
-                                                            this.$el.style.transform = '';
-                                                            this.$el.style.position = '';
-                                                            this.$el.style.zIndex = '';
-                                                        } else if (taskBarRect.left >= containerRect.left) {
-                                                            // Task is fully visible and wide enough - normal position
-                                                            this.shouldShowOutside = false;
-                                                            this.stickyOffset = 0;
-                                                            this.$el.style.transform = '';
-                                                            this.$el.style.position = '';
-                                                            this.$el.style.zIndex = '';
-                                                        } else if (taskBarRect.right > containerRect.left && visibleTaskWidth >= 100) {
-                                                            // Task is partially off-screen but has enough visible area - stick inside
-                                                            this.shouldShowOutside = false;
-                                                            this.stickyOffset = containerRect.left - taskBarRect.left;
-                                                            this.$el.style.transform = 'translateX(' + this.stickyOffset + 'px)';
-                                                            this.$el.style.position = 'relative';
-                                                            this.$el.style.zIndex = '10';
-                                                        } else {
-                                                            // Task is mostly/completely off-screen - show outside
-                                                            this.shouldShowOutside = true;
-
-                                                            if (taskBarRect.right < containerRect.left) {
-                                                                // Task is completely off-screen
-                                                                this.stickyOffset = taskBarRect.width + 4;
-                                                            } else {
-                                                                // Task is partially visible - position just outside
-                                                                this.stickyOffset = visibleRight - taskBarRect.left + 4;
-                                                            }
-
-                                                            this.$el.style.transform = '';
-                                                            this.$el.style.position = '';
-                                                            this.$el.style.zIndex = '';
-                                                        }
-                                                    };
-
-                                                    // Smooth scroll handler using requestAnimationFrame
-                                                    let ticking = false;
-                                                    const handleScroll = () => {
-                                                        if (!ticking) {
-                                                            requestAnimationFrame(() => {
-                                                                updatePosition();
-                                                                ticking = false;
-                                                            });
-                                                            ticking = true;
-                                                        }
-                                                    };
-
-                                                    // Listen for task resize completion events
-                                                    const handleTaskResizeComplete = (event) => {
-                                                        // Check if this is the task that was resized OR if we should update all tasks
-                                                        const taskId = taskBar.getAttribute('wire:key');
-                                                        if (event.detail.updateAll || taskId === 'task-' + event.detail.taskId) {
-                                                            // Force position update after a short delay to allow DOM to update
-                                                            setTimeout(() => {
-                                                                updatePosition();
-                                                            }, 100);
-                                                        }
-                                                    };
-
-                                                    // Listen for modal events and Livewire updates
-                                                    const handleModalAndUpdates = () => {
-                                                        setTimeout(() => {
-                                                            updatePosition();
-                                                        }, 50);
-                                                    };
-
-                                                    container.addEventListener('scroll', handleScroll, { passive: true });
-                                                    window.addEventListener('resize', updatePosition);
-                                                    window.addEventListener('task-resize-complete', handleTaskResizeComplete);
-                                                    window.addEventListener('task-modal-opened', handleModalAndUpdates);
-                                                    window.addEventListener('task-modal-closed', handleModalAndUpdates);
-                                                    document.addEventListener('livewire:updated', handleModalAndUpdates);
-
-                                                    // Initial check
-                                                    setTimeout(updatePosition, 50);
-
-                                                    this.$el._cleanup = () => {
-                                                        container.removeEventListener('scroll', handleScroll);
-                                                        window.removeEventListener('resize', updatePosition);
-                                                        window.removeEventListener('task-resize-complete', handleTaskResizeComplete);
-                                                        window.removeEventListener('task-modal-opened', handleModalAndUpdates);
-                                                        window.removeEventListener('task-modal-closed', handleModalAndUpdates);
-                                                        document.removeEventListener('livewire:updated', handleModalAndUpdates);
-                                                    };
-                                                }
-                                            }"
-                                            x-destroy="$el._cleanup && $el._cleanup()"
-                                        >
-                                            <!-- Content block -->
+                            <!-- Task content -->
+                            <div class="flex-1 relative mx-2 h-full overflow-visible">
+                                <flux:card
+                                    class="select-none !bg-transparent border-0 shadow-none p-1 my-0 overflow-visible h-full"
+                                    x-on:click="updating = true; $wire.editTask({{$task->id}})"
+                                    @task-modal-opened.window="updating = false"
+                                    @task-modal-closed.window="updating = false"
+                                    :key="$task->id"
+                                    x-bind:class="{
+                                        'cursor-pointer': !updating,
+                                        'cursor-not-allowed': updating
+                                    }"
+                                >
+                                    <div class="flex flex-col justify-between h-full gap-1 min-h-0 overflow-visible">
+                                        <div class="flex items-center justify-between flex-shrink-0 relative overflow-visible">
+                                            <!-- Task Title and Vendor - keep existing sticky behavior -->
                                             <div
-                                                x-bind:class="{
-                                                    'absolute left-0 top-0 z-5': shouldShowOutside,
-                                                    'flex flex-col gap-1': !shouldShowOutside
-                                                }"
-                                                x-bind:style="shouldShowOutside ? 'transform: translateX(' + stickyOffset + 'px); pointer-events: none;' : ''"
-                                            >
-                                                <!-- Task Title -->
-                                                <span class="font-medium leading-tight text-sm whitespace-nowrap">
-                                                    {{$task->title}}
-                                                </span>
+                                                class="flex flex-col gap-1 flex-1 min-w-0 relative overflow-visible"
+                                                x-data="{
+                                                    shouldShowOutside: false,
+                                                    stickyOffset: 0,
+                                                    hasFollowingSibling: {{ $hasFollowingSibling ? 'true' : 'false' }},
 
-                                                <!-- User / Vendor Row -->
-                                                <div class="flex items-center gap-2 min-h-0 h-5">
-                                                    @if($task->users->count() > 0)
-                                                        <flux:avatar.group>
-                                                            @foreach($task->users as $user)
-                                                                <flux:avatar size="xs" name="{{ $user->full_name }}" color="auto" color:seed="{{ $user->id }}" />
-                                                            @endforeach
-                                                        </flux:avatar.group>
-                                                    @endif
-                                                    @if($task->vendor)
-                                                        <flux:avatar size="xs" name="{{ $task->vendor->name }}" color="auto" color:seed="{{ $task->vendor->id }}" class="flex-shrink-0" />
-                                                        <flux:text class="text-xs min-w-0 whitespace-nowrap truncate">{{ $task->vendor->name }}</flux:text>
-                                                    @endif
+                                                    init() {
+                                                        this.$nextTick(() => {
+                                                            this.setupSticky();
+                                                        });
+                                                    },
+
+                                                    setupSticky() {
+                                                        const container = this.$el.closest('.h-full.overflow-auto');
+                                                        let taskBar = this.$el;
+
+                                                        // Walk up the DOM to find the task bar element
+                                                        while (taskBar && !taskBar.hasAttribute('wire:key')) {
+                                                            taskBar = taskBar.parentElement;
+                                                        }
+
+                                                        if (!container || !taskBar) {
+                                                            return;
+                                                        }
+
+                                                        const updatePosition = () => {
+                                                            const taskBarRect = taskBar.getBoundingClientRect();
+                                                            const containerRect = container.getBoundingClientRect();
+
+                                                            // Calculate visible area of the task bar
+                                                            const visibleLeft = Math.max(taskBarRect.left, containerRect.left);
+                                                            const visibleRight = Math.min(taskBarRect.right, containerRect.right);
+                                                            const visibleTaskWidth = Math.max(0, visibleRight - visibleLeft);
+
+                                                            // Check if task bar is too narrow (less than 100) - show outside ONLY if no following sibling
+                                                            if (taskBarRect.width < 100 && !this.hasFollowingSibling) {
+                                                                this.shouldShowOutside = true;
+                                                                this.stickyOffset = taskBarRect.width + 4;
+                                                                this.$el.style.transform = '';
+                                                                this.$el.style.position = '';
+                                                                this.$el.style.zIndex = '';
+                                                            } else if (taskBarRect.left >= containerRect.left) {
+                                                                // Task is fully visible and wide enough - normal position
+                                                                this.shouldShowOutside = false;
+                                                                this.stickyOffset = 0;
+                                                                this.$el.style.transform = '';
+                                                                this.$el.style.position = '';
+                                                                this.$el.style.zIndex = '';
+                                                            } else if (taskBarRect.right > containerRect.left && visibleTaskWidth >= 100) {
+                                                                // Task is partially off-screen but has enough visible area - stick inside
+                                                                this.shouldShowOutside = false;
+                                                                this.stickyOffset = containerRect.left - taskBarRect.left;
+                                                                this.$el.style.transform = 'translateX(' + this.stickyOffset + 'px)';
+                                                                this.$el.style.position = 'relative';
+                                                                this.$el.style.zIndex = '10';
+                                                            } else if (!this.hasFollowingSibling) {
+                                                                // Task is mostly/completely off-screen - show outside ONLY if no following sibling
+                                                                this.shouldShowOutside = true;
+
+                                                                if (taskBarRect.right < containerRect.left) {
+                                                                    // Task is completely off-screen
+                                                                    this.stickyOffset = taskBarRect.width + 4;
+                                                                } else {
+                                                                    // Task is partially visible - position just outside
+                                                                    this.stickyOffset = visibleRight - taskBarRect.left + 4;
+                                                                }
+
+                                                                this.$el.style.transform = '';
+                                                                this.$el.style.position = '';
+                                                                this.$el.style.zIndex = '';
+                                                            } else {
+                                                                // Has following sibling - don't show outside, hide text instead
+                                                                this.shouldShowOutside = false;
+                                                                this.stickyOffset = 0;
+                                                                this.$el.style.transform = '';
+                                                                this.$el.style.position = '';
+                                                                this.$el.style.zIndex = '';
+                                                            }
+                                                        };
+
+                                                        // Smooth scroll handler using requestAnimationFrame
+                                                        let ticking = false;
+                                                        const handleScroll = () => {
+                                                            if (!ticking) {
+                                                                requestAnimationFrame(() => {
+                                                                    updatePosition();
+                                                                    ticking = false;
+                                                                });
+                                                                ticking = true;
+                                                            }
+                                                        };
+
+                                                        container.addEventListener('scroll', handleScroll, { passive: true });
+                                                        window.addEventListener('resize', updatePosition);
+
+                                                        // Initial check
+                                                        setTimeout(updatePosition, 50);
+
+                                                        this.$el._cleanup = () => {
+                                                            container.removeEventListener('scroll', handleScroll);
+                                                            window.removeEventListener('resize', updatePosition);
+                                                        };
+                                                    }
+                                                }"
+                                                x-destroy="$el._cleanup && $el._cleanup()"
+                                            >
+                                                <!-- Content block - Only show outside if no following sibling -->
+                                                <div
+                                                    x-bind:class="{
+                                                        'absolute left-0 top-0 z-5': shouldShowOutside && !hasFollowingSibling,
+                                                        'flex flex-col gap-1': !shouldShowOutside || hasFollowingSibling,
+                                                        'opacity-0': hasFollowingSibling && shouldShowOutside
+                                                    }"
+                                                    x-bind:style="(shouldShowOutside && !hasFollowingSibling) ? 'transform: translateX(' + stickyOffset + 'px); pointer-events: none;' : ''"
+                                                >
+                                                    <!-- Task Title without sibling indicator -->
+                                                    <span class="font-medium leading-tight text-sm whitespace-nowrap">
+                                                        {{ $task->title }}
+                                                    </span>
+
+                                                    <!-- User / Vendor Row -->
+                                                    <div class="flex items-center gap-2 min-h-0 h-5">
+                                                        @if($task->users->count() > 0)
+                                                            <flux:avatar.group>
+                                                                @foreach($task->users as $user)
+                                                                    <flux:avatar size="xs" name="{{ $user->full_name }}" color="auto" color:seed="{{ $user->id }}" />
+                                                                @endforeach
+                                                            </flux:avatar.group>
+                                                        @endif
+                                                        @if($task->vendor)
+                                                            <flux:avatar size="xs" name="{{ $task->vendor->name }}" color="auto" color:seed="{{ $task->vendor->id }}" class="flex-shrink-0" />
+                                                            <flux:text class="text-xs min-w-0 whitespace-nowrap truncate">{{ $task->vendor->name }}</flux:text>
+                                                        @endif
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
                                     </div>
-                                </div>
-                            </flux:card>
-                        </div>
+                                </flux:card>
+                            </div>
 
-                        <!-- Right resize handle -->
-                        @if(!$taskEndDate->isAfter($this->days->last()))
-                            <div
-                                class="w-2 h-full absolute top-0 right-0 bg-{{ $taskTypeColor }}-500 opacity-30 group-hover:opacity-50 hover:!opacity-100 rounded-r hover:bg-{{ $taskTypeColor }}-700 z-15"
-                                x-bind:class="{
-                                    'opacity-100 bg-{{ $taskTypeColor }}-700': resizing,
-                                    'cursor-ew-resize': !updating,
-                                    'cursor-not-allowed opacity-20': updating
-                                }"
-                                @mousedown="startResize('right', $event, '{{ $taskStartDate->format('Y-m-d') }}', '{{ $taskEndDate->format('Y-m-d') }}', '{{ $this->days->first()->format('Y-m-d') }}', '{{ $this->days->last()->format('Y-m-d') }}')"
-                                @touchstart="startResize('right', $event, '{{ $taskStartDate->format('Y-m-d') }}', '{{ $taskEndDate->format('Y-m-d') }}', '{{ $this->days->first()->format('Y-m-d') }}', '{{ $this->days->last()->format('Y-m-d') }}')"
-                            ></div>
-                        @endif
-                    </div>
+                            <!-- Right resize handle -->
+                            @if(!$taskEndDate->isAfter($this->days->last()))
+                                <div
+                                    class="w-2 h-full absolute top-0 right-0 bg-{{ $taskTypeColor }}-500 opacity-30 group-hover:opacity-50 hover:!opacity-100 rounded-r hover:bg-{{ $taskTypeColor }}-700 z-15"
+                                    x-bind:class="{
+                                        'opacity-100 bg-{{ $taskTypeColor }}-700': resizing,
+                                        'cursor-ew-resize': !updating,
+                                        'cursor-not-allowed opacity-20': updating
+                                    }"
+                                    @mousedown="startResize('right', $event, '{{ $taskStartDate->format('Y-m-d') }}', '{{ $taskEndDate->format('Y-m-d') }}', '{{ $this->days->first()->format('Y-m-d') }}', '{{ $this->days->last()->format('Y-m-d') }}')"
+                                    @touchstart="startResize('right', $event, '{{ $taskStartDate->format('Y-m-d') }}', '{{ $taskEndDate->format('Y-m-d') }}', '{{ $this->days->first()->format('Y-m-d') }}', '{{ $this->days->last()->format('Y-m-d') }}')"
+                                ></div>
+                            @endif
+                        </div>
+                    @endforeach
                 @endforeach
             </div>
         @endforeach
@@ -557,7 +553,3 @@
 
     <livewire:tasks.task-create :projects="$this->projects" :employees="$employees" :vendors="$vendors"/>
 </div>
-
-
-
-
