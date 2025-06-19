@@ -5,7 +5,7 @@
 @endphp
 
 <div
-    class="h-full overflow-auto"
+    class="h-full overflow-auto isolate"
     x-data="{
         scrollToToday() {
             // Find yesterday's element instead of today

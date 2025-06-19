@@ -22,6 +22,7 @@
         "itsgoingd/clockwork": "^5.1",
         "laravel/framework": "^12.00",
         "laravel/horizon": "^5.30",
+        "laravel/nightwatch": "^1.7",
         "laravel/sanctum": "^4.0",
         "laravel/scout": "^10.11",
         "laravel/tinker": "^2.9",
@@ -34,6 +35,7 @@
         "nyholm/psr7": "*",
         "opcodesio/log-viewer": "^3.4",
         "openai-php/client": "^0.10.3",
+        "pestphp/pest": "^3.0",
         "php-webdriver/webdriver": "^1.15",
         "railsware/mailtrap-php": "*",
         "regulus/tetra-text": "^0.6.16",
@@ -48,8 +50,7 @@
         "symfony/panther": "^2.1",
         "twilio/sdk": "^6.44",
         "vlucas/phpdotenv": "^5.5",
-        "zoon/puphpeteer": "^2.2",
-        "pestphp/pest": "^3.0"
+        "zoon/puphpeteer": "^2.2"
     },
     "require-dev": {
         "dbrekelmans/bdi": "^1.0",

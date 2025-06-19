@@ -128,7 +128,12 @@
             {{ $slot }}
         </flux:main>
 
-        <div class="fixed top-4 left-6 lg:hidden"><flux:sidebar.toggle icon="bars-2" /></div>
+        <div class="fixed top-4 left-6 lg:hidden">
+            <flux:sidebar.toggle
+                icon="bars-2"
+                class="backdrop-blur-lg shadow-lg shadow-gray-500/50 bg-black/5 ring-1 ring-black/15 hover:bg-black/10 hover:shadow-xl transition-all duration-200"
+            />
+        </div>
 
         @persist('toast')
             <flux:toast />

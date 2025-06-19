@@ -11,11 +11,14 @@ use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Livewire\Component;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Url; // Add this import
 
 class GanttIndex extends Component
 {
     public $vendors = [];
     public $employees = [];
+
+    #[Url] // Add this attribute to make it a query parameter
     public $week = '';
 
     protected $listeners = ['refreshComponent' => '$refresh'];
@@ -57,7 +60,18 @@ class GanttIndex extends Component
             $query->where('start_date', '<=', $endDate->format('Y-m-d'))
                 ->where('end_date', '>=', $startDate->format('Y-m-d'))
                 ->orderBy('start_date');
-        }])->status(['Active'])->get();
+        }])
+        ->where(function ($query) use ($startDate, $endDate) {
+            // Get projects that either:
+            // 1. Have "Active" status, OR
+            // 2. Have tasks scheduled during the date range (regardless of current status)
+            $query->status(['Active'])
+                  ->orWhereHas('tasks', function ($taskQuery) use ($startDate, $endDate) {
+                      $taskQuery->where('start_date', '<=', $endDate->format('Y-m-d'))
+                               ->where('end_date', '>=', $startDate->format('Y-m-d'));
+                  });
+        })
+        ->get();
     }
 
     #[Computed]

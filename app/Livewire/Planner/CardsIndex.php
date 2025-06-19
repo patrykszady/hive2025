@@ -109,49 +109,14 @@ class CardsIndex extends Component
 
                 return true;
             })->map(function ($task) use ($day) {
-                // Add calculated data to each task
-                $taskStartDate = Carbon::parse($task->start_date);
-                $taskEndDate = Carbon::parse($task->end_date);
-
-                // Calculate total days accounting for weekend exclusions
-                $period = CarbonPeriod::create($taskStartDate, $taskEndDate);
-                $totalDays = 0;
-                $currentDayNumber = 0;
-                $dayFound = false;
-
-                foreach ($period as $date) {
-                    $isSaturday = $date->isSaturday();
-                    $isSunday = $date->isSunday();
-                    $taskOptions = $task->options ?? (object)[];
-
-                    // Include the day if:
-                    // - It's a weekday (not Saturday or Sunday)
-                    // - It's Saturday and Saturday is enabled
-                    // - It's Sunday and Sunday is enabled
-                    $includeDay = (!$isSaturday && !$isSunday) ||
-                        ($isSaturday && ($taskOptions->saturday ?? false)) ||
-                        ($isSunday && ($taskOptions->sunday ?? false));
-
-                    if ($includeDay) {
-                        $totalDays++;
-
-                        // Calculate current day number
-                        if (!$dayFound && $date->format('Y-m-d') <= $day->format('Y-m-d')) {
-                            $currentDayNumber = $totalDays;
-                        }
-
-                        if ($date->isSameDay($day)) {
-                            $dayFound = true;
-                            $currentDayNumber = $totalDays;
-                        }
-                    }
-                }
+                // Get task family information using existing relationships
+                $familyInfo = $this->getTaskFamilyInfo($task, $day);
 
                 return [
                     'task' => $task,
                     'taskTypeColor' => $task->type === 'Task' ? 'blue' : ($task->type === 'Milestone' ? 'indigo' : 'blue'),
-                    'totalDays' => $totalDays,
-                    'currentDayNumber' => $currentDayNumber
+                    'currentFamilyDay' => $familyInfo['currentFamilyDay'],
+                    'totalFamilyDays' => $familyInfo['totalFamilyDays'],
                 ];
             });
 
@@ -164,15 +129,90 @@ class CardsIndex extends Component
         // Add no-date tasks at the beginning
         return collect([
             'noDateTasks' => $noDateTasks->map(function ($task) {
+                $familyInfo = $this->getTaskFamilyInfo($task, null);
+
                 return [
                     'task' => $task,
                     'taskTypeColor' => $task->type === 'Task' ? 'blue' : ($task->type === 'Milestone' ? 'indigo' : 'blue'),
-                    'totalDays' => null,
-                    'currentDayNumber' => null
+                    'currentFamilyDay' => null,
+                    'totalFamilyDays' => $familyInfo['totalFamilyDays'],
                 ];
             }),
             'dayTasks' => $dayTasksData
         ]);
+    }
+
+    private function getTaskFamilyInfo($task, $currentDay = null)
+    {
+        $familyTasks = collect();
+
+        // Use the existing relationships to get family tasks
+        if ($task->parent_task_id) {
+            // This is a child task - get parent + all siblings (including itself)
+
+            // Add the parent
+            $parent = Task::find($task->parent_task_id);
+            if ($parent) {
+                $familyTasks->push($parent);
+            }
+
+            // Add all children of the parent (which includes this task and its siblings)
+            $allChildren = Task::where('parent_task_id', $task->parent_task_id)->get();
+            $familyTasks = $familyTasks->merge($allChildren);
+
+        } else {
+            // This is a parent task - get itself + all children
+            $familyTasks->push($task);
+            $children = $task->children()->get();
+            $familyTasks = $familyTasks->merge($children);
+        }
+
+        // Get all working days across all family tasks in chronological order
+        $allFamilyDays = collect();
+
+        foreach ($familyTasks as $familyTask) {
+            if ($familyTask->start_date && $familyTask->end_date) {
+                $taskStartDate = Carbon::parse($familyTask->start_date);
+                $taskEndDate = Carbon::parse($familyTask->end_date);
+
+                $period = CarbonPeriod::create($taskStartDate, $taskEndDate);
+
+                foreach ($period as $date) {
+                    $isSaturday = $date->isSaturday();
+                    $isSunday = $date->isSunday();
+                    $taskOptions = $familyTask->options ?? (object)[];
+
+                    // Include the day if it's a valid work day for this task
+                    $includeDay = (!$isSaturday && !$isSunday) ||
+                        ($isSaturday && ($taskOptions->saturday ?? false)) ||
+                        ($isSunday && ($taskOptions->sunday ?? false));
+
+                    if ($includeDay) {
+                        $allFamilyDays->push($date->format('Y-m-d'));
+                    }
+                }
+            }
+        }
+
+        // Remove duplicates and sort chronologically
+        $allFamilyDays = $allFamilyDays->unique()->sort()->values();
+
+        $totalFamilyDays = $allFamilyDays->count();
+        $currentFamilyDay = null;
+
+        // Find the current day's position if provided
+        if ($currentDay) {
+            $currentDayFormat = $currentDay->format('Y-m-d');
+            $currentFamilyDay = $allFamilyDays->search($currentDayFormat);
+            if ($currentFamilyDay !== false) {
+                $currentFamilyDay += 1; // Convert to 1-based index
+            }
+        }
+
+        return [
+            'currentFamilyDay' => $currentFamilyDay,
+            'totalFamilyDays' => $totalFamilyDays
+        ];
     }
 
     private function getTasksQuery($startDate, $endDate)
