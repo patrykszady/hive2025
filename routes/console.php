@@ -3,10 +3,10 @@
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schedule;
 
-// Reusable scheduling function
-function scheduleTask(callable $task, string $taskName, string $frequency)
+// Updated reusable scheduling function to handle time-specific schedules
+function scheduleTask(callable $task, string $taskName, string $frequency, string $time = null)
 {
-    Schedule::call(function () use ($task, $taskName) {
+    $scheduled = Schedule::call(function () use ($task, $taskName) {
         try {
             $task();
         } catch (\Throwable $e) {
@@ -15,7 +15,14 @@ function scheduleTask(callable $task, string $taskName, string $frequency)
                 'trace' => $e->getTraceAsString(),
             ]);
         }
-    })->$frequency();
+    });
+
+    // Handle time-specific scheduling
+    if ($time && $frequency === 'daily') {
+        $scheduled->dailyAt($time);
+    } else {
+        $scheduled->$frequency();
+    }
 }
 
 // Schedule tasks
@@ -129,6 +136,15 @@ scheduleTask(
         ->fetchMessagesFromInsuranceMailbox(),
     'fetchMessagesFromInsuranceMailbox',
     'hourly'
+);
+
+// Task reminders - send at 7 PM daily (now with proper time parameter)
+scheduleTask(
+    fn() => app(\App\Http\Controllers\TaskReminderController::class)
+        ->sendTomorrowReminders(),
+    'sendTomorrowReminders',
+    'daily',
+    '19:00'
 );
 
 // horizon:snapshot command

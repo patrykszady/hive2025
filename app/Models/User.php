@@ -150,4 +150,21 @@ class User extends Authenticatable
     {
         return $query->where('is_employed', 1);
     }
+
+    public function routeNotificationForTwilio()
+    {
+        if (!$this->cell_phone) {
+            return null;
+        }
+
+        $phone = preg_replace('/[^0-9]/', '', $this->cell_phone);
+
+        // If it's a 10-digit US number, add +1
+        if (strlen($phone) === 10) {
+            return '+1' . $phone;
+        }
+
+        // Default: add + to whatever we have
+        return '+' . $phone;
+    }
 }

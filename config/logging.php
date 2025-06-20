@@ -80,7 +80,14 @@ return [
 
         'google_places' => [
             'driver' => 'single',
-            'path' => storage_path('logs/vendor_docs.log'),
+            'path' => storage_path('logs/google_places.log'),
+            'level' => 'debug',
+            'days' => 30,
+        ],
+
+        'task_reminder' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/task_reminder.log'),
             'level' => 'debug',
             'days' => 30,
         ],
