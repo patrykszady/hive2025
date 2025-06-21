@@ -1,155 +1,132 @@
 <?php
 
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schedule;
 
-// Updated reusable scheduling function to handle time-specific schedules
-function scheduleTask(callable $task, string $taskName, string $frequency, string $time = null)
-{
-    $scheduled = Schedule::call(function () use ($task, $taskName) {
-        try {
-            $task();
-        } catch (\Throwable $e) {
-            Log::channel('schedule')->error("Error in $taskName", [
-                'message' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-        }
-    });
+// Email processing tasks
+Schedule::call(function () {
+    app(\App\Http\Controllers\CompanyEmailController::class)->fetchMessagesForGrantId();
+})->everyTenMinutes()
+  ->name('fetch-messages-for-grant-id')
+  ->withoutOverlapping()
+  ->onOneServer();
 
-    // Handle time-specific scheduling
-    if ($time && $frequency === 'daily') {
-        $scheduled->dailyAt($time);
-    } else {
-        $scheduled->$frequency();
-    }
-}
+Schedule::call(function () {
+    app(\App\Http\Controllers\LeadController::class)->leads_in_email();
+})->everyTenMinutes()
+  ->name('leads-in-email')
+  ->withoutOverlapping()
+  ->onOneServer();
 
-// Schedule tasks
-scheduleTask(
-    fn() => app(\App\Http\Controllers\CompanyEmailController::class)
-        ->fetchMessagesForGrantId(),
-    'fetchMessagesForGrantId',
-    'everyTenMinutes'
-);
+Schedule::call(function () {
+    app(\App\Http\Controllers\CompanyEmailController::class)->fetchAutoReceipts();
+})->everyTenMinutes()
+  ->name('fetch-auto-receipts')
+  ->withoutOverlapping()
+  ->onOneServer();
 
-scheduleTask(
-    fn() => app(\App\Http\Controllers\LeadController::class)
-        ->leads_in_email(),
-    'leads_in_email',
-    'everyTenMinutes'
-);
+Schedule::call(function () {
+    app(\App\Http\Controllers\VendorDocsController::class)->fetchMessagesFromInsuranceMailbox();
+})->hourly()
+  ->name('fetch-insurance-mailbox')
+  ->withoutOverlapping()
+  ->onOneServer();
 
-scheduleTask(
-    fn() => app(\App\Http\Controllers\CompanyEmailController::class)
-        ->fetchAutoReceipts(),
-    'fetchAutoReceipts',
-    'everyTenMinutes'
-);
+// Plaid/Transaction tasks
+Schedule::call(function () {
+    app(\App\Http\Controllers\TransactionController::class)->plaid_item_status();
+})->hourly()
+  ->name('plaid-item-status')
+  ->withoutOverlapping()
+  ->onOneServer();
 
-scheduleTask(
-    fn() => app(\App\Http\Controllers\TransactionController::class)
-        ->plaid_item_status(),
-    'plaid_item_status',
-    'hourly'
-);
+Schedule::call(function () {
+    app(\App\Http\Controllers\TransactionController::class)->plaid_transactions_sync();
+})->hourly()
+  ->name('plaid-transactions-sync')
+  ->withoutOverlapping()
+  ->onOneServer();
 
-scheduleTask(
-    fn() => app(\App\Http\Controllers\TransactionController::class)
-        ->plaid_transactions_sync(),
-    'plaid_transactions_sync',
-    'hourly'
-);
+Schedule::call(function () {
+    app(\App\Http\Controllers\TransactionController::class)->add_check_deposit_to_transactions();
+})->everyTenMinutes()
+  ->name('add-check-deposits')
+  ->withoutOverlapping()
+  ->onOneServer();
 
-scheduleTask(
-    fn() => app(\App\Http\Controllers\ReceiptController::class)
-        ->amazon_orders_api(),
-    'amazon_orders_api',
-    'hourly'
-);
+Schedule::call(function () {
+    app(\App\Http\Controllers\TransactionController::class)->add_vendor_to_transactions();
+})->everyTenMinutes()
+  ->name('add-vendor-to-transactions')
+  ->withoutOverlapping()
+  ->onOneServer();
 
-scheduleTask(
-    fn() => app(\App\Http\Controllers\TransactionController::class)
-        ->add_check_deposit_to_transactions(),
-    'add_check_deposit_to_transactions',
-    'everyTenMinutes'
-);
+Schedule::call(function () {
+    app(\App\Http\Controllers\TransactionController::class)->add_expense_to_transactions();
+})->everyTenMinutes()
+  ->name('add-expense-to-transactions')
+  ->withoutOverlapping()
+  ->onOneServer();
 
-scheduleTask(
-    fn() => app(\App\Http\Controllers\TransactionController::class)
-        ->add_vendor_to_transactions(),
-    'add_vendor_to_transactions',
-    'everyTenMinutes'
-);
+Schedule::call(function () {
+    app(\App\Http\Controllers\TransactionController::class)->add_check_id_to_transactions();
+})->everyTenMinutes()
+  ->name('add-check-id-to-transactions')
+  ->withoutOverlapping()
+  ->onOneServer();
 
-scheduleTask(
-    fn() => app(\App\Http\Controllers\TransactionController::class)
-        ->add_expense_to_transactions(),
-    'add_expense_to_transactions',
-    'everyTenMinutes'
-);
+Schedule::call(function () {
+    app(\App\Http\Controllers\TransactionController::class)->add_payments_to_transaction();
+})->everyTenMinutes()
+  ->name('add-payments-to-transactions')
+  ->withoutOverlapping()
+  ->onOneServer();
 
-scheduleTask(
-    fn() => app(\App\Http\Controllers\TransactionController::class)
-        ->add_check_id_to_transactions(),
-    'add_check_id_to_transactions',
-    'everyTenMinutes'
-);
+Schedule::call(function () {
+    app(\App\Http\Controllers\TransactionController::class)->add_transaction_to_expenses_sin_vendor();
+})->everyTenMinutes()
+  ->name('add-transactions-to-expenses')
+  ->withoutOverlapping()
+  ->onOneServer();
 
-scheduleTask(
-    fn() => app(\App\Http\Controllers\TransactionController::class)
-        ->add_payments_to_transaction(),
-    'add_payments_to_transaction',
-    'everyTenMinutes'
-);
+Schedule::call(function () {
+    app(\App\Http\Controllers\TransactionController::class)->find_credit_payments_on_debit();
+})->everyTenMinutes()
+  ->name('find-credit-payments')
+  ->withoutOverlapping()
+  ->onOneServer();
 
-scheduleTask(
-    fn() => app(\App\Http\Controllers\TransactionController::class)
-        ->add_transaction_to_expenses_sin_vendor(),
-    'add_transaction_to_expenses_sin_vendor',
-    'everyTenMinutes'
-);
+Schedule::call(function () {
+    app(\App\Http\Controllers\TransactionController::class)->add_category_to_expense();
+})->hourly()
+  ->name('add-category-to-expense')
+  ->withoutOverlapping()
+  ->onOneServer();
 
-scheduleTask(
-    fn() => app(\App\Http\Controllers\TransactionController::class)
-        ->find_credit_payments_on_debit(),
-    'find_credit_payments_on_debit',
-    'everyTenMinutes'
-);
+Schedule::call(function () {
+    app(\App\Http\Controllers\TransactionController::class)->transaction_vendor_bulk_match();
+})->everyTenMinutes()
+  ->name('transaction-vendor-bulk-match')
+  ->withoutOverlapping()
+  ->onOneServer();
 
-scheduleTask(
-    fn() => app(\App\Http\Controllers\TransactionController::class)
-        ->add_category_to_expense(),
-    'add_category_to_expense',
-    'hourly'
-);
+// External API tasks
+Schedule::call(function () {
+    app(\App\Http\Controllers\ReceiptController::class)->amazon_orders_api();
+})->hourly()
+  ->name('amazon-orders-api')
+  ->withoutOverlapping()
+  ->onOneServer();
 
-scheduleTask(
-    fn() => app(\App\Http\Controllers\TransactionController::class)
-        ->transaction_vendor_bulk_match(),
-    'transaction_vendor_bulk_match',
-    'everyTenMinutes'
-);
+// Daily tasks
+Schedule::call(function () {
+    app(\App\Http\Controllers\TaskReminderController::class)->sendTomorrowReminders();
+})->dailyAt('19:00')
+  ->name('send-tomorrow-reminders')
+  ->withoutOverlapping()
+  ->onOneServer();
 
-scheduleTask(
-    fn() => app(\App\Http\Controllers\VendorDocsController::class)
-        ->fetchMessagesFromInsuranceMailbox(),
-    'fetchMessagesFromInsuranceMailbox',
-    'hourly'
-);
-
-// Task reminders - send at 7 PM daily (now with proper time parameter)
-scheduleTask(
-    fn() => app(\App\Http\Controllers\TaskReminderController::class)
-        ->sendTomorrowReminders(),
-    'sendTomorrowReminders',
-    'daily',
-    '19:00'
-);
-
-// horizon:snapshot command
+// System maintenance
 Schedule::command('horizon:snapshot')
     ->everyFiveMinutes()
-    ->appendOutputTo(storage_path('logs/horizon_snapshot-' . date('Y-m-d') . '.log'));
-
-// Schedule::command('cache:prune-stale-tags')->hourly();
+    ->name('horizon-snapshot')
+    ->withoutOverlapping();
