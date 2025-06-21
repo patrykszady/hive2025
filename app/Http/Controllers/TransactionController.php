@@ -1327,15 +1327,21 @@ class TransactionController extends Controller
                 ->get();
 
             if($transactions->isEmpty()){
-                // Add the check ID to the processed IDs
-                //IF NO Transaction found
-                //otherwise, remove the check ID from the processed IDs if it exists and transaction not found
-                $processedIds[] = $check->id;
-                continue;
-            }else{
+                // Add the check ID to the processed IDs only if it's not already there
+                if (!in_array($check->id, $processedIds)) {
+                    $processedIds[] = $check->id;
+                }
+            } else {
                 foreach ($transactions as $transaction) {
                     $transaction->check()->associate($check)->save();
                 }
+
+                // Remove the check ID from processed IDs if transaction was found and processed successfully
+                $processedIds = array_filter($processedIds, function($id) use ($check) {
+                    return $id !== $check->id;
+                });
+                // Re-index the array to maintain proper structure
+                $processedIds = array_values($processedIds);
             }
         }
 
@@ -1343,6 +1349,11 @@ class TransactionController extends Controller
         if ($checks->isNotEmpty()) {
             $lastProcessedId = $checks->last()->id;
         }
+
+        // Remove duplicates from processedIds before saving
+        $processedIds = array_unique($processedIds);
+        $processedIds = array_values($processedIds); // Re-index array
+
         $this->saveProcessedChecks($processedIds, $lastProcessedId);
     }
 
@@ -1731,6 +1742,7 @@ class TransactionController extends Controller
                     //         ->where('vendor_id', $receipt_account->vendor->id)
                     //         //when $receipt_account->vendor->receipts->isNotEmpty()
                     //         ->whereDoesntHave('expense')
+
                     //         ->whereNull('check_number')
                     //         ->get();
                     // dd($transactions);
@@ -1768,7 +1780,7 @@ class TransactionController extends Controller
                     //             'paid_by' => null,
                     //             'belongs_to_vendor_id' => $receipt_account->belongs_to_vendor_id,
                     //             'created_by_user_id' => 0,
-                    //         ]);
+                    //         });
                     //     }
 
                     //     $transaction->expense_id = $expense->id;

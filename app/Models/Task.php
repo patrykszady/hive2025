@@ -93,8 +93,6 @@ class Task extends Model
             $checkStart = $taskToCheck->start_date->format('Y-m-d');
             $checkEnd = $taskToCheck->end_date->format('Y-m-d');
 
-            \Log::info('Checking task ' . $taskToCheck->id . ': ' . $checkStart . ' to ' . $checkEnd);
-
             // Two date ranges overlap if:
             // (newStart <= checkEnd) AND (newEnd >= checkStart)
             $overlaps = ($newStartDate <= $checkEnd && $newEndDate >= $checkStart);

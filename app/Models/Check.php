@@ -21,7 +21,6 @@ class Check extends Model
 
     // protected $dates = ['date', 'deleted_at'];
 
-    protected $appends = ['amount_difference'];
     protected function casts(): array
     {
         return [
@@ -79,7 +78,9 @@ class Check extends Model
 
     public function getAmountDifferenceAttribute()
     {
-        return $this->amount - $this->transactions_sum_amount;
+        // If transactions_sum_amount is not loaded, calculate it
+        $transactions_sum = $this->transactions_sum_amount ?? $this->transactions()->sum('amount');
+        return $this->amount - $transactions_sum;
     }
 
     public function getOwnerAttribute()
