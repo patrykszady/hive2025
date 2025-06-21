@@ -91,6 +91,12 @@ return [
             'level' => 'debug',
             'days' => 30,
         ],
+        'vendor_docs' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/vendor_docs.log'),
+            'level' => 'debug',
+            'days' => 30,
+        ],
     ],
 
 ];

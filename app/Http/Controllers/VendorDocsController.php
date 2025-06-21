@@ -73,6 +73,40 @@ class VendorDocsController extends Controller
         }
     }
 
+    public function moveEmailBasedOnMatchingResults($messageId, $grantId, $matchedVendorId, $matchedBelongsToVendorId)
+    {
+        $manualAddFolderId = 'AAMkADlmZDViM2ZhLWZkYjUtNGVlZC1iNzRhLTRjMzhmMjQ0MmNmOAAuAAAAAABj7uvVHKHMQqSEZ0xJa9c1AQCwrDriHLtHRZNuXjKXm1MrAAG9ITvDAAA=';
+        $processedFolderId = 'AAMkADlmZDViM2ZhLWZkYjUtNGVlZC1iNzRhLTRjMzhmMjQ0MmNmOAAuAAAAAABj7uvVHKHMQqSEZ0xJa9c1AQCwrDriHLtHRZNuXjKXm1MrAAG2_4hNAAA=';
+        $failedFolderId = 'AAMkADlmZDViM2ZhLWZkYjUtNGVlZC1iNzRhLTRjMzhmMjQ0MmNmOAAuAAAAAABj7uvVHKHMQqSEZ0xJa9c1AQCwrDriHLtHRZNuXjKXm1MrAAG9ITvBAAA=';
+
+        try {
+            if (is_null($matchedVendorId) || is_null($matchedBelongsToVendorId)) {
+                // Move to manual add folder when vendor matching fails
+                $this->nylasService->moveEmailToFolder($messageId, $manualAddFolderId, $grantId);
+            } else {
+                // Move to processed folder when vendor matching succeeds
+                $this->nylasService->moveEmailToFolder($messageId, $processedFolderId, $grantId);
+            }
+        } catch (\Exception $e) {
+            // If moving fails, try to move to failed folder
+            try {
+                $this->nylasService->moveEmailToFolder($messageId, $failedFolderId, $grantId);
+            } catch (\Exception $failedMoveException) {
+                Log::channel('vendor_docs')->error('Failed to move email to any folder', [
+                    'message_id' => $messageId,
+                    'original_error' => $e->getMessage(),
+                    'failed_move_error' => $failedMoveException->getMessage()
+                ]);
+                return;
+            }
+
+            Log::channel('vendor_docs')->error('Failed to move email to intended folder, moved to failed folder instead', [
+                'message_id' => $messageId,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
     public function audit_docs_pdf($files)
     {
         $filename = 'audit-'.auth()->user()->vendor->id.'-'.date('Y-m-d-h-m-s');

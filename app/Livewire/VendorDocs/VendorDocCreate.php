@@ -12,6 +12,8 @@ use App\Traits\ProcessesVendorDocs;
 use Flux;
 
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 use Livewire\Component;
 use Livewire\WithFileUploads;
@@ -86,34 +88,60 @@ class VendorDocCreate extends Component
 
     public function store()
     {
+        $this->validate();
         $docType = strtolower($this->doc_file->getClientOriginalExtension());
-        $tempFilePath = "temp_vendor_docs/{$this->doc_file->getClientOriginalName()}";
 
-        // Store the uploaded file temporarily
-        $this->doc_file->storeAs('temp_vendor_docs', $this->doc_file->getClientOriginalName(), 'files');
+        // Sanitize filename
+        $originalName = $this->doc_file->getClientOriginalName();
+        $sanitizedName = Str::slug(pathinfo($originalName, PATHINFO_FILENAME)) . '.' . $docType;
+        $tempFilePath = "temp_vendor_docs/{$sanitizedName}";
 
-        // Process the documenthandleVendorDocProcessing
-        $this->handleVendorDocProcessing(
-            $tempFilePath,
-            $docType,
-            $this->vendor->id,
-            auth()->user()->vendor->id
-        );
+        // Store file temporarily
+        $this->doc_file->storeAs('temp_vendor_docs', $sanitizedName, 'files');
 
-        // Reset input and notify the user
+        try {
+            // Process the document
+            $result = $this->handleVendorDocProcessing(
+                $tempFilePath,
+                $docType,
+                $this->vendor->id,
+                auth()->user()->vendor->id
+            );
+
+            if ($result === false) {
+                // Keep temp file for debugging on failure
+                Flux::toast(
+                    duration: 5000,
+                    position: 'top right',
+                    variant: 'danger',
+                    heading: 'Processing Failed',
+                    text: 'Unable to match vendor information from the document. Please verify the document contains correct vendor details.',
+                );
+            } else {
+                Flux::toast(
+                    duration: 5000,
+                    position: 'top right',
+                    variant: 'success',
+                    heading: 'Vendor Document Added',
+                    text: '',
+                );
+
+                $this->dispatch('refreshComponent')->to('vendor-docs.vendor-docs-card');
+            }
+
+        } catch (\Exception $e) {
+            // Keep temp file for debugging on exception
+            Flux::toast(
+                duration: 5000,
+                position: 'top right',
+                variant: 'danger',
+                heading: 'Upload Failed',
+                text: 'Error processing document: ' . $e->getMessage(),
+            );
+        }
+
         $this->modal('vendor_doc_form_modal')->close();
         $this->doc_file = null;
-
-        $this->dispatch('refreshComponent')->to('vendor-docs.vendor-docs-card');
-
-        Flux::toast(
-            duration: 5000,
-            position: 'top right',
-            variant: 'success',
-            heading: 'Vendor Document Added',
-            // route / href / wire:click
-            text: '',
-        );
     }
 
     public function render()

@@ -549,8 +549,9 @@ class ReceiptController extends Controller
             //Should never be here. VendorDocCreate validates: file must be pdf, jpg, png
         }
 
-        // $file = Storage::disk('files')->get($file_location);
-        $file = file_get_contents(storage_path($file_location));
+        // Fix: Use Storage disk to get the file content instead of file_get_contents
+        $file = Storage::disk('files')->get($file_location);
+
         //start OCR
         $ch = curl_init();
 
