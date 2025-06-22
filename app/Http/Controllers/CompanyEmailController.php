@@ -288,23 +288,27 @@ class CompanyEmailController extends Controller
                     // print_r($receipt_html_main);
                     // dd();
 
+                    // Set defaults at the top
+                    $doc_type = 'pdf'; // Default to PDF for most cases
+                    $ocr_filename = date('Y-m-d-H-i-s') . '-' . rand(10, 99);
+
                     if (!isset($receipt->options['receipt_image_regex']) && !isset($receipt->options['pdf_html'])) {
-                        $doc_type = 'pdf';
-                        $ocr_filename = date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '.pdf';
-                        // Render the view with proper data passing
+                        // HTML to PDF conversion
+                        $ocr_filename .= '.' . $doc_type;
                         $view = view('misc.create_pdf_receipt', [
                             'receipt_html_main' => $receipt_html_main,
                             'message_type' => $bodyType
                         ])->render();
 
-                        $location = storage_path($ocr_path = 'files/_temp_ocr/' . $ocr_filename);
+                        $ocr_path = '_temp_ocr/' . $ocr_filename;
+                        $location = Storage::disk('files')->path($ocr_path);
                         Browsershot::html($view)->newHeadless()->format('A4')->margins(20, 0, 20, 20)->save($location);
+
                     } elseif (isset($receipt->options['pdf_html'])) {
-                        $doc_type = 'pdf';
+                        // PDF attachment processing
                         if (!empty($message['attachments'])) {
                             $attachment = $message['attachments'][0];
-
-                            $ocr_filename = date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '.pdf';
+                            $ocr_filename .= '.' . $doc_type;
                             $attachmentContent = $this->nylasService->downloadAttachment($attachment['id'], $grantId, $messageId);
 
                             // $attachment = collect($attachments)->first(function ($attachment_found, $loop) use ($receipt) {
@@ -315,17 +319,20 @@ class CompanyEmailController extends Controller
                             //     return true;
                             // });
 
-                            Storage::disk('files')->put('/_temp_ocr/' . $ocr_filename, $attachmentContent);
-                            $location = storage_path($ocr_path = 'files/_temp_ocr/' . $ocr_filename);
+                            $ocr_path = '_temp_ocr/' . $ocr_filename;
+                            Storage::disk('files')->put($ocr_path, $attachmentContent);
                         } else {
                             // No attachments found
                             $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Error'], $grantId);
                             continue;
                         }
+
                     } else {
+                        // Image processing - override the default $doc_type
                         $doc_type = 'jpg';
-                        $ocr_filename = date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '.' . $doc_type;
-                        $location = storage_path($ocr_path = 'files/_temp_ocr/' . $ocr_filename);
+                        $ocr_filename .= '.' . $doc_type;
+                        $ocr_path = '_temp_ocr/' . $ocr_filename;
+                        $location = Storage::disk('files')->path($ocr_path);
                         Image::make($image_email_url)->save($location);
                     }
 
@@ -486,7 +493,6 @@ class CompanyEmailController extends Controller
 
                         // Generate a unique filename and create the temporary file path.
                         $ocr_filename = date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '.pdf';
-                        //$ocr_path = 'files/_temp_ocr/'.$ocr_filename;
                         $ocr_path = '_temp_ocr/' . $ocr_filename;
 
                         // Download the attachment content.
@@ -503,11 +509,8 @@ class CompanyEmailController extends Controller
                         $document_model = $this->azureDocumentService->getDocumentModel($ocr_path, $doc_type);
 
                         // Process the attachment using ReceiptController.
-                        $ocr_receipt_extracted = app(\App\Http\Controllers\ReceiptController::class)
-                            ->azure_receipts('files/' . $ocr_path, $doc_type, $document_model);
-
-                        $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)
-                            ->ocr_extract($ocr_receipt_extracted, null, true);
+                        $ocr_receipt_extracted = app(\App\Http\Controllers\ReceiptController::class)->azure_receipts($ocr_path, $doc_type, $document_model);
+                        $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->ocr_extract($ocr_receipt_extracted, null, true);
 
                         if (isset($ocr_receipt_data['error']) && $ocr_receipt_data['error'] === true)
                         {

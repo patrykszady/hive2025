@@ -20,3 +20,6 @@ yarn-error.log
 meilisearch
 home/forge/meilifiles
 auth.json
+# Meilisearch data
+data.ms/
+*.mdb

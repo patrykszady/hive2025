@@ -224,7 +224,7 @@ class ExpenseCreate extends Component
         $this->resetModal();
         $this->dispatch('resetSplits')->to('expenses.expense-splits-create');
         // {
-        //6-14-2022 this only works for Retail vendors.. really need a Modal from MatchVendor or CreateNewVendor forms and taken back here
+        //6-14-2022 this only works for Retail vendors.. really need a Modal from MatchVendor or VendorCreate forms and taken back here
         //create Retail vendor here if doesnt exist yet
         // if(is_null($transaction->vendor_id)){
         //     $vendor = Vendor::create([

@@ -1,7 +1,7 @@
 <!-- Single Kanban Card -->
 <div class="h-full">
     <flux:card
-        class="max-w-lg mx-auto h-full overflow-auto p-0 isolate"
+        class="mx-auto h-full overflow-auto p-0 isolate"
         x-data="{
             scrollToToday() {
                 // Find today's element
@@ -43,7 +43,7 @@
                     <!-- No Date Tasks Header - Sticky under main header -->
                     <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 shadow-sm select-none relative z-40">
                         <flux:accordion>
-                            <flux:accordion.item>
+                            <flux:accordion.item expanded>
                                 <flux:accordion.heading class="bg-gray-50 px-4 py-2">
                                     <div class="flex items-center justify-between w-full">
                                         <div class="text-gray-700">

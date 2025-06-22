@@ -59,9 +59,7 @@ class VendorCreate extends Component
             'userVendor',
             'addVendorToVendor',
             'newVendor',
-            'vendorModal',
             'editVendor',
-            'resetModal',
             'viaVendor',
         ];
 
@@ -94,41 +92,6 @@ class VendorCreate extends Component
         }
     }
 
-    public function vendorModal($team_member = null)
-    {
-        // $this->form->reset();
-        // $this->business_name_text = NULL;
-        // $this->vendor = Vendor::make();
-        // $this->vendor->business_name = NULL;
-        // $this->business_name_text = NULL;
-        // $this->modal('vendors_form_modal')->close();
-        // $this->resetModal();
-
-        //5-18-2023 to reset modal if was clicked away and not CANCEL was clicked...whyyyyy
-        // if(is_numeric($team_member)){
-        //     $this->team_member = $team_member;
-
-        //     $user_info = [
-        //         'id' => $team_member,
-        //         'hourly_rate' => 0,
-        //         'role' => 1
-        //     ];
-
-        //     $this->userVendor($user_info);
-
-        //     $this->vendor->business_name = $this->user->full_name;
-        //     $this->business_name_text = $this->vendor->business_name;
-        // }else{
-
-        //     //role and hourly here for new vendor?
-        //     // $this->team_member = 'index';
-        //     // $this->user = User::make();
-        // }
-
-        $this->team_member = 'index';
-        $this->modal('vendors_form_modal')->show();
-    }
-
     public function viaVendor(User $user, $business_name)
     {
         $this->user = $user;
@@ -151,7 +114,6 @@ class VendorCreate extends Component
     public function editVendor(Vendor $vendor)
     {
         //5-18-2023 to reset modal if was clicked away and not CANCEL was clicked...whyyyyy
-        // $this->resetModal();
         $this->vendor = $vendor;
 
         $this->form->setVendor($this->vendor);
@@ -218,29 +180,11 @@ class VendorCreate extends Component
         }
     }
 
-    // Everthing in top pulbic should be reset here
-    public function resetModal()
-    {
-        $this->form->reset();
-        $this->vendor = Vendor::make();
-        // $this->vendor->business_name = NULL;
-        $this->business_name_text = null;
-        $this->modal('vendors_form_modal')->show();
-        $this->user = null;
-        $this->address_isset = null;
-        $this->user_vendors = null;
-        $this->vendor_id = null;
-        $this->user_vendor_id = null;
-    }
-
     public function newVendor()
     {
-        // $this->resetModal();
-        $this->vendor->business_name = $this->business_name_text;
+        $this->modal('vendors_form_modal')->show();
+        // $this->vendor->business_name = $this->business_name_text;
 
-        // dd($this->vendor->business_name);
-        // dd($this->vendor);
-        // dd('in new vendor');
         //remove existing and add vendor and top textbox AND open rest of form
     }
 
@@ -256,7 +200,7 @@ class VendorCreate extends Component
         // $this->render();
         $this->modal('vendors_form_modal')->close();
         // $this->vendor = Vendor::make();
-        // $this->resetModal();
+
         $this->dispatch('refreshComponent')->to('vendors.vendors-index');
 
         //notification
@@ -331,7 +275,7 @@ class VendorCreate extends Component
         //reset component
         $this->modal('vendors_form_modal')->close();
         $this->dispatch('refreshComponent')->self();
-        // $this->resetModal();
+
         $this->form->reset();
         // $this->dispatch('via', 'vendor')->to('users.users-form');
         $this->dispatch('refreshComponent')->to('vendors.vendors-index');

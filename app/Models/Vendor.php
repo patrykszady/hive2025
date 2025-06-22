@@ -4,12 +4,16 @@ namespace App\Models;
 
 use App\Models\Scopes\ClientScope;
 use App\Models\Scopes\VendorScope;
+
+use App\Collections\SearchableCollection;
+
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+
 use Laravel\Scout\Searchable;
 
 class Vendor extends Model
@@ -25,13 +29,19 @@ class Vendor extends Model
         static::addGlobalScope(new VendorScope);
     }
 
-    //Searchable / Typesense
+    //Searchable
     public function toSearchableArray(): array
     {
+        // Only calculate if not already loaded
+        $ytdExpenseSum = $this->ytd_expense_sum ?? $this->expenses()
+            ->where('created_at', '>=', today()->subYear())
+            ->sum('amount');
+
         return array_merge($this->toArray(), [
             'id' => (string) $this->id,
             'business_name' => $this->business_name,
             'business_type' => $this->business_type,
+            'ytd_expense_sum' => (float) $ytdExpenseSum,
             'created_at' => $this->created_at->timestamp,
         ]);
     }
@@ -41,7 +51,7 @@ class Vendor extends Model
      */
     public function searchableAs(): string
     {
-        return 'vendors_index';
+        return env('APP_ENV') == 'local' ? 'vendors_index_dev' : 'vendors_index';
     }
 
     public function vendor_categories(): BelongsToMany
@@ -219,9 +229,23 @@ class Vendor extends Model
 
     public function getAddressMapURI()
     {
+        //2025-6-21 lets use google maps api for this
         $url = 'https://maps.apple.com/?q='.$this->address.', '.$this->city.', '.$this->state.', '.$this->zip_code;
 
         return $url;
+    }
+
+    public function getYtdExpenseSumAttribute()
+    {
+        // If it's already set (from search results), return it
+        if (array_key_exists('ytd_expense_sum', $this->attributes)) {
+            return $this->attributes['ytd_expense_sum'];
+        }
+
+        // Fallback calculation for non-search queries
+        return $this->expenses()
+            ->where('created_at', '>=', today()->subYear())
+            ->sum('amount');
     }
 
     public function scopeHiveVendors($query)

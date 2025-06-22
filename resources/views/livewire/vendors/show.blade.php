@@ -25,10 +25,8 @@
                 {{-- VENDOR TEAM MEMBERS --}}
                 <livewire:users.users-index :vendor="$vendor" :view="'vendors.show'"/>
 
-                @if($vendor->business_type != 'Retail')
-                    {{-- VENDOR CHECKS --}}
-                    <livewire:checks.checks-index :vendor="$vendor->id" :view="'vendors.show'" lazy />
-                @endif
+                {{-- VENDOR CHECKS --}}
+                <livewire:checks.checks-index :vendor="$vendor->id" :view="'vendors.show'" lazy />
 
                 {{-- INSURANCE --}}
                 @if(in_array($vendor->business_type, ["Sub", "DBA"]))

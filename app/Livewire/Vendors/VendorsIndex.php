@@ -19,8 +19,7 @@ class VendorsIndex extends Component
 
     public $view;
 
-    public $sortBy = 'expense_count';
-
+    public $sortBy = 'ytd_expense_sum';
     public $sortDirection = 'desc';
 
     protected $queryString = [
@@ -45,29 +44,17 @@ class VendorsIndex extends Component
     #[Computed]
     public function vendors()
     {
-        return Vendor::where('business_name', 'like', "%{$this->business_name}%")
-            // ->where('business_type', 'like', "%{$this->vendor_type}%")
-            ->withCount([
-                'expenses',
-                'expenses as expense_count' => function ($query) {
-                    $query->where('created_at', '>=', today()->subYear());
-                },
-            ])
-            ->when($this->vendor_type === 'All', function ($query, $item) {
-                return $query;
-            })
-            ->when($this->vendor_type !== 'All', function ($query, $item) {
-                return $query->where('business_type', 'like', "%{$this->vendor_type}%");
-            })
-            //as expense count
+        // Use Meilisearch for search and sorting
+        $query = Vendor::search($this->business_name);
 
-            // ->with(['expenses' => function ($query) {
-            //     $query->where('created_at', '>=', today()->subYear())->count();
-            // }])
+        if ($this->vendor_type !== 'All') {
+            $query->where('business_type', $this->vendor_type);
+        }
 
-            //sort by expenses ytd
-            ->tap(fn ($query) => $this->sortBy ? $query->orderBy($this->sortBy, $this->sortDirection) : $query)
-            ->paginate(20);
+        $query->orderBy($this->sortBy, $this->sortDirection);
+
+        // Use the AppServiceProvider macro that automatically handles search attributes
+        return $query->paginateWithSearchData(20);
     }
 
     public function sort($column)

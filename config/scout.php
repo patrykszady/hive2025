@@ -2,6 +2,7 @@
 
 use App\Models\Expense;
 use App\Models\Transaction;
+use App\Models\Vendor;
 
 return [
 
@@ -115,10 +116,10 @@ return [
     |
     */
 
-    'algolia' => [
-        'id' => env('ALGOLIA_APP_ID', ''),
-        'secret' => env('ALGOLIA_SECRET', ''),
-    ],
+    // 'algolia' => [
+    //     'id' => env('ALGOLIA_APP_ID', ''),
+    //     'secret' => env('ALGOLIA_SECRET', ''),
+    // ],
 
     /*
     |--------------------------------------------------------------------------
@@ -138,7 +139,6 @@ return [
         'key' => env('MEILISEARCH_KEY'),
         'index-settings' => [
             Expense::class => [
-                // 'is_project_id_null', 'is_distribution_id_null',
                 'filterableAttributes'=> ['vendor_id', 'project_id', 'distribution_id', 'check_id', 'has_splits', 'belongs_to_vendor_id', 'expense_status'],
                 'sortableAttributes' => ['date'],
                 'searchableAttributes' => ['amount'],
@@ -152,8 +152,13 @@ return [
                 'sortableAttributes' => ['transaction_date'],
                 'searchableAttributes' => ['amount'],
                 'typoTolerance' => ['enabled' => false],
-                // matchingStrategy
-                // 'rankingRules' =>
+            ],
+
+            Vendor::class => [
+                'filterableAttributes'=> ['business_type', 'business_name'],
+                'sortableAttributes' => ['business_name', 'ytd_expense_sum', 'created_at'],
+                'searchableAttributes' => ['business_name'],
+                'typoTolerance' => ['enabled' => true],
             ],
         ],
     ],

@@ -545,11 +545,8 @@ class ReceiptController extends Controller
             $doc_content_type = 'Content-Type: application/pdf';
         } elseif (strtolower($doc_type) == 'png') {
             $doc_content_type = 'Content-Type: image/png';
-        } else {
-            //Should never be here. VendorDocCreate validates: file must be pdf, jpg, png
         }
 
-        // Fix: Use Storage disk to get the file content instead of file_get_contents
         $file = Storage::disk('files')->get($file_location);
 
         //start OCR
@@ -576,7 +573,6 @@ class ReceiptController extends Controller
         $re = '/(\d|\D){8}-(\d|\D){4}-(\d|\D){4}-(\d|\D){4}-(\d|\D){12}/m';
         $str = $location_result;
         preg_match($re, $str, $matches, PREG_OFFSET_CAPTURE, 0);
-        // dd($matches);
         $operation_location_id = $matches[0][0];
 
         //get OCR result
@@ -584,7 +580,7 @@ class ReceiptController extends Controller
         $uri = env('AZURE_DI_ENDPOINT').'/documentintelligence/documentModels/'.$document_model.'/analyzeResults/'.$operation_location_id.'?api-version='.$azure_api_version.'" -H "Ocp-Apim-Subscription-Key: '.$azure_api_key.'"';
         $result = exec('curl -v -X GET "https://'.$uri);
         $result = json_decode($result, true);
-        // dd($result);
+
         //2024-12-25 ..if $result is error...LOG and inform user
 
         //wait but go as soon as done.

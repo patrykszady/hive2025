@@ -31,6 +31,8 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use Opcodes\LogViewer\Facades\LogViewer;
 
+use Laravel\Scout\Builder;
+
 class AppServiceProvider extends ServiceProvider
 {
     /**
@@ -103,6 +105,27 @@ class AppServiceProvider extends ServiceProvider
 
         // Also set Carbon's timezone
         Carbon::setTestNow(null);
+
+        // Extend Scout's Builder to automatically include search attributes
+        Builder::macro('paginateWithSearchData', function (int $perPage = null, string $pageName = 'page', int $page = null) {
+            $results = $this->paginate($perPage, $pageName, $page);
+            $rawResults = $this->raw();
+
+            if (isset($rawResults['hits'])) {
+                $searchData = collect($rawResults['hits'])->keyBy('id');
+
+                $results->through(function ($model) use ($searchData) {
+                    if ($searchData->has($model->id)) {
+                        foreach ($searchData[$model->id] as $key => $value) {
+                            $model->setAttribute($key, $value);
+                        }
+                    }
+                    return $model;
+                });
+            }
+
+            return $results;
+        });
     }
 
     public function bootEvent()

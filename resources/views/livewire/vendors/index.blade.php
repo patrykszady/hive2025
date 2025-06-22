@@ -2,8 +2,8 @@
     <flux:card class="space-y-2">
         <div class="flex justify-between">
             <flux:heading size="lg">Filters</flux:heading>
-            @can('create', App\Models\Expense::class)
-                <flux:button wire:click="$dispatchTo('vendors.vendor-create', 'vendorModal')">Add New Vendor</flux:button>
+            @can('create', App\Models\Vendor::class)
+                <flux:button wire:click="$dispatchTo('vendors.vendor-create', 'newVendor')">Add New Vendor</flux:button>
             @endcan
         </div>
 
@@ -32,7 +32,9 @@
                 <flux:table.columns>
                     <flux:table.column sortable :sorted="$sortBy === 'business_name'" :direction="$sortDirection" wire:click="sort('business_name')">Vendor</flux:table.column>
                     <flux:table.column>Type</flux:table.column>
-                    {{-- <flux:column sortable :sorted="$sortBy === 'expense_count'" :direction="$sortDirection" wire:click="sort('expense_count')">Score</flux:column> --}}
+                    @can('create', App\Models\Vendor::class)
+                        <flux:table.column sortable :sorted="$sortBy === 'ytd_expense_sum'" :direction="$sortDirection" wire:click="sort('ytd_expense_sum')">YTD Paid</flux:table.column>
+                    @endcan
                 </flux:table.columns>
 
                 <flux:table.rows>
@@ -40,14 +42,18 @@
                         <flux:table.row :key="$vendor->id">
                             <flux:table.cell variant="strong"><a wire:navigate.hover href="{{route('vendors.show', $vendor->id)}}">{{$vendor->name}}</a></flux:table.cell>
                             <flux:table.cell><flux:badge color="green" inset="top bottom">{{$vendor->business_type}}</flux:badge></flux:table.cell>
-                            {{-- <flux:cell>{{$vendor->expense_count}}</flux:cell> --}}
+                            @can('create', App\Models\Vendor::class)
+                                <flux:table.cell>{{ money($vendor->ytd_expense_sum) }}</flux:table.cell>
+                            @endcan
                         </flux:table.row>
                     @endforeach
                 </flux:table.rows>
             </flux:table>
 
             {{-- VENDOR FORM MODAL --}}
-            <livewire:vendors.vendor-create />
+            @can('create', App\Models\Vendor::class)
+                <livewire:vendors.vendor-create />
+            @endcan
         </div>
     </flux:card>
 </div>
