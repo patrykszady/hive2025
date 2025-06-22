@@ -28,6 +28,8 @@ class VendorCreate extends Component
     ];
 
     public Vendor $vendor;
+    public $hasSearched = false;
+    public $business_name_text = null;
 
     public $user = null;
 
@@ -45,11 +47,8 @@ class VendorCreate extends Component
 
     public $user_vendor_id = null;
 
-    public $business_name_text = null;
-
     public $existing_vendors = null;
-
-    public $add_vendors_vendor = null;
+    public $new_vendors_for_company = null;
 
     public $open_vendor_form = false;
 
@@ -57,7 +56,7 @@ class VendorCreate extends Component
         [
             'refreshComponent' => '$refresh',
             'userVendor',
-            'addVendorToVendor',
+            'addVendorToCompany',
             'newVendor',
             'editVendor',
             'viaVendor',
@@ -69,6 +68,13 @@ class VendorCreate extends Component
     public function boot(GooglePlacesService $googlePlacesService)
     {
         $this->bootHandlesAddresses($googlePlacesService);
+    }
+
+    protected function rules()
+    {
+        return [
+            'business_name_text' => 'nullable|min:3|max:255',
+        ];
     }
 
     public function mount()
@@ -91,6 +97,28 @@ class VendorCreate extends Component
             // ];
         }
     }
+
+    // public function updated($field)
+    // {
+    //     $this->validateOnly($field);
+
+    //     if ($field == 'vendor.business_type') {
+    //         if (in_array($this->vendor->business_type, ['Sub', '1099', 'DBA'])) {
+    //             if (isset($this->user->id)) {
+    //                 $this->address_isset = true;
+    //             }
+    //             // $this->user = $this->user;
+    //             // }elseif($this->vendor->business_type == 'Retail'){
+    //             //     $this->user = NULL;
+    //         } elseif ($this->vendor->business_type == 'Retail') {
+    //             $this->user = null;
+    //             $this->address_isset = null;
+    //             $this->user_vendors = null;
+    //         } else {
+    //             $this->address_isset = null;
+    //         }
+    //     }
+    // }
 
     public function viaVendor(User $user, $business_name)
     {
@@ -133,51 +161,55 @@ class VendorCreate extends Component
         $this->modal('vendors_form_modal')->show();
     }
 
-    public function UpdatedBusinessNameText($value)
+    public function updatedBusinessNameText($value)
     {
+        $trimmedValue = trim($value);
+
+        // Always validate (nullable allows empty values)
+        $this->validateOnly('business_name_text');
+
+        // Reset everything if empty or validation failed
+        if (strlen($trimmedValue) === 0) {
+            $this->hasSearched = false;
+            $this->existing_vendors = collect();
+            $this->new_vendors_for_company = collect();
+            $this->form->reset();
+            return;
+        }
+
+        // Check if there are validation errors (length < 3)
+        if ($this->getErrorBag()->has('business_name_text')) {
+            $this->hasSearched = false;
+            $this->existing_vendors = collect();
+            $this->new_vendors_for_company = collect();
+            $this->form->reset();
+            return;
+        }
+
+        // If validation passes, mark that we've performed a search
+        $this->hasSearched = true;
+
         $existing_vendor_ids = auth()->user()->vendor->vendors->pluck('id')->toArray();
 
         $this->existing_vendors =
             Vendor::withoutGlobalScopes()
                 ->orderBy('business_name', 'ASC')
-                ->where('business_name', 'like', "%{$this->business_name_text}%")
+                ->where('business_name', 'like', "%{$trimmedValue}%")
                 ->whereIn('id', $existing_vendor_ids)
                 ->distinct()
                 ->get();
 
-        $this->add_vendors_vendor =
+        $this->new_vendors_for_company =
             Vendor::withoutGlobalScopes()
                 ->orderBy('business_name', 'ASC')
-                ->where('business_name', 'like', "%{$this->business_name_text}%")
+                ->where('business_name', 'like', "%{$trimmedValue}%")
                 ->whereNotIn('id', $existing_vendor_ids)
                 ->distinct()
                 ->get();
 
         $this->form->reset();
-        $this->form->business_name = $value;
+        $this->form->business_name = $trimmedValue;
         $this->open_vendor_form = false;
-    }
-
-    public function updated($field)
-    {
-        $this->validateOnly($field);
-
-        if ($field == 'vendor.business_type') {
-            if (in_array($this->vendor->business_type, ['Sub', '1099', 'DBA'])) {
-                if (isset($this->user->id)) {
-                    $this->address_isset = true;
-                }
-                // $this->user = $this->user;
-                // }elseif($this->vendor->business_type == 'Retail'){
-                //     $this->user = NULL;
-            } elseif ($this->vendor->business_type == 'Retail') {
-                $this->user = null;
-                $this->address_isset = null;
-                $this->user_vendors = null;
-            } else {
-                $this->address_isset = null;
-            }
-        }
     }
 
     public function newVendor()
@@ -188,26 +220,25 @@ class VendorCreate extends Component
         //remove existing and add vendor and top textbox AND open rest of form
     }
 
-    //add Existing Vendor to auth->user->vendor
-    public function addVendorToVendor($vendor_id)
+    //add Existing Vendor to auth->user->vendor (Company)
+    //used to be addVendorToVendor
+    public function addVendorToCompany($vendor_id)
     {
-        //Add existing Vendor to the logged-in-vendor
-        //add $vendor to currently logged in vendor
+        //add $vendor to currently logged in vendor (company)
         auth()->user()->vendor->vendors()->attach($vendor_id);
 
-        // $this->vendor_id = $vendor_id;
-        // $this->mount();
-        // $this->render();
-        $this->modal('vendors_form_modal')->close();
-        // $this->vendor = Vendor::make();
+        $this->redirectRoute('vendors.show', ['vendor' => $vendor_id]);
+        // $this->dispatch('refreshComponent')->to('vendors.vendors-index');
+        // $this->modal('vendors_form_modal')->close();
 
-        $this->dispatch('refreshComponent')->to('vendors.vendors-index');
-
-        //notification
-        $this->dispatch('notify',
-            type: 'success',
-            content: 'Vendor Added',
-            route: 'vendors/'.$vendor_id
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Vendor Added.',
+            // route / href / wire:click
+            // route: 'vendors/'.$vendor_id,
+            text: '',
         );
     }
 
@@ -235,7 +266,6 @@ class VendorCreate extends Component
             variant: 'success',
             heading: 'Vendor Updated.',
             // route / href / wire:click
-            // route: 'vendors/'.$vendor->id
             text: '',
         );
     }

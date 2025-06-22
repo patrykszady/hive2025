@@ -5,31 +5,36 @@ use Illuminate\Support\Facades\Schedule;
 // Email processing tasks
 Schedule::call(function () {
     app(\App\Http\Controllers\CompanyEmailController::class)->fetchMessagesForGrantId();
-})->everyTenMinutes()
-  ->name('fetch-messages-for-grant-id')
-  ->withoutOverlapping()
-  ->onOneServer();
+    })
+    ->everyTenMinutes()
+    ->between('7:00', '20:00')
+    ->name('fetch-messages-for-grant-id')
+    ->withoutOverlapping()
+    ->onOneServer();
 
-Schedule::call(function () {
-    app(\App\Http\Controllers\LeadController::class)->leads_in_email();
-})->everyTenMinutes()
-  ->name('leads-in-email')
-  ->withoutOverlapping()
-  ->onOneServer();
+// Schedule::call(function () {
+//     app(\App\Http\Controllers\LeadController::class)->leads_in_email();
+// })->everyTenMinutes()
+//   ->name('leads-in-email')
+//   ->withoutOverlapping()
+//   ->onOneServer();
 
 Schedule::call(function () {
     app(\App\Http\Controllers\CompanyEmailController::class)->fetchAutoReceipts();
-})->everyTenMinutes()
-  ->name('fetch-auto-receipts')
-  ->withoutOverlapping()
-  ->onOneServer();
+    })
+    ->everyTenMinutes()
+    ->between('7:00', '22:00')
+    ->name('fetch-auto-receipts')
+    ->withoutOverlapping()
+    ->onOneServer();
 
 Schedule::call(function () {
     app(\App\Http\Controllers\VendorDocsController::class)->fetchMessagesFromInsuranceMailbox();
-})->hourly()
-  ->name('fetch-insurance-mailbox')
-  ->withoutOverlapping()
-  ->onOneServer();
+    })->hourly()
+    ->between('7:00', '20:00')
+    ->name('fetch-insurance-mailbox')
+    ->withoutOverlapping()
+    ->onOneServer();
 
 // Plaid/Transaction tasks
 Schedule::call(function () {
@@ -112,18 +117,27 @@ Schedule::call(function () {
 // External API tasks
 Schedule::call(function () {
     app(\App\Http\Controllers\ReceiptController::class)->amazon_orders_api();
-})->hourly()
-  ->name('amazon-orders-api')
-  ->withoutOverlapping()
-  ->onOneServer();
+    })
+    ->hourly()
+    ->between('7:00', '23:00')
+    ->name('amazon-orders-api')
+    ->withoutOverlapping()
+    ->onOneServer();
 
-// Daily tasks
+// Daily user/team member task reminders
 Schedule::call(function () {
     app(\App\Http\Controllers\TaskReminderController::class)->sendTomorrowReminders();
 })->dailyAt('19:00')
   ->name('send-tomorrow-reminders')
   ->withoutOverlapping()
   ->onOneServer();
+
+// Search index maintenance
+Schedule::command('vendors:update-search-index')
+    ->dailyAt('02:00')
+    ->name('update-vendor-search-index')
+    ->withoutOverlapping()
+    ->onOneServer();
 
 // System maintenance
 Schedule::command('horizon:snapshot')

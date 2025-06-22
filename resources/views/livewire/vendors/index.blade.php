@@ -41,7 +41,7 @@
                     @foreach ($this->vendors as $vendor)
                         <flux:table.row :key="$vendor->id">
                             <flux:table.cell variant="strong"><a wire:navigate.hover href="{{route('vendors.show', $vendor->id)}}">{{$vendor->name}}</a></flux:table.cell>
-                            <flux:table.cell><flux:badge color="green" inset="top bottom">{{$vendor->business_type}}</flux:badge></flux:table.cell>
+                            <flux:table.cell><flux:badge color="blue" inset="top bottom">{{$vendor->business_type}}</flux:badge></flux:table.cell>
                             @can('create', App\Models\Vendor::class)
                                 <flux:table.cell>{{ money($vendor->ytd_expense_sum) }}</flux:table.cell>
                             @endcan

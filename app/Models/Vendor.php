@@ -46,9 +46,7 @@ class Vendor extends Model
         ]);
     }
 
-    /**
-     * Get the name of the index associated with the model.
-     */
+    // Get the name of the index associated with the model.
     public function searchableAs(): string
     {
         return env('APP_ENV') == 'local' ? 'vendors_index_dev' : 'vendors_index';

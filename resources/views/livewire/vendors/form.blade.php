@@ -1,81 +1,118 @@
-<flux:modal name="vendors_form_modal" class="space-y-2">
+<flux:modal name="vendors_form_modal" class="space-y-2 md:w-96">
     <div class="flex justify-between">
         <flux:heading size="lg">{{$view_text['card_title']}}</flux:heading>
     </div>
 
     <flux:separator variant="subtle" />
 
-    <form wire:submit="{{$view_text['form_submit']}}" class="grid gap-6">
-        {{-- BIZ NAME TEXT--}}
+    <form wire:submit="{{$view_text['form_submit']}}" class="space-y-2">
+        {{-- BUSINESS NAME TEXT--}}
+        {{-- 2025-6-22 change this to $view != ... --}}
         @if($view_text['card_title'] != 'Update Vendor')
-            <div
-                x-data="{via_vendor: @entangle('via_vendor')}"
-                x-transition
-                >
-                <flux:input
-                    wire:model.live.debounce.1000ms="business_name_text"
-                    label="New Vendor Business Name"
-                    type="text"
-                    x-bind:disabled="via_vendor"
-                    placeholder="Business Name"
-                />
-            </div>
+            <flux:input
+                wire:model.live.debounce.500ms="business_name_text"
+                label="New Vendor Business Name"
+                type="text"
+                x-bind:disabled="$wire.via_vendor"
+                placeholder="Business Name"
+                autofocus
+            />
         @endif
-
-        @if(!$errors->has('business_name_text'))
             <div
-                x-data="{business_name_text: @entangle('business_name_text')}"
-                x-show="business_name_text"
+                x-show="$wire.business_name_text"
                 x-transition
+                class="space-y-2"
                 >
-                @if(!is_null($existing_vendors))
-                    @if(!$existing_vendors->isEmpty())
-                        <flux:radio.group label="Existing Vendors" variant="cards" class="flex-col" :indicator="false">
-                            @foreach($existing_vendors as $vendor_found)
-                                <flux:radio
-                                    value="{{$vendor_found->id}}"
-                                    label="{!!$vendor_found->business_name!!}"
-                                    description="{{$vendor_found->business_type}}"
-                                />
-                            @endforeach
-                        </flux:radio.group>
-                    @endif
+
+                {{-- Existing Vendors that belong to the logged in Hive Vendor --}}
+                @if(optional($existing_vendors)->isNotEmpty())
+                    <flux:heading class="!mb-0">Your Existing {{ Str::plural('Vendor', $existing_vendors->count()) }}</flux:heading>
+                    <flux:text>
+                        {{ $existing_vendors->count() === 1 ? 'This vendor is' : 'These vendors are' }} already connected to your company.
+                    </flux:text>
+
+                    @foreach($existing_vendors as $vendor_found)
+                        <flux:card class="!border !border-blue-300 !p-1 !pl-2 hover:!border-blue-400 !bg-blue-50/75 hover:!bg-blue-100/75">
+                            <div class="flex justify-between items-center">
+                                <flux:heading class="truncate text-gray-700 hover:text-gray-900">
+                                    <a href="{{route('vendors.show', $vendor_found->id)}}" target="_blank">
+                                        {{$vendor_found->name}}
+                                    </a>
+                                </flux:heading>
+                                <div>
+                                    <flux:badge color="blue" inset="top bottom">{{$vendor_found->business_type}}</flux:badge>
+                                    <flux:button size="sm" class="m-0" href="{{route('vendors.show', $vendor_found->id)}}" target="_blank">
+                                        View
+                                    </flux:button>
+                                </div>
+                            </div>
+                        </flux:card>
+                    @endforeach
                 @endif
 
-                @if(!is_null($add_vendors_vendor))
-                    @if(!$add_vendors_vendor->isEmpty())
-                        <flux:label>Add Vendor</flux:label>
-                        @foreach($add_vendors_vendor as $vendor_found)
-                            <flux:command.items>
-                                <flux:command.item
-                                    {{-- wire:click="..." --}}
-                                    >
-                                    <div>
-                                        {{$vendor_found->business_name}}
-                                        <br>
-                                        <i>{{$vendor_found->business_type}}</i>
-                                    </div>
-                                </flux:command.item>
-                            </flux:command.items>
-                        @endforeach
-                    @endif
+                {{-- Existing Vendors that DO NOT belong to the logged in Hive Vendor --}}
+                @if(optional($new_vendors_for_company)->isNotEmpty())
+                    <flux:heading class="!mb-0">Add Existing Vendors</flux:heading>
+                    <flux:text>
+                        These vendors are available to add but not yet connected to your company.
+                        Click <span class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded bg-gray-100 text-gray-700 border border-gray-200">Add</span> to connect them to your company.
+                    </flux:text>
+
+                    @foreach($new_vendors_for_company as $new_vendor_found)
+                        <flux:card class="!border !border-blue-300 !p-1 !pl-2 hover:!border-blue-400 !bg-blue-50/75 hover:!bg-blue-100/75">
+                            <div class="flex justify-between items-center">
+                                <flux:heading class="truncate text-gray-700">
+                                    {{$new_vendor_found->name}}
+                                </flux:heading>
+
+                                <div>
+                                    <flux:badge color="blue" inset="top bottom">{{$new_vendor_found->business_type}}</flux:badge>
+                                    {{-- wire:click="$dispatchTo('vendors.vendor-create', 'newVendor')" --}}
+                                    <flux:button size="sm" class="m-0" wire:click="addVendorToCompany({{$new_vendor_found->id}})">
+                                        Add
+                                    </flux:button>
+                                </div>
+                            </div>
+                        </flux:card>
+                    @endforeach
                 @endif
 
+                {{-- Create New Vendor BUTTON --}}
                 <div
-                    x-data="{open_vendor_form: @entangle('open_vendor_form'), business_name_text: @entangle('business_name_text')}"
-                    {{--  && open_vendor_form == false --}}
-                    x-show="business_name_text"
+                    x-data="{open_vendor_form: @entangle('open_vendor_form')}"
+                    x-transition
                     class="mt-4"
                     >
-                    @if($view_text['card_title'] != 'Update Vendor')
-                        <flux:button
-                            class="w-full"
-                            {{-- Open form below (New bendor form) --}}
-                            wire:click="open_vendor_form = true"
-                            >
 
-                            <b>Create New Vendor</b>
-                        </flux:button>
+                    {{-- 2025-6-22 change this to $view != ... --}}
+                    @if($view_text['card_title'] != 'Update Vendor')
+                        {{-- Show button when: Has business_name_text AND has searched at least once --}}
+                        <div x-show="$wire.business_name_text && $wire.hasSearched" class="space-y-2">
+                            {{-- Only show separator with "or" text if there are existing or add vendors --}}
+                            @if(optional($existing_vendors)->isNotEmpty() || optional($new_vendors_for_company)->isNotEmpty())
+                                <flux:separator text="or" />
+                            @endif
+
+                            {{-- Show primary button when no existing vendors --}}
+                            @if(optional($existing_vendors)->isEmpty() && optional($new_vendors_for_company)->isEmpty())
+                                <flux:button
+                                    class="w-full font-extrabold"
+                                    wire:click="open_vendor_form = true"
+                                    variant="primary"
+                                    color="blue"
+                                    >
+                                    Create New Vendor
+                                </flux:button>
+                            @else
+                                {{-- Show default button when there are existing vendors --}}
+                                <flux:button
+                                    class="w-full font-extrabold"
+                                    wire:click="open_vendor_form = true"
+                                    >
+                                    Create New Vendor
+                                </flux:button>
+                            @endif
+                        </div>
                     @endif
                 </div>
 
@@ -191,7 +228,7 @@
                     </div>
                 </div>
             </div>
-        @endif
+
 
         {{-- FOOTER --}}
         <div
