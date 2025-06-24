@@ -31,8 +31,26 @@
     >
         <!-- Header - Sticky at top -->
         <div class="sticky top-0 bg-white z-50 shadow-sm">
-            <flux:heading size="lg" class="p-4">{{ $headerTitle }}</flux:heading>
-            <flux:separator />
+            <div class="flex items-start justify-between gap-4 p-4">
+                <flux:heading size="lg">{{ $headerTitle }}</flux:heading>
+
+                {{-- Show Add Task button based on type and authorization --}}
+                @if(
+                    ($type === 'project' && $project && $this->can('update', $project)) ||
+                    ($type === 'vendor' && $vendor) ||
+                    ($type === 'employee' && $employee)
+                )
+                    <div class="flex-shrink-0">
+                        <flux:button
+                            wire:click="addTaskButton"
+                            size="sm"
+                            icon="plus"
+                        >
+                            Add Task
+                        </flux:button>
+                    </div>
+                @endif
+            </div>
         </div>
 
         <!-- Days as Rows (including No Date Tasks) -->

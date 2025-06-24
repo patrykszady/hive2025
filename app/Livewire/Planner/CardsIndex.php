@@ -244,6 +244,34 @@ class CardsIndex extends Component
         return $query->get();
     }
 
+    public function addTaskButton()
+    {
+        switch ($this->type) {
+            case 'project':
+                $this->dispatch('addTask',
+                    $this->project ? $this->project->id : null  // First parameter: project_id
+                )->to('tasks.task-create');
+                break;
+
+            case 'vendor':
+                $this->dispatch('addTask',
+                    null,  // First parameter: project_id (null)
+                    null,  // Second parameter: date (null)
+                    $this->vendor ? $this->vendor->id : null  // Third parameter: vendor_id
+                )->to('tasks.task-create');
+                break;
+
+            case 'employee':
+                $this->dispatch('addTask',
+                    null,  // First parameter: project_id (null)
+                    null,  // Second parameter: date (null)
+                    null,  // Third parameter: vendor_id (null)
+                    $this->employee ? [$this->employee->id] : []  // Fourth parameter: user_ids
+                )->to('tasks.task-create');
+                break;
+        }
+    }
+
     private function getNoDateTasksQuery()
     {
         $query = Task::where(function ($q) {

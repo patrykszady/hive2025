@@ -29,7 +29,7 @@ class TaskForm extends Form
     public $user_ids = null;
 
     #[Validate('required')]
-    public $type = null;
+    public $type = 'Task';
 
     #[Validate('nullable')]
     public $notes = null;

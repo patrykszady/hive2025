@@ -6,6 +6,7 @@
     <form wire:submit="{{$view_text['form_submit']}}" class="grid space-y-2">
         {{-- TYPE --}}
         <flux:radio.group wire:model="form.type" label="Task Type" variant="segmented">
+            {{-- checked --}}
             <flux:radio value="Task" label="Task" class="!text-blue-800" />
             <flux:radio value="Milestone" label="Milestone" class="!text-indigo-800" />
             {{-- <flux:radio value="Material" label="Material" /> --}}

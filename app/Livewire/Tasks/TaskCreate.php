@@ -78,7 +78,7 @@ class TaskCreate extends Component
         // The computed property will handle the weekend-aware calculation
     }
 
-    public function addTask($project_id, $date = null)
+    public function addTask($project_id = null, $date = null, $vendor_id = null, $user_ids = [])
     {
         $this->form->reset();
         $this->resetErrorBag();
@@ -90,7 +90,20 @@ class TaskCreate extends Component
         ];
 
         $this->form->dates = $date ? [Carbon::parse($date)->format('Y-m-d')] : [];
-        $this->form->project_id = $project_id;
+
+        // Set the appropriate fields based on what was passed
+        if ($project_id) {
+            $this->form->project_id = $project_id;
+        }
+
+        if ($vendor_id) {
+            $this->form->vendor_id = $vendor_id;
+        }
+
+        if (!empty($user_ids)) {
+            $this->form->user_ids = $user_ids;
+        }
+
         $this->modal('task_create_form_modal')->show();
     }
 

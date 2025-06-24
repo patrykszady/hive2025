@@ -10,6 +10,9 @@ use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 // use Livewire\Attributes\Rule;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Validate;
+
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Form;
 
 class ExpenseForm extends Form
@@ -447,7 +450,11 @@ class ExpenseForm extends Form
         $this->save_splits($this->expense);
 
         if ($this->receipt_file) {
-            $this->upload_receipt_file($this->expense->amount, $this->expense->id);
+            $receipt_success = $this->upload_receipt_file($this->expense->amount, $this->expense->id);
+
+            if (!$receipt_success) {
+                session()->flash('warning', 'Expense updated but receipt could not be processed. Please try uploading the receipt again.');
+            }
         }
 
         return $this->expense;
@@ -526,7 +533,12 @@ class ExpenseForm extends Form
         }
 
         if ($this->receipt_file) {
-            $this->upload_receipt_file($expense->amount, $expense->id);
+            $receipt_success = $this->upload_receipt_file($expense->amount, $expense->id);
+
+            if (!$receipt_success) {
+                // Handle the failure - expense is already saved, just inform user
+                session()->flash('warning', 'Expense saved but receipt could not be processed. Please try uploading the receipt again.');
+            }
         }
 
         return $expense;
@@ -537,19 +549,50 @@ class ExpenseForm extends Form
         $doc_type = $this->receipt_file->getClientOriginalExtension();
 
         $ocr_filename = date('Y-m-d-H-i-s').'-'.rand(10, 99).'.'.$doc_type;
-        $ocr_path = 'files/_temp_ocr/'.$ocr_filename;
-        $this->receipt_file->storeAs('_temp_ocr', $ocr_filename, 'files');
+        $ocr_path = '_temp_ocr/'.$ocr_filename;
 
-        $document_model = app(\App\Http\Controllers\ReceiptController::class)->azure_document_model($doc_type, $ocr_path);
+        // Store the file using Storage facade
+        Storage::disk('files')->put($ocr_path, file_get_contents($this->receipt_file->getRealPath()));
+
+        // Pass the path in the format that azure_document_model expects (with 'files/' prefix)
+        $azure_path = 'files/' . $ocr_path;
+        $document_model = app(\App\Http\Controllers\ReceiptController::class)->azure_document_model($doc_type, $azure_path);
 
         //send to ReceiptController@azure_receipts
         $ocr_receipt_extracted = app(\App\Http\Controllers\ReceiptController::class)->azure_receipts($ocr_path, $doc_type, $document_model);
         //pass receipt info to ocr_extract method
         $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->ocr_extract($ocr_receipt_extracted, $expense_amount);
 
-        //ATTACHMENT
+        // Check if OCR extraction failed
+        if (isset($ocr_receipt_data['error']) && $ocr_receipt_data['error'] === true) {
+            // Log the error
+            Log::error('OCR extraction failed for expense', [
+                'expense_id' => $expense_id,
+                'filename' => $ocr_filename,
+                'expense_amount' => $expense_amount,
+                'ocr_path' => $ocr_path,
+            ]);
+
+            // Clean up the temporary file
+            Storage::disk('files')->delete($ocr_path);
+
+            // Reset the receipt file
+            $this->receipt_file = null;
+
+            // Add error message for the user
+            $this->addError('receipt_file', 'Unable to process receipt. Please check the file and try again.');
+
+            return false;
+        }
+
+        //ATTACHMENT - only proceed if OCR was successful
         app(\App\Http\Controllers\CompanyEmailController::class)->saveExpenseReceipt($expense_id, $ocr_receipt_data, $ocr_filename);
 
+        // Clean up temp file
+        Storage::disk('files')->delete($ocr_path);
+
         $this->receipt_file = null;
+
+        return true;
     }
 }
