@@ -148,10 +148,11 @@
                                         </flux:table.columns>
 
                                         <flux:table.rows x-sort="$wire.sort_line_item($key, $position)">
-                                            @foreach($section->estimate_line_items as $line_item)
+                                            @foreach($section->estimate_line_items as $line_item_index => $line_item)
                                                 <div>
                                                     <flux:table.row x-sort:item="{{$line_item->id}}" :key="$line_item->id">
-                                                        <flux:table.cell x-sort:handle>{{$index + 1}}.{{$line_item->order + 1}}</flux:table.cell>
+                                                        {{-- Use the loop index instead of database order --}}
+                                                        <flux:table.cell x-sort:handle>{{$index + 1}}.{{$line_item_index + 1}}</flux:table.cell>
                                                         <flux:table.cell variant="strong">
                                                             <a
                                                                 class="cursor-pointer"
@@ -167,15 +168,6 @@
                                                         <flux:table.cell>{{$line_item->unit_type !== 'no_unit' ? money($line_item->cost) : ''}}</flux:table.cell>
                                                         <flux:table.cell variant="strong">{{money($line_item->total)}}</flux:table.cell>
                                                     </flux:table.row>
-                                                    {{-- <flux:table.row class="w-full">
-                                                        <flux:table.cell></flux:table.cell>
-                                                        <flux:table.cell>
-                                                            <div class="w-48">
-                                                                <p>{!! $line_item->desc !!}</p>
-                                                                <p><i>{!! $line_item->notes !!}</i></p>
-                                                            </div>
-                                                        </flux:table.cell>
-                                                    </flux:table.row> --}}
                                                 </div>
                                             @endforeach
                                         </flux:table.rows>
