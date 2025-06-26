@@ -36,7 +36,7 @@
 
                 {{-- Show Add Task button based on type and authorization --}}
                 @if(
-                    ($type === 'project' && $project && $this->can('update', $project)) ||
+                    ($type === 'project' && auth()->user()->can('update', $project)) ||
                     ($type === 'vendor' && $vendor) ||
                     ($type === 'employee' && $employee)
                 )

@@ -427,7 +427,8 @@
                                                             // Check if task bar is too narrow (less than 100) - show outside ONLY if no following sibling
                                                             if (taskBarRect.width < 100 && !this.hasFollowingSibling) {
                                                                 this.shouldShowOutside = true;
-                                                                this.stickyOffset = taskBarRect.width + 4;
+                                                                // Subtract 8px to account for mx-2 left margin
+                                                                this.stickyOffset = taskBarRect.width - 8;
                                                                 this.$el.style.transform = '';
                                                                 this.$el.style.position = '';
                                                                 this.$el.style.zIndex = '';
@@ -450,11 +451,11 @@
                                                                 this.shouldShowOutside = true;
 
                                                                 if (taskBarRect.right < containerRect.left) {
-                                                                    // Task is completely off-screen
-                                                                    this.stickyOffset = taskBarRect.width + 4;
+                                                                    // Task is completely off-screen - subtract 8px for mx-2
+                                                                    this.stickyOffset = taskBarRect.width - 8;
                                                                 } else {
-                                                                    // Task is partially visible - position just outside
-                                                                    this.stickyOffset = visibleRight - taskBarRect.left + 4;
+                                                                    // Task is partially visible - position just outside, subtract 8px for mx-2
+                                                                    this.stickyOffset = visibleRight - taskBarRect.left - 8;
                                                                 }
 
                                                                 this.$el.style.transform = '';
@@ -520,7 +521,14 @@
                                                             </flux:avatar.group>
                                                         @endif
                                                         @if($task->vendor)
-                                                            <flux:avatar size="xs" name="{{ $task->vendor->name }}" color="auto" color:seed="{{ $task->vendor->id }}" class="flex-shrink-0" />
+                                                            <!-- Add the same ring styling to vendor avatar -->
+                                                            <flux:avatar
+                                                                size="xs"
+                                                                name="{{ $task->vendor->name }}"
+                                                                color="auto"
+                                                                color:seed="{{ $task->vendor->id }}"
+                                                                class="flex-shrink-0 ring-2 ring-white"
+                                                            />
                                                             <flux:text class="text-xs min-w-0 whitespace-nowrap truncate">{{ $task->vendor->name }}</flux:text>
                                                         @endif
                                                     </div>
