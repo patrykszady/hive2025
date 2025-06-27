@@ -250,4 +250,12 @@ class Vendor extends Model
     {
         return $query->withoutGlobalScopes()->where('business_type', 'Sub')->where('registration->registered', true);
     }
+
+    public static function topExpenseVendors($limit = 5000)
+    {
+        return static::search('')
+            ->whereNotIn('business_type', ['Retail'])
+            ->orderBy('ytd_expense_sum', 'desc')
+            ->take($limit);
+    }
 }

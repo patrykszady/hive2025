@@ -33,12 +33,10 @@ class CardsIndex extends Component
     {
         $this->type = $type;
 
-        // Load base data
-        $this->vendors = Vendor::whereNot('business_type', 'Retail')
-            ->orderBy('business_name')
-            ->get();
+        $this->vendors = Vendor::topExpenseVendors()->get();
+
         $this->employees = auth()->user()->vendor->users()->employed()->get();
-        $this->projects = Project::status(['Active'])->get();
+        $this->projects = Project::status(['Active', 'Scheduled', 'Service Call'])->get();
 
         // Set the specific entity based on type
         switch ($type) {

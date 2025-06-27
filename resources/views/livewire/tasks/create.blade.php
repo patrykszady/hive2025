@@ -45,11 +45,18 @@
         </flux:select>
 
         {{-- VENDOR --}}
-        <flux:select wire:model.live="form.vendor_id" label="Vendor" variant="listbox" searchable placeholder="Assign vendor...">
+        <flux:select
+            wire:model.live="form.vendor_id"
+            label="Vendor"
+            variant="listbox"
+            searchable
+            clearable
+            placeholder="Assign vendor..."
+        >
             @foreach($vendors as $vendor)
                 <flux:select.option wire:key="{{$vendor->id}}" value="{{$vendor->id}}">
                     <div class="flex items-center gap-2 whitespace-nowrap">
-                        <flux:avatar size="xs" name="{{ $vendor->name }}" color="auto" color:seed="{{ $vendor->id }}"  />
+                        <flux:avatar size="xs" name="{{ $vendor->name }}" color="auto" color:seed="{{ $vendor->id }}" />
                         {{$vendor->name}}
                     </div>
                 </flux:select.option>

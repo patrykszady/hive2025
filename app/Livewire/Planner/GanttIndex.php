@@ -25,19 +25,7 @@ class GanttIndex extends Component
 
     public function mount()
     {
-        // 12-9-2024 also used in VendorIndex and GanttIndex.. needs to be a global scope
-        $this->vendors = Vendor::whereNot('business_type', 'Retail')
-            ->withCount([
-                'expenses',
-                'expenses as expense_count' => function ($query) {
-                    $query->where('created_at', '>=', today()->subYear());
-                },
-            ])
-            //as expense count
-            // sort by expenses ytd
-            ->tap(fn ($query) => 'expense_count' ? $query->orderBy('expense_count', 'desc') : $query)
-            ->get();
-
+        $this->vendors = Vendor::topExpenseVendors()->get();
         $this->employees = auth()->user()->vendor->users()->employed()->get();
     }
 
