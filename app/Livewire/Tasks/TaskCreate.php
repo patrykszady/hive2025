@@ -3,6 +3,7 @@
 namespace App\Livewire\Tasks;
 
 use App\Models\Task;
+use App\Models\TaskDependency;
 use App\Livewire\Forms\TaskForm;
 use App\Livewire\Planner\GanttIndex;
 use App\Livewire\Planner\CardsIndex;
@@ -23,6 +24,9 @@ class TaskCreate extends Component
     public $projects = [];
     public $vendors = [];
     public $employees = [];
+    public $selectedPredecessorId = null;
+    public $dependencyType = 'finish_to_start';
+    public $lagDays = 0;
 
     public $view_text = [
         'card_title' => 'Create Task',
@@ -83,6 +87,11 @@ class TaskCreate extends Component
         $this->form->reset();
         $this->resetErrorBag();
 
+        // Reset dependency fields
+        $this->selectedPredecessorId = null;
+        $this->dependencyType = 'finish_to_start';
+        $this->lagDays = 0;
+
         $this->view_text = [
             'card_title' => 'Create Task',
             'button_text' => 'Create',
@@ -110,6 +119,11 @@ class TaskCreate extends Component
     public function editTask(Task $task)
     {
         $this->resetErrorBag();
+
+        // Reset dependency fields
+        $this->selectedPredecessorId = null;
+        $this->dependencyType = 'finish_to_start';
+        $this->lagDays = 0;
 
         $this->view_text = [
             'card_title' => 'Edit Task',
@@ -244,6 +258,92 @@ class TaskCreate extends Component
             heading: 'Task Created',
             text: '',
         );
+    }
+
+    public function addDependency()
+    {
+        $this->validate([
+            'selectedPredecessorId' => [
+                'required',
+                'exists:tasks,id',
+                function ($attribute, $value, $fail) {
+                    if ($value == $this->form->task->id) {
+                        $fail('A task cannot depend on itself.');
+                    }
+                }
+            ],
+            'dependencyType' => 'required|in:finish_to_start,start_to_start,finish_to_finish,start_to_finish',
+            'lagDays' => 'integer',
+        ]);
+
+        // Check for circular dependencies
+        if (TaskDependency::wouldCreateCircularDependency($this->selectedPredecessorId, $this->form->task->id)) {
+            $this->addError('selectedPredecessorId', 'This would create a circular dependency.');
+            return;
+        }
+
+        // Check if dependency already exists
+        $existingDependency = TaskDependency::where('predecessor_task_id', $this->selectedPredecessorId)
+            ->where('successor_task_id', $this->form->task->id)
+            ->first();
+
+        if ($existingDependency) {
+            $this->addError('selectedPredecessorId', 'This dependency already exists.');
+            return;
+        }
+
+        TaskDependency::create([
+            'predecessor_task_id' => $this->selectedPredecessorId,
+            'successor_task_id' => $this->form->task->id,
+            'type' => $this->dependencyType,
+            'lag_days' => $this->lagDays,
+        ]);
+
+        // Reset form
+        $this->selectedPredecessorId = null;
+        $this->lagDays = 0;
+
+        // Refresh the task
+        $this->form->task->refresh();
+
+        Flux::toast(
+            variant: 'success',
+            heading: 'Dependency Added',
+            text: 'Task dependency has been created.'
+        );
+    }
+
+    public function removeDependency($dependencyId)
+    {
+        TaskDependency::find($dependencyId)->delete();
+        $this->form->task->refresh();
+
+        Flux::toast(
+            variant: 'success',
+            heading: 'Dependency Removed',
+            text: 'Task dependency has been removed.'
+        );
+    }
+
+    #[Computed]
+    public function availableTasks()
+    {
+        if (!$this->form->task || !$this->form->task->project_id) {
+            return collect();
+        }
+
+        $excludeIds = [$this->form->task->id];
+
+        // Exclude tasks that are already predecessors
+        $existingPredecessorIds = $this->form->task->predecessorTasks->pluck('id')->toArray();
+        $excludeIds = array_merge($excludeIds, $existingPredecessorIds);
+
+        return Task::where('project_id', $this->form->task->project_id)
+                ->whereNotIn('id', $excludeIds)
+                ->whereNotNull('start_date')
+                ->whereNotNull('end_date')
+                ->orderBy('start_date')
+                ->get();
     }
 
     public function render()

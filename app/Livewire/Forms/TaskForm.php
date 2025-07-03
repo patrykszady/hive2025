@@ -44,22 +44,32 @@ class TaskForm extends Form
     {
         $this->task = $task;
 
+        // Load existing task data
         $this->title = $task->title;
-        $this->dates = [
-            'start' => $task->start_date?->format('Y-m-d'),
-            'end' => $task->end_date?->format('Y-m-d'),
-        ];
-        $this->project_id = $task->project_id;
-        $this->order = $task->order;
-        $this->vendor_id = $task->vendor_id;
-        $this->user_ids = $task->user_ids;
         $this->type = $task->type;
+        $this->project_id = $task->project_id;
+        $this->vendor_id = $task->vendor_id;
+        $this->user_ids = $task->user_ids ?? [];
         $this->notes = $task->notes;
         $this->parent_task_id = $task->parent_task_id;
+        $this->order = $task->order; // Add this line
+
+        // Set dates
+        if ($task->start_date && $task->end_date) {
+            $this->dates = [
+                'start' => $task->start_date->format('Y-m-d'),
+                'end' => $task->end_date->format('Y-m-d')
+            ];
+        }
 
         // Set weekend options
-        $this->saturday = $task->options?->saturday ?? false;
-        $this->sunday = $task->options?->sunday ?? false;
+        if ($task->options) {
+            $this->saturday = $task->options->saturday ?? false;
+            $this->sunday = $task->options->sunday ?? false;
+        }
+
+        // Load dependencies (they'll be accessible via $task->predecessorDependencies)
+        $task->load(['predecessorDependencies.predecessor', 'successorDependencies.successor']);
     }
 
     public function update()
@@ -100,7 +110,7 @@ class TaskForm extends Form
             'user_ids' => $this->user_ids,
             'title' => $this->title,
             'notes' => $this->notes,
-            'order' => $this->order,
+            'order' => $this->order ?? $this->task->order ?? 0, // Preserve existing order or default to 0
             'options' => $options,
             'parent_task_id' => $this->parent_task_id,
         ]);

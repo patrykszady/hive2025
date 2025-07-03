@@ -91,9 +91,10 @@ return [
             'level' => 'debug',
             'days' => 30,
         ],
-        'vendor_docs' => [
+
+        'receipt_processing' => [
             'driver' => 'single',
-            'path' => storage_path('logs/vendor_docs.log'),
+            'path' => storage_path('logs/receipt_processing.log'),
             'level' => 'debug',
             'days' => 30,
         ],

@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[ObservedBy([TaskObserver::class])]
@@ -144,5 +145,90 @@ class Task extends Model
         return Attribute::make(
             set: fn ($value) => empty($value) ? null : $value,
         );
+    }
+
+    // Dependencies where this task is the predecessor
+    public function successorDependencies(): HasMany
+    {
+        return $this->hasMany(TaskDependency::class, 'predecessor_task_id');
+    }
+
+    // Dependencies where this task is the successor
+    public function predecessorDependencies(): HasMany
+    {
+        return $this->hasMany(TaskDependency::class, 'successor_task_id');
+    }
+
+    // Tasks that must finish before this task can start
+    public function predecessorTasks(): BelongsToMany
+    {
+        return $this->belongsToMany(Task::class, 'task_dependencies', 'successor_task_id', 'predecessor_task_id')
+                    ->withPivot('type', 'lag_days', 'id')
+                    ->withTimestamps();
+    }
+
+    // Tasks that depend on this task
+    public function successorTasks(): BelongsToMany
+    {
+        return $this->belongsToMany(Task::class, 'task_dependencies', 'predecessor_task_id', 'successor_task_id')
+                    ->withPivot('type', 'lag_days', 'id')
+                    ->withTimestamps();
+    }
+
+    // Check if this task can start based on its dependencies
+    public function canStart(): bool
+    {
+        foreach ($this->predecessorTasks as $predecessor) {
+            $dependencyType = $predecessor->pivot->type;
+
+            switch ($dependencyType) {
+                case 'finish_to_start':
+                    if (!$predecessor->end_date || $predecessor->progress < 100) {
+                        return false;
+                    }
+                    break;
+                case 'start_to_start':
+                    if (!$predecessor->start_date) {
+                        return false;
+                    }
+                    break;
+                // Add other dependency type checks as needed
+            }
+        }
+
+        return true;
+    }
+
+    // Calculate the earliest possible start date based on dependencies
+    public function getEarliestStartDate(): ?Carbon
+    {
+        $earliestDate = null;
+
+        foreach ($this->predecessorTasks as $predecessor) {
+            $dependencyType = $predecessor->pivot->type;
+            $lagDays = $predecessor->pivot->lag_days;
+
+            $calculatedDate = null;
+
+            switch ($dependencyType) {
+                case 'finish_to_start':
+                    if ($predecessor->end_date) {
+                        $calculatedDate = $predecessor->end_date->copy()->addDays($lagDays + 1);
+                    }
+                    break;
+                case 'start_to_start':
+                    if ($predecessor->start_date) {
+                        $calculatedDate = $predecessor->start_date->copy()->addDays($lagDays);
+                    }
+                    break;
+                // Add other dependency types
+            }
+
+            if ($calculatedDate && (!$earliestDate || $calculatedDate->gt($earliestDate))) {
+                $earliestDate = $calculatedDate;
+            }
+        }
+
+        return $earliestDate;
     }
 }

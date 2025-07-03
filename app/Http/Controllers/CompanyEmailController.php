@@ -514,8 +514,16 @@ class CompanyEmailController extends Controller
 
                         if (isset($ocr_receipt_data['error']) && $ocr_receipt_data['error'] === true)
                         {
-                            //if error move this single $attachment to a folder for debug...
-                            // Storage::disk('files')->move('/_temp_ocr/'.$ocr_filename, '/auto_receipts_failed/'.$ocr_filename);
+                            // Log the failed receipt processing with debug filepath
+                            Log::channel('receipt_processing')->error('OCR processing failed', [
+                                'company_email_id' => $company_email->id,
+                                'attachment_filename' => $attachment['filename'] ?? 'unknown',
+                                'failed_file_path' => 'auto_receipts_failed/' . $company_email->vendor_id . '-' . $ocr_filename,
+                                'ocr_error_data' => $ocr_receipt_data,
+                                'timestamp' => now()->toISOString()
+                            ]);
+
+                            // Move this single attachment to a folder for debug
                             Storage::disk('files')->put('auto_receipts_failed/'. $company_email->vendor_id . '-' .$ocr_filename, $attachmentContent);
                             Storage::disk('files')->delete($ocr_path);
 
@@ -580,6 +588,8 @@ class CompanyEmailController extends Controller
                                 if ($expense_duplicate->receipts()->latest()->first()->receipt_html != $ocr_receipt_data['content']) {
                                     $expense = $expense_duplicate;
                                 } else {
+                                    // Clean up the temporary OCR file before skipping
+                                    Storage::disk('files')->delete($ocr_path);
                                     continue; // Skip if the receipt is an exact duplicate.
                                 }
                             } else {
