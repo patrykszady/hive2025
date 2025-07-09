@@ -1,106 +1,144 @@
-<flux:modal name="task_create_form_modal" class="space-y-2">
-    <flux:heading size="lg">{{$view_text['card_title']}}</flux:heading>
+<flux:modal name="task_create_form_modal" class="!mt-8 w-full max-w-sm">
+    <flux:heading size="lg" class="!mb-0">{{$view_text['card_title']}}</flux:heading>
+    @if(isset($form->task))
+        <flux:subheading>{{$form->task->title}}</flux:subheading>
+    @endif
 
-    <flux:separator variant="subtle" />
+    <!-- Tab Navigation -->
+    <div x-data="{ activeTab: 'details' }">
+        <div class="border-b border-gray-200">
+            <nav class="-mb-px flex space-x-8">
+                <button
+                    @click="activeTab = 'details'"
+                    :class="activeTab === 'details' ? 'border-accent text-accent' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                    class="py-2 px-1 border-b-2 font-medium text-sm"
+                >
+                    Details
+                </button>
+                @if($view_text['form_submit'] === 'edit' && $form->task)
+                    <button
+                        @click="activeTab = 'dependencies'"
+                        :class="activeTab === 'dependencies' ? 'border-accent text-accent' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                        class="py-2 px-1 border-b-2 font-medium text-sm flex items-center gap-2"
+                    >
+                        Dependencies
+                        @if($form->task->predecessorDependencies->count() > 0)
+                            <flux:badge size="sm" color="blue" inset="left right">
+                                {{ $form->task->predecessorDependencies->count() }}
+                            </flux:badge>
+                        @endif
+                    </button>
+                @endif
+            </nav>
+        </div>
 
-    <form wire:submit="{{$view_text['form_submit']}}" class="grid space-y-2">
-        {{-- TYPE --}}
-        <flux:radio.group wire:model="form.type" label="Task Type" variant="segmented">
-            {{-- checked --}}
-            <flux:radio value="Task" label="Task" class="!text-blue-800" />
-            <flux:radio value="Milestone" label="Milestone" class="!text-indigo-800" />
-            {{-- <flux:radio value="Material" label="Material" /> --}}
-        </flux:radio.group>
+        <!-- Task Details Panel -->
+        <div x-show="activeTab === 'details'">
+            <div class="relative">
+                <form wire:submit="{{$view_text['form_submit']}}" class="grid space-y-4">
+                    {{-- TYPE --}}
+                    <flux:radio.group wire:model="form.type" label="Task Type" variant="segmented">
+                        <flux:radio value="Task" label="Task" class="!text-accent"/>
+                        <flux:radio value="Milestone" label="Milestone" class="!text-indigo-800" />
+                    </flux:radio.group>
 
-        {{-- TITLE --}}
-        <flux:input wire:model.blur="form.title" label="Title" placeholder="Task Title" autofocus/>
+                    {{-- TITLE --}}
+                    <flux:input wire:model.blur="form.title" label="Title" placeholder="Task Title" autofocus/>
 
-        {{-- DATES --}}
-        <flux:input.group label="Dates">
-            <flux:date-picker
-                with-today
-                mode="range"
-                wire:model.live="form.dates"
-                :error="$errors->has('form.dates')"
-            />
-            <flux:input.group.suffix>{{ $this->duration }} {{ Str::plural('Day', $this->duration) }}</flux:input.group.suffix>
-        </flux:input.group>
-        <flux:error name="form.dates" />
+                    {{-- DATES --}}
+                    <flux:input.group label="Dates" class="w-full">
+                        <flux:date-picker
+                            with-today
+                            mode="range"
+                            wire:model.live="form.dates"
+                            :error="$errors->has('form.dates')"
+                            class="flex-1"
+                        />
+                        <flux:input.group.suffix>{{ $this->duration }} {{ Str::plural('Day', $this->duration) }}</flux:input.group.suffix>
+                    </flux:input.group>
+                    <flux:error name="form.dates" />
 
-        {{-- OPTIONS --}}
-        <flux:fieldset>
-            <flux:legend>Weekend</flux:legend>
-            <flux:description>Include weekend days.</flux:description>
-            <div class="flex gap-4 *:gap-x-2">
-                <flux:checkbox wire:model.live="form.saturday" value="saturday" label="Saturday" />
-                <flux:checkbox wire:model.live="form.sunday" value="sunday" label="Sunday" />
+                    {{-- WEEKEND DAYS --}}
+                    <flux:checkbox.group label="Weekend" variant="buttons">
+                        <flux:checkbox wire:model.live="form.saturday" value="saturday" label="Saturday" />
+                        <flux:checkbox wire:model.live="form.sunday" value="sunday" label="Sunday" />
+                    </flux:checkbox.group>
+
+                    {{-- PROJECT --}}
+                    <flux:select wire:model.live="form.project_id" label="Project" variant="listbox" searchable placeholder="Assign project...">
+                        @foreach($projects as $project)
+                            <flux:select.option wire:key="{{$project->id}}" value="{{$project->id}}">
+                                <div>{{$project->address}} <br> <i>{{$project->project_name}}</i></div>
+                            </flux:select.option>
+                        @endforeach
+                    </flux:select>
+
+                    {{-- VENDOR --}}
+                    <flux:select
+                        wire:model.live="form.vendor_id"
+                        label="Vendor"
+                        variant="listbox"
+                        searchable
+                        clearable
+                        placeholder="Assign vendor..."
+                    >
+                        @foreach($vendors as $vendor)
+                            <flux:select.option wire:key="{{$vendor->id}}" value="{{$vendor->id}}">
+                                <div class="flex items-center gap-2 whitespace-nowrap">
+                                    <flux:avatar size="xs" name="{{ $vendor->name }}" color="auto" color:seed="{{ $vendor->id }}" />
+                                    {{$vendor->name}}
+                                </div>
+                            </flux:select.option>
+                        @endforeach
+                    </flux:select>
+
+                    {{-- USERS --}}
+                    <flux:select wire:model.blur="form.user_ids" multiple label="Team Members" variant="listbox" placeholder="Assign team members...">
+                        @foreach($employees as $employee)
+                            <flux:select.option wire:key="{{$employee->id}}" value="{{$employee->id}}">
+                                <div class="flex items-center gap-2 whitespace-nowrap">
+                                    <flux:avatar size="xs" name="{{ $employee->full_name }}" color="auto" color:seed="{{ $employee->id }}"  />
+                                    {{$employee->first_name}}
+                                </div>
+                            </flux:select.option>
+                        @endforeach
+                    </flux:select>
+
+                    {{-- NOTES --}}
+                    <flux:textarea
+                        wire:model.blur="form.notes"
+                        label="Task Notes"
+                        rows="auto"
+                        placeholder="Notes about this task."
+                    />
+
+                    {{-- STICKY FOOTER - NOW INSIDE FORM --}}
+                    <div class="sticky bottom-0 flex justify-end space-x-2">
+                        {{-- Only show duplicate button when editing (not creating) --}}
+                        @if($view_text['form_submit'] === 'edit')
+                            <flux:button wire:click="duplicateTask">Duplicate</flux:button>
+                        @endif
+
+                        <flux:button wire:click="removeTask" variant="danger">Remove</flux:button>
+
+                        <flux:button type="submit" variant="primary">{{$view_text['button_text']}}</flux:button>
+                    </div>
+                </form>
             </div>
-        </flux:fieldset>
+        </div>
 
-        {{-- PROJECT --}}
-        <flux:select wire:model.live="form.project_id" label="Project" variant="listbox" searchable placeholder="Assign project...">
-            @foreach($projects as $project)
-                <flux:select.option wire:key="{{$project->id}}" value="{{$project->id}}"><div>{{$project->address}} <br> <i>{{$project->project_name}}</i></div></flux:select.option>
-            @endforeach
-        </flux:select>
-
-        {{-- VENDOR --}}
-        <flux:select
-            wire:model.live="form.vendor_id"
-            label="Vendor"
-            variant="listbox"
-            searchable
-            clearable
-            placeholder="Assign vendor..."
-        >
-            @foreach($vendors as $vendor)
-                <flux:select.option wire:key="{{$vendor->id}}" value="{{$vendor->id}}">
-                    <div class="flex items-center gap-2 whitespace-nowrap">
-                        <flux:avatar size="xs" name="{{ $vendor->name }}" color="auto" color:seed="{{ $vendor->id }}" />
-                        {{$vendor->name}}
-                    </div>
-                </flux:select.option>
-            @endforeach
-        </flux:select>
-
-        {{-- USERS --}}
-        <flux:select wire:model.blur="form.user_ids" multiple label="Team Members" variant="listbox" placeholder="Assign team members...">
-            @foreach($employees as $employee)
-                <flux:select.option wire:key="{{$employee->id}}" value="{{$employee->id}}">
-                    <div class="flex items-center gap-2 whitespace-nowrap">
-                        <flux:avatar size="xs" name="{{ $employee->full_name }}" color="auto" color:seed="{{ $employee->id }}"  />
-                        {{$employee->first_name}}
-                    </div>
-                </flux:select.option>
-            @endforeach
-        </flux:select>
-
-        {{-- DEPENDENCIES --}}
+        <!-- Dependencies Panel -->
         @if($view_text['form_submit'] === 'edit' && $form->task)
-            <flux:separator />
-
-            <!-- Dependencies Accordion -->
-            <flux:accordion>
-                <flux:accordion.item>
-                    <flux:accordion.heading>
-                        <div class="flex items-center justify-between w-full">
-                            <flux:heading size="sm">Task Dependencies</flux:heading>
-                            @if($form->task->predecessorDependencies->count() > 0)
-                                <flux:badge size="sm" color="blue">
-                                    {{ $form->task->predecessorDependencies->count() }}
-                                </flux:badge>
-                            @endif
-                        </div>
-                    </flux:accordion.heading>
-
-                    <flux:accordion.content>
-                        <div class="space-y-4 p-4 bg-gray-50 rounded-lg">
-                            <!-- Current Dependencies -->
-                            @if($form->task->predecessorDependencies->count() > 0)
+            <div x-show="activeTab === 'dependencies'">
+                <div class="relative">
+                    <div class="space-y-4">
+                        <!-- Current Dependencies -->
+                        @if($form->task->predecessorDependencies->count() > 0)
+                            <div class="space-y-3">
+                                <flux:subheading>Current Prerequisites</flux:subheading>
                                 <div class="space-y-2">
-                                    <flux:subheading>Prerequisites ({{ $form->task->predecessorDependencies->count() }})</flux:subheading>
                                     @foreach($form->task->predecessorDependencies as $dependency)
-                                        <div class="flex items-center justify-between p-3 bg-white rounded border">
+                                        <div class="flex items-center justify-between p-3 bg-gray-50 rounded border">
                                             <div class="flex-1">
                                                 <div class="font-medium text-sm">{{ $dependency->predecessor->title }}</div>
                                                 <div class="text-xs text-gray-600">
@@ -125,56 +163,51 @@
                                         </div>
                                     @endforeach
                                 </div>
-                            @endif
+                            </div>
 
-                            <!-- Add New Dependency -->
-                            <div class="space-y-3">
-                                <flux:subheading>Add New Dependency</flux:subheading>
+                            <flux:separator />
+                        @endif
 
-                                <flux:select wire:model="selectedPredecessorId" label="Prerequisite Task" placeholder="Select a task that must complete first...">
-                                    @foreach($this->availableTasks as $availableTask)
-                                        <flux:select.option value="{{ $availableTask->id }}">
-                                            <div>
-                                                <div class="font-medium">{{ $availableTask->title }}</div>
-                                                @if($availableTask->start_date && $availableTask->end_date)
-                                                    <div class="text-xs text-gray-500">
-                                                        {{ $availableTask->start_date->format('M j') }} - {{ $availableTask->end_date->format('M j') }}
-                                                    </div>
-                                                @endif
-                                            </div>
-                                        </flux:select.option>
-                                    @endforeach
+                        <!-- Add New Dependency -->
+                        <div class="space-y-4">
+                            <flux:subheading>Add New Dependency</flux:subheading>
+
+                            <flux:select wire:model="selectedPredecessorId" label="Prerequisite Task" placeholder="Select a task that must complete first...">
+                                @foreach($this->availableTasks as $availableTask)
+                                    <flux:select.option value="{{ $availableTask->id }}">
+                                        <div>
+                                            <div class="font-medium">{{ $availableTask->title }}</div>
+                                            @if($availableTask->start_date && $availableTask->end_date)
+                                                <div class="text-xs text-gray-500">
+                                                    {{ $availableTask->start_date->format('M j') }} - {{ $availableTask->end_date->format('M j') }}
+                                                </div>
+                                            @endif
+                                        </div>
+                                    </flux:select.option>
+                                @endforeach
+                            </flux:select>
+
+                            <div class="grid grid-cols-2 gap-4">
+                                <flux:select wire:model="dependencyType" label="Dependency Type">
+                                    <flux:select.option value="finish_to_start">Finish to Start</flux:select.option>
+                                    <flux:select.option value="start_to_start">Start to Start</flux:select.option>
+                                    <flux:select.option value="finish_to_finish">Finish to Finish</flux:select.option>
+                                    <flux:select.option value="start_to_finish">Start to Finish</flux:select.option>
                                 </flux:select>
 
-                                <div class="grid grid-cols-2 gap-3">
-                                    <flux:select wire:model="dependencyType" label="Dependency Type">
-                                        <flux:select.option value="finish_to_start">Finish to Start</flux:select.option>
-                                        <flux:select.option value="start_to_start">Start to Start</flux:select.option>
-                                        <flux:select.option value="finish_to_finish">Finish to Finish</flux:select.option>
-                                        <flux:select.option value="start_to_finish">Start to Finish</flux:select.option>
-                                    </flux:select>
-
+                                <flux:field>
+                                    <flux:label>Lag Days</flux:label>
                                     <flux:input
                                         wire:model="lagDays"
                                         type="number"
-                                        label="Lag Days"
                                         placeholder="0"
-                                        description="Positive for delay, negative for overlap"
                                     />
-                                </div>
-
-                                <flux:button
-                                    wire:click="addDependency"
-                                    variant="primary"
-                                    size="sm"
-                                    :disabled="!$selectedPredecessorId"
-                                >
-                                    Add Dependency
-                                </flux:button>
+                                    <flux:description>Positive for delay, negative for overlap.</flux:description>
+                                </flux:field>
                             </div>
 
                             <!-- Dependency Help -->
-                            <div class="text-xs text-gray-600 bg-blue-50 p-3 rounded">
+                            <div class="text-xs text-gray-600 bg-accent/10 p-3 rounded mb-2">
                                 <strong>Dependency Types:</strong><br>
                                 • <strong>Finish to Start:</strong> Prerequisite must finish before this task starts<br>
                                 • <strong>Start to Start:</strong> Both tasks start at the same time<br>
@@ -182,31 +215,20 @@
                                 • <strong>Start to Finish:</strong> This task finishes when prerequisite starts
                             </div>
                         </div>
-                    </flux:accordion.content>
-                </flux:accordion.item>
-            </flux:accordion>
+                    </div>
+
+                    {{-- STICKY FOOTER --}}
+                    <div class="sticky bottom-0 flex justify-end space-x-2">
+                        <flux:button
+                            wire:click="addDependency"
+                            variant="primary"
+                            {{-- :disabled="!$selectedPredecessorId" --}}
+                        >
+                            Add Dependency
+                        </flux:button>
+                    </div>
+                </div>
+            </div>
         @endif
-
-        {{-- NOTES --}}
-        <flux:textarea
-            wire:model.blur="form.notes"
-            label="Task Notes"
-            rows="auto"
-            placeholder="Notes about this task."
-        />
-
-        {{-- FOOTER --}}
-        <div class="flex space-x-2 sticky bottom-0">
-            <flux:spacer />
-
-            {{-- Only show duplicate button when editing (not creating) --}}
-            @if($view_text['form_submit'] === 'edit')
-                <flux:button wire:click="duplicateTask" variant="filled">Duplicate</flux:button>
-            @endif
-
-            <flux:button wire:click="removeTask" variant="danger">Remove</flux:button>
-
-            <flux:button type="submit" variant="primary">{{$view_text['button_text']}}</flux:button>
-        </div>
-    </form>
+    </div>
 </flux:modal>

@@ -28,6 +28,8 @@ class TaskCreate extends Component
     public $dependencyType = 'finish_to_start';
     public $lagDays = 0;
 
+    public $activeTab = 'details';
+
     public $view_text = [
         'card_title' => 'Create Task',
         'button_text' => 'Create',
@@ -84,6 +86,7 @@ class TaskCreate extends Component
 
     public function addTask($project_id = null, $date = null, $vendor_id = null, $user_ids = [])
     {
+        $this->activeTab = 'details'; // Reset to first tab
         $this->form->reset();
         $this->resetErrorBag();
 
@@ -118,6 +121,10 @@ class TaskCreate extends Component
 
     public function editTask(Task $task)
     {
+        // Dispatch to disable interactions on the gantt
+        $this->dispatch('task-operation-started', taskId: $task->id)->to(GanttIndex::class);
+
+        $this->activeTab = 'details';
         $this->resetErrorBag();
 
         // Reset dependency fields
@@ -165,11 +172,11 @@ class TaskCreate extends Component
         $this->form->user_ids = $currentTask->user_ids;
         $this->form->notes = $currentTask->notes;
 
-        // Copy weekend options if they exist
-        if ($currentTask->options) {
-            $this->form->saturday = $currentTask->options->saturday ?? false;
-            $this->form->sunday = $currentTask->options->sunday ?? false;
-        }
+        // // Copy weekend options if they exist
+        // if ($currentTask->options) {
+        //     $this->form->saturday = $currentTask->options->saturday ?? false;
+        //     $this->form->sunday = $currentTask->options->sunday ?? false;
+        // }
 
         // Set up parent-child relationship
         if ($currentTask->parent_task_id) {
@@ -198,6 +205,9 @@ class TaskCreate extends Component
         $this->refreshPlannerComponents();
         $this->modal('task_create_form_modal')->close();
 
+        // Dispatch to re-enable interactions
+        $this->dispatch('task-operation-completed')->to(GanttIndex::class);
+
         Flux::toast(
             duration: 3000,
             position: 'top right',
@@ -217,7 +227,6 @@ class TaskCreate extends Component
             \Log::info('Form update failed');
 
             // The form's errors need to be copied to the component's error bag
-            // Get all errors from the form and add them to the component
             $formErrors = $this->form->getErrorBag();
 
             \Log::info('Form error bag contents: ', $formErrors->messages());
@@ -236,6 +245,9 @@ class TaskCreate extends Component
         $this->refreshPlannerComponents();
         $this->modal('task_create_form_modal')->close();
 
+        // Dispatch to re-enable interactions
+        $this->dispatch('task-operation-completed')->to(GanttIndex::class);
+
         Flux::toast(
             duration: 3000,
             position: 'top right',
@@ -250,6 +262,8 @@ class TaskCreate extends Component
         $this->form->store();
         $this->refreshPlannerComponents();
         $this->modal('task_create_form_modal')->close();
+
+        $this->dispatch('task-operation-completed')->to(GanttIndex::class);
 
         Flux::toast(
             duration: 3000,
@@ -306,6 +320,9 @@ class TaskCreate extends Component
         // Refresh the task
         $this->form->task->refresh();
 
+        // Add this line to refresh the Gantt chart
+        $this->refreshPlannerComponents();
+
         Flux::toast(
             variant: 'success',
             heading: 'Dependency Added',
@@ -317,6 +334,9 @@ class TaskCreate extends Component
     {
         TaskDependency::find($dependencyId)->delete();
         $this->form->task->refresh();
+
+        // Add this line to refresh the Gantt chart
+        $this->refreshPlannerComponents();
 
         Flux::toast(
             variant: 'success',

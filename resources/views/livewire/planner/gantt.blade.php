@@ -13,7 +13,7 @@
         <div class="min-w-max relative">
             <!-- Dependency Lines SVG -->
             <svg
-                class="absolute inset-0 z-10 w-full h-full pointer-events-none"
+                class="absolute inset-0 z-5 w-full h-full pointer-events-none"
                 xmlns="http://www.w3.org/2000/svg"
                 x-data="dependencyHandler()"
                 x-init="initSvg()"
@@ -117,15 +117,14 @@
 
             <!-- Date header -->
             <div
-                class="sticky top-0 grid bg-white border-b border-gray-200 z-30 h-[49px]"
+                class="sticky top-0 grid bg-white border-b border-gray-200 z-40 h-[49px]"
                 style="grid-template-columns: repeat({{ count($this->days) }}, {{ $dayColumnWidth }}px);"
             >
                 @foreach ($this->days as $day)
                     <div
                         class="p-2 text-left text-xs border-r border-gray-300
-                            {{ $day->isToday() && $day->isWeekend() ? 'font-bold bg-gradient-to-br from-blue-400/30 to-blue-500/30' :
-                                ($day->isToday() ? 'font-bold bg-blue-50' :
-                                ($day->isWeekend() ? 'bg-[conic-gradient(from_45deg,transparent_25%,rgb(156_163_175/0.15)_25%,rgb(156_163_175/0.15)_50%,transparent_50%,transparent_75%,rgb(156_163_175/0.15)_75%)] bg-[length:8px_8px] bg-gray-50/30' : '')) }}"
+                            {{ $day->isToday() ? 'font-bold bg-accent/10 text-accent' :
+                                ($day->isWeekend() ? 'bg-gray-100' : 'bg-gray-50') }}"
                         @if($day->isToday()) data-today @endif
                     >
                         <div>{{ $day->format('D') }}</div>
@@ -143,7 +142,7 @@
                 @endphp
 
                 <!-- Project header -->
-                <div class="sticky top-[49px] relative bg-gray-200 border-b border-gray-200 z-20">
+                <div class="sticky top-[49px] relative bg-gray-200 border-b border-gray-200 z-35">
                     <!-- Background grid -->
                     <div
                         class="absolute inset-0 grid"
@@ -152,22 +151,22 @@
                         @foreach ($this->days as $day)
                             <div
                                 class="border-r border-gray-200 h-full
-                                    {{ $day->isToday() && $day->isWeekend() ? 'bg-gradient-to-br from-blue-400/30 to-blue-500/30' :
-                                        ($day->isToday() ? 'bg-blue-200/80' :
-                                        ($day->isWeekend() ? 'bg-[conic-gradient(from_45deg,transparent_25%,rgb(156_163_175/0.15)_25%,rgb(156_163_175/0.15)_50%,transparent_50%,transparent_75%,rgb(156_163_175/0.15)_75%)] bg-[length:8px_8px] bg-gray-50/30' : '')) }}"
+                                    {{ $day->isToday() ? 'bg-accent/20' :
+                                        ($day->isWeekend() ? 'bg-gray-100' : 'bg-gray-50') }}"
+                                @if($day->isToday()) data-today @endif
                             ></div>
                         @endforeach
                     </div>
 
                     <!-- Project name section -->
                     <div class="relative flex items-center h-[40px]">
-                        <div class="sticky left-0 px-2 text-sm flex items-center z-30">
+                        <div class="sticky left-0 px-2 text-sm flex items-center z-35">
                             <div class="flex items-center gap-x-4 flex-shrink-0">
                                 <div class="flex flex-col">
                                     <a
                                         href="{{ route('projects.show', $project->id) }}"
                                         target="_blank"
-                                        class="font-semibold text-gray-800 hover:text-blue-600 transition-colors"
+                                        class="font-semibold text-gray-800 hover:text-accent transition-colors"
                                     >
                                         {{ $project->address }}
                                     </a>
@@ -185,6 +184,7 @@
 
                     <!-- Unscheduled Tasks -->
                     <div class="relative w-full h-[36px]">
+                        <!-- Background grid -->
                         <div
                             class="absolute inset-0 grid"
                             style="grid-template-columns: repeat({{ count($this->days) }}, {{ $dayColumnWidth }}px);"
@@ -192,27 +192,27 @@
                             @foreach ($this->days as $day)
                                 <div
                                     class="border-r border-gray-200 h-full
-                                        {{ $day->isToday() && $day->isWeekend() ? 'bg-gradient-to-br from-blue-400/30 to-blue-500/30' :
-                                            ($day->isToday() ? 'bg-blue-200/80' :
-                                            ($day->isWeekend() ? 'bg-[conic-gradient(from_45deg,transparent_25%,rgb(156_163_175/0.15)_25%,rgb(156_163_175/0.15)_50%,transparent_50%,transparent_75%,rgb(156_163_175/0.15)_75%)] bg-[length:8px_8px] bg-gray-50/30' : '')) }}"
+                                        {{ $day->isToday() ? 'bg-accent/20' :
+                                            ($day->isWeekend() ? 'bg-gray-100' : 'bg-gray-50') }}"
                                 ></div>
                             @endforeach
                         </div>
 
                         @if($projectData['unscheduledTasks']->count() > 0)
                             <div class="relative flex items-center h-full">
-                                <div class="sticky left-0 z-30 h-full flex items-center">
+                                <div class="sticky left-0 z-35 h-full flex items-center">
                                     <div class="overflow-x-auto flex items-center px-2 py-1 gap-2 h-full scrollbar-w-1.5 scrollbar-h-1.5 scrollbar-track-gray-100 scrollbar-thumb-gray-400 scrollbar-thumb-rounded max-w-full">
                                         @foreach($projectData['unscheduledTasks'] as $unscheduledTask)
-                                            @php
-                                                $taskTypeColor = $unscheduledTask->type === 'Task' ? 'blue' : ($unscheduledTask->type === 'Milestone' ? 'indigo' : 'blue');
-                                            @endphp
                                             <flux:badge
                                                 size="sm"
-                                                variant="outline"
-                                                color="{{ $taskTypeColor }}"
-                                                class="flex-shrink-0 cursor-pointer hover:border-{{ $taskTypeColor }}-500 whitespace-nowrap transition-colors"
+                                                color="{{ $unscheduledTask->type === 'Task' ? 'blue' : 'indigo' }}"
+                                                class="flex-shrink-0 cursor-pointer whitespace-nowrap transition-all duration-200 !opacity-100
+                                                    hover:ring-2 hover:ring-offset-1
+                                                    {{ $unscheduledTask->type === 'Task' ? 'hover:ring-blue-500' : 'hover:ring-indigo-500' }}"
                                                 wire:click="editTask({{ $unscheduledTask->id }})"
+                                                wire:loading.attr="disabled"
+                                                wire:loading.class="opacity-50 cursor-not-allowed pointer-events-none"
+                                                wire:target="editTask"
                                             >
                                                 {{ $unscheduledTask->title }}
                                             </flux:badge>
@@ -237,9 +237,8 @@
                         @foreach ($this->days as $day)
                             <div
                                 class="border-r border-gray-200 h-full
-                                    {{ $day->isToday() && $day->isWeekend() ? 'bg-gradient-to-br from-blue-400/30 to-blue-500/30' :
-                                        ($day->isToday() ? 'bg-blue-200/80' :
-                                        ($day->isWeekend() ? 'bg-[conic-gradient(from_45deg,transparent_25%,rgb(156_163_175/0.15)_25%,rgb(156_163_175/0.15)_50%,transparent_50%,transparent_75%,rgb(156_163_175/0.15)_75%)] bg-[length:8px_8px] bg-gray-50/30' : '')) }}"
+                                    {{ $day->isToday() ? 'bg-accent/20' :
+                                        ($day->isWeekend() ? 'bg-gray-100' : 'bg-gray-50') }}"
                             ></div>
                         @endforeach
                     </div>
@@ -256,41 +255,33 @@
                                 $leftPosition = $taskData['leftPosition'];
                                 $barWidth = $taskData['barWidth'];
                                 $topPosition = $rowIndex * ($taskBarHeight + $taskBarMarginY * 2) + $taskBarMarginY;
-                                $taskTypeColor = $task->type === 'Task' ? 'blue' : ($task->type === 'Milestone' ? 'indigo' : 'blue');
                             @endphp
 
                             <div
                                 wire:key="task-{{ $task->id }}"
-                                class="task-bar group absolute bg-white/50 border-{{ $taskTypeColor }}-500 border-opacity-30
+                                class="task-bar group absolute bg-white/50 border-opacity-30
+                                    {{ $task->type === 'Task' ? 'border-accent' : 'border-indigo-500' }}
                                     text-md flex items-center shadow select-none overflow-visible transition-all duration-200
                                     {{ $taskStartDate->isBefore($this->days->first()) ? 'border-r border-t border-b rounded-r' :
                                         ($taskEndDate->isAfter($this->days->last()) ? 'border-l border-t border-b rounded-l' :
-                                        ($taskStartDate->isBefore($this->days->first()) && $taskEndDate->isAfter($this->days->last()) ? 'border-t border-b' : 'border rounded')) }}
-                                    hover:border-opacity-50 hover:shadow-md"
+                                        ($taskStartDate->isBefore($this->days->first()) && $taskEndDate->isAfter($this->days->last()) ? 'border-t border-b' : 'border rounded')) }}"
                                 style="left: {{ $leftPosition + 2 }}px; width: {{ $barWidth - 4 }}px; top: {{ $topPosition }}px; height: {{ $taskBarHeight }}px;"
                                 data-task-id="{{ $task->id }}"
                                 x-data="taskResize({{ $task->id }}, {{ $renderStartDayIndex }}, {{ $renderEndDayIndex }})"
                                 x-bind:class="{
                                     'shadow-lg z-15 scale-102': resizing,
                                     '!border-opacity-100': resizing,
-                                    'animate-pulse': updating,
-                                    'cursor-ew-resize': !updating && !resizing,
-                                    'cursor-not-allowed': updating,
-                                    'cursor-grabbing': resizing
+                                    'cursor-ew-resize': !resizing,
+                                    'cursor-grabbing': resizing,
+                                    'hover:border-opacity-100 hover:shadow-md': !$wire.__instance.effects.redirect && !$wire.__instance.effects.busy
                                 }"
+                                wire:loading.class="animate-pulse cursor-not-allowed"
+                                wire:target="updateTaskDates"
                                 @mouseenter="highlightTask({{ $task->id }}, true)"
                                 @mouseleave="highlightTask({{ $task->id }}, false)"
                             >
-                                <!-- Loading indicator -->
-                                <div
-                                    x-show="updating"
-                                    class="absolute inset-0 bg-{{ $taskTypeColor }}-100/30 rounded flex items-center justify-center z-40"
-                                >
-                                    <div class="w-4 h-4 border-2 border-{{ $taskTypeColor }}-500 border-t-transparent rounded-full animate-spin"></div>
-                                </div>
-
                                 <!-- Weekend exclusion overlay -->
-                                <div class="absolute inset-0 pointer-events-none">
+                                <div class="absolute inset-0 pointer-events-none z-5">
                                     <div class="h-full flex">
                                         @foreach($this->getTaskWeekendExclusions($task, $taskStartDate, $taskEndDate, $barWidth) as $dayData)
                                             <div
@@ -304,29 +295,34 @@
                                 <!-- Left resize handle -->
                                 @if(!$taskStartDate->isBefore($this->days->first()))
                                     <div
-                                        class="resize-handle w-2 h-full absolute top-0 left-0 bg-{{ $taskTypeColor }}-500
-                                            opacity-30 rounded-l z-15 transition-all duration-200
-                                            group-hover:opacity-50 hover:!opacity-100 hover:bg-{{ $taskTypeColor }}-700"
+                                        class="resize-handle w-2 h-full absolute top-0 left-0
+                                            {{ $task->type === 'Task' ? 'bg-accent' : 'bg-indigo-500' }}
+                                            opacity-30 rounded-l z-30 transition-all duration-200"
                                         x-bind:class="{
-                                            'opacity-100 bg-{{ $taskTypeColor }}-700': resizing,
-                                            'cursor-ew-resize': !updating,
-                                            'cursor-not-allowed opacity-20': updating
+                                            '{{ $task->type === 'Task' ? 'opacity-100 bg-accent-content' : 'opacity-100 bg-indigo-600' }}': resizing,
+                                            'cursor-ew-resize': true,
+                                            'group-hover:opacity-50 hover:!opacity-100 {{ $task->type === 'Task' ? 'hover:bg-accent-content' : 'hover:bg-indigo-600' }}': !$wire.__instance.effects.redirect && !$wire.__instance.effects.busy
                                         }"
+                                        wire:loading.class="cursor-not-allowed opacity-20 pointer-events-none"
+                                        wire:target="updateTaskDates"
                                         @mousedown="startResize('left', $event, '{{ $taskStartDate->format('Y-m-d') }}', '{{ $taskEndDate->format('Y-m-d') }}', '{{ $this->days->first()->format('Y-m-d') }}', '{{ $this->days->last()->format('Y-m-d') }}')"
                                         @touchstart="startResize('left', $event, '{{ $taskStartDate->format('Y-m-d') }}', '{{ $taskEndDate->format('Y-m-d') }}', '{{ $this->days->first()->format('Y-m-d') }}', '{{ $this->days->last()->format('Y-m-d') }}')"
                                     ></div>
                                 @endif
 
                                 <!-- Task content -->
-                                <div class="flex-1 relative mx-2 h-full overflow-hidden">
+                                <div class="flex-1 relative mx-2 h-full overflow-hidden z-20">
                                     <div
                                         class="select-none bg-transparent border-0 shadow-none p-1 my-0 h-full
-                                            cursor-pointer rounded transition-colors duration-200
-                                            hover:bg-gray-100/20"
-                                        x-on:click="handleTaskEdit({{ $task->id }})"
+                                            rounded transition-colors duration-200"
+                                        wire:click="editTask({{ $task->id }})"
+                                        wire:loading.class="animate-pulse opacity-50 pointer-events-none cursor-not-allowed"
+                                        wire:target="editTask"
                                         x-bind:class="{
-                                            'cursor-pointer': !updating,
-                                            'cursor-not-allowed pointer-events-none': updating
+                                            'cursor-ew-resize': resizing && !$wire.__instance.effects.redirect && !$wire.__instance.effects.busy,
+                                            'cursor-pointer': !resizing && !$wire.__instance.effects.redirect && !$wire.__instance.effects.busy,
+                                            'cursor-not-allowed': $wire.__instance.effects.redirect || $wire.__instance.effects.busy,
+                                            'hover:bg-gray-100/20': !$wire.__instance.effects.redirect && !$wire.__instance.effects.busy && !resizing
                                         }"
                                     >
                                         <div class="flex flex-col justify-between h-full min-h-0 pointer-events-none">
@@ -338,7 +334,7 @@
 
                                                     <div class="flex items-center gap-1 min-h-0 overflow-hidden">
                                                         @if($task->users->count() > 0)
-                                                            <flux:avatar.group>
+                                                            @if($task->users->count() === 1)
                                                                 @foreach($task->users as $user)
                                                                     <flux:avatar
                                                                         size="xs"
@@ -347,7 +343,18 @@
                                                                         color:seed="{{ $user->id }}"
                                                                     />
                                                                 @endforeach
-                                                            </flux:avatar.group>
+                                                            @else
+                                                                <flux:avatar.group>
+                                                                    @foreach($task->users as $user)
+                                                                        <flux:avatar
+                                                                            size="xs"
+                                                                            name="{{ $user->full_name }}"
+                                                                            color="auto"
+                                                                            color:seed="{{ $user->id }}"
+                                                                        />
+                                                                    @endforeach
+                                                                </flux:avatar.group>
+                                                            @endif
                                                         @endif
                                                         @if($task->vendor)
                                                             <flux:avatar
@@ -368,14 +375,16 @@
                                 <!-- Right resize handle -->
                                 @if(!$taskEndDate->isAfter($this->days->last()))
                                     <div
-                                        class="resize-handle w-2 h-full absolute top-0 right-0 bg-{{ $taskTypeColor }}-500
-                                            opacity-30 rounded-r z-15 transition-all duration-200
-                                            group-hover:opacity-50 hover:!opacity-100 hover:bg-{{ $taskTypeColor }}-700"
+                                        class="resize-handle w-2 h-full absolute top-0 right-0
+                                            {{ $task->type === 'Task' ? 'bg-accent' : 'bg-indigo-500' }}
+                                            opacity-30 rounded-r z-30 transition-all duration-200"
                                         x-bind:class="{
-                                            'opacity-100 bg-{{ $taskTypeColor }}-700': resizing,
-                                            'cursor-ew-resize': !updating,
-                                            'cursor-not-allowed opacity-20': updating
+                                            '{{ $task->type === 'Task' ? 'opacity-100 bg-accent-content' : 'opacity-100 bg-indigo-600' }}': resizing,
+                                            'cursor-ew-resize': true,
+                                            'group-hover:opacity-50 hover:!opacity-100 {{ $task->type === 'Task' ? 'hover:bg-accent-content' : 'hover:bg-indigo-600' }}': !$wire.__instance.effects.redirect && !$wire.__instance.effects.busy
                                         }"
+                                        wire:loading.class="cursor-not-allowed opacity-20 pointer-events-none"
+                                        wire:target="updateTaskDates"
                                         @mousedown="startResize('right', $event, '{{ $taskStartDate->format('Y-m-d') }}', '{{ $taskEndDate->format('Y-m-d') }}', '{{ $this->days->first()->format('Y-m-d') }}', '{{ $this->days->last()->format('Y-m-d') }}')"
                                         @touchstart="startResize('right', $event, '{{ $taskStartDate->format('Y-m-d') }}', '{{ $taskEndDate->format('Y-m-d') }}', '{{ $this->days->first()->format('Y-m-d') }}', '{{ $this->days->last()->format('Y-m-d') }}')"
                                     ></div>
@@ -410,12 +419,6 @@
                             block: 'nearest'
                         });
                     }
-                },
-
-                handleTaskEdit(taskId) {
-                    this.updating = true;
-                    this.$wire.editTask(taskId)
-                        .finally(() => this.updating = false);
                 }
             }
         }
@@ -606,7 +609,6 @@
                 startIndex,
                 endIndex,
                 resizing: false,
-                updating: false,
                 eventHandlers: null,
 
                 highlightTask(taskId, highlight) {
@@ -616,15 +618,7 @@
                     ));
                 },
 
-                handleTaskEdit(taskId) {
-                    this.updating = true;
-                    this.$wire.editTask(taskId)
-                        .finally(() => this.updating = false);
-                },
-
                 startResize(side, event, taskStartDate, taskEndDate, viewStartDate, viewEndDate) {
-                    if (this.updating) return;
-
                     this.resizing = true;
                     event.stopPropagation();
                     event.preventDefault();
@@ -676,23 +670,12 @@
 
                 handleUp(e, side, actualStartIndex, actualEndIndex) {
                     if (this.resizing) {
-                        this.updating = true;
-
                         const finalStartIndex = side === 'left' ? this.startIndex : (actualStartIndex < 0 ? actualStartIndex : this.startIndex);
                         const finalEndIndex = side === 'left' ? (actualEndIndex > {{ count($this->days) - 1 }} ? actualEndIndex : this.endIndex) : this.endIndex;
 
-                        this.$wire.call('updateTaskDates', this.taskId, finalStartIndex, finalEndIndex)
-                            .then(() => this.updateComplete())
-                            .catch(() => this.updateComplete());
+                        this.$wire.call('updateTaskDates', this.taskId, finalStartIndex, finalEndIndex);
                     }
                     this.cleanup();
-                },
-
-                updateComplete() {
-                    this.updating = false;
-                    window.dispatchEvent(new CustomEvent('task-resize-complete', {
-                        detail: { taskId: this.taskId, updateAll: true }
-                    }));
                 },
 
                 disableSelection() {
