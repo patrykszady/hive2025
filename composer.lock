@@ -135,16 +135,16 @@
         },
         {
             "name": "aws/aws-sdk-php",
-            "version": "3.349.2",
+            "version": "3.349.3",
             "source": {
                 "type": "git",
                 "url": "https://github.com/aws/aws-sdk-php.git",
-                "reference": "63cc727845f077d17cb94791deb327249e1626ce"
+                "reference": "b2d4718786398f47626add9c29840fc416175ef2"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/aws/aws-sdk-php/zipball/63cc727845f077d17cb94791deb327249e1626ce",
-                "reference": "63cc727845f077d17cb94791deb327249e1626ce",
+                "url": "https://api.github.com/repos/aws/aws-sdk-php/zipball/b2d4718786398f47626add9c29840fc416175ef2",
+                "reference": "b2d4718786398f47626add9c29840fc416175ef2",
                 "shasum": ""
             },
             "require": {
@@ -226,9 +226,9 @@
             "support": {
                 "forum": "https://github.com/aws/aws-sdk-php/discussions",
                 "issues": "https://github.com/aws/aws-sdk-php/issues",
-                "source": "https://github.com/aws/aws-sdk-php/tree/3.349.2"
+                "source": "https://github.com/aws/aws-sdk-php/tree/3.349.3"
             },
-            "time": "2025-07-03T18:08:27+00:00"
+            "time": "2025-07-09T18:10:17+00:00"
         },
         {
             "name": "barryvdh/laravel-snappy",
@@ -3769,16 +3769,16 @@
         },
         {
             "name": "livewire/flux",
-            "version": "v2.2.2",
+            "version": "v2.2.3",
             "source": {
                 "type": "git",
                 "url": "https://github.com/livewire/flux.git",
-                "reference": "a995f9513b9eb48b05c8431fe881efa4c6219513"
+                "reference": "0fb4c0b78eac393ad3a19a387af193573c310371"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/livewire/flux/zipball/a995f9513b9eb48b05c8431fe881efa4c6219513",
-                "reference": "a995f9513b9eb48b05c8431fe881efa4c6219513",
+                "url": "https://api.github.com/repos/livewire/flux/zipball/0fb4c0b78eac393ad3a19a387af193573c310371",
+                "reference": "0fb4c0b78eac393ad3a19a387af193573c310371",
                 "shasum": ""
             },
             "require": {
@@ -3826,25 +3826,25 @@
             ],
             "support": {
                 "issues": "https://github.com/livewire/flux/issues",
-                "source": "https://github.com/livewire/flux/tree/v2.2.2"
+                "source": "https://github.com/livewire/flux/tree/v2.2.3"
             },
-            "time": "2025-07-08T07:13:42+00:00"
+            "time": "2025-07-11T00:25:51+00:00"
         },
         {
             "name": "livewire/flux-pro",
-            "version": "2.2.2",
+            "version": "2.2.3",
             "dist": {
                 "type": "zip",
-                "url": "https://composer.fluxui.dev/download/9f56f9ac-4dec-4d2b-9aac-aad8ea038433/flux-pro-2.2.2.zip",
-                "reference": "a4c05079b8930b0b207681eb17743656717b6ed3",
-                "shasum": "b56cc1119317b671cf4fc668acc961946777b4ef"
+                "url": "https://composer.fluxui.dev/download/9f5c71a4-3991-455e-a2aa-5f090e1ab06b/flux-pro-2.2.3.zip",
+                "reference": "c5d01f717049e92b6402f0866ff61a7ee0486bcf",
+                "shasum": "78c16099c98a93191886484f4c60752997f1c91f"
             },
             "require": {
                 "illuminate/console": "^10.0|^11.0|^12.0",
                 "illuminate/support": "^10.0|^11.0|^12.0",
                 "illuminate/view": "^10.0|^11.0|^12.0",
                 "laravel/prompts": "^0.1.24|^0.2|^0.3",
-                "livewire/flux": "2.2.2|dev-main",
+                "livewire/flux": "2.2.3|dev-main",
                 "livewire/livewire": "^3.6.2",
                 "php": "^8.1",
                 "symfony/console": "^6.0|^7.0"
@@ -3885,7 +3885,7 @@
                 "livewire",
                 "ui"
             ],
-            "time": "2025-07-08T07:17:30+00:00"
+            "time": "2025-07-11T00:32:04+00:00"
         },
         {
             "name": "livewire/livewire",
@@ -12567,16 +12567,16 @@
         },
         {
             "name": "zoon/rialto",
-            "version": "v1.6.2",
+            "version": "v1.6.4",
             "source": {
                 "type": "git",
                 "url": "https://github.com/zoonru/rialto.git",
-                "reference": "49f93c49113a7959f982331e7466307aac72239d"
+                "reference": "95db4ee34c0e4660d159c35e10890ec1b8969a9c"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/zoonru/rialto/zipball/49f93c49113a7959f982331e7466307aac72239d",
-                "reference": "49f93c49113a7959f982331e7466307aac72239d",
+                "url": "https://api.github.com/repos/zoonru/rialto/zipball/95db4ee34c0e4660d159c35e10890ec1b8969a9c",
+                "reference": "95db4ee34c0e4660d159c35e10890ec1b8969a9c",
                 "shasum": ""
             },
             "require": {
@@ -12621,9 +12621,9 @@
             ],
             "support": {
                 "issues": "https://github.com/zoonru/rialto/issues",
-                "source": "https://github.com/zoonru/rialto/tree/v1.6.2"
+                "source": "https://github.com/zoonru/rialto/tree/v1.6.4"
             },
-            "time": "2025-07-08T17:38:34+00:00"
+            "time": "2025-07-09T17:12:59+00:00"
         }
     ],
     "packages-dev": [

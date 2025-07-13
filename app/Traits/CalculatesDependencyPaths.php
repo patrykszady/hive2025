@@ -189,6 +189,7 @@ trait CalculatesDependencyPaths
 
     private function calculateBlockingPath(array $context): array
     {
+        // Use the same logic as other blocking path methods to determine starting position
         if ($context['sameStartDate']) {
             return $this->createSameStartDateBlockingPath($context);
         }
@@ -245,7 +246,8 @@ trait CalculatesDependencyPaths
         $successorCoords = $context['successorCoords'];
         $successorIsAbove = $context['successorIsAbove'];
 
-        $fromX = $predecessorCoords['centerX'];
+        // For non-overlapping blocking paths, start from left edge with offset
+        $fromX = $predecessorCoords['startX'] + 15; // Start from left edge with small offset
 
         // FIX: Use the same small offset as overlapping paths for consistency
         $smallOffset = 4; // Same as overlapping blocking paths
@@ -253,7 +255,7 @@ trait CalculatesDependencyPaths
             ? $predecessorCoords['topY'] - $smallOffset
             : $predecessorCoords['bottomY'] + $smallOffset;
 
-        // Start from the smaller offset position
+        // Start from the left offset position
         $pathData = "M {$fromX},{$offsetY} L {$fromX},{$successorCoords['y']} L {$context['finalToX']},{$successorCoords['y']}";
 
         return $this->createLineData($context['dependency'], $pathData);
@@ -402,7 +404,7 @@ trait CalculatesDependencyPaths
 
     private function createLineData($dependency, string $pathData, bool $isTruncated = false): array
     {
-        return [
+        $lineData = [
             'id' => $dependency->id,
             'pathData' => $pathData,
             'isBlocking' => $dependency->isBlocking(),
@@ -410,5 +412,53 @@ trait CalculatesDependencyPaths
             'successorId' => $dependency->successor->id,
             'showArrow' => !$isTruncated,
         ];
+
+        // Always provide complete path data for JavaScript highlighting
+        if ($isTruncated) {
+            $lineData['isTruncated'] = true;
+            $lineData['truncatedPath'] = $pathData; // Current truncated path
+            $lineData['completePath'] = $this->calculateCompletePath($dependency); // Full path to target
+            $lineData['completeMarker'] = $dependency->isBlocking() ? 'url(#arrowhead-blocking)' : 'url(#arrowhead)'; // Add missing completeMarker
+        } else {
+            // For non-truncated paths, the complete path is the same as the current path
+            $lineData['completePath'] = $pathData;
+        }
+
+        return $lineData;
+    }
+
+    // Add this new method to calculate the complete path
+    private function calculateCompletePath($dependency): string
+    {
+        $predecessorCoords = $this->findTaskCoordinates($dependency->predecessor->id);
+        $successorCoords = $this->findTaskCoordinates($dependency->successor->id);
+
+        if (!$predecessorCoords || !$successorCoords) {
+            return '';
+        }
+
+        // Create a context without truncation to get the full path
+        $context = $this->createPathContext($dependency, $predecessorCoords, $successorCoords, []);
+        $context['isTruncated'] = false; // Force no truncation
+        $context['blockingDependencies'] = []; // Remove blocking dependencies
+
+        // Calculate the complete path based on the dependency type
+        if ($context['sameRow']) {
+            $result = $this->calculateSameRowPath($context);
+        } else {
+            $predecessorStartDate = Carbon::parse($dependency->predecessor->start_date);
+            $successorStartDate = Carbon::parse($dependency->successor->start_date);
+            $isReverseDependency = $successorStartDate->isBefore($predecessorStartDate);
+
+            if ($isReverseDependency && $context['tasksOverlap']) {
+                $result = $this->createReverseDependencyPath($context);
+            } else if ($dependency->isBlocking()) {
+                $result = $this->calculateBlockingPath($context);
+            } else {
+                $result = $this->calculateNonBlockingPath($context);
+            }
+        }
+
+        return $result['pathData'];
     }
 }

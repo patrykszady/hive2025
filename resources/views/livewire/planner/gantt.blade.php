@@ -83,10 +83,12 @@
                             class="stroke-transparent stroke-[10px] fill-none cursor-pointer pointer-events-auto"
                             data-predecessor-id="{{ $line['predecessorId'] }}"
                             data-successor-id="{{ $line['successorId'] }}"
+                            @if(isset($line['completePath']))
+                                data-complete-path="{{ $line['completePath'] }}"
+                            @endif
                             @if(isset($line['isTruncated']) && $line['isTruncated'])
                                 data-truncated="true"
                                 data-truncated-path="{{ $line['truncatedPath'] }}"
-                                data-complete-path="{{ $line['completePath'] }}"
                                 data-complete-marker="{{ $line['completeMarker'] }}"
                             @endif
                             @mouseenter="highlightDependency($event.target, true)"
@@ -101,10 +103,12 @@
                                 opacity-80 hover:opacity-100 hover:stroke-[3px]"
                             data-predecessor-id="{{ $line['predecessorId'] }}"
                             data-successor-id="{{ $line['successorId'] }}"
+                            @if(isset($line['completePath']))
+                                data-complete-path="{{ $line['completePath'] }}"
+                            @endif
                             @if(isset($line['isTruncated']) && $line['isTruncated'])
                                 data-truncated="true"
                                 data-truncated-path="{{ $line['truncatedPath'] }}"
-                                data-complete-path="{{ $line['completePath'] }}"
                                 data-complete-marker="{{ $line['completeMarker'] }}"
                             @endif
                             @if($line['showArrow'])
@@ -486,11 +490,18 @@
                     const dependencyPaths = this.$el.querySelectorAll('.dependency-path');
 
                     if (highlight) {
-                        dependencyPaths.forEach(path => {
+                        dependencyPaths.forEach(path => {  // Fix: Add opening parenthesis here
                             const { predecessorId, successorId } = path.dataset;
 
                             if (predecessorId == taskId || successorId == taskId) {
-                                this.highlightPath(path, true);
+                                // Check if this is a successor task being highlighted
+                                if (successorId == taskId) {
+                                    // When highlighting successor (inspections), show truncated versions
+                                    this.highlightPath(path, false); // Don't show complete path
+                                } else {
+                                    // When highlighting predecessor (framing), show complete versions
+                                    this.highlightPath(path, true); // Show complete path
+                                }
                             } else {
                                 this.dimPath(path);
                             }
@@ -557,13 +568,26 @@
                     const currentMarker = path.getAttribute('marker-end');
                     const isBlocking = currentMarker?.includes('blocking');
 
-                    path.setAttribute('marker-end',
-                        isBlocking ? 'url(#arrowhead-blocking-highlighted)' : 'url(#arrowhead-highlighted)'
-                    );
+                    // For highlighted paths, prioritize blocking markers over regular ones
+                    if (isBlocking) {
+                        path.setAttribute('marker-end', 'url(#arrowhead-blocking-highlighted)');
+                        // Show complete path for blocking paths only when showComplete is true
+                        if (showComplete && path.dataset.completePath) {
+                            path.setAttribute('d', path.dataset.completePath);
+                        }
+                    } else {
+                        // Show complete path for non-blocking paths only when showComplete is true
+                        if (showComplete && path.dataset.completePath) {
+                            path.setAttribute('d', path.dataset.completePath);
+                        }
 
-                    if (showComplete && path.dataset.truncated === 'true' && !isBlocking && path.dataset.completePath) {
-                        path.setAttribute('d', path.dataset.completePath);
-                        path.setAttribute('marker-end', 'url(#arrowhead-highlighted)');
+                        // Only show arrow when showComplete is true (when hovering framing, not inspections)
+                        if (showComplete) {
+                            path.setAttribute('marker-end', 'url(#arrowhead-highlighted)');
+                        } else {
+                            // When hovering inspections, don't show arrow at intersection
+                            path.removeAttribute('marker-end');
+                        }
                     }
                 },
 
@@ -574,28 +598,76 @@
                     const currentMarker = path.getAttribute('marker-end');
                     const isBlocking = currentMarker?.includes('blocking');
 
-                    path.setAttribute('marker-end',
-                        isBlocking ? 'url(#arrowhead-blocking)' : 'url(#arrowhead)'
-                    );
+                    if (isBlocking) {
+                        // Check if there's a non-blocking path from the same predecessor being highlighted
+                        const predecessorId = path.dataset.predecessorId;
+                        const successorId = path.dataset.successorId;
+
+                        const hasHighlightedNonBlockingFromSamePred = Array.from(this.$el.querySelectorAll('.dependency-path'))
+                            .some(otherPath =>
+                                otherPath !== path &&
+                                otherPath.dataset.predecessorId === predecessorId &&
+                                otherPath.dataset.successorId === successorId &&
+                                !otherPath.classList.contains('stroke-red-500') &&
+                                otherPath.classList.contains('opacity-100')
+                            );
+
+                        if (hasHighlightedNonBlockingFromSamePred) {
+                            // When framing is highlighted, completely hide the red path
+                            path.style.display = 'none';
+                        } else {
+                            // Normal dimming behavior
+                            path.setAttribute('marker-end', 'url(#arrowhead-blocking)');
+                        }
+                    } else {
+                        // Reset to original path when dimming
+                        if (path.dataset.truncatedPath) {
+                            path.setAttribute('d', path.dataset.truncatedPath);
+                        }
+
+                        // Check if there's a blocking path to the same target before showing arrow
+                        const successorId = path.dataset.successorId;
+                        const hasBlockingPathToTarget = Array.from(this.$el.querySelectorAll('.dependency-path'))
+                            .some(otherPath =>
+                                otherPath !== path &&
+                                otherPath.dataset.successorId === successorId &&
+                                otherPath.classList.contains('stroke-red-500')
+                            );
+
+                        // Only show arrow if there's no blocking path to same target
+                        if (!hasBlockingPathToTarget) {
+                            path.setAttribute('marker-end', 'url(#arrowhead)');
+                        } else {
+                            path.removeAttribute('marker-end');
+                        }
+                    }
                 },
 
                 resetPath(path) {
                     path.classList.remove('opacity-100', 'stroke-[3px]', 'opacity-30');
 
+                    // Reset display to visible
+                    path.style.display = '';
+
+                    // Always reset to original path data first
+                    if (path.dataset.completePath) {
+                        path.setAttribute('d', path.dataset.completePath);
+                    }
+
                     const currentMarker = path.getAttribute('marker-end');
                     const isBlocking = currentMarker?.includes('blocking');
 
-                    path.setAttribute('marker-end',
-                        isBlocking ? 'url(#arrowhead-blocking)' : 'url(#arrowhead)'
-                    );
-
-                    if (path.dataset.truncated === 'true' && !isBlocking && path.dataset.truncatedPath) {
-                        const currentPath = path.getAttribute('d');
-                        const completePath = path.dataset.completePath;
-
-                        if (currentPath === completePath) {
+                    // Reset to original marker
+                    if (isBlocking) {
+                        path.setAttribute('marker-end', 'url(#arrowhead-blocking)');
+                    } else {
+                        // Check if truncated to determine arrow visibility
+                        if (path.dataset.truncatedPath) {
                             path.setAttribute('d', path.dataset.truncatedPath);
-                            path.removeAttribute('marker-end');
+                            path.removeAttribute('marker-end'); // No arrow when truncated
+                        } else {
+                            // Show arrow when not truncated
+                            path.setAttribute('marker-end', 'url(#arrowhead)');
                         }
                     }
                 }

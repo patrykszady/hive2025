@@ -23,7 +23,7 @@ class TaskReminderController extends Controller
                   ->whereDate('end_date', '>=', $tomorrow);
         })
         ->whereNotNull('user_ids')
-        ->with(['project.client']) // Remove 'users' from here
+        ->with(['project.client'])
         ->get();
 
         $userTasks = [];
@@ -35,8 +35,13 @@ class TaskReminderController extends Controller
                 continue;
             }
 
+            // Check if tomorrow is a weekend day and if it's excluded in options
+            if ($this->shouldSkipWeekendTask($task, $tomorrow)) {
+                continue;
+            }
+
             // Use the users attribute (which calls getUsersAttribute)
-            $taskUsers = $task->users; // This calls the getUsersAttribute method
+            $taskUsers = $task->users;
 
             foreach ($taskUsers as $user) {
                 if (!$user->cell_phone) {
@@ -90,5 +95,38 @@ class TaskReminderController extends Controller
             'notifications_queued' => $successCount,
             'errors' => $errorCount
         ];
+    }
+
+    /**
+     * Check if a task should be skipped for weekend days based on options
+     */
+    private function shouldSkipWeekendTask($task, $date)
+    {
+        // Check if the date is a weekend
+        $dayOfWeek = $date->dayOfWeek; // 0 = Sunday, 6 = Saturday
+
+        if ($dayOfWeek !== 0 && $dayOfWeek !== 6) {
+            return false; // Not a weekend, don't skip
+        }
+
+        // Get the options
+        $options = $task->options;
+
+        // If no options, skip weekend tasks by default
+        if (!$options) {
+            return true;
+        }
+
+        // Check for Saturday
+        if ($dayOfWeek === 6) { // Saturday
+            return !isset($options->saturday) || $options->saturday !== true;
+        }
+
+        // Check for Sunday
+        if ($dayOfWeek === 0) { // Sunday
+            return !isset($options->sunday) || $options->sunday !== true;
+        }
+
+        return false;
     }
 }

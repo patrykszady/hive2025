@@ -3,6 +3,7 @@
 namespace App\Observers;
 
 use App\Models\Expense;
+use App\Jobs\UpdateVendorSearchIndex;
 
 class ExpenseObserver
 {
@@ -13,7 +14,9 @@ class ExpenseObserver
      */
     public function created(Expense $expense): void
     {
-        //
+        if ($expense->vendor_id) {
+            UpdateVendorSearchIndex::dispatch($expense->vendor_id);
+        }
     }
 
     /**
@@ -21,7 +24,15 @@ class ExpenseObserver
      */
     public function updated(Expense $expense): void
     {
-        //
+        // Update search index for current vendor
+        if ($expense->vendor_id) {
+            UpdateVendorSearchIndex::dispatch($expense->vendor_id);
+        }
+
+        // If vendor changed, also update the old vendor's index
+        if ($expense->isDirty('vendor_id') && $expense->getOriginal('vendor_id')) {
+            UpdateVendorSearchIndex::dispatch($expense->getOriginal('vendor_id'));
+        }
     }
 
     /**
@@ -29,7 +40,9 @@ class ExpenseObserver
      */
     public function deleted(Expense $expense): void
     {
-        //
+        if ($expense->vendor_id) {
+            UpdateVendorSearchIndex::dispatch($expense->vendor_id);
+        }
     }
 
     /**
@@ -37,7 +50,9 @@ class ExpenseObserver
      */
     public function restored(Expense $expense): void
     {
-        //
+        if ($expense->vendor_id) {
+            UpdateVendorSearchIndex::dispatch($expense->vendor_id);
+        }
     }
 
     /**
@@ -45,6 +60,8 @@ class ExpenseObserver
      */
     public function forceDeleted(Expense $expense): void
     {
-        //
+        if ($expense->vendor_id) {
+            UpdateVendorSearchIndex::dispatch($expense->vendor_id);
+        }
     }
 }
