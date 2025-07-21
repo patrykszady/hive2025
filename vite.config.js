@@ -11,15 +11,15 @@ export default defineConfig({
         tailwindcss(),
     ],
     server: {
-        host: '192.168.56.56', // Replace with your Homestead IP
-        https: false,
-        hmr: {
-            host: '192.168.56.56', // Replace with your Homestead IP
-        },
-        watch: {
-            usePolling: true,
-            ignored: ['**/storage/**', '**/vendor/**'],
-        },
+    host: '127.0.0.1',
+    port: 5173,
+    hmr: {
+        host: '127.0.0.1',
+    },
+    watch: {
+        usePolling: true,
+        ignored: ['**/storage/**', '**/vendor/**'],
+    },
     },
 
     build: {

@@ -14,6 +14,7 @@ use Carbon\CarbonPeriod;
 use Livewire\Component;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
+use Livewire\Attributes\Title;
 
 class GanttIndex extends Component
 {
@@ -281,6 +282,7 @@ class GanttIndex extends Component
         return $visibleTaskDays;
     }
 
+    #[Title('Gantt Planner')]
     public function render()
     {
         $taskDependencies = [];

@@ -22,7 +22,7 @@ use Spatie\Browsershot\Browsershot;
 use Intervention\Image\Facades\Image;
 
 use Exception;
-
+ 
 class CompanyEmailController extends Controller
 {
     private $nylasService;
@@ -232,8 +232,10 @@ class CompanyEmailController extends Controller
                     // Handle images
                     $image_email_url = null;
                     if (isset($receipt->options['receipt_image_regex'])) {
-                        preg_match($receipt->options['receipt_image_regex'], $string, $matches);
-                        $image_email_url = $matches[1] ?? null;
+                        // Fix JSON-loaded regex by evaluating it properly
+                        $pattern = stripslashes($receipt->options['receipt_image_regex']);
+                        preg_match($pattern, $string, $matches);
+                        $image_email_url = isset($matches[1]) ? html_entity_decode($matches[1]) : null;
                     } else {
                         $string = preg_replace("/<img[^>]+\>/i", '', $string);
                     }
@@ -328,12 +330,37 @@ class CompanyEmailController extends Controller
                         }
 
                     } else {
+                        // dd($ocr_filename);
                         // Image processing - override the default $doc_type
                         $doc_type = 'jpg';
                         $ocr_filename .= '.' . $doc_type;
                         $ocr_path = '_temp_ocr/' . $ocr_filename;
                         $location = Storage::disk('files')->path($ocr_path);
-                        Image::make($image_email_url)->save($location);
+                        
+                        // Validate image URL before processing
+                        if (empty($image_email_url)) {
+                            // Log error and skip image processing
+                            Log::error("Empty image URL for receipt", [
+                                'receipt_id' => $receipt->id,
+                                'message_id' => $messageId ?? null
+                            ]);
+                            // Move to error folder or handle appropriately
+                            $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Error'], $grantId);
+                            continue;
+                        }
+                        
+                        try {
+                            Image::make($image_email_url)->save($location);
+                        } catch (\Exception $e) {
+                            Log::error("Failed to process image", [
+                                'error' => $e->getMessage(),
+                                'image_url' => $image_email_url,
+                                'receipt_id' => $receipt->id
+                            ]);
+                            // Move to error folder or handle appropriately
+                            $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Error'], $grantId);
+                            continue;
+                        }
                     }
 
                     $document_model = $receipt->options['document_model'];
