@@ -178,7 +178,7 @@ trait CalculatesDependencyPaths
         $successorCoords = $context['successorCoords'];
 
         $fromX = $predecessorCoords['x'];
-        $fromY = $predecessorCoords['y'];
+        $fromY = $predecessorCoords['bottomY'];
         $toX = $successorCoords['startX'] - $this->arrowSize;
         $toY = $successorCoords['y'];
 
@@ -205,14 +205,13 @@ trait CalculatesDependencyPaths
     {
         $predecessorCoords = $context['predecessorCoords'];
         $successorCoords = $context['successorCoords'];
-        $successorIsAbove = $context['successorIsAbove'];
-
-        // Start from the proper edge position (middle of the edge)
+        
+        // Start from the left edge position at the BOTTOM of the task
         $startX = $predecessorCoords['startX'];
         $offsetX = $predecessorCoords['startX'] - 15;
-
-        // FIX: Use the middle of the left edge
-        $startY = $predecessorCoords['y']; // This is already the middle Y of the task
+        
+        // Use bottomY instead of y (middle)
+        $startY = $predecessorCoords['bottomY']; 
 
         // Create clean L-shape: horizontal from edge, then vertical to successor
         $pathData = "M {$startX},{$startY} L {$offsetX},{$startY} L {$offsetX},{$successorCoords['y']} L {$context['finalToX']},{$successorCoords['y']}";
@@ -224,18 +223,14 @@ trait CalculatesDependencyPaths
     {
         $predecessorCoords = $context['predecessorCoords'];
         $successorCoords = $context['successorCoords'];
-        $successorIsAbove = $context['successorIsAbove'];
-
+        
         $fromX = $predecessorCoords['startX'] + 15;
 
-        // FIX: Use smaller offset for overlapping blocking paths
-        $smallOffset = 4; // Smaller offset for cleaner look
-        $offsetY = $successorIsAbove
-            ? $predecessorCoords['topY'] - $smallOffset
-            : $predecessorCoords['bottomY'] + $smallOffset;
+        // Use EXACT bottomY with no offset
+        $fromY = $predecessorCoords['bottomY'];
 
         // Start from the smaller offset position
-        $pathData = "M {$fromX},{$offsetY} L {$fromX},{$successorCoords['y']} L {$context['finalToX']},{$successorCoords['y']}";
+        $pathData = "M {$fromX},{$fromY} L {$fromX},{$successorCoords['y']} L {$context['finalToX']},{$successorCoords['y']}";
 
         return $this->createLineData($context['dependency'], $pathData);
     }
@@ -244,20 +239,16 @@ trait CalculatesDependencyPaths
     {
         $predecessorCoords = $context['predecessorCoords'];
         $successorCoords = $context['successorCoords'];
-        $successorIsAbove = $context['successorIsAbove'];
-
+        
         // For non-overlapping blocking paths, start from left edge with offset
-        $fromX = $predecessorCoords['startX'] + 15; // Start from left edge with small offset
-
-        // FIX: Use the same small offset as overlapping paths for consistency
-        $smallOffset = 4; // Same as overlapping blocking paths
-        $offsetY = $successorIsAbove
-            ? $predecessorCoords['topY'] - $smallOffset
-            : $predecessorCoords['bottomY'] + $smallOffset;
-
-        // Start from the left offset position
-        $pathData = "M {$fromX},{$offsetY} L {$fromX},{$successorCoords['y']} L {$context['finalToX']},{$successorCoords['y']}";
-
+        $fromX = $predecessorCoords['startX'] + 15;
+        
+        // ALWAYS use exact bottomY without any offset
+        $fromY = $predecessorCoords['bottomY'];
+        
+        // Start from the exact bottom edge
+        $pathData = "M {$fromX},{$fromY} L {$fromX},{$successorCoords['y']} L {$context['finalToX']},{$successorCoords['y']}";
+        
         return $this->createLineData($context['dependency'], $pathData);
     }
 
@@ -280,8 +271,8 @@ trait CalculatesDependencyPaths
         $successorCoords = $context['successorCoords'];
 
         $fromX = $predecessorCoords['startX'];
-        $fromY = $predecessorCoords['y'];
-        $toY = $successorCoords['y'];
+        $fromY = $predecessorCoords['bottomY']; 
+        $toY = $successorCoords['y']; // Define $toY properly!
 
         // Check for truncation
         $isTruncated = $context['isTruncated'];
@@ -314,75 +305,29 @@ trait CalculatesDependencyPaths
 
         $fromX = $predecessorCoords['startX'] + 15;
 
-        // FIX: Use smaller offset for overlapping non-blocking paths
-        $smallOffset = 3; // Much smaller offset for cleaner look
-        $offsetY = $successorIsAbove
-            ? $predecessorCoords['topY'] - $smallOffset
-            : $predecessorCoords['bottomY'] + $smallOffset;
+        // ALWAYS use exact bottomY with no offset
+        $fromY = $predecessorCoords['bottomY'];
 
-        // Check for truncation
-        $isTruncated = $context['isTruncated'];
-        $blockingVerticalX = null;
+        // Create path starting from exact bottom edge
+        $pathData = "M {$fromX},{$fromY} L {$fromX},{$successorCoords['y']} L {$context['finalToX']},{$successorCoords['y']}";
 
-        if ($isTruncated && !empty($context['blockingDependencies'])) {
-            $grayLineStartX = $predecessorCoords['centerX'];
-            $grayLineEndX = $successorCoords['startX'];
-            foreach ($context['blockingDependencies'] as $block) {
-                if ($block['verticalX'] > $grayLineStartX && ($blockingVerticalX === null || $block['verticalX'] < $blockingVerticalX)) {
-                    $blockingVerticalX = $block['verticalX'];
-                }
-            }
-
-            if ($blockingVerticalX !== null && $blockingVerticalX > $grayLineStartX && $blockingVerticalX <= $grayLineEndX) {
-                $intersectionY = $successorCoords['y'];
-                // FIX: Start from smaller offset position
-                $pathData = "M {$fromX},{$offsetY} L {$fromX},{$intersectionY} L {$blockingVerticalX},{$intersectionY}";
-                return $this->createLineData($context['dependency'], $pathData, true);
-            }
-        }
-
-        // FIX: Start from the smaller offset position
-        $pathData = "M {$fromX},{$offsetY} L {$fromX},{$successorCoords['y']} L {$context['finalToX']},{$successorCoords['y']}";
-        return $this->createLineData($context['dependency'], $pathData, $isTruncated);
+        return $this->createLineData($context['dependency'], $pathData, $context['isTruncated']);
     }
 
     private function createNonOverlappingNonBlockingPath(array $context): array
     {
         $predecessorCoords = $context['predecessorCoords'];
         $successorCoords = $context['successorCoords'];
-        $successorIsAbove = $context['successorIsAbove'];
-
+        
         $fromX = $predecessorCoords['centerX'];
-
-        // FIX: Use smaller offset for consistency
-        $smallOffset = 3; // Same as overlapping non-blocking paths
-        $offsetY = $successorIsAbove
-            ? $predecessorCoords['topY'] - $smallOffset
-            : $predecessorCoords['bottomY'] + $smallOffset;
-
-        // Check for truncation
-        $isTruncated = $context['isTruncated'];
-        $blockingVerticalX = null;
-
-        if ($isTruncated && !empty($context['blockingDependencies'])) {
-            $grayLineStartX = $fromX;
-            $grayLineEndX = $successorCoords['startX'];
-            foreach ($context['blockingDependencies'] as $block) {
-                if ($block['verticalX'] > $grayLineStartX && ($blockingVerticalX === null || $block['verticalX'] < $blockingVerticalX)) {
-                    $blockingVerticalX = $block['verticalX'];
-                }
-            }
-
-            if ($blockingVerticalX !== null && $blockingVerticalX > $grayLineStartX && $blockingVerticalX <= $grayLineEndX) {
-                $intersectionY = $successorCoords['y'];
-                $pathData = "M {$fromX},{$offsetY} L {$fromX},{$intersectionY} L {$blockingVerticalX},{$intersectionY}";
-                return $this->createLineData($context['dependency'], $pathData, true);
-            }
-        }
-
-        // Start from the smaller offset position
-        $pathData = "M {$fromX},{$offsetY} L {$fromX},{$successorCoords['y']} L {$context['finalToX']},{$successorCoords['y']}";
-        return $this->createLineData($context['dependency'], $pathData, $isTruncated);
+        
+        // ALWAYS use exact bottomY with no offset
+        $fromY = $predecessorCoords['bottomY'];
+        
+        // Create path from exact bottom edge
+        $pathData = "M {$fromX},{$fromY} L {$fromX},{$successorCoords['y']} L {$context['finalToX']},{$successorCoords['y']}";
+        
+        return $this->createLineData($context['dependency'], $pathData, $context['isTruncated']);
     }
 
     // Add a new method to handle reverse dependency (successor starts before predecessor)
@@ -391,15 +336,62 @@ trait CalculatesDependencyPaths
         $predecessorCoords = $context['predecessorCoords'];
         $successorCoords = $context['successorCoords'];
 
-        // Start from offset below the predecessor task
         $fromX = $predecessorCoords['startX'] + 15;
-        $fromY = $predecessorCoords['bottomY'] + $this->verticalOffset; // FIX: Add offset
-        $horizontalOffset = 30; // Go further left
-        $verticalOffset = 20;   // Go further down from the offset
+        // Remove the vertical offset
+        $fromY = $predecessorCoords['bottomY'];
+        $horizontalOffset = 30;
+        $verticalOffset = 20;
         $leftX = $successorCoords['startX'] - $horizontalOffset;
         $downY = $fromY + $verticalOffset;
+
         $pathData = "M {$fromX},{$fromY} L {$fromX},{$downY} L {$leftX},{$downY} L {$leftX},{$successorCoords['y']} L {$context['finalToX']},{$successorCoords['y']}";
+
         return $this->createLineData($context['dependency'], $pathData);
+    }
+
+    // For paths from the right edge
+    private function createRightEdgePath(array $context): array
+    {
+        $predecessorCoords = $context['predecessorCoords'];
+        $successorCoords = $context['successorCoords'];
+        
+        // Use EXACT right edge (x) with no offset
+        $fromX = $predecessorCoords['x'];
+        $fromY = $predecessorCoords['bottomY'];
+        
+        $pathData = "M {$fromX},{$fromY} L {$fromX},{$successorCoords['y']} L {$context['finalToX']},{$successorCoords['y']}";
+        
+        return $this->createLineData($context['dependency'], $pathData, $context['isTruncated']);
+    }
+
+    // For paths from the left edge
+    private function createLeftEdgePath(array $context): array
+    {
+        $predecessorCoords = $context['predecessorCoords'];
+        $successorCoords = $context['successorCoords'];
+        
+        // Use EXACT left edge (startX) with no offset
+        $fromX = $predecessorCoords['startX'];
+        $fromY = $predecessorCoords['bottomY'];
+        
+        $pathData = "M {$fromX},{$fromY} L {$fromX},{$successorCoords['y']} L {$context['finalToX']},{$successorCoords['y']}";
+        
+        return $this->createLineData($context['dependency'], $pathData, $context['isTruncated']);
+    }
+
+    // For paths from the center
+    private function createCenterPath(array $context): array
+    {
+        $predecessorCoords = $context['predecessorCoords'];
+        $successorCoords = $context['successorCoords'];
+        
+        // Use EXACT center (centerX) with no offset
+        $fromX = $predecessorCoords['centerX'];
+        $fromY = $predecessorCoords['bottomY'];
+        
+        $pathData = "M {$fromX},{$fromY} L {$fromX},{$successorCoords['y']} L {$context['finalToX']},{$successorCoords['y']}";
+        
+        return $this->createLineData($context['dependency'], $pathData, $context['isTruncated']);
     }
 
     private function createLineData($dependency, string $pathData, bool $isTruncated = false): array

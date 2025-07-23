@@ -227,6 +227,7 @@ Route::middleware(['auth', 'user.vendor'])->group(function () {
     Route::get('/planner/gantt', GanttIndex::class)->name('planner.gantt');
     Route::get('/planner/cards', CardsIndex::class)->name('planner.cards');
 
+    
 });
 
 require __DIR__.'/auth.php';

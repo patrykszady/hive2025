@@ -45,7 +45,7 @@
 
                     <!-- Validation Errors -->
                     {{-- <x-auth-validation-errors class="mb-4" :errors="$errors" /> --}}
-                    <x-forms.error errorName="email_not_registered" />
+                    {{-- <x-forms.error errorName="email_not_registered" /> --}}
                 </div>
                 @if($errors->has('email_not_registered'))
                     <x-misc.hr :padding="''">

@@ -1,11 +1,14 @@
-<flux:modal name="task_create_form_modal" class="!mt-8 w-full max-w-sm">
+<flux:modal name="task_create_form_modal" class="!mt-8 w-full max-w-sm" x-on:modal-show.window="$dispatch('reset-tabs')">
     <flux:heading size="lg" class="!mb-0">{{$view_text['card_title']}}</flux:heading>
     @if(isset($form->task))
         <flux:subheading>{{$form->task->title}}</flux:subheading>
     @endif
 
     <!-- Tab Navigation -->
-    <div x-data="{ activeTab: 'details' }">
+    <div 
+        x-data="{ activeTab: 'details' }" 
+        @reset-tabs.window="activeTab = 'details'"
+    >
         <div class="border-b border-gray-200">
             <nav class="-mb-px flex space-x-8">
                 <button

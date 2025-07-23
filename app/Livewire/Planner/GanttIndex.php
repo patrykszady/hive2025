@@ -143,29 +143,40 @@ class GanttIndex extends Component
                         $projectHeaderHeight = 76;
                         $taskBarHeight = 60;
                         $taskBarMarginY = 4;
-
-                        $y = 49; // Date header height
+                        
+                        $y = 49;
                         for ($i = 0; $i < $projectIndex; $i++) {
                             $y += $projectHeaderHeight + $this->projectsData[$i]['projectTimelineHeight'];
                         }
-                        $y += $projectHeaderHeight + ($rowIndex * ($taskBarHeight + $taskBarMarginY * 2)) + $taskBarMarginY;
+                        $y += $projectHeaderHeight;
+                        
+                        // This should match the template exactly
+                        $templateTopPosition = ($rowIndex * ($taskBarHeight + $taskBarMarginY * 2)) + $taskBarMarginY;
+                        $absoluteTopPosition = $y + $templateTopPosition;
+                        
+                        $rawLeftPosition = $taskData['leftPosition'];
+                        $rawBarWidth = $taskData['barWidth'];
+                        $actualLeftPosition = $rawLeftPosition + 2;
+                        $actualBarWidth = $rawBarWidth - 4;
+                        
+                        // Add a small correction factor that increases with depth
+                        $verticalCorrection = ($projectIndex * 0.5) + ($rowIndex * 0.25);
 
-                        // Use the raw positions without the CSS adjustments
-                        $leftPosition = $taskData['leftPosition'];
-                        $barWidth = $taskData['barWidth'];
+                        $fixedOffset = 8; // Increase to 8 pixels below the task bar
 
-                        return [
-                            'x' => $leftPosition + $barWidth, // Right edge
-                            'centerX' => $leftPosition + ($barWidth / 2), // Center X
-                            'y' => $y + ($taskBarHeight / 2), // Middle of task
-                            'topY' => $y, // Top edge of task
-                            'bottomY' => $y + $taskBarHeight, // Bottom edge
-                            'startX' => $leftPosition, // Left edge
-                            'width' => $barWidth,
+                        $coords = [
+                            'x' => $actualLeftPosition + $actualBarWidth,
+                            'centerX' => $actualLeftPosition + ($actualBarWidth / 2),
+                            'y' => $absoluteTopPosition + ($taskBarHeight / 2),
+                            'topY' => $absoluteTopPosition,
+                            'bottomY' => $absoluteTopPosition + $taskBarHeight + $verticalCorrection + $fixedOffset, // Add the correction
+                            'startX' => $actualLeftPosition,
+                            'width' => $actualBarWidth,
                             'rowIndex' => $rowIndex,
                             'projectIndex' => $projectIndex,
-                            'taskBarHeight' => $taskBarHeight, // Add this for calculations
                         ];
+
+                        return $coords;
                     }
                 }
             }

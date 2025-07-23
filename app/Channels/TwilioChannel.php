@@ -39,12 +39,6 @@ class TwilioChannel
                     'body' => $message
                 ]
             );
-
-            Log::channel('task_reminder')->info("SMS sent successfully", [
-                'user_id' => $notifiable->id,
-                'phone' => $phone
-            ]);
-
         } catch (\Exception $e) {
             Log::channel('task_reminder')->error("SMS failed to send", [
                 'user_id' => $notifiable->id,

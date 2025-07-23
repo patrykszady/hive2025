@@ -271,6 +271,7 @@
                                         ($taskStartDate->isBefore($this->days->first()) && $taskEndDate->isAfter($this->days->last()) ? 'border-t border-b' : 'border rounded')) }}"
                                 style="left: {{ $leftPosition + 2 }}px; width: {{ $barWidth - 4 }}px; top: {{ $topPosition }}px; height: {{ $taskBarHeight }}px;"
                                 data-task-id="{{ $task->id }}"
+                                data-debug-coords="left:{{ $leftPosition + 2 }},top:{{ $topPosition }},bottom:{{ $topPosition + $taskBarHeight }}"
                                 x-data="taskResize({{ $task->id }}, {{ $renderStartDayIndex }}, {{ $renderEndDayIndex }})"
                                 x-bind:class="{
                                     'shadow-lg z-15 scale-102': resizing,
@@ -581,13 +582,8 @@
                             path.setAttribute('d', path.dataset.completePath);
                         }
 
-                        // Only show arrow when showComplete is true (when hovering framing, not inspections)
-                        if (showComplete) {
-                            path.setAttribute('marker-end', 'url(#arrowhead-highlighted)');
-                        } else {
-                            // When hovering inspections, don't show arrow at intersection
-                            path.removeAttribute('marker-end');
-                        }
+                        // Always show arrow when highlighting, regardless of successor or predecessor
+                        path.setAttribute('marker-end', 'url(#arrowhead-highlighted)');
                     }
                 },
 

@@ -78,12 +78,6 @@ class TaskCreate extends Component
         $this->dispatch('refreshComponent')->to(CardsIndex::class);
     }
 
-    public function updated($field, $value)
-    {
-        // No need to manually calculate duration anymore - it's computed automatically
-        // The computed property will handle the weekend-aware calculation
-    }
-
     public function addTask($project_id = null, $date = null, $vendor_id = null, $user_ids = [])
     {
         $this->activeTab = 'details'; // Reset to first tab

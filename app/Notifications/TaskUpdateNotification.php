@@ -10,16 +10,18 @@ use Illuminate\Notifications\Notification;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
-class TaskReminderNotification extends Notification implements ShouldQueue
+class TaskUpdateNotification extends Notification implements ShouldQueue
 {
     use Queueable;
 
-    protected $tasks;
+    protected $currentTasks;
+    protected $removedTasks;
     protected $date;
 
-    public function __construct($tasks, Carbon $date)
+    public function __construct($currentTasks, $removedTasks, Carbon $date)
     {
-        $this->tasks = $tasks;
+        $this->currentTasks = $currentTasks;
+        $this->removedTasks = $removedTasks;
         $this->date = $date;
     }
 
@@ -44,16 +46,16 @@ class TaskReminderNotification extends Notification implements ShouldQueue
      */
     private function buildMessage($user)
     {
-        // Hi {$user->first_name}!
-        $taskCount = count($this->tasks);
-
-        // Use Str::plural for singular/plural task text
-        $message = Str::upper(Str::plural('task', $taskCount)) . " for TOMORROW:\n";
-
+        $message = "UPDATED TASKS for TODAY:\n";
         $message .= "{$this->date->format('l, M j, Y')}\n\n";
 
-        foreach ($this->tasks as $index => $task) {
-            // Add empty line between tasks if there are multiple tasks
+        // Check if there are no current tasks but there are removed tasks
+        if (count($this->currentTasks) === 0 && count($this->removedTasks) > 0) {
+            $message .= "You no longer have any tasks scheduled for today.\n";
+        }
+
+        // Current tasks
+        foreach ($this->currentTasks as $index => $task) {
             if ($index > 0) {
                 $message .= "\n";
             }
@@ -63,16 +65,16 @@ class TaskReminderNotification extends Notification implements ShouldQueue
 
             $fullAddress = strip_tags(str_replace('<br>', "\n", $task->project->full_address));
             $message .= "{$fullAddress}\n";
+        }
 
-            // Add short link at the bottom
-            // $message .= "\n🔗 https://dashboard.hive.contractors/‌"; // Added zero-width non-joiner
+        // Removed tasks - uncomment to show removed tasks in the notification
+        foreach ($this->removedTasks as $task) {
+            $message .= "\n(REMOVED):\n";
+            $message .= "{$task->title}\n";
+            $message .= "{$task->project->client->name}\n";
 
-            // // Show task duration if it's a multi-day task
-            // if ($task->start_date !== $task->end_date) {
-            //     $startDate = Carbon::parse($task->start_date);
-            //     $endDate = Carbon::parse($task->end_date);
-            //     $message .= "⏰ Duration: {$startDate->format('M j')} - {$endDate->format('M j')}\n";
-            // }
+            $fullAddress = strip_tags(str_replace('<br>', "\n", $task->project->full_address));
+            $message .= "{$fullAddress}\n";
         }
 
         return $message;
@@ -83,9 +85,9 @@ class TaskReminderNotification extends Notification implements ShouldQueue
      */
     public function failed($exception)
     {
-        Log::channel('task_reminder')->error("Task reminder notification failed", [
-            'task_count' => count($this->tasks),
-            'task_ids' => collect($this->tasks)->pluck('id')->toArray(),
+        Log::channel('task_reminder')->error("Task update notification failed", [
+            'current_tasks' => count($this->currentTasks),
+            'removed_tasks' => count($this->removedTasks),
             'date' => $this->date->format('Y-m-d'),
             'error' => $exception->getMessage()
         ]);

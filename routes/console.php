@@ -124,14 +124,20 @@ Schedule::call(function () {
     ->withoutOverlapping()
     ->onOneServer();
 
-// Daily user/team member task reminders
-Schedule::call(function () {
-    app(\App\Http\Controllers\TaskReminderController::class)->sendTomorrowReminders();
-})->dailyAt('19:00')
-  ->name('send-tomorrow-reminders')
-  ->withoutOverlapping()
-  ->onOneServer();
+// Daily user/team member task reminders for next day
+Schedule::command('tasks:send-tomorrow-reminders')
+    ->dailyAt('19:00')
+    ->name('send-tomorrow-reminders')
+    ->withoutOverlapping()
+    ->onOneServer();
 
+// Process all task notifications
+Schedule::command('tasks:process-notifications')
+    ->everyMinute()
+    ->name('process-task-notifications')
+    ->withoutOverlapping()
+    ->onOneServer();
+    
 // Search index maintenance
 Schedule::command('vendors:update-search-index')
     ->dailyAt('02:00')
@@ -144,3 +150,5 @@ Schedule::command('horizon:snapshot')
     ->everyFiveMinutes()
     ->name('horizon-snapshot')
     ->withoutOverlapping();
+
+
