@@ -9,7 +9,7 @@
         x-data="{ activeTab: 'details' }" 
         @reset-tabs.window="activeTab = 'details'"
     >
-        <div class="border-b border-gray-200">
+        <div class="border-b border-gray-200 mb-4">
             <nav class="-mb-px flex space-x-8">
                 <button
                     @click="activeTab = 'details'"
@@ -19,17 +19,18 @@
                     Details
                 </button>
                 @if($view_text['form_submit'] === 'edit' && $form->task)
+                    <!-- Replace the "Dependencies" tab button with "Related Tasks" -->
                     <button
                         @click="activeTab = 'dependencies'"
                         :class="activeTab === 'dependencies' ? 'border-accent text-accent' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
                         class="py-2 px-1 border-b-2 font-medium text-sm flex items-center gap-2"
                     >
-                        Dependencies
-                        @if($form->task->predecessorDependencies->count() > 0)
-                            <flux:badge size="sm" color="blue">
-                                {{ $form->task->predecessorDependencies->count() }}
-                            </flux:badge>
-                        @endif
+                        Related Tasks
+
+                        <!-- Use red badge if any dependency is blocking, blue otherwise -->
+                        <flux:badge size="sm" color="{{ $this->hasBlockingDependency ? 'red' : 'blue' }}">
+                            {{ $form->task->total_dependencies_count }}
+                        </flux:badge>
                     </button>
                 @endif
             </nav>
@@ -130,100 +131,18 @@
             </div>
         </div>
 
-        <!-- Dependencies Panel -->
+        <!-- Updated Dependencies Panel (now called Related Tasks) -->
         @if($view_text['form_submit'] === 'edit' && $form->task)
             <div x-show="activeTab === 'dependencies'">
                 <div class="relative">
-                    <div class="space-y-4">
-                        <!-- Current Dependencies -->
+                    <div class="space-y-6">
+                        <!-- Tasks This Depends On (Prerequisites) -->
                         @if($form->task->predecessorDependencies->count() > 0)
                             <div class="space-y-3">
-                                <flux:subheading>Current Prerequisites</flux:subheading>
+                                <flux:subheading>Tasks This Depends On</flux:subheading>
                                 <div class="space-y-2">
                                     @foreach($form->task->predecessorDependencies as $dependency)
-                                        @php
-                                            $isBlocking = $dependency->isBlocking();
-                                        @endphp
-                                        <div class="relative bg-white/50 border transition-all duration-200
-                                            {{ $isBlocking ? 'border-red-500 border-2 border-dashed bg-red-50/50' : 'border-opacity-30 border-accent bg-accent/30' }}
-                                            rounded flex items-center shadow select-none p-3
-                                            {{ $isBlocking ? 'hover:border-red-600 hover:bg-red-50' : 'hover:bg-accent/10' }} hover:shadow-md group">
-
-                                            <!-- Task content -->
-                                            <div class="flex-1 flex items-center justify-between">
-                                                <div class="flex flex-col gap-1 flex-1 min-w-0">
-                                                    <span class="font-medium leading-tight text-sm whitespace-nowrap overflow-hidden text-ellipsis
-                                                        {{ $isBlocking ? 'text-red-800' : '' }}">
-                                                        {{ $dependency->predecessor->title }}
-                                                    </span>
-
-                                                    <div class="text-xs {{ $isBlocking ? 'text-red-700 font-medium' : 'text-gray-600' }}">
-                                                        {{ ucfirst(str_replace('_', ' to ', $dependency->type)) }}
-                                                        @if($dependency->lag_days != 0)
-                                                            • {{ $dependency->lag_days > 0 ? '+' : '' }}{{ $dependency->lag_days }} days
-                                                        @endif
-                                                        @if($isBlocking)
-                                                            <span class="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
-                                                                Blocking
-                                                            </span>
-                                                        @endif
-                                                    </div>
-
-                                                    @if($dependency->predecessor->start_date && $dependency->predecessor->end_date)
-                                                        <div class="text-xs {{ $isBlocking ? 'text-red-600' : 'text-gray-500' }}">
-                                                            {{ $dependency->predecessor->start_date->format('M j') }} - {{ $dependency->predecessor->end_date->format('M j') }}
-                                                        </div>
-                                                    @endif
-
-                                                    <!-- Users and vendor info like in gantt -->
-                                                    <div class="flex items-center gap-1 min-h-0 overflow-hidden">
-                                                        @if($dependency->predecessor->users->count() > 0)
-                                                            @if($dependency->predecessor->users->count() === 1)
-                                                                @foreach($dependency->predecessor->users as $user)
-                                                                    <flux:avatar
-                                                                        size="xs"
-                                                                        name="{{ $user->full_name }}"
-                                                                        color="auto"
-                                                                        color:seed="{{ $user->id }}"
-                                                                    />
-                                                                @endforeach
-                                                            @else
-                                                                <flux:avatar.group>
-                                                                    @foreach($dependency->predecessor->users as $user)
-                                                                        <flux:avatar
-                                                                            size="xs"
-                                                                            name="{{ $user->full_name }}"
-                                                                            color="auto"
-                                                                            color:seed="{{ $user->id }}"
-                                                                        />
-                                                                    @endforeach
-                                                                </flux:avatar.group>
-                                                            @endif
-                                                        @endif
-                                                        @if($dependency->predecessor->vendor)
-                                                            <flux:avatar
-                                                                size="xs"
-                                                                name="{{ $dependency->predecessor->vendor->name }}"
-                                                                color="auto"
-                                                                color:seed="{{ $dependency->predecessor->vendor->id }}"
-                                                            />
-                                                            <flux:text size="xs" class="min-w-0 whitespace-nowrap truncate">{{ $dependency->predecessor->vendor->name }}</flux:text>
-                                                        @endif
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            <!-- Right action button (like resize handle position) -->
-                                            <div class="ml-3 opacity-30 group-hover:opacity-100 transition-all duration-200">
-                                                <flux:button
-                                                    wire:click="removeDependency({{ $dependency->id }})"
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    icon="trash"
-                                                    class="{{ $isBlocking ? 'text-red-700 hover:text-red-900' : 'text-red-600 hover:text-red-800' }}"
-                                                />
-                                            </div>
-                                        </div>
+                                        <x-task-dependency-card :dependency="$dependency" mode="predecessor" />
                                     @endforeach
                                 </div>
                             </div>
@@ -231,7 +150,23 @@
                             <flux:separator />
                         @endif
 
-                        <!-- Add New Dependency -->
+                        <!-- Tasks That Depend On This (Successors) -->
+                        @if($form->task->successorDependencies->count() > 0)
+                            <div class="space-y-3">
+                                <flux:subheading>Tasks That Depend On This</flux:subheading>
+                                <div class="space-y-2">
+                                    @foreach($form->task->successorDependencies as $dependency)
+                                        <x-task-dependency-card :dependency="$dependency" mode="successor" />
+                                    @endforeach
+                                </div>
+                            </div>
+                        @else
+                            <div class="mt-4 text-sm text-gray-500">No tasks depend on this task.</div>
+                        @endif
+
+                        <flux:separator />
+
+                        <!-- Add New Dependency Section - Keep this unchanged -->
                         <div class="space-y-4">
                             <flux:subheading>Add New Dependency</flux:subheading>
 
@@ -266,8 +201,9 @@
                                                     <li>• <strong>Start to Finish:</strong> This task finishes when prerequisite starts</li>
                                                 </ul>
                                             </flux:tooltip.content>
-                                        </flux:tooltip>
-                                    </flux:label>
+                                        </flux:tooltip> <!-- FIXED: Close tooltip tag properly -->
+                                    </flux:label> <!-- Then close label tag -->
+
                                     <flux:select wire:model="dependencyType">
                                         <flux:select.option value="finish_to_start">Finish to Start</flux:select.option>
                                         <flux:select.option value="start_to_start">Start to Start</flux:select.option>
@@ -290,12 +226,11 @@
                     </div>
 
                     <div class="mt-6">
-                        {{-- STICKY FOOTER --}}
+                        <!-- STICKY FOOTER -->
                         <div class="sticky bottom-0 flex justify-end space-x-2">
                             <flux:button
                                 wire:click="addDependency"
                                 variant="primary"
-                                {{-- :disabled="!$selectedPredecessorId" --}}
                             >
                                 Add Dependency
                             </flux:button>

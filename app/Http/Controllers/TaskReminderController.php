@@ -313,12 +313,13 @@ class TaskReminderController extends Controller
     {
         $tomorrow = Carbon::tomorrow();
 
-        // Get all tasks that have tomorrow as one of their days
+        // More efficient query with our updated implementation
         $tasks = Task::where(function ($query) use ($tomorrow) {
             $query->whereDate('start_date', '<=', $tomorrow)
                   ->whereDate('end_date', '>=', $tomorrow);
         })
         ->whereNotNull('user_ids')
+        ->whereRaw('JSON_LENGTH(user_ids) > 0')  // Ensure there are actually user IDs
         ->with(['project.client'])
         ->get();
 
@@ -336,10 +337,7 @@ class TaskReminderController extends Controller
                 continue;
             }
 
-            // Use the users attribute (which calls getUsersAttribute)
-            $taskUsers = $task->users;
-
-            foreach ($taskUsers as $user) {
+            foreach ($task->users as $user) {
                 if (!$user->cell_phone) {
                     continue;
                 }

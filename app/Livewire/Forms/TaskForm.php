@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Forms;
 
+use App\Models\User;
 use App\Models\Task;
 use Livewire\Attributes\Validate;
 use Livewire\Form;
@@ -43,7 +44,7 @@ class TaskForm extends Form
     public function setTask(Task $task)
     {
         $this->task = $task;
-
+        
         // Load existing task data
         $this->title = $task->title;
         $this->type = $task->type;
@@ -52,7 +53,7 @@ class TaskForm extends Form
         $this->user_ids = $task->user_ids ?? [];
         $this->notes = $task->notes;
         $this->parent_task_id = $task->parent_task_id;
-        $this->order = $task->order; // Add this line
+        $this->order = $task->order;
 
         // Set dates
         if ($task->start_date && $task->end_date) {
@@ -68,8 +69,8 @@ class TaskForm extends Form
             $this->sunday = $task->options->sunday ?? false;
         }
 
-        // Load dependencies (they'll be accessible via $task->predecessorDependencies)
-        $task->load(['predecessorDependencies.predecessor', 'successorDependencies.successor']);
+        // Load dependencies without eager loading users
+        $this->refreshTaskWithDependencies($task->id);
     }
 
     public function update()
@@ -167,5 +168,18 @@ class TaskForm extends Form
         ]);
 
         return $task;
+    }
+
+    /**
+     * Refresh task with properly loaded dependencies
+     */
+    public function refreshTaskWithDependencies($taskId)
+    {
+        // Load the task with all necessary relations in a single query
+        $this->task = Task::with([
+            'predecessorDependencies.predecessor.vendor',
+            'successorDependencies.successor.vendor',
+        ])->withCount(['predecessorDependencies', 'successorDependencies'])
+        ->find($taskId);
     }
 }

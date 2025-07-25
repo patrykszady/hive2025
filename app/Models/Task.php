@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Task;
+use App\Models\User;
 use App\Models\Traits\Sortable;
 use App\Observers\TaskObserver;
 use Carbon\Carbon;
@@ -135,11 +136,6 @@ class Task extends Model
                    ->where('id', '!=', $this->id);
     }
 
-    public function getUsersAttribute()
-    {
-        return User::whereIn('id', $this->user_ids ?? [])->get();
-    }
-
     protected function vendorId(): Attribute
     {
         return Attribute::make(
@@ -176,59 +172,98 @@ class Task extends Model
     }
 
     // Check if this task can start based on its dependencies
-    public function canStart(): bool
-    {
-        foreach ($this->predecessorTasks as $predecessor) {
-            $dependencyType = $predecessor->pivot->type;
+    // public function canStart(): bool
+    // {
+    //     foreach ($this->predecessorTasks as $predecessor) {
+    //         $dependencyType = $predecessor->pivot->type;
 
-            switch ($dependencyType) {
-                case 'finish_to_start':
-                    if (!$predecessor->end_date || $predecessor->progress < 100) {
-                        return false;
-                    }
-                    break;
-                case 'start_to_start':
-                    if (!$predecessor->start_date) {
-                        return false;
-                    }
-                    break;
-                // Add other dependency type checks as needed
-            }
-        }
+    //         switch ($dependencyType) {
+    //             case 'finish_to_start':
+    //                 if (!$predecessor->end_date || $predecessor->progress < 100) {
+    //                     return false;
+    //                 }
+    //                 break;
+    //             case 'start_to_start':
+    //                 if (!$predecessor->start_date) {
+    //                     return false;
+    //                 }
+    //                 break;
+    //             // Add other dependency type checks as needed
+    //         }
+    //     }
 
-        return true;
-    }
+    //     return true;
+    // }
 
     // Calculate the earliest possible start date based on dependencies
-    public function getEarliestStartDate(): ?Carbon
+    // public function getEarliestStartDate(): ?Carbon
+    // {
+    //     $earliestDate = null;
+
+    //     foreach ($this->predecessorTasks as $predecessor) {
+    //         $dependencyType = $predecessor->pivot->type;
+    //         $lagDays = $predecessor->pivot->lag_days;
+
+    //         $calculatedDate = null;
+
+    //         switch ($dependencyType) {
+    //             case 'finish_to_start':
+    //                 if ($predecessor->end_date) {
+    //                     $calculatedDate = $predecessor->end_date->copy()->addDays($lagDays + 1);
+    //                 }
+    //                 break;
+    //             case 'start_to_start':
+    //                 if ($predecessor->start_date) {
+    //                     $calculatedDate = $predecessor->start_date->copy()->addDays($lagDays);
+    //                 }
+    //                 break;
+    //             // Add other dependency types
+    //         }
+
+    //         if ($calculatedDate && (!$earliestDate || $calculatedDate->gt($earliestDate))) {
+    //             $earliestDate = $calculatedDate;
+    //         }
+    //     }
+
+    //     return $earliestDate;
+    // }
+
+    /**
+     * Get users assigned to this task using the JSON user_ids column
+     * This is an accessor that returns a collection directly
+     */
+    public function getUsersAttribute()
     {
-        $earliestDate = null;
-
-        foreach ($this->predecessorTasks as $predecessor) {
-            $dependencyType = $predecessor->pivot->type;
-            $lagDays = $predecessor->pivot->lag_days;
-
-            $calculatedDate = null;
-
-            switch ($dependencyType) {
-                case 'finish_to_start':
-                    if ($predecessor->end_date) {
-                        $calculatedDate = $predecessor->end_date->copy()->addDays($lagDays + 1);
-                    }
-                    break;
-                case 'start_to_start':
-                    if ($predecessor->start_date) {
-                        $calculatedDate = $predecessor->start_date->copy()->addDays($lagDays);
-                    }
-                    break;
-                // Add other dependency types
-            }
-
-            if ($calculatedDate && (!$earliestDate || $calculatedDate->gt($earliestDate))) {
-                $earliestDate = $calculatedDate;
-            }
+        // If we've already loaded the users, return that
+        if ($this->relationLoaded('users')) {
+            return $this->getRelation('users');
         }
+        
+        // Otherwise query them directly
+        $users = User::whereIn('id', $this->user_ids ?? [])->get();
+        
+        // Store for later access
+        $this->setRelation('users', $users);
+        
+        return $users;
+    }
 
-        return $earliestDate;
+    /**
+     * Get total number of dependencies (both predecessor and successor)
+     */
+    public function getTotalDependenciesCountAttribute()
+    {
+        // If counts were loaded via loadCount()
+        if (isset($this->predecessor_dependencies_count) && isset($this->successor_dependencies_count)) {
+            return $this->predecessor_dependencies_count + $this->successor_dependencies_count;
+        }
+        
+        // If relationships were already loaded
+        if ($this->relationLoaded('predecessorDependencies') && $this->relationLoaded('successorDependencies')) {
+            return $this->predecessorDependencies->count() + $this->successorDependencies->count();
+        }
+        
+        // Fallback - least efficient, makes separate queries
+        return $this->predecessorDependencies()->count() + $this->successorDependencies()->count();
     }
 }

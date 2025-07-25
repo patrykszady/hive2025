@@ -28,8 +28,6 @@ class TaskCreate extends Component
     public $dependencyType = 'finish_to_start';
     public $lagDays = 0;
 
-    public $activeTab = 'details';
-
     public $view_text = [
         'card_title' => 'Create Task',
         'button_text' => 'Create',
@@ -70,6 +68,85 @@ class TaskCreate extends Component
     }
 
     /**
+     * Reset form and dependency fields to initial state
+     */
+    private function resetFormFields()
+    {
+        $this->form->reset();
+        $this->resetErrorBag();
+        $this->selectedPredecessorId = null;
+        $this->dependencyType = 'finish_to_start';
+        $this->lagDays = 0;
+    }
+
+    /**
+     * Set the view text configuration based on mode
+     */
+    private function setupViewText(string $mode)
+    {
+        $config = [
+            'create' => [
+                'card_title' => 'Create Task',
+                'button_text' => 'Create',
+                'form_submit' => 'save',
+            ],
+            'edit' => [
+                'card_title' => 'Edit Task',
+                'button_text' => 'Update',
+                'form_submit' => 'edit',
+            ],
+            'duplicate' => [
+                'card_title' => 'Duplicate Task',
+                'button_text' => 'Create',
+                'form_submit' => 'save',
+            ],
+        ];
+
+        $this->view_text = $config[$mode] ?? $config['create'];
+    }
+
+    /**
+     * Handle common task operations (show modal, dispatch events)
+     */
+    private function handleTaskOperation(string $operation, ?Task $task = null)
+    {
+        if ($operation === 'start' && $task) {
+            $this->dispatch('task-operation-started', taskId: $task->id)->to(GanttIndex::class);
+        } elseif ($operation === 'complete') {
+            $this->refreshPlannerComponents();
+            $this->modal('task_create_form_modal')->close();
+            $this->dispatch('task-operation-completed')->to(GanttIndex::class);
+        }
+    }
+
+    /**
+     * Show a standardized toast notification
+     */
+    private function showNotification(string $action)
+    {
+        $messages = [
+            'created' => 'Task Created',
+            'updated' => 'Task Updated',
+            'removed' => 'Task Removed',
+            'dependency_added' => 'Dependency Added',
+            'dependency_removed' => 'Dependency Removed',
+        ];
+
+        $descriptions = [
+            'dependency_added' => 'Task dependency has been created.',
+            'dependency_removed' => 'Task dependency has been removed.',
+        ];
+
+        Flux::toast(
+            duration: 3000,
+            position: 'top right',
+            variant: 'success',
+            heading: $messages[$action] ?? 'Action Completed',
+            text: $descriptions[$action] ?? '',
+        );
+    }
+
+    /**
      * Helper method to refresh all planner components
      */
     private function refreshPlannerComponents()
@@ -78,23 +155,36 @@ class TaskCreate extends Component
         $this->dispatch('refreshComponent')->to(CardsIndex::class);
     }
 
+    /**
+     * Copy task data for duplication
+     */
+    private function copyTaskData(Task $task)
+    {
+        $this->form->title = $task->title;
+        $this->form->type = $task->type;
+        $this->form->project_id = $task->project_id;
+        $this->form->vendor_id = $task->vendor_id;
+        $this->form->user_ids = $task->user_ids;
+        $this->form->notes = $task->notes;
+        
+        // Set up parent-child relationship
+        if ($task->parent_task_id) {
+            // If current task is already a child, make duplicate a sibling
+            $this->form->parent_task_id = $task->parent_task_id;
+        } else {
+            // If current task is standalone/parent, make duplicate its child
+            $this->form->parent_task_id = $task->id;
+        }
+        
+        // Leave dates empty as requested
+        $this->form->dates = [];
+    }
+
     public function addTask($project_id = null, $date = null, $vendor_id = null, $user_ids = [])
     {
-        $this->activeTab = 'details'; // Reset to first tab
-        $this->form->reset();
-        $this->resetErrorBag();
-
-        // Reset dependency fields
-        $this->selectedPredecessorId = null;
-        $this->dependencyType = 'finish_to_start';
-        $this->lagDays = 0;
-
-        $this->view_text = [
-            'card_title' => 'Create Task',
-            'button_text' => 'Create',
-            'form_submit' => 'save',
-        ];
-
+        $this->resetFormFields();
+        $this->setupViewText('create');
+        
         $this->form->dates = $date ? [Carbon::parse($date)->format('Y-m-d')] : [];
 
         // Set the appropriate fields based on what was passed
@@ -115,27 +205,14 @@ class TaskCreate extends Component
 
     public function editTask(Task $task)
     {
-        // Dispatch to disable interactions on the gantt
-        $this->dispatch('task-operation-started', taskId: $task->id)->to(GanttIndex::class);
-
-        $this->activeTab = 'details';
-        $this->resetErrorBag();
-
-        // Reset dependency fields
-        $this->selectedPredecessorId = null;
-        $this->dependencyType = 'finish_to_start';
-        $this->lagDays = 0;
-
-        $this->view_text = [
-            'card_title' => 'Edit Task',
-            'button_text' => 'Update',
-            'form_submit' => 'edit',
-        ];
-
+        $this->handleTaskOperation('start', $task);
+        $this->resetFormFields();
+        $this->setupViewText('edit');
+        
+        // Simply use the task as-is without reloading
         $this->form->setTask($task);
+        
         $this->modal('task_create_form_modal')->show();
-
-        // Emit event that modal opened successfully
         $this->dispatch('task-modal-opened');
     }
 
@@ -143,51 +220,16 @@ class TaskCreate extends Component
     {
         // Get the current task data
         $currentTask = $this->form->task;
-
-        // Close the current modal first
         $this->modal('task_create_form_modal')->close();
-
-        // Reset the form
-        $this->form->reset();
-        $this->resetErrorBag();
-
-        // Set up for creating a new task
-        $this->view_text = [
-            'card_title' => 'Duplicate Task',
-            'button_text' => 'Create',
-            'form_submit' => 'save',
-        ];
-
-        // Copy all the data except dates
-        $this->form->title = $currentTask->title;
-        $this->form->type = $currentTask->type;
-        $this->form->project_id = $currentTask->project_id;
-        $this->form->vendor_id = $currentTask->vendor_id;
-        $this->form->user_ids = $currentTask->user_ids;
-        $this->form->notes = $currentTask->notes;
-
-        // // Copy weekend options if they exist
-        // if ($currentTask->options) {
-        //     $this->form->saturday = $currentTask->options->saturday ?? false;
-        //     $this->form->sunday = $currentTask->options->sunday ?? false;
-        // }
-
-        // Set up parent-child relationship
-        if ($currentTask->parent_task_id) {
-            // If current task is already a child, make duplicate a sibling
-            $this->form->parent_task_id = $currentTask->parent_task_id;
-        } else {
-            // If current task is standalone/parent, make duplicate its child
-            $this->form->parent_task_id = $currentTask->id;
-        }
-
-        // Leave dates empty as requested
-        $this->form->dates = [];
-
+        
+        $this->resetFormFields();
+        $this->setupViewText('duplicate');
+        
+        // Copy relevant data from current task
+        $this->copyTaskData($currentTask);
+        
         // Open the modal again with the duplicated data
         $this->modal('task_create_form_modal')->show();
-
-        // Emit event that modal opened
         $this->dispatch('task-modal-opened');
     }
 
@@ -195,77 +237,38 @@ class TaskCreate extends Component
     {
         $task = $this->form->task;
         $task->delete();
-
-        $this->refreshPlannerComponents();
-        $this->modal('task_create_form_modal')->close();
-
-        // Dispatch to re-enable interactions
-        $this->dispatch('task-operation-completed')->to(GanttIndex::class);
-
-        Flux::toast(
-            duration: 3000,
-            position: 'top right',
-            variant: 'success',
-            heading: 'Task Removed',
-            text: '',
-        );
+        
+        $this->handleTaskOperation('complete');
+        $this->showNotification('removed');
     }
 
     public function edit()
     {
         $this->authorize('update', $this->form->task);
-
         $result = $this->form->update();
 
         if ($result === false) {
-            \Log::info('Form update failed');
-
             // The form's errors need to be copied to the component's error bag
             $formErrors = $this->form->getErrorBag();
-
-            \Log::info('Form error bag contents: ', $formErrors->messages());
-
+            
             // Add each form error to the component's error bag with 'form.' prefix
             foreach ($formErrors->messages() as $field => $messages) {
                 foreach ($messages as $message) {
                     $this->addError("form.{$field}", $message);
-                    \Log::info("Added error: form.{$field} => {$message}");
                 }
             }
-
             return; // Don't close modal
         }
 
-        $this->refreshPlannerComponents();
-        $this->modal('task_create_form_modal')->close();
-
-        // Dispatch to re-enable interactions
-        $this->dispatch('task-operation-completed')->to(GanttIndex::class);
-
-        Flux::toast(
-            duration: 3000,
-            position: 'top right',
-            variant: 'success',
-            heading: 'Task Updated',
-            text: '',
-        );
+        $this->handleTaskOperation('complete');
+        $this->showNotification('updated');
     }
 
     public function save()
     {
         $this->form->store();
-        $this->refreshPlannerComponents();
-        $this->modal('task_create_form_modal')->close();
-
-        $this->dispatch('task-operation-completed')->to(GanttIndex::class);
-
-        Flux::toast(
-            duration: 3000,
-            position: 'top right',
-            variant: 'success',
-            heading: 'Task Created',
-            text: '',
-        );
+        $this->handleTaskOperation('complete');
+        $this->showNotification('created');
     }
 
     public function addDependency()
@@ -300,43 +303,38 @@ class TaskCreate extends Component
             return;
         }
 
+        // Create the dependency
         TaskDependency::create([
             'predecessor_task_id' => $this->selectedPredecessorId,
             'successor_task_id' => $this->form->task->id,
             'type' => $this->dependencyType,
             'lag_days' => $this->lagDays,
         ]);
-
-        // Reset form
+        
+        // Reset form fields
         $this->selectedPredecessorId = null;
         $this->lagDays = 0;
 
-        // Refresh the task
-        $this->form->task->refresh();
-
-        // Add this line to refresh the Gantt chart
+        // Refresh task data with eager loading
+        $this->form->refreshTaskWithDependencies($this->form->task->id);
+        
+        // Refresh planner components
         $this->refreshPlannerComponents();
-
-        Flux::toast(
-            variant: 'success',
-            heading: 'Dependency Added',
-            text: 'Task dependency has been created.'
-        );
+        
+        $this->showNotification('dependency_added');
     }
 
     public function removeDependency($dependencyId)
     {
         TaskDependency::find($dependencyId)->delete();
-        $this->form->task->refresh();
-
-        // Add this line to refresh the Gantt chart
+        
+        // Refresh task data with eager loading
+        $this->form->refreshTaskWithDependencies($this->form->task->id);
+        
+        // Refresh planner components
         $this->refreshPlannerComponents();
-
-        Flux::toast(
-            variant: 'success',
-            heading: 'Dependency Removed',
-            text: 'Task dependency has been removed.'
-        );
+        
+        $this->showNotification('dependency_removed');
     }
 
     #[Computed]
@@ -358,6 +356,48 @@ class TaskCreate extends Component
                 ->whereNotNull('end_date')
                 ->orderBy('start_date')
                 ->get();
+    }
+
+    /**
+     * View a dependent task by opening its edit modal
+     */
+    public function viewDependentTask($taskId)
+    {
+        // Close current task modal
+        $this->modal('task_create_form_modal')->close();
+        
+        // Get fresh task data with no query cache
+        $task = Task::withoutGlobalScopes()->findOrFail($taskId);
+    
+        // Dispatch the editTask event to open the task
+        $this->dispatch('editTask', task: $taskId)->to('tasks.task-create');
+    }
+
+    /**
+     * Check if any dependency is blocking
+     */
+    #[Computed]
+    public function hasBlockingDependency()
+    {
+        if (!isset($this->form->task)) {
+            return false;
+        }
+        
+        // Check predecessor dependencies first
+        foreach($this->form->task->predecessorDependencies as $dependency) {
+            if($dependency->isBlocking()) {
+                return true;
+            }
+        }
+        
+        // Then check successor dependencies
+        foreach($this->form->task->successorDependencies as $dependency) {
+            if($dependency->isBlocking()) {
+                return true;
+            }
+        }
+        
+        return false;
     }
 
     public function render()

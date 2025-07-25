@@ -25,6 +25,7 @@ Schedule::call(function () {
     ->everyTenMinutes()
     ->between('7:00', '22:00')
     ->name('fetch-auto-receipts')
+    ->environments(['production'])
     ->withoutOverlapping()
     ->onOneServer();
 
@@ -33,6 +34,7 @@ Schedule::call(function () {
     })->hourly()
     ->between('7:00', '20:00')
     ->name('fetch-insurance-mailbox')
+    ->environments(['production'])
     ->withoutOverlapping()
     ->onOneServer();
 
@@ -41,6 +43,7 @@ Schedule::call(function () {
     app(\App\Http\Controllers\TransactionController::class)->plaid_item_status();
 })->hourly()
   ->name('plaid-item-status')
+  ->environments(['production'])
   ->withoutOverlapping()
   ->onOneServer();
 
@@ -48,6 +51,7 @@ Schedule::call(function () {
     app(\App\Http\Controllers\TransactionController::class)->plaid_transactions_sync();
 })->hourly()
   ->name('plaid-transactions-sync')
+  ->environments(['production'])
   ->withoutOverlapping()
   ->onOneServer();
 
@@ -128,6 +132,7 @@ Schedule::call(function () {
 Schedule::command('tasks:send-tomorrow-reminders')
     ->dailyAt('19:00')
     ->name('send-tomorrow-reminders')
+    ->environments(['production'])
     ->withoutOverlapping()
     ->onOneServer();
 
@@ -135,6 +140,7 @@ Schedule::command('tasks:send-tomorrow-reminders')
 Schedule::command('tasks:process-notifications')
     ->everyMinute()
     ->name('process-task-notifications')
+    ->environments(['production'])
     ->withoutOverlapping()
     ->onOneServer();
     
