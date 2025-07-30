@@ -3,11 +3,11 @@
 namespace App\Livewire\Vendors;
 
 use App\Livewire\Forms\VendorForm;
-use App\Services\GooglePlacesService;
-use App\Traits\HandlesAddresses;
-
 use App\Models\User;
 use App\Models\Vendor;
+
+use App\Services\GooglePlacesService;
+use App\Traits\HandlesAddresses;
 
 use Flux;
 
@@ -28,20 +28,15 @@ class VendorCreate extends Component
     ];
 
     public Vendor $vendor;
-    public $hasSearched = false;
-    public $business_name_text = null;
+    public User $user;
 
-    public $user = null;
+    public $business_name_text = null;
 
     public $vendor_add_type = null;
 
     public $via_vendor = null;
 
-    public $address_isset = null;
-
-    public $team_member = '';
-
-    public $user_vendors = null;
+    // public $user_vendors = null;
 
     public $vendor_id = null;
 
@@ -77,80 +72,14 @@ class VendorCreate extends Component
         ];
     }
 
-    public function mount()
-    {
-        if (isset($this->vendor->id)) {
-            $this->vendor = $this->vendor;
-            $this->vendor_add_type = $this->vendor_id;
-            // $this->view_text = [
-            //     'card_title' => 'Update Vendor',
-            //     'button_text' => 'Update Vendor',
-            //     'form_submit' => 'update',
-            // ];
-        } else {
-            $this->vendor = Vendor::make();
-            $this->vendor_add_type = 'NEW';
-            // $this->view_text = [
-            //     'card_title' => 'Create Vendor',
-            //     'button_text' => 'Create Vendor',
-            //     'form_submit' => 'store',
-            // ];
-        }
-    }
-
-    // public function updated($field)
-    // {
-    //     $this->validateOnly($field);
-
-    //     if ($field == 'vendor.business_type') {
-    //         if (in_array($this->vendor->business_type, ['Sub', '1099', 'DBA'])) {
-    //             if (isset($this->user->id)) {
-    //                 $this->address_isset = true;
-    //             }
-    //             // $this->user = $this->user;
-    //             // }elseif($this->vendor->business_type == 'Retail'){
-    //             //     $this->user = NULL;
-    //         } elseif ($this->vendor->business_type == 'Retail') {
-    //             $this->user = null;
-    //             $this->address_isset = null;
-    //             $this->user_vendors = null;
-    //         } else {
-    //             $this->address_isset = null;
-    //         }
-    //     }
-    // }
-
-    public function viaVendor(User $user, $business_name)
-    {
-        $this->user = $user;
-        $this->form->business_name = $business_name;
-        $this->business_name_text = $business_name;
-        $this->form->business_type = '1099';
-
-        //similar to $this->userVendor($user_info);
-        $this->form->user_hourly_rate = 0;
-        $this->form->user_role = 1;
-
-        $this->user_vendors = $this->user->vendors()->unique()->get();
-        $this->address_isset = true;
-
-        $this->via_vendor = true;
-
-        $this->modal('vendors_form_modal')->show();
-    }
-
     public function editVendor(Vendor $vendor)
     {
-        //5-18-2023 to reset modal if was clicked away and not CANCEL was clicked...whyyyyy
-        $this->vendor = $vendor;
-
-        $this->form->setVendor($this->vendor);
-        $this->user = $this->vendor->users()->first();
+        $this->form->setVendor($vendor);
+        $this->user = $vendor->users()->first();
         $this->business_name_text = $vendor->business_name;
         $this->open_vendor_form = true;
-        if ($this->vendor->business_type != 'Retail') {
-            $this->address_isset = true;
-        }
+
+        $this->vendor_add_type = $vendor->id;
 
         $this->view_text = [
             'card_title' => 'Update Vendor',
@@ -163,38 +92,15 @@ class VendorCreate extends Component
 
     public function updatedBusinessNameText($value)
     {
-        $trimmedValue = trim($value);
-
         // Always validate (nullable allows empty values)
         $this->validateOnly('business_name_text');
-
-        // Reset everything if empty or validation failed
-        if (strlen($trimmedValue) === 0) {
-            $this->hasSearched = false;
-            $this->existing_vendors = collect();
-            $this->new_vendors_for_company = collect();
-            $this->form->reset();
-            return;
-        }
-
-        // Check if there are validation errors (length < 3)
-        if ($this->getErrorBag()->has('business_name_text')) {
-            $this->hasSearched = false;
-            $this->existing_vendors = collect();
-            $this->new_vendors_for_company = collect();
-            $this->form->reset();
-            return;
-        }
-
-        // If validation passes, mark that we've performed a search
-        $this->hasSearched = true;
 
         $existing_vendor_ids = auth()->user()->vendor->vendors->pluck('id')->toArray();
 
         $this->existing_vendors =
             Vendor::withoutGlobalScopes()
                 ->orderBy('business_name', 'ASC')
-                ->where('business_name', 'like', "%{$trimmedValue}%")
+                ->where('business_name', 'like', "%{$value}%")
                 ->whereIn('id', $existing_vendor_ids)
                 ->distinct()
                 ->get();
@@ -202,22 +108,38 @@ class VendorCreate extends Component
         $this->new_vendors_for_company =
             Vendor::withoutGlobalScopes()
                 ->orderBy('business_name', 'ASC')
-                ->where('business_name', 'like', "%{$trimmedValue}%")
+                ->where('business_name', 'like', "%{$value}%")
                 ->whereNotIn('id', $existing_vendor_ids)
                 ->distinct()
                 ->get();
 
         $this->form->reset();
-        $this->form->business_name = $trimmedValue;
+        $this->form->business_name = $value;
         $this->open_vendor_form = false;
+    }
+
+    public function viaVendor(User $user, $business_name)
+    {
+        $this->user = $user;
+        $this->form->business_name = $business_name;
+        $this->business_name_text = $business_name;
+        $this->form->business_type = '1099';
+
+        //similar to $this->userVendor($user_info);
+        $this->form->user_hourly_rate = 0;
+        $this->form->user_role = 1;
+
+        // $this->user_vendors = $this->user->vendors()->unique()->get();
+
+        $this->via_vendor = true;
+
+        $this->modal('vendors_form_modal')->show();
     }
 
     public function newVendor()
     {
+        $this->vendor_add_type = 'NEW';
         $this->modal('vendors_form_modal')->show();
-        // $this->vendor->business_name = $this->business_name_text;
-
-        //remove existing and add vendor and top textbox AND open rest of form
     }
 
     //add Existing Vendor to auth->user->vendor (Company)
@@ -249,8 +171,7 @@ class VendorCreate extends Component
         $this->form->user_hourly_rate = $user_info['hourly_rate'];
         $this->form->user_role = $user_info['role'];
 
-        $this->user_vendors = $this->user->vendors()->get()->unique('id');
-        $this->address_isset = true;
+        // $this->user_vendors = $this->user->vendors()->get()->unique('id');
     }
 
     public function edit()
@@ -273,14 +194,14 @@ class VendorCreate extends Component
     public function store()
     {
         if (isset($this->vendor->id)) {
-            //attach vendor to auth->user->vendor (logged in/working vendor)
+            //attach vendor to auth->user->vendor (logged in/working vendor/Company)
             $vendor = $this->vendor;
             auth()->user()->vendor->vendors()->attach($vendor);
+        //NEW VENDOR
         } else {
             $vendor = $this->form->store();
-            //NEW VENDOR
 
-            //Add existing Vendor to the logged-in-vendor || add $vendor to currently logged in vendor
+            //Add existing Vendor to the logged-in-vendor/company || add $vendor to currently logged in vendor
             auth()->user()->vendor->vendors()->attach($vendor->id);
 
             if ($vendor->business_type != 'Retail') {
@@ -305,9 +226,8 @@ class VendorCreate extends Component
         //reset component
         $this->modal('vendors_form_modal')->close();
         $this->dispatch('refreshComponent')->self();
-
         $this->form->reset();
-        // $this->dispatch('via', 'vendor')->to('users.users-form');
+
         $this->dispatch('refreshComponent')->to('vendors.vendors-index');
 
         // route: 'vendors/' . $vendor->id
@@ -323,8 +243,6 @@ class VendorCreate extends Component
 
     public function render()
     {
-        return view('livewire.vendors.form', [
-            'view_text' => $this->view_text,
-        ]);
+        return view('livewire.vendors.form');
     }
 }

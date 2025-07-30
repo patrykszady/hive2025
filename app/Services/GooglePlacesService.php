@@ -111,4 +111,27 @@ class GooglePlacesService
             return [];
         }
     }
+
+    /**
+     * Generate a map URL for an address
+     * 
+     * @param string $address Street address
+     * @param string $city City
+     * @param string $state State
+     * @param string $zipCode Postal/ZIP code
+     * @param string $provider Map provider (google or apple)
+     * @return string URL to the map
+     */
+    public function getMapUrl($address, $city, $state, $zipCode, $provider = 'google')
+    {
+        // Format the address components into a query string
+        $query = urlencode("{$address}, {$city}, {$state} {$zipCode}");
+        
+        // Generate URL based on the provider
+        if ($provider === 'apple') {
+            return "https://maps.apple.com/?q={$query}";
+        } else {
+            return "https://www.google.com/maps/search/?api=1&query={$query}";
+        }
+    }
 }

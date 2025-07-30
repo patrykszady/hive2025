@@ -5,9 +5,9 @@
             <livewire:users.user-details :user="$user">
 
             {{-- VENDOR DETAILS --}}
-            @if($user->this_vendor)
+            {{-- @if($user->this_vendor)
                  <livewire:vendors.vendor-details :vendor="$user->vendor">
-            @endif
+            @endif --}}
         </div>
 
         {{-- USER / VENDOR FINANCES --}}

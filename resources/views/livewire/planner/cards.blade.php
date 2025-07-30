@@ -30,7 +30,7 @@
         x-init="$nextTick(() => scrollToToday())"
     >
         <!-- Header - Sticky at top -->
-        <div class="sticky top-0 bg-white z-50 shadow-sm">
+        <div class="sticky top-0 z-50 bg-white dark:bg-zinc-800 shadow-sm">
             <div class="flex items-start justify-between gap-4 p-4">
                 <flux:heading size="lg">{{ $headerTitle }}</flux:heading>
 
@@ -54,28 +54,28 @@
         </div>
 
         <!-- Days as Rows (including No Date Tasks) -->
-        <div class="divide-y divide-gray-200">
+        <div class="divide-y divide-zinc-200">
             <!-- No Date Tasks Row - Show first if exists -->
             @if($tasksData['noDateTasks']->count() > 0)
-                <div class="bg-gray-50 select-none">
+                <div class="bg-zinc-50 select-none">
                     <!-- No Date Tasks Header - Sticky under main header -->
-                    <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 shadow-sm select-none relative z-40">
+                    <div class="bg-zinc-50 border-b border-zinc-200 px-4 py-2 shadow-sm select-none relative z-40">
                         <flux:accordion>
                             <flux:accordion.item expanded>
-                                <flux:accordion.heading class="bg-gray-50 px-4 py-2">
+                                <flux:accordion.heading class="bg-zinc-50 px-4 py-2">
                                     <div class="flex items-center justify-between w-full">
-                                        <div class="text-gray-700">
+                                        <div class="text-zinc-700">
                                             <h4 class="font-medium text-sm">Unscheduled Tasks</h4>
-                                            <p class="text-xs text-gray-500">Tasks with no dates assigned</p>
+                                            <p class="text-xs text-zinc-500">Tasks with no dates assigned</p>
                                         </div>
-                                        <flux:badge size="sm" color="gray" variant="outline">
+                                        <flux:badge size="sm" color="zinc" variant="outline">
                                             {{ $tasksData['noDateTasks']->count() }}
                                         </flux:badge>
                                     </div>
                                 </flux:accordion.heading>
 
                                 <flux:accordion.content>
-                                    <div class="space-y-3 p-4 bg-gray-50 max-h-60 overflow-y-auto">
+                                    <div class="space-y-3 p-4 bg-zinc-50 max-h-60 overflow-y-auto">
                                         @foreach($tasksData['noDateTasks'] as $taskData)
                                             @php
                                                 $task = $taskData['task'];
@@ -83,14 +83,14 @@
                                             @endphp
 
                                             <!-- Task Card -->
-                                            <div class="bg-white border border-l-4 rounded transition-all hover:bg-gray-50 relative select-none {{ $taskTypeColor === 'blue' ? 'border-blue-500 border-l-blue-500' : 'border-indigo-500 border-l-indigo-500' }}">
+                                            <div class="border border-l-4 rounded transition-all hover:bg-zinc-50 relative select-none {{ $taskTypeColor === 'blue' ? 'border-blue-500 border-l-blue-500' : 'border-indigo-500 border-l-indigo-500' }}">
                                                 <div class="p-3">
                                                     <!-- Project Address (show for employee/vendor view, hide for project view) -->
                                                     @if($task->project && $type !== 'project')
                                                         <a
                                                             href="{{ $task->project->getAddressMapURI() }}"
                                                             target="_blank"
-                                                            class="truncate font-medium text-sm text-gray-800 mb-1 block hover:text-blue-600 cursor-pointer flex items-center gap-1 select-none"
+                                                            class="truncate font-medium text-sm text-zinc-800 mb-1 block hover:text-blue-600 cursor-pointer flex items-center gap-1 select-none"
                                                             >
                                                             <flux:icon.map-pin class="w-3 h-3" />
                                                             {{ $task->project->address }}
@@ -99,7 +99,7 @@
 
                                                     <!-- Task Title -->
                                                     <div
-                                                        class="truncate italic text-sm text-gray-900 mb-2 cursor-pointer hover:text-blue-600 flex items-center gap-1 select-none"
+                                                        class="truncate italic text-sm text-zinc-900 mb-2 cursor-pointer hover:text-blue-600 flex items-center gap-1 select-none"
                                                         wire:click="editTask({{ $task->id }})"
                                                         >
                                                         <flux:icon.pencil-square class="w-3 h-3" />
@@ -129,7 +129,7 @@
                                                                 color:seed="{{ $task->vendor->id }}"
                                                                 class="flex-shrink-0"
                                                             />
-                                                            <span class="text-xs min-w-0 whitespace-nowrap truncate text-gray-600">
+                                                            <span class="text-xs min-w-0 whitespace-nowrap truncate text-zinc-600">
                                                                 {{ $task->vendor->name }}
                                                             </span>
                                                         @endif
@@ -156,13 +156,11 @@
                 <!-- Day Row -->
                 <div class="{{ $day->isToday() ? 'bg-blue-50/50' : '' }} select-none" @if($day->isToday()) data-today @endif>
                     <!-- Day Header - Sticky under main header -->
-                    <div class="sticky top-[56px] bg-white border-b border-gray-100 px-4 py-2 shadow-sm select-none relative z-30">
+                    <div class="bg-white dark:bg-zinc-800 sticky top-[56px] border-b border-zinc-100 dark:border-zinc-700 px-4 py-2 shadow-sm select-none relative z-30">
                         <div class="flex items-center justify-between">
-                            <div class="{{ $day->isToday() ? 'text-blue-600' : ($isWeekend ? 'text-gray-500 italic' : 'text-gray-900') }}">
-                                <h4 class="font-medium text-sm">
-                                    {{ $day->format('l') }} <!-- Full day name -->
-                                </h4>
-                                <p class="text-xs {{ $day->isToday() ? 'text-blue-500' : ($isWeekend ? 'text-gray-400 italic' : 'text-gray-600') }}">{{ $day->format('M j, Y') }}</p>
+                            <div class="{{ $day->isToday() ? 'text-blue-600 dark:text-blue-400' : ($isWeekend ? 'text-zinc-500 italic dark:text-zinc-500' : 'text-zinc-900 dark:text-zinc-100') }}">
+                                <flux:text class="font-bold {{ $day->isToday() ? 'text-blue-600 dark:text-blue-400' : ($isWeekend ? 'text-zinc-500 italic dark:text-zinc-500' : 'text-zinc-900 dark:text-zinc-100') }}"> {{ $day->format('l') }}</flux:text>
+                                <flux:text class="{{ $day->isToday() ? 'text-blue-500 dark:text-blue-300' : ($isWeekend ? 'text-zinc-400 italic dark:text-zinc-600' : 'text-zinc-700 dark:text-zinc-300') }}">{{ $day->format('M j, Y') }}</flux:text>
                             </div>
                         </div>
                     </div>
@@ -177,14 +175,14 @@
                                 @endphp
 
                                 <!-- Task Card -->
-                                <div class="bg-white border border-l-4 rounded transition-all hover:bg-gray-50 relative select-none {{ $taskTypeColor === 'blue' ? 'border-blue-500 border-l-blue-500' : 'border-indigo-500 border-l-indigo-500' }}">
+                                <div class="border border-l-4 rounded transition-all hover:bg-zinc-50 relative select-none {{ $taskTypeColor === 'blue' ? 'border-blue-500 border-l-blue-500' : 'border-indigo-500 border-l-indigo-500' }}">
                                     <div class="p-3">
                                         <!-- Project Address (show for employee/vendor view, hide for project view) -->
                                         @if($task->project && $type !== 'project')
                                             <a
                                                 href="{{ $task->project->getAddressMapURI() }}"
                                                 target="_blank"
-                                                class="truncate font-medium text-sm text-gray-800 mb-1 block hover:text-blue-600 cursor-pointer flex items-center gap-1 select-none"
+                                                class="truncate font-medium text-sm text-zinc-800 mb-1 block hover:text-blue-600 cursor-pointer flex items-center gap-1 select-none"
                                                 >
                                                 <flux:icon.map-pin class="w-3 h-3" />
                                                 {{ $task->project->address }}
@@ -193,7 +191,7 @@
 
                                         <!-- Task Title -->
                                         <div
-                                            class="truncate italic text-sm text-gray-900 mb-2 cursor-pointer hover:text-blue-600 flex items-center gap-1 select-none"
+                                            class="truncate italic text-sm text-zinc-900 mb-2 cursor-pointer hover:text-blue-600 flex items-center gap-1 select-none"
                                             wire:click="editTask({{ $task->id }})"
                                             >
                                             <flux:icon.pencil-square class="w-3 h-3" />
@@ -223,7 +221,7 @@
                                                     color:seed="{{ $task->vendor->id }}"
                                                     class="flex-shrink-0"
                                                 />
-                                                <span class="text-xs min-w-0 whitespace-nowrap truncate text-gray-600">
+                                                <span class="text-xs min-w-0 whitespace-nowrap truncate text-zinc-600">
                                                     {{ $task->vendor->name }}
                                                 </span>
                                             @endif
@@ -232,7 +230,7 @@
 
                                     <!-- Day Indicator -->
                                     @if($taskData['totalFamilyDays'] > 1 && $taskData['currentFamilyDay'])
-                                        <div class="absolute bottom-1 right-1 text-xs text-gray-400 select-none">
+                                        <div class="absolute bottom-1 right-1 text-xs text-zinc-400 select-none">
                                             {{ $taskData['currentFamilyDay'] }}/{{ $taskData['totalFamilyDays'] }}
                                         </div>
                                     @endif

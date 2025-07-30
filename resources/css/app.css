@@ -44,6 +44,7 @@
 
 /* Hide elements with x-cloak until Alpine initializes */
 [x-cloak] { display: none !important; }
+
 /*
   The default border color has changed to `currentColor` in Tailwind CSS v4,
   so we've added these compatibility styles to make sure everything still
@@ -62,17 +63,3 @@
     border-color: var(--color-gray-200, currentColor);
   }
 }
-
-@layer base {
-    :root {
-        --color-accent: var(--color-sky-600);
-        --color-accent-content: var(--color-sky-600);
-        --color-accent-foreground: var(--color-white);
-    }
-
-    .dark {
-        --color-accent: var(--color-sky-600);
-        --color-accent-content: var(--color-sky-400);
-        --color-accent-foreground: var(--color-white);
-    }
-} */

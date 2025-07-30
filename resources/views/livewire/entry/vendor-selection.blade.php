@@ -9,23 +9,35 @@
             </div>
         </div>
         <flux:radio.group wire:model.live="vendor_id" label="{{$user->first_name}}'s Accounts" variant="cards" class="flex-col" :indicator="false">
-            @foreach($vendors as $vendor)
-                <flux:radio value="{{$vendor->id}}" label="{!!$vendor->business_name!!} | {{$vendor->business_type}}" description="{{$vendor->address}} {{$vendor->city . ', ' . $vendor->state . ' ' . $vendor->zip_code}}" />
+            @foreach($this->vendors as $vendor)
+                <flux:radio 
+                    value="{{$vendor->id}}" 
+                    label="{!!$vendor->business_name!!} | {{$vendor->business_type}}" 
+                    description="{{ $vendor->one_line_address }} | Role: {{ $user->getRoleForVendor($vendor->id) }}" 
+                />
             @endforeach
         </flux:radio.group>
 
-        <div x-data="{ open: @entangle('vendor_name') }" x-show="open" x-transition>
+        <div x-show="$wire.vendor_id" x-transition>
             <div class="flex gap-4">
                 <flux:spacer />
-                <flux:button variant="primary" wire:click="save">{{$vendor_name}}</flux:button>
+                <flux:button variant="primary" wire:click="save">
+                    @if($vendor_id && $this->vendors->find($vendor_id))
+                        @php
+                            $selectedVendor = $this->vendors->find($vendor_id);
+                            $buttonText = isset($selectedVendor->registration['registered']) && $selectedVendor->registration['registered'] 
+                                ? 'Login to ' 
+                                : 'Register ';
+                        @endphp
+                        {{ $buttonText . $selectedVendor->business_name }}
+                    @endif
+                </flux:button>
             </div>
         </div>
     </flux:card>
 
-    <br>
-    <flux:separator text="+" />
-    <br>
-
+    <flux:separator text="+" class="my-8"/>
+  
     <flux:card class="space-y-6">
         <div class="flex">
             <div class="flex-1">
@@ -36,8 +48,8 @@
                 </flux:subheading>
             </div>
         </div>
+        
+        {{-- CREATE NEW VENDOR/BUSINESS --}}
+        {{-- <livewire:vendors.vendor-create /> --}}
     </flux:card>
-
-    {{-- CREATE NEW VENDOR/BUSINESS --}}
-    {{-- <livewire:vendors.vendor-create /> --}}
 </div>

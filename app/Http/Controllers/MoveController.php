@@ -671,15 +671,6 @@ class MoveController extends Controller
 
         // dd('past foreach');
 
-        //W9 vendor = 1099
-        // $vendors = Vendor::withoutGlobalScopes()->where('business_type', 'W9')->get();
-        // foreach($vendors as $vendor){
-        //     $vendor->business_type = '1099';
-        //     $vendor->save();
-        // }
-
-        // dd('DONE WITH W9 vendor = 1099');
-
         //PROJECT_VENDOR
         // $projects = Project::withoutGlobalScopes()->where('belongs_to_vendor_id', 1)->get();
 
@@ -859,39 +850,6 @@ class MoveController extends Controller
         //                 'remember_token' => NULL,
         //                 'created_at' => $user->created_at,
         //                 'updated_at' => $user->updated_at,
-        //             ]);
-        //         }
-
-        //         //VENDORS
-        //         $vendors = $move_database->select('select * from vendors');
-        //         foreach($vendors as $vendor){
-        //             // dd($vendor);
-        //             if($vendor->biz_type == 1){
-        //                 $vendor_type = 'Sub';
-        //             }elseif($vendor->biz_type == 2){
-        //                 $vendor_type = 'Retail';
-        //             }elseif($vendor->biz_type == 3){
-        //                 $vendor_type = 'DBA';
-        //             }elseif($vendor->biz_type == 4){
-        //                 $vendor_type = 'W9';
-        //             }else{
-        //                 $vendor_type = '';
-        //             }
-
-        //             Vendor::create([
-        //                 'id' => $vendor->id,
-        //                 'business_name' => $vendor->business_name,
-        //                 'business_type' => $vendor_type,
-        //                 'address' => $vendor->address,
-        //                 'address_2' => $vendor->address_2,
-        //                 'city' => $vendor->city,
-        //                 'state' => $vendor->state,
-        //                 'zip_code' => $vendor->zip_code,
-        //                 'business_phone' => $vendor->biz_phone,
-        //                 'business_email' => $vendor->email,
-        //                 // 'cliff_registration' => NULL,
-        //                 'created_at' => $vendor->created_at,
-        //                 'updated_at' => $vendor->updated_at,
         //             ]);
         //         }
 

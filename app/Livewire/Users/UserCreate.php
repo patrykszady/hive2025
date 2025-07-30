@@ -15,7 +15,6 @@ use App\Models\User;
 use App\Models\Vendor;
 
 use Flux;
-use removeMember;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Component;
 
@@ -34,7 +33,7 @@ class UserCreate extends Component
     public $model = ['type' => null, 'id' => null];
     public $user_cell = false;
     public $user_form = false;
-    public $isRegistered = false;
+    // public $isRegistered = false;
 
     public $via_vendor = null;
     public $via_vendors = [];
@@ -52,7 +51,6 @@ class UserCreate extends Component
     // public function mount(User $user)
     // {
     //     dd($user->isRegistered);
-    //     dd($user->isRegistered);
     //     $this->user = $user;
     //     $this->isRegistered = $user->isRegistered;
     // }
@@ -60,6 +58,7 @@ class UserCreate extends Component
     public function updated($field, $value)
     {
         if ($field == 'user_cell') {
+            $this->form->reset();
             $this->user_form = false;
         }
 
@@ -136,25 +135,22 @@ class UserCreate extends Component
     //new Vendor or Client member
     public function newMember($model, $model_id = null)
     {
-        // $this->user_cell = false;
-        // $this->user_form = false;
-
-        //creating new Vendor or Client or adding Team Member/Client User to existing Vendor or Client
+        //creating NEW Vendor or Client or adding Team Member/Client User to existing Vendor or Client
         $this->model['type'] = $model;
         $this->model['id'] = $model_id;
 
         // 5-17-2023 ... this creates duplicates in the array of $this->model
-        if ($model == 'client') {
-            if ($this->model['id'] == 'NEW') {
+        if ($model === 'client') {
+            if ($this->model['id'] === 'NEW') {
                 $this->view_text['card_title'] = 'Create Client';
                 $this->view_text['button_text'] = 'Continue to Client';
             } else {
                 $this->view_text['card_title'] = 'Add User to Client';
                 $this->view_text['button_text'] = 'Add User';
             }
-        } elseif ($model == 'vendor') {
+        } elseif ($model === 'vendor') {
             //if creating User for New Vendor dont show user_role or user_hourly
-            if ($this->model['id'] == 'NEW') {
+            if ($this->model['id'] === 'NEW') {
                 $this->view_text['card_title'] = 'Add Owner to Vendor';
                 $this->view_text['button_text'] = 'Add Owner';
             } else {
@@ -170,7 +166,7 @@ class UserCreate extends Component
     {
         $this->user_cell = $user->cell_phone;
         $this->user_form = true;
-        $this->isRegistered = $user->isRegistered;
+        // $this->isRegistered = $user->isRegistered;
 
         // //creating new Vendor or Client or adding Team Member/Client User to existing Vendor or Client
         $this->model['type'] = 'user';
@@ -215,14 +211,6 @@ class UserCreate extends Component
     {
         $user = $this->form->store();
         $this->form->setUser($user);
-
-        // $this->user_form = FALSE;
-
-        //if model is Vendor only
-        // if($this->model['type'] == 'vendor'){
-        //     $this->form->business_name = $user->full_name;
-        //     $this->via_vendor = TRUE;
-        // }
     }
 
     public function save()
@@ -235,11 +223,11 @@ class UserCreate extends Component
         }
 
         //Vendor User
-        if ($this->model['type'] == 'vendor') {
+        if ($this->model['type'] === 'vendor') {
             // when creating new Vendor
-            if ($this->model['id'] == 'NEW') {
-                $user->hourly_rate = $this->form->hourly_rate;
-                $user->role = $this->form->role;
+            if ($this->model['id'] === 'NEW') {
+                $user->hourly_rate = 0;
+                $user->role = 1;
 
                 $this->modal('user_form_modal')->close();
                 $this->dispatch('userVendor', $user->toArray());
@@ -256,7 +244,7 @@ class UserCreate extends Component
                 $this->modal('user_form_modal')->close();
 
                 $this->dispatch('confirmProcessStep', 'team_members')->to('entry.vendor-registration');
-                $this->dispatch('testUsers', vendor: $this->model['id'])->to(UsersIndex::class);
+                $this->dispatch('refreshComponent')->to(UsersIndex::class);
 
                 Flux::toast(
                     duration: 5000,
@@ -269,7 +257,7 @@ class UserCreate extends Component
             }
             //Client User
             //if existing User .. dispatchTo ClientCreate with user (show existing users the User is part of) and close $this->modal.
-        } elseif ($this->model['type'] == 'client') {
+        } elseif ($this->model['type'] === 'client') {
             // when creating new Client
             if ($this->model['id'] == 'NEW') {
                 $this->dispatch('addUser', user: $user->id, client_id: $this->model['id'])->to(ClientCreate::class);

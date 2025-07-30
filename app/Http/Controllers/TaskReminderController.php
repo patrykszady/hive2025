@@ -375,12 +375,6 @@ class TaskReminderController extends Controller
             }
         }
 
-        Log::channel('task_reminder')->info("Daily task reminder summary", [
-            'date' => $tomorrow->format('Y-m-d'),
-            'total_tasks' => $tasks->count(),
-            'unique_users' => count($userTasks),
-        ]);
-
         return [
             'total_tasks' => $tasks->count(),
             'unique_users' => count($userTasks),

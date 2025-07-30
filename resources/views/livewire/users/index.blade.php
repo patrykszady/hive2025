@@ -37,14 +37,12 @@
                         {{ $user->full_name }}
                     </flux:table.cell>
                     <flux:table.cell>{{ $user->cell_phone }}</flux:table.cell>
-                    {{-- Str::limit($user->email, 8) --}}
                     <flux:table.cell>{{ $user->email }}</flux:table.cell>
                     @if($view === 'vendors.show')
-                        <flux:table.cell>
-                            {{ $user->getVendorRole($vendor->id) }}
-                            {{-- <flux:badge inset="top bottom" color="{{$user->getVendorRole($vendor->id) === 'Admin' ? 'cyan' : 'purple'}}">
-                                {{ $user->getVendorRole($vendor->id) }}
-                            </flux:badge> --}}
+                        <flux:table.cell>                            
+                            <flux:badge inset="top bottom" color="blue" size="sm">
+                                {{ $user->getRoleForVendor($vendor->id) }}
+                            </flux:badge>
                         </flux:table.cell>
                     @endif
                 </flux:table.row>

@@ -57,7 +57,8 @@
             />
             <flux:input
                 wire:model.live.debounce.250ms="form.email"
-                x-bind:disabled="($wire.model.type != 'user' && $wire.form.user) || $wire.isRegistered"
+                {{-- ) || $wire.isRegistered --}}
+                x-bind:disabled="$wire.model.type != 'user' && $wire.form.user"
                 label="Email"
                 placeholder="Email"
             />
@@ -79,9 +80,9 @@
             {{-- CREATE/ATTACH 1099 / SUB Vendor / PAYROLL --}}
             <div
                 {{-- model_id: @entangle('model.id') --}}
-                x-data="{ model_type: @entangle('model.type'), user_form: @entangle('form.user') }"
+                x-data="{ user_form: @entangle('form.user') }"
                 {{--  && model_id == 'NEW' --}}
-                x-show="model_type == 'vendor' && user_form"
+                x-show="$wire.model.type == 'vendor' && $wire.model.id != 'NEW' && user_form"
                 class="my-4 space-y-4"
                 >
 
@@ -129,8 +130,9 @@
 
                 {{-- USER / VENDOR HOURLY PAY --}}
                 <div
-                    x-data="{ via_vendor: @entangle('form.via_vendor'), role: @entangle('form.role') }"
-                    x-show="(via_vendor && via_vendor != 'NEW_VIA') || role == 1"
+                    {{-- x-data="{ via_vendor: @entangle('form.via_vendor'), role: @entangle('form.role') }"
+                    x-show="(via_vendor && via_vendor != 'NEW_VIA') || role == 1" --}}
+                    x-show="$wire.model.id != 'NEW' && $wire.model.type == 'vendor'"
                     class="my-4 space-y-4"
                     >
                     {{-- USER / VENDOR HOURLY PAY --}}

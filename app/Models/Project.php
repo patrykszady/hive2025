@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Scopes\ProjectScope;
+use App\Traits\HasAddress;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Builder;
@@ -11,10 +12,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\HasOneThrough;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 
 class Project extends Model
 {
-    use HasFactory;
+    use HasFactory, HasAddress;
 
     protected $fillable = ['project_name', 'client_id', 'belongs_to_vendor_id', 'created_by_user_id', 'note', 'timesheet_id', 'created_by_user_id', 'note', 'do_not_include', 'address', 'address_2', 'city', 'state', 'zip_code', 'created_at', 'updated_at'];
 
@@ -139,57 +141,82 @@ class Project extends Model
     //     }
     // }
 
-    public function getFullAddressAttribute()
+    /**
+     * Format project_name with title case (First Letter Of Each Word)
+     */
+    protected function projectName(): Attribute
     {
-        if ($this->address_2 == null) {
-            $address1 = $this->address;
-        } else {
-            $address1 = $this->address.'<br>'.$this->address_2;
-        }
-
-        $address2 = $this->city.', '.$this->state.' '.$this->zip_code;
-
-        return $address1.'<br>'.$address2;
+        return Attribute::make(
+            get: fn ($value) => $value,
+            set: function ($value) {
+                if (!$value) {
+                    return null;
+                }
+                
+                // Convert to title case (capitalize first letter of each word)
+                return ucwords(strtolower($value));
+            }
+        );
     }
 
-    public function getFinancesAttribute()
+    /**
+     * Get the name attribute for the project
+     */
+    protected function name(): Attribute
     {
-        $expenses_sum = $this->expenses()->where('reimbursment', 'Client')->sum('amount');
-        $splits_sum = $this->expenseSplits()->where('reimbursment', 'Client')->sum('amount');
-
-        $finances['estimate'] = (float) $this->bids()->where('type', 1)->sum('amount');
-        $finances['change_orders'] = $this->bids()->where('type', '!=', 1)->sum('amount');
-        $finances['total_bid'] = $finances['estimate'] + $finances['change_orders'];
-        $finances['reimbursments'] = $splits_sum + $expenses_sum;
-        $finances['total_project'] = round($finances['reimbursments'] + $finances['estimate'] + $finances['change_orders'], 2);
-        $finances['expenses'] = $this->expenses->sum('amount') + $this->expenseSplits->sum('amount');
-        $finances['timesheets'] = $this->timesheets->sum('amount');
-        $finances['total_cost'] = $finances['timesheets'] + $finances['expenses'];
-        $finances['payments'] = round($this->payments->sum('amount'), 2);
-        //amount_format(..., 2)
-        $finances['profit'] = $finances['payments'] - $finances['total_cost'];
-        $finances['balance'] = $finances['total_project'] - $finances['payments'];
-
-        return $finances;
+        return Attribute::make(
+            get: function ($value, array $attributes) {
+                // Check if project_name exists, provide a default if not
+                if (!isset($attributes['project_name'])) {
+                    return 'NO PROJECT';
+                }
+                
+                // Special project names that don't need address
+                if ($attributes['project_name'] == 'EXPENSE SPLIT' || $attributes['project_name'] == 'NO PROJECT') {
+                    return $attributes['project_name'];
+                }
+                
+                // Distribution projects just use project name
+                if (isset($attributes['distribution']) && $attributes['distribution'] == true) {
+                    return $attributes['project_name'];
+                }
+                
+                // Standard projects combine address and name, but check if address exists
+                if (isset($attributes['address']) && !empty($attributes['address'])) {
+                    return $attributes['address'].' | '.$attributes['project_name'];
+                }
+                
+                // Fallback to just project name if no address
+                return $attributes['project_name'];
+            }
+        );
     }
 
-    public function getAddressMapURI()
+    /**
+     * Get the calculated financial data for the project
+     */
+    protected function finances(): Attribute
     {
-        $url = 'https://maps.apple.com/?q='.$this->address.', '.$this->city.', '.$this->state.', '.$this->zip_code;
+        return Attribute::make(
+            get: function ($value, array $attributes) {
+                $expenses_sum = $this->expenses()->where('reimbursment', 'Client')->sum('amount');
+                $splits_sum = $this->expenseSplits()->where('reimbursment', 'Client')->sum('amount');
 
-        return $url;
-    }
+                $finances = [];
+                $finances['estimate'] = (float) $this->bids()->where('type', 1)->sum('amount');
+                $finances['change_orders'] = $this->bids()->where('type', '!=', 1)->sum('amount');
+                $finances['total_bid'] = $finances['estimate'] + $finances['change_orders'];
+                $finances['reimbursments'] = $splits_sum + $expenses_sum;
+                $finances['total_project'] = round($finances['reimbursments'] + $finances['estimate'] + $finances['change_orders'], 2);
+                $finances['expenses'] = $this->expenses->sum('amount') + $this->expenseSplits->sum('amount');
+                $finances['timesheets'] = $this->timesheets->sum('amount');
+                $finances['total_cost'] = $finances['timesheets'] + $finances['expenses'];
+                $finances['payments'] = round($this->payments->sum('amount'), 2);
+                $finances['profit'] = $finances['payments'] - $finances['total_cost'];
+                $finances['balance'] = $finances['total_project'] - $finances['payments'];
 
-    public function getNameAttribute()
-    {
-        if ($this->project_name == 'EXPENSE SPLIT' || $this->project_name == 'NO PROJECT') {
-            $name = $this->project_name;
-        } elseif ($this->distribution == true) {
-            $name = $this->project_name;
-        } else {
-            $name = $this->address.' | '.$this->project_name;
-        }
-
-        return $name;
+                return $finances;
+            }
+        );
     }
 }

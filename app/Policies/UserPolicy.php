@@ -25,7 +25,8 @@ class UserPolicy
      */
     public function hasAdminRole(User $user): bool
     {
-        return $user->primary_vendor->pivot->role_id === 1;
+        return $user->vendor_role === 'Admin';
+        // return $user->primary_vendor->pivot->role_id === 1;
     }
 
     /**

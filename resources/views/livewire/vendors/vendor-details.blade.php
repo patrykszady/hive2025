@@ -1,105 +1,89 @@
-<flux:card>
-    {{-- HEADER - Keep outside accordion --}}
-    <div class="flex justify-between">
-        <flux:heading size="lg" class="mb-0 truncate">{!! $vendor->name !!}</flux:heading>
-
-        @can('update', $vendor)
-            @if(in_array($vendor->business_type, ["Sub", "DBA", "1099"]))
-                @if($vendor->id != auth()->user()->vendor->id)
-                    <flux:button.group>
-                        <flux:button
-                            size="sm"
-                            href="{{route('vendors.payment', $vendor->id)}}"
-                            >
-                            Make Payment
-                        </flux:button>
-                        <flux:dropdown position="bottom" align="end">
-                            <flux:button size="sm" icon-trailing="chevron-down"></flux:button>
-
-                            <flux:menu>
-                                <flux:menu.item wire:click="$dispatchTo('vendors.vendor-create', 'editVendor', { vendor: {{$vendor->id}} })">Edit</flux:menu.item>
-                            </flux:menu>
-                        </flux:dropdown>
-                    </flux:button.group>
-                @else
-                    <flux:button
-                        size="sm"
-                        wire:click="$dispatchTo('vendors.vendor-create', 'editVendor', { vendor: {{$vendor->id}} })"
-                        >
-                        Edit
-                    </flux:button>
-                @endif
-            @endif
-        @endcan
-    </div>
+<x-details.card
+    :title="$vendor->name"
     {{-- SUBHEADING  --}}
-    @if($registration)
+    {{-- @if($registration)
         <flux:subheading>Confirm information.</flux:subheading>
     @else
         <flux:subheading>YTD Paid {{ money($vendor->ytd_expense_sum) }}</flux:subheading>
-    @endif
+    @endif --}}
+    :subheading="'YTD Paid: ' . money($vendor->ytd_expense_sum)"
+    :canEdit="auth()->user()->can('update', $vendor)"
+    >
+    <x-slot:header_buttons>
+        @if($vendor->business_type != 'Retail')
+            @if($vendor->id != auth()->user()->primary_vendor->id)
+                {{-- Show payment button + dropdown for other vendors --}}
+                <flux:button.group>
+                    <flux:button
+                        size="sm"
+                        href="{{route('vendors.payment', $vendor->id)}}"
+                        >
+                        Make Payment
+                    </flux:button>
+                    <flux:dropdown position="bottom" align="end">
+                        <flux:button size="sm" icon-trailing="chevron-down"></flux:button>
 
-    <flux:separator class="my-2"/>
+                        <flux:menu>
+                            <flux:menu.item wire:click="$dispatchTo('vendors.vendor-create', 'editVendor', { vendor: {{$vendor->id}} })">Edit</flux:menu.item>
+                        </flux:menu>
+                    </flux:dropdown>
+                </flux:button.group>
+            @else
+                {{-- Show simple edit button for own/ primary_vendor --}}
+                <flux:button
+                    size="sm"
+                    wire:click="$dispatchTo('vendors.vendor-create', 'editVendor', { vendor: {{$vendor->id}} })"
+                    >
+                    Edit
+                </flux:button>
+            @endif
+        @endif
+    </x-slot:header_buttons>
+    
+    <x-slot:details>
+        {{-- Business Name --}}
+        <x-details.row 
+            title="Name" 
+            :content="$vendor->business_name"
+        />
 
-    {{-- DETAILS LIST wrapped in accordion --}}
-    <flux:accordion transition>
-        <flux:accordion.item>
-            <flux:accordion.heading>
-                Vendor Details
-            </flux:accordion.heading>
-            <flux:accordion.content>
-                <div class="divide-y divide-gray-200">
-                    {{-- Business Name --}}
-                    <div class="grid grid-cols-3 gap-4 py-2">
-                        <flux:subheading class="text-sm font-medium text-gray-900">Business Name</flux:subheading>
-                        <div class="col-span-2 text-sm text-gray-700">{!! $vendor->business_name !!}</div>
-                    </div>
+        {{-- Vendor Type --}}
+        <x-details.row 
+            title="Type" 
+            :content="$vendor->business_type"
+        />
 
-                    {{-- Vendor Type --}}
-                    <div class="grid grid-cols-3 gap-4 py-2">
-                        <flux:subheading class="text-sm font-medium text-gray-900">Vendor Type</flux:subheading>
-                        <div class="col-span-2 text-sm text-gray-700">{{ $vendor->business_type }}</div>
-                    </div>
+        {{-- Vendor Address with Link --}}
+        @if($vendor->business_type != 'Retail')
+            <x-details.row 
+                title="Address" 
+                :content="$vendor->full_address" 
+                :href="$vendor->getAddressMapURI()"
+                :copyable="true"
+            />
+        @endif
 
-                    {{-- Vendor Address --}}
-                    @if($vendor->business_type != 'Retail')
-                        <div class="grid grid-cols-3 gap-4 py-2">
-                            <flux:subheading class="text-sm font-medium text-gray-900">Vendor Address</flux:subheading>
-                            <div class="col-span-2 text-sm text-gray-700">
-                                <a
-                                    href="{{ $vendor->getAddressMapURI() }}"
-                                    target="_blank"
-                                    class="text-gray-700 hover:text-gray-900 hover:underline"
-                                >
-                                    {!! $vendor->full_address !!}
-                                </a>
-                            </div>
-                        </div>
-                    @endif
+        {{-- Business Phone --}}
+        @if($vendor->business_type != 'Retail' && $vendor->business_phone)
+            <x-details.row 
+                title="Phone" 
+                :content="$vendor->business_phone"
+                :copyable="true"
+            />
+        @endif
 
-                    {{-- Business Phone --}}
-                    @if(in_array($vendor->business_type, ["Sub", "DBA", "1099"]) && $vendor->business_phone)
-                        <div class="grid grid-cols-3 gap-4 py-2">
-                            <flux:subheading class="text-sm font-medium text-gray-900">Business Phone</flux:subheading>
-                            <div class="col-span-2 text-sm text-gray-700">{{ $vendor->business_phone }}</div>
-                        </div>
-                    @endif
+        {{-- Business Email --}}
+        @if($vendor->business_type != 'Retail' && $vendor->business_email)
+            <x-details.row 
+                title="Email" 
+                :content="$vendor->business_email"
+                :copyable="true"
+            />
+        @endif
+    </x-slot:details>
 
-                    {{-- Business Email --}}
-                    @if(in_array($vendor->business_type, ["Sub", "DBA", "1099"]) && $vendor->business_email)
-                        <div class="grid grid-cols-3 gap-4 py-2">
-                            <flux:subheading class="text-sm font-medium text-gray-900">Business Email</flux:subheading>
-                            <div class="col-span-2 text-sm text-gray-700">{{ $vendor->business_email }}</div>
-                        </div>
-                    @endif
-                </div>
-            </flux:accordion.content>
-        </flux:accordion.item>
-    </flux:accordion>
-
-    {{-- CONFIRM BUTTON --}}
-    @if($registration)
-        <div class="flex justify-end pt-4">
+    {{-- @if($registration)
+        <x-slot:confirmButton>
             <flux:button
                 type="submit"
                 variant="primary"
@@ -107,10 +91,12 @@
             >
                 Confirm Details
             </flux:button>
-        </div>
-    @endif
-
-    @can('update', $vendor)
-        <livewire:vendors.vendor-create />
-    @endcan
-</flux:card>
+        </x-slot:confirmButton>
+    @endif --}}
+    
+    <x-slot:footer>
+        @can('update', $vendor)
+            <livewire:vendors.vendor-create />
+        @endcan
+    </x-slot:footer>
+</x-details.card>

@@ -304,7 +304,10 @@ class CompanyEmailController extends Controller
 
                         $ocr_path = '_temp_ocr/' . $ocr_filename;
                         $location = Storage::disk('files')->path($ocr_path);
-                        Browsershot::html($view)->newHeadless()->format('A4')->margins(20, 0, 20, 20)->save($location);
+
+                        $nodePath = trim(shell_exec('which node'));
+                        $npmPath = trim(shell_exec('which npm'));
+                        Browsershot::html($view)->setNodeBinary($nodePath)->setNpmBinary($npmPath)->newHeadless()->format('A4')->margins(20, 0, 20, 20)->save($location);
 
                     } elseif (isset($receipt->options['pdf_html'])) {
                         // PDF attachment processing
@@ -695,22 +698,84 @@ class CompanyEmailController extends Controller
 
     public function saveExpenseReceipt($expense_id, $ocr_receipt_data, $ocr_filename, $message = NULL)
     {
-        if($message){
+        if ($message) {
             if (!empty($message['attachments'])) {
-                $attachment = $message['attachments'][0];
-
-                if($ocr_filename){
-                    $sourcePath = '_temp_ocr/' . $ocr_filename;
-                    Storage::disk('files')->delete($sourcePath);
+                // Filter out inline attachments, keep only non-inline ones
+                $nonInlineAttachments = array_filter($message['attachments'], function($attachment) {
+                    return !isset($attachment['is_inline']) || $attachment['is_inline'] === false;
+                });
+                
+                // Process all non-inline attachments
+                if (!empty($nonInlineAttachments)) {
+                    // First clean up existing temp file if passed in
+                    if ($ocr_filename) {
+                        $sourcePath = '_temp_ocr/' . $ocr_filename;
+                        Storage::disk('files')->delete($sourcePath);
+                    }
+                    
+                    // Track all processed attachments for this expense
+                    $processedFiles = [];
+                    
+                    foreach ($nonInlineAttachments as $attachmentIndex => $attachment) {
+                        // Generate unique filename for this attachment
+                        $currentFilename = date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '-' . $attachmentIndex . '.pdf';
+                        $ocr_path = '_temp_ocr/' . $currentFilename;
+                        
+                        // Download attachment
+                        $attachmentContent = $this->nylasService->downloadAttachment(
+                            $attachment['id'], 
+                            $message['grant_id'], 
+                            $message['id']
+                        );
+                        
+                        Storage::disk('files')->put($ocr_path, $attachmentContent);
+                        
+                        // Determine doc type (defaulting to PDF)
+                        $doc_type = 'pdf';
+                        
+                        // Get document model based on width (like in auto receipts)
+                        $document_model = $this->azureDocumentService->getDocumentModel($ocr_path, $doc_type);
+                        
+                        // OCR the file
+                        $ocr_receipt_extracted = app(\App\Http\Controllers\ReceiptController::class)
+                            ->azure_receipts($ocr_path, $doc_type, $document_model);
+                        
+                        // Process OCR results
+                        $current_ocr_data = app(\App\Http\Controllers\ReceiptController::class)
+                            ->ocr_extract($ocr_receipt_extracted, null, 'email');
+                        
+                        // Save this attachment as an expense receipt
+                        $targetFilename = $expense_id . '-' . $currentFilename;
+                        $destinationPath = 'receipts/' . $targetFilename;
+                        
+                        // Create receipt record in database
+                        $expense_receipt = new ExpenseReceipts;
+                        $expense_receipt->expense_id = $expense_id;
+                        $expense_receipt->receipt_filename = $targetFilename;
+                        $expense_receipt->receipt_html = $current_ocr_data['content'];
+                        $expense_receipt->receipt_items = $current_ocr_data['fields'];
+                        $expense_receipt->save();
+                        
+                        // Move the file to permanent storage
+                        if (Storage::disk('files')->move($ocr_path, $destinationPath)) {
+                            // Success case
+                        } else {
+                            if (Storage::disk('files')->copy($ocr_path, $destinationPath)) {
+                                Storage::disk('files')->delete($ocr_path);
+                            }
+                        }
+                        
+                        // Track processed files
+                        $processedFiles[] = $targetFilename;
+                    }
+                    
+                    // Return early since we've processed all attachments
+                    return $processedFiles;
                 }
-
-                $ocr_filename = date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '.pdf';
-                $attachmentContent = $this->nylasService->downloadAttachment($attachment['id'], $message['grant_id'], $message['id']);
-
-                Storage::disk('files')->put('/_temp_ocr/' . $ocr_filename, $attachmentContent);
             }
         }
 
+        // Original functionality for handling single files (for backward compatibility)
         $filename = $expense_id . '-' . $ocr_filename;
         $sourcePath = '_temp_ocr/' . $ocr_filename;
         $destinationPath = 'receipts/' . $filename;
@@ -725,12 +790,14 @@ class CompanyEmailController extends Controller
 
         // Perform the move operation with fallback to copy-delete
         if (Storage::disk('files')->move($sourcePath, $destinationPath)) {
-
+            // Success case
         } else {
             if (Storage::disk('files')->copy($sourcePath, $destinationPath)) {
                 Storage::disk('files')->delete($sourcePath);
             }
         }
+        
+        return [$filename];
     }
 
     public function fuzzyMatchVendor($ocrName, $vendors, $threshold = 80.0)

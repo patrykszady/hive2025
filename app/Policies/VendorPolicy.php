@@ -27,7 +27,13 @@ class VendorPolicy
      */
     public function view(User $user, Vendor $vendor): bool
     {
-        //
+        // Prevent users from viewing their own vendor page
+        if ($user->primary_vendor->id === $vendor->id) {
+            return false;
+        }
+        
+        // Allow all other vendor views
+        return true;
     }
 
     /**

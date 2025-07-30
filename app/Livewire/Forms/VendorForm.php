@@ -22,7 +22,7 @@ class VendorForm extends Form
     #[Rule('nullable|email|min:5', as: 'business email')]
     public $business_email = null;
 
-    #[Rule('nullable|digits:10', as: 'business phone')]
+    // No Rule attribute for business_phone, we'll use rules() method instead
     public $business_phone = null;
 
     #[Rule('nullable')]
@@ -31,6 +31,33 @@ class VendorForm extends Form
     #[Rule('nullable')]
     public $user_role = null;
 
+    /**
+     * Define rules for the business phone field
+     */
+    public function rules()
+    {
+        return [
+            'business_phone' => [
+                'nullable',
+                function ($attribute, $value, $fail) {
+                    // Only count the digits
+                    $digitsOnly = preg_replace('/[^0-9]/', '', $value ?: '');
+                    
+                    // Allow empty values (handled by 'nullable')
+                    if (empty($digitsOnly)) {
+                        return;
+                    }
+                    
+                    // Check if we have exactly 10 digits
+                    if (strlen($digitsOnly) !== 10) {
+                        $fail('The business phone must contain exactly 10 digits.');
+                    }
+                },
+            ],
+        ];
+    }
+
+    // Keep the setVendor method as is
     public function setVendor(Vendor $vendor)
     {
         $this->vendor = $vendor;
@@ -48,6 +75,7 @@ class VendorForm extends Form
     public function update()
     {
         $this->authorize('create', Vendor::class);
+        // This will combine rules from attributes and the rules() method
         $this->validate();
 
         $this->vendor->update([
@@ -68,6 +96,7 @@ class VendorForm extends Form
     public function store()
     {
         $this->authorize('create', Vendor::class);
+        // This will combine rules from attributes and the rules() method
         $this->validate();
 
         return Vendor::create([

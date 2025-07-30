@@ -119,8 +119,8 @@
         </flux:sidebar>
 
         <flux:main
-            {{-- x-data
-            x-cloak --}}
+            x-data
+            x-cloak
             {{-- @navigate.window="Livewire.navigate($event.detail)" --}}
             {{-- $fullscreenClasses prop in render of Planner/Board --}}
             :class="$fullscreenClasses ?? null"

@@ -72,11 +72,9 @@ class MatchVendor extends Component
 
     public function store_expense_vendors()
     {
-        // dd('in store_expense_vendors');
         // $this->authorize('create', Expense::class);
         $this->validate();
 
-        // dd($this->match_expense_merchant_names);
         foreach ($this->match_expense_merchant_names as $key => $vendor_match) {
             if ($vendor_match['vendor_id'] == 'NEW') {
                 //new Retail Vendor

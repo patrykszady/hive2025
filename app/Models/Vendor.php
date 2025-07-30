@@ -2,6 +2,9 @@
 
 namespace App\Models;
 
+use App\Traits\HasAddress;
+use Laravel\Scout\Searchable;
+
 use App\Models\Scopes\ClientScope;
 use App\Models\Scopes\VendorScope;
 
@@ -13,12 +16,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
-
-use Laravel\Scout\Searchable;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 
 class Vendor extends Model
 {
-    use HasFactory, Searchable;
+    use HasFactory, Searchable, HasAddress;
 
     protected $fillable = ['business_name', 'business_type', 'sheets_type', 'category_id', 'address', 'address_2', 'city', 'state', 'zip_code', 'business_phone', 'business_email', 'created_at', 'updated_at'];
 
@@ -57,7 +59,7 @@ class Vendor extends Model
         return $this->belongsToMany(VendorCategory::class, 'category_vendor', 'vendor_id', 'vendor_category_id')->withTimestamps();
     }
 
-    //Vendors that belong to Logged in vendor / via $user->primary_vendor_id
+    //Vendors that belong to Logged in vendor(Company) / via $user->primary_vendor_id
     public function vendors(): BelongsToMany
     {
         return $this->belongsToMany(Vendor::class, 'vendors_vendor', 'belongs_to_vendor_id')->withoutGlobalScopes()->withTimestamps();
@@ -143,11 +145,6 @@ class Vendor extends Model
         return $this->hasMany(BankAccount::class);
     }
 
-    // public function project_status()
-    // {
-    //     return $this->hasMany(ProjectStatus::class, '');
-    // }
-
     public function transactions(): HasMany
     {
         return $this->hasMany(Transaction::class);
@@ -173,79 +170,6 @@ class Vendor extends Model
         return $this->hasOne(Client::class)->withoutGlobalScope(ClientScope::class);
     }
 
-    public function getRegistrationAttribute($value)
-    {
-        $value = json_decode($value, true);
-        $status_array = ['registered', 'vendor_info', 'team_members', 'user_registered', 'banks_registered', 'emails_registered'];
-
-        foreach ($status_array as $status) {
-            if (! isset($value[$status])) {
-                $value[$status] = false;
-            }
-        }
-
-        return $value;
-    }
-
-    public function getFullAddressAttribute()
-    {
-        if ($this->address_2) {
-            $address = $this->address.'<br>'.$this->address_2.'<br>'.$this->city.', '.$this->state.' '.$this->zip_code;
-        } elseif ($this->address) {
-            $address = $this->address.'<br>'.$this->city.', '.$this->state.' '.$this->zip_code;
-        } else {
-            $address = null;
-        }
-
-        return $address;
-    }
-
-    public function getBusienssNameAttribute()
-    {
-        if (is_null($this->business_name)) {
-            return 'NO VENDOR';
-        } else {
-            return html_entity_decode($this->business_name);
-        }
-    }
-
-    public function getNameAttribute()
-    {
-        if (is_null($this->business_name)) {
-            return 'NO VENDOR';
-        }
-
-        if ($this->biz_type == 4 && $this->users()->exists()) {
-            $user = $this->users()->first();
-            return html_entity_decode($user->first_name . ' ' . $user->last_name);
-        }
-
-        // Extract first part before ',' if available
-        $nameParts = explode(',', $this->business_name);
-        return html_entity_decode(trim($nameParts[0]));
-    }
-
-    public function getAddressMapURI()
-    {
-        //2025-6-21 lets use google maps api for this
-        $url = 'https://maps.apple.com/?q='.$this->address.', '.$this->city.', '.$this->state.', '.$this->zip_code;
-
-        return $url;
-    }
-
-    public function getYtdExpenseSumAttribute()
-    {
-        // If it's already set (from search results), return it
-        if (array_key_exists('ytd_expense_sum', $this->attributes)) {
-            return $this->attributes['ytd_expense_sum'];
-        }
-
-        // Fallback calculation for non-search queries
-        return $this->expenses()
-            ->where('created_at', '>=', today()->subYear())
-            ->sum('amount');
-    }
-
     public function scopeHiveVendors($query)
     {
         return $query->withoutGlobalScopes()->where('business_type', 'Sub')->where('registration->registered', true);
@@ -257,5 +181,137 @@ class Vendor extends Model
             ->whereNotIn('business_type', ['Retail'])
             ->orderBy('ytd_expense_sum', 'desc')
             ->take($limit);
+    }
+    
+    /**
+     * Get the vendor registration status
+     */
+    protected function registration(): Attribute
+    {
+        return Attribute::make(
+            get: function ($value) {
+                $value = json_decode($value, true);
+                $status_array = ['registered', 'vendor_info', 'team_members', 'user_registered', 'banks_registered', 'emails_registered'];
+
+                foreach ($status_array as $status) {
+                    if (! isset($value[$status])) {
+                        $value[$status] = false;
+                    }
+                }
+
+                return $value;
+            }
+        );
+    }
+
+    /**
+     * Get the name attribute based on business type and name
+     */
+    protected function name(): Attribute
+    {
+        return Attribute::make(
+            get: function ($value, array $attributes) {
+                if (empty($attributes['business_name'])) {
+                    return 'NO VENDOR';
+                }
+                
+                // For 1099 vendors, use the first associated user's name
+                // Add isset check to prevent "undefined array key" error
+                if (isset($attributes['business_type']) && $attributes['business_type'] == '1099' && $this->users()->exists()) {
+                    $user = $this->users()->first();
+                    return $user->first_name . ' ' . $user->last_name;
+                }
+                
+                // Extract first part before ',' if available
+                $nameParts = explode(',', $attributes['business_name']);
+                return trim($nameParts[0]);
+            }
+        );
+    }
+
+    /**
+     * Get the year-to-date expense sum
+     */
+    protected function ytdExpenseSum(): Attribute
+    {
+        return Attribute::make(
+            get: function ($value, array $attributes) {
+                // If it's already set (from search results), return it
+                if (array_key_exists('ytd_expense_sum', $attributes)) {
+                    return $attributes['ytd_expense_sum'];
+                }
+                
+                // Fallback calculation for non-search queries
+                return $this->expenses()
+                    ->where('created_at', '>=', today()->subYear())
+                    ->sum('amount');
+            }
+        );
+    }
+
+    protected function businessPhone(): Attribute
+    {
+        return Attribute::make(
+            get: function ($value) {
+                if (!$value) {
+                    return null;
+                }
+                
+                // Format 10-digit number as (XXX) XXX-XXXX
+                if (strlen($value) === 10) {
+                    return '(' . substr($value, 0, 3) . ') ' . substr($value, 3, 3) . '-' . substr($value, 6);
+                }
+                
+                return $value;
+            },
+            set: function ($value) {
+                if (!$value) {
+                    return null;
+                }
+                
+                // Remove all non-numeric characters
+                return preg_replace('/[^0-9]/', '', $value);
+            }
+        );
+    }
+    
+    protected function businessName(): Attribute
+    {
+        return Attribute::make(
+            get: function ($value) {
+                if (is_null($value)) {
+                    return 'NO VENDOR';
+                }
+                return $value;
+            },
+            set: function ($value) {
+                if (!$value) {
+                    return null;
+                }
+                
+                // Convert to title case (capitalize first letter of each word)
+                return ucwords(strtolower($value));
+            }
+        );
+    }
+
+    /**
+     * Format business_email to be all lowercase
+     */
+    protected function businessEmail(): Attribute
+    {
+        return Attribute::make(
+            get: function ($value) {
+                return $value;
+            },
+            set: function ($value) {
+                if (!$value) {
+                    return null;
+                }
+                
+                // Convert to all lowercase
+                return strtolower($value);
+            }
+        );
     }
 }

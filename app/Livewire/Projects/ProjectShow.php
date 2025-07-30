@@ -17,8 +17,6 @@ class ProjectShow extends Component
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 
-    //11/07/2024 took reimbursments to ProjectFiances
-
     public function mount()
     {
         //include deleted
@@ -28,7 +26,7 @@ class ProjectShow extends Component
     #[Title('Project')]
     public function render()
     {
-        // $this->authorize('view', $this->project);
+        $this->authorize('view', $this->project);
         return view('livewire.projects.show');
     }
 }
