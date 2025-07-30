@@ -234,7 +234,9 @@ class TaskReminderController extends Controller
         
         // Set expiration timer
         $timerKey = "task_notification_timer:{$userId}:{$today->format('Y-m-d')}";
-        Redis::set($timerKey, now()->addMinutes($notification_delay)->timestamp);
+        
+        // FIX: Use $this-> to access class property
+        Redis::set($timerKey, now()->addMinutes($this->notification_delay)->timestamp);
     }
     
     /**
