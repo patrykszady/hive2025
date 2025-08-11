@@ -2,67 +2,78 @@
     <div class="grid max-w-xl grid-cols-4 gap-4 xl:relative lg:max-w-5xl sm:px-6">
         <div class="col-span-4 space-y-4 lg:col-span-2 lg:h-32 lg:sticky lg:top-5">
             {{-- EXPENSE DETAILS --}}
-            <flux:card>
-                <div class="flex justify-between">
-                    <flux:heading size="lg" class="mb-0">Expense Details</flux:heading>
-                    @can('update', $expense)
-                        <flux:button.group>
-                            <flux:button
-                                wire:click="$dispatchTo('expenses.expense-create', 'editExpense', { expense: {{$expense->id}}})"
-                                size="sm"
-                                >
-                                Edit Expense
-                            </flux:button>
-                            <flux:dropdown position="bottom" align="end">
-                                <flux:button icon-trailing="chevron-down" size="sm"></flux:button>
+            <x-details.card 
+                title="Expense Details"
+                subheading="Expense and related details like Expense Splits and Expense Receipts."
+                :canEdit="auth()->user()->can('update', $expense)"
+            >
+                <x-slot:header_buttons>
+                    <flux:button.group>
+                        <flux:button
+                            wire:click="$dispatchTo('expenses.expense-create', 'editExpense', { expense: {{$expense->id}}})"
+                            size="sm"
+                            >
+                            Edit Expense
+                        </flux:button>
+                        <flux:dropdown position="bottom" align="end">
+                            <flux:button icon-trailing="chevron-down" size="sm"></flux:button>
+                            <flux:menu>
+                                <flux:menu.item wire:click="$dispatchTo('expenses.expenses-associated', 'addAssociatedExpense', { expense: {{$expense->id}}})">Link Expenses</flux:menu.item>
+                            </flux:menu>
+                        </flux:dropdown>
+                    </flux:button.group>
+                </x-slot:header_buttons>
 
-                                <flux:menu>
-                                    <flux:menu.item wire:click="$dispatchTo('expenses.expenses-associated', 'addAssociatedExpense', { expense: {{$expense->id}}})">Link Expenses</flux:menu.item>
-                                </flux:menu>
-                            </flux:dropdown>
-                        </flux:button.group>
-                    @endcan
-                </div>
-                <flux:subheading>Expense and related details like Expense Splits and Expense Receipts.</flux:subheading>
-
-                <flux:separator class="my-2"/>
-
-                <x-lists.details_list>
-                    <x-lists.details_item title="Amount" detail="{{money($expense->amount)}}" />
-                    <x-lists.details_item title="Date" detail="{{$expense->date->format('m/d/Y')}}" />
-                    <x-lists.details_item title="Vendor" detail="{{$expense->vendor->business_name . ', ' . $expense->vendor->business_type}}" href="{{isset($expense->vendor->id) ? route('vendors.show', $expense->vendor->id) : ''}}"/>
-                    <x-lists.details_item title="Project" detail="{{$expense->project->name}}" href="{{isset($expense->project->id) ? route('projects.show', $expense->project->id) : ''}}"/>
+                <x-slot:details>
+                    <x-details.row title="Amount" content="{{ money($expense->amount) }}" />
+                    <x-details.row title="Date" content="{{ $expense->date->format('m/d/Y') }}" />
+                    <x-details.row 
+                        title="Vendor" 
+                        content="{{ $expense->vendor->business_name . ', ' . $expense->vendor->business_type }}"
+                        href="{{ isset($expense->vendor->id) ? route('vendors.show', $expense->vendor->id) : null }}"
+                    />
+                    <x-details.row 
+                        title="Project" 
+                        content="{{ $expense->project->name }}"
+                        href="{{ isset($expense->project->id) ? route('projects.show', $expense->project->id) : null }}"
+                    />
+                    
+                    @if($expense->note)
+                        <flux:description><i class="text-sky-800">{{$expense->note}}</i></flux:description>
+                    @endif
+                    @if($expense->has('receipts'))
+                        @if(isset($expense->receipts()->first()->notes))
+                            <flux:description><i class="text-sky-800">{{$expense->receipts()->first()->notes}}</i></flux:description>
+                        @endif
+                    @endif
 
                     @if($expense->reimbursment)
-                        <x-lists.details_item title="Reimbursment" detail="{{$expense->reimbursment}}" />
+                        <x-details.row title="Reimbursment" content="{{ $expense->reimbursment }}" />
                     @endif
 
                     @if($expense->paid_by)
-                        <x-lists.details_item title="Paid By" detail="{{$expense->paidby->full_name}}" />
+                        <x-details.row title="Paid By" content="{{ $expense->paidby->full_name }}" />
                     @endif
 
                     @if($expense->invoice)
-                        <x-lists.details_item title="Invoice" detail="{{$expense->invoice}}" />
+                        <x-details.row title="Invoice" content="{{ $expense->invoice }}" />
                     @endif
 
                     @if($expense->note)
-                        <x-lists.details_item title="Note" detail="{{$expense->note}}" />
+                        <x-details.row title="Note" content="{{ $expense->note }}" />
                     @endif
 
-                    @if($expense->receipt)
-                        @if($expense->receipt->notes)
-                            <x-lists.details_item title="PO" detail="{{$expense->receipt->notes}}" />
-                        @endif
+                    @if($expense->receipt && $expense->receipt->notes)
+                        <x-details.row title="PO" content="{{ $expense->receipt->notes }}" />
                     @endif
-                </x-lists.details_list>
+                </x-slot:details>
 
-                {{-- FOOTER --}}
-                <div>
-                    @if($expense->created_by_user_id === 0)
+                @if($expense->created_by_user_id === 0)
+                    <x-slot:footer>
                         <flux:subheading><i>*Expense Created Automatically.</i></flux:subheading>
-                    @endif
-                </div>
-            </flux:card>
+                    </x-slot:footer>
+                @endif
+            </x-details.card>
 
             {{-- TRANSACTIONS --}}
             @if($expense->transactions->isNotEmpty())

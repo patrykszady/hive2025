@@ -270,6 +270,7 @@ class CompanyEmailController extends Controller
                         foreach ($ends as $end_text) {
                             if (is_numeric($pos = strpos($string, $end_text, $receipt_start))) {
                                 $receipt_end = $pos;
+                                // $receipt_end_text = $end_text; // Store the matched text for clarity
                                 break;
                             }
                         }
@@ -333,7 +334,6 @@ class CompanyEmailController extends Controller
                         }
 
                     } else {
-                        // dd($ocr_filename);
                         // Image processing - override the default $doc_type
                         $doc_type = 'jpg';
                         $ocr_filename .= '.' . $doc_type;
@@ -700,11 +700,21 @@ class CompanyEmailController extends Controller
     {
         if ($message) {
             if (!empty($message['attachments'])) {
-                // Filter out inline attachments, keep only non-inline ones
-                $nonInlineAttachments = array_filter($message['attachments'], function($attachment) {
-                    return !isset($attachment['is_inline']) || $attachment['is_inline'] === false;
+                //TEMP HARD CODED FOR HOME DEPOT. REPLACE
+                // Filter to find eReceipt.pdf attachments
+                $eReceiptAttachments = array_filter($message['attachments'], function($attachment) {
+                    return $attachment['filename'] === 'eReceipt.pdf' && (!isset($attachment['is_inline']) || $attachment['is_inline'] === false);
                 });
-                
+
+                if(!empty($eReceiptAttachments) && !strpos($ocr_receipt_data['content'], 'RECALL AMOUNT')){
+                    $nonInlineAttachments = $eReceiptAttachments;
+                }else{
+                    // Filter out inline attachments, keep only non-inline ones
+                    $nonInlineAttachments = array_filter($message['attachments'], function($attachment) {
+                        return !isset($attachment['is_inline']) || $attachment['is_inline'] === false;
+                    });
+                }
+
                 // Process all non-inline attachments
                 if (!empty($nonInlineAttachments)) {
                     // First clean up existing temp file if passed in
