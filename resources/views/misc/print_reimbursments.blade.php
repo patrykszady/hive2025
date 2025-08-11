@@ -60,7 +60,7 @@
                                         </span>
                                         <br>
                                         <span class="text-gray-700 text-sm">
-                                            {{$expense->vendor->busienss_name}}
+                                            {{$expense->business_name}}
                                         </span>
                                     </li>
 

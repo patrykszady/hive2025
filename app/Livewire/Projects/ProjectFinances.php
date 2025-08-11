@@ -66,7 +66,11 @@ class ProjectFinances extends Component
         $view = view('misc.print_reimbursments', compact(['expenses', 'title']))->render();
         $location = storage_path('files/reimbursements/'.$title_file.'.pdf');
 
+        $nodePath = trim(shell_exec('which node'));
+        $npmPath = trim(shell_exec('which npm'));
         Browsershot::html($view)
+            ->setNodeBinary($nodePath)
+            ->setNpmBinary($npmPath)
             ->newHeadless()
             // ->scale(0.8)
             ->showBrowserHeaderAndFooter()
