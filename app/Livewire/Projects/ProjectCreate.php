@@ -159,8 +159,6 @@ class ProjectCreate extends Component
                 $this->form->state = $client_address->state;
                 $this->form->zip_code = $client_address->zip_code;
             }
-
-            // dd($this->client_addresses->first());
         }
 
         $this->modal('project_form_modal')->show();
@@ -184,7 +182,6 @@ class ProjectCreate extends Component
 
     public function save()
     {
-        // dd($this);
         $project = $this->form->store();
 
         //9-1-2023 NOTIFICATIONS when we redirect with Livewire...

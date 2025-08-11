@@ -12,7 +12,7 @@ class CompanyEmailPolicy
      */
     public function viewAny(User $user): bool
     {
-        return $user->primary_vendor->pivot->role_id === 1;
+        return $user->vendor_role === 'Admin';
     }
 
     /**
@@ -20,7 +20,7 @@ class CompanyEmailPolicy
      */
     public function view(User $user, CompanyEmail $companyEmail): bool
     {
-        return $user->primary_vendor->pivot->role_id === 1;
+        return $user->vendor_role === 'Admin';
     }
 
     /**

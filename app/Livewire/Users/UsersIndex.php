@@ -12,11 +12,10 @@ class UsersIndex extends Component
     public Vendor $vendor;
     public $users = [];
 
-    public $view = null;
-    public $registration = null;
+    public $view = false;
 
-    protected $listeners = ['refreshComponent' => '$refresh'];
-
+    protected $listeners = ['refreshComponent' => 'loadUsers'];
+    
     public $view_text = [
         'card_title' => 'Users',
         'button_text' => 'Add User',
@@ -24,10 +23,15 @@ class UsersIndex extends Component
 
     public function mount()
     {
+        $this->loadUsers();
+    }
+    
+    public function loadUsers()
+    {
         if ($this->view == 'clients.show') {
             $this->view_text['card_title'] = 'Client Members';
             $this->users = Client::findOrFail($this->client->id)->users;
-        } elseif ($this->view == 'vendors.show') {
+        } elseif ($this->view == 'vendors.show' || $this->view == 'vendor_registration') {
             $this->view_text['card_title'] = 'Team Members';
             $this->users = $this->vendor->users()->employed()->get();
         }
@@ -37,7 +41,7 @@ class UsersIndex extends Component
     {
         if ($this->view == 'clients.show') {
             $this->dispatch('newMember', model: 'client', model_id: $this->client->id);
-        } elseif ($this->view == 'vendors.show') {
+        } elseif ($this->view == 'vendors.show' || $this->view == 'vendor_registration') {
             $this->dispatch('newMember', model: 'vendor', model_id: $this->vendor->id);
         }
     }

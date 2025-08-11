@@ -26,7 +26,7 @@
                 <x-forms.one_line label="Hourly">
                     <flux:input.group>
                         <flux:input.group.prefix>$</flux:input.group.prefix>
-                        <flux:input wire:model="form.hourly" type="numeric" disabled inputmode="numeric" step="0.25" :disabled="$user->user_role == 'Member' ? true : ($user->logged_in ? true : false)" />
+                        <flux:input wire:model.live.debounce.300ms="form.hourly" type="numeric" disabled inputmode="numeric" step="0.25" :disabled="$user->user_role == 'Member' ? true : ($user->logged_in ? true : false)" />
                     </flux:input.group>
                     <flux:error name="form.hourly" />
                 </x-forms.one_line>
@@ -34,7 +34,7 @@
                 <x-forms.one_line label="Amount">
                     <flux:input.group>
                         <flux:input.group.prefix>$</flux:input.group.prefix>
-                        <flux:input wire:model="form.amount" type="text" disabled />
+                        <flux:input wire:model.live="form.amount" type="text" disabled />
                     </flux:input.group>
                     <flux:error name="form.amount" />
                 </x-forms.one_line>

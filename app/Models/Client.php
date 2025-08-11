@@ -2,38 +2,37 @@
 
 namespace App\Models;
 
-use App\Models\Scopes\ClientScope;
-use App\Models\Scopes\VendorScope;
+use App\Scopes\ClientScope;
+use App\Scopes\VendorScope;
+
 use App\Traits\HasAddress;
+
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Client extends Model
 {
     use HasFactory, HasAddress;
 
-    protected $with = ['users'];
-
     protected $fillable = ['business_name', 'address', 'address_2', 'city', 'state', 'zip_code', 'home_phone', 'source', 'created_at', 'updated_at'];
-
-    protected $appends = ['name'];
 
     protected static function booted()
     {
         static::addGlobalScope(new ClientScope);
     }
 
-    public function projects(): BelongsToMany
+    public function projects(): HasMany
     {
-        return $this->belongsToMany(Project::class, 'project_vendor', 'client_id', 'project_id');
+        return $this->hasMany(Project::class);
     }
 
     public function users(): BelongsToMany
     {
-        return $this->belongsToMany(User::class);
+        return $this->belongsToMany(User::class)->withTimestamps();
     }
 
     public function vendor(): BelongsTo
@@ -43,7 +42,7 @@ class Client extends Model
 
     public function vendors(): BelongsToMany
     {
-        return $this->belongsToMany(Vendor::class)->withPivot('source', 'vendor_id')->withTimestamps();
+        return $this->belongsToMany(Vendor::class)->withPivot('source')->withTimestamps();
     }
 
     /**
@@ -56,32 +55,37 @@ class Client extends Model
                 if (empty($attributes['business_name'])) {
                     $users = $this->users;
 
+                    if ($users->count() == 0) {
+                        return 'No Name';
+                    }
+                    
                     if ($users->count() == 1) {
                         return $users->first()->first_name.' '.$users->first()->last_name;
                     } else {
-                        $users_last_names = $users->groupBy('last_name');
-
-                        if ($users_last_names->count() == 1) {
-                            $users_implode = [];
-                            foreach ($users as $user) {
-                                $users_implode[] = $user->first_name;
+                        // Group users by last name
+                        $usersByLastName = $users->groupBy('last_name');
+                        
+                        $nameGroups = [];
+                        
+                        // Process each last name group
+                        foreach ($usersByLastName as $lastName => $lastNameGroup) {
+                            if ($lastNameGroup->count() == 1) {
+                                // Single person with this last name - use full name
+                                $nameGroups[] = $lastNameGroup->first()->first_name . ' ' . $lastName;
+                            } else {
+                                // Multiple people with same last name - combine first names
+                                $firstNames = $lastNameGroup->pluck('first_name')->toArray();
+                                $nameGroups[] = implode(' & ', $firstNames) . ' ' . $lastName;
                             }
-
-                            $users_implode = implode(' & ', $users_implode);
-                            $users_last_name = array_keys($users_last_names->toArray())[0];
-
-                            return $users_implode.' '.$users_last_name;
-                        } else {
-                            $users_implode = [];
-                            foreach ($users as $user) {
-                                $users_implode[] = $user->first_name.' '.$user->last_name;
-                            }
-
-                            return implode(' & ', $users_implode);
                         }
+                        
+                        // Join all name groups with " & "
+                        return implode(' & ', $nameGroups);
                     }
                 } else {
-                    return $attributes['business_name'];
+                    // Extract first part before ',' if available
+                    $nameParts = explode(',', $attributes['business_name']);
+                    return trim($nameParts[0]);
                 }
             }
         );

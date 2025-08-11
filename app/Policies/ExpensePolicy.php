@@ -13,9 +13,6 @@ class ExpensePolicy
     public function viewAny(User $user): bool
     {
         return true;
-        // if($user->vendor->user_role == 'Admin'){
-        //     return true;
-        // }
     }
 
     /**
@@ -25,14 +22,29 @@ class ExpensePolicy
      */
     public function view(User $user, Expense $expense): bool
     {
-        if ($user->primary_vendor->pivot->role_id == 1) {
+        // Admin can see all expenses
+        if ($user->vendor_role === 'Admin') {
             return true;
-            //if expense paid_by user
-        } elseif ($expense->belongs_to_vendor_id == $user->primary_vendor_id && $expense->paid_by == $user->id) {
-            return true;
-        } else {
-            return false;
         }
+        
+        // Get the user's via_vendor_id from pivot
+        $userVendorPivot = $user->vendors()
+            ->where('vendors.id', $user->vendor->id)
+            ->first();
+        
+        $viaVendorId = $userVendorPivot ? $userVendorPivot->pivot->via_vendor_id : null;
+        
+        // Check if this is a via vendor expense
+        if ($viaVendorId && $expense->vendor_id == $viaVendorId) {
+            return true;
+        }
+        
+        // Regular user can see expenses they paid for
+        if ($expense->belongs_to_vendor_id == $user->vendor->id && $expense->paid_by == $user->id) {
+            return true;
+        }
+        
+        return false;
     }
 
     /**
@@ -42,7 +54,7 @@ class ExpensePolicy
      */
     public function create(User $user): bool
     {
-        return $user->primary_vendor->pivot->role_id === 1;
+        return $user->vendor_role === 'Admin';
     }
 
     /**
@@ -52,7 +64,12 @@ class ExpensePolicy
      */
     public function update(User $user, Expense $expense): bool
     {
-        return $user->primary_vendor->pivot->role_id === 1;
+        // Admin can update any expense
+        if ($user->vendor_role === 'Admin') {
+            return true;
+        }
+        
+        return false;
     }
 
     /**

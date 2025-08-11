@@ -10,14 +10,14 @@
             @endif --}}
         </div>
 
-        {{-- USER / VENDOR FINANCES --}}
-        @if($user->this_vendor)
-            @can('update', $user)
+        {{-- USER FINANCES --}}
+        @can('update', $user)
+            @if($user->isEmployed())
                 <div class="space-y-2 col-span-4 lg:col-span-2">
                     <livewire:users.user-finances :user="$user">
                 </div>
-            @endcan
-        @endif
+            @endif
+        @endcan
 	</div>
     <livewire:users.user-create />
 </div>

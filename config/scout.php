@@ -5,7 +5,6 @@ use App\Models\Transaction;
 use App\Models\Vendor;
 
 return [
-
     /*
     |--------------------------------------------------------------------------
     | Default Search Engine
@@ -139,21 +138,28 @@ return [
         'key' => env('MEILISEARCH_KEY'),
         'index-settings' => [
             Expense::class => [
-                'filterableAttributes'=> ['vendor_id', 'project_id', 'distribution_id', 'check_id', 'has_splits', 'belongs_to_vendor_id', 'expense_status'],
-                'sortableAttributes' => ['date'],
+                'filterableAttributes'=> [
+                    'vendor_id', 'project_id', 'distribution_id', 'check_id', 
+                    'has_splits', 'belongs_to_vendor_id', 'expense_status', 
+                    'paid_by', '__soft_deleted'
+                ],
+                'sortableAttributes' => ['date', 'amount'],
                 'searchableAttributes' => ['amount'],
                 'typoTolerance' => ['enabled' => false],
-                // matchingStrategy
-                // 'rankingRules' =>
+                'rankingRules' => ['sort', 'exactness'],
             ],
-
+            
             Transaction::class => [
-                'filterableAttributes'=> ['vendor_id', 'deposit', 'transaction_date', 'posted_date', 'expense_id', 'check_id'],
-                'sortableAttributes' => ['transaction_date'],
+                'filterableAttributes'=> [
+                    'vendor_id', 'deposit', 'transaction_date', 'posted_date', 
+                    'expense_id', 'check_id', 'bank_account_id', '__soft_deleted'
+                ],
+                'sortableAttributes' => ['transaction_date', 'amount'],
                 'searchableAttributes' => ['amount'],
                 'typoTolerance' => ['enabled' => false],
+                'rankingRules' => ['sort', 'exactness'],
             ],
-
+            
             Vendor::class => [
                 'filterableAttributes'=> ['business_type', 'business_name'],
                 'sortableAttributes' => ['business_name', 'ytd_expense_sum', 'created_at'],

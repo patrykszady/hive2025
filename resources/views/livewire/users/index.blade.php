@@ -1,14 +1,13 @@
-{{-- 10-05-2024 should be same as VENDOR USERS --}}
-<flux:card class="space-y-2 mb-4">
+<flux:card class="space-y-2 !py-4">
     <div class="flex justify-between">
         <flux:heading size="lg">{{$view_text['card_title']}}</flux:heading>
-        @if($view === 'vendors.show')
+        @if($view === 'vendors.show' || $view === 'vendor_registration')
             @can('create_team_member', [App\Models\User::class, $vendor->id])
-                <flux:button wire:navigate.hover wire:click="add_user" icon="plus" size="sm">{{$view_text['card_title']}}</flux:button>
+                <flux:button wire:navigate.hover wire:click="add_user" icon="plus" size="sm">Add Member</flux:button>
             @endcan
-        @else
+        @elseif(isset($client))
             @can('create_client_member', [App\Models\User::class, $client])
-                <flux:button wire:navigate.hover wire:click="add_user" icon="plus" size="sm">{{$view_text['card_title']}}</flux:button>
+                <flux:button wire:navigate.hover wire:click="add_user" icon="plus" size="sm">Add Member</flux:button>
             @endcan
         @endif
     </div>
@@ -20,7 +19,7 @@
             <flux:table.column>Name</flux:table.column>
             <flux:table.column>Phone</flux:table.column>
             <flux:table.column>Email</flux:table.column>
-            @if($view === 'vendors.show')
+            @if($view === 'vendors.show' || $view === 'vendor_registration')
                 <flux:table.column>Role</flux:table.column>
             @endif
         </flux:table.columns>
@@ -38,7 +37,8 @@
                     </flux:table.cell>
                     <flux:table.cell>{{ $user->cell_phone }}</flux:table.cell>
                     <flux:table.cell>{{ $user->email }}</flux:table.cell>
-                    @if($view === 'vendors.show')
+                    @if($view === 'vendors.show' || $view === 'vendor_registration')
+                        {{-- Show role only for vendor users --}}
                         <flux:table.cell>                            
                             <flux:badge inset="top bottom" color="blue" size="sm">
                                 {{ $user->getRoleForVendor($vendor->id) }}
@@ -49,18 +49,23 @@
             @endforeach
         </flux:table.rows>
     </flux:table>
-    <div class="flex space-x-2">
-        <flux:spacer />
+    
+    <div class="flex justify-end">
+        <div x-data="{ isConfirmed: false }">
+            @if($this->view == 'vendor_registration' && !isset($vendor->registration?->team_members))
+                <flux:button
+                    variant="primary"
+                    x-show="!isConfirmed"
+                    wire:click="$dispatchTo('entry.vendor-registration', 'confirmProcessStep', { process_step: 'team_members' }); $nextTick(() => { isConfirmed = true })"
+                    >
+                    No More Employees
+                </flux:button>
+            @endif
 
-        <div
-            x-data="{ vendor_info: @entangle('registration') }"
-            x-show="vendor_info"
-            x-transition
-            >
-            <flux:button type="submit" variant="primary" wire:click="$dispatchTo('entry.vendor-registration', 'confirmProcessStep', { process_step: 'team_members' })">
-                No More Employees
-            </flux:button>
+            <livewire:users.user-create />
+            {{-- @can('update', $vendor)
+                <livewire:users.user-create />
+            @endcan --}}
         </div>
     </div>
-    <livewire:users.user-create />
 </flux:card>

@@ -29,75 +29,59 @@ class Expense extends Model
         static::addGlobalScope(new ExpenseScope);
     }
 
-    public function toSearchableArray(): array
-    {
-        // All model attributes are made searchable
-        $array = $this->toArray();
-        // Then we add/adjust some additional fields
-        $array['date'] = $this->date->timestamp;
-
-        // if($this->check()->withoutGlobalScopes()){
-        //     if($this->check()->withoutGlobalScopes()->transactions->isNotEmpty()){
-        //         if($this->check()->withoutGlobalScopes()->transactions->sum('amount') == $this->check()->withoutGlobalScopes()->amount){
-        //             $expense_status = 'Complete';
-        //         }else{
-        //             $expense_status = 'Missing Transaction';
-        //         }
-        //     }else{
-        //         $expense_status = 'No Transaction';
-        //     }
-        // }else{
-        //     $expense_status = ''
-        // }
-        // if(($this->transactions->isNotEmpty() && $this->project->project_name != 'NO PROJECT') || ($this->paid_by != NULL && $this->project->project_name != 'NO PROJECT')){
-        //     $expense_status = 'Complete';
-        // }else{
-        //     if($this->project->project_name != 'NO PROJECT' && $this->transactions->isEmpty()){
-        //         $expense_status = 'No Transaction';
-        //     }elseif($this->project->project_name == 'NO PROJECT' && ($this->transactions->isNotEmpty() || $this->paid_by != NULL)){
-        //         $expense_status = 'No Project';
-        //     }else{
-        //         $expense_status = 'Missing Info';
-        //     }
-        // }
-
-        // $array['is_project_id_null'] = $this->distribution_id ? false : true;
-        // $array['is_distribution_id_null'] = $this->distribution_id ? false : true;
-        $array['has_splits'] = $this->splits->isEmpty() ? false : true;
-        // ! is_null($this->project_id) ? 'Complete' : 'Missing Info';
-        // $array['expense_status'] = $this->status;
-        return $array;
-
-        //ONLY:
-        // return [
-        //     'id' => $this->id,
-        //     'name' => $this->name,
-        //     'email' => $this->email,
-        // ];
-
-        // return array_merge($this->toArray(), [
-        //     'id' => (string) $this->id,
-        //     'vendor_id' => (string) $this->vendor_id,
-        //     'belongs_to_vendor_id' => (string) $this->belongs_to_vendor_id,
-        //     'project_id' => (string) $this->project_id,
-        //     'check_id' => (string) $this->check_id,
-        //     'is_project_id_null' => $this->distribution_id ? false : true,
-        //     'distribution_id' => (string) $this->distribution_id,
-        //     'is_distribution_id_null' => $this->distribution_id ? false : true,
-        //     'has_splits' => $this->splits->isEmpty() ? false : true,
-        //     'amount' => $this->amount,
-        //     'expense_status' => ! is_null($this->project_id) ? 'Complete' : 'Missing Info',
-        //     'date' => $this->date->format('Y-m-d'),
-        //     'created_at' => $this->created_at->timestamp,
-        // ]);
-    }
-
     /**
      * Get the name of the index associated with the model.
      */
     public function searchableAs(): string
     {
         return env('APP_ENV') == 'local' ? 'expenses_index_dev' : 'expenses_index';
+    }
+
+    public function toSearchableArray(): array
+    {
+        // All model attributes are made searchable
+        $array = $this->toArray();
+
+        // Then we add/adjust some additional fields
+        $array['date'] = $this->date->timestamp;
+        $array['has_splits'] = $this->splits->isEmpty() ? false : true;
+
+        return $array;
+    }
+
+    /**
+     * Create a search builder that respects user access permissions
+     */
+    public static function scopedSearch($query = '', $filterConditions = [], $sortBy = 'date', $sortDirection = 'desc')
+    {
+        return self::search($query, function ($meilisearch, $searchQuery, $options) use ($filterConditions, $sortBy, $sortDirection) {
+            // Apply base security filters
+            $user = auth()->user();
+            $baseFilter = "__soft_deleted = 0 AND belongs_to_vendor_id = {$user->vendor->id}";
+            
+            // Add role-specific filter
+            if ($user->vendor_role === 'Member') {
+                $baseFilter .= " AND paid_by = {$user->id}";
+            }
+            
+            // Add custom filters if any
+            if (!empty($filterConditions)) {
+                $filterString = implode(' AND ', $filterConditions);
+                $options['filter'] = "({$baseFilter}) AND ({$filterString})";
+            } else {
+                $options['filter'] = $baseFilter;
+            }
+            
+            // Always apply sorting to maintain order
+            $options['sort'] = [$sortBy . ':' . $sortDirection];
+            
+            // Use 'all' matching strategy for exact prefix matching
+            if (!empty($searchQuery)) {
+                $options['matchingStrategy'] = 'all';
+            }
+            
+            return $meilisearch->search($searchQuery, $options);
+        });
     }
 
     public function project(): BelongsTo
@@ -156,22 +140,22 @@ class Expense extends Model
         return $this->hasMany(Transaction::class);
     }
 
-    // public function getTransactionsAttribute()
-    // {
-    //     // If the expense has its own transactions, return them
-    //     $own = $this->transactions()->get();
-    //     if ($own->isNotEmpty()) {
-    //         return $own;
-    //     }
+    public function getTransactionsAttribute()
+    {
+        // If the expense has its own transactions, return them
+        $own = $this->transactions()->get();
+        if ($own->isNotEmpty()) {
+            return $own;
+        }
 
-    //     // If the check exists and has transactions, return those
-    //     if ($this->check && $this->check->transactions()->exists()) {
-    //         return $this->check->transactions;
-    //     }
+        // If the check exists and has transactions, return those
+        if ($this->check && $this->check->transactions()->exists()) {
+            return $this->check->transactions;
+        }
 
-    //     // Otherwise, return an empty collection
-    //     return collect();
-    // }
+        // Otherwise, return an empty collection
+        return collect();
+    }
 
     public function receipts(): HasMany
     {
@@ -207,28 +191,49 @@ class Expense extends Model
 
     protected function status(): Attribute
     {
-        //['Complete', 'Missing Info', 'No Project', 'No Transaction']
-        if (($this->transactions->isNotEmpty() && $this->project->project_name != 'NO PROJECT') || ($this->paid_by != null && $this->project->project_name != 'NO PROJECT')) {
-            $status = 'Complete';
-        } else {
-            if ($this->project->project_name != 'NO PROJECT' && $this->transactions->isEmpty()) {
-                $status = 'No Transaction';
-            } elseif ($this->project->project_name == 'NO PROJECT' && ($this->transactions->isNotEmpty() || $this->paid_by != null)) {
-                $status = 'No Project';
-            } else {
-                $status = 'Missing Info';
-            }
+        // First check if expense has a check with "Complete" status
+        if ($this->check && $this->check->status === 'Complete') {
+            return Attribute::make(
+                get: fn ($value) => 'Complete'
+            );
         }
-
-        return Attribute::make(
-            get: fn ($value) => $status,
-        );
+        
+        // Normalize project name for comparison to avoid case sensitivity issues
+        $projectName = strtoupper($this->project->project_name);
+        
+        // Special handling for "NO PROJECT"
+        if ($projectName === 'NO PROJECT') {
+            return Attribute::make(
+                get: fn ($value) => 'No Project'
+            );
+        }
+        
+        // Status logic for regular projects
+        if ($this->transactions->isNotEmpty() || $this->paid_by !== null) {
+            return Attribute::make(
+                get: fn ($value) => 'Complete'
+            );
+        } elseif ($this->transactions->isEmpty()) {
+            return Attribute::make(
+                get: fn ($value) => 'No Transaction'
+            );
+        } else {
+            return Attribute::make(
+                get: fn ($value) => 'Missing Info'
+            );
+        }
     }
 
     protected function statusColor(): Attribute
     {
         return Attribute::make(
-            get: fn ($value) => $this->status === 'Complete' ? 'green' : ($this->status === 'No Transaction' ? 'yellow' : ($this->status === 'No Project' ? 'red' : 'amber')),
+            get: fn ($value) => match($this->status) {
+                'Complete' => 'green',
+                'No Transaction' => 'yellow',
+                'No Project' => 'red',
+                'Missing Info' => 'amber',
+                default => 'zinc'
+            }
         );
     }
 }

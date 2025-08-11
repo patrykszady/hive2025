@@ -39,7 +39,7 @@
                 <flux:input.group label="User">
                     <flux:input
                         wire:model.live="full_name"
-                        x-bind:disabled="{{!is_null($user)}}"
+                        x-bind:disabled="$wire.user"
                         type="text"
                         placeholder="Lead User"
                     />
@@ -55,7 +55,7 @@
                 <flux:input
                     wire:model.live="lead.phone"
                     label="Phone"
-                    x-bind:disabled="{{!is_null($user)}}"
+                    x-bind:disabled="$wire.user"
                     type="number"
                     placeholder="Phone"
                 />
@@ -63,7 +63,7 @@
                 <flux:input
                     wire:model.live="lead.email"
                     label="Email"
-                    x-bind:disabled="{{!is_null($user)}}"
+                    x-bind:disabled="$wire.user"
                     type="text"
                     placeholder="Email"
                 />

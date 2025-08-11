@@ -12,7 +12,7 @@ class LeadPolicy
      */
     public function viewAny(User $user): bool
     {
-        return $user->primary_vendor->pivot->role_id === 1;
+        return $user->vendor_role === 'Admin';
     }
 
     /**
@@ -20,7 +20,7 @@ class LeadPolicy
      */
     public function view(User $user, Lead $lead): bool
     {
-        return $user->primary_vendor->pivot->role_id === 1;
+        return $user->vendor_role === 'Admin';
     }
 
     /**

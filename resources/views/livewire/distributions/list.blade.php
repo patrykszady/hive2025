@@ -1,4 +1,3 @@
-{{-- PROJECT DETAILS --}}
 <flux:card>
     <div class="flex justify-between">
         <flux:heading size="lg">Distributions</flux:heading>

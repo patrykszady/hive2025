@@ -12,16 +12,34 @@ class ExpenseScope implements Scope
     {
         $user = auth()->user();
 
-        if (is_null($user)) {
-            // $builder;
-        } else {
-            //if Admin..all Expenses ... if Member...only expenses the User Paid For....?
-            if ($user->primary_vendor->pivot->role_id == 1) {
-                $builder->where('belongs_to_vendor_id', $user->primary_vendor_id);
-            } elseif ($user->primary_vendor->pivot->role_id == 2) {
-                $builder->where('belongs_to_vendor_id', $user->primary_vendor_id)->where('paid_by', $user->id);
-            } else {
-
+        if ($user) {
+            // Get the user's via_vendor_id from pivot
+            $userVendorPivot = $user->vendors()
+                ->where('vendors.id', $user->vendor->id)
+                ->first();
+            
+            $viaVendorId = $userVendorPivot ? $userVendorPivot->pivot->via_vendor_id : null;
+            
+            // if Admin: all vendor expenses
+            if ($user->vendor_role == 'Admin') {
+                $builder->where(function ($query) use ($user, $viaVendorId) {
+                    $query->where('belongs_to_vendor_id', $user->vendor->id);
+                });
+            } 
+            // if Member: only expenses the User Paid For + their via vendor expenses
+            elseif ($user->vendor_role == 'Member') {
+                $builder->where(function ($query) use ($user, $viaVendorId) {
+                    // Regular user PAID BY expenses
+                    $query->where(function ($subQuery) use ($user) {
+                        $subQuery->where('belongs_to_vendor_id', $user->vendor->id)
+                                ->where('paid_by', $user->id);
+                    });
+                    
+                    // Add via vendor expenses if applicable
+                    if ($viaVendorId) {
+                        $query->orWhere('vendor_id', $viaVendorId);
+                    }
+                });
             }
         }
     }

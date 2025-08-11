@@ -18,10 +18,21 @@
             <flux:table :paginate="$this->payments">
                 <flux:table.columns>
                     <flux:table.column>Amount</flux:table.column>
-                    <flux:table.column sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')">Date</flux:table.column>
+                    <flux:table.column 
+                        sortable 
+                        :sorted="$sortBy === 'date'" 
+                        :direction="$sortDirection" 
+                        wire:click="sort('date')"
+                        wire:loading.class="opacity-50"
+                        wire:loading.attr="disabled"
+                      
+                        >
+                        Date
+                    </flux:table.column>
 
                     @if($view != 'projects.show')
                         <flux:table.column>Project</flux:table.column>
+                        <flux:table.column>Client</flux:table.column>
                     @endif
 
                     <flux:table.column>Reference</flux:table.column>
@@ -32,7 +43,8 @@
                     @foreach ($this->payments as $payment)
                         <flux:table.row :key="$payment->id">
                             <flux:table.cell
-                                wire:click="$dispatchTo('payments.payment-create', 'editPayment', { payment: {{$payment->id}}})"
+                                wire:navigate.hover
+                                href="{{route('payments.show', $payment->id)}}"
                                 variant="strong"
                                 class="cursor-pointer"
                                 >
@@ -46,6 +58,13 @@
                                     class="cursor-pointer"
                                     >
                                     {{ $payment->project->name }}
+                                </flux:table.cell>
+                                <flux:table.cell
+                                    wire:navigate.hover
+                                    href="{{route('clients.show', $payment->project->client->id)}}"
+                                    class="cursor-pointer"
+                                    >
+                                    {{ $payment->project->client->name }}
                                 </flux:table.cell>
                             @endif
                             <flux:table.cell>{{ $payment->reference }}</flux:table.cell>

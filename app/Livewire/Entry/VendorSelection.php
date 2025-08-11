@@ -25,6 +25,7 @@ class VendorSelection extends Component
     public function vendors()
     {
         return $this->user->vendors()
+            // 1099
             ->whereIn('vendors.business_type', ['Sub'])
             ->wherePivot('is_employed', 1)
             ->withoutGlobalScopes()
@@ -32,11 +33,11 @@ class VendorSelection extends Component
             ->get();
     }
 
-    #[Computed]
-    public function clients()
-    {
-        return $this->user->clients()->get();
-    }
+    // #[Computed]
+    // public function clients()
+    // {
+    //     return $this->user->clients()->get();
+    // }
 
     public function updatedVendorId($vendor_id)
     {
@@ -47,7 +48,7 @@ class VendorSelection extends Component
     {
         $this->user->update(['primary_vendor_id' => $this->vendor->id]);
 
-        if ($this->vendor->registration['registered']) {
+        if (isset($this->vendor->registration->registered)) {
             return redirect()->route('dashboard');
         } else {
             return redirect()->route('vendor_registration', $this->vendor->id);

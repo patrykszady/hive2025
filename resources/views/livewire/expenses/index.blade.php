@@ -60,7 +60,7 @@
         </div>
 
         <div class="space-y-2">
-            <flux:table :paginate="$expenses" wire:loading.class="opacity-50 text-opacity-50">
+            <flux:table :paginate="$this->expenses" wire:loading.class="opacity-50 text-opacity-50">
                 <flux:table.columns>
                     <flux:table.column>Amount</flux:table.column>
                     <flux:table.column
@@ -83,10 +83,14 @@
                 </flux:table.columns>
 
                 <flux:table.rows>
-                    @foreach ($expenses as $expense)
+                    @foreach ($this->expenses as $expense)
                         <flux:table.row :key="$expense->id">
                             <flux:table.cell
-                                wire:click="$dispatchTo('expenses.expense-create', 'editExpense', { expense: {{$expense->id}}})"
+                                x-data="{
+                                    canEdit: {{ auth()->user()->can('create', App\Models\Expense::class) ? 'true' : 'false' }},
+                                    showUrl: '{{ route('expenses.show', $expense->id) }}'
+                                }"
+                                @click="canEdit ? $wire.dispatchTo('expenses.expense-create', 'editExpense', { expense: {{ $expense->id }} }) : window.location.href = showUrl"
                                 variant="strong"
                                 class="cursor-pointer"
                                 >
@@ -116,14 +120,14 @@
         </div>
     </flux:card>
 
-    @if($view === NULL)
+    @if($view === NULL && auth()->user()->can('create', App\Models\Expense::class))
         <flux:card>
             <div>
                 <flux:heading size="lg">Transactions</flux:heading>
             </div>
 
             <div>
-                <flux:table :paginate="$transactions" wire:loading.class="opacity-50 text-opacity-50">
+                <flux:table :paginate="$this->transactions" wire:loading.class="opacity-50 text-opacity-50">
                     <flux:table.columns>
                         <flux:table.column>Amount</flux:table.column>
                         <flux:table.column>Date</flux:table.column>
@@ -133,7 +137,7 @@
                     </flux:table.columns>
 
                     <flux:table.rows>
-                        @foreach ($transactions as $transaction)
+                        @foreach ($this->transactions as $transaction)
                             <flux:table.row :key="$transaction->id">
                                 <flux:table.cell
                                     wire:click="$dispatchTo('expenses.expense-create', 'createExpenseFromTransaction', { transaction: {{$transaction->id}}})"
@@ -143,7 +147,9 @@
                                     {{ money($transaction->amount) }}
                                 </flux:table.cell>
                                 <flux:table.cell>{{ $transaction->transaction_date->format('m/d/Y') }}</flux:table.cell>
-                                <flux:table.cell>{{ Str::limit($transaction->vendor->name != 'No Vendor' ? $transaction->vendor->name : $transaction->plaid_merchant_description, 35)}}</flux:table.cell>
+                                <flux:table.cell class="max-w-[150px] truncate" title="{{ $transaction->vendor->name != 'No Vendor' ? $transaction->vendor->name : $transaction->plaid_merchant_description }}">
+                                    {{ $transaction->vendor->name != 'No Vendor' ? $transaction->vendor->name : $transaction->plaid_merchant_description }}
+                                </flux:table.cell>
                                 <flux:table.cell>{{ $transaction->bank_account->bank->name }}</flux:table.cell>
                                 <flux:table.cell>{{ isset($transaction->owner) ? $transaction->owner : $transaction->bank_account->account_number }}</flux:table.cell>
                                 {{--
@@ -173,37 +179,3 @@
 
     <livewire:expenses.expense-create />
 </div>
-{{--
-
-<div>
-    <x-cards.heading>
-        <div class="mx-auto">
-            <div>
-                <select
-                    wire:model.live="bank_plaid_ins_id"
-                    id="bank_plaid_ins_id"
-                    name="bank_plaid_ins_id"
-                    class="block w-full py-2 pl-3 pr-10 mt-1 text-base border-gray-300 rounded-md focus:outline-hidden focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
-                    <option value="" readonly>All Banks</option>
-                    @foreach($banks as $institution_id => $bank)
-                        <option value="{{$institution_id}}">{{$bank->first()->name}}</option>
-                    @endforeach
-                </select>
-            </div>
-            @if(!empty($bank_owners))
-                <div>
-                    <select
-                        wire:model.live="bank_owner"
-                        id="bank_owner"
-                        name="bank_owner"
-                        class="block w-full py-2 pl-3 pr-10 mt-1 text-base border-gray-300 rounded-md focus:outline-hidden focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
-                        <option value="" readonly>All Owners</option>
-                        @foreach($bank_owners as $owner)
-                            <option value="{{$owner}}">{{$owner}}</option>
-                        @endforeach
-                    </select>
-                </div>
-            @endif
-        </div>
-    </x-cards.heading>
-</div> --}}

@@ -61,7 +61,7 @@
                     <!-- No Date Tasks Header - Sticky under main header -->
                     <div class="bg-zinc-50 border-b border-zinc-200 px-4 py-2 shadow-sm select-none relative z-40">
                         <flux:accordion>
-                            <flux:accordion.item expanded>
+                            <flux:accordion.item>
                                 <flux:accordion.heading class="bg-zinc-50 px-4 py-2">
                                     <div class="flex items-center justify-between w-full">
                                         <div class="text-zinc-700">

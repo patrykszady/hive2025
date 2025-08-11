@@ -16,6 +16,7 @@ class UserShow extends Component
     #[Title('User')]
     public function render()
     {
+        $this->authorize('view', $this->user);
         return view('livewire.users.show');
     }
 }

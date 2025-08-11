@@ -36,9 +36,9 @@ class TimesheetCreate extends Component
             return redirect()->route('timesheets.index');
         } else {
             $this->user->hours = $this->weekly_hours->sum('hours');
-            $this->user->hourly = $this->user->vendors()->where('vendors.id', $this->user->vendor->id)->first()->pivot->hourly_rate;
+            $this->user->hourly = $this->user->vendor_pivot->hourly_rate;
             $this->user->amount = $this->getUserHoursAmountProperty();
-            $this->user->user_role = $this->user->vendor->user_role;
+            $this->user->user_role = $this->user->vendor_pivot->role_id;
             $this->user->logged_in = $this->user->id == auth()->user()->id ? true : false;
         }
 

@@ -33,9 +33,7 @@ class UserCreate extends Component
     public $model = ['type' => null, 'id' => null];
     public $user_cell = false;
     public $user_form = false;
-    // public $isRegistered = false;
 
-    public $via_vendor = null;
     public $via_vendors = [];
     public $via_client = null;
 
@@ -47,13 +45,6 @@ class UserCreate extends Component
             'user_cell' => 'required|digits:10',
         ];
     }
-
-    // public function mount(User $user)
-    // {
-    //     dd($user->isRegistered);
-    //     $this->user = $user;
-    //     $this->isRegistered = $user->isRegistered;
-    // }
 
     public function updated($field, $value)
     {
@@ -70,25 +61,8 @@ class UserCreate extends Component
         $this->validateOnly($field);
     }
 
-    // public function ViaVendorId($via_vendor_id)
-    // {
-    //     $this->via_vendor = TRUE;
-    //     $this->form->via_vendor = $via_vendor_id;
-    //     //UPDATE $via_vendors in view here
-    //     $this->via_vendors = $this->form->user->vendors()->where('business_type', '!=', 'Sub')->get();
-    //     dd($this->via_vendors);
-    //     // $this->render();
-    // }
-
-    public function create_via_vendor()
-    {
-        //dispatch to VendorCreate with user, via_vendor (come back here after with via_vendor(id))
-        $this->dispatch('viaVendor', user: $this->form->user, business_name: $this->form->business_name)->to(VendorCreate::class);
-    }
-
     public function user_cell_find()
     {
-        $this->via_vendor = false;
         $this->validateOnly('user_cell');
 
         $user = User::where('cell_phone', $this->user_cell)->first();
@@ -126,10 +100,20 @@ class UserCreate extends Component
             }
         }
 
-        // $this->resetErrorBag();
         $this->user_form = true;
         $this->resetErrorBag();
-        // $this->user_form = TRUE;
+    }
+
+    public function create_via_vendor()
+    {
+        //dispatch to VendorCreate with user, via_vendor (come back here after with via_vendor(id))
+        $this->dispatch('viaVendor', user: $this->form->user, business_name: $this->form->user->full_name)->to(VendorCreate::class);
+    }
+
+    public function ViaVendorId($via_vendor_id)
+    {
+        $this->form->via_vendor = $via_vendor_id;
+        $this->via_vendors = $this->form->user->vendors()->where('business_type', '!=', 'Sub')->get();
     }
 
     //new Vendor or Client member
@@ -166,7 +150,6 @@ class UserCreate extends Component
     {
         $this->user_cell = $user->cell_phone;
         $this->user_form = true;
-        // $this->isRegistered = $user->isRegistered;
 
         // //creating new Vendor or Client or adding Team Member/Client User to existing Vendor or Client
         $this->model['type'] = 'user';
@@ -183,8 +166,6 @@ class UserCreate extends Component
 
     public function removeMember(User $user)
     {
-        // 2-7-22 need REMOVAL MODAL to confirm
-        // 2-28-2025 - kind of have in the blade view with wire:confirm.prompt
         $user->vendor->users()->wherePivot('is_employed', '1')
             ->updateExistingPivot($user->id, [
                 'end_date' => today()->format('Y-m-d'),
@@ -192,11 +173,8 @@ class UserCreate extends Component
                 'updated_at' => now(),
             ]);
 
-        // Assuming you have User and Role models with a many-to-many relationship
-        // Fetch all pivot entries for this user
-
         $this->redirect(DashboardShow::class, navigate: true);
-        //6-1-2024 set blurry background...
+        
         Flux::toast(
             duration: 5000,
             position: 'top right',
@@ -229,31 +207,33 @@ class UserCreate extends Component
                 $user->hourly_rate = 0;
                 $user->role = 1;
 
-                $this->modal('user_form_modal')->close();
+                //VendorCreate
                 $this->dispatch('userVendor', $user->toArray());
             } else {
-                $user->vendors()->attach(
-                    $this->model['id'], [
-                        'role_id' => $this->form->role,
-                        'hourly_rate' => $this->form->hourly_rate,
-                        'start_date' => today()->format('Y-m-d'),
-                        'via_vendor_id' => $this->form->via_vendor ?? null,
-                    ]
-                );
+                // Check if this relationship already exists to prevent duplicates
+                if (!$user->vendors()->where('vendor_id', $this->model['id'])->exists()) {
+                    $user->vendors()->attach(
+                        $this->model['id'], [
+                            'role_id' => $this->form->role,
+                            'hourly_rate' => $this->form->hourly_rate,
+                            'start_date' => today()->format('Y-m-d'),
+                            'via_vendor_id' => $this->form->via_vendor ?? null
+                        ]
+                    );
 
-                $this->modal('user_form_modal')->close();
+                    // $this->dispatch('confirmProcessStep', 'team_members')->to('entry.vendor-registration');
+                    // $this->dispatch('refreshComponent')->to('users.users-index');
+                    $this->dispatch('refreshComponent')->to(UsersIndex::class);
 
-                $this->dispatch('confirmProcessStep', 'team_members')->to('entry.vendor-registration');
-                $this->dispatch('refreshComponent')->to(UsersIndex::class);
-
-                Flux::toast(
-                    duration: 5000,
-                    position: 'top right',
-                    variant: 'success',
-                    heading: 'User Added to Vendor.',
-                    // route / href / wire:click
-                    text: '',
-                );
+                    Flux::toast(
+                        duration: 5000,
+                        position: 'top right',
+                        variant: 'success',
+                        heading: 'User Added to Vendor.',
+                        // route / href / wire:click
+                        text: '',
+                    );
+                }
             }
             //Client User
             //if existing User .. dispatchTo ClientCreate with user (show existing users the User is part of) and close $this->modal.
@@ -263,21 +243,24 @@ class UserCreate extends Component
                 $this->dispatch('addUser', user: $user->id, client_id: $this->model['id'])->to(ClientCreate::class);
             } else {
                 //add User to existing/this Client
-                $user->clients()->attach($this->model['id']);
-                $this->dispatch('refreshComponent')->to(UsersIndex::class);
-
-                Flux::toast(
-                    duration: 5000,
-                    position: 'top right',
-                    variant: 'success',
-                    heading: 'User Added to Client.',
-                    // route / href / wire:click
-                    text: '',
-                );
+                // Check if this relationship already exists to prevent duplicates
+                if (!$user->clients()->where('client_id', $this->model['id'])->exists()) {
+                    $user->clients()->attach($this->model['id']);
+                    $this->dispatch('refreshComponent')->to(UsersIndex::class);
+                    $this->dispatch('refreshComponent')->to('clients.clients-show');
+                    
+                    Flux::toast(
+                        duration: 5000,
+                        position: 'top right',
+                        variant: 'success',
+                        heading: 'User Added to Client.',
+                        text: '',
+                    );
+                }
             }
-
-            $this->modal('user_form_modal')->close();
         }
+
+        $this->modal('user_form_modal')->close();
     }
 
     public function edit()

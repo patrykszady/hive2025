@@ -50,6 +50,7 @@ class TimesheetPaymentCreate extends Component
 
     public function mount()
     {
+        $this->authorize('viewPayment', [Timesheet::class, $this->user]);
         $this->view_text = [
             'card_title' => 'Create Daily Hours',
             'button_text' => 'Pay '.$this->user->first_name,
@@ -58,7 +59,7 @@ class TimesheetPaymentCreate extends Component
 
         $this->employees = auth()->user()->vendor->users()->where('is_employed', 1)->whereNot('users.id', $this->user->id)->get();
 
-        $this->user->pivot_user_vendor = $this->user->vendors()->where('vendors.id', auth()->user()->primary_vendor_id)->first()->pivot->via_vendor_id;
+        $this->user->pivot_user_vendor = $this->user->vendors()->where('vendors.id', auth()->user()->vendor->id)->first()->pivot->via_vendor_id;
 
         if (! is_null($this->user->pivot_user_vendor)) {
             $via_vendor_back = Vendor::withoutGlobalScopes()->findOrFail($this->user->pivot_user_vendor);
@@ -197,7 +198,7 @@ class TimesheetPaymentCreate extends Component
 
     public function save()
     {
-        $this->authorize('viewPayment', Timesheet::class);
+        $this->authorize('viewAnyPayment', Timesheet::class);
 
         //validate Pay User Total Check is greater than $0 / $this->weekly_timesheets has at least one Item in Collection
         if ($this->weekly_timesheets_total <= 0) {
@@ -230,9 +231,8 @@ class TimesheetPaymentCreate extends Component
     #[Title('Timesheets Payment')]
     public function render()
     {
-        $this->authorize('viewPayment', Timesheet::class);
+        $this->authorize('viewPayment', [Timesheet::class, $this->user]);
 
-        //07/16/2022: what about distributions.. would distributions ever end up here?
         return view('livewire.timesheets.payment-form');
     }
 }

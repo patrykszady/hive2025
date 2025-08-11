@@ -23,7 +23,7 @@ class ProjectObserver
         ProjectStatus::create([
             'project_id' => $project->id,
             'start_date' => today()->format('Y-m-d'),
-            'belongs_to_vendor_id' => auth()->user()->primary_vendor_id,
+            'belongs_to_vendor_id' => $project->belongs_to_vendor_id,
             'title' => 'Estimate',
         ]);
     }

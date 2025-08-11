@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Scopes\LeadScope;
 use Illuminate\Database\Eloquent\Casts\AsArrayObject;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -23,6 +24,11 @@ class Lead extends Model
             'deleted_at' => 'date:Y-m-d',
             'lead_data' => AsArrayObject::class,
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::addGlobalScope(new LeadScope);
     }
 
     public function user(): BelongsTo

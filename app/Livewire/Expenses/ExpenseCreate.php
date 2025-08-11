@@ -2,7 +2,6 @@
 
 namespace App\Livewire\Expenses;
 
-// use App\Jobs\UpdateProjectDistributionsAmount;
 use App\Livewire\Forms\ExpenseForm;
 use App\Models\BankAccount;
 use App\Models\Check;
@@ -23,12 +22,15 @@ class ExpenseCreate extends Component
 
     public ExpenseForm $form;
 
+    public Expense $expense;
+
     public $split = false;
     public $splits = false;
-    public Expense $expense;
     public $expense_splits = [];
+
     public $employees = [];
     public $via_vendor_employees = [];
+    
     public $bank_accounts = [];
     public $vendors  = [];
     public $projects  = [];
@@ -52,22 +54,9 @@ class ExpenseCreate extends Component
 
         $this->bank_accounts = BankAccount::latestCheckingAccounts()->get();
         $this->vendors = Vendor::orderBy('business_name')->get(['id', 'business_name']);
-        $this->projects = Project::status(['Active', 'Complete', 'Service Call', 'Service Call Complete'])
-            ->whereHas('statuses', function ($query) {
-                $query->where('title', 'Active');
-            })
-            ->with(['statuses' => function ($query) {
-                $query->where('title', 'Active')->orderBy('start_date', 'desc');
-            }])
-            ->orderByDesc(function ($query) {
-                $query->select('start_date')
-                    ->from('project_status')
-                    ->whereColumn('project_status.project_id', 'projects.id')
-                    ->where('title', 'Active')
-                    ->latest('start_date')
-                    ->limit(1);
-            })
-            ->get();
+
+        //use Computed projects method below instead of loading here?
+        $this->projects = Project::orderBy('created_at', 'desc')->get();
         $this->distributions = Distribution::all(['id', 'name']);
     }
 
@@ -127,14 +116,12 @@ class ExpenseCreate extends Component
         }
 
         if ($field == 'form.reimbursment') {
-
             // if($value == NULL){
             //     $this->form->reimbursment = NULL;
             // }elseif($value == 'client_reimbursement'){
             //     // dd('Client');
             //     $this->form->reimbursment = 'client_reimbursement';
             // }
-
 
             // if($title == 'Complete' && $this->form->reimbursment == 'Client'){
             //     $this->addError('form.reimbursment', 'No Client reimbursment allowed when Project is Complete.');
@@ -356,14 +343,13 @@ class ExpenseCreate extends Component
 
         $this->resetModal();
         //queue
-        // UpdateProjectDistributionsAmount::dispatch($expense->project, $expense->project->distributions->pluck('id')->toArray());
 
         $this->dispatch('refreshComponent')->to('expenses.expense-index');
     }
 
     public function render()
     {
-        $this->authorize('create', Expense::class);
+        // $this->authorize('create', Expense::class);
         return view('livewire.expenses.form');
     }
 }

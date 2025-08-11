@@ -17,7 +17,17 @@ class CheckPolicy
      */
     public function viewAny(User $user): bool
     {
-        //
+        // First check if user has a vendor
+        if (!$user->vendor) {
+            return false;
+        }
+        
+        // Only allow if vendor business_type is NOT 1099
+        if ($user->vendor->business_type === '1099') {
+            return false;
+        }
+        
+        return true;
     }
 
     /**
@@ -27,6 +37,28 @@ class CheckPolicy
      */
     public function view(User $user, Check $check): bool
     {
+        // Admin can view any check
+        if ($user->vendor_role === 'Admin') {
+            return true;
+        }
+        
+        // User can view their own checks
+        if ($check->user_id === $user->id) {
+            return true;
+        }
+        
+        // Get the user's via_vendor_id from pivot
+        $userVendorPivot = $user->vendors()
+            ->where('vendors.id', $user->vendor->id)
+            ->first();
+        
+        $viaVendorId = $userVendorPivot ? $userVendorPivot->pivot->via_vendor_id : null;
+        
+        // User can view checks for their via_vendor
+        if ($viaVendorId && $check->vendor_id == $viaVendorId) {
+            return true;
+        }
+        
         return false;
     }
 
@@ -37,7 +69,7 @@ class CheckPolicy
      */
     public function create(User $user): bool
     {
-        //
+        return $user->vendor_role === 'Admin';
     }
 
     /**
@@ -47,7 +79,12 @@ class CheckPolicy
      */
     public function update(User $user, Check $check): bool
     {
-        //
+        // Admin can update any check
+        if ($user->vendor_role === 'Admin') {
+            return true;
+        }
+        
+        return false;
     }
 
     /**
@@ -57,7 +94,12 @@ class CheckPolicy
      */
     public function delete(User $user, Check $check): bool
     {
-        //
+        // Admin can delete check
+        if ($user->vendor_role === 'Admin') {
+            return true;
+        }
+        
+        return false;
     }
 
     /**
@@ -67,7 +109,7 @@ class CheckPolicy
      */
     public function restore(User $user, Check $check): bool
     {
-        //
+        return $user->vendor_role === 'Admin';
     }
 
     /**
@@ -77,6 +119,6 @@ class CheckPolicy
      */
     public function forceDelete(User $user, Check $check): bool
     {
-        //
+        return false;
     }
 }

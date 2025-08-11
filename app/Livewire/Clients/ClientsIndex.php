@@ -62,6 +62,7 @@ class ClientsIndex extends Component
     #[Title('Clients')]
     public function render()
     {
+        $this->authorize('viewAny', Client::class);
         return view('livewire.clients.index');
     }
 }

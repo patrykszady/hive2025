@@ -17,19 +17,10 @@ class TimesheetsIndex extends Component
     use AuthorizesRequests, WithPagination;
 
     public $amount = '';
-    // public $weekly_hours_to_confirm = [];
 
     protected $queryString = [
         'amount' => ['except' => ''],
     ];
-
-    public function mount()
-    {
-        //01-04-2023 if user is Admin for user->vendor, show all, otherview if NOT Admin, only show User hours/timesheets
-        //group by USER and WEEK
-
-        // dd($this->weekly_hours_to_confirm);
-    }
 
     #[Title('Timesheets')]
     public function render()

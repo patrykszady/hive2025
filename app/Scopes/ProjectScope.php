@@ -11,35 +11,37 @@ class ProjectScope implements Scope
 {
     public function apply(Builder $builder, Model $model)
     {
+        // Skip for guests/unauthenticated users
         if (auth()->guest()) {
-
-        } else {
-            $user = auth()->user();
-            $user_vendor_pivot = $user->primary_vendor->pivot;
-
-            $builder->withWhereHas('vendor', function ($query) use ($user) {
-                $query->where('vendor_id', $user->vendor->id);
-            });
-
-            //where client/vendor
-            //Admin
-            if ($user_vendor_pivot->role_id == 1) {
-                // dd($user_vendor_pivot);
-                // $builder->where('belongs_to_vendor_id', $user->primary_vendor_id);
-
-                //shows all projects
-                // $builder;
-                //Member
-            } elseif ($user_vendor_pivot->role_id == 2) {
-                //03-15-2023  and any active projects despite how long ago they were created...
-                $projects_start_date = Carbon::parse($user_vendor_pivot->start_date)->subMonths(6)->format('Y-m-d');
-                // $projects_end_date = Carbon::parse($user->vendor->auth_user_role->first()->pivot->end_date);
-
-                //only show projects since employment started ..minus 6 months (why 6 months?)
-                //whereBetween start and end dates
-                // $builder->whereBetween('created_at', [$projects_start_date, $projects_end_date]);
-                $builder->where('created_at', '>', $projects_start_date);
-            }
+            return;
+        }
+        
+        $user = auth()->user();
+        
+        // Skip if user doesn't have a vendor
+        if (!$user->vendor) {
+            return;
+        }
+        
+        // Filter projects that are related to user's vendor
+        // through the project_vendor pivot table
+        $builder->whereHas('vendors', function ($query) use ($user) {
+            $query->where('vendor_id', $user->vendor->id);
+        });
+        
+        // For Admin users, we're done - show all vendor projects
+        if ($user->vendor_role === 'Admin') {
+            return;
+        }
+        
+        // For Member users, limit by employment start date
+        if ($user->vendor_role === 'Member' && isset($user->vendor_pivot->start_date)) {
+            $projects_start_date = Carbon::parse($user->vendor_pivot->start_date)
+                ->subMonths(6)
+                ->format('Y-m-d');
+                
+            // Apply date filter on projects created after member's start date
+            $builder->where('created_at', '>', $projects_start_date);
         }
     }
 }

@@ -12,15 +12,14 @@ class LineItemPolicy
      */
     public function viewAny(User $user): bool
     {
-        return $user->primary_vendor->pivot->role_id === 1;
-    }
+        return $user->vendor_role === 'Admin';
 
     /**
      * Determine whether the user can view the model.
      */
     public function view(User $user, LineItem $lineItem): bool
     {
-        return $user->primary_vendor->pivot->role_id === 1;
+        return $user->vendor_role === 'Admin';
     }
 
     /**
@@ -28,7 +27,7 @@ class LineItemPolicy
      */
     public function create(User $user): bool
     {
-        return $user->primary_vendor->pivot->role_id === 1;
+        return $user->vendor_role === 'Admin';
     }
 
     /**

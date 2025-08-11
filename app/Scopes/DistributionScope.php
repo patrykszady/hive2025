@@ -13,7 +13,7 @@ class DistributionScope implements Scope
         if (auth()->guest()) {
 
         } else {
-            $builder->where('vendor_id', auth()->user()->primary_vendor_id);
+            $builder->where('vendor_id', auth()->user()->vendor->id);
         }
     }
 }

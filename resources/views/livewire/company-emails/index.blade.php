@@ -3,15 +3,12 @@
     <flux:card>
         <div class="flex justify-between">
             <flux:heading size="lg">Company Email Accounts</flux:heading>
-            {{-- <flux:button
+            <flux:button
+                href="{{route('company-email.login')}}" 
                 size="sm"
                 >
                 Add Email Account
-            </flux:button> --}}
-
-            <a href="{{route('company-email.login')}}" type="button">
-                Add Email Account
-            </a>
+            </flux:button>
         </div>
         <flux:subheading>Email accounts you use to recieve digital receipts from vendors.</flux:subheading>
         <flux:separator variant="subtle" />

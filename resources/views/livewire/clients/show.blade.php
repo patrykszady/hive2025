@@ -2,65 +2,50 @@
     <div class="grid grid-cols-4 gap-4 lg:max-w-5xl">
         <div class="col-span-4 lg:col-span-2">
             {{-- CLIENT DETAILS --}}
-            <flux:card>
-                {{-- HEADER - Keep outside accordion --}}
-                <div class="flex justify-between">
-                    <flux:heading size="lg" class="mb-0 truncate">{{ $client->name }}</flux:heading>
+            <x-details.card 
+                :title="$client->name"
+                :canEdit="auth()->user()->can('update', $client)"
+            >
+                <x-slot:header_buttons>
+                    <flux:button
+                        wire:click="$dispatchTo('clients.client-create', 'editClient', { client: {{$client->id}}})"
+                        size="sm"
+                    >
+                        Edit Client
+                    </flux:button>
+                </x-slot:header_buttons>
+                
+                <x-slot:details>
+                    {{-- Client Name --}}
+                    <x-details.row 
+                        title="Name" 
+                        :content="$client->name"
+                    />
 
-                    @can('update', $client)
-                        <flux:button
-                            wire:click="$dispatchTo('clients.client-create', 'editClient', { client: {{$client->id}}})"
-                            size="sm"
-                            >
-                            Edit Client
-                        </flux:button>
-                    @endcan
-                </div>
+                    {{-- Client Address with Link --}}
+                    <x-details.row 
+                        title="Billing Address" 
+                        :content="$client->full_address" 
+                        :href="$client->getAddressMapURI()"
+                        :copyable="true"
+                    />
 
-                {{-- SUBHEADING --}}
-                <flux:subheading>Client Information</flux:subheading>
+                    {{-- Client Phone --}}
+                    @if($client->home_phone)
+                        <x-details.row 
+                            title="Phone" 
+                            :content="$client->home_phone"
+                            :copyable="true"
+                        />
+                    @endif
 
-                <flux:separator class="my-2"/>
-
-                {{-- DETAILS LIST wrapped in accordion --}}
-                <flux:accordion transition>
-                    <flux:accordion.item expanded>
-                        <flux:accordion.heading>
-                            Details
-                        </flux:accordion.heading>
-                        <flux:accordion.content>
-                            {{-- Client Name --}}
-                            <x-details.row 
-                                title="Name" 
-                                :content="$client->name"
-                            />
-
-                            {{-- Client Address with Link --}}
-                            <x-details.row 
-                                title="Billing Address" 
-                                :content="$client->full_address" 
-                                :href="$client->getAddressMapURI()"
-                                :copyable="true"
-                            />
-
-                            {{-- Client Source --}}
-                            <x-details.row 
-                                title="Source" 
-                                :content="$client->source"
-                            />
-
-                            {{-- Client Phone --}}
-                            @if($client->home_phone)
-                                <x-details.row 
-                                    title="Phone" 
-                                    :content="$client->home_phone"
-                                    :copyable="true"
-                                />
-                            @endif
-                        </flux:accordion.content>
-                    </flux:accordion.item>
-                </flux:accordion>
-            </flux:card>
+                    {{-- Client Source --}}
+                    <x-details.row 
+                        title="Source" 
+                        :content="$client->source"
+                    />
+                </x-slot:details>
+            </x-details.card>
         </div>
 
         {{-- CLIENT USERS --}}

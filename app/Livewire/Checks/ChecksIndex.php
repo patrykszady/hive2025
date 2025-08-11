@@ -13,7 +13,7 @@ use Livewire\Attributes\Title;
 use Livewire\Component;
 use Livewire\WithPagination;
 
-#[Lazy]
+// #[Lazy]
 class ChecksIndex extends Component
 {
     use AuthorizesRequests, WithPagination;
@@ -113,23 +113,13 @@ class ChecksIndex extends Component
                 })
                 ->simplePaginate($paginate_number);
 
-        $checks->getCollection()->each(function ($check, $key) {
-            if ($check->transactions->sum('amount') == $check->amount) {
-                $check->status = 'Complete';
-            } elseif (($check->transactions->isNotEmpty() && $check->transactions->sum('amount') != $check->amount)) {
-                $check->status = 'Missing Transactions';
-            } else {
-                $check->status = 'No Transactions';
-            }
-        });
-
         return $checks;
     }
 
     #[Title('Checks')]
     public function render()
     {
-        //$this->authorize('viewAny', Expense::class);
+        $this->authorize('viewAny', Check::class);
         return view('livewire.checks.index', [
         ]);
     }

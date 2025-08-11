@@ -33,7 +33,7 @@ class CardsIndex extends Component
     {
         $this->type = $type;
 
-        $this->vendors = Vendor::topExpenseVendors()->get();
+        // $this->vendors = Vendor::topExpenseVendors()->get();
 
         $this->employees = auth()->user()->vendor->users()->employed()->get();
         $this->projects = Project::status(['Active', 'Scheduled', 'Service Call'])->get();

@@ -83,23 +83,70 @@ class Check extends Model
         return $this->amount - $transactions_sum;
     }
 
-    public function getOwnerAttribute()
+    protected function owner(): Attribute
     {
-        //$vendor_id = belongs_to_user ($user_id) //distribution of user that belongs to vendor_id
-        if ($this->vendor_id && $this->user_id) {
-            $owner = $this->user->full_name;
-        } elseif ($this->vendor_id) {
-            if ($this->vendor) {
-                $owner = $this->vendor->business_name;
-            } else {
-                $owner = $this->vendor_id;
+        return Attribute::make(
+            get: function () {
+                // If check has a user, check for via_vendor relationship
+                if ($this->user_id) {
+                    // Get user's relationship with the current vendor context
+                    $userVendorPivot = $this->user->vendors()
+                        ->where('vendors.id', auth()->user()->vendor->id)
+                        ->first();
+                    
+                    // If user has a via_vendor_id, get the vendor directly through the relationship
+                    if ($userVendorPivot && $userVendorPivot->pivot->via_vendor_id) {
+                        // Load the via_vendor through the Vendor model's relationship
+                        $viaVendor = $userVendorPivot->vendors()
+                            ->where('vendors.id', $userVendorPivot->pivot->via_vendor_id)
+                            ->first();
+                            
+                        if ($viaVendor) {
+                            return $viaVendor->business_name . ' (' . $viaVendor->business_type . ')';
+                        }
+                    }
+                    
+                    // Otherwise use user's full name
+                    return $this->user->full_name;
+                } 
+                // If check has a vendor, use vendor name
+                elseif ($this->vendor) {
+                    return $this->vendor->business_name . ' (' . $this->vendor->business_type . ')';
+                }
+                
+                // Fallback if neither user nor vendor are valid
+                return null;
             }
-        } elseif ($this->user_id) {
-            $owner = $this->user->full_name;
-        } else {
-            $owner = null;
-        }
+        );
+    }
 
-        return $owner;
+    protected function status(): Attribute
+    {
+        return Attribute::make(
+            get: function () {
+                if ($this->transactions->sum('amount') == $this->amount) {
+                    return 'Complete';
+                } elseif ($this->transactions->isNotEmpty() && $this->transactions->sum('amount') != $this->amount) {
+                    return 'Missing Transactions';
+                } else {
+                    return 'No Transactions';
+                }
+            }
+        );
+    }
+
+    /**
+     * Get the appropriate color for the status badge
+     */
+    protected function statusColor(): Attribute
+    {
+        return Attribute::make(
+            get: fn () => match($this->status) {
+                'Complete' => 'green',
+                'Missing Transactions' => 'yellow',
+                'No Transactions' => 'red',
+                default => 'zinc'
+            }
+        );
     }
 }

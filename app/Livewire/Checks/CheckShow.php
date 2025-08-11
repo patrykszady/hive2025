@@ -6,11 +6,16 @@ use App\Models\Check;
 use App\Models\Expense;
 use App\Models\Timesheet;
 use App\Models\Vendor;
+
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
 class CheckShow extends Component
 {
+    use AuthorizesRequests;
+
     public Check $check;
 
     protected $listeners = ['refreshComponent' => '$refresh'];
@@ -18,26 +23,10 @@ class CheckShow extends Component
     #[Title('Check')]
     public function render()
     {
-        //paid_by 60 = Robert, find vendor_id on vendor_user table "team members"(include previous/all
-        // $user_via_vendor = auth()->user()->vendor->users()->where('via_vendor_id', $this->check->vendor_id);
+        $this->authorize('view', $this->check);
+        //paid_by user_id 60 = Robert, find vendor_id on vendor_user table "team members"(include previous/all
 
-        // if(!$user_via_vendor->get()->isEmpty()){
-        //     $via_vendor_user_id = $user_via_vendor->first()->id;
-
-        //     $vendor_paid_expenses =
-        //         Expense::
-        //             where('paid_by', $via_vendor_user_id)
-        //             ->where('check_id', $this->check->id)
-        //             ->whereNotNull('distribution_id')
-        //             ->get();
-        //     if($vendor_paid_expenses->isEmpty()){
-        //         $vendor_paid_expenses = NULL;
-        //     }
-        // }else{
-        //     $vendor_paid_expenses = NULL;
-        // }
-        // dd($vendor_paid_expenses);
-
+        // EXPENSES
         $vendor_expenses =
             Expense::where('check_id', $this->check->id)
                 ->whereNull('reimbursment')
@@ -74,6 +63,7 @@ class CheckShow extends Component
         // Paid Expenses
         $user_paid_expenses =
             Expense::where('paid_by', $this->check->user_id)
+                ->whereNotNull('paid_by')
                 ->where('check_id', $this->check->id)
                 ->where(function ($query) {
                     $query->whereNull('reimbursment')

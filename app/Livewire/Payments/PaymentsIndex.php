@@ -19,34 +19,30 @@ class PaymentsIndex extends Component
     public $view = null;
 
     public $sortBy = 'date';
-
     public $sortDirection = 'desc';
-
 
     #[Computed]
     public function payments()
     {
-        if (isset($this->project)) {
-            $payments =
-                $this->project->payments()->tap(fn ($query) => $this->sortBy ? $query->orderBy($this->sortBy, $this->sortDirection) : $query)
-                    ->paginate(25);
-            // Payment::where('project_id', $this->project->id)->tap(fn ($query) => $this->sortBy ? $query->orderBy($this->sortBy, $this->sortDirection) : $query)
-            // ->paginate(10);
+        // Start with the base query based on view
+        $query = $this->view == 'projects.show'
+            ? $this->project->payments()
+            : Payment::query();
 
-            // dd($payments);
-        } else {
-            $payments =
-                Payment::tap(fn ($query) => $this->sortBy ? $query->orderBy($this->sortBy, $this->sortDirection) : $query)
-                    ->paginate(15);
+        // Apply sorting if specified
+        if ($this->sortBy) {
+            $query->orderBy($this->sortBy, $this->sortDirection);
         }
 
-        return $payments;
+        // Apply pagination with different limits based on view
+        return $query->paginate($this->view == 'projects.show' ? 25 : 15);
     }
 
     public function sort($column)
     {
         if ($this->sortBy === $column) {
-            $this->sortDirection = $this->sortDirection === 'asc' ? 'asc' : 'desc';
+            // Toggle between asc and desc
+            $this->sortDirection = $this->sortDirection === 'asc' ? 'desc' : 'asc';
         } else {
             $this->sortBy = $column;
             $this->sortDirection = 'asc';
@@ -56,6 +52,7 @@ class PaymentsIndex extends Component
     #[Title('Payments')]
     public function render()
     {
+        $this->authorize('viewAny', Payment::class);
         return view('livewire.payments.index');
     }
 }

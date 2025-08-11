@@ -8,9 +8,8 @@ use Livewire\Component;
 class VendorDetails extends Component
 {
     public Vendor $vendor;
-
-    //im usign $view for this in the app so change?
-    public $registration = false;
+    public $view = false;
+    public $expanded = true;
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 

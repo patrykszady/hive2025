@@ -8,7 +8,6 @@ use App\Models\EstimateLineItem;
 use App\Models\Expense;
 use App\Models\LineItem;
 use App\Models\Project;
-use App\Models\UserVendor;
 use App\Models\Vendor;
 
 use App\Observers\BidObserver;
@@ -17,7 +16,6 @@ use App\Observers\EstimateLineItemObserver;
 use App\Observers\ExpenseObserver;
 use App\Observers\LineItemObserver;
 use App\Observers\ProjectObserver;
-use App\Observers\UserVendorObserver;
 use App\Observers\VendorObserver;
 
 use Carbon\Carbon;
@@ -136,7 +134,6 @@ class AppServiceProvider extends ServiceProvider
         EstimateLineItem::observe(EstimateLineItemObserver::class);
         LineItem::observe(LineItemObserver::class);
         Project::observe(ProjectObserver::class);
-        UserVendor::observe(UserVendorObserver::class);
         Vendor::observe(VendorObserver::class);
     }
 

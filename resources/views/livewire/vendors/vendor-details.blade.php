@@ -1,43 +1,38 @@
 <x-details.card
     :title="$vendor->name"
-    {{-- SUBHEADING  --}}
-    {{-- @if($registration)
-        <flux:subheading>Confirm information.</flux:subheading>
-    @else
-        <flux:subheading>YTD Paid {{ money($vendor->ytd_expense_sum) }}</flux:subheading>
-    @endif --}}
-    :subheading="'YTD Paid: ' . money($vendor->ytd_expense_sum)"
+    :subheading="$this->view == 'vendor_registration' 
+                 ? 'Confirm Company information.' 
+                 : (auth()->user()->can('update', $vendor) ? 'YTD Paid: ' . money($vendor->ytd_expense_sum) : '')"
     :canEdit="auth()->user()->can('update', $vendor)"
-    >
+    :expanded="$expanded"
+>
     <x-slot:header_buttons>
-        @if($vendor->business_type != 'Retail')
-            @if($vendor->id != auth()->user()->primary_vendor->id)
+        @unless($vendor->business_type == 'Retail')
+            @if($vendor->id != auth()->user()->vendor->id)
                 {{-- Show payment button + dropdown for other vendors --}}
                 <flux:button.group>
-                    <flux:button
-                        size="sm"
-                        href="{{route('vendors.payment', $vendor->id)}}"
-                        >
+                    <flux:button size="sm" href="{{route('vendors.payment', $vendor->id)}}">
                         Make Payment
                     </flux:button>
                     <flux:dropdown position="bottom" align="end">
                         <flux:button size="sm" icon-trailing="chevron-down"></flux:button>
-
                         <flux:menu>
-                            <flux:menu.item wire:click="$dispatchTo('vendors.vendor-create', 'editVendor', { vendor: {{$vendor->id}} })">Edit</flux:menu.item>
+                            <flux:menu.item wire:click="$dispatchTo('vendors.vendor-create', 'editVendor', { vendor: {{$vendor->id}} })">
+                                Edit
+                            </flux:menu.item>
                         </flux:menu>
                     </flux:dropdown>
                 </flux:button.group>
             @else
-                {{-- Show simple edit button for own/ primary_vendor --}}
+                {{-- Show simple edit button for own/ F --}}
                 <flux:button
                     size="sm"
                     wire:click="$dispatchTo('vendors.vendor-create', 'editVendor', { vendor: {{$vendor->id}} })"
-                    >
+                >
                     Edit
                 </flux:button>
             @endif
-        @endif
+        @endunless
     </x-slot:header_buttons>
     
     <x-slot:details>
@@ -54,49 +49,49 @@
         />
 
         {{-- Vendor Address with Link --}}
-        @if($vendor->business_type != 'Retail')
+        @unless($vendor->business_type == 'Retail')
             <x-details.row 
                 title="Address" 
                 :content="$vendor->full_address" 
                 :href="$vendor->getAddressMapURI()"
                 :copyable="true"
             />
-        @endif
+        
+            {{-- Business Phone --}}
+            @if($vendor->business_phone)
+                <x-details.row 
+                    title="Phone" 
+                    :content="$vendor->business_phone"
+                    :copyable="true"
+                />
+            @endif
 
-        {{-- Business Phone --}}
-        @if($vendor->business_type != 'Retail' && $vendor->business_phone)
-            <x-details.row 
-                title="Phone" 
-                :content="$vendor->business_phone"
-                :copyable="true"
-            />
-        @endif
-
-        {{-- Business Email --}}
-        @if($vendor->business_type != 'Retail' && $vendor->business_email)
-            <x-details.row 
-                title="Email" 
-                :content="$vendor->business_email"
-                :copyable="true"
-            />
-        @endif
+            {{-- Business Email --}}
+            @if($vendor->business_email)
+                <x-details.row 
+                    title="Email" 
+                    :content="$vendor->business_email"
+                    :copyable="true"
+                />
+            @endif
+        @endunless
     </x-slot:details>
-
-    {{-- @if($registration)
-        <x-slot:confirmButton>
-            <flux:button
-                type="submit"
-                variant="primary"
-                wire:click="$dispatchTo('entry.vendor-registration', 'confirmProcessStep', { process_step: 'vendor_info' })"
-            >
-                Confirm Details
-            </flux:button>
-        </x-slot:confirmButton>
-    @endif --}}
     
     <x-slot:footer>
-        @can('update', $vendor)
-            <livewire:vendors.vendor-create />
-        @endcan
+        <div x-data="{ isConfirmed: false }">
+            @if($this->view == 'vendor_registration' && !isset($vendor->registration?->vendor_info))
+                <flux:button
+                    variant="primary"
+                    x-show="!isConfirmed"
+                    wire:click="$dispatchTo('entry.vendor-registration', 'confirmProcess', { process_step: 'vendor_info' }); $nextTick(() => { isConfirmed = true })"
+                >
+                    Confirm Vendor Details
+                </flux:button>
+            @endif
+
+            @can('update', $vendor)
+                <livewire:vendors.vendor-create />
+            @endcan
+        </div>
     </x-slot:footer>
 </x-details.card>

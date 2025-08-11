@@ -39,7 +39,7 @@
         <div
             x-data="{ open: @entangle('user_form'), user: @entangle('form.user') }"
             x-show="open"
-            class="space-y-4"
+            class="space-y-1"
             >
             <flux:input
                 wire:model.live="form.first_name"
@@ -100,18 +100,18 @@
                     >
 
                     {{-- VIA VENDOR --}}
-                    <flux:radio.group wire:model.live="form.via_vendor" class="flex-col" label="Via Vendor" variant="cards" :indicator="false">
-                        {{-- @dd($via_vendors) --}}
-                        @foreach($via_vendors as $via_vendor)
-                            <flux:radio value="{{$via_vendor->id}}" label="{!!$via_vendor->business_name!!} {{$via_vendor->business_type}}" description="{{$via_vendor->address}} {{$via_vendor->city . ', ' . $via_vendor->state . ' ' . $via_vendor->zip_code}}" />
-                        @endforeach
+                    <flux:radio.group wire:model.live="form.via_vendor" class="flex-col" label="Member Type" variant="cards" :indicator="false">
+                        <flux:radio value="PAYROLL" label="Payroll" disabled />
 
+                        @foreach($via_vendors as $via_vendor)
+                            <flux:radio value="{{$via_vendor->id}}" label="{!!$via_vendor->business_name!!} {{$via_vendor->business_type}}" description="{{$via_vendor->address . ', ' . $via_vendor->city . ', ' . $via_vendor->state . ' ' . $via_vendor->zip_code}}" />
+                        @endforeach
+                        
                         <flux:radio value="NEW_VIA" label="New Vendor" />
                     </flux:radio.group>
 
                     <div
-                        x-data="{ via_vendor: @entangle('form.via_vendor')}"
-                        x-show="via_vendor == 'NEW_VIA' ? true : false"
+                        x-show="$wire.form.via_vendor == 'NEW_VIA'"
                         x-transition
                         class="my-4 space-y-4"
                         >
@@ -123,16 +123,12 @@
                             >
                             Create Vendor
                         </flux:button>
-
-                        {{-- <livewire:vendors.vendor-create /> --}}
                     </div>
                 </div>
 
                 {{-- USER / VENDOR HOURLY PAY --}}
                 <div
-                    {{-- x-data="{ via_vendor: @entangle('form.via_vendor'), role: @entangle('form.role') }"
-                    x-show="(via_vendor && via_vendor != 'NEW_VIA') || role == 1" --}}
-                    x-show="$wire.model.id != 'NEW' && $wire.model.type == 'vendor'"
+                    x-show="($wire.form.via_vendor && $wire.form.via_vendor != 'NEW_VIA') || $wire.form.role == 1"
                     class="my-4 space-y-4"
                     >
                     {{-- USER / VENDOR HOURLY PAY --}}
@@ -148,16 +144,22 @@
             </div>
         </div>
 
-        <div class="flex space-x-2 sticky bottom-0">
-            <flux:spacer />
+        {{-- FOOTER --}}
+        <div 
+            class="flex space-x-2 sticky bottom-0 justify-end"             
+            x-show="$wire.user_form && $wire.form.user && 
+                    ($wire.model.type == 'client' || 
+                    ($wire.model.type == 'vendor' && (($wire.form.via_vendor && $wire.form.via_vendor != 'NEW_VIA') || $wire.form.role == 1)))"
+            x-transition
+            >
 
-            <div
-                x-data="{open: @entangle('user_form'), user: @entangle('form.user')}"
-                x-show="open && user"
-                x-transition
+            <flux:button
+                wire:click="{{$view_text['form_submit']}}"
+                type="submit"
+                variant="primary"
                 >
-                <flux:button type="submit" variant="primary">{{$view_text['button_text']}}</flux:button>
-            </div>
+                {{$view_text['button_text']}}
+            </flux:button>
         </div>
     </form>
 </flux:modal>

@@ -5,19 +5,18 @@
 
     <flux:separator variant="subtle" />
 
-    <form wire:submit="{{$view_text['form_submit']}}" class="space-y-2">
+    <form wire:submit="{{$view_text['form_submit']}}" class="grid gap-6">
         {{-- BUSINESS NAME TEXT/SEARCH--}}
-        {{-- 2025-6-22 change this to $view != ... --}}
-        @if($view_text['form_submit'] != 'edit')
+        <div x-show="$wire.view_text.form_submit != 'edit' && !$wire.via_vendor">
             <flux:input
                 wire:model.live.debounce.500ms="business_name_text"
                 label="New Vendor Business Name"
                 type="text"
-                {{-- x-bind:disabled="$wire.via_vendor" --}}
-                placeholder="Business Name"
+                x-bind:disabled="$wire.via_vendor"
+                placeholder="Business Search"
                 autofocus
             />
-        @endif
+        </div>
 
         <div
             x-show="$wire.business_name_text && $wire.business_name_text.length >= 3"
@@ -82,15 +81,14 @@
 
             {{-- Create New Vendor BUTTON --}}
             <div
-                x-data="{open_vendor_form: @entangle('open_vendor_form')}"
+                x-show="!$wire.via_vendor"
                 x-transition
                 class="mt-4"
                 >
 
                 {{-- 2025-6-22 change this to $view != ... --}}
                 @if($view_text['card_title'] != 'Update Vendor')
-                    {{-- Show button when: Has business_name_text AND has searched at least once --}}
-                    {{--  && $wire.hasSearched --}}
+                    {{-- Show button when: Has business_name_text --}}
                     <div x-show="$wire.business_name_text" class="space-y-2">
                         {{-- Only show separator with "or" text if there are existing or add vendors --}}
                         @if(optional($existing_vendors)->isNotEmpty() || optional($new_vendors_for_company)->isNotEmpty())
@@ -101,7 +99,7 @@
                         @if(optional($existing_vendors)->isEmpty() && optional($new_vendors_for_company)->isEmpty())
                             <flux:button
                                 class="w-full font-extrabold"
-                                wire:click="open_vendor_form = true"
+                                @click="$wire.open_vendor_form = true"
                                 variant="primary"
                                 color="blue"
                                 >
@@ -111,7 +109,7 @@
                             {{-- Show default button when there are existing vendors --}}
                             <flux:button
                                 class="w-full font-extrabold"
-                                wire:click="open_vendor_form = true"
+                                @click="$wire.open_vendor_form = true"
                                 >
                                 Create New Vendor
                             </flux:button>
@@ -136,7 +134,6 @@
                         label="Business Name"
                         type="text"
                         {{-- 4-28-23 disabled only on new vendor, not on editVendor --}}
-                        {{-- x-bind:disabled="!vendor_id_disabled || business_type_disabled == '1099'" --}}
                         {{-- $wire.via_vendor ||  --}}
                         x-bind:disabled="$wire.form.business_name"
                         {{-- 3-21-23 if you need to change business name, undo and reset component --}}
@@ -151,10 +148,10 @@
                         size="sm"
                         :disabled="$view_text['form_submit'] === 'edit'"
                     >
-                        <flux:radio value="Sub" label="Sub" />
-                        <flux:radio value="DBA" label="DBA" />
-                        <flux:radio value="Retail" label="Retail" />
-                        <flux:radio value="1099" label="1099" />
+                        <flux:radio value="Sub" label="Sub" :disabled="$via_vendor || $view_text['form_submit'] === 'edit'" />
+                        <flux:radio value="DBA" label="DBA" :disabled="$via_vendor || $view_text['form_submit'] === 'edit'" />
+                        <flux:radio value="Retail" label="Retail" :disabled="$via_vendor || $view_text['form_submit'] === 'edit'" />
+                        <flux:radio value="1099" label="1099" :disabled="$view_text['form_submit'] === 'edit'" />
                     </flux:radio.group>
                 </div>
 
@@ -169,11 +166,10 @@
                     <flux:button
                         class="w-full"
                         wire:click="$dispatchTo('users.user-create', 'newMember', { model: 'vendor', model_id: '{{$vendor_add_type}}' })"
-                        {{-- x-bind:disabled="team_member != 'index' || via_vendor" --}}
-                        :disabled="$view_text['form_submit'] === 'edit'"
+                        :disabled="$view_text['form_submit'] === 'edit' || $via_vendor"
                         >
 
-                        {{isset($user->first_name) ? $user->full_name : 'Add Owner'}}
+                        {{$user->full_name ?? 'Add Owner'}}
                     </flux:button>
 
                     @if($vendor_add_type === 'NEW')
@@ -187,20 +183,15 @@
                     x-show="(business_type == 'Sub' || business_type == '1099' || business_type == 'DBA')"
                     x-transition
                     >
-
-                    @if(!is_null($user_vendors))
-                        @if(!$user_vendors->isEmpty())
-                            <flux:radio.group label="{{$user->first_name}}'s Existing Vendors" variant="cards" class="flex-col" :indicator="false">
-                                @foreach($user_vendors as $user_vendor_found)
-                                    <flux:radio
-                                        value="{{$user_vendor_found->id}}"
-                                        label="{!!$user_vendor_found->business_name!!}"
-                                        description="{{$user_vendor_found->business_type}}"
-                                    />
-                                @endforeach
-                            </flux:radio.group>
-                        @endif
-                    @endif
+                    <flux:radio.group label="{{$user->first_name}}'s Existing Vendors" variant="cards" class="flex-col" :indicator="false">
+                        @foreach($user->vendors as $user_vendor_found)
+                            <flux:radio
+                                value="{{$user_vendor_found->id}}"
+                                label="{!!$user_vendor_found->business_name!!}"
+                                description="{{$user_vendor_found->business_type}}"
+                            />
+                        @endforeach
+                    </flux:radio.group>
                 </div> --}}
 
                 {{-- ADDRESS / BUSINESS EMAIL AND PHONE--}}
@@ -210,45 +201,45 @@
                     class="space-y-4"
                     >
                     
-                    {{-- <livewire:address.address-create /> --}}
-                    {{-- ['model' => 'vendor']) --}}                        
+                    {{-- <livewire:address.address-create /> --}}                 
                     {{-- ADDRESS --}}
                     @include('components.forms._address_form', ['address_suggestions' => $address_suggestions])
 
-                    <flux:input
-                        wire:model.live.debounce.500ms="form.business_email"
-                        label="Business Email"
-                        type="email"
-                        placeholder="Business Email"
-                    />
+                    <div x-show="!$wire.via_vendor && ['Sub','DBA'].includes($wire.form.business_type)">
+                        <flux:input
+                            wire:model.live.debounce.500ms="form.business_email"
+                            label="Business Email"
+                            type="email"
+                            placeholder="Business Email"
+                        />
 
-                    <flux:input
-                        wire:model.live.debounce.500ms="form.business_phone"
-                        label="Business Phone"
-                        type="tel"
-                        x-data
-                        x-mask="(999) 999-9999"
-                        placeholder="Business Phone"
-                    />
+                        <flux:input
+                            wire:model.live.debounce.500ms="form.business_phone"
+                            label="Business Phone"
+                            type="tel"
+                            x-data
+                            x-mask="(999) 999-9999"
+                            placeholder="Business Phone"
+                        />
+                    </div>
                 </div>
             </div>
         </div>
 
         {{-- FOOTER --}}
-        <div
+        <div 
+            class="flex space-x-2 sticky bottom-0 justify-end"             
             x-show="$wire.form.business_type === 'Retail' || ($wire.form.business_type !== 'Retail' && $wire.zip_code)"
             x-transition
             >
-            <div class="flex space-x-2 sticky bottom-0">
-                <flux:spacer />
-                <flux:button
-                    wire:click="{{$view_text['form_submit']}}"
-                    type="submit"
-                    variant="primary"
-                    >
-                    {{$view_text['button_text']}}
-                </flux:button>
-            </div>
+
+            <flux:button
+                wire:click="{{$view_text['form_submit']}}"
+                type="submit"
+                variant="primary"
+                >
+                {{$view_text['button_text']}}
+            </flux:button>
         </div>
     </form>
 </flux:modal>

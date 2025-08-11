@@ -77,38 +77,7 @@ class ClientCreate extends Component
     public function newClient()
     {
         $this->user_client_id = 'NEW';
-
-        // if(is_numeric($team_member)){
-        //     $this->team_member = $team_member;
-
-        //     $this->user = User::findOrFail($this->team_member);
-        // }else{
-        //     //role and hourly here for new vendor?
-        //     $this->team_member = 'index';
-        // }
-
-        // $this->address = TRUE;
     }
-
-    // public function add_user_to_client()
-    // {
-    //     //ADD USER TO CLIENT
-    //     $this->form->user->clients()->attach($this->client->id);
-
-    //     Flux::toast(
-    //         duration: 5000,
-    //         position: 'top right',
-    //         variant: 'success',
-    //         heading: 'User Added to Client.',
-    //         // route / href / wire:click
-    //         text: '',
-    //     );
-
-    //     $this->modal('client_form_modal')->close();
-
-    //     $this->dispatch('refreshComponent')->to('clients.clients-show');
-    //     $this->dispatch('refreshComponent')->to('users.users-index');
-    // }
 
     public function editClient(Client $client)
     {
@@ -120,12 +89,6 @@ class ClientCreate extends Component
             'button_text' => 'Update',
             'form_submit' => 'edit',
         ];
-
-        // $this->view_text = [
-        //     'card_title' => 'Update Expense',
-        //     'button_text' => 'Update',
-        //     'form_submit' => 'edit',
-        // ];
 
         $this->modal('client_form_modal')->show();
     }
@@ -150,19 +113,17 @@ class ClientCreate extends Component
         //if existing Client ... redirect to that with Livewire.navigate
         if (is_numeric($this->user_client_id)) {
             $this->modal('client_form_modal')->close();
-
             return $this->redirect('/clients/'.$this->user_client_id, navigate: true);
-
         }
-        //12-3-22 authorize
+
+        $this->modal('client_form_modal')->close();
+        $this->dispatch('refreshComponent')->to('clients.clients-show');
+
+        //new client
         if (! is_numeric($this->user_client_id)) {
             $client = $this->form->store();
 
-            // $this->dispatch('notify',
-            //     type: 'success',
-            //     content: 'Client Created',
-            //     route: 'clients/' . $client->id
-            // );
+            return $this->redirect('/clients/'.$client->id, navigate: true);
         } else {
             $auth_user_vendor = auth()->user()->vendor;
             $client = $this->user_clients[$this->user_client_id];
@@ -178,15 +139,9 @@ class ClientCreate extends Component
                 );
             } else {
                 $auth_user_vendor->clients()->attach($client->id);
-                // $this->dispatch('notify',
-                //     type: 'success',
-                //     content: 'Client Added',
-                //     route: 'clients/' . $client->id
-                // );
             }
         }
 
-        $this->modal('client_form_modal')->close();
         $this->dispatch('refreshComponent')->to('clients.clients-index');
     }
 

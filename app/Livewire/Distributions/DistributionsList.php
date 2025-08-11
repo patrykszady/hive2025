@@ -9,10 +9,9 @@ use Livewire\Attributes\Computed;
 
 class DistributionsList extends Component
 {
-    //refreshForce
     protected $listeners = ['refreshComponent' => '$refresh'];
 
-    public $registration = false;
+    public $view = false;
 
     #[Computed]
     public function distributions()

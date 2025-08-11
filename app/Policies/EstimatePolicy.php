@@ -13,7 +13,17 @@ class EstimatePolicy
      */
     public function viewAny(User $user): bool
     {
-        return $user->primary_vendor->pivot->role_id === 1;
+        // First check if user is Admin
+        if ($user->vendor_role !== 'Admin') {
+            return false;
+        }
+        
+        // Then check if user's vendor has business_type of 1099
+        if ($user->vendor && $user->vendor->business_type === '1099') {
+            return false;
+        }
+        
+        return true;
     }
 
     /**
@@ -21,7 +31,17 @@ class EstimatePolicy
      */
     public function view(User $user, Estimate $estimate): bool
     {
-        return $user->primary_vendor->pivot->role_id === 1;
+        // First check if user is Admin
+        if ($user->vendor_role !== 'Admin') {
+            return false;
+        }
+        
+        // Then check if user's vendor has business_type of 1099
+        if ($user->vendor && $user->vendor->business_type === '1099') {
+            return false;
+        }
+        
+        return true;
     }
 
     /**
@@ -30,7 +50,7 @@ class EstimatePolicy
     public function create(User $user, Project $project): bool
     {
         //can create if project->latestStatus is NOT X Y and Z
-        if ($user->primary_vendor->pivot->role_id === 1 && ! in_array($project->latestStatus->title, ['Complete', 'Service Call', 'Service Call Complete', 'Cancelled', 'VIEW_ONLY'])) {
+        if ($user->vendor_role === 'Admin' && ! in_array($project->latestStatus->title, ['Complete', 'Service Call', 'Service Call Complete', 'Cancelled', 'VIEW_ONLY'])) {
             return true;
         } else {
             return false;

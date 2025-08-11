@@ -4,7 +4,7 @@ namespace App\Models;
 
 use App\Models\Task;
 use App\Models\User;
-use App\Models\Traits\Sortable;
+use App\Traits\Sortable;
 use App\Observers\TaskObserver;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;

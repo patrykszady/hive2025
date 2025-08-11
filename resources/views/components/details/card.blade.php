@@ -1,10 +1,11 @@
 @props([
     'title' => null,
     'subheading' => null,
-    'canEdit' => false
+    'canEdit' => false,
+    'expanded' => true  // New prop with default value true
 ])
 
-<flux:card>
+<flux:card class="!py-5">
     {{-- HEADER - Keep outside accordion --}}
     <div class="flex justify-between">
         <flux:heading size="lg" class="mb-0 truncate">{!! $title !!}</flux:heading>
@@ -27,7 +28,7 @@
 
     {{-- DETAILS LIST wrapped in accordion --}}
     <flux:accordion transition>
-        <flux:accordion.item expanded>
+        <flux:accordion.item :expanded="$expanded">  <!-- Use the prop here -->
             <flux:accordion.heading>
                 Details
             </flux:accordion.heading>
@@ -37,5 +38,8 @@
         </flux:accordion.item>
     </flux:accordion>
 
-    {{ $footer ?? '' }}
+    {{-- Footer with right-aligned content --}}
+    <div class="flex justify-end mt-4">
+        {{ $footer ?? '' }}
+    </div>
 </flux:card>

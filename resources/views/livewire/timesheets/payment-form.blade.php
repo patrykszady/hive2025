@@ -13,14 +13,18 @@
                             <flux:error name="form.payee_name" />
                         </x-forms.one_line>
 
-                        @include('livewire.checks._payment_form', ['disablePaidBy' => $this->disablePaidBy])
+                        @can('viewAnyPayment', App\Models\Timesheet::class)
+                            @include('livewire.checks._payment_form', ['disablePaidBy' => $this->disablePaidBy])
+                        @endcan
                     </x-cards.body>
 
                     <flux:separator variant="subtle" />
 
                     <div class="space-y-2 mt-2">
                         <flux:button class="w-full">Check Total | <b>{{money($this->weekly_timesheets_total)}}</b></flux:button>
-                        <flux:button type="submit" variant="primary" class="w-full">{{$view_text['button_text']}}</flux:button>
+                        @can('viewAnyPayment', App\Models\Timesheet::class)
+                            <flux:button type="submit" variant="primary" class="w-full">{{$view_text['button_text']}}</flux:button>
+                        @endcan
                     </div>
 
                     <flux:error name="weekly_timesheets_total" />

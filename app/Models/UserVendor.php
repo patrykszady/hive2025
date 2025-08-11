@@ -6,18 +6,11 @@ use Illuminate\Database\Eloquent\Relations\Pivot;
 
 class UserVendor extends Pivot
 {
+    protected $table = 'user_vendor';
+    
     protected $casts = [
-        'start_date' => 'date:Y-m-d',
-        'end_date' => 'date:Y-m-d',
+        'start_date' => 'date',
+        'end_date' => 'date',
+        'hourly_rate' => 'decimal:2',
     ];
-
-    //  public function via_vendor()
-    // {
-    //     return $this->belongsTo(Vendor::class, 'via_vendor_id')->withoutGlobalScopes();
-    // }
-
-    // public function via_vendor()
-    // {
-    //     return $this->belongsTo(Vendor::class, 'via_vendor_id')->withoutGlobalScopes();
-    // }
 }

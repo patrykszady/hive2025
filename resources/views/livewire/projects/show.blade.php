@@ -53,7 +53,7 @@
                             :copyable="true"
                         />
 
-                        @can('update', $project)
+                        @can('viewFinancials', $project)
                             {{-- Billing Address --}}
                             <x-details.row 
                                 title="Billing Address" 
@@ -78,11 +78,12 @@
             </div>
 		</div>
 
-        @can('update', $project)
+        @can('viewFinancials', $project)
             <div class="col-span-4 space-y-4 lg:col-span-2 lg:col-start-3">
                 {{-- PROJECT ESTIMATES --}}
-                <livewire:estimates.estimates-index :project="$project" :view="'projects.show'" lazy />
-
+                @can('viewAny', App\Models\Estimate::class)
+                    <livewire:estimates.estimates-index :project="$project" :view="'projects.show'" lazy />
+                @endcan
                 {{-- PROEJCT LIFESPAN --}}
                 <livewire:project-status.status-create :project="$project" lazy />
             </div>

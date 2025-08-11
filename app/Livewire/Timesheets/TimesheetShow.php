@@ -31,7 +31,7 @@ class TimesheetShow extends Component
                 ->where('user_id', $this->timesheet->user_id)
                 ->get()
                 ->each(function ($item, $key){
-                    $item->status = $item->paid_by ? 'Paid By' : ($item->check_id ? 'Paid' : (auth()->user()->primary_vendor->pivot->role_id == 1 ? 'Pay' : 'Not Paid'));
+                    $item->status = $item->paid_by ? 'Paid By' : ($item->check_id ? 'Paid' : (auth()->user()->vendor_role == 'Admin' ? 'Pay' : 'Not Paid'));
                 });
 
         $this->not_paid = $this->weekly_hours->pluck('status')->every(function ($value) {

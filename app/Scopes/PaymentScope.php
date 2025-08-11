@@ -13,7 +13,7 @@ class PaymentScope implements Scope
         if (auth()->guest()) {
 
         } else {
-            $builder->where('belongs_to_vendor_id', auth()->user()->primary_vendor_id);
+            $builder->where('belongs_to_vendor_id', auth()->user()->vendor->id);
         }
     }
 }

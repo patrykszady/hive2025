@@ -3,12 +3,14 @@
     {{-- HEADING --}}
     <div class="flex justify-between">
         <flux:heading size="lg" class="mb-0">Project Finances</flux:heading>
-        <flux:button
-            wire:click="$dispatchTo('bids.bid-create', 'addBids', { vendor: {{auth()->user()->vendor->id}}, project: {{$project->id}} })"
-            size="sm"
-            >
-            Edit Bid
-        </flux:button>
+        @can('create', App\Models\Bid::class)
+            <flux:button
+                wire:click="$dispatchTo('bids.bid-create', 'addBids', { vendor: {{auth()->user()->vendor->id}}, project: {{$project->id}} })"
+                size="sm"
+                >
+                Edit Bid
+            </flux:button>
+        @endcan
     </div>
 
     <livewire:bids.bid-create />

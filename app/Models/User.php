@@ -43,29 +43,39 @@ class User extends Authenticatable
         ];
     }
 
-    //Vednors USER belongs to
+    //Vendors USER belongs to
     public function vendors(): BelongsToMany
     {
-        return $this->belongsToMany(Vendor::class)->using(UserVendor::class)->withoutGlobalScopes()->withTimestamps()->with('vendor')->withPivot(['is_employed', 'role_id', 'via_vendor_id', 'start_date', 'end_date', 'hourly_rate']);
+        return $this->belongsToMany(Vendor::class)
+            ->using(UserVendor::class)
+            ->withTimestamps()
+            ->withPivot(['is_employed', 'role_id', 'via_vendor_id', 'start_date', 'end_date', 'hourly_rate']);
     }
 
     //User's default/logged in vendor
     public function vendor(): BelongsTo
     {
-        // dd($this->vendors()->find($this->primary_vendor_id));
-        // return $this->vendors()->find($this->primary_vendor_id);
         return $this->belongsTo(Vendor::class, 'primary_vendor_id')->withoutGlobalScopes();
     }
 
-    // public function primary_vendor()
-    // {
-    //     // return $this->belongsTo(Vendor::class, 'primary_vendor_id');
-    //     return $this->vendor->users()->find($this->primary_vendor);
-    // }
-
-    public function via_vendor(): BelongsTo
+    /**
+     * Get the pivot data for the primary vendor
+     */
+    protected function vendorPivot(): Attribute
     {
-        return $this->belongsTo(Vendor::class, 'primary_vendor_id')->withoutGlobalScopes();
+        return Attribute::make(
+            get: function () {
+                // if (!$this->vendor->id) {
+                //     return null;
+                // }
+                
+                // Use the vendors() relationship to get pivot data
+                return $this->vendors()
+                    ->where('vendor_id', auth()->user()->vendor->id)
+                    ->first()
+                    ?->pivot;
+            }
+        );
     }
 
     public function leads(): HasMany
@@ -92,25 +102,47 @@ class User extends Authenticatable
     {
         return $this->hasMany(Distribution::class);
     }
-
-
     
     /**
      * Get the user's vendor relationship for the primary vendor
      */
-    protected function primaryVendor(): Attribute
-    {
-        return Attribute::make(
-            get: function () {
-                // Add null check to prevent the error
-                if (!$this->vendor) {
-                    return null;
-                }
+    // protected function primaryVendor(): Attribute
+    /**
+     * Get the relationship data between this user and their primary vendor
+     */
+    // protected function primaryVendorRelationship(): Attribute
+    // {
+    //     return Attribute::make(
+    //         get: function () {
+    //             if (!$this->primary_vendor_id) {
+    //                 return null;
+    //             }
                 
-                return $this->vendor->users()->find($this->id);
-            }
-        );
-    }
+    //             return $this->vendors()
+    //                 ->where('vendor_id', $this->primary_vendor_id)
+    //                 ->first();
+    //         }
+    //     );
+    // }
+
+    // /**
+    //  * Get the vendor for the currently authenticated user
+    //  */
+    // protected function thisVendor(): Attribute
+    // {
+    //     return Attribute::make(
+    //         get: function () {
+    //             $authVendorId = auth()->user()?->vendor?->id;
+    //             return $this->vendors->where('id', $authVendorId)->first();
+    //         }
+    //     );
+    // }
+    
+    // public function via_vendor(): BelongsTo
+    // {
+    //     return $this->belongsTo(Vendor::class, 'primary_vendor_id')->withoutGlobalScopes();
+    // }
+
 
     /**
      * Check if user is registered
@@ -118,23 +150,9 @@ class User extends Authenticatable
     protected function isRegistered(): Attribute
     {
         return Attribute::make(
-            get: fn () => !!($this->registration['registered'] ?? false)
+            get: fn () => !($this->registration?->registered ?? false)
         );
     }
-
-    /**
-     * Get the vendor for the currently authenticated user
-     */
-    protected function thisVendor(): Attribute
-    {
-        return Attribute::make(
-            get: function () {
-                $authVendorId = auth()->user()?->vendor?->id;
-                return $this->vendors->where('id', $authVendorId)->first();
-            }
-        );
-    }
-
     /**
      * Get role name mapping from ID
      * 
@@ -150,33 +168,24 @@ class User extends Authenticatable
     
     /**
      * Get role for user's primary vendor relationship
-     */
+    */
     protected function vendorRole(): Attribute
     {
         return Attribute::make(
             get: function () {
-                // Check if vendor exists first to prevent errors
-                if (!$this->vendor) {
+                if (!$this->vendor->id) {
                     return 'No Role';
                 }
                 
-                // Check if primary_vendor relationship exists
-                if (!$this->primary_vendor) {
-                    return 'No Role';
-                }
-                
-                $roleId = $this->primary_vendor->pivot->role_id ?? null;
-                return $this->roleNames()[$roleId] ?? 'No Role';
+                // Use getRoleForVendor which is already optimized
+                return $this->getRoleForVendor($this->vendor->id);
             }
         );
     }
-    
+
     /**
      * Get user's role for any vendor
-     * 
-     * @param int $vendorId
-     * @return string
-     */
+    */
     public function getRoleForVendor($vendorId): string
     {
         // Check if vendors are already loaded to prevent extra query
@@ -210,6 +219,57 @@ class User extends Authenticatable
     }
 
     /**
+     * Format cell_phone with proper phone format
+     */
+    protected function cellPhone(): Attribute
+    {
+        return Attribute::make(
+            get: function ($value) {
+                if (!$value) {
+                    return null;
+                }
+                
+                // Format 10-digit number as (XXX) XXX-XXXX
+                if (strlen($value) === 10) {
+                    return '(' . substr($value, 0, 3) . ') ' . substr($value, 3, 3) . '-' . substr($value, 6);
+                }
+                
+                return $value;
+            },
+            set: function ($value) {
+                if (!$value) {
+                    return null;
+                }
+                
+                // Remove all non-numeric characters
+                return preg_replace('/[^0-9]/', '', $value);
+            }
+        );
+    }
+    
+    /**
+     * Get/set the user's first name with proper capitalization.
+     */
+    protected function firstName(): Attribute
+    {
+        return Attribute::make(
+            get: fn ($value) => ucwords(strtolower($value)),
+            set: fn ($value) => ucwords(strtolower($value))
+        );
+    }
+
+    /**
+     * Get/set the user's last name with proper capitalization.
+     */
+    protected function lastName(): Attribute
+    {
+        return Attribute::make(
+            get: fn ($value) => ucwords(strtolower($value)),
+            set: fn ($value) => ucwords(strtolower($value))
+        );
+    }
+
+    /**
      * Get the user's full name.
      */
     protected function fullName(): Attribute
@@ -223,6 +283,14 @@ class User extends Authenticatable
     public function scopeEmployed($query)
     {
         return $query->where('is_employed', 1);
+    }
+
+    public function isEmployed(): bool
+    {
+        return $this->vendors()
+            ->where('vendors.id', auth()->user()->vendor->id)
+            ->wherePivot('is_employed', 1)
+            ->exists();
     }
 
     public function routeNotificationForTwilio()
@@ -240,5 +308,28 @@ class User extends Authenticatable
 
         // Default: add + to whatever we have
         return '+' . $phone;
+    }
+
+    /**
+     * Get the via vendor for this user based on current vendor context
+     */
+    protected function viaVendor(): Attribute
+    {
+        return Attribute::make(
+            get: function () {
+                // Get user's relationship with the current vendor context
+                $userVendorPivot = $this->vendors()
+                    ->where('vendors.id', auth()->user()->vendor->id)
+                    ->first();
+                
+                // Return null if no pivot found or no via_vendor_id
+                if (!$userVendorPivot || !$userVendorPivot->pivot->via_vendor_id) {
+                    return null;
+                }
+                
+                // Fetch the via vendor model
+                return Vendor::find($userVendorPivot->pivot->via_vendor_id);
+            }
+        );
     }
 }

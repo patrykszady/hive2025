@@ -28,7 +28,7 @@ class VendorPolicy
     public function view(User $user, Vendor $vendor): bool
     {
         // Prevent users from viewing their own vendor page
-        if ($user->primary_vendor->id === $vendor->id) {
+        if ($user->vendor->id === $vendor->id) {
             return false;
         }
         
@@ -43,7 +43,7 @@ class VendorPolicy
      */
     public function create(User $user): bool
     {
-        return $user->primary_vendor->pivot->role_id === 1;
+        return $user->vendor_role === 'Admin';
     }
 
     /**
@@ -53,7 +53,7 @@ class VendorPolicy
      */
     public function update(User $user, Vendor $vendor): bool
     {
-        return $user->primary_vendor->pivot->role_id === 1;
+        return $user->vendor_role === 'Admin';
     }
 
     /**

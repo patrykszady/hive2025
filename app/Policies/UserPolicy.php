@@ -26,7 +26,6 @@ class UserPolicy
     public function hasAdminRole(User $user): bool
     {
         return $user->vendor_role === 'Admin';
-        // return $user->primary_vendor->pivot->role_id === 1;
     }
 
     /**
@@ -42,11 +41,54 @@ class UserPolicy
     /**
      * Determine whether the user can view the model.
      *
-     * @return \Illuminate\Auth\Access\Response|bool
+     * @return bool
      */
     public function view(User $user, User $model): bool
     {
-        //
+        // 1. Users can always view their own profile
+        if ($user->id === $model->id) {
+            return true;
+        }
+
+        // Short-circuit if user has no vendor
+        if (!$user->vendor) {
+            return false;
+        }
+
+        // 2. Check if target user belongs to auth user's vendor
+        $modelInSameVendor = $model->vendors()
+            ->where('vendors.id', $user->vendor->id)
+            ->exists();
+        
+        if ($modelInSameVendor) {
+            return true;
+        }
+
+        // 3. Check if target user belongs to any client that auth user's vendor has in client_vendor
+        $modelInAuthClientsUsers = $model->clients()
+            ->whereHas('vendors', function($query) use ($user) {
+                $query->where('vendors.id', $user->vendor->id);
+            })
+            ->exists();
+        
+        if ($modelInAuthClientsUsers) {
+            return true;
+        }
+
+        // 4. Check if target user belongs to a vendor that auth user's vendor has in vendors_vendor
+        $vendorIds = $user->vendor->vendors()->pluck('vendor_id')->toArray();
+        
+        if (!empty($vendorIds)) {
+            $modelInRelatedVendorUsers = $model->vendors()
+                ->whereIn('vendors.id', $vendorIds)
+                ->exists();
+            
+            if ($modelInRelatedVendorUsers) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -66,15 +108,15 @@ class UserPolicy
 
     public function create_client_member(User $user, Client $client)
     {
-        if ($client->vendor()->exists()) {
-            return false;
-        } else {
-            if ($this->hasAdminRole($user) && in_array($user->vendor->business_type, ['Sub', 'DBA'])) {
-                return true;
-            } else {
-                return false;
-            }
+        // First check if client has a vendor_id set - if so, prevent adding users
+        if (!is_null($client->vendor_id)) {
+            return $this->deny('Cannot add users to vendor-linked clients.');
         }
+        
+        // Otherwise, use the existing conditions
+        return $this->hasAdminRole($user) && 
+               $user->vendor && 
+               $user->vendor->clients()->where('client_id', $client->id)->exists();
     }
 
     /**
@@ -84,11 +126,31 @@ class UserPolicy
      */
     public function update(User $user, User $model): bool
     {
+        // Users can always update their own profile
         if ($user->id == $model->id) {
             return true;
-        } else {
-            return $this->hasAdminRole($user);
         }
+        
+        // Only admins can update other users
+        if (!$this->hasAdminRole($user)) {
+            return false;
+        }
+        
+        // Check if target user belongs to a client with vendor_id set
+        $clientsWithVendor = $model->clients()->whereNotNull('vendor_id')->get();
+        if ($clientsWithVendor->isNotEmpty()) {
+            // For each client with vendor_id, check if auth user's vendor matches
+            foreach ($clientsWithVendor as $client) {
+                // If auth user's vendor doesn't match client's vendor_id, deny update
+                if ($user->vendor->id != $client->vendor_id) {
+                    // Return false instead of a Response object
+                    return false;
+                }
+            }
+        }
+        
+        // Otherwise allow the update
+        return true;
     }
 
     /**

@@ -2,70 +2,37 @@
     <div class="grid max-w-xl grid-cols-5 gap-4 xl:relative lg:max-w-5xl sm:px-6">
         <div class="col-span-5 space-y-4 lg:col-span-2 lg:h-32 lg:sticky lg:top-5">
             {{-- CHECK DETAILS --}}
-            <x-lists.details_card>
-                {{-- HEADING --}}
-                <x-slot:heading>
-                    <div>
-                        <flux:heading size="lg" class="mb-0">Check Details</flux:heading>
-                    </div>
-
+            <x-details.card title="Check Details" :canEdit="auth()->user()->can('update', $check)">
+                <x-slot:header_buttons>                 
                     <flux:button
                         wire:click="$dispatchTo('checks.check-create', 'editCheck', { check: {{$check->id}}})"
                         size="sm"
-                        >
+                    >
                         Edit Check
                     </flux:button>
-                </x-slot>
+                </x-slot:header_buttons>
 
-                {{-- DETAILS --}}
-                <x-lists.details_list>
-                    <x-lists.details_item title="Amount" detail="{{money($check->amount)}}" />
-                    <x-lists.details_item title="Payee" detail="{{$check->owner}}" href="{{$check->vendor_id ? route('vendors.show', $check->vendor->id) : ''}}" />
-                    <x-lists.details_item title="Date" detail="{{$check->date->format('m/d/Y')}}" />
-                    <x-lists.details_item title="Type" detail="{{$check->check_type}}" />
-
+                <x-slot:details>
+                    <x-details.row title="Amount" :content="money($check->amount)" />
+                    <x-details.row title="Payee" :content="$check->owner" href="{{$check->vendor_id ? route('vendors.show', $check->vendor->id) : ($check->user_id ? route('users.show', $check->user->id) : '')}}"/>
+                    <x-details.row title="Date" :content="$check->date->format('m/d/Y')" />
+                    <x-details.row title="Type" :content="$check->check_type" />
                     @if($check->bank_account)
-                        <x-lists.details_item title="Bank" detail="{{$check->bank_account->getNameAndType()}}" />
+                        <x-details.row title="Bank" :content="$check->bank_account->getNameAndType()" />
                     @endif
-
-                    <x-lists.details_item title="{{$check->check_type === 'Check' ? 'Check Number' : ($check->check_type === 'Transfer' ? 'Transfer ID' : ($check->check_type === 'Cash' ? 'Cash ID' : ''))}}" detail="{{$check->check_number}}" />
-                </x-lists.details_list>
-            </x-lists.details_card>
+                    <x-details.row
+                        title="{{ $check->check_type === 'Check' ? 'Check #' : ($check->check_type === 'Transfer' ? 'Transfer ID' : ($check->check_type === 'Cash' ? 'Cash ID' : '')) }}"
+                        :content="$check->check_number"
+                    />
+                </x-slot:details>
+            </x-details.card>
 
             {{-- CHECK TRANSACTIONS --}}
-            @if(!$check->transactions->isEmpty())
-                <flux:card class="space-y-2">
-                    <flux:heading size="lg" class="mb-0">Transactions</flux:heading>
-                    <flux:separator variant="subtle" />
-
-                    <div class="space-y-6">
-                        {{-- wire:loading.class="opacity-50 text-opacity-40" --}}
-                        <flux:table>
-                            <flux:table.columns>
-                                <flux:table.column>Amount</flux:table.column>
-                                <flux:table.column>Date</flux:table.column>
-                                <flux:table.column>Bank</flux:table.column>
-                                <flux:table.column>Account</flux:table.column>
-                            </flux:table.columns>
-
-                            <flux:table.rows>
-                                @foreach ($check->transactions as $transaction)
-                                    <flux:table.row :key="$transaction->id">
-                                        <flux:table.cell variant="strong">
-                                            {{ money($transaction->amount) }}
-                                        </flux:table.cell>
-                                        <flux:table.cell>{{ $transaction->transaction_date->format('m/d/Y') }}</flux:table.cell>
-                                        <flux:table.cell>{{ $transaction->bank_account->bank->name }}</flux:table.cell>
-                                        <flux:table.cell>{{ $transaction->bank_account->account_number }}</flux:table.cell>
-                                    </flux:table.row>
-                                    <flux:table.row>
-                                        <flux:table.cell colspan="4" class="text-right"><i>{{ $transaction->plaid_merchant_description }}</i></flux:table.cell>
-                                    </flux:table.row>
-                                @endforeach
-                            </flux:table.rows>
-                        </flux:table>
-                    </div>
-                </flux:card>
+            @if($check->transactions->isNotEmpty())
+                <x-transactions.list_card 
+                    :transactions="$check->transactions" 
+                    title="Transactions"
+                />
             @endif
         </div>
 
@@ -195,7 +162,7 @@
             </x-cards.wrapper>
             @endif --}}
 
-            {{-- THIS CHECK VENDOR EXPENSES --}}
+            {{-- EXPENSES --}}
             @if($vendor_expenses->isNotEmpty())
                 <div class="col-span-5 lg:col-span-3 lg:col-start-3">
                     <livewire:expenses.expense-index :check="$check->id" :view="'checks.show'"/>

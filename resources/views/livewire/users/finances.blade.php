@@ -98,7 +98,7 @@
                 <flux:table.cell>
                     {{money(
                         $timesheets_paid->sum('amount')
-                        // - $expenses_paid->sum('amount')
+                        - $expenses_paid->sum('amount')
                         + $distribution_checks->sum('amount')
                         + $distribution_expenses->sum('amount')
                         + $timesheets_paid_by->sum('amount')

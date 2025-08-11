@@ -30,7 +30,7 @@ class GanttIndex extends Component
 
     public function mount()
     {
-        $this->vendors = Vendor::topExpenseVendors()->get();
+        // $this->vendors = Vendor::topExpenseVendors()->get();
         $this->employees = auth()->user()->vendor->users()->employed()->get();
     }
 

@@ -140,6 +140,7 @@ class PaymentCreate extends Component
     #[Title('Payment')]
     public function render()
     {
+        $this->authorize('create', Payment::class);
         return view('livewire.payments.form');
     }
 }

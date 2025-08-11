@@ -16,10 +16,10 @@ class TimesheetScope implements Scope
             $user = auth()->user();
 
             //if Admin..all Expenses ... if Member...only expenses the User Paid For....?
-            if ($user->primary_vendor->pivot->role_id == 1) {
-                $builder->where('vendor_id', $user->primary_vendor_id);
-            } elseif ($user->primary_vendor->pivot->role_id == 2) {
-                $builder->where('vendor_id', $user->primary_vendor_id)->where('user_id', $user->id);
+            if ($user->vendor_role == 'Admin') {
+                $builder->where('vendor_id', $user->vendor->id);
+            } elseif ($user->vendor_role == 'Member') {
+                $builder->where('vendor_id', $user->vendor->id)->where('user_id', $user->id);
             }
         }
     }

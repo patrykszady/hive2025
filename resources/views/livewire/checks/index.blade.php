@@ -60,7 +60,7 @@
                                 <flux:table.cell>{{$check->owner}}</flux:table.cell>
                             @endif
                             <flux:table.cell>
-                                <flux:badge size="sm" :color="$check->status == 'Complete' ? 'green' : ($check->status == 'Missing Transactions' ? 'yellow' : 'red')" inset="top bottom">{{ $check->status }}</flux:badge>
+                                <flux:badge size="sm" :color="$check->statusColor" inset="top bottom">{{ $check->status }}</flux:badge>
                             </flux:table.cell>
                         </flux:table.row>
                     @endforeach

@@ -118,7 +118,7 @@ class BulkMatchIndex extends Component
                         'project_id' => null,
                         'distribution_id' => $this->distribution_id,
                         'vendor_id' => $transaction->vendor_id,
-                        'belongs_to_vendor_id' => auth()->user()->primary_vendor_id,
+                        'belongs_to_vendor_id' => auth()->user()->vendor->id,
                         'created_by_user_id' => 0,
                     ]);
 

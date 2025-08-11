@@ -313,7 +313,7 @@ class ExpenseForm extends Form
                         'distribution_id' => $distribution_id,
                         'reimbursment' => isset($split['reimbursment']) ? $split['reimbursment'] : null,
                         'note' => isset($split['note']) ? $split['note'] : null,
-                        'belongs_to_vendor_id' => auth()->user()->primary_vendor_id,
+                        'belongs_to_vendor_id' => auth()->user()->vendor->id,
                         'created_by_user_id' => auth()->user()->id,
                         'receipt_items' => (object) $split['items'],
                     ]);
@@ -325,7 +325,7 @@ class ExpenseForm extends Form
                         'distribution_id' => $distribution_id,
                         'reimbursment' => isset($split['reimbursment']) ? $split['reimbursment'] : null,
                         'note' => isset($split['note']) ? $split['note'] : null,
-                        'belongs_to_vendor_id' => auth()->user()->primary_vendor_id,
+                        'belongs_to_vendor_id' => auth()->user()->vendor->id,
                         'created_by_user_id' => auth()->user()->id,
                         'receipt_items' => (object) $split['items'],
                     ]);
@@ -503,7 +503,7 @@ class ExpenseForm extends Form
                     //user_id if expense project = distribution
                     'user_id' => $dist_user,
                     'vendor_id' => $this->vendor_id,
-                    'belongs_to_vendor_id' => auth()->user()->primary_vendor_id,
+                    'belongs_to_vendor_id' => auth()->user()->vendor->id,
                     'created_by_user_id' => auth()->user()->id,
                 ]);
             }

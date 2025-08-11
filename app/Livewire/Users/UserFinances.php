@@ -32,111 +32,108 @@ class UserFinances extends Component
 
     public function mount()
     {
-        if ($this->user->this_vendor) {
-            $user_distribution = $this->user->distributions->first()->id ?? null;
+        $user_distribution = $this->user->distributions->first()->id ?? null;
 
-            //Checks Written
-            $this->checks_written =
-                Check::where('user_id', $this->user->id)
-                    ->whereYear('date', $this->year)
-                    ->where('belongs_to_vendor_id', $this->user->this_vendor->id)
-                    // ->withWhereHas('expenses')
-                    // ->withWhereHas('timesheets')
-                    ->get();
+        //Checks Written
+        $this->checks_written =
+            Check::where('user_id', $this->user->id)
+                ->whereYear('date', $this->year)
+                ->where('belongs_to_vendor_id', auth()->user()->vendor->id)
+                // ->withWhereHas('expenses')
+                // ->withWhereHas('timesheets')
+                ->get();
 
-            //Timesheets Paid
-            $this->timesheets_paid =
-                Timesheet::
-                    where('user_id', $this->user->id)
-                    ->where('vendor_id', $this->user->this_vendor->id)
-                    ->whereNull('paid_by')
-                    ->whereHas('check', function ($query){
-                        return $query->whereYear('date', $this->year);
-                    })
-                    ->get();
+        //Timesheets Paid
+        $this->timesheets_paid =
+            Timesheet::
+                where('user_id', $this->user->id)
+                ->where('vendor_id', auth()->user()->vendor->id)
+                ->whereNull('paid_by')
+                ->whereHas('check', function ($query){
+                    return $query->whereYear('date', $this->year);
+                })
+                ->get();
 
-            //Timesheets Paid Others
-            $this->timesheets_paid_others =
-                //whereNot('user_id', $this->user->id)
-                // where('user_id', 212)
-                Timesheet::whereNot('user_id', $this->user->id)
-                    ->where('paid_by', $this->user->id)
-                    ->where('vendor_id', $this->user->this_vendor->id)
-                    ->whereHas('check', function ($query) {
-                        return $query->whereYear('date', $this->year);
-                    })
-                    ->get();
+        //Timesheets Paid Others
+        $this->timesheets_paid_others =
+            //whereNot('user_id', $this->user->id)
+            // where('user_id', 212)
+            Timesheet::whereNot('user_id', $this->user->id)
+                ->where('paid_by', $this->user->id)
+                ->where('vendor_id', auth()->user()->vendor->id)
+                ->whereHas('check', function ($query) {
+                    return $query->whereYear('date', $this->year);
+                })
+                ->get();
 
-            // Timesheets Paid By
-            $this->timesheets_paid_by =
-                Timesheet::withoutGlobalScopes()
-                    ->where('user_id', $this->user->id)
-                    ->where('vendor_id', $this->user->this_vendor->id)
-                    ->whereNotNull('paid_by')
-                    ->whereHas('check', function ($query) {
-                        return $query->withoutGlobalScopes()->whereYear('date', $this->year);
-                    })
-                    ->get();
+        // Timesheets Paid By
+        $this->timesheets_paid_by =
+            Timesheet::withoutGlobalScopes()
+                ->where('user_id', $this->user->id)
+                ->where('vendor_id', auth()->user()->vendor->id)
+                ->whereNotNull('paid_by')
+                ->whereHas('check', function ($query) {
+                    return $query->withoutGlobalScopes()->whereYear('date', $this->year);
+                })
+                ->get();
 
-            // Distribution Checks
-            $this->distribution_checks = $user_distribution
-                ? Expense::where('distribution_id', $user_distribution)
-                    // ->whereNull('reimbursment')
-                    ->whereHas('check', function ($query) {
-                        return $query->whereYear('date', $this->year);
-                    })
-                    ->get()
-                : collect();
+        // Distribution Checks
+        $this->distribution_checks = $user_distribution
+            ? Expense::where('distribution_id', $user_distribution)
+                // ->whereNull('reimbursment')
+                ->whereHas('check', function ($query) {
+                    return $query->whereYear('date', $this->year);
+                })
+                ->get()
+            : collect();
 
-            // Expenses Paid
-            $this->expenses_paid =
-                Expense::where('paid_by', $this->user->id)
-                    // ->whereYear('date', $year)
-                    // ->whereNotNull('check_id')
-                    // ->whereNull('reimbursment')
-                    ->whereHas('check', function ($query) {
-                        return $query->whereYear('date', $this->year);
-                    })
-                    ->get();
+        // Expenses Paid
+        $this->expenses_paid =
+            Expense::where('paid_by', $this->user->id)
+                // ->whereYear('date', $year)
+                // ->whereNotNull('check_id')
+                // ->whereNull('reimbursment')
+                ->whereHas('check', function ($query) {
+                    return $query->whereYear('date', $this->year);
+                })
+                ->get();
 
-            // User Reimbursement Expenses Paid
-            $this->user_reimbursement_expenses =
-                Expense::whereNull('paid_by')
-                    ->where('reimbursment', $this->user->id)
-                    ->whereHas('check', function ($query) {
-                        return $query->whereYear('date', $this->year);
-                    })
-                    ->get();
+        // User Reimbursement Expenses Paid
+        $this->user_reimbursement_expenses =
+            Expense::whereNull('paid_by')
+                ->where('reimbursment', $this->user->id)
+                ->whereHas('check', function ($query) {
+                    return $query->whereYear('date', $this->year);
+                })
+                ->get();
 
-            // User Reimbursement Expenses Paid By Others
-            $this->user_reimbursement_paid_by =
-                Expense::whereNotNull('paid_by')
-                    ->where('reimbursment', $this->user->id)
-                    ->whereHas('check', function ($query) {
-                        return $query->whereYear('date', $this->year);
-                    })
-                    ->get();
+        // User Reimbursement Expenses Paid By Others
+        $this->user_reimbursement_paid_by =
+            Expense::whereNotNull('paid_by')
+                ->where('reimbursment', $this->user->id)
+                ->whereHas('check', function ($query) {
+                    return $query->whereYear('date', $this->year);
+                })
+                ->get();
 
-            // Paid Other User Reimbursement Expenses
-            $this->paid_other_user_reimbursements =
-                Expense::where('paid_by', $this->user->id)
-                    ->whereRaw('reimbursment REGEXP "^[0-9]+$"')
-                    ->whereHas('check', function ($query) {
-                        return $query->whereYear('date', $this->year);
-                    })
-                    ->get();
-            // dd($paid_other_user_reimbursements->sum('amount'));
+        // Paid Other User Reimbursement Expenses
+        $this->paid_other_user_reimbursements =
+            Expense::where('paid_by', $this->user->id)
+                ->whereRaw('reimbursment REGEXP "^[0-9]+$"')
+                ->whereHas('check', function ($query) {
+                    return $query->whereYear('date', $this->year);
+                })
+                ->get();
 
-            // Distribution Expenses
-            $this->distribution_expenses = $user_distribution
-                ? Expense::where('distribution_id', $user_distribution)
-                    ->whereNull('check_id')
-                    ->whereYear('date', $this->year)
-                    // ->whereNotIn('id', $this->paid_other_user_reimbursements->pluck('id')->toArray())
-                    // whereHas('transactions') ...transaction_date = $year
-                    ->get()
-                : collect();
-        }
+        // Distribution Expenses
+        $this->distribution_expenses = $user_distribution
+            ? Expense::where('distribution_id', $user_distribution)
+                ->whereNull('check_id')
+                ->whereYear('date', $this->year)
+                // ->whereNotIn('id', $this->paid_other_user_reimbursements->pluck('id')->toArray())
+                // whereHas('transactions') ...transaction_date = $year
+                ->get()
+            : collect();
     }
 
     public function getCheckDifference()

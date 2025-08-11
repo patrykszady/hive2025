@@ -10,15 +10,6 @@ class ProjectPolicy
 {
     use HandlesAuthorization;
 
-    // public function viewPayments(User $user, Project $project)
-    // {
-    //     if($user->vendor->id == $project->belongs_to_vendor_id){
-    //         return true;
-    //     }else{
-    //         return false;
-    //     }
-    // }
-
     public function viewAny(User $user): bool
     {
         return true;
@@ -41,7 +32,7 @@ class ProjectPolicy
      */
     public function create(User $user): bool
     {
-        return $user->primary_vendor->pivot->role_id === 1;
+        return $user->vendor_role === 'Admin';
     }
 
     /**
@@ -51,7 +42,18 @@ class ProjectPolicy
      */
     public function update(User $user, Project $project): bool
     {
-        return $user->primary_vendor->pivot->role_id === 1;
+        // First check if user has admin role
+        if ($user->vendor_role !== 'Admin') {
+            return false;
+        }
+        
+        // Check if there's a client_id mismatch
+        // This prevents updates when the direct client_id doesn't match the related client's id
+        if ($project->client_id && $project->client && $project->client_id != $project->client->id) {
+            return false;
+        }
+        
+        return true;
     }
 
     /**
@@ -82,5 +84,17 @@ class ProjectPolicy
     public function forceDelete(User $user, Project $project): bool
     {
         //
+    }
+    
+    /**
+     * Determine whether the user can view financial details of the project.
+     * Like update but without the client mismatch restriction.
+     *
+     * @return \Illuminate\Auth\Access\Response|bool
+     */
+    public function viewFinancials(User $user, Project $project): bool
+    {
+        // Only check if user has admin role
+        return $user->vendor_role === 'Admin';
     }
 }

@@ -1,13 +1,17 @@
 <?php
 
+use App\Http\Controllers\CompanyEmailController;
 use App\Http\Controllers\LeadController;
 use App\Http\Controllers\MoveController;
 use App\Http\Controllers\ReceiptController;
 use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\VendorDocsController;
-use App\Http\Controllers\CompanyEmailController;
 use App\Http\Controllers\WebhookController;
 
+use App\Livewire\Auth\CantLogin;
+use App\Livewire\Auth\Login;
+use App\Livewire\Auth\Register;
+use App\Livewire\Auth\VerifyResetCode;
 use App\Livewire\Banks\BankIndex;
 use App\Livewire\Banks\BankShow;
 use App\Livewire\BulkMatch\BulkMatchIndex;
@@ -32,9 +36,10 @@ use App\Livewire\Hours\HourCreate;
 use App\Livewire\Leads\LeadsIndex;
 use App\Livewire\LineItems\LineItemsIndex;
 use App\Livewire\Payments\PaymentCreate;
+use App\Livewire\Payments\PaymentShow;
 use App\Livewire\Payments\PaymentsIndex;
-use App\Livewire\Planner\GanttIndex;
 use App\Livewire\Planner\CardsIndex;
+use App\Livewire\Planner\GanttIndex;
 use App\Livewire\Projects\ProjectShow;
 use App\Livewire\Projects\ProjectsIndex;
 use App\Livewire\Sheets\SheetShow;
@@ -51,10 +56,12 @@ use App\Livewire\VendorDocs\AuditShow;
 use App\Livewire\VendorDocs\VendorDocsIndex;
 use App\Livewire\Vendors\VendorPaymentCreate;
 use App\Livewire\Vendors\VendorSheetsTypeIndex;
+
 use App\Livewire\Vendors\VendorShow;
 use App\Livewire\Vendors\VendorsIndex;
-
 use Illuminate\Support\Facades\Route;
+
+
 
 //if guests go to '/', if logged in go to dashboard (or to /vendor_selection if not set and User has multiple)
 Route::middleware('guest')->group(function () {
@@ -62,13 +69,25 @@ Route::middleware('guest')->group(function () {
         return view('welcome');
     })->name('welcome');
 
-    Route::get('/login', function () {
-        return view('auth.login');
-    });
+    Route::get('login', Login::class)->name('login');
+    Route::get('register', Register::class)->name('register');
+    Route::get('cant-login', CantLogin::class)->name('cant.login');
+    Route::get('verify-reset-code/{token}', VerifyResetCode::class)->name('verify.reset.code');
 
-    Route::get('/registration', Registration::class)->middleware('guest')->name('registration');
-    // Route::get('/registration-not-ready', Registration::class)->middleware('guest')->name('registration-not-ready');
+    Route::get('registration', Registration::class)->name('registration');
+    // Route::get('/registration-not-ready', Registration::class)->name('registration-not-ready');
 
+});
+
+Route::middleware('auth')->group(function () {
+    Route::post('logout', function () {
+        Auth::logout();
+        session()->invalidate();
+        session()->regenerateToken();
+        return redirect('/');
+    })->name('logout');
+
+    Route::get('/vendor_selection', VendorSelection::class)->name('vendor_selection');
 });
 
 //Nylas verify webhook
@@ -86,10 +105,6 @@ if(env('APP_ENV') === 'local') {
 
 Route::get('/company-email/login', [CompanyEmailController::class, 'nylasLogin'])->name('company-email.login');
 Route::get('/company-email/auth-response', [CompanyEmailController::class, 'nylasAuthResponse'])->name('company-email.auth-response');
-
-//3-29-2022 :it passes auth BUT FAILS user.vendor middleware, send to /vendor_selection if passes both..send to /dashboard
-Route::get('/vendor_selection', VendorSelection::class)->middleware('auth')->name('vendor_selection');
-Route::get('/vendor_registration/{vendor}', VendorRegistration::class)->middleware('auth')->name('vendor_registration');
 
 //1-18-2023 combine the next 3 functions into one. Pass type = original or temp
 Route::get('/leads/leads_in_email', [LeadController::class, 'leads_in_email'])->name('leads.leads_in_email');
@@ -134,8 +149,12 @@ Route::get('transactions/bulk_match', BulkMatchIndex::class)->name('transactions
 // Route::post('plaid_webhooks', 'TransactionController@plaid_webhooks');
 // Route::get('fire_webhook', 'TransactionController@fire_webhook');
 
-Route::middleware(['auth', 'user.vendor'])->group(function () {
-    //DASHBOARD/ PRIMARY VENDOR
+Route::middleware(['auth', 'vendor.access'])->group(function () {
+    // Registration route
+    Route::get('vendor/registration/{vendor}', VendorRegistration::class)
+        ->name('vendor_registration');
+    
+    // All protected routes
     Route::get('/dashboard', DashboardShow::class)->name('dashboard');
 
     //USERS
@@ -200,7 +219,9 @@ Route::middleware(['auth', 'user.vendor'])->group(function () {
     Route::get('/projects/{project}', ProjectShow::class)->name('projects.show');
 
     //TIMESHEETS
-    Route::get('/timesheets', TimesheetsIndex::class)->name('timesheets.index');
+    Route::get('/timesheets', TimesheetsIndex::class)
+        ->middleware('can:viewAny,'.App\Models\Timesheet::class)
+        ->name('timesheets.index');
     Route::get('/timesheets/create/{hour}', TimesheetCreate::class)->name('timesheets.create');
     Route::get('/timesheets/payment/{user}', TimesheetPaymentCreate::class)->name('timesheets.payment');
     Route::get('/timesheets/payments', TimesheetPaymentIndex::class)->name('timesheets.payments');
@@ -217,7 +238,8 @@ Route::middleware(['auth', 'user.vendor'])->group(function () {
 
     //PAYMENTS
     Route::get('/payments', PaymentsIndex::class)->name('payments.index');
-    Route::get('/payments/create/{client}', PaymentCreate::class)->name('payments.create');
+    Route::get('/payments/{payment}', PaymentShow::class)->name('payments.show');
+    // Route::get('/payments/create/{client}', PaymentCreate::class)->name('payments.create');
 
     //SHEETS
     Route::get('/sheets', SheetsIndex::class)->name('sheets.index');
@@ -225,9 +247,5 @@ Route::middleware(['auth', 'user.vendor'])->group(function () {
 
     //PLANNER
     Route::get('/planner/gantt', GanttIndex::class)->name('planner.gantt');
-    Route::get('/planner/cards', CardsIndex::class)->name('planner.cards');
-
-    
+    Route::get('/planner/cards', CardsIndex::class)->name('planner.cards');    
 });
-
-require __DIR__.'/auth.php';

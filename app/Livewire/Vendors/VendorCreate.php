@@ -31,17 +31,9 @@ class VendorCreate extends Component
     public User $user;
 
     public $business_name_text = null;
-
     public $vendor_add_type = null;
-
     public $via_vendor = null;
-
-    // public $user_vendors = null;
-
     public $vendor_id = null;
-
-    public $user_vendor_id = null;
-
     public $existing_vendors = null;
     public $new_vendors_for_company = null;
 
@@ -124,14 +116,11 @@ class VendorCreate extends Component
         $this->form->business_name = $business_name;
         $this->business_name_text = $business_name;
         $this->form->business_type = '1099';
-
-        //similar to $this->userVendor($user_info);
         $this->form->user_hourly_rate = 0;
         $this->form->user_role = 1;
 
-        // $this->user_vendors = $this->user->vendors()->unique()->get();
-
         $this->via_vendor = true;
+        $this->open_vendor_form = true;
 
         $this->modal('vendors_form_modal')->show();
     }
@@ -170,8 +159,6 @@ class VendorCreate extends Component
         $this->user = User::findOrFail($user_info['id']);
         $this->form->user_hourly_rate = $user_info['hourly_rate'];
         $this->form->user_role = $user_info['role'];
-
-        // $this->user_vendors = $this->user->vendors()->get()->unique('id');
     }
 
     public function edit()

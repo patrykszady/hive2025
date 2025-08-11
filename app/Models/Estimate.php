@@ -2,7 +2,7 @@
 
 namespace App\Models;
 
-use App\Models\Scopes\EstimateScope;
+use App\Scopes\EstimateScope;
 use Carbon\Carbon;
 
 use Illuminate\Database\Eloquent\Casts\Attribute;

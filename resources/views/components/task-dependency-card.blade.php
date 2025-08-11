@@ -49,7 +49,7 @@
                                     />
                                 @endforeach
                             @else
-                                <flux:avatar.group>
+                                <flux:avatar.group class="**:ring-zinc-50 dark:**:ring-zinc-800">
                                     @foreach($task->users as $user)
                                         <flux:avatar
                                             size="xs"

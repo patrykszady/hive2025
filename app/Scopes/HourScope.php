@@ -13,9 +13,9 @@ class HourScope implements Scope
         $user = auth()->user();
 
         //if Admin..all Hours ... if Member...only hours the User belongs to....?
-        if ($user->primary_vendor->pivot->role_id == 1) {
+        if ($user->vendor_role == 'Admin') {
             $builder->where('vendor_id', $user->vendor->id);
-        } elseif ($user->primary_vendor->pivot->role_id == 2) {
+        } elseif ($user->vendor_role == 'Member') {
             $builder->where('vendor_id', $user->vendor->id)->where('user_id', $user->id);
         }
     }

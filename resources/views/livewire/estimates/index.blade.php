@@ -91,9 +91,7 @@
 
                             <flux:table.cell>
                                 <flux:dropdown position="bottom" align="end">
-                                    <flux:button square inset="top bottom" size="sm">
-                                        <flux:icon.ellipsis-horizontal variant="solid" size="sm" />
-                                    </flux:button>
+                                    <flux:button inset="top bottom" size="sm" icon="ellipsis-horizontal"></flux:button>
 
                                     <flux:menu>
                                         @if($estimate->status === 'Active')

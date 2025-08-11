@@ -2,7 +2,7 @@
 
 namespace App\Models;
 
-use App\Models\Scopes\TransactionScope;
+use App\Scopes\TransactionScope;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -21,7 +21,6 @@ class Transaction extends Model
     protected function casts(): array
     {
         return [
-            'date' => 'date:Y-m-d',
             'transaction_date' => 'date:Y-m-d',
             'posted_date' => 'date:Y-m-d',
             'details' => 'array',
@@ -33,7 +32,15 @@ class Transaction extends Model
         static::addGlobalScope(new TransactionScope);
     }
 
-    // //Searchable / Typesense
+    /**
+     * Get the name of the index associated with the model.
+     */
+    public function searchableAs(): string
+    {
+        return env('APP_ENV') == 'local' ? 'transaction_index_dev' : 'transaction_index';
+    }
+
+    // Searchable
     public function toSearchableArray(): array
     {
         $array = $this->toArray();
@@ -42,28 +49,55 @@ class Transaction extends Model
         $array['deposit'] = $this->deposit ? ($this->payments->isEmpty() ? 'NO_PAYMENTS' : 'HAS_PAYMENTS') : 'NOT_DEPOSIT';
 
         return $array;
-    //     return array_merge($this->toArray(), [
-    //         'id' => (string) $this->id,
-    //         'amount' => $this->amount,
-    //         'deposit' => (string) $this->deposit ? ($this->payments->isEmpty() ? 'NO_PAYMENTS' : 'HAS_PAYMENTS') : 'NOT_DEPOSIT',
-    //         'vendor_id' => (string) $this->vendor_id,
-    //         'bank_account_id' => (string) $this->bank_account_id,
-    //         'expense_id' => (string) $this->expense_id,
-    //         'is_expense_id_null' => $this->expense_id ? false : true,
-    //         'check_id' => (string) $this->check_id,
-    //         'is_check_id_null' => $this->check_id ? false : true,
-    //         'transaction_date' => $this->transaction_date,
-    //         'posted_date' => $this->posted_date,
-    //         'created_at' => $this->created_at->timestamp,
-    //     ]);
     }
 
     /**
-     * Get the name of the index associated with the model.
+     * Create a search builder that respects user access permissions
+     * and allows chaining additional filters
      */
-    public function searchableAs(): string
+    public static function scopedSearch($query = '', $filterConditions = [], $sortBy = 'transaction_date', $sortDirection = 'desc')
     {
-        return env('APP_ENV') == 'local' ? 'transaction_index_dev' : 'transaction_index';
+        return self::search($query, function ($meilisearch, $searchQuery, $options) use ($filterConditions, $sortBy, $sortDirection) {
+            // Get the current user
+            $user = auth()->user();
+            
+            // Get bank account IDs that belong to the current vendor
+            $bankAccountIds = BankAccount::where('vendor_id', $user->vendor->id)
+                ->pluck('id')
+                ->toArray();
+            
+            // Convert bank account IDs array to MeiliSearch filter format
+            $bankAccountFilter = "bank_account_id IN [" . implode(',', $bankAccountIds) . "]";
+            
+            // Base filters that apply to all queries
+            $baseFilters = [
+                "__soft_deleted = 0",
+                $bankAccountFilter,
+                "expense_id IS NULL",
+                "check_id IS NULL",
+                'deposit IN ["NOT_DEPOSIT", "NO_PAYMENTS"]',
+            ];
+            
+            $baseFilter = implode(' AND ', $baseFilters);
+            
+            // Add custom filters if any
+            if (!empty($filterConditions)) {
+                $filterString = implode(' AND ', $filterConditions);
+                $options['filter'] = "({$baseFilter}) AND ({$filterString})";
+            } else {
+                $options['filter'] = $baseFilter;
+            }
+            
+            // Apply sorting
+            $options['sort'] = [$sortBy . ':' . $sortDirection];
+            
+            // Use 'all' matching strategy for exact prefix matching
+            if (!empty($searchQuery)) {
+                $options['matchingStrategy'] = 'all';
+            }
+            
+            return $meilisearch->search($searchQuery, $options);
+        });
     }
 
     public function vendor(): BelongsTo

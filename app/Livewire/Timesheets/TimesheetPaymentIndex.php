@@ -16,7 +16,7 @@ class TimesheetPaymentIndex extends Component
     #[Title('Timesheet Payments')]
     public function render()
     {
-        $this->authorize('viewPayment', Timesheet::class);
+        $this->authorize('viewAnyPayment', Timesheet::class);
 
         $user = auth()->user();
         $vendor_users = $user->vendor->users()->where('is_employed', 1)->get();
@@ -150,7 +150,6 @@ class TimesheetPaymentIndex extends Component
             $total -= $user_paid_by_reimbursements;
 
             $vendor_users[$index]->total = $total;
-            // dd($total);
         }
 
         // $user_timesheets =

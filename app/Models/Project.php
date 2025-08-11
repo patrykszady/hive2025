@@ -2,25 +2,25 @@
 
 namespace App\Models;
 
+use App\Models\Client;
+use App\Models\ProjectVendor;
 use App\Scopes\ProjectScope;
 use App\Traits\HasAddress;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\HasOneThrough;
-use Illuminate\Database\Eloquent\Casts\Attribute;
 
 class Project extends Model
 {
     use HasFactory, HasAddress;
 
     protected $fillable = ['project_name', 'client_id', 'belongs_to_vendor_id', 'created_by_user_id', 'note', 'timesheet_id', 'created_by_user_id', 'note', 'do_not_include', 'address', 'address_2', 'city', 'state', 'zip_code', 'created_at', 'updated_at'];
-
-    protected $appends = ['name'];
 
     protected static function booted()
     {
@@ -37,52 +37,76 @@ class Project extends Model
         return $this->hasMany(Expense::class);
     }
 
-    public function bids(): HasMany
-    {
-        return $this->hasMany(Bid::class);
-    }
-
-    //projects many to many vendors
-    public function vendors(): BelongsToMany
-    {
-        return $this->belongsToMany(Vendor::class)->withPivot('client_id')->withTimestamps();
-    }
-
-    public function vendor(): belongsToMany
-    {
-        //project has one vendor via the project_vendor pivot table
-        // return $this->belongsTo(Vendor::class);
-        return $this->belongsToMany(Vendor::class)->withPivot('client_id')->withTimestamps();
-    }
-
-    public function getVendorAttribute()
-    {
-        return $this->vendor()->first();
-    }
-
     public function expenseSplits(): HasMany
     {
         return $this->hasMany(ExpenseSplits::class);
     }
 
-    public function clients(): BelongsToMany
+    public function bids(): HasMany
     {
-        //through project_vendor->client_id
-        return $this->belongsToMany(Client::class, 'project_vendor')->withPivot('vendor_id')->withTimestamps();
+        return $this->hasMany(Bid::class);
     }
 
-    public function client(): belongsToMany
+    public function vendors(): BelongsToMany
     {
-        //project has one client via the project_vendor pivot table client_id
-        // return $this->hasOneThrough(Client::class, 'project_vendor_pivot', 'project_id', 'client_id');
-        //->using(ProjectVendor::class)
-        return $this->belongsToMany(Client::class, 'project_vendor')->withPivot('vendor_id')->withTimestamps();
+        return $this->belongsToMany(Vendor::class)->withTimestamps();
     }
 
-    public function getClientAttribute()
+    public function createdByVendor(): BelongsTo
     {
-        return $this->client()->wherePivot('vendor_id', $this->vendor->id)->first();
+        return $this->belongsTo(Vendor::class, 'belongs_to_vendor_id');
     }
+    // //projects many to many vendors
+    // public function vendors(): BelongsToMany
+    // {
+    //     return $this->belongsToMany(Vendor::class)->withPivot('client_id')->withTimestamps();
+    // }
+
+    // public function vendor(): belongsToMany
+    // {
+    //     //project has one vendor via the project_vendor pivot table
+    //     // return $this->belongsTo(Vendor::class);
+    //     return $this->belongsToMany(Vendor::class)->withPivot('client_id')->withTimestamps();
+    // }
+
+    // public function getVendorAttribute()
+    // {
+    //     return $this->vendor()->first();
+    // }
+
+    /**
+     * Get the client for the project through the project_vendor pivot table
+     */
+    public function client(): HasOneThrough
+    {
+        return $this->hasOneThrough(
+            Client::class,
+            ProjectVendor::class,
+            'project_id', // Foreign key on project_vendor table
+            'id',         // Foreign key on clients table
+            'id',         // Local key on projects table
+            'client_id'   // Local key on project_vendor table
+        );
+    }
+
+    // public function clients(): BelongsToMany
+    // {
+    //     //through project_vendor->client_id
+    //     return $this->belongsToMany(Client::class, 'project_vendor')->withPivot('vendor_id')->withTimestamps();
+    // }
+
+    // public function client(): belongsToMany
+    // {
+    //     //project has one client via the project_vendor pivot table client_id
+    //     // return $this->hasOneThrough(Client::class, 'project_vendor_pivot', 'project_id', 'client_id');
+    //     //->using(ProjectVendor::class)
+    //     return $this->belongsToMany(Client::class, 'project_vendor')->withPivot('vendor_id')->withTimestamps();
+    // }
+
+    // public function getClientAttribute()
+    // {
+    //     return $this->client()->wherePivot('vendor_id', $this->vendor->id)->first();
+    // }
 
     public function estimates(): HasMany
     {
@@ -126,67 +150,46 @@ class Project extends Model
         });
     }
 
-    // public function getClientAttribute()
-    // {
-    //     // dd(Client::findOrFail($this->vendors()->first()->pivot->client_id));
-    //     // dd($this->clients);
-    //     dd($this->vendors);
-    //     // return Client::withoutGlobalScopes()->findOrFail($this->clients()->first()->id);
-    //     $vendor = $this->vendors()->first();
-    //     // dd($vendor);
-    //     if($this->belongs_to_vendor_id == $vendor->id){
-    //         return Client::findOrFail($vendor->pivot->client_id);
-    //     }else{
-    //         return Client::findOrFail($vendor->pivot->client_id);
-    //     }
-    // }
-
     /**
-     * Format project_name with title case (First Letter Of Each Word)
+     * Handle project_name formatting and access
      */
     protected function projectName(): Attribute
     {
         return Attribute::make(
             get: fn ($value) => $value,
-            set: function ($value) {
-                if (!$value) {
-                    return null;
-                }
-                
-                // Convert to title case (capitalize first letter of each word)
-                return ucwords(strtolower($value));
-            }
+            set: fn ($value) => $value ? ucwords(strtolower($value)) : null
         );
     }
 
     /**
-     * Get the name attribute for the project
+     * Get the display name for the project
      */
     protected function name(): Attribute
     {
         return Attribute::make(
             get: function ($value, array $attributes) {
-                // Check if project_name exists, provide a default if not
+                // Check if project_name exists
                 if (!isset($attributes['project_name'])) {
-                    return 'NO PROJECT';
+                    return 'No Project';
                 }
                 
-                // Special project names that don't need address
-                if ($attributes['project_name'] == 'EXPENSE SPLIT' || $attributes['project_name'] == 'NO PROJECT') {
-                    return $attributes['project_name'];
+                // Special project names
+                $specialNames = ['EXPENSE SPLIT', 'No Project', 'NO PROJECT'];
+                if (in_array($attributes['project_name'], $specialNames, true)) {
+                    return $attributes['project_name'] === 'NO PROJECT' ? 'No Project' : $attributes['project_name'];
                 }
                 
-                // Distribution projects just use project name
+                // Distribution projects
                 if (isset($attributes['distribution']) && $attributes['distribution'] == true) {
                     return $attributes['project_name'];
                 }
                 
-                // Standard projects combine address and name, but check if address exists
-                if (isset($attributes['address']) && !empty($attributes['address'])) {
+                // Standard projects with address
+                if (!empty($attributes['address'])) {
                     return $attributes['address'].' | '.$attributes['project_name'];
                 }
                 
-                // Fallback to just project name if no address
+                // Default to just project name
                 return $attributes['project_name'];
             }
         );

@@ -17,7 +17,11 @@ class TimesheetPolicy
      */
     public function viewAny(User $user): bool
     {
-        return true;
+        // Admins can list timesheets only if their vendor is not 1099.
+        // Non-admins can list (listing should be filtered to their own records).
+        return $user->vendor_role === 'Admin'
+            ? ($user->vendor?->business_type !== '1099')
+            : true;
     }
 
     /**
@@ -27,28 +31,39 @@ class TimesheetPolicy
      */
     public function view(User $user, Timesheet $timesheet): bool
     {
-        // dd($timesheet->user->vendors()->where('vendors.id', 1)->first()->pivot->user_id);
-        // dd($timesheet->user->id);
-
-        //or user_role = Member
-        //$user->vendor->user_role == 'Admin'
-
-        // dd($user->vendors()->where('vendors.id', $timesheet->vendor_id)->first()->pivot->user_id);
-        if ($timesheet->user_id == $user->id || $user->primary_vendor->pivot->role_id == 1) {
+        // Owner can view their own timesheet
+        if ($timesheet->user_id === $user->id) {
             return true;
-        } else {
-            return false;
         }
-        // if($timesheet->user_id == $user->id){
-        //     return true;
-        // }else{
-        //     return false;
-        // }
+
+        // Admins can view if vendor is not 1099
+        if ($user->vendor_role === 'Admin' && $user->vendor?->business_type !== '1099') {
+            return true;
+        }
+
+        return false;
     }
 
-    public function viewPayment(User $user)
+    public function viewAnyPayment(User $user): bool
     {
-        return $user->primary_vendor->pivot->role_id === 1;
+        return $user->vendor_role === 'Admin'
+            && $user->vendor?->business_type !== '1099';
+    }
+
+    public function viewPayment(User $user, User $paymentUser): bool
+    {
+        // No payments visibility for 1099 vendors (even Admins)
+        if ($user->vendor?->business_type === '1099') {
+            return false;
+        }
+
+        // Admins on non-1099 vendors can view payments
+        if ($user->vendor_role === 'Admin') {
+            return true;
+        }
+
+        // Otherwise, users can view their own payment page
+        return $user->id === $paymentUser->id;
     }
 
     /**

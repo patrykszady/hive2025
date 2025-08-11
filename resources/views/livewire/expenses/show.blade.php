@@ -30,7 +30,7 @@
                 <x-lists.details_list>
                     <x-lists.details_item title="Amount" detail="{{money($expense->amount)}}" />
                     <x-lists.details_item title="Date" detail="{{$expense->date->format('m/d/Y')}}" />
-                    <x-lists.details_item title="Vendor" detail="{{$expense->vendor->name}}" href="{{isset($expense->vendor->id) ? route('vendors.show', $expense->vendor->id) : ''}}"/>
+                    <x-lists.details_item title="Vendor" detail="{{$expense->vendor->business_name . ', ' . $expense->vendor->business_type}}" href="{{isset($expense->vendor->id) ? route('vendors.show', $expense->vendor->id) : ''}}"/>
                     <x-lists.details_item title="Project" detail="{{$expense->project->name}}" href="{{isset($expense->project->id) ? route('projects.show', $expense->project->id) : ''}}"/>
 
                     @if($expense->reimbursment)
@@ -65,40 +65,11 @@
             </flux:card>
 
             {{-- TRANSACTIONS --}}
-            {{-- 10-01-2024 USE FROM EXPENSES.INDEX @include --}}
-            @if(!$expense->transactions->isEmpty())
-                <flux:card class="space-y-2">
-                    <flux:heading size="lg" class="mb-0">Transactions</flux:heading>
-                    <flux:separator variant="subtle" />
-
-                    <div class="space-y-6">
-                        {{-- wire:loading.class="opacity-50 text-opacity-40" --}}
-                        <flux:table>
-                            <flux:table.columns>
-                                <flux:table.column>Amount</flux:table.column>
-                                <flux:table.column>Date</flux:table.column>
-                                <flux:table.column>Bank</flux:table.column>
-                                <flux:table.column>Account</flux:table.column>
-                            </flux:table.columns>
-
-                            <flux:table.rows>
-                                @foreach ($expense->transactions as $transaction)
-                                    <flux:table.row :key="$transaction->id">
-                                        <flux:table.cell variant="strong">
-                                            {{ money($transaction->amount) }}
-                                        </flux:table.cell>
-                                        <flux:table.cell>{{ $transaction->transaction_date->format('m/d/Y') }}</flux:table.cell>
-                                        <flux:table.cell>{{ $transaction->bank_account->bank->name }}</flux:table.cell>
-                                        <flux:table.cell>{{ isset($transaction->owner) ? $transaction->owner : $transaction->bank_account->account_number }}</flux:table.cell>
-                                    </flux:table.row>
-                                    <flux:table.row>
-                                        <flux:table.cell colspan="4" class="text-right">{{ $transaction->vendor->name != 'No Vendor' ? $transaction->vendor->name : $transaction->plaid_merchant_description}}</flux:table.cell>
-                                    </flux:table.row>
-                                @endforeach
-                            </flux:table.rows>
-                        </flux:table>
-                    </div>
-                </flux:card>
+            @if($expense->transactions->isNotEmpty())
+                <x-transactions.list_card 
+                    :transactions="$expense->transactions" 
+                    :title="$expense->check?->transactions->isNotEmpty() ? 'Check Transactions' : 'Transactions'"
+                />
             @endif
         </div>
 

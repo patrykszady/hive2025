@@ -22,7 +22,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->replaceInGroup('web', \Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class, \App\Http\Middleware\VerifyCsrfToken::class);
 
         $middleware->alias([
-            'user.vendor' => \App\Http\Middleware\EnsureUserHasPrimaryVendor::class,
+            'vendor.access' => \App\Http\Middleware\VendorAccessControl::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

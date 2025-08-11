@@ -7,9 +7,11 @@
             </div>
 
             {{-- VENDOR TIMELINE --}}
-            <div class="h-180">
-                <livewire:planner.cards-index type="vendor" :vendor-id="$vendor->id" />
-            </div>
+            @if($vendor->business_type != 'Retail')
+                <div class="h-100">
+                    <livewire:planner.cards-index type="vendor" :vendor-id="$vendor->id" />
+                </div>
+            @endif
 
             {{-- EXPENSES --}}
             @if(in_array($vendor->business_type, ["Retail"]))
@@ -19,23 +21,28 @@
             @endif
         </div>
 
-
         @if($vendor->business_type != 'Retail')
             <div class="col-span-4 lg:col-span-2 space-y-4">
                 {{-- VENDOR TEAM MEMBERS --}}
                 <livewire:users.users-index :vendor="$vendor" :view="'vendors.show'"/>
 
                 {{-- VENDOR CHECKS --}}
-                <livewire:checks.checks-index :vendor="$vendor->id" :view="'vendors.show'" lazy />
-
-                {{-- INSURANCE --}}
-                @if(in_array($vendor->business_type, ["Sub", "DBA"]))
-                    <livewire:vendor-docs.vendor-docs-card :vendor="$vendor" :view="true" lazy />
+                @if($vendor->checks()->count() > 0 )
+                    <livewire:checks.checks-index :vendor="$vendor->id" :view="'vendors.show'" lazy />
                 @endif
+
+                {{-- VENDOR FINANCES --}}
+                {{-- INSURANCE --}}
+                @can('edit', $vendor)
+                    @if(in_array($vendor->business_type, ["Sub", "DBA"]))
+                        <livewire:vendor-docs.vendor-docs-card :vendor="$vendor" :view="true" lazy />
+                    @endif 
+                    {{-- <livewire:vendors.vendor-finances :vendor="$vendor" /> --}}
+                @endcan
             </div>
         @endif
 	</div>
-    <livewire:users.user-create />
+    {{-- <livewire:users.user-create />
     <livewire:clients.client-create />
-    <livewire:vendor-docs.vendor-doc-create />
+    <livewire:vendor-docs.vendor-doc-create /> --}}
 </div>

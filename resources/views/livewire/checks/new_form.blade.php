@@ -37,15 +37,13 @@
                     />
                 </div>
             </div>
-            <div class="flex space-x-2 mt-2">
-                <flux:spacer />
-
-                <flux:button wire:click="remove" variant="danger">Remove</flux:button>
-                {{-- @if(!$form->transaction)
-
-                @endif --}}
-                {{-- <flux:button type="submit" x-bind:disabled="transaction" variant="primary">{{$view_text['button_text']}}</flux:button> --}}
-            </div>
+            
+            @can('delete', $check)
+                <div class="flex space-x-2 mt-2">
+                    <flux:spacer />
+                    <flux:button wire:click="remove" variant="danger">Remove</flux:button>
+                </div>
+            @endcan
         </div>
     </form>
 </flux:modal>

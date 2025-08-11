@@ -51,7 +51,7 @@
                         @foreach($weekly_hours as $timesheet)
                             <flux:table.row :key="$timesheet->id">
                                 <flux:table.cell variant="strong">
-                                    <a wire:navigate.hover href="{{$timesheet->check ? route('checks.show', $timesheet->check->id) : (!$timesheet->check && $timesheet->check_id ? '' : (auth()->user()->primary_vendor->pivot->role_id == 1 ? route('timesheets.payment', $timesheet->user_id) : ''))}}">{{ money($timesheet->amount) }}</a>
+                                    <a wire:navigate.hover href="{{$timesheet->check ? route('checks.show', $timesheet->check->id) : (!$timesheet->check && $timesheet->check_id ? '' : (auth()->user()->vendor_role === 'Admin' ? route('timesheets.payment', $timesheet->user_id) : ''))}}">{{ money($timesheet->amount) }}</a>
                                 </flux:table.cell>
                                 <flux:table.cell>{{ $timesheet->hours}}</flux:table.cell>
                                 <flux:table.cell>
@@ -67,7 +67,13 @@
                                 @endif
 
                                 <flux:table.cell>
-                                    <flux:badge size="sm" :color="$timesheet->status == 'Paid' ? 'green' : 'yellow'" inset="top bottom">{{ $timesheet->status }}</flux:badge>
+                                    <flux:badge 
+                                        size="sm" 
+                                        :color="$timesheet->status == 'Paid' ? 'green' : ($timesheet->status == 'Not Paid' ? 'red' : 'yellow')" 
+                                        inset="top bottom"
+                                    >
+                                        {{ $timesheet->status }}
+                                    </flux:badge>
                                 </flux:table.cell>
                             </flux:table.row>
                         @endforeach

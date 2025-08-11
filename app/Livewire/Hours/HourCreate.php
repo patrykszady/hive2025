@@ -8,22 +8,24 @@ use App\Models\Project;
 use App\Models\Task;
 use App\Models\Timesheet;
 
-use Illuminate\Support\Carbon;
 use Carbon\CarbonInterval;
 use Carbon\CarbonPeriod;
-
 use Flux;
 
-use Livewire\Attributes\Title;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+
+use Illuminate\Support\Carbon;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Title;
 use Livewire\Component;
 
 class HourCreate extends Component
 {
+    use AuthorizesRequests;
+    
     public HourForm $form;
 
     public $projects = [];
-    // public $other_projects = [];
     public Carbon $selected_date;
     public $days = [];
 
@@ -53,6 +55,7 @@ class HourCreate extends Component
 
     public function mount()
     {
+        $this->authorize('create', Hour::class);
         $this->selectedDate(Carbon::today(config('app.timezone')));
 
         $confirmed_weeks =
@@ -266,6 +269,7 @@ class HourCreate extends Component
     #[Title('Hours')]
     public function render()
     {
+        $this->authorize('create', Hour::class);
         return view('livewire.hours.form');
     }
 }

@@ -6,43 +6,49 @@ use App\Models\Bid;
 use App\Models\Check;
 use App\Models\Client;
 use App\Models\Distribution;
+use App\Models\Payment;
 use App\Models\Project;
-use App\Models\Scopes\VendorScope;
+use App\Models\ProjectStatus;
+use App\Models\Timesheet;
 use App\Models\Vendor;
+use App\Scopes\VendorScope;
+use Illuminate\Http\Request;
+use Livewire\Attributes\PublicProperty;
 use Livewire\Component;
 
 class VendorRegistration extends Component
 {
     public Vendor $vendor;
-
     public $user;
+    public $view;
 
-    public $vendor_users;
-
-    public $vendor_add_type;
-
+    #[PublicProperty]
     public $registration;
 
-    protected $listeners = ['refreshComponent' => '$refresh', 'confirmProcessStep'];
+    protected $listeners = ['refreshComponent' => '$refresh', 'confirmProcess'];
 
-    public function mount()
+    public function mount(Request $request)
     {
+        $this->view = $request->route()->getName();
         $this->user = auth()->user();
-        $this->vendor_add_type = $this->user->vendor->id;
-        $this->vendor_users = $this->user->vendor->users()->where('is_employed', 1)->get();
-        $this->registration = $this->user->vendor->registration;
+        
+        // Initialize registration with default values
+        $this->registration = $this->vendor->registration ?? new \stdClass();
 
-        //06-21-2024 gate or scope? This shouldnt be here...
-        if (is_null($this->user->vendor)) {
-            return redirect(route('vendor_selection'));
+        // Only include steps needed for the vendor type
+        $registrationSteps = $this->vendor->business_type === '1099'
+            ? ['vendor_info', 'registered']
+            : ['vendor_info', 'team_members', 'emails_registered', 'banks_registered', 'registered'];
+
+        foreach ($registrationSteps as $step) {
+            if (!isset($this->registration->{$step})) {
+                $this->registration->{$step} = false;
+            }
         }
 
-        if ($this->vendor->id != $this->user->vendor->id or $this->registration['registered']) {
-            return redirect(route('vendor_selection'));
-        }
-
+        // Rest of your mount logic
         if (in_array($this->vendor->business_type, ['Sub', 'DBA'])) {
-            if ($this->user->vendor->distributions->isEmpty()) {
+            if ($this->vendor->distributions->isEmpty()) {
                 //create OFFICE and admin user distributions
                 Distribution::create([
                     'vendor_id' => $this->user->vendor->id,
@@ -51,51 +57,136 @@ class VendorRegistration extends Component
                 ]);
 
                 Distribution::create([
-                    'vendor_id' => $this->user->vendor->id,
+                    'vendor_id' => $this->vendor->id,
                     'name' => $this->user->first_name.' - Home',
                     'user_id' => $this->user->id,
                 ]);
             }
 
-            if ($this->user->vendor->company_emails()->exists() and $this->registration['emails_registered'] == false) {
+            if ($this->vendor->company_emails()->exists() and !isset($this->registration->emails_registered)) {
                 $this->confirmProcess('emails_registered');
             }
 
-            if ($this->user->vendor->banks()->exists() and $this->registration['banks_registered'] == false) {
+            if ($this->vendor->banks()->exists() and !isset($this->registration->banks_registered)) {
                 $this->confirmProcess('banks_registered');
             }
-        } elseif ($this->vendor->business_type == '1099') {
-            $this->confirmProcess('team_members');
-            $this->confirmProcess('emails_registered');
-            $this->confirmProcess('banks_registered');
-        }
+        } 
     }
 
     public function confirmProcess($process_step)
     {
-        $this->registration[$process_step] = true;
-        $this->user->vendor->registration = json_encode($this->registration);
-        $this->user->vendor->save();
+        // Using object property access for dynamic property
+        $this->registration->{$process_step} = true;
+        $this->vendor->registration = $this->registration;
+        $this->vendor->save();
     }
 
-    public function confirmProcessStep($process_step)
+    public function getStepStatus($stepName)
     {
-        $this->confirmProcess($process_step);
-
-        if ($process_step === 'vendor_info') {
-            $this->dispatch('refresh')->to('vendors.vendor-details');
-        } elseif ($process_step === 'team_members') {
-            $this->dispatch('refresh')->to('users.users-index');
+        // If step is completed
+        if (isset($this->registration->{$stepName}) && $this->registration->{$stepName}) {
+            return 'completed';
         }
+        
+        // If step is current (previous step complete, this one not)
+        $previousStep = $this->getPreviousStep($stepName);
+        if ($previousStep === null || 
+            (isset($this->registration->{$previousStep}) && $this->registration->{$previousStep})) {
+            return 'current';
+        }
+        
+        // Otherwise it's a future step
+        return 'upcoming';
+    }
+
+    public function getPreviousStep($step)
+    {
+        $steps = [
+            'vendor_info' => null,
+            'team_members' => 'vendor_info',
+            'emails_registered' => 'team_members',
+            'banks_registered' => 'emails_registered',
+            // For 1099, registered depends on vendor_info only; otherwise on banks_registered
+            'registered' => $this->vendor->business_type === '1099' ? 'vendor_info' : 'banks_registered'
+        ];
+        
+        return $steps[$step] ?? null;
+    }
+
+    // Add these methods to define the steps and rendering
+    public function getRegistrationSteps(): array
+    {
+        // Always include vendor_info
+        $steps = [
+            [
+                'name' => 'vendor_info',
+                'label' => 'Confirm',
+                'description' => $this->vendor->name . ', '. $this->vendor->business_type,
+                'suffix' => 'Account',
+                'icon' => 'briefcase',
+            ],
+        ];
+
+        // Non-1099 vendors include more steps
+        if ($this->vendor->business_type !== '1099') {
+            $steps[] = [
+                'name' => 'team_members',
+                'label' => 'Add',
+                'description' => 'Team Members',
+                'suffix' => null,
+                'icon' => 'user-plus',
+            ];
+
+            if (in_array($this->vendor->business_type, ['Sub', 'DBA'])) {
+                $steps[] = [
+                    'name' => 'emails_registered',
+                    'label' => 'Add',
+                    'description' => 'Receipt',
+                    'suffix' => 'Accounts',
+                    'icon' => 'envelope',
+                ];
+                
+                $steps[] = [
+                    'name' => 'banks_registered',
+                    'label' => 'Add',
+                    'description' => 'Transaction',
+                    'suffix' => 'Accounts',
+                    'icon' => 'credit-card',
+                ];
+            }
+        }
+
+        // Final step
+        $steps[] = [
+            'name' => 'registered',
+            'label' => '',
+            'description' => $this->vendor->name . ', '. $this->vendor->business_type,
+            'suffix' => 'registration complete',
+            'icon' => 'check-circle',
+        ];
+        
+        return $steps;
+    }
+
+    /**
+     * Get visibility state for a step section
+     */
+    public function isStepVisible(string $stepName): bool
+    {
+        if (!isset($this->registration->{$stepName})) {
+            return false;
+        }
+        
+        return (bool)$this->registration->{$stepName};
     }
 
     public function addVendorHiveInfo()
     {
-        // dd('TOO FAR');
         //5-19-2023 ... queue this in case someone EXITS, if job not done and user tries to come back, show the spinning/loading wheel upon login...
         ini_set('max_execution_time', '480000');
         //where vendor is registering initinally or going forward ($vendor->registration->registered = true)
-        $vendor = $this->user->vendor;
+        $vendor = $this->vendor;
+
         $vendor_users_ids = $vendor->users->pluck('id')->toArray();
         $vendor_id = $vendor->id;
 
@@ -138,7 +229,7 @@ class VendorRegistration extends Component
             if (is_null($client)) {
                 //create client from $this->vendor
                 $adding_vendor = Vendor::withoutGlobalScope(VendorScope::class)->findOrFail($belongs_to_vendor_id);
-                // dd($adding_vendor);
+
                 $client = Client::make();
                 $client->business_name = $adding_vendor->business_name;
                 $client->address = $adding_vendor->address;
@@ -232,12 +323,125 @@ class VendorRegistration extends Component
 
     public function store()
     {
-        $this->addVendorHiveInfo();
+        // dd($this);
+        // $this->addVendorHiveInfo();
 
-        //register vendor with user
-        $this->user->vendor->registration = '{"registered": true}';
-        $this->user->vendor->save();
+        //register vendor
+        $this->confirmProcess('registered');
 
+        $timesheets = Timesheet::withoutGlobalScopes()
+            ->where('user_id', $this->user->id)
+            ->where(function($query) {
+                $query->whereNotNull('paid_by')
+                      ->orWhereNotNull('check_id');
+            })
+            ->whereNull('deleted_at')
+            ->orderBy('created_at', 'DESC')
+            ->get();
+
+        // First group by vendor_id
+        $vendorGroups = $timesheets->groupBy('vendor_id');
+
+        // Then for each vendor group, group by check_id
+        $nestedGroups = $vendorGroups->map(function ($vendorTimesheets) {
+            return $vendorTimesheets->groupBy('check_id');
+        });
+
+        // Now loop through the nested structure
+        foreach($nestedGroups as $vendor_id => $checkGroups) {
+            // Get the actual vendor model
+            $vendor = Vendor::withoutGlobalScopes()->find($vendor_id);
+
+            // Skip if vendor doesn't exist
+            if (!$vendor) continue;
+            
+            // Process vendor client logic
+            if ($vendor->client) {
+                $vendor_client = $vendor->client;
+            } else {
+                //create new and ONLY Client for $vendor
+                //5-25-2025 incorporate VendorObserver | similar code
+                //8-8-2025 need to sync vendor and client data including users/members in an observer?
+                $vendor_client = new Client();
+                $vendor_client->business_name = $vendor->business_name;
+                $vendor_client->address = $vendor->address;
+                $vendor_client->address_2 = $vendor->address_2;
+                $vendor_client->city = $vendor->city;
+                $vendor_client->state = $vendor->state;
+                $vendor_client->zip_code = $vendor->zip_code;
+                $vendor_client->vendor_id = $vendor->id;
+
+                $vendor_client->save();
+            
+                // Attach the client to the authenticated user's vendor in the pivot table
+                $vendor_client->vendors()->attach($this->user->vendor->id, ['source' => 'Vendor Client']);
+
+                // Get all admin users from the vendor and attach them to the client
+                $adminUsers = $vendor->users()
+                    ->wherePivot('role_id', 1) // Admin role ID is 1
+                    ->wherePivot('is_employed', true) // Only active employees
+                    ->get();
+
+                if ($adminUsers->isNotEmpty()) {
+                    // Attach all admin users to this client
+                    $vendor_client->users()->attach($adminUsers->pluck('id')->toArray());
+                }
+            }
+
+            // Now loop through each check group for this vendor
+            foreach ($checkGroups as $check_id => $timesheets) {     
+                //create a Payment for $user->vendor based on $check and $timesheets?
+                // Create a payment record for each timesheet in the check group
+                $parent_payment_id = null;
+                foreach ($timesheets as $index => $timesheet) {
+                    // Check if the project is already attached to the user's vendor
+                    $project = $timesheet->project()->withoutGlobalScopes()->first();
+
+                    if (!$project) {
+                        continue; // Skip if no project found
+                    }
+
+                    $project_vendor = $project->vendors()
+                        ->where('vendors.id', $this->user->vendor->id)
+                        ->exists();
+
+                    // If the project is not attached to the vendor yet, attach it
+                    if (!$project_vendor) {
+                        $project->vendors()->attach(
+                            $this->user->vendor->id,
+                            ['client_id' => $vendor_client->id]
+                        );
+                        
+                        // Create project status
+                        ProjectStatus::create([
+                            'project_id' => $project->id,
+                            'belongs_to_vendor_id' => $this->user->vendor->id,
+                            'title' => 'VIEW ONLY',
+                            'start_date' => $project->created_at->format('Y-m-d'),
+                        ]);
+                    }
+                    
+                    // First payment has null parent_id, others reference the first payment's ID
+                    $payment = Payment::create([
+                        'amount' => $timesheet->amount,
+                        'project_id' => $timesheet->project_id,
+                        'date' => $timesheet->created_at->format('Y-m-d'),
+                        // 'reference' => $check ? $check->check_number : 'Check #' . $check_id,
+                        'belongs_to_vendor_id' => $this->user->vendor->id,
+                        // 'note' => "Payment for timesheet ID: {$timesheet->id}",
+                        'created_by_user_id' => 0,
+                        'parent_client_payment_id' => $parent_payment_id,
+                        'check_id' => !empty($check_id) ? $check_id : NULL
+                    ]);
+                    
+                    // Set the first payment's ID as parent for all subsequent payments
+                    if ($index == 0) {
+                        $parent_payment_id = $payment->id;
+                    }
+                }
+            }
+        }
+        
         return redirect(route('dashboard'));
     }
 

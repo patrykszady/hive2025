@@ -5,8 +5,8 @@ namespace App\Models;
 use App\Traits\HasAddress;
 use Laravel\Scout\Searchable;
 
-use App\Models\Scopes\ClientScope;
-use App\Models\Scopes\VendorScope;
+use App\Scopes\ClientScope;
+use App\Scopes\VendorScope;
 
 use App\Collections\SearchableCollection;
 
@@ -24,7 +24,14 @@ class Vendor extends Model
 
     protected $fillable = ['business_name', 'business_type', 'sheets_type', 'category_id', 'address', 'address_2', 'city', 'state', 'zip_code', 'business_phone', 'business_email', 'created_at', 'updated_at'];
 
-    protected $appends = ['name'];
+    // protected $appends = ['name'];
+
+    protected function casts(): array
+    {
+        return [
+            'registration' => 'object', //array
+        ];
+    }
 
     protected static function booted()
     {
@@ -59,12 +66,17 @@ class Vendor extends Model
         return $this->belongsToMany(VendorCategory::class, 'category_vendor', 'vendor_id', 'vendor_category_id')->withTimestamps();
     }
 
-    //Vendors that belong to Logged in vendor(Company) / via $user->primary_vendor_id
+    //Vendors that belong to Logged in vendor(Company) / via $user->vendor->id
     public function vendors(): BelongsToMany
     {
         return $this->belongsToMany(Vendor::class, 'vendors_vendor', 'belongs_to_vendor_id')->withoutGlobalScopes()->withTimestamps();
     }
 
+    public function vendor(): BelongsToMany
+    {
+        return $this->belongsToMany(Vendor::class, 'vendors_vendor', 'vendor_id')->withTimestamps();
+    }
+    
     public function projects(): BelongsToMany
     {
         return $this->belongsToMany(Project::class)->withTimestamps();
@@ -78,11 +90,6 @@ class Vendor extends Model
     public function category(): BelongsTo
     {
         return $this->belongsTo(Category::class);
-    }
-
-    public function vendor(): BelongsToMany
-    {
-        return $this->belongsToMany(Vendor::class, 'vendors_vendor', 'vendor_id')->withTimestamps();
     }
 
     public function receipt_account(): HasOne
@@ -150,6 +157,11 @@ class Vendor extends Model
         return $this->hasMany(Transaction::class);
     }
 
+    public function checks(): HasMany
+    {
+        return $this->hasMany(Check::class);
+    }
+
     public function hours(): HasMany
     {
         return $this->hasMany(Hour::class);
@@ -157,51 +169,30 @@ class Vendor extends Model
 
     public function users(): BelongsToMany
     {
-        return $this->belongsToMany(User::class)->with('vendor')->withPivot(['is_employed', 'role_id', 'via_vendor_id', 'start_date', 'end_date', 'hourly_rate']);
+        return $this->belongsToMany(User::class)
+            ->using(UserVendor::class)
+            ->withPivot(['is_employed', 'role_id', 'via_vendor_id', 'start_date', 'end_date', 'hourly_rate']);
     }
 
     public function clients(): BelongsToMany
     {
-        return $this->belongsToMany(Client::class);
+        return $this->belongsToMany(Client::class)->withTimestamps();
     }
 
+    //the client this vendor belongs to (like via_vendor )
     public function client(): HasOne
     {
         return $this->hasOne(Client::class)->withoutGlobalScope(ClientScope::class);
     }
 
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class, 'belongs_to_vendor_id');
+    }
+
     public function scopeHiveVendors($query)
     {
         return $query->withoutGlobalScopes()->where('business_type', 'Sub')->where('registration->registered', true);
-    }
-
-    public static function topExpenseVendors($limit = 5000)
-    {
-        return static::search('')
-            ->whereNotIn('business_type', ['Retail'])
-            ->orderBy('ytd_expense_sum', 'desc')
-            ->take($limit);
-    }
-    
-    /**
-     * Get the vendor registration status
-     */
-    protected function registration(): Attribute
-    {
-        return Attribute::make(
-            get: function ($value) {
-                $value = json_decode($value, true);
-                $status_array = ['registered', 'vendor_info', 'team_members', 'user_registered', 'banks_registered', 'emails_registered'];
-
-                foreach ($status_array as $status) {
-                    if (! isset($value[$status])) {
-                        $value[$status] = false;
-                    }
-                }
-
-                return $value;
-            }
-        );
     }
 
     /**
@@ -217,10 +208,10 @@ class Vendor extends Model
                 
                 // For 1099 vendors, use the first associated user's name
                 // Add isset check to prevent "undefined array key" error
-                if (isset($attributes['business_type']) && $attributes['business_type'] == '1099' && $this->users()->exists()) {
-                    $user = $this->users()->first();
-                    return $user->first_name . ' ' . $user->last_name;
-                }
+                // if (isset($attributes['business_type']) && $attributes['business_type'] == '1099' && $this->users()->exists()) {
+                //     $user = $this->users()->first();
+                //     return $user->first_name . ' ' . $user->last_name;
+                // }
                 
                 // Extract first part before ',' if available
                 $nameParts = explode(',', $attributes['business_name']);

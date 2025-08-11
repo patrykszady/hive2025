@@ -42,7 +42,7 @@ class VendorPaymentForm extends Form
                 'date' => $this->date,
                 'bank_account_id' => $this->component->bank_account_id,
                 'vendor_id' => $this->component->vendor->id,
-                'belongs_to_vendor_id' => auth()->user()->primary_vendor_id,
+                'belongs_to_vendor_id' => auth()->user()->vendor->id,
                 'created_by_user_id' => auth()->user()->id,
             ]);
         } else {

@@ -1,50 +1,38 @@
-{{-- form classes divide-y divide-gray-200 --}}
-<form wire:submit="{{$view_text['form_submit']}}">
-    <x-cards class="max-w-2xl mx-auto">
-        {{-- HEADER --}}
-        <x-cards.heading>
-            <x-slot name="left">
-                <h1>{{$view_text['card_title']}}</h1>
-            </x-slot>
-            <x-slot name="right">
+<div class="max-w-lg">
+    <flux:card class="space-y-4">
+        <div class="flex justify-between">
+            <flux:heading>{{$view_text['card_title']}}</flux:heading>
+        </div>
 
-            </x-slot>
-        </x-cards.heading>
+        <flux:separator variant="subtle" />
 
-        {{-- ROWS --}}
-        <x-cards.body :class="'space-y-4 my-4'">
-
-            {{-- USER --}}
-            <x-forms.row
+        <form wire:submit="{{$view_text['form_submit']}}" class="space-y-6">
+            <flux:select 
                 wire:model.live.debounce.250ms="user_id"
-                errorName="user_id"
-                name="user_id"
-                text="User"
-                type="dropdown"
-                >
-
-                <option value="" readonly>Select User</option>
+                label="Select User"
+                variant="listbox" 
+                placeholder="Select User to Login As..."
+                variant="combobox"
+            >
+                <x-slot name="search">
+                    <flux:select.search placeholder="Search users..." />
+                </x-slot>
+                
                 @foreach ($users as $user)
-                    <option value="{{$user->id}}">{{$user->full_name}}</option>
+                    <flux:select.option value="{{$user->id}}">
+                        {{ $user->full_name }}
+                    </flux:select.option>
                 @endforeach
+            </flux:select>
 
-            </x-forms.row>
-        </x-cards.body>
-
-        {{-- FOOTER --}}
-        <x-cards.footer>
-            <button
-                type="button"
-                {{-- class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-xs hover:bg-gray-50 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500" --}}
+            <div class="flex justify-end" x-show="$wire.user_id">
+                <flux:button 
+                    type="submit"
+                    variant="primary"
                 >
-                {{-- Cancel --}}
-            </button>
-            <button
-                type="submit"
-                {{-- x-bind:disabled="expense.project_id" --}}
-                class="inline-flex justify-center px-4 py-2 ml-3 text-sm text-white bg-indigo-600 border border-transparent rounded-md shadow-xs disabled:opacity-50 hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                {{$view_text['button_text']}}
-            </button>
-        </x-cards.footer>
-    </x-cards>
-</form>
+                    {{$view_text['button_text']}}
+                </flux:button>
+            </div>
+        </form>
+    </flux:card>
+</div>

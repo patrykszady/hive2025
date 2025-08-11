@@ -2,6 +2,7 @@
 
 namespace App\Policies;
 
+use App\Models\Payment;
 use App\Models\User;
 use Illuminate\Auth\Access\HandlesAuthorization;
 
@@ -11,25 +12,62 @@ class PaymentPolicy
 
     public function viewAny(User $user): bool
     {
+        if ($user->vendor_role !== 'Admin') {
+            return false;
+        }
+
+        return true;
+    }
+    
+    public function view(User $user, Payment $payment): bool
+    {
+        if ($user->vendor_role !== 'Admin') {
+            return false;
+        }
+
         return true;
     }
 
     public function create(User $user): bool
     {
-        if (request()->route()->action['as'] == 'projects.show') {
-            $vendor_id = request()->route()->project->client->vendor_id;
-        } elseif (request()->route()->action['as'] == 'payments.create') {
-            $vendor_id = request()->route()->client->vendor_id;
-        } elseif (request()->route()->action['as'] == 'payments.index') {
-            $vendor_id = false;
-        } else {
-            $vendor_id = true;
+        // Only Admins can create payments
+        if ($user->vendor_role !== 'Admin') {
+            return false;
         }
 
-        if ($vendor_id) {
+        return true;
+    }
+
+    /**
+     * Determine whether the user can update the payment.
+     *
+     * @return bool
+     */
+    public function update(User $user, Payment $payment): bool
+    {
+        // First check if user is Admin
+        if ($user->vendor_role !== 'Admin') {
             return false;
-        } else {
-            return true;
         }
+        
+        // Skip check if payment doesn't have a creator ID
+        if (!$payment->created_by_user_id) {
+            return false;
+        }
+        
+        // If user doesn't have a vendor, they can't update payments
+        if (!$user->vendor) {
+            return false;
+        }
+        
+        // Check if the payment creator is part of the user's vendor team
+        $vendorUserIds = $user->vendor->users()->pluck('users.id')->toArray();
+        
+        // Only allow update if creator is in the same vendor team
+        if (!in_array($payment->created_by_user_id, $vendorUserIds)) {
+            return false;
+        }
+
+        return true;
     }
 }

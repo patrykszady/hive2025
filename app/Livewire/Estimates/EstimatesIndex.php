@@ -75,8 +75,6 @@ class EstimatesIndex extends Component
     public function activateEstimate($estimate_id)
     {
         $estimate = Estimate::withTrashed()->findOrFail($estimate_id);
-
-        // $this->estimate = $estimate;
         $estimate->restore();
 
         Flux::toast(
@@ -92,7 +90,7 @@ class EstimatesIndex extends Component
     #[Title('Estimates')]
     public function render()
     {
-        // $this->authorize('viewAny', Project::class);
+        $this->authorize('viewAny', Estimate::class);
         return view('livewire.estimates.index');
     }
 }

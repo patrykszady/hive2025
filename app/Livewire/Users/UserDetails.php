@@ -3,10 +3,9 @@
 namespace App\Livewire\Users;
 
 use App\Models\User;
-
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
-
 use Livewire\Component;
+use Livewire\Attributes\Computed;
 
 class UserDetails extends Component
 {

@@ -17,7 +17,7 @@ class ClientPolicy
      */
     public function viewAny(User $user): bool
     {
-        //
+        return $user->vendor_role === 'Admin';
     }
 
     /**
@@ -37,7 +37,7 @@ class ClientPolicy
      */
     public function create(User $user): bool
     {
-        return $user->primary_vendor->pivot->role_id === 1;
+        return $user->vendor_role === 'Admin';
     }
 
     /**
@@ -47,7 +47,13 @@ class ClientPolicy
      */
     public function update(User $user, Client $client): bool
     {
-        return $user->primary_vendor->pivot->role_id === 1;
+        // If client has a vendor_id set, it's a vendor client and cannot be modified
+        if (!is_null($client->vendor_id)) {
+            return false;
+        }
+        
+        // Otherwise, check if user is an Admin
+        return $user->vendor_role === 'Admin';
     }
 
     /**

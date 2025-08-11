@@ -12,7 +12,7 @@ class HourPolicy
      */
     public function viewAny(User $user): bool
     {
-        //
+        return false;
     }
 
     /**
@@ -20,7 +20,7 @@ class HourPolicy
      */
     public function view(User $user, Hour $hour): bool
     {
-        //
+        return false;
     }
 
     /**
@@ -28,7 +28,12 @@ class HourPolicy
      */
     public function create(User $user): bool
     {
-        //
+        // Users with 1099 business type cannot create hours
+        if ($user->vendor?->business_type === '1099') {
+            return false;
+        }
+        
+        return true;
     }
 
     /**

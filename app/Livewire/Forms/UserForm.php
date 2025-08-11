@@ -32,12 +32,6 @@ class UserForm extends Form
     #[Validate('nullable')]
     public $via_vendor = null;
 
-    #[Validate('nullable')]
-    public $business_type = null;
-
-    #[Validate('nullable')]
-    public $business_name = null;
-
     public function rules()
     {
         // Don't validate anything if the form hasn't been properly initialized
