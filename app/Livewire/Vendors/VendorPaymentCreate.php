@@ -84,9 +84,18 @@ class VendorPaymentCreate extends Component
         $this->employees = auth()->user()->vendor->users()->where('is_employed', 1)->get();
     }
 
+    /**
+     * Handle updates to form fields
+     */
     public function updated($field, $value)
     {
         $this->handleChecksUpdated($field, $value);
+        
+        // Check if a project amount was updated
+        if (preg_match('/^projects\.(\d+)\.amount$/', $field, $matches)) {
+            $project_id = $matches[1];
+            $this->updateProjectBalance($project_id);
+        }
     }
 
     public function addProject()

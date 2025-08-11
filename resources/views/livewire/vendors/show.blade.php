@@ -33,7 +33,7 @@
 
                 {{-- VENDOR FINANCES --}}
                 {{-- INSURANCE --}}
-                @can('edit', $vendor)
+                @can('update', $vendor)
                     @if(in_array($vendor->business_type, ["Sub", "DBA"]))
                         <livewire:vendor-docs.vendor-docs-card :vendor="$vendor" :view="true" lazy />
                     @endif 
@@ -42,7 +42,8 @@
             </div>
         @endif
 	</div>
+    <livewire:vendor-docs.vendor-doc-create />
     {{-- <livewire:users.user-create />
     <livewire:clients.client-create />
-    <livewire:vendor-docs.vendor-doc-create /> --}}
+     --}}
 </div>
