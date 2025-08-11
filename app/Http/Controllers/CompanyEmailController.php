@@ -762,8 +762,16 @@ class CompanyEmailController extends Controller
                         $expense_receipt = new ExpenseReceipts;
                         $expense_receipt->expense_id = $expense_id;
                         $expense_receipt->receipt_filename = $targetFilename;
-                        $expense_receipt->receipt_html = $current_ocr_data['content'];
-                        $expense_receipt->receipt_items = $current_ocr_data['fields'];
+                        
+                        // Use original OCR data for the first attachment if it exists
+                        if ($attachmentIndex === array_key_first($nonInlineAttachments) && isset($ocr_receipt_data['content'])) {
+                            $expense_receipt->receipt_html = $ocr_receipt_data['content'];
+                            $expense_receipt->receipt_items = $ocr_receipt_data['fields'] ?? $current_ocr_data['fields'];
+                        } else {
+                            $expense_receipt->receipt_html = $current_ocr_data['content'];
+                            $expense_receipt->receipt_items = $current_ocr_data['fields'];
+                        }
+                        
                         $expense_receipt->save();
                         
                         // Move the file to permanent storage

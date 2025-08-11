@@ -886,7 +886,6 @@ class TransactionController extends Controller
         foreach ($hive_vendors as $hive_vendor) {
             $hive_vendor_bank_account_ids = $hive_vendor->bank_accounts->pluck('id');
 
-            //withoutGlobalScopes()
             $expenses = Expense::with('transactions')
                 ->with('receipts')
                 ->whereNull('deleted_at')
@@ -913,7 +912,7 @@ class TransactionController extends Controller
                 }
 
                 $transaction_amount_outstanding = (float) $transaction_amount_outstanding;
-
+     
                 $transactions = Transaction::whereIn('bank_account_id', $hive_vendor_bank_account_ids)
                     ->whereNull('expense_id')
                     ->whereNull('deleted_at')
