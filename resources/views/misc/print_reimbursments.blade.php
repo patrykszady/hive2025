@@ -179,7 +179,7 @@
                                                             ])
                                                             >
                                                             @if($search_url && !$split)
-                                                                <a href="{{$search_url}} {{$line_item->ProductCode}}">{{$line_item->ProductCode}}</a>
+                                                                <a href="{{$search_url}}{{$line_item->ProductCode}}">{{$line_item->ProductCode}}</a>
                                                             @else
                                                                 {{$line_item->ProductCode}}
                                                             @endif
@@ -218,7 +218,7 @@
 
                                             <flux:table.row>
                                                 <flux:table.cell colspan="3" class="text-right font-semibold">Subtotal</flux:table.cell>
-                                                <flux:table.cell>{{money($expense->receipt->receipt_items->total)}}</flux:table.cell>
+                                                <flux:table.cell>{{money($expense->receipt->receipt_items->subtotal)}}</flux:table.cell>
                                             </flux:table.row>
 
                                             <flux:table.row>
@@ -240,7 +240,6 @@
                                                             <b>{{money($expense->amount)}}</b>
                                                         @else
                                                             <b>{{money($expense->amount)}}</b>
-                                                            {{-- {{money($expense->receipt->receipt_items->total)}}   --}}
                                                         @endif
                                                     @endif
                                                 </flux:table.cell>
