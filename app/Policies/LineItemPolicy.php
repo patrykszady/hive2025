@@ -13,7 +13,7 @@ class LineItemPolicy
     public function viewAny(User $user): bool
     {
         return $user->vendor_role === 'Admin';
-
+    }
     /**
      * Determine whether the user can view the model.
      */
