@@ -64,15 +64,10 @@ class Estimate extends Model
         );
     }
 
-
     public function getClientAttribute()
     {
-        return $this->project->clients()->wherePivot('vendor_id', $this->belongs_to_vendor_id)->first();
+        return $this->project->client;
     }
-    // public function getClient($vendor)
-    // {
-    //     dd($vendor);
-    // }
 
     public function getStartDateAttribute()
     {
