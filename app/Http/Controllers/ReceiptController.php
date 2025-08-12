@@ -747,11 +747,16 @@ class ReceiptController extends Controller
 
             $transaction_date = $transaction_date->format('Y-m-d');
         } else {
-            $ocr_receipt_data = [
-                'error' => true,
-            ];
+            if($expense_amount){
+                $transaction_date = NULL;
+            }else{
+                $ocr_receipt_data = [
+                    'error' => true,
+                ];
 
-            return $ocr_receipt_data;
+                return $ocr_receipt_data;
+            }
+
             //if coming from creating email, allow $transaction_date to be NULL.
 
             //if coming from UPDATE EXPENSE ... allow.... otherwire deny.

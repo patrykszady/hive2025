@@ -103,7 +103,7 @@ class TimesheetPaymentCreate extends Component
                 ->orderBy('date', 'DESC')
                 ->get()
                 ->each(function ($item, $key) {
-                    $item->checkbox = true;
+                    $item->checkbox = false;
                 })
                 ->keyBy('id');
 
@@ -114,7 +114,7 @@ class TimesheetPaymentCreate extends Component
                 ->orderBy('date', 'DESC')
                 ->get()
                 ->each(function ($item, $key) {
-                    $item->checkbox = true;
+                    $item->checkbox = false;
                 })
                 ->keyBy('id');
 

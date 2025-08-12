@@ -55,4 +55,5 @@
             </flux:table.rows>
         </flux:table>
     @endif
+    {{-- <livewire:vendor-docs.vendor-doc-create /> --}}
 </flux:card>
