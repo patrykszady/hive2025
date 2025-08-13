@@ -255,19 +255,28 @@ class ExpenseForm extends Form
             $project_id = $this->project_id;
             $distribution_id = null;
             $dist_user = null;
-        } elseif ($this->component->splits) {
-            $project_id = null;
-            $distribution_id = null;
-            $dist_user = null;
-        } elseif (is_null($this->project_id)) {
-            dd('in elseif');
-            $project_id = null;
-            $distribution_id = null;
-            $dist_user = $this->vendor_id;
-        } else {
+        }elseif(isset($this->project_id)){
             $project_id = null;
             $distribution_id = substr($this->project_id, 2);
             $dist_user = null;
+        } elseif ($this->component->split) {
+            $project_id = null;
+            $distribution_id = null;
+            $dist_user = null;
+        } else {
+            Log::error('ExpenseForm expenseDetails error', [
+                'expense' => $this->expense,
+                'project_id' => $this->project_id,
+                'vendor_id' => $this->vendor_id,
+            ]);
+
+            dd('in else');
+
+            // } elseif (is_null($this->project_id)) {
+            // dd('in elseif');
+            // $project_id = null;
+            // $distribution_id = null;
+            // $dist_user = $this->vendor_id;
 
             //for checks
             // $distribution = Distribution::findOrFail($distribution_id)->user_id;
