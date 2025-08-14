@@ -47,17 +47,9 @@ class CheckShow extends Component
 
         $user_distributions =
             Expense::whereNotNull('distribution_id')
+                ->whereNull('paid_by')
                 ->whereNull('reimbursment')
                 ->where('check_id', $this->check->id)
-                ->get();
-
-        $user_paid_by_reimbursements =
-            Expense::
-                where('paid_by', $this->check->user_id)
-                ->whereNotNull('reimbursment')
-                ->where('reimbursment', '!=', 'Client')
-                ->where('check_id', $this->check->id)
-                ->orderBy('date', 'DESC')
                 ->get();
 
         // Paid Expenses
@@ -74,6 +66,17 @@ class CheckShow extends Component
                         });
                 })
                 ->get();
+
+        // dd($user_distributions, $user_paid_expenses);
+        $user_paid_by_reimbursements =
+            Expense::
+                where('paid_by', $this->check->user_id)
+                ->whereNotNull('reimbursment')
+                ->where('reimbursment', '!=', 'Client')
+                ->where('check_id', $this->check->id)
+                ->orderBy('date', 'DESC')
+                ->get();
+
 
         $user_reimbursement_expenses = $this->check->user_id
             ? Expense::where('reimbursment', $this->check->user_id)
