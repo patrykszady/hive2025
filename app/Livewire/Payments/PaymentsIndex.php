@@ -24,6 +24,10 @@ class PaymentsIndex extends Component
     #[Computed]
     public function payments()
     {
+        // Get payments without transactions
+        // $no_transaction_payments = Payment::whereNull('transaction_id')->where('date', '>', '2018-01-03')->where('reference', '!=', 'Cash')->get();
+        // dd($no_transaction_payments);
+            
         // Start with the base query based on view
         $query = $this->view == 'projects.show'
             ? $this->project->payments()

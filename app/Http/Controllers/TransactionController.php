@@ -237,7 +237,7 @@ class TransactionController extends Controller
 
     public function plaid_transactions_sync()
     {
-        $banks = Bank::withoutGlobalScopes()->whereNotNull('plaid_access_token')->get();
+        $banks = Bank::withoutGlobalScopes()->whereNotNull('plaid_access_token')->where('id', 21)->get();
 
         //if not in error state...
         foreach ($banks as $bank) {
@@ -272,26 +272,43 @@ class TransactionController extends Controller
             $bank->plaid_options = $plaidOptions;
             $bank->save();
 
+            // dd($result);
+
             if ($result['has_more'] == true) {
                 $this->plaid_transactions_sync_bank($bank);
             }
 
-            //REMOVED
-            foreach ($result['removed'] as $old_transaction) {
-                //make sure transaction_id does not exist yet.. if it does..update..
-                $transaction = Transaction::whereDate('transaction_date', '>=', '2023-01-01')->whereNotNull('plaid_transaction_id')->where('plaid_transaction_id', $old_transaction['transaction_id'])->first();
+            //ADDED
+            foreach ($result['added'] as $index => $new_transaction) {
+                if ($new_transaction['date'] <= $transactions_last_date) {
+                    continue;
+                } else {
+                    //make sure transaction_id does not exist yet.. if it does..update..
+                    if (Transaction::whereNotNull('plaid_transaction_id')->where('plaid_transaction_id', $new_transaction['pending_transaction_id'])->get()->isNotEmpty()) {
+                        $transaction = Transaction::where('plaid_transaction_id', $new_transaction['pending_transaction_id'])->first();
+                    } elseif (Transaction::whereNotNull('plaid_transaction_id')->where('plaid_transaction_id', $new_transaction['transaction_id'])->get()->isNotEmpty()) {
+                        $transaction = Transaction::where('plaid_transaction_id', $new_transaction['transaction_id'])->first();
+                    } elseif (Transaction::whereDate('posted_date', $new_transaction['date'])->whereNotNull('plaid_transaction_id')->where('owner', $new_transaction['account_owner'])->where('amount', $new_transaction['amount'])->get()->isNotEmpty()) {
+                        //11/14/2024 ...used in multiple places on this Controller
+                        //->where('plaid_transaction_id', $new_transaction['transaction_id'])
+                        $existing_transactions = Transaction::whereDate('posted_date', $new_transaction['date'])->whereIn('bank_account_id', $bank_account_ids)->where('owner', $new_transaction['account_owner'])->where('amount', $new_transaction['amount'])->get();
 
-                if (! is_null($transaction)) {
-                    //transaction has payments ...disassociate
-                    $transaction->payments()->get()->each(function ($payment) {
-                        $payment->transaction()->dissociate();
-                        $payment->save();
-                    });
+                        if ($existing_transactions->count() === 1) {
+                            $transaction = $existing_transactions->first();
+                        } else {
+                            if ($existing_transactions->isEmpty()) {
+                                $transaction = new Transaction;
+                            } else {
+                                //LOG
+                                //DiffInDays / Carbon
+                                Log::channel('plaid_adds')->error(['ADDED in TransactionController' => [$new_transaction, $existing_transactions], $result]);
+                            }
+                        }
+                    } else {
+                        $transaction = new Transaction;
+                    }
 
-                    $transaction->deleted_at = now();
-                    $transaction->save();
-
-                    Log::channel('plaid_transaction_removal')->info([$transaction->id, $transaction->plaid_transaction_id]);
+                    $this->plaid_add_transaction($transaction, $new_transaction);
                 }
             }
 
@@ -365,37 +382,22 @@ class TransactionController extends Controller
                 $transaction->save();
             }
 
-            //ADDED
-            foreach ($result['added'] as $index => $new_transaction) {
-                if ($new_transaction['date'] <= $transactions_last_date) {
-                    continue;
-                } else {
-                    //make sure transaction_id does not exist yet.. if it does..update..
-                    if (Transaction::whereNotNull('plaid_transaction_id')->where('plaid_transaction_id', $new_transaction['pending_transaction_id'])->get()->isNotEmpty()) {
-                        $transaction = Transaction::where('plaid_transaction_id', $new_transaction['pending_transaction_id'])->first();
-                    } elseif (Transaction::whereNotNull('plaid_transaction_id')->where('plaid_transaction_id', $new_transaction['transaction_id'])->get()->isNotEmpty()) {
-                        $transaction = Transaction::where('plaid_transaction_id', $new_transaction['transaction_id'])->first();
-                    } elseif (Transaction::whereDate('posted_date', $new_transaction['date'])->whereNotNull('plaid_transaction_id')->where('owner', $new_transaction['account_owner'])->where('amount', $new_transaction['amount'])->get()->isNotEmpty()) {
-                        //11/14/2024 ...used in multiple places on this Controller
-                        //->where('plaid_transaction_id', $new_transaction['transaction_id'])
-                        $existing_transactions = Transaction::whereDate('posted_date', $new_transaction['date'])->whereIn('bank_account_id', $bank_account_ids)->where('owner', $new_transaction['account_owner'])->where('amount', $new_transaction['amount'])->get();
+            //REMOVED
+            foreach ($result['removed'] as $old_transaction) {
+                //make sure transaction_id does not exist yet.. if it does..update..
+                $transaction = Transaction::whereDate('transaction_date', '>=', '2023-01-01')->whereNotNull('plaid_transaction_id')->where('plaid_transaction_id', $old_transaction['transaction_id'])->first();
 
-                        if ($existing_transactions->count() === 1) {
-                            $transaction = $existing_transactions->first();
-                        } else {
-                            if ($existing_transactions->isEmpty()) {
-                                $transaction = new Transaction;
-                            } else {
-                                //LOG
-                                //DiffInDays / Carbon
-                                Log::channel('plaid_adds')->error(['ADDED in TransactionController' => [$new_transaction, $existing_transactions], $result]);
-                            }
-                        }
-                    } else {
-                        $transaction = new Transaction;
-                    }
+                if (! is_null($transaction)) {
+                    //transaction has payments ...disassociate
+                    $transaction->payments()->get()->each(function ($payment) {
+                        $payment->transaction()->dissociate();
+                        $payment->save();
+                    });
 
-                    $this->plaid_add_transaction($transaction, $new_transaction);
+                    $transaction->deleted_at = now();
+                    $transaction->save();
+
+                    Log::channel('plaid_transaction_removal')->info([$transaction->id, $transaction->plaid_transaction_id]);
                 }
             }
         } else {
@@ -1380,48 +1382,39 @@ class TransactionController extends Controller
         //where doesnt have clientpayment
         //1-26-2023 why does 2019/older transactions/client_payments not work?
         $transactions = Transaction::where('transaction_date', '>', '2019-01-01')
-            ->where('deposit', 1)
+            // ->where('deposit', 1)
             ->whereDoesntHave('payments')
             ->whereNull('expense_id')
-            // ->where('id', 21781)
-            ->orderBy('posted_date', 'DESC')
+            ->where('amount', 'LIKE', '-%') // Only get negative transactions
+            ->orderBy('transaction_date', 'DESC')
+            ->take(3)
             ->get();
-        // dd($transactions);
 
         foreach ($transactions as $transaction) {
             $vendor_id = $transaction->bank_account->bank->vendor_id;
 
             $payments = Payment::
-                // withoutGlobalScopes()
                 whereBetween('date', [$transaction->transaction_date->subDays(21), $transaction->transaction_date->addDays(4)])
                 //where bank_id belongs_to same vendor_id as this payment
                     ->where('belongs_to_vendor_id', $vendor_id)
-                    ->where('transaction_id', null);
-            // ->where('amount', substr($transaction->amount, 1))
-            // ->get();
+                    ->whereNull('transaction_id');
 
             //06-21-2021 json store which $transactions have been checked against which $payments so it doesnt check again?
             //where parent_client_payment_id is not in json for this $transaction
             // ->groupBy('parent_client_payment_id');
 
             // if first character is -
-            $single_payments = $payments->where('amount', is_numeric(substr($transaction->amount, 0, 1)) ? '-'.$transaction->amount : substr($transaction->amount, 1))->get();
-            // dd($single_payments);
-            if (! $single_payments->isEmpty()) {
+            $single_payments = $payments->where('amount', is_numeric(substr($transaction->amount, 0, 1)) ? '-'.$transaction->amount : substr($transaction->amount, 1))->orderBy('date', 'DESC')->get();
+
+            if ($single_payments->isNotEmpty()) {
                 //closest date. diffInDays
-                foreach ($single_payments as $single_payment) {
-                    $single_payment->date_diff = $transaction->transaction_date->floatDiffInDays($single_payment->date);
-                }
-
-                $save_payment = $single_payments->sortBy('date_diff')->first();
-                // dd($payment->makeHidden('date_diff'));
-                $save_payment = Payment::findOrFail($save_payment->id);
-                $save_payment->transaction_id = $transaction->id;
-                $save_payment->save();
-
+                $save_payment = $single_payments->first(); // Just use the first match without date comparison
+                
+                // Associate and save in one step using the relationship
+                $transaction->payments()->save($save_payment);
+                
                 //so Searchable gets send to Scout/TypeSense
                 $transaction->save();
-                // $transaction->payments()->associate($payment->id);
             } else {
                 $payments = Payment::whereBetween('date', [$transaction->transaction_date->subDays(21), $transaction->transaction_date->addDays(4)])
                     //where bank_id belongs_to same vendor_id as this payment
