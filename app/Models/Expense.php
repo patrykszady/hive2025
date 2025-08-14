@@ -39,14 +39,48 @@ class Expense extends Model
 
     public function toSearchableArray(): array
     {
+        // Load necessary relationships for computing status if not already loaded
+        if (!$this->relationLoaded('check') || 
+            !$this->relationLoaded('project') || 
+            !$this->relationLoaded('transactions') || 
+            !$this->relationLoaded('splits')) {
+            $this->load(['check', 'project', 'transactions', 'splits']);
+        }
+        
         // All model attributes are made searchable
         $array = $this->toArray();
 
-        // Then we add/adjust some additional fields
+        // Add computed fields
         $array['date'] = $this->date->timestamp;
         $array['has_splits'] = $this->splits->isEmpty() ? false : true;
-
+        $array['expense_status'] = $this->getStatusValue(); // Use private method to avoid recursion
+        
         return $array;
+    }
+
+    /**
+     * Get status value directly without using the attribute accessor
+     * (prevents infinite recursion in toSearchableArray)
+     */
+    private function getStatusValue(): string
+    {
+        if ($this->check && $this->check->status === 'Complete') {
+            return 'Complete';
+        }
+        
+        $projectName = strtoupper($this->project->project_name ?? '');
+        
+        if ($projectName === 'NO PROJECT') {
+            return 'No Project';
+        }
+        
+        if ($this->transactions->isNotEmpty() || $this->paid_by !== null) {
+            return 'Complete';
+        } elseif ($this->transactions->isEmpty()) {
+            return 'No Transaction';
+        } else {
+            return 'Missing Info';
+        }
     }
 
     /**
@@ -189,39 +223,41 @@ class Expense extends Model
         );
     }
 
+    /**
+     * Get the status attribute, preferring indexed value when available
+     */
     protected function status(): Attribute
     {
-        // First check if expense has a check with "Complete" status
-        if ($this->check && $this->check->status === 'Complete') {
-            return Attribute::make(
-                get: fn ($value) => 'Complete'
-            );
-        }
-        
-        // Normalize project name for comparison to avoid case sensitivity issues
-        $projectName = strtoupper($this->project->project_name);
-        
-        // Special handling for "NO PROJECT"
-        if ($projectName === 'NO PROJECT') {
-            return Attribute::make(
-                get: fn ($value) => 'No Project'
-            );
-        }
-        
-        // Status logic for regular projects
-        if ($this->transactions->isNotEmpty() || $this->paid_by !== null) {
-            return Attribute::make(
-                get: fn ($value) => 'Complete'
-            );
-        } elseif ($this->transactions->isEmpty()) {
-            return Attribute::make(
-                get: fn ($value) => 'No Transaction'
-            );
-        } else {
-            return Attribute::make(
-                get: fn ($value) => 'Missing Info'
-            );
-        }
+        return Attribute::make(
+            get: function ($value, array $attributes) {
+                // If it's already set from search results, use that
+                if (array_key_exists('expense_status', $attributes)) {
+                    return $attributes['expense_status'];
+                }
+                
+                // Otherwise calculate it (existing logic)
+                if ($this->check && $this->check->status === 'Complete') {
+                    return 'Complete';
+                }
+                
+                // Normalize project name for comparison
+                $projectName = strtoupper($this->project->project_name ?? '');
+                
+                // Special handling for "NO PROJECT"
+                if ($projectName === 'NO PROJECT') {
+                    return 'No Project';
+                }
+                
+                // Status logic for regular projects
+                if ($this->transactions->isNotEmpty() || $this->paid_by !== null) {
+                    return 'Complete';
+                } elseif ($this->transactions->isEmpty()) {
+                    return 'No Transaction';
+                } else {
+                    return 'Missing Info';
+                }
+            }
+        );
     }
 
     protected function statusColor(): Attribute

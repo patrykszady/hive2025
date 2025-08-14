@@ -46,10 +46,12 @@
                     @endforeach
                 </flux:select>
 
-                {{-- <flux:select variant="listbox" label="Status" multiple placeholder="Choose status..." wire:model.live="expense_statuses">
-                    <flux:select.option><flux:badge color="green">Complete</flux:badge></flux:select.option>
-                    <flux:select.option><flux:badge color="red">No Project</flux:badge></flux:select.option>
-                </flux:select> --}}
+                <flux:select variant="listbox" label="Status" multiple placeholder="Choose status..." wire:model.live="expense_statuses">
+                    <flux:select.option value="Complete"><flux:badge size="md" inset="top bottom" color="green">Complete</flux:badge></flux:select.option>
+                    <flux:select.option value="No Transaction"><flux:badge size="md" inset="top bottom" color="yellow">No Transaction</flux:badge></flux:select.option>
+                    <flux:select.option value="No Project"><flux:badge size="md" inset="top bottom" color="red">No Project</flux:badge></flux:select.option>
+                    <flux:select.option value="Missing Info"><flux:badge size="md" inset="top bottom" color="amber">Missing Info</flux:badge></flux:select.option>
+                </flux:select>
             </div>
         </flux:card>
     @endif

@@ -102,11 +102,26 @@ class ExpenseIndex extends Component
         }
     }
 
+    public function updatedExpenseStatuses($value)
+    {
+        // Reset pagination when filters change
+        $this->resetPage('expenses-page');
+    }
+
     #[Computed]
     public function expenses()
     {
         // Build filter conditions for non-search filters
         $filterConditions = [];
+        
+        // Add status filters if any are selected
+        if (!empty($this->expense_statuses)) {
+            $statusFilter = [];
+            foreach ($this->expense_statuses as $status) {
+                $statusFilter[] = "expense_status = '{$status}'";
+            }
+            $filterConditions[] = '(' . implode(' OR ', $statusFilter) . ')';
+        }
         
         // Add vendor filter
         if (is_numeric($this->expense_vendor)) {
@@ -138,7 +153,8 @@ class ExpenseIndex extends Component
             $filterConditions,
             $this->sortBy, 
             $this->sortDirection
-        )->paginate($this->paginate_number, pageName: 'expenses-page');
+        )
+        ->paginate($this->paginate_number, pageName: 'expenses-page');
     }
 
     #[Computed]

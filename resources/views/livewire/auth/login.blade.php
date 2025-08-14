@@ -8,8 +8,6 @@
                 </a>
             </div>
 
-            {{-- <flux:heading class="text-center" size="xl">Welcome back</flux:heading>
-            <flux:subheading class="text-center text-zinc-500">Sign in to your Hive</flux:subheading> --}}
             <flux:heading class="text-center" size="xl">Sign in to your Hive</flux:heading>
 
             <div class="space-y-6">
@@ -19,7 +17,6 @@
                         label="Email"
                         type="email"
                         placeholder="email@example.com"
-                        {{-- autofocus  --}}
                         required
                     />
 
@@ -36,6 +33,13 @@
                         />
                     </flux:field>
 
+                    <flux:switch wire:model.live="remember" label="Remember Me" align="left" />
+                        {{-- <flux:field variant="inline">
+                            <flux:label>Remember Me</flux:label>
+                            <flux:switch wire:model.live="remember"/>
+                            <flux:error name="remember" />
+                        </flux:field> --}}
+
                     <flux:button type="submit" variant="primary" class="w-full">
                         Sign in
                     </flux:button>
@@ -46,7 +50,6 @@
 
             <flux:button 
                 href="{{ route('registration') }}"
-                variant="filled" 
                 class="w-full"
                 {{-- Remove disabled attribute --}}
             >

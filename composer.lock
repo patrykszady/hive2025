@@ -135,16 +135,16 @@
         },
         {
             "name": "aws/aws-sdk-php",
-            "version": "3.353.0",
+            "version": "3.354.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/aws/aws-sdk-php.git",
-                "reference": "73a28b9be8b465af1dd02b6a1b23fca4b145c36b"
+                "reference": "014ce3465277cf78a05e60c04ce04c9893733bf2"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/aws/aws-sdk-php/zipball/73a28b9be8b465af1dd02b6a1b23fca4b145c36b",
-                "reference": "73a28b9be8b465af1dd02b6a1b23fca4b145c36b",
+                "url": "https://api.github.com/repos/aws/aws-sdk-php/zipball/014ce3465277cf78a05e60c04ce04c9893733bf2",
+                "reference": "014ce3465277cf78a05e60c04ce04c9893733bf2",
                 "shasum": ""
             },
             "require": {
@@ -226,9 +226,9 @@
             "support": {
                 "forum": "https://github.com/aws/aws-sdk-php/discussions",
                 "issues": "https://github.com/aws/aws-sdk-php/issues",
-                "source": "https://github.com/aws/aws-sdk-php/tree/3.353.0"
+                "source": "https://github.com/aws/aws-sdk-php/tree/3.354.0"
             },
-            "time": "2025-08-13T18:05:58+00:00"
+            "time": "2025-08-14T18:10:08+00:00"
         },
         {
             "name": "barryvdh/laravel-snappy",
@@ -1231,16 +1231,16 @@
         },
         {
             "name": "fidry/cpu-core-counter",
-            "version": "1.2.0",
+            "version": "1.3.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/theofidry/cpu-core-counter.git",
-                "reference": "8520451a140d3f46ac33042715115e290cf5785f"
+                "reference": "db9508f7b1474469d9d3c53b86f817e344732678"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/theofidry/cpu-core-counter/zipball/8520451a140d3f46ac33042715115e290cf5785f",
-                "reference": "8520451a140d3f46ac33042715115e290cf5785f",
+                "url": "https://api.github.com/repos/theofidry/cpu-core-counter/zipball/db9508f7b1474469d9d3c53b86f817e344732678",
+                "reference": "db9508f7b1474469d9d3c53b86f817e344732678",
                 "shasum": ""
             },
             "require": {
@@ -1250,10 +1250,10 @@
                 "fidry/makefile": "^0.2.0",
                 "fidry/php-cs-fixer-config": "^1.1.2",
                 "phpstan/extension-installer": "^1.2.0",
-                "phpstan/phpstan": "^1.9.2",
-                "phpstan/phpstan-deprecation-rules": "^1.0.0",
-                "phpstan/phpstan-phpunit": "^1.2.2",
-                "phpstan/phpstan-strict-rules": "^1.4.4",
+                "phpstan/phpstan": "^2.0",
+                "phpstan/phpstan-deprecation-rules": "^2.0.0",
+                "phpstan/phpstan-phpunit": "^2.0",
+                "phpstan/phpstan-strict-rules": "^2.0",
                 "phpunit/phpunit": "^8.5.31 || ^9.5.26",
                 "webmozarts/strict-phpunit": "^7.5"
             },
@@ -1280,7 +1280,7 @@
             ],
             "support": {
                 "issues": "https://github.com/theofidry/cpu-core-counter/issues",
-                "source": "https://github.com/theofidry/cpu-core-counter/tree/1.2.0"
+                "source": "https://github.com/theofidry/cpu-core-counter/tree/1.3.0"
             },
             "funding": [
                 {
@@ -1288,7 +1288,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2024-08-06T10:04:20+00:00"
+            "time": "2025-08-14T07:29:31+00:00"
         },
         {
             "name": "filp/whoops",
@@ -2802,16 +2802,16 @@
         },
         {
             "name": "laravel/nightwatch",
-            "version": "v1.11.5",
+            "version": "v1.12.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/laravel/nightwatch.git",
-                "reference": "0fa3864d14331da1f8b7a4bb576937b6e9ea78f1"
+                "reference": "6fc8774f6c2244269719cd82988a95d84517bf12"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/laravel/nightwatch/zipball/0fa3864d14331da1f8b7a4bb576937b6e9ea78f1",
-                "reference": "0fa3864d14331da1f8b7a4bb576937b6e9ea78f1",
+                "url": "https://api.github.com/repos/laravel/nightwatch/zipball/6fc8774f6c2244269719cd82988a95d84517bf12",
+                "reference": "6fc8774f6c2244269719cd82988a95d84517bf12",
                 "shasum": ""
             },
             "require": {
@@ -2884,7 +2884,7 @@
                 "issues": "https://github.com/laravel/nightwatch/issues",
                 "source": "https://github.com/laravel/nightwatch"
             },
-            "time": "2025-08-04T07:34:08+00:00"
+            "time": "2025-08-14T07:10:52+00:00"
         },
         {
             "name": "laravel/prompts",

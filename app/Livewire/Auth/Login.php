@@ -3,7 +3,6 @@
 namespace App\Livewire\Auth;
 
 use Illuminate\Support\Facades\Auth;
-
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
@@ -11,8 +10,8 @@ class Login extends Component
 {
     public $email = '';
     public $password = '';
-    // public $remember = false;
-
+    public $remember = false; // Uncomment this line
+    
     protected $rules = [
         'email' => 'required|email',
         'password' => 'required',
@@ -22,8 +21,8 @@ class Login extends Component
     {
         $this->validate();
 
-        //, $this->remember
-        if (Auth::attempt(['email' => $this->email, 'password' => $this->password])) {
+        // Add the remember parameter to Auth::attempt
+        if (Auth::attempt(['email' => $this->email, 'password' => $this->password], $this->remember)) {
             session()->regenerate();
             return $this->redirect(route('dashboard'));
         }

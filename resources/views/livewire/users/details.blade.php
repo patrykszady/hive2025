@@ -50,12 +50,16 @@
                     :content="$user->vendor_pivot->start_date->format('m/d/Y')" 
                 />
 
-                @can('create_team_member', auth()->user()->vendor->id)
+                <x-details.row 
+                    title="Hourly Rate" 
+                    :content="money($user->vendor_pivot->hourly_rate)" 
+                />
+                {{-- @can('create_team_member', [App\Models\User::class, auth()->user()->vendor->id])
                     <x-details.row 
                         title="Hourly Rate" 
                         :content="money($user->vendor_pivot->hourly_rate)" 
                     />
-                @endcan
+                @endcan --}}
             @endcan
 
             <x-details.row title="Vendor Role" :content="$user->getRoleForVendor(auth()->user()->vendor->id)" />

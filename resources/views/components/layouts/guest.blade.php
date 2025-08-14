@@ -6,5 +6,12 @@
         <div class="h-screen font-sans antialiased text-gray-900">
             {{ $slot }}
         </div>
+
+        
+        @persist('toast')
+            <flux:toast />
+        @endpersist
+
+        @fluxScripts
     </body>
 </html>
