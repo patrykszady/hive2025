@@ -53,27 +53,27 @@ class Expense extends Model
         $array['has_splits'] = $this->splits->isEmpty() ? false : true;
 
         // Full status determination with properly loaded relationships
-        $status = 'Missing Info';
+        // $status = 'Missing Info';
         
-        if ($this->check && $this->check->status === 'Complete') {
-            $status = 'Complete';
-        } else {
-            // Normalize project name for comparison
-            $projectName = strtoupper($this->project->project_name ?? '');
+        // if ($this->check && $this->check->status === 'Complete') {
+        //     $status = 'Complete';
+        // } else {
+        //     // Normalize project name for comparison
+        //     $projectName = strtoupper($this->project->project_name ?? '');
             
-            // Special handling for "NO PROJECT"
-            if ($projectName === 'NO PROJECT') {
-                $status = 'No Project';
-            }
-            // Status logic for regular projects
-            elseif ($this->transactions->isNotEmpty() || $this->paid_by !== null) {
-                $status = 'Complete';
-            } elseif ($this->transactions->isEmpty()) {
-                $status = 'No Transaction';
-            }
-        }
+        //     // Special handling for "NO PROJECT"
+        //     if ($projectName === 'NO PROJECT') {
+        //         $status = 'No Project';
+        //     }
+        //     // Status logic for regular projects
+        //     elseif ($this->transactions->isNotEmpty() || $this->paid_by !== null) {
+        //         $status = 'Complete';
+        //     } elseif ($this->transactions->isEmpty()) {
+        //         $status = 'No Transaction';
+        //     }
+        // }
 
-        $array['expense_status'] = $status;
+        $array['expense_status'] = $this->status;
 
         return $array;
     }
