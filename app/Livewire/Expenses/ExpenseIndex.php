@@ -37,7 +37,6 @@ class ExpenseIndex extends Component
 
     public $bank_account_ids = [];
 
-    public $status = null;
     public $view = null;
 
     public $paginate_number = 8;
@@ -52,7 +51,6 @@ class ExpenseIndex extends Component
         'project_id' => ['except' => ''],
         'expense_statuses' => ['except' => []],
         // 'bank_plaid_ins_id' => ['except' => ''],
-        // 'status' => ['except' => ''],
     ];
 
     public function updating()
