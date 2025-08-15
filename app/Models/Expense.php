@@ -45,8 +45,30 @@ class Expense extends Model
         // Add computed fields
         $array['date'] = $this->date->timestamp;
         $array['has_splits'] = $this->splits->isEmpty() ? false : true;
-        $array['expense_status'] = $this->status; // Use private method to avoid recursion
+
+        if ($this->check && $this->check->status === 'Complete') {
+            $status = 'Complete';
+        }
         
+        // Normalize project name for comparison
+        $projectName = strtoupper($this->project->project_name ?? '');
+        
+        // Special handling for "NO PROJECT"
+        if ($projectName === 'NO PROJECT') {
+            $status = 'No Project';
+        }
+        
+        // Status logic for regular projects
+        if ($this->transactions->isNotEmpty() || $this->paid_by !== null) {
+            $status = 'Complete';
+        } elseif ($this->transactions->isEmpty()) {
+            $status = 'No Transaction';
+        } else {
+            $status = 'Missing Info';
+        }
+        
+        $array['expense_status'] = $status;
+
         return $array;
     }
 
