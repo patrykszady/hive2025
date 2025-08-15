@@ -50,6 +50,7 @@ class ExpenseIndex extends Component
         'amount' => ['except' => ''],
         'expense_vendor' => ['except' => ''],
         'project_id' => ['except' => ''],
+        'expense_statuses' => ['except' => []],
         // 'bank_plaid_ins_id' => ['except' => ''],
         // 'status' => ['except' => ''],
     ];
