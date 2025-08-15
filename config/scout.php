@@ -138,7 +138,7 @@ return [
         'key' => env('MEILISEARCH_KEY'),
         'timeout' => env('MEILISEARCH_TIMEOUT', 1200), // Increase timeout
         'chunk' => [
-            \App\Models\Expense::class => 10, // Very small chunks for expenses
+            \App\Models\Expense::class => 5, // Very small chunks for expenses
         ],
         'index-settings' => [
             Expense::class => [
