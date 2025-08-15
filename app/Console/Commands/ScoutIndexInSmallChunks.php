@@ -5,7 +5,6 @@ namespace App\Console\Commands;
 
 use App\Models\Expense;
 use Illuminate\Console\Command;
-use Laravel\Scout\ModelObserver;
 
 class ScoutIndexInSmallChunks extends Command
 {
@@ -23,21 +22,21 @@ class ScoutIndexInSmallChunks extends Command
         $this->info("Indexing expenses in chunks of {$chunkSize}");
         $this->info("Memory limit: " . ini_get('memory_limit'));
 
+        // Check if MeiliSearch is reachable
+        // try {
+        //     // Use the client directly for health check
+        //     $searchClient = app('meilisearch');
+        //     $health = $searchClient->health();
+        //     $this->info("MeiliSearch connection successful: " . ($health['status'] ?? 'connected'));
+        // } catch (\Exception $e) {
+        //     $this->error("Failed to connect to MeiliSearch: " . $e->getMessage());
+        //     return Command::FAILURE;
+        // }
+
         // Get total count for progress bar
         $total = Expense::count();
         $bar = $this->output->createProgressBar($total);
         
-        // Check if MeiliSearch is reachable
-        try {
-            $engine = app(\Laravel\Scout\EngineManager::class)->engine();
-            // Try a simple operation
-            $engine->map();
-            $this->info("MeiliSearch connection successful");
-        } catch (\Exception $e) {
-            $this->error("Failed to connect to MeiliSearch: " . $e->getMessage());
-            return Command::FAILURE;
-        }
-
         // Process each chunk
         $lastId = 0;
         $errorCount = 0;
@@ -80,7 +79,6 @@ class ScoutIndexInSmallChunks extends Command
                 
                 // Log detailed exception for debugging
                 \Log::error("Scout indexing error at ID {$lastId}: " . $e->getMessage(), [
-                    'exception' => $e,
                     'trace' => $e->getTraceAsString()
                 ]);
                 
@@ -91,7 +89,7 @@ class ScoutIndexInSmallChunks extends Command
                 }
                 
                 // Reduce chunk size and try again
-                $chunkSize = max(1, $chunkSize / 2);
+                $chunkSize = max(1, floor($chunkSize / 2));
                 $this->warn("Reducing chunk size to {$chunkSize} and continuing...");
                 
                 sleep($sleepTime * 2);
