@@ -233,9 +233,6 @@ class Vendor extends Model
                 }
                 
                 // // Fallback calculation for non-search queries
-                // return $this->expenses()
-                //     ->where('created_at', '>=', today()->subYear())
-                //     ->sum('amount');
             }
         );
     }

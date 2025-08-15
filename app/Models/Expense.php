@@ -15,7 +15,7 @@ class Expense extends Model
 {
     use HasFactory, Searchable, SoftDeletes;
 
-    protected $fillable = ['amount', 'date', 'invoice', 'note', 'categroy_id', 'project_id', 'distribution_id', 'vendor_id', 'check_id', 'reimbursment', 'belongs_to_vendor_id', 'created_by_user_id', 'paid_by', 'created_at', 'updated_at', 'deleted_at'];
+    protected $fillable = ['amount', 'date', 'invoice', 'note', 'project_id', 'distribution_id', 'vendor_id', 'check_id', 'reimbursment', 'belongs_to_vendor_id', 'created_by_user_id', 'paid_by', 'created_at', 'updated_at', 'deleted_at'];
 
     protected function casts(): array
     {
@@ -224,7 +224,6 @@ class Expense extends Model
     {
         return Attribute::make(
             get: function ($value, array $attributes) {
-                // dd($attributes);
                 // If it's already set from search results, use that
                 if (array_key_exists('expense_status', $attributes)) {
                     return $attributes['expense_status'];
