@@ -46,28 +46,28 @@ class Expense extends Model
         $array['date'] = $this->date->timestamp;
         $array['has_splits'] = $this->splits->isEmpty() ? false : true;
 
-        if ($this->check && $this->check->status === 'Complete') {
-            $status = 'Complete';
-        }
+        // if ($this->check && $this->check->status === 'Complete') {
+        //     $status = 'Complete';
+        // }
         
-        // Normalize project name for comparison
-        $projectName = strtoupper($this->project->project_name ?? '');
+        // // Normalize project name for comparison
+        // $projectName = strtoupper($this->project->project_name ?? '');
         
-        // Special handling for "NO PROJECT"
-        if ($projectName === 'NO PROJECT') {
-            $status = 'No Project';
-        }
+        // // Special handling for "NO PROJECT"
+        // if ($projectName === 'NO PROJECT') {
+        //     $status = 'No Project';
+        // }
         
-        // Status logic for regular projects
-        if ($this->transactions->isNotEmpty() || $this->paid_by !== null) {
-            $status = 'Complete';
-        } elseif ($this->transactions->isEmpty()) {
-            $status = 'No Transaction';
-        } else {
-            $status = 'Missing Info';
-        }
-        
-        $array['expense_status'] = $status;
+        // // Status logic for regular projects
+        // if ($this->transactions->isNotEmpty() || $this->paid_by !== null) {
+        //     $status = 'Complete';
+        // } elseif ($this->transactions->isEmpty()) {
+        //     $status = 'No Transaction';
+        // } else {
+        //     $status = 'Missing Info';
+        // }
+
+        // $array['expense_status'] = $status;
 
         return $array;
     }
