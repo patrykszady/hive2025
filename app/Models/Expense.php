@@ -39,14 +39,6 @@ class Expense extends Model
 
     public function toSearchableArray(): array
     {
-        // Load necessary relationships for computing status if not already loaded
-        if (!$this->relationLoaded('check') || 
-            !$this->relationLoaded('project') || 
-            !$this->relationLoaded('transactions') || 
-            !$this->relationLoaded('splits')) {
-            $this->load(['check', 'project', 'transactions', 'splits']);
-        }
-        
         // All model attributes are made searchable
         $array = $this->toArray();
 
@@ -78,7 +70,7 @@ class Expense extends Model
         }
         
         // Check for project_id existence
-        if (!$this->project_id) {
+        if (!$this->project_id || !$this->distribution_id) {
             return 'No Project';
         }
         
