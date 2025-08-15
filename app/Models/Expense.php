@@ -112,7 +112,9 @@ class Expense extends Model
 
     public function project(): BelongsTo
     {
-        return $this->belongsTo(Project::class)->withDefault(function ($project, $expense) {
+        return $this->belongsTo(Project::class)
+        
+        ->withDefault(function ($project, $expense) {
             if ($expense->splits()->exists()) {
                 $project->project_name = 'EXPENSE SPLIT';
             } elseif ($expense->distribution) {

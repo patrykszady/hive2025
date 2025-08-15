@@ -105,38 +105,12 @@
 
                             @if($view != 'projects.show')
                                 <flux:table.cell>
-                                    @if($expense->project_id)
-                                        @php
-                                            // Handle both object and array representation of project
-                                            $projectName = is_array($expense->project) 
-                                                ? ($expense->project['project_name'] ?? 'Unknown') 
-                                                : ($expense->project->name ?? $expense->project->project_name ?? 'Unknown');
-                                            
-                                            $projectId = is_array($expense->project) 
-                                                ? ($expense->project['id'] ?? null) 
-                                                : ($expense->project->id ?? null);
-                                        @endphp
-                                        
-                                        @if($projectId)
-                                            <a wire:navigate.hover href="{{route('projects.show', $projectId)}}">
-                                                {{ Str::limit($projectName, 25) }}
-                                            </a>
-                                        @else
-                                            {{ Str::limit($projectName, 25) }}
-                                        @endif
-                                    @else
-                                        @php
-                                            $projectName = is_array($expense->project) 
-                                                ? ($expense->project['project_name'] ?? 'No Project') 
-                                                : ($expense->project->name ?? $expense->project->project_name ?? 'No Project');
-                                        @endphp
-                                        {{ Str::limit($projectName, 25) }}
-                                    @endif
+                                    {{ $expense->project['project_name'] }}
                                 </flux:table.cell>
                             @endif
                             <flux:table.cell>
                                 {{-- Just use status directly, no fallback needed if coming from search --}}
-                                <flux:badge size="sm" inset="top bottom" color="{{$expense->status_color ?? 'zinc'}}">
+                                <flux:badge size="sm" inset="top bottom" color="{{$expense->status_color}}">
                                     {{$expense->status}}
                                 </flux:badge>
                             </flux:table.cell>
