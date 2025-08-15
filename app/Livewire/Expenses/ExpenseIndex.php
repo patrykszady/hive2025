@@ -110,6 +110,24 @@ class ExpenseIndex extends Component
     #[Computed]
     public function expenses()
     {
+        // Get search results from Scout first
+        $expenses = Expense::scopedSearch(
+            $this->amount,
+            $this->buildFilterConditions(),
+            $this->sortBy, 
+            $this->sortDirection
+        )->paginateWithSearchData($this->paginate_number, pageName: 'expenses-page');
+        
+        // Then load relationships on the collection
+        if ($expenses->count() > 0) {
+            $expenses->load(['vendor', 'project']);
+        }
+        
+        return $expenses;
+    }
+
+    private function buildFilterConditions()
+    {
         // Build filter conditions for non-search filters
         $filterConditions = [];
         
@@ -146,14 +164,7 @@ class ExpenseIndex extends Component
             $filterConditions[] = "check_id = {$this->check}";
         }
         
-        // Use scopedSearch - let MeiliSearch handle amount search
-        return Expense::scopedSearch(
-            $this->amount,  // Pass amount directly as search term
-            $filterConditions,
-            $this->sortBy, 
-            $this->sortDirection
-        )
-        ->paginate($this->paginate_number, pageName: 'expenses-page');
+        return $filterConditions;
     }
 
     #[Computed]
@@ -167,13 +178,23 @@ class ExpenseIndex extends Component
             $filterConditions[] = "vendor_id = {$this->expense_vendor}";
         }
         
-        // Use scopedSearch from the model
-        return Transaction::scopedSearch(
-            $this->amount,  // Pass amount directly as search term
+        // Get paginated results from Scout first
+        $transactions = Transaction::scopedSearch(
+            $this->amount,
             $filterConditions,
             'transaction_date',
             'desc'
         )->paginate(100, pageName: 'transactions-page');
+        
+        // Then load the relationships on the collection
+        if ($transactions->count() > 0) {
+            $transactions->load([
+                'vendor',
+                'bank_account.bank'
+            ]);
+        }
+        
+        return $transactions;
     }
 
     #[Title('Expenses')]

@@ -18,6 +18,8 @@ class Transaction extends Model
 
     protected $guarded = [];
 
+    protected $with = ['vendor', 'bank_account.bank'];
+
     protected function casts(): array
     {
         return [

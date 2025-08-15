@@ -144,13 +144,16 @@ return [
             Expense::class => [
                 'filterableAttributes'=> [
                     'vendor_id', 'project_id', 'distribution_id', 'check_id', 
-                    'has_splits', 'belongs_to_vendor_id', 'expense_status', 
+                    'has_splits', 'belongs_to_vendor_id', 'expense_status', // Added this
                     'paid_by', '__soft_deleted'
                 ],
-                'sortableAttributes' => ['date', 'amount'],
+                'sortableAttributes' => ['date', 'amount', 'expense_status'],
                 'searchableAttributes' => ['amount'],
                 'typoTolerance' => ['enabled' => false],
                 'rankingRules' => ['sort', 'exactness'],
+                'displayedAttributes' => [
+                    '*', 'expense_status', 'status'
+                ],
             ],
             
             Transaction::class => [

@@ -232,10 +232,10 @@ class Vendor extends Model
                     return $attributes['ytd_expense_sum'];
                 }
                 
-                // Fallback calculation for non-search queries
-                return $this->expenses()
-                    ->where('created_at', '>=', today()->subYear())
-                    ->sum('amount');
+                // // Fallback calculation for non-search queries
+                // return $this->expenses()
+                //     ->where('created_at', '>=', today()->subYear())
+                //     ->sum('amount');
             }
         );
     }

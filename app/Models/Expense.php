@@ -42,40 +42,37 @@ class Expense extends Model
      */
     public function toSearchableArray(): array
     {
-        // Explicitly load required relationships first
-        $this->load(['splits', 'transactions', 'check', 'project']);
+        // Calculate status before indexing
+        $status = $this->calculateStatus(); // Create a private method for this
         
-        // All model attributes are made searchable
-        $array = $this->toArray();
+        return array_merge($this->toArray(), [
+            'id' => (string) $this->id,
+            'date' => $this->date->timestamp,
+            'has_splits' => $this->splits->isEmpty() ? false : true,
+            'expense_status' => $status,
+            'belongs_to_vendor_id' => (int) $this->belongs_to_vendor_id,
+        ]);
+    }
 
-        // Add computed fields
-        $array['date'] = $this->date->timestamp;
-        $array['has_splits'] = $this->splits->isEmpty() ? false : true;
-
-        // Full status determination with properly loaded relationships
-        // $status = 'Missing Info';
+    // Add this private method to calculate status for indexing
+    private function calculateStatus(): string
+    {
+        if ($this->check && $this->check->status === 'Complete') {
+            return 'Complete';
+        }
         
-        // if ($this->check && $this->check->status === 'Complete') {
-        //     $status = 'Complete';
-        // } else {
-        //     // Normalize project name for comparison
-        //     $projectName = strtoupper($this->project->project_name ?? '');
-            
-        //     // Special handling for "NO PROJECT"
-        //     if ($projectName === 'NO PROJECT') {
-        //         $status = 'No Project';
-        //     }
-        //     // Status logic for regular projects
-        //     elseif ($this->transactions->isNotEmpty() || $this->paid_by !== null) {
-        //         $status = 'Complete';
-        //     } elseif ($this->transactions->isEmpty()) {
-        //         $status = 'No Transaction';
-        //     }
-        // }
-
-        $array['expense_status'] = $this->status;
-
-        return $array;
+        $projectName = strtoupper($this->project->project_name ?? '');
+        if ($projectName === 'NO PROJECT') {
+            return 'No Project';
+        }
+        
+        if ($this->transactions->isNotEmpty() || $this->paid_by !== null) {
+            return 'Complete';
+        } elseif ($this->transactions->isEmpty()) {
+            return 'No Transaction';
+        }
+        
+        return 'Missing Info';
     }
 
     /**
@@ -115,17 +112,19 @@ class Expense extends Model
 
     public function project(): BelongsTo
     {
-        //1-4-2022 below creates an N + 1 problem
         return $this->belongsTo(Project::class)->withDefault(function ($project, $expense) {
             if ($expense->splits()->exists()) {
                 $project->project_name = 'EXPENSE SPLIT';
             } elseif ($expense->distribution) {
-                $project->project_name = $expense->distribution->name;
+                // Check if distribution is an array (from MeiliSearch) or an object
+                if (is_array($expense->distribution)) {
+                    $project->project_name = $expense->distribution['name'] ?? 'Unknown Distribution';
+                } else {
+                    $project->project_name = $expense->distribution->name;
+                }
                 $project->distribution = true;
             } else {
                 $project->project_name = 'NO PROJECT';
-                //1/3/2022 else shoud behave as regular belongsTo method with no withDefault()
-                // throw new \Exception("Attempt to read property project_name on null");
             }
         });
     }
@@ -169,23 +168,6 @@ class Expense extends Model
         return $this->hasMany(Transaction::class);
     }
 
-    public function getTransactionsAttribute()
-    {
-        // If the expense has its own transactions, return them
-        $own = $this->transactions()->get();
-        if ($own->isNotEmpty()) {
-            return $own;
-        }
-
-        // If the check exists and has transactions, return those
-        if ($this->check && $this->check->transactions()->exists()) {
-            return $this->check->transactions;
-        }
-
-        // Otherwise, return an empty collection
-        return collect();
-    }
-
     public function receipts(): HasMany
     {
         return $this->hasMany(ExpenseReceipts::class);
@@ -211,6 +193,23 @@ class Expense extends Model
         }
     }
 
+    public function getTransactionsAttribute()
+    {
+        // If the expense has its own transactions, return them
+        $own = $this->transactions()->get();
+        if ($own->isNotEmpty()) {
+            return $own;
+        }
+
+        // If the check exists and has transactions, return those
+        if ($this->check && $this->check->transactions()->exists()) {
+            return $this->check->transactions;
+        }
+
+        // Otherwise, return an empty collection
+        return collect();
+    }
+
     protected function reimbursment(): Attribute
     {
         return Attribute::make(
@@ -225,31 +224,10 @@ class Expense extends Model
     {
         return Attribute::make(
             get: function ($value, array $attributes) {
+                dd($attributes);
                 // If it's already set from search results, use that
-                // if (array_key_exists('expense_status', $attributes)) {
-                //     return $attributes['expense_status'];
-                // }
-                
-                // Otherwise calculate it (existing logic)
-                if ($this->check && $this->check->status === 'Complete') {
-                    return 'Complete';
-                }
-                
-                // Normalize project name for comparison
-                $projectName = strtoupper($this->project->project_name ?? '');
-                
-                // Special handling for "NO PROJECT"
-                if ($projectName === 'NO PROJECT') {
-                    return 'No Project';
-                }
-                
-                // Status logic for regular projects
-                if ($this->transactions->isNotEmpty() || $this->paid_by !== null) {
-                    return 'Complete';
-                } elseif ($this->transactions->isEmpty()) {
-                    return 'No Transaction';
-                } else {
-                    return 'Missing Info';
+                if (array_key_exists('expense_status', $attributes)) {
+                    return $attributes['expense_status'];
                 }
             }
         );

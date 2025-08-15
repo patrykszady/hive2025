@@ -1,5 +1,4 @@
 <?php
-// filepath: /home/patryk/web/hive/app/Console/Commands/ScoutIndexInSmallChunks.php
 
 namespace App\Console\Commands;
 
@@ -21,17 +20,6 @@ class ScoutIndexInSmallChunks extends Command
         
         $this->info("Indexing expenses in chunks of {$chunkSize}");
         $this->info("Memory limit: " . ini_get('memory_limit'));
-
-        // Check if MeiliSearch is reachable
-        // try {
-        //     // Use the client directly for health check
-        //     $searchClient = app('meilisearch');
-        //     $health = $searchClient->health();
-        //     $this->info("MeiliSearch connection successful: " . ($health['status'] ?? 'connected'));
-        // } catch (\Exception $e) {
-        //     $this->error("Failed to connect to MeiliSearch: " . $e->getMessage());
-        //     return Command::FAILURE;
-        // }
 
         // Get total count for progress bar
         $total = Expense::count();
