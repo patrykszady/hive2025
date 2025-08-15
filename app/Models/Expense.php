@@ -224,7 +224,7 @@ class Expense extends Model
     {
         return Attribute::make(
             get: function ($value, array $attributes) {
-                dd($attributes);
+                // dd($attributes);
                 // If it's already set from search results, use that
                 if (array_key_exists('expense_status', $attributes)) {
                     return $attributes['expense_status'];
