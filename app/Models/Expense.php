@@ -64,23 +64,31 @@ class Expense extends Model
      */
     private function getStatusValue(): string
     {
-        if ($this->check && $this->check->status === 'Complete') {
+        // Use simplified status logic that doesn't rely on expensive relationship lookups
+        // Check for basic indicators without loading relationships
+        
+        // Check ID is most reliable without loading the relation
+        if ($this->check_id) {
             return 'Complete';
         }
         
-        $projectName = strtoupper($this->project->project_name ?? '');
+        // Simple checks based on direct attributes
+        if ($this->paid_by !== null) {
+            return 'Complete';
+        }
         
-        if ($projectName === 'NO PROJECT') {
+        // Check for project_id existence
+        if (!$this->project_id) {
             return 'No Project';
         }
         
-        if ($this->transactions->isNotEmpty() || $this->paid_by !== null) {
-            return 'Complete';
-        } elseif ($this->transactions->isEmpty()) {
-            return 'No Transaction';
-        } else {
-            return 'Missing Info';
+        // Check if we can determine transaction status directly
+        if (isset($this->attributes['has_transactions'])) {
+            return $this->attributes['has_transactions'] ? 'Complete' : 'No Transaction';
         }
+        
+        // Default fallback
+        return 'Missing Info';
     }
 
     /**
