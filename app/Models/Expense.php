@@ -37,8 +37,14 @@ class Expense extends Model
         return env('APP_ENV') == 'local' ? 'expenses_index_dev' : 'expenses_index';
     }
 
+    /**
+     * Get the indexable data array for the model.
+     */
     public function toSearchableArray(): array
     {
+        // Explicitly load required relationships first
+        $this->load(['splits', 'transactions', 'check', 'project']);
+        
         // All model attributes are made searchable
         $array = $this->toArray();
 
@@ -46,25 +52,25 @@ class Expense extends Model
         $array['date'] = $this->date->timestamp;
         $array['has_splits'] = $this->splits->isEmpty() ? false : true;
 
-        // if ($this->check && $this->check->status === 'Complete') {
-        //     $status = 'Complete';
-        // }
+        // Full status determination with properly loaded relationships
+        $status = 'Missing Info';
         
-        // // Normalize project name for comparison
-        // $projectName = strtoupper($this->project->project_name ?? '');
-        
-        // // Special handling for "NO PROJECT"
-        // if ($projectName === 'NO PROJECT') {
-        //     $status = 'No Project';
-        // }
-        
-        // // Status logic for regular projects
-        if ($this->transactions->isNotEmpty() || $this->paid_by !== null) {
+        if ($this->check && $this->check->status === 'Complete') {
             $status = 'Complete';
-        } elseif ($this->transactions->isEmpty()) {
-            $status = 'No Transaction';
         } else {
-            $status = 'Missing Info';
+            // Normalize project name for comparison
+            $projectName = strtoupper($this->project->project_name ?? '');
+            
+            // Special handling for "NO PROJECT"
+            if ($projectName === 'NO PROJECT') {
+                $status = 'No Project';
+            }
+            // Status logic for regular projects
+            elseif ($this->transactions->isNotEmpty() || $this->paid_by !== null) {
+                $status = 'Complete';
+            } elseif ($this->transactions->isEmpty()) {
+                $status = 'No Transaction';
+            }
         }
 
         $array['expense_status'] = $status;
@@ -220,9 +226,9 @@ class Expense extends Model
         return Attribute::make(
             get: function ($value, array $attributes) {
                 // If it's already set from search results, use that
-                if (array_key_exists('expense_status', $attributes)) {
-                    return $attributes['expense_status'];
-                }
+                // if (array_key_exists('expense_status', $attributes)) {
+                //     return $attributes['expense_status'];
+                // }
                 
                 // Otherwise calculate it (existing logic)
                 if ($this->check && $this->check->status === 'Complete') {
