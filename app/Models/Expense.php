@@ -59,15 +59,15 @@ class Expense extends Model
         // }
         
         // // Status logic for regular projects
-        // if ($this->transactions->isNotEmpty() || $this->paid_by !== null) {
-        //     $status = 'Complete';
-        // } elseif ($this->transactions->isEmpty()) {
-        //     $status = 'No Transaction';
-        // } else {
-        //     $status = 'Missing Info';
-        // }
+        if ($this->transactions->isNotEmpty() || $this->paid_by !== null) {
+            $status = 'Complete';
+        } elseif ($this->transactions->isEmpty()) {
+            $status = 'No Transaction';
+        } else {
+            $status = 'Missing Info';
+        }
 
-        // $array['expense_status'] = $status;
+        $array['expense_status'] = $status;
 
         return $array;
     }
