@@ -45,34 +45,9 @@ class Expense extends Model
         // Add computed fields
         $array['date'] = $this->date->timestamp;
         $array['has_splits'] = $this->splits->isEmpty() ? false : true;
-        $array['expense_status'] = $this->getStatusValue(); // Use private method to avoid recursion
+        $array['expense_status'] = $this->status; // Use private method to avoid recursion
         
         return $array;
-    }
-
-    /**
-     * Get status value directly without using the attribute accessor
-     * (prevents infinite recursion in toSearchableArray)
-     */
-    private function getStatusValue(): string
-    {
-        if ($this->check && $this->check->status === 'Complete') {
-            return 'Complete';
-        }
-        
-        $projectName = strtoupper($this->project->project_name ?? '');
-        
-        if ($projectName === 'NO PROJECT') {
-            return 'No Project';
-        }
-        
-        if ($this->transactions->isNotEmpty() || $this->paid_by !== null) {
-            return 'Complete';
-        } elseif ($this->transactions->isEmpty()) {
-            return 'No Transaction';
-        } else {
-            return 'Missing Info';
-        }
     }
 
     /**
