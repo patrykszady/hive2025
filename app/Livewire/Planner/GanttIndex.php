@@ -15,6 +15,7 @@ use Livewire\Component;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
 use Livewire\Attributes\Title;
+use Illuminate\Support\Facades\Schema;
 
 class GanttIndex extends Component
 {
@@ -30,7 +31,11 @@ class GanttIndex extends Component
 
     public function mount()
     {
-        // $this->vendors = Vendor::topExpenseVendors()->get();
+        // Use Scout search to sort by ytd_expense_sum
+        $this->vendors = Vendor::search('*')
+            ->orderBy('ytd_expense_sum', 'desc')
+            ->get();
+            
         $this->employees = auth()->user()->vendor->users()->employed()->get();
     }
 
