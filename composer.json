@@ -12,6 +12,7 @@
         "2captcha/2captcha": "*",
         "aws/aws-sdk-php": "^3.247",
         "barryvdh/laravel-snappy": "^1.0",
+        "doctrine/dbal": "^4.3",
         "guzzlehttp/guzzle": "^7.9",
         "h4cc/wkhtmltoimage-amd64": "0.12.x",
         "h4cc/wkhtmltopdf-amd64": "0.12.x",

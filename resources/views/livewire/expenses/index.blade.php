@@ -128,52 +128,52 @@
             </div>
 
             <div>
-                <flux:table :paginate="$this->transactions" wire:loading.class="opacity-50 text-opacity-50">
-                    <flux:table.columns>
-                        <flux:table.column>Amount</flux:table.column>
-                        <flux:table.column>Date</flux:table.column>
-                        <flux:table.column>Vendor</flux:table.column>
-                        <flux:table.column>Bank</flux:table.column>
-                        <flux:table.column>Account</flux:table.column>
-                    </flux:table.columns>
+                    <flux:table :paginate="$this->transactions" wire:loading.class="opacity-50 text-opacity-50">
+                        <flux:table.columns>
+                            <flux:table.column>Amount</flux:table.column>
+                            <flux:table.column>Date</flux:table.column>
+                            <flux:table.column>Vendor</flux:table.column>
+                            <flux:table.column>Bank</flux:table.column>
+                            <flux:table.column>Account</flux:table.column>
+                        </flux:table.columns>
 
-                    <flux:table.rows>
-                        @foreach ($this->transactions as $transaction)
-                            <flux:table.row :key="$transaction->id">
-                                <flux:table.cell
-                                    wire:click="$dispatchTo('expenses.expense-create', 'createExpenseFromTransaction', { transaction: {{$transaction->id}}})"
-                                    variant="strong"
-                                    class="cursor-pointer"
-                                    >
-                                    {{ money($transaction->amount) }}
-                                </flux:table.cell>
-                                <flux:table.cell>{{ $transaction->transaction_date->format('m/d/Y') }}</flux:table.cell>
-                                <flux:table.cell class="max-w-[150px] truncate" title="{{ $transaction->vendor->name != 'No Vendor' ? $transaction->vendor->name : $transaction->plaid_merchant_description }}">
-                                    {{ $transaction->vendor->name != 'No Vendor' ? $transaction->vendor->name : $transaction->plaid_merchant_description }}
-                                </flux:table.cell>
-                                <flux:table.cell>{{ $transaction->bank_account->bank->name }}</flux:table.cell>
-                                <flux:table.cell>{{ isset($transaction->owner) ? $transaction->owner : $transaction->bank_account->account_number }}</flux:table.cell>
-                                {{--
-                                @if(!in_array($view, ['checks.show', 'vendors.show']))
-                                    <flux:table.cell><a href="{{isset($expense->vendor->id) ? route('vendors.show', $expense->vendor->id) : ''}}">{{Str::limit($expense->vendor->name, 20)}}</a></flux:table.cell>
-                                @endif
-
-                                @if($view != 'projects.show')
-                                    <flux:table.cell>
-                                        @if($expense->project_id)
-                                            <a wire:navigate.hover href="{{route('projects.show', $expense->project->id)}}">{{ Str::limit($expense->project->name, 25) }}</a>
-                                        @else
-                                            {{ Str::limit($expense->project->name, 25) }}
-                                        @endif
+                        <flux:table.rows>
+                            @foreach ($this->transactions as $transaction)
+                                <flux:table.row :key="$transaction->id">
+                                    <flux:table.cell
+                                        wire:click="$dispatchTo('expenses.expense-create', 'createExpenseFromTransaction', { transaction: {{$transaction->id}}})"
+                                        variant="strong"
+                                        class="cursor-pointer"
+                                        >
+                                        {{ money($transaction->amount) }}
                                     </flux:table.cell>
-                                @endif
-                                <flux:table.cell>
-                                    <flux:badge size="sm" :color="'sky'" inset="top bottom">Status</flux:badge>
-                                </flux:table.cell> --}}
-                            </flux:table.row>
-                        @endforeach
-                    </flux:table.rows>
-                </flux:table>
+                                    <flux:table.cell>{{ $transaction->transaction_date->format('m/d/Y') }}</flux:table.cell>
+                                    <flux:table.cell class="max-w-[150px] truncate" title="{{ $transaction->vendor->name != 'No Vendor' ? $transaction->vendor->name : $transaction->plaid_merchant_description }}">
+                                        {{ $transaction->vendor->name != 'No Vendor' ? $transaction->vendor->name : $transaction->plaid_merchant_description }}
+                                    </flux:table.cell>
+                                    <flux:table.cell>{{ $transaction->bank_account->bank->name }}</flux:table.cell>
+                                    <flux:table.cell>{{ isset($transaction->owner) ? $transaction->owner : $transaction->bank_account->account_number }}</flux:table.cell>
+                                    {{--
+                                    @if(!in_array($view, ['checks.show', 'vendors.show']))
+                                        <flux:table.cell><a href="{{isset($expense->vendor->id) ? route('vendors.show', $expense->vendor->id) : ''}}">{{Str::limit($expense->vendor->name, 20)}}</a></flux:table.cell>
+                                    @endif
+
+                                    @if($view != 'projects.show')
+                                        <flux:table.cell>
+                                            @if($expense->project_id)
+                                                <a wire:navigate.hover href="{{route('projects.show', $expense->project->id)}}">{{ Str::limit($expense->project->name, 25) }}</a>
+                                            @else
+                                                {{ Str::limit($expense->project->name, 25) }}
+                                            @endif
+                                        </flux:table.cell>
+                                    @endif
+                                    <flux:table.cell>
+                                        <flux:badge size="sm" :color="'sky'" inset="top bottom">Status</flux:badge>
+                                    </flux:table.cell> --}}
+                                </flux:table.row>
+                            @endforeach
+                        </flux:table.rows>
+                    </flux:table>
             </div>
         </flux:card>
     @endif

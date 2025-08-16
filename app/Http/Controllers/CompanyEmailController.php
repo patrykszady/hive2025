@@ -818,7 +818,7 @@ class CompanyEmailController extends Controller
         return [$filename];
     }
 
-    public function fuzzyMatchVendor($ocrName, $vendors, $threshold = 80.0)
+    public function fuzzyMatchVendor($ocrName, $vendors, $threshold = 75.0)
     {
         // Normalize by converting to lowercase and removing punctuation,
         // but retain spaces so we can be word sensitive.

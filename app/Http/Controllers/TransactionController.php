@@ -237,7 +237,8 @@ class TransactionController extends Controller
 
     public function plaid_transactions_sync()
     {
-        $banks = Bank::withoutGlobalScopes()->whereNotNull('plaid_access_token')->where('id', 21)->get();
+        // ->where('id', 22)
+        $banks = Bank::withoutGlobalScopes()->whereNotNull('plaid_access_token')->get();
 
         //if not in error state...
         foreach ($banks as $bank) {
@@ -252,8 +253,15 @@ class TransactionController extends Controller
     public function plaid_transactions_sync_bank(Bank $bank)
     {
         $result = $this->syncBankTransactions($bank, true);
-        $bank_account_ids = $bank->accounts->pluck('id')->toArray();
 
+        // Update bank account balances from Plaid response
+        if (!array_key_exists('error_code', $result) && isset($result['accounts'])) {
+            $this->updateBankAccountBalances($result['accounts']);
+        }
+        
+        // Continue with your existing code below
+        $bank_account_ids = $bank->accounts->pluck('id')->toArray();
+    
         if($result['transactions_update_status'] ?? 'HISTORICAL_UPDATE_COMPLETE') {
             $transactions_last_date = Transaction::whereIn('bank_account_id', $bank_account_ids)->latest()->first()->transaction_date->subWeeks(3)->format('Y-m-d');
         }else{
@@ -271,8 +279,6 @@ class TransactionController extends Controller
             $plaidOptions['accounts'] = $result['accounts'];
             $bank->plaid_options = $plaidOptions;
             $bank->save();
-
-            // dd($result);
 
             if ($result['has_more'] == true) {
                 $this->plaid_transactions_sync_bank($bank);
@@ -327,21 +333,6 @@ class TransactionController extends Controller
                     continue;
                 }
 
-                //if database $transaction->check_number isset, make it null in case its 0000
-                // if(isset($transaction->check_number)){
-                //     $transaction->check_number = NULL;
-                // }
-
-                // if($transaction['check_id'] == NULL || $transaction['check_id'] == 0000){
-                //     // $transaction->check_number = $new_transaction['check_number'];
-                //     $transaction->check_number = NULL;
-
-                //     if($new_transaction['check_number'] != NULL){
-                //         $transaction->check_number = $new_transaction['check_number'];
-                //     }
-                // }else{
-
-                // }
                 if ($new_transaction['check_number'] != null) {
                     $transaction->check_number = $new_transaction['check_number'];
                 } else {
@@ -358,7 +349,6 @@ class TransactionController extends Controller
                 if ($new_transaction['authorized_date'] == null) {
                     $transaction->transaction_date = $new_transaction['date'];
                 } else {
-                    // $transaction->transaction_date = $new_transaction['authorized_date'];
                     if (isset($transaction->transaction_date)) {
 
                     } else {
@@ -402,6 +392,45 @@ class TransactionController extends Controller
             }
         } else {
             return;
+        }
+    }
+
+    private function updateBankAccountBalances(array $accountsData): void
+    {
+        if (empty($accountsData)) {
+            return;
+        }
+
+        foreach ($accountsData as $accountData) {
+            // Find the bank account by its Plaid account_id
+            $bankAccount = BankAccount::where('plaid_account_id', $accountData['account_id'])->first();
+            
+            if (!$bankAccount) {
+                continue;
+            }
+            
+            // Get current options or initialize empty array
+            $options = (array) $bankAccount->options ?? [];
+            $balancesChanged = false;
+            
+            // Check if balances have changed by comparing with existing data
+            if (!isset($options['balances']) || 
+                $options['balances']['available'] != $accountData['balances']['available'] || 
+                $options['balances']['current'] != $accountData['balances']['current']) {
+                $balancesChanged = true;
+            }
+            
+            // Update the balances data
+            $options['balances'] = $accountData['balances'];
+            
+            // Only update timestamp if balances have changed
+            if ($balancesChanged) {
+                $options['last_balance_update'] = now()->toDateTimeString();
+            }
+            
+            // Save updated options back to the bank account
+            $bankAccount->options = $options;
+            $bankAccount->save();
         }
     }
 
@@ -1740,7 +1769,7 @@ class TransactionController extends Controller
                     //     $duplicate_start_date = $transaction->transaction_date->subDays(1)->format('Y-m-d');
                     //     $duplicate_end_date = $transaction->transaction_date->addDays(4)->format('Y-m-d');
 
-                    //     //find duplicate expenses
+                    //         //     //find duplicate expenses
                     //     $duplicates =
                     //         Expense::where('belongs_to_vendor_id', $transaction->bank_account->bank->vendor_id)->
                     //             whereNull('deleted_at')->

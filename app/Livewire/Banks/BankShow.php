@@ -28,18 +28,29 @@ class BankShow extends Component
 
     public function mount(Bank $bank)
     {
-        // Group accounts by account_number and type, and include checks in the result
-        $this->accounts = $this->bank->accounts
+        $this->bank = $bank;
+        
+        // Group accounts by account_number and type, and include account options and checks
+        $this->accounts = $this->bank->accounts()->withTrashed()->get()
             ->groupBy('account_number')
             ->map(function ($accountsByNumber) {
                 return $accountsByNumber->groupBy('type')->map(function ($accountsByType) {
-                    return $accountsByType->flatMap(function ($account) {
-                        return $account->checks()
-                            ->whereIn('check_type', ['Transfer', 'Check'])
-                            ->whereYear('date', '>=', 2024)
-                            ->whereDoesntHave('transactions')
-                            ->get();
-                    });
+                    // Find the latest account (most recently updated) to use for this account type
+                    $latestAccount = $accountsByType->sortByDesc('updated_at')->first();
+                    
+                    // Create a result structure with a single representative account
+                    $result = [
+                        'account' => $latestAccount, // Use the latest account as THE account
+                        'checks' => $accountsByType->flatMap(function ($account) {
+                            return $account->checks()
+                                ->whereIn('check_type', ['Transfer', 'Check'])
+                                ->whereYear('date', '>=', 2024)
+                                ->whereDoesntHave('transactions')
+                                ->get();
+                        })
+                    ];
+                    
+                    return $result;
                 });
             });
     }
@@ -81,13 +92,6 @@ class BankShow extends Component
                 $bankId
             );
 
-
-            // Display an error message using flux.ui toast
-            // $this->dispatch('toast', [
-            //     'type' => 'error',
-            //     'message' => 'An error occurred while updating the bank link: ' . $result['error_message'],
-            // ]);
-
             return;
         }
 
@@ -95,12 +99,6 @@ class BankShow extends Component
         app(\App\Http\Controllers\TransactionController::class)->plaid_item_status();
         sleep(5);
         $this->render();
-
-        // Dispatch a success toast
-        // $this->dispatch('toast', [
-        //     'type' => 'success',
-        //     'message' => 'Bank link updated successfully!',
-        // ]);
 
         $this->dispatch('confirmProcessStep', 'banks_registered')->to('entry.vendor-registration');
     }
@@ -137,10 +135,6 @@ class BankShow extends Component
 
         $this->bank = $bank;
         // Display an error message using flux.ui toast
-        // $this->dispatch('toast', [
-        //     'type' => 'error',
-        //     'message' => 'An error occurred while updating the bank: ' . $errorData['error_message'],
-        // ]);
     }
 
     #[Title('Bank')]

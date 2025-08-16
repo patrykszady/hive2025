@@ -122,7 +122,7 @@ class ExpenseIndex extends Component
         if ($expenses->count() > 0) {
             $expenses->load(['vendor', 'project']);
         }
-        
+
         return $expenses;
     }
 
@@ -169,7 +169,7 @@ class ExpenseIndex extends Component
 
     #[Computed]
     public function transactions()
-    {
+    {        
         // Build filter conditions
         $filterConditions = [];
         
@@ -193,7 +193,7 @@ class ExpenseIndex extends Component
                 'bank_account.bank'
             ]);
         }
-        
+
         return $transactions;
     }
 

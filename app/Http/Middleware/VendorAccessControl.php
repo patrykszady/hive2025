@@ -32,7 +32,7 @@ class VendorAccessControl
         }
         
         // Handle regular routes
-        if (!$user->vendor->id) {
+        if (!$user->vendor?->id) {
             // No primary vendor selected
             return redirect(route('vendor_selection'));
         }

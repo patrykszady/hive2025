@@ -1,4 +1,4 @@
-<flux:modal name="client_form_modal" class="space-y-2 min-w-2xl">
+<flux:modal name="client_form_modal" class="space-y-2">
     <div class="flex justify-between">
         <flux:heading size="lg">{{$view_text['card_title']}}</flux:heading>
     </div>

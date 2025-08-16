@@ -19,6 +19,11 @@ class BankAccount extends Model
         static::addGlobalScope(new BankAccountScope);
     }
 
+    protected $casts = [
+        'options' => 'object',
+        'options->last_balance_update' => 'date:Y-m-d',
+    ];
+
     public function bank(): BelongsTo
     {
         return $this->belongsTo(Bank::class);

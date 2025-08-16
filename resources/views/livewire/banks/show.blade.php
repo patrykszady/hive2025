@@ -24,29 +24,29 @@
         </div>
 
         @foreach($accounts as $bank_account_number => $bank_account_types)
-            @foreach($bank_account_types as $bank_account_type => $bank_account_checks)
+            @foreach($bank_account_types as $bank_account_type => $bank_account_data)
                 <flux:card class="space-y-2 p-2!">
                     <div class="flex justify-between">
                         <flux:heading size="lg">
                             {{$bank_account_number}}
-                            <flux:badge inset="top bottom" size="sm" color="sky">{{$bank_account_type}}</flux:badge>
+                            <flux:badge inset="top bottom" size="sm" color="{{ $bank_account_data['account']->trashed() ? 'zinc' : 'blue' }}">{{$bank_account_type}}</flux:badge>
                         </flux:heading>
-                        {{-- <div>
-                            <flux:button variant="primary" disabled class="float-right">
-                                @php
-                                    $balances = collect($bank->plaid_options->accounts)->where('account_id', $account->plaid_account_id)->first();
-                                @endphp
-
-                                @if(isset($balances))
-                                    {{money(isset($balances->balances->available) ? $balances->balances->available : $balances->balances->current)}}
-                                @else
-                                    "N/A"
+                        <div class="flex flex-col">
+                            @if(isset($bank_account_data['account']->options->balances))
+                                <flux:button variant="primary" disabled class="self-end">
+                                    {{money($bank_account_data['account']->options->balances->current ?? '')}}
+                                </flux:button>
+                            @endif
+                            <div class="text-xs mt-1">
+                                @if(isset($bank_account_data['account']->options->last_balance_update))
+                                    <i>{{ \Carbon\Carbon::parse($bank_account_data['account']->options->last_balance_update)->diffForHumans() }}</i>
                                 @endif
-                            </flux:button>
-                        </div> --}}
+                            </div>
+                        </div>
                     </div>
-                    @if($bank_account_checks->isNotEmpty())
-                        @foreach($bank_account_checks as $check)
+                    
+                    @if($bank_account_data['checks']->isNotEmpty())
+                        @foreach($bank_account_data['checks'] as $check)
                             <flux:card class="p-2!">
                                 <div class="flex justify-between">
                                     <a href="{{route('checks.show', $check->id)}}">

@@ -19,8 +19,7 @@ class CompanyEmailsIndex extends Component
 
     public function mount()
     {
-        $this->email_accounts =
-        CompanyEmail::all();
+        $this->email_accounts = CompanyEmail::all();
         // $this->email_accounts =
         //     CompanyEmail::all()->each(function ($email, $key) {
         //         if (is_null($email->api_json['errors'])) {

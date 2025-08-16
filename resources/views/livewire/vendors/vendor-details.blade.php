@@ -1,11 +1,13 @@
 <x-details.card
     :title="$vendor->name"
     :subheading="$this->view == 'vendor_registration' 
-                 ? 'Confirm Company information.' 
-                 : (auth()->user()->can('update', $vendor) ? 'YTD Paid: ' . money($vendor->ytd_expense_sum) : '')"
+             ? 'Confirm Company information.' 
+             : (auth()->user()->can('update', $vendor) && $vendor->id != auth()->user()->vendor?->id 
+                ? 'YTD Paid: ' . money($vendor->ytd_expense_sum) 
+                : '')"
     :canEdit="auth()->user()->can('update', $vendor)"
     :expanded="$expanded"
->
+    >
     <x-slot:header_buttons>
         @unless($vendor->business_type == 'Retail')
             @if($vendor->id != auth()->user()->vendor->id)

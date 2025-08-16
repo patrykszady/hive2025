@@ -19,14 +19,14 @@
                     </flux:table.cell>
                 </flux:table.row>
                 @foreach($vendor_transactions_amount['distributions_count'] as $distribution_name => $distribution_count)
-                    <!-- Nested row with disabled borders and indented content -->
+                    <!-- Nested row with disabled borders and indenEted content -->
                     <flux:table.row class="border-0">
                         <flux:table.cell class="pl-4">
                             <flux:badge color="yellow" size="sm" inset="top bottom">
                                 {{ $distribution_count }}
                             </flux:badge>
                             <span class="ml-4">{{ $distribution_name }}</span>
-                        </flux:table.cell>
+                        </flux:table.cell>E
                     </flux:table.row>
                 @endforeach
             @endforeach
