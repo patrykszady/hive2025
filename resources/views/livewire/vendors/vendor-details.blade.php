@@ -9,32 +9,30 @@
     :expanded="$expanded"
     >
     <x-slot:header_buttons>
-        @unless($vendor->business_type == 'Retail')
-            @if($vendor->id != auth()->user()->vendor->id)
-                {{-- Show payment button + dropdown for other vendors --}}
-                <flux:button.group>
-                    <flux:button size="sm" href="{{route('vendors.payment', $vendor->id)}}">
-                        Make Payment
-                    </flux:button>
-                    <flux:dropdown position="bottom" align="end">
-                        <flux:button size="sm" icon-trailing="chevron-down"></flux:button>
-                        <flux:menu>
-                            <flux:menu.item wire:click="$dispatchTo('vendors.vendor-create', 'editVendor', { vendor: {{$vendor->id}} })">
-                                Edit
-                            </flux:menu.item>
-                        </flux:menu>
-                    </flux:dropdown>
-                </flux:button.group>
-            @else
-                {{-- Show simple edit button for own/ F --}}
-                <flux:button
-                    size="sm"
-                    wire:click="$dispatchTo('vendors.vendor-create', 'editVendor', { vendor: {{$vendor->id}} })"
-                >
-                    Edit
+        @if($vendor->id != auth()->user()->vendor->id && $vendor->business_type != 'Retail')
+            {{-- Show payment button + dropdown for other non-retail vendors --}}
+            <flux:button.group>
+                <flux:button size="sm" href="{{route('vendors.payment', $vendor->id)}}">
+                    Make Payment
                 </flux:button>
-            @endif
-        @endunless
+                <flux:dropdown position="bottom" align="end">
+                    <flux:button size="sm" icon-trailing="chevron-down"></flux:button>
+                    <flux:menu>
+                        <flux:menu.item wire:click="$dispatchTo('vendors.vendor-create', 'editVendor', { vendor: {{$vendor->id}} })">
+                            Edit
+                        </flux:menu.item>
+                    </flux:menu>
+                </flux:dropdown>
+            </flux:button.group>
+        @else
+            {{-- Show simple edit button for own vendor or retail vendors --}}
+            <flux:button
+                size="sm"
+                wire:click="$dispatchTo('vendors.vendor-create', 'editVendor', { vendor: {{$vendor->id}} })"
+            >
+                Edit
+            </flux:button>
+        @endif
     </x-slot:header_buttons>
     
     <x-slot:details>

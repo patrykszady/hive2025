@@ -1,200 +1,192 @@
-<div class="max-w-xl mx-auto space-y-4 sm:px-6">
-    <x-cards>
-        <x-cards.heading>
-            <x-slot name="left">
-                <h1 class="text-lg"></h1>
-            </x-slot>
-            <x-slot name="right">
-                <x-cards.button
-                    wire:click="export_csv"
-                    >
-                    Export CSV
-                </x-cards.button>
-
-                {{-- NEW PROJECT MODAL --}}
-                {{-- <livewire:projects.project-create :$clients /> --}}
-            </x-slot>
-        </x-cards.heading>
-    </x-cards>
-    <x-cards>
-        <x-lists.ul>
-            <x-lists.search_li
-                :basic=true
-                :bold="TRUE"
-                :line_title="'REVENUE'"
-                :line_data="money($revenue)"
+<div class="max-w-xl space-y-2 sm:px-6">
+    {{-- HEADER SECTION --}}
+    <flux:card>
+        <div class="flex justify-between items-center">
+            <div>
+                <flux:heading size="lg" class="mb-0">Sheets</flux:heading>
+                <flux:subheading class="text-zinc-500">{{ date('m/d/Y', strtotime($start_date)) }} to {{ date('m/d/Y', strtotime($end_date)) }}</flux:subheading>
+            </div>
+            <flux:button wire:click="export_csv">
+                Export CSV
+            </flux:button>
+        </div>
+    </flux:card>
+    
+    {{-- REVENUE SUMMARY --}}
+    <x-details.card title="Revenue" :canEdit="true">
+        <x-slot:header_buttons>
+            <flux:button
+                size="sm"
+                variant="primary" 
+                color="blue"
+                disabled
                 >
-            </x-lists.search_li>
-        </x-lists.ul>
-    </x-cards>
+                {{ money($this->revenue()) }}
+            </flux:button>
+        </x-slot:header_buttons>
+    </x-details.card>
 
-    <x-cards accordian="OPENED">
-        <x-cards.heading>
-            <x-slot name="left">
-                <h1 class="text-lg">Cost of Revenue</b></h1>
-            </x-slot>
-        </x-cards.heading>
-
-        <x-cards.body>
-            <x-lists.ul>
-                <x-lists.search_li
-                    :basic=true
-                    :bold="TRUE"
-                    :line_title="strtoupper('Cost of Labor')"
-                    :line_data="money($cost_of_labor_sum)"
-                    >
-                </x-lists.search_li>
-                <x-lists.ul>
-                    @foreach($cost_of_labor_vendors as $vendor_name => $cost_of_labor_vendor)
-                        <x-lists.search_li
-                            :basic=true
-                            :line_title="$vendor_name"
-                            :line_data="money($cost_of_labor_vendor->sum('amount'))"
+    {{-- COST OF REVENUE --}}
+    <x-details.card title="Cost of Revenue" :expanded="false" :details_text="false">
+        <x-slot:details>
+            {{-- Add padding container for nested cards --}}
+            <div class="space-y-2">
+                {{-- COST OF LABOR SECTION AS CARD --}}
+                <div>
+                    <x-details.card title="Cost of Labor" :expanded="false" :details_text="false">
+                        <x-slot:details>
+                            @foreach($this->costOfLaborVendors() as $vendor_name => $cost_of_labor_vendor)
+                                <x-details.row 
+                                    title="{!! $vendor_name !!}" 
+                                    :content="money($cost_of_labor_vendor->sum('amount'))"
+                                    :right-align="true"
+                                    :href="route('vendors.show', $cost_of_labor_vendor->first()->vendor_id)"
+                                />
+                            @endforeach
+                        </x-slot:details>
+                        <x-slot:footer>
+                            <flux:button
+                                size="sm"
+                                disabled
                             >
-                        </x-lists.search_li>
-                    @endforeach
-                </x-lists.ul>
-
-                <x-lists.search_li
-                    :basic=true
-                    :bold="TRUE"
-                    :line_title="strtoupper('Cost of Materials')"
-                    :line_data="money($cost_of_materials_sum)"
-                    >
-                </x-lists.search_li>
-                <x-lists.ul>
-                    @foreach($cost_of_materials_vendors as $vendor_name => $cost_of_materials_vendors)
-                        <x-lists.search_li
-                            :basic=true
-                            :line_title="$vendor_name"
-                            :line_data="money($cost_of_materials_vendors->sum('amount'))"
+                                {{ money($this->costOfLaborSum()) }}
+                            </flux:button>
+                        </x-slot:footer>
+                    </x-details.card>
+                </div>
+                
+                {{-- COST OF MATERIALS SECTION AS CARD --}}
+                <div>
+                    <x-details.card title="Cost of Materials" :expanded="false" :details_text="false">
+                        <x-slot:details>
+                            @foreach($this->costOfMaterialsVendors() as $vendor_name => $cost_of_materials_vendors)
+                                <x-details.row 
+                                    title="{!! $vendor_name !!}" 
+                                    :content="money($cost_of_materials_vendors->sum('amount'))" 
+                                    :right-align="true"
+                                    :href="route('vendors.show', $cost_of_materials_vendors->first()->vendor_id)"
+                                />
+                            @endforeach
+                        </x-slot:details>
+                        <x-slot:footer>
+                            <flux:button
+                                size="sm"
+                                disabled
                             >
-                        </x-lists.search_li>
-                    @endforeach
-                </x-lists.ul>
-            </x-lists.ul>
-        </x-cards.body>
+                                {{ money($this->costOfMaterialsSum()) }}
+                            </flux:button>
+                        </x-slot:footer>
+                    </x-details.card>
+                </div>
+            </div>
+        </x-slot:details>
+        
+        <x-slot:footer>
+            <flux:button
+                size="sm"
+                variant="primary" 
+                color="red"
+                disabled
+            >
+                {{ money($this->costOfLaborSum() + $this->costOfMaterialsSum()) }}
+            </flux:button>
+        </x-slot:footer>
+    </x-details.card>
 
-        <x-cards.footer has_ul="TRUE">
-            <x-lists.ul>
-                <x-lists.search_li
-                    :basic=true
-                    :bold="TRUE"
-                    :line_title="'TOTAL'"
-                    :line_data="money($cost_of_labor_sum + $cost_of_materials_sum)"
-                    >
-                </x-lists.search_li>
-            </x-lists.ul>
-        </x-cards.footer>
-    </x-cards>
+    {{-- GROSS PROFIT --}}
+    <x-details.card title="Gross Profit" :expanded="false" :details_text="false">
+        <x-slot:details>
+            <x-details.row title="Revenue" :content="money($this->revenue())" :right-align="true" />
+            <x-details.row title="Cost of Revenue" :content="'-' . money($this->costOfLaborSum() + $this->costOfMaterialsSum())" :right-align="true" />
+        </x-slot:details>
+        <x-slot:footer>
+            <flux:button
+                size="sm"
+                variant="primary" 
+                color="blue"
+                disabled
+            >
+                {{ money($this->revenue() - $this->costOfLaborSum() - $this->costOfMaterialsSum()) }}
+            </flux:button>
+        </x-slot:footer>
+    </x-details.card>
 
-    <x-cards accordian="OPENED">
-        <x-cards.heading>
-            <x-slot name="left">
-                <h1 class="text-lg">Gross Profit</b></h1>
-            </x-slot>
-        </x-cards.heading>
-
-        <x-cards.body>
-            <x-lists.ul>
-                <x-lists.search_li
-                    :basic=true
-                    :line_title="'Revenue'"
-                    :line_data="money($revenue)"
-                    >
-                </x-lists.search_li>
-                <x-lists.search_li
-                    :basic=true
-                    :line_title="'- Cost of Revenue'"
-                    :line_data="money($cost_of_labor_sum + $cost_of_materials_sum)"
-                    >
-                </x-lists.search_li>
-            </x-lists.ul>
-        </x-cards.body>
-
-        <x-cards.footer has_ul="TRUE">
-            <x-lists.ul>
-                <x-lists.search_li
-                    :basic=true
-                    :bold="TRUE"
-                    :line_title="'TOTAL'"
-                    :line_data="money($revenue - $cost_of_labor_sum - $cost_of_materials_sum)"
-                    >
-                </x-lists.search_li>
-            </x-lists.ul>
-        </x-cards.footer>
-    </x-cards>
-
-    {{-- order each category by sum of vendor for each category. High first --}}
-    <x-cards accordian="CLOSED">
-        <x-cards.heading>
-            <x-slot name="left">
-                <h1 class="text-lg">General & Administrative Expenses</b></h1>
-            </x-slot>
-        </x-cards.heading>
-
-        <x-cards.body>
-            <x-lists.ul>
-                @foreach($general_expense_categories as $category_primary_name => $general_expense_category)
-                    <x-lists.search_li
-                        :basic=true
-                        :bold="TRUE"
-                        :no_hover="TRUE"
-                        :line_title="strtoupper($category_primary_name)"
-                        :line_data="money($general_expense_category->sum('amount'))"
-                        >
-                    </x-lists.search_li>
-
-                    @foreach($general_expense_category->groupBy('category.friendly_detailed') as $category_friendly_detailed => $category_friendly_expenses)
-                        <x-lists.search_li
-                            :basic=true
-                            :no_hover="TRUE"
-                            {{-- '&emsp;' .  --}}
-                            {{-- :line_title="strtoupper($category_friendly_detailed) . '<br><i>' . $category_primary_name . '</i>'" --}}
-                            :line_title="$category_friendly_detailed"
-                            :line_data="money($category_friendly_expenses->sum('amount'))"
-                            >
-                        </x-lists.search_li>
-
-                        @foreach($category_friendly_expenses->groupBy('vendor.busienss_name') as $vendor_name => $general_expense_vendor_expenses)
-                            <x-lists.search_li
-                                {{-- wire:click="$dispatchTo('categories.vendor-categories-create', 'addCategories', { vendor: {{$general_expense_vendor_expenses->first()->vendor->id}} })" --}}
-                                :basic=true
-                                :line_title="$vendor_name"
-                                :line_data="money($general_expense_vendor_expenses->sum('amount'))"
+    {{-- GENERAL & ADMINISTRATIVE EXPENSES --}}
+    <x-details.card title="General & Administrative Expenses" :expanded="false" :details_text="false">
+        <x-slot:details>
+            <div class="space-y-2"> {{-- Space between primary categories --}}
+                @foreach($this->sortedExpenseCategories() as $category_primary_name => $category_data)
+                    {{-- PRIMARY CATEGORY AS CARD --}}
+                    <div>
+                        <x-details.card title="{{ $category_primary_name }}" :expanded="false" :details_text="false" class="!shadow-none !border-none !bg-transparent">
+                            <x-slot:details>
+                                {{-- Add padding container for nested cards --}}
+                                <div class="space-y-2"> {{-- Added space-y-6 for subcategories --}}
+                                    @foreach($category_data['subcategories'] as $subcategory)
+                                        {{-- Make each detailed category its own card with margin --}}
+                                        <div>
+                                            <x-details.card title="{!! $subcategory['name'] !!}" :expanded="false" :details_text="false" class="!shadow-none !border-none !bg-transparent">
+                                                <x-slot:details>
+                                                    @foreach($subcategory['vendors'] as $vendor_data)
+                                                        <x-details.row 
+                                                            title="{!! $vendor_data['name'] !!}" 
+                                                            :content="money($vendor_data['sum'])" 
+                                                            :right-align="true"
+                                                            :href="isset($vendor_data['vendor_id']) ? route('vendors.show', $vendor_data['vendor_id']) : null"
+                                                        />
+                                                    @endforeach
+                                                </x-slot:details>
+                                                
+                                                <x-slot:footer>
+                                                    <flux:button
+                                                        size="sm"
+                                                        disabled
+                                                    >
+                                                        {{ money($subcategory['sum']) }}
+                                                    </flux:button>
+                                                </x-slot:footer>
+                                            </x-details.card>
+                                        </div>
+                                    @endforeach
+                                </div>
+                            </x-slot:details>
+                            
+                            <x-slot:footer>
+                                <flux:button
+                                    size="sm"
+                                    disabled
                                 >
-                            </x-lists.search_li>
-                        @endforeach
-                    @endforeach
-
+                                    {{ money($category_data['sum']) }}
+                                </flux:button>
+                            </x-slot:footer>
+                        </x-details.card>
+                    </div>
                 @endforeach
-            </x-lists.ul>
-        </x-cards.body>
+            </div>
+        </x-slot:details>
+        
+        <x-slot:footer>
+            <flux:button
+                size="sm"
+                variant="primary" 
+                color="red"
+                disabled
+            >
+                {{ money($this->generalExpenses()) }}
+            </flux:button>
+        </x-slot:footer>
+    </x-details.card>
 
-        {{-- <livewire:categories.vendor-categories-create /> --}}
-
-        <x-cards.footer has_ul="TRUE">
-            <x-lists.ul>
-                <x-lists.search_li
-                    :basic=true
-                    :bold="TRUE"
-                    :line_title="'TOTAL'"
-                    :line_data="money($general_expenses)"
-                    >
-                </x-lists.search_li>
-            </x-lists.ul>
-        </x-cards.footer>
-    </x-cards>
-
-    <x-cards>
-        <x-lists.ul>
-            <x-lists.search_li
-                :basic=true
-                :bold="TRUE"
-                :line_title="'NET INCOME'"
-                :line_data="money($revenue - $cost_of_labor_sum - $cost_of_materials_sum - $general_expenses)"
-                >
-            </x-lists.search_li>
-        </x-lists.ul>
-    </x-cards>
+    {{-- NET INCOME --}}
+    <x-details.card title="Net Income" :canEdit="true">
+        <x-slot:header_buttons>
+            <flux:button
+                variant="primary" 
+                color="green"
+                disabled
+            >
+                {{ money($this->revenue() - $this->costOfLaborSum() - $this->costOfMaterialsSum() - $this->generalExpenses()) }}
+            </flux:button>
+        </x-slot:header_buttons>
+    </x-details.card>
 </div>

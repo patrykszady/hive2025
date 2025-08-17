@@ -4,6 +4,7 @@ namespace App\Livewire\Sheets;
 
 // use Livewire\Component\Sheets\SheetShow;
 use App\Models\Bank;
+use App\Models\Sheet;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -13,7 +14,6 @@ class SheetsIndex extends Component
     use AuthorizesRequests;
 
     public $start_date = '';
-
     public $end_date = '';
 
     public $banks = [];
@@ -29,6 +29,15 @@ class SheetsIndex extends Component
 
     public function mount()
     {
+        // Set default dates if not provided
+        if (empty($this->start_date)) {
+            $this->start_date = date('Y-m-d', strtotime('-1 year')); // Today minus 1 year
+        }
+        
+        if (empty($this->end_date)) {
+            $this->end_date = date('Y-m-d'); // Today's date
+        }
+        
         $this->banks =
             Bank::whereNotNull('plaid_access_token')
                 ->with(['accounts'])

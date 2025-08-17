@@ -1,12 +1,12 @@
-<div class="max-w-3xl">
-    <flux:card class="space-y-2 mb-4">
+<div class="max-w-xl">
+    <flux:card class="space-y-2">
         <div class="flex justify-between">
             <flux:heading size="lg">Sheet Filters</flux:heading>
         </div>
 
         <flux:separator variant="subtle" />
 
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
             {{-- START DATE --}}
             <flux:input
                 wire:model.live="start_date"
@@ -28,7 +28,7 @@
                 @endforeach
             </flux:checkbox.group>
         </div>
-        <div class="flex space-x-2">
+        <div class="flex">
             <flux:spacer />
 
             <flux:button type="button" wire:click="run" variant="primary">Show Sheet</flux:button>

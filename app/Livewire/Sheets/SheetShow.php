@@ -8,6 +8,7 @@ use App\Models\Payment;
 use App\Models\Sheet;
 use App\Models\Vendor;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 use OpenSpout\Common\Entity\Style\Border;
@@ -21,26 +22,8 @@ class SheetShow extends Component
     use AuthorizesRequests;
 
     public $start_date = null;
-
     public $end_date = null;
-
     public $bank_account_ids = [];
-
-    public $cost_of_labor_sum = 0;
-
-    public $cost_of_materials_sum = 0;
-
-    public $general_expenses = 0;
-
-    public $revenue = 0;
-
-    public $cost_of_materials_vendors = [];
-
-    public $cost_of_labor_vendors = [];
-
-    public $general_expense_categories = [];
-
-    // protected $listeners = ['sheet_info'];
 
     protected $queryString = [
         'start_date' => ['except' => ''],
@@ -50,20 +33,17 @@ class SheetShow extends Component
 
     public function mount()
     {
-        //08/23/2024 move to middleware .. somehwere else in the onion... not here!
-        // if($this->year == ''){
-        //     return(redirect('sheets'));
-        // }
+        // Keep only initialization logic here
+        // All calculations now moved to computed properties
+    }
 
-        //employed between the dates?
-        $vendor_admins = auth()->user()->vendor->users()->employed()->wherePivot('role_id', 1)->pluck('user_id')->toArray();
-
-        //1-22-24 do not show CASH when preparing TAXES
-        //(float)
-        $this->revenue = Payment::whereBetween('date', [$this->start_date, $this->end_date])
+    #[Computed]
+    public function revenue()
+    {
+        return Payment::whereBetween('date', [$this->start_date, $this->end_date])
             ->with(['transaction', 'project'])
             ->whereHas('project', function ($query) {
-                $query->whereHas('last_status', function ($query) {
+                $query->whereHas('latestStatus', function ($query) {
                     $query->where('title', '!=', 'VIEW ONLY');
                 });
             })
@@ -71,70 +51,154 @@ class SheetShow extends Component
                 $query->whereIn('bank_account_id', $this->bank_account_ids);
             })
             ->sum('amount');
+    }
 
-        $cost_of_labor =
-            Check::
-                //where check cleared account, not when entered
-                whereBetween('date', [$this->start_date, $this->end_date])
-                    ->whereNot('check_type', 'Cash')
-                // ->where(function($query) use($vendor_admins){
-                //     $query->whereNotIn('user_id', $vendor_admins)->orWhere('user_id', NULL);
-                // })
-                    ->whereHas('vendor', function ($query) {
-                        //->where('business_name', 'Jesus De La Torre')
-                        $query->where('business_type', '!=', 'Retail')->where('id', '!=', auth()->user()->vendor->id);
-                    })
-                    ->whereHas('transactions', function ($query) {
-                        $query->whereIn('bank_account_id', $this->bank_account_ids);
-                    });
-        // ->get()
-        // ->groupBy('vendor.business_name');
+    #[Computed]
+    public function materialVendorIds()
+    {
+        return Vendor::where('sheets_type', 'Materials')->pluck('id');
+    }
 
-        $this->cost_of_labor_vendors = $cost_of_labor->get()->groupBy('vendor.business_name')->toBase();
-        $this->cost_of_labor_sum = $cost_of_labor->get()->sum('amount');
+    #[Computed]
+    public function subVendorIds()
+    {
+        return Vendor::whereNot('business_type', 'Retail')->pluck('id');
+    }
 
-        //material or NOT GENERAL/ADMINISTRATIVE
-        $material_vendor_ids = Vendor::where('sheets_type', 'Materials')->pluck('id');
-        $sub_vendors_ids = Vendor::whereNot('business_type', 'Retail')->pluck('id');
+    #[Computed]
+    public function costOfLaborVendors()
+    {
+        $vendors = Check::whereBetween('date', [$this->start_date, $this->end_date])
+            ->whereNot('check_type', 'Cash')
+            ->whereHas('vendor', function ($query) {
+                $query->where('business_type', '!=', 'Retail')
+                      ->where('id', '!=', auth()->user()->vendor->id);
+            })
+            ->whereHas('transactions', function ($query) {
+                $query->whereIn('bank_account_id', $this->bank_account_ids);
+            })
+            ->get()
+            ->groupBy('vendor.business_name')
+            ->toBase();
+            
+        // Sort vendors by sum
+        return $vendors->sortByDesc(function($vendor) {
+            return $vendor->sum('amount');
+        })->toBase();
+    }
 
-        $this->general_expense_categories =
-            Expense::whereBetween('date', [$this->start_date, $this->end_date])
-                ->whereNotIn('category_id', [112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128])
-                ->whereNotIn('vendor_id', array_merge($material_vendor_ids->toArray(), $sub_vendors_ids->toArray()))
-                ->with(['category', 'vendor'])
-                ->whereHas('transactions', function ($query) {
-                    $query->whereIn('bank_account_id', $this->bank_account_ids);
-                })
-                ->get()
-                // ->groupBy(['category.friendly_detailed', 'vendor.busienss_name'])
-                ->groupBy('category.friendly_primary')
-                ->toBase();
+    #[Computed]
+    public function costOfLaborSum()
+    {
+        return $this->costOfLaborVendors()->flatten()->sum('amount');
+    }
 
-        $this->cost_of_materials_vendors =
-            Expense::whereBetween('date', [$this->start_date, $this->end_date])
-                ->whereIn('vendor_id', $material_vendor_ids)
-                ->with(['vendor'])
-                ->whereHas('transactions', function ($query) {
-                    $query->whereIn('bank_account_id', $this->bank_account_ids);
-                })
-                ->get()
-                ->groupBy('vendor.business_name')
-                ->toBase();
-        $this->cost_of_materials_sum =
-            Expense::whereBetween('date', [$this->start_date, $this->end_date])
-                ->whereHas('transactions', function ($query) {
-                    $query->whereIn('bank_account_id', $this->bank_account_ids);
-                })
-                ->whereIn('vendor_id', $material_vendor_ids)
-                ->sum('amount');
-        $this->general_expenses =
-            Expense::whereBetween('date', [$this->start_date, $this->end_date])
-                ->whereHas('transactions', function ($query) {
-                    $query->whereIn('bank_account_id', $this->bank_account_ids);
-                })
-                ->whereNotIn('vendor_id', array_merge($material_vendor_ids->toArray(), $sub_vendors_ids->toArray()))
-                ->whereNotIn('category_id', [123, 124, 125, 126, 127, 128])
-                ->sum('amount');
+    #[Computed]
+    public function costOfMaterialsVendors()
+    {
+        $vendors = Expense::whereBetween('date', [$this->start_date, $this->end_date])
+            ->whereIn('vendor_id', $this->materialVendorIds())
+            ->with(['vendor'])
+            ->whereHas('transactions', function ($query) {
+                $query->whereIn('bank_account_id', $this->bank_account_ids);
+            })
+            ->get()
+            ->groupBy('vendor.business_name')
+            ->toBase();
+            
+        // Sort vendors by sum
+        return $vendors->sortByDesc(function($vendor) {
+            return $vendor->sum('amount');
+        })->toBase();
+    }
+
+    #[Computed]
+    public function costOfMaterialsSum()
+    {
+        return Expense::whereBetween('date', [$this->start_date, $this->end_date])
+            ->whereHas('transactions', function ($query) {
+                $query->whereIn('bank_account_id', $this->bank_account_ids);
+            })
+            ->whereIn('vendor_id', $this->materialVendorIds())
+            ->sum('amount');
+    }
+
+    #[Computed]
+    public function generalExpenses()
+    {
+        return Expense::whereBetween('date', [$this->start_date, $this->end_date])
+            ->whereHas('transactions', function ($query) {
+                $query->whereIn('bank_account_id', $this->bank_account_ids);
+            })
+            ->whereNotIn('vendor_id', array_merge($this->materialVendorIds()->toArray(), $this->subVendorIds()->toArray()))
+            ->whereNotIn('category_id', [123, 124, 125, 126, 127, 128])
+            ->sum('amount');
+    }
+
+    #[Computed]
+    public function generalExpenseCategories()
+    {
+        return Expense::whereBetween('date', [$this->start_date, $this->end_date])
+            ->whereNotIn('category_id', [112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128])
+            ->whereNotIn('vendor_id', array_merge($this->materialVendorIds()->toArray(), $this->subVendorIds()->toArray()))
+            ->with(['category', 'vendor'])
+            ->whereHas('transactions', function ($query) {
+                $query->whereIn('bank_account_id', $this->bank_account_ids);
+            })
+            ->get()
+            ->groupBy('category.friendly_primary')
+            ->toBase();
+    }
+
+    #[Computed]
+    public function sortedExpenseCategories()
+    {
+        $sortedCategories = [];
+        
+        foreach ($this->generalExpenseCategories() as $categoryPrimaryName => $generalExpenseCategory) {
+            $sortedDetailedCategories = [];
+            
+            foreach ($generalExpenseCategory->groupBy('category.friendly_detailed') as $categoryFriendlyDetailed => $categoryFriendlyExpenses) {
+                $sortedVendors = [];
+                
+                foreach ($categoryFriendlyExpenses->groupBy('vendor.business_name') as $vendorName => $generalExpenseVendorExpenses) {
+                    $sortedVendors[] = [
+                        'name' => $vendorName ?: 'Unknown Vendor',
+                        'sum' => $generalExpenseVendorExpenses->sum('amount'),
+                        'vendor_id' => $generalExpenseVendorExpenses->first()->vendor_id ?? null,
+                    ];
+                }
+                
+                // Sort vendors by amount (descending)
+                usort($sortedVendors, function($a, $b) {
+                    return $b['sum'] <=> $a['sum'];
+                });
+                
+                $sortedDetailedCategories[] = [
+                    'name' => $categoryFriendlyDetailed ?: 'Uncategorized',
+                    'sum' => $categoryFriendlyExpenses->sum('amount'),
+                    'vendors' => $sortedVendors
+                ];
+            }
+            
+            // Sort detailed categories by amount (descending)
+            usort($sortedDetailedCategories, function($a, $b) {
+                return $b['sum'] <=> $a['sum'];
+            });
+            
+            $sortedCategories[$categoryPrimaryName] = [
+                'subcategories' => $sortedDetailedCategories,
+                'sum' => $generalExpenseCategory->sum('amount'),
+                'name' => $categoryPrimaryName
+            ];
+        }
+        
+        // Sort primary categories by sum (descending)
+        uasort($sortedCategories, function($a, $b) {
+            return $b['sum'] <=> $a['sum'];
+        });
+        
+        return $sortedCategories;
     }
 
     public function export_csv()
@@ -146,157 +210,130 @@ class SheetShow extends Component
             new BorderPart(Border::BOTTOM, Color::BLACK, Border::WIDTH_THIN, Border::STYLE_SOLID)
         );
 
-        $writer = SimpleExcelWriter::create('test-'.mt_rand(0, 19999999).'.xlsx')->addHeader([]);
-
-        $writer->addRow([
-            'category' => 'REVENUE',
-            'sub_category' => null,
-            'vendor' => null,
-            'amount' => money($this->revenue),
-        ], (new Style)->setFontBold()->setBorder($border));
-
-        $writer->addRow([
-            'category' => null,
-            'sub_category' => null,
-            'vendor' => null,
-            'amount' => null,
-        ]);
-
-        $writer->addRow([
-            'category' => 'COST OF REVENUE',
-            'sub_category' => null,
-            'vendor' => null,
-            'amount' => money($this->cost_of_materials_sum + $this->cost_of_labor_sum),
-        ], (new Style)->setFontBold()->setBorder($border));
-
-        $writer->addRow([
-            'category' => null,
-            'sub_category' => null,
-            'vendor' => null,
-            'amount' => null,
-        ]);
-
-        $writer->addRow([
-            'category' => null,
-            'sub_category' => 'COST OF MATERIALS',
-            'vendor' => null,
-            'amount' => money($this->cost_of_materials_sum),
-        ], (new Style)->setFontBold()->setBorder($border));
-
-        foreach ($this->cost_of_materials_vendors as $vendor_name => $cost_of_materials_vendor) {
-            $writer->addRow([
-                'category' => null,
-                'sub_category' => null,
-                'vendor' => $vendor_name,
-                'amount' => money($cost_of_materials_vendor->sum('amount')),
-            ]);
-        }
-
-        $writer->addRow([
-            'category' => null,
-            'sub_category' => null,
-            'vendor' => null,
-            'amount' => null,
-        ]);
-
-        $writer->addRow([
-            'category' => null,
-            'sub_category' => 'COST OF LABOR',
-            'vendor' => null,
-            'amount' => money($this->cost_of_labor_sum),
-        ], (new Style)->setFontBold()->setBorder($border));
-
-        foreach ($this->cost_of_labor_vendors as $vendor_name => $cost_of_labor_vendor) {
-            $writer->addRow([
-                'category' => null,
-                'sub_category' => null,
-                'vendor' => $vendor_name,
-                'amount' => money($cost_of_labor_vendor->sum('amount')),
-            ]);
-        }
-
-        $writer->addRow([
-            'category' => null,
-            'sub_category' => null,
-            'vendor' => null,
-            'amount' => null,
-        ]);
-
-        $writer->addRow([
-            'category' => 'GROSS PROFIT',
-            'sub_category' => null,
-            'vendor' => null,
-            'amount' => money($this->revenue - $this->cost_of_labor_sum - $this->cost_of_materials_sum),
-        ], (new Style)->setFontBold()->setBorder($border));
-
-        $writer->addRow([
-            'category' => null,
-            'sub_category' => null,
-            'vendor' => null,
-            'amount' => null,
-        ]);
-
-        $writer->addRow([
-            'category' => 'GENERAL & ADMINISTRATIVE EXPENSES',
-            'sub_category' => null,
-            'vendor' => null,
-            'amount' => money($this->general_expenses),
-        ], (new Style)->setFontBold()->setBorder($border));
-
-        $writer->addRow([
-            'category' => null,
-            'sub_category' => null,
-            'vendor' => null,
-            'amount' => null,
-        ]);
-
-        foreach ($this->general_expense_categories as $category_primary_name => $general_expense_category) {
-            $writer->addRow([
-                'category' => $category_primary_name,
-                'sub_category' => null,
-                'vendor' => null,
-                'amount' => money($general_expense_category->sum('amount')),
-            ], (new Style)->setFontBold()->setBorder($border));
-
-            foreach ($general_expense_category->groupBy('category.friendly_detailed') as $category_friendly_detailed => $category_friendly_expenses) {
-                $writer->addRow([
-                    'category' => null,
-                    'sub_category' => $category_friendly_detailed,
-                    'vendor' => null,
-                    'amount' => money($category_friendly_expenses->sum('amount')),
-                ], (new Style)->setFontItalic()->setBorder($border_thin));
-
-                foreach ($category_friendly_expenses->groupBy('vendor.busienss_name') as $vendor_name => $general_expense_vendor_expenses) {
-                    $writer->addRow([
-                        'category' => null,
-                        'sub_category' => null,
-                        'vendor' => $vendor_name,
-                        'amount' => money($general_expense_vendor_expenses->sum('amount')),
-                    ]);
+        // Create filename
+        $filename = 'financial-report-' . date('Y-m-d', strtotime($this->start_date)) . '-to-' . 
+                    date('Y-m-d', strtotime($this->end_date)) . '.xlsx';
+                    
+        return response()->streamDownload(function() use ($border, $border_thin) {
+            // Format money values correctly without currency symbols
+            $formatMoney = function($amount) {
+                return number_format($amount, 2, '.', '');
+            };
+            
+            // Create Excel file using PHPSpreadsheet since SimpleExcelWriter::createFromString() doesn't exist
+            $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+            $sheet = $spreadsheet->getActiveSheet();
+            
+            // Add header row
+            $sheet->setCellValue('A1', 'Category');
+            $sheet->setCellValue('B1', 'Sub-Category');
+            $sheet->setCellValue('C1', 'Vendor');
+            $sheet->setCellValue('D1', 'Amount');
+            
+            $row = 2;
+            
+            // REVENUE
+            $sheet->setCellValue('A' . $row, 'REVENUE');
+            $sheet->setCellValue('D' . $row, $formatMoney($this->revenue()));
+            $sheet->getStyle('A' . $row . ':D' . $row)->getFont()->setBold(true);
+            $row += 2;
+            
+            // COST OF REVENUE
+            $sheet->setCellValue('A' . $row, 'COST OF REVENUE');
+            $sheet->setCellValue('D' . $row, $formatMoney($this->costOfMaterialsSum() + $this->costOfLaborSum()));
+            $sheet->getStyle('A' . $row . ':D' . $row)->getFont()->setBold(true);
+            $row += 2;
+            
+            // COST OF MATERIALS
+            $sheet->setCellValue('B' . $row, 'COST OF MATERIALS');
+            $sheet->setCellValue('D' . $row, $formatMoney($this->costOfMaterialsSum()));
+            $sheet->getStyle('B' . $row . ':D' . $row)->getFont()->setBold(true);
+            $row++;
+            
+            // Materials vendors
+            foreach ($this->costOfMaterialsVendors() as $vendorName => $costOfMaterialsVendor) {
+                $sheet->setCellValue('C' . $row, $vendorName);
+                $sheet->setCellValue('D' . $row, $formatMoney($costOfMaterialsVendor->sum('amount')));
+                $row++;
+            }
+            
+            $row++;
+            
+            // COST OF LABOR
+            $sheet->setCellValue('B' . $row, 'COST OF LABOR');
+            $sheet->setCellValue('D' . $row, $formatMoney($this->costOfLaborSum()));
+            $sheet->getStyle('B' . $row . ':D' . $row)->getFont()->setBold(true);
+            $row++;
+            
+            // Labor vendors
+            foreach ($this->costOfLaborVendors() as $vendorName => $costOfLaborVendor) {
+                $sheet->setCellValue('C' . $row, $vendorName);
+                $sheet->setCellValue('D' . $row, $formatMoney($costOfLaborVendor->sum('amount')));
+                $row++;
+            }
+            
+            $row++;
+            
+            // GROSS PROFIT
+            $sheet->setCellValue('A' . $row, 'GROSS PROFIT');
+            $sheet->setCellValue('D' . $row, $formatMoney($this->revenue() - $this->costOfLaborSum() - $this->costOfMaterialsSum()));
+            $sheet->getStyle('A' . $row . ':D' . $row)->getFont()->setBold(true);
+            $row += 2;
+            
+            // GENERAL & ADMINISTRATIVE EXPENSES
+            $sheet->setCellValue('A' . $row, 'GENERAL & ADMINISTRATIVE EXPENSES');
+            $sheet->setCellValue('D' . $row, $formatMoney($this->generalExpenses()));
+            $sheet->getStyle('A' . $row . ':D' . $row)->getFont()->setBold(true);
+            $row += 2;
+            
+            // Export categories following sort order
+            foreach ($this->sortedExpenseCategories() as $categoryName => $categoryData) {
+                $sheet->setCellValue('A' . $row, $categoryName);
+                $sheet->setCellValue('D' . $row, $formatMoney($categoryData['sum']));
+                $sheet->getStyle('A' . $row . ':D' . $row)->getFont()->setBold(true);
+                $row++;
+                
+                foreach ($categoryData['subcategories'] as $subcategory) {
+                    $sheet->setCellValue('B' . $row, $subcategory['name']);
+                    $sheet->setCellValue('D' . $row, $formatMoney($subcategory['sum']));
+                    $sheet->getStyle('B' . $row . ':D' . $row)->getFont()->setItalic(true);
+                    $row++;
+                    
+                    foreach ($subcategory['vendors'] as $vendor) {
+                        $sheet->setCellValue('C' . $row, $vendor['name']);
+                        $sheet->setCellValue('D' . $row, $formatMoney($vendor['sum']));
+                        $row++;
+                    }
                 }
             }
-        }
-
-        $writer->addRow([
-            'category' => null,
-            'sub_category' => null,
-            'vendor' => null,
-            'amount' => null,
+            
+            $row++;
+            
+            // NET INCOME
+            $sheet->setCellValue('A' . $row, 'NET INCOME');
+            $sheet->setCellValue('D' . $row, $formatMoney($this->revenue() - $this->costOfLaborSum() - $this->costOfMaterialsSum() - $this->generalExpenses()));
+            $sheet->getStyle('A' . $row . ':D' . $row)->getFont()->setBold(true);
+            
+            // Format amount column as currency
+            $sheet->getStyle('D2:D' . $row)->getNumberFormat()->setFormatCode('$#,##0.00');
+            
+            // Auto-size columns
+            foreach(range('A', 'D') as $col) {
+                $sheet->getColumnDimension($col)->setAutoSize(true);
+            }
+            
+            // Output spreadsheet directly
+            $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+            $writer->save('php://output');
+        }, $filename, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         ]);
-
-        $writer->addRow([
-            'category' => 'NET INCOME',
-            'sub_category' => null,
-            'vendor' => null,
-            'amount' => money($this->revenue - $this->cost_of_labor_sum - $this->cost_of_materials_sum - $this->general_expenses),
-        ], (new Style)->setFontBold()->setBorder($border));
     }
 
     #[Title('Sheet')]
     public function render()
     {
         $this->authorize('viewAny', Sheet::class);
-
         return view('livewire.sheets.show');
     }
 }

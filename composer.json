@@ -38,6 +38,7 @@
         "openai-php/client": "^0.10.3",
         "pestphp/pest": "^3.0",
         "php-webdriver/webdriver": "^1.15",
+        "phpoffice/phpspreadsheet": "^5.0",
         "railsware/mailtrap-php": "*",
         "regulus/tetra-text": "^0.6.16",
         "setasign/fpdf": "1.8.*",
