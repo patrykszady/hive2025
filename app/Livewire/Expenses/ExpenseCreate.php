@@ -3,6 +3,7 @@
 namespace App\Livewire\Expenses;
 
 use App\Livewire\Forms\ExpenseForm;
+
 use App\Models\BankAccount;
 use App\Models\Check;
 use App\Models\Distribution;
@@ -10,15 +11,20 @@ use App\Models\Expense;
 use App\Models\Project;
 use App\Models\Transaction;
 use App\Models\Vendor;
+
+use App\Traits\HandlesChecks;
+
 use Flux;
+
 use Illuminate\Support\Facades\Route;
+
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 use Livewire\WithFileUploads;
 
 class ExpenseCreate extends Component
 {
-    use WithFileUploads;
+    use WithFileUploads, HandlesChecks;
 
     public ExpenseForm $form;
 
@@ -31,7 +37,7 @@ class ExpenseCreate extends Component
     public $employees = [];
     public $via_vendor_employees = [];
     
-    public $bank_accounts = [];
+    // public $bank_accounts = [];
     public $vendors  = [];
     public $projects  = [];
     public $distributions  = [];
@@ -52,7 +58,7 @@ class ExpenseCreate extends Component
         $this->employees = $team_members->get();
         $this->via_vendor_employees = $team_members->wherePivotNotNull('via_vendor_id')->get();
 
-        $this->bank_accounts = BankAccount::latestCheckingAccounts()->get();
+        // $this->bank_accounts = BankAccount::latestCheckingAccounts()->get();
         $this->vendors = Vendor::orderBy('business_name')->get(['id', 'business_name']);
 
         //use Computed projects method below instead of loading here?
@@ -138,6 +144,16 @@ class ExpenseCreate extends Component
             }
         } else {
             $this->form->project_completed = false;
+        }
+
+        // Add this to handle check_type updates correctly
+        if ($field === 'check_type') {
+            if ($value === 'Check') {
+                $this->autoCheckNumber(); // This will set next_check_auto to true
+            } else {
+                $this->check_number = null;
+                $this->next_check_auto = false;
+            }
         }
 
         $this->validateOnly($field);
@@ -285,10 +301,8 @@ class ExpenseCreate extends Component
             return $this->addError('no_splits', 'Splits required if Project is Split');
         }
 
-        // dd($this);
         $expense = $this->form->update();
         $this->modal('expenses_form_modal')->close();
-        // $this->resetModal();
 
         Flux::toast(
             duration: 5000,
@@ -307,7 +321,6 @@ class ExpenseCreate extends Component
     public function remove()
     {
         $this->form->delete();
-
         $this->modal('expenses_form_modal')->close();
 
         Flux::toast(

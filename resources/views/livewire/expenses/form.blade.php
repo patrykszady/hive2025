@@ -135,8 +135,7 @@
             x-show="(project_id || splits) && !open"
             x-transition
             >
-
-            @include('livewire.checks.form')
+            @include('livewire.checks._payment_form', ['hideBasicFields' => true])
         </div>
 
         {{-- RECEIPT --}}

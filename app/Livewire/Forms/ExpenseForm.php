@@ -54,15 +54,15 @@ class ExpenseForm extends Form
     #[Validate]
     public $paid_by = null;
 
-    // required_without:form.paid_by
-    #[Validate('nullable', as: 'bank account')]
-    public $bank_account_id = null;
+    // // required_without:form.paid_by
+    // #[Validate('nullable', as: 'bank account')]
+    // public $bank_account_id = null;
 
-    #[Validate('required_with:bank_account_id', as: 'type')]
-    public $check_type = null;
+    // #[Validate('required_with:bank_account_id', as: 'type')]
+    // public $check_type = null;
 
-    // #[Validate('required_if:check_type,Check')]
-    public $check_number = null;
+    // // #[Validate('required_if:check_type,Check')]
+    // public $check_number = null;
 
     // #[Validate]
     public $merchant_name = null;
@@ -77,103 +77,8 @@ class ExpenseForm extends Form
 
     public function rules()
     {
-        return [
-            'check_number' => [
-                'required_if:check_type,Check',
-                'nullable',
-                'numeric',
-
-                //ignore if vendor_id of Check is same as request()->vendor_id
-                // ->ignore($this->check),
-                Rule::unique('checks', 'check_number')->where(function ($query) {
-                    //->where('vendor_id', '!=', $this->vendor_id)
-
-                    //where per vendor bank_account ... all bank accounts that have the inst ID
-                    return $query->where('deleted_at', null)->where('bank_account_id', $this->bank_account_id)->where('vendor_id', '!=', $this->vendor_id);
-                }),
-                // ->ignore($this->check),
-            ],
-        ];
+        return [];
     }
-    // public function rules()
-    // {
-    //     return [
-    //         'project_id' => 'required_unless:split,true',
-
-    //         'merchant_name' => 'nullable',
-
-    //         'transaction' => 'nullable',
-    //         // 'reimbursment' => [
-    //         //     Rule::requiredIf(function(){
-    //         //         //client_reimbursement
-    //         //         // dd($this->reimbursment == 'client_reimbursement');
-    //         //         // dd(Project::findOrFail($this->project_id)->project_status->title == "Complete");
-    //         //         $title = Project::findOrFail($this->project_id)->project_status->title;
-
-    //         //         // return $title == 'Complete' && $this->reimbursment == 'client_reimbursement' ? false : true;
-    //         //         if($title == 'Complete' && $this->reimbursment == 'client_reimbursement'){
-    //         //             Rule::notIn(['client_reimbursement']);
-    //         //         }else{
-    //         //             //false = continue. true = validation error!
-    //         //             return false;
-    //         //             // || $this->split == true
-    //         //             // return $this->reimbursment != NULL ? true : false;
-    //         //         }
-    //         //     }),
-    //         //     // 'nullable',
-    //         //     // 'mimes:jpeg,jpg,png,pdf'
-    //         //     ],
-
-    //         'receipt_file' => [
-    //             Rule::requiredIf(function(){
-    //                 if($this->receipts != FALSE){
-    //                     return false;
-    //                 }else{
-    //                     // || $this->split == true
-    //                     return $this->reimbursment != NULL && !is_numeric($this->reimbursment) ? true : false;
-    //                 }
-    //             }),
-    //             'nullable',
-    //             'mimes:jpeg,jpg,pdf,png'
-    //             ],
-    //     ];
-    // }
-
-    // $this->form->reimbursment
-    // if($value == 'Client'){
-    //     $project = Project::findOrFail($this->form->project_id);
-    //     // dd($project);
-    //     //return with validation error for Reimbursment ... no Client Reimbursment allowed if Project_status = Complete
-    //     //$this->reimbursment
-    //     if($value == 'Client' && $project->project_status->title == 'Complete'){
-    //         // errorBag reimbursment = "Cannot add Expense as Reimbursment for a project already Completed."
-    //         $this->addError('testtest', 'Cannot add Expense as Reimbursment for a project already Completed.');
-    //     }
-    // }
-
-    //     return [
-
-    //         'amount_disabled' => 'nullable',
-
-    //         //USED in MULTIPLE OF PLACES TimesheetPaymentForm and VendorPaymentForm
-    //         //required_without:check.paid_by
-    //         'check.bank_account_id' => 'nullable',
-    //         'check.check_type' => 'required_with:check.bank_account_id',
-    //         // 'check.check_number' => 'required_if:check.check_type,Check',
-    //         //check_number is unique on Checks table where bank_account_id and check_number must be unique
-    //         //02-21-2023 - used in MILTIPLE of places... VendorPaymentForm...
-    //         'check.check_number' => [
-    //             //ignore if vendor_id of Check is same as request()->vendor_id
-    //             'required_if:check.check_type,Check',
-    //             'nullable',
-    //             'numeric',
-    //             Rule::unique('checks', 'check_number')->where(function ($query) {
-    //                 return $query->where('deleted_at', NULL)->where('bank_account_id', $this->check->bank_account_id)->where('vendor_id', '!=', $this->expense->vendor_id);
-    //             }),
-    //             //->ignore(request()->get('check_id_id'))
-    //         ],
-    //         'via_vendor_employees' => 'nullable',
-    //     ];
 
     protected $messages =
         [
@@ -404,57 +309,77 @@ class ExpenseForm extends Form
             'project_id' => $expense_details['project_id'],
             'distribution_id' => $expense_details['distribution_id'],
             'vendor_id' => $this->vendor_id,
-            // 'check_id' => $check_id,
             'paid_by' => empty($this->paid_by) ? null : $this->paid_by,
             'reimbursment' => empty($this->reimbursment) ? null : $this->reimbursment,
-            // 'belongs_to_vendor_id' => $vendor->id,
             'created_by_user_id' => auth()->user()->id,
         ]);
 
+        // Handle existing check
         $check = $this->expense->check;
-        if($check){
-            $check->vendor_id = $this->vendor_id;
+        
+        // Create or update check when bank_account_id, check_type, and check_number are set
+        if (empty($this->paid_by) && isset($this->component->bank_account_id) && isset($this->component->check_type)) {
+            // Calculate distribution user ID if needed
+            if ($expense_details['distribution_id']) {
+                $distribution_user_id = Distribution::findOrFail($expense_details['distribution_id'])->user_id;
+                $dist_user = ($distribution_user_id != 0) ? $distribution_user_id : null;
+            } else {
+                $dist_user = null;
+            }
+
+            // Look for an existing check with the same details
+            if (!is_null($this->component->check_number)) {
+                $existing_check = Check::where('deleted_at', null)
+                    ->where('bank_account_id', $this->component->bank_account_id)
+                    ->where('check_type', $this->component->check_type)
+                    ->where('check_number', $this->component->check_number)
+                    ->where('vendor_id', $this->vendor_id)
+                    ->first();
+            }
+
+            // If there's an existing check with these details, update it
+            if (isset($existing_check)) {
+                // If this expense already had a different check, adjust that check's amount
+                if ($check && $check->id !== $existing_check->id) {
+                    $check->amount = $check->amount - $this->amount;
+                    $check->save();
+                }
+                
+                $check = $existing_check;
+                $check->amount = $check->amount + $this->amount;
+                $check->save();
+            } 
+            // Otherwise create a new check
+            else if (!$check || $check->check_number != $this->component->check_number || 
+                     $check->bank_account_id != $this->component->bank_account_id) {
+                // Create new check
+                $check = Check::create([
+                    'check_type' => $this->component->check_type,
+                    'check_number' => $this->component->check_number,
+                    'date' => $this->date,
+                    'bank_account_id' => $this->component->bank_account_id,
+                    'amount' => $this->amount,
+                    'user_id' => $dist_user,
+                    'vendor_id' => $this->vendor_id,
+                    'belongs_to_vendor_id' => auth()->user()->vendor->id,
+                    'created_by_user_id' => auth()->user()->id,
+                ]);
+            }
+            
+            // Update the expense with the new check_id
+            $this->expense->update([
+                'check_id' => $check->id,
+            ]);
+        } else if ($check) {
+            // If there's no bank account or check details but there was a check previously,
+            // detach the check from this expense
+            $check->amount = $check->amount - $this->amount;
             $check->save();
+            
+            $this->expense->update([
+                'check_id' => null
+            ]);
         }
-
-        //check...
-        // if (empty($this->paid_by) && isset($this->bank_account_id)) {
-        //     if ($expense_details['distribution_id']) {
-        //         $distribution_user_id = Distribution::findOrFail($expense_details['distribution_id'])->user_id;
-        //         if ($distribution_user_id != 0) {
-        //             $dist_user = $distribution_user_id;
-        //         } else {
-        //             $dist_user = null;
-        //         }
-        //     } else {
-        //         $dist_user = null;
-        //     }
-
-        //     $existing_check = Check::where('deleted_at', null)->where('check_type', 'Check')->where('bank_account_id', $this->bank_account_id)->where('check_number', $this->check_number)->where('vendor_id', $this->vendor_id)->first();
-
-        //     if (isset($existing_check)) {
-        //         $check = $existing_check;
-        //         $check->amount = $check->amount + $this->amount;
-        //         $check->save();
-        //     } else {
-        //         $check = Check::create([
-        //             'check_type' => $this->check_type,
-        //             'check_number' => $this->check_number,
-        //             'date' => $this->date,
-        //             'bank_account_id' => $this->bank_account_id,
-        //             'amount' => $this->amount,
-        //             //user_id if expense project = distribution
-        //             'user_id' => $dist_user,
-        //             'vendor_id' => $this->vendor_id,
-        //             'belongs_to_vendor_id' => auth()->user()->primary_vendor_id,
-        //             'created_by_user_id' => auth()->user()->id,
-        //         ]);
-        //     }
-
-        //     $this->expense->update([
-        //         'check_id' => $check->id,
-        //     ]);
-        // }
 
         $this->save_splits($this->expense);
 

@@ -89,6 +89,7 @@ class VendorPaymentCreate extends Component
      */
     public function updated($field, $value)
     {
+        // Call trait method to handle check-related updates
         $this->handleChecksUpdated($field, $value);
         
         // Check if a project amount was updated
@@ -96,6 +97,8 @@ class VendorPaymentCreate extends Component
             $project_id = $matches[1];
             $this->updateProjectBalance($project_id);
         }
+        
+        $this->validateOnly($field);
     }
 
     public function addProject()

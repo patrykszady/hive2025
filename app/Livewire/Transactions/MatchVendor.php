@@ -191,7 +191,8 @@ class MatchVendor extends Component
     {
         $this->authorize('viewAny', TransactionBulkMatch::class);
 
-        $transaction_bank_accounts = BankAccount::withoutGlobalScopes()->whereNull('deleted_at')->pluck('id')->toArray();
+        //->whereNull('deleted_at')
+        $transaction_bank_accounts = BankAccount::withoutGlobalScopes()->pluck('id')->toArray();
         $this->merchant_names =
             Transaction::transactionsSinVendor()
                 ->whereIn('bank_account_id', $transaction_bank_accounts)

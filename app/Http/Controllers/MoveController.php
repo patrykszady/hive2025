@@ -42,11 +42,11 @@ class MoveController extends Controller
 {
     public function move()
     {
-        $transactions = Transaction::withoutGlobalScopes()->where('vendor_id', 317)->get();
-        foreach($transactions as $transaction){
-            $transaction->vendor_id = 218;
-            $transaction->save();
-        }
+        // $transactions = Transaction::withoutGlobalScopes()->where('vendor_id', 317)->get();
+        // foreach($transactions as $transaction){
+        //     $transaction->vendor_id = 218;
+        //     $transaction->save();
+        // }
 
         // $expenses = Expense::where('vendor_id', 317)->get();
         // foreach($expenses as $expense){
