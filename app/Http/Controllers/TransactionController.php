@@ -409,23 +409,23 @@ class TransactionController extends Controller
                 continue;
             }
             
-            // Get current options or initialize empty array
-            $options = (array) $bankAccount->options ?? [];
+            // Get current options as object or initialize empty object
+            $options = $bankAccount->options ?? new \stdClass();
             $balancesChanged = false;
             
             // Check if balances have changed by comparing with existing data
-            if (!isset($options['balances']) || 
-                $options['balances']['available'] != $accountData['balances']['available'] || 
-                $options['balances']['current'] != $accountData['balances']['current']) {
+            if (!isset($options->balances) || 
+                $options->balances->available != $accountData['balances']['available'] || 
+                $options->balances->current != $accountData['balances']['current']) {
                 $balancesChanged = true;
             }
             
-            // Update the balances data
-            $options['balances'] = $accountData['balances'];
+            // Update the balances data - convert array to object
+            $options->balances = json_decode(json_encode($accountData['balances']));
             
             // Only update timestamp if balances have changed
             if ($balancesChanged) {
-                $options['last_balance_update'] = now()->toDateTimeString();
+                $options->last_balance_update = now()->toDateTimeString();
             }
             
             // Save updated options back to the bank account
