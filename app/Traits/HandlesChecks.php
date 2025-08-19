@@ -128,4 +128,114 @@ trait HandlesChecks
         $this->auto_check_number = $next_check_number; // Store the auto-generated value
         $this->next_check_auto = true;
     }
+    
+    /**
+     * Associate expense(s) with a check
+     * 
+     * @param \App\Models\Check $check - The check to associate expenses with
+     * @param \Illuminate\Support\Collection|\App\Models\Expense|array $expenses - Expense(s) to associate
+     * @param bool $updateCheckAmount - Whether to update the check amount based on expenses
+     * @return \App\Models\Check
+     */
+    public function associateExpensesToCheck($check, $expenses, $updateCheckAmount = true)
+    {
+        // Convert single expense to collection
+        if ($expenses instanceof \App\Models\Expense) {
+            $expenses = collect([$expenses]);
+        } elseif (is_array($expenses)) {
+            $expenses = collect($expenses);
+        }
+        
+        // Calculate total expense amount
+        $totalAmount = 0;
+        
+        foreach ($expenses as $expense) {
+            // Skip if already associated with this check
+            if ($expense->check_id == $check->id) {
+                $totalAmount += $expense->amount;
+                continue;
+            }
+            
+            // If expense is already associated with another check, detach it first
+            if ($expense->check_id) {
+                $oldCheck = \App\Models\Check::find($expense->check_id);
+                if ($oldCheck) {
+                    $oldCheck->amount -= $expense->amount;
+                    $oldCheck->save();
+                }
+            }
+            
+            // Update expense with new check ID
+            $expense->update([
+                'check_id' => $check->id
+            ]);
+            
+            $totalAmount += $expense->amount;
+        }
+        
+        // Update check amount if requested
+        if ($updateCheckAmount) {
+            $check->amount = $totalAmount;
+            $check->save();
+        }
+        
+        return $check;
+    }
+
+    /**
+     * Create a check and associate expenses with it
+     * 
+     * @param array $checkData - Data for creating the check
+     * @param \Illuminate\Support\Collection|\App\Models\Expense|array $expenses - Expense(s) to associate
+     * @return \App\Models\Check
+     */
+    public function createCheckWithExpenses($checkData, $expenses)
+    {
+        // Create the check
+        $check = \App\Models\Check::create($checkData);
+        
+        // Associate expenses with the check
+        return $this->associateExpensesToCheck($check, $expenses);
+    }
+
+    /**
+     * Find or create a check based on bank_account_id, check_type, and check_number
+     * and associate expenses with it
+     * 
+     * @param array $checkData - Data for finding/creating the check
+     * @param \Illuminate\Support\Collection|\App\Models\Expense|array $expenses - Expense(s) to associate
+     * @return \App\Models\Check
+     */
+    public function findOrCreateCheckForExpenses($checkData, $expenses)
+    {
+        // Required fields for finding a check
+        $requiredFields = ['bank_account_id', 'check_type', 'check_number', 'vendor_id'];
+        
+        // Check if all required fields are present
+        foreach ($requiredFields as $field) {
+            if (!isset($checkData[$field])) {
+                throw new \InvalidArgumentException("Missing required field: {$field}");
+            }
+        }
+        
+        // Try to find an existing check with the same details
+        $existingCheck = null;
+        
+        if ($checkData['check_type'] == 'Check' && !empty($checkData['check_number'])) {
+            $existingCheck = \App\Models\Check::where('deleted_at', null)
+                ->where('bank_account_id', $checkData['bank_account_id'])
+                ->where('check_type', $checkData['check_type'])
+                ->where('check_number', $checkData['check_number'])
+                ->where('vendor_id', $checkData['vendor_id'])
+                ->first();
+        }
+        
+        if ($existingCheck) {
+            // Use the existing check
+            return $this->associateExpensesToCheck($existingCheck, $expenses);
+        } else {
+            // Create a new check
+            return $this->createCheckWithExpenses($checkData, $expenses);
+        }
+    }
 }
