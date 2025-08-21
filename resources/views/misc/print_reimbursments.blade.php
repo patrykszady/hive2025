@@ -129,121 +129,135 @@
                                         </flux:table.columns>
 
                                         <flux:table.rows>
-                                            @foreach($expense->receipt->receipt_items->items as $item_index => $line_item)
-                                                @php
-                                                    // $split = $expense->receipt_items && $expense->receipt_items[$item_index]['checkbox'] == true ? false : true;
-                                                    if($expense->receipt_items){
-                                                        if($expense->receipt_items[$item_index]['checkbox'] == false){
-                                                            $split = true;
+                                            @if(isset($expense->receipt->receipt_items) && 
+                                                isset($expense->receipt->receipt_items->items) && 
+                                                is_array($expense->receipt->receipt_items->items) || 
+                                                is_object($expense->receipt->receipt_items->items))
+                                                @foreach($expense->receipt->receipt_items->items as $item_index => $line_item)
+                                                    @php
+                                                        // $split = $expense->receipt_items && $expense->receipt_items[$item_index]['checkbox'] == true ? false : true;
+                                                        if($expense->receipt_items){
+                                                            if($expense->receipt_items[$item_index]['checkbox'] == false){
+                                                                $split = true;
+                                                            }else{
+                                                                $split = false;
+                                                            }
                                                         }else{
                                                             $split = false;
                                                         }
-                                                    }else{
-                                                        $split = false;
-                                                    }
 
-                                                    if($expense->vendor->id === 8){
-                                                        //Home Depot Search
-                                                        $search_url = 'https://www.homedepot.com/s/';
-                                                    }elseif($expense->vendor->id === 10){
-                                                        //Menards Search
-                                                        $search_url = 'https://www.menards.com/main/search.html?search=';
-                                                    }elseif($expense->vendor->id === 54){
-                                                        //Amazon Search
-                                                        $search_url = 'https://www.amazon.com/s?k=';
-                                                    }else{
-                                                        $search_url = false;
-                                                    }
-                                                @endphp
+                                                        if($expense->vendor->id === 8){
+                                                            //Home Depot Search
+                                                            $search_url = 'https://www.homedepot.com/s/';
+                                                        }elseif($expense->vendor->id === 10){
+                                                            //Menards Search
+                                                            $search_url = 'https://www.menards.com/main/search.html?search=';
+                                                        }elseif($expense->vendor->id === 54){
+                                                            //Amazon Search
+                                                            $search_url = 'https://www.amazon.com/s?k=';
+                                                        }else{
+                                                            $search_url = false;
+                                                        }
+                                                    @endphp
+
+                                                    <flux:table.row>
+                                                        <flux:table.cell colspan="4" class="pb-0!">
+                                                            <span
+                                                                @class([
+                                                                    'text-gray-200 line-through' => $split
+                                                                ])
+                                                                >
+                                                                {{-- {{$line_item->Description ?? Str::limit($line_item->Description, 45) : ''}} --}}
+                                                                {{isset($line_item->Description) ? Str::limit($line_item->Description, 45) : ''}}
+                                                            </span>
+                                                        </flux:table.cell>
+                                                    </flux:table.row>
+
+                                                    <flux:table.row class="border-none! py-0!">
+                                                        {{-- 09/28/24 URL TO ITEM --}}
+                                                        <flux:table.cell class="text-right">
+                                                            <i
+                                                                @class([
+                                                                    'text-gray-200 line-through' => $split,
+                                                                    'underline' => $search_url && !$split
+                                                                ])
+                                                                >
+                                                                @if($search_url && !$split)
+                                                                    <a href="{{$search_url}}{{$line_item->ProductCode}}">{{$line_item->ProductCode}}</a>
+                                                                @else
+                                                                    {{$line_item->ProductCode}}
+                                                                @endif
+                                                            </i>
+                                                        </flux:table.cell>
+                                                        <flux:table.cell>
+                                                            <span
+                                                                @class([
+                                                                    'text-gray-200 line-through' => $split
+                                                                ])
+                                                                >
+                                                                {{money($line_item->Price)}}
+                                                            </span>
+                                                        </flux:table.cell>
+                                                        <flux:table.cell>
+                                                            <span
+                                                                @class([
+                                                                    'text-gray-200 line-through' => $split
+                                                                ])
+                                                                >
+                                                                {{$line_item->Quantity}}
+                                                            </span>
+                                                        </flux:table.cell>
+                                                        <flux:table.cell>
+                                                            <span
+                                                                @class([
+                                                                    'text-gray-200 line-through' => $split,
+                                                                    'font-semibold' => !$split
+                                                                ])
+                                                                >
+                                                                {{money($line_item->TotalPrice)}}
+                                                            </span>
+                                                        </flux:table.cell>
+                                                    </flux:table.row>
+                                                @endforeach
 
                                                 <flux:table.row>
-                                                    <flux:table.cell colspan="4" class="pb-0!">
-                                                        <span
-                                                            @class([
-                                                                'text-gray-200 line-through' => $split
-                                                            ])
-                                                            >
-                                                            {{-- {{$line_item->Description ?? Str::limit($line_item->Description, 45) : ''}} --}}
-                                                            {{isset($line_item->Description) ? Str::limit($line_item->Description, 45) : ''}}
-                                                        </span>
-                                                    </flux:table.cell>
+                                                    <flux:table.cell colspan="3" class="text-right font-semibold">Subtotal</flux:table.cell>
+                                                    <flux:table.cell>{{money($expense->receipt->receipt_items->subtotal)}}</flux:table.cell>
                                                 </flux:table.row>
 
-                                                <flux:table.row class="border-none! py-0!">
-                                                    {{-- 09/28/24 URL TO ITEM --}}
-                                                    <flux:table.cell class="text-right">
-                                                        <i
-                                                            @class([
-                                                                'text-gray-200 line-through' => $split,
-                                                                'underline' => $search_url && !$split
-                                                            ])
-                                                            >
-                                                            @if($search_url && !$split)
-                                                                <a href="{{$search_url}}{{$line_item->ProductCode}}">{{$line_item->ProductCode}}</a>
-                                                            @else
-                                                                {{$line_item->ProductCode}}
-                                                            @endif
-                                                        </i>
-                                                    </flux:table.cell>
-                                                    <flux:table.cell>
-                                                        <span
-                                                            @class([
-                                                                'text-gray-200 line-through' => $split
-                                                            ])
-                                                            >
-                                                            {{money($line_item->Price)}}
-                                                        </span>
-                                                    </flux:table.cell>
-                                                    <flux:table.cell>
-                                                        <span
-                                                            @class([
-                                                                'text-gray-200 line-through' => $split
-                                                            ])
-                                                            >
-                                                            {{$line_item->Quantity}}
-                                                        </span>
-                                                    </flux:table.cell>
-                                                    <flux:table.cell>
-                                                        <span
-                                                            @class([
-                                                                'text-gray-200 line-through' => $split,
-                                                                'font-semibold' => !$split
-                                                            ])
-                                                            >
-                                                            {{money($line_item->TotalPrice)}}
-                                                        </span>
-                                                    </flux:table.cell>
+                                                <flux:table.row>
+                                                    <flux:table.cell colspan="3" class="text-right font-semibold">Tax</flux:table.cell>
+                                                    <flux:table.cell>{{money($expense->receipt->receipt_items->total_tax)}}</flux:table.cell>
                                                 </flux:table.row>
-                                            @endforeach
 
-                                            <flux:table.row>
-                                                <flux:table.cell colspan="3" class="text-right font-semibold">Subtotal</flux:table.cell>
-                                                <flux:table.cell>{{money($expense->receipt->receipt_items->subtotal)}}</flux:table.cell>
-                                            </flux:table.row>
-
-                                            <flux:table.row>
-                                                <flux:table.cell colspan="3" class="text-right font-semibold">Tax</flux:table.cell>
-                                                <flux:table.cell>{{money($expense->receipt->receipt_items->total_tax)}}</flux:table.cell>
-                                            </flux:table.row>
-
-                                            <flux:table.row>
-                                                <flux:table.cell colspan="3" class="text-right font-semibold">Total</flux:table.cell>
-                                                <flux:table.cell>
-                                                    @if($expense->receipt_items)
-                                                        <s>{{money($expense->receipt->receipt_items->total)}}</s>
-                                                        <br>
-                                                        <b>{{money($expense->amount)}}</b>
-                                                    @else
-                                                        @if($expense->amount != $expense->receipt->receipt_items->total)
+                                                <flux:table.row>
+                                                    <flux:table.cell colspan="3" class="text-right font-semibold">Total</flux:table.cell>
+                                                    <flux:table.cell>
+                                                        @if($expense->receipt_items)
                                                             <s>{{money($expense->receipt->receipt_items->total)}}</s>
                                                             <br>
                                                             <b>{{money($expense->amount)}}</b>
                                                         @else
-                                                            <b>{{money($expense->amount)}}</b>
+                                                            @if($expense->amount != $expense->receipt->receipt_items->total)
+                                                                <s>{{money($expense->receipt->receipt_items->total)}}</s>
+                                                                <br>
+                                                                <b>{{money($expense->amount)}}</b>
+                                                            @else
+                                                                <b>{{money($expense->amount)}}</b>
+                                                            @endif
                                                         @endif
-                                                    @endif
-                                                </flux:table.cell>
-                                            </flux:table.row>
+                                                    </flux:table.cell>
+                                                </flux:table.row>
+                                            @else
+                                                <flux:table.row>
+                                                    <flux:table.cell colspan="4" class="text-center py-4">
+                                                        <div class="text-gray-500">
+                                                            <p class="font-medium">No itemized receipt data available</p>
+                                                            <p>{{$expense->business_name}}: {{money($expense->amount)}}</p>
+                                                        </div>
+                                                    </flux:table.cell>
+                                                </flux:table.row>
+                                            @endif
                                         </flux:table.rows>
                                     </flux:table>
                                 </flux:card>

@@ -68,6 +68,7 @@ class ProjectFinances extends Component
 
         $nodePath = trim(shell_exec('which node'));
         $npmPath = trim(shell_exec('which npm'));
+
         Browsershot::html($view)
             ->setNodeBinary($nodePath)
             ->setNpmBinary($npmPath)

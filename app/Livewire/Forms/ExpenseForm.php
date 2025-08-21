@@ -305,7 +305,6 @@ class ExpenseForm extends Form
             'date' => $this->date,
             'invoice' => $this->invoice,
             'note' => $this->note,
-            //if $split true, project_id = NULL || if expense_splits isset/true, project_id by default is NULL as expected.
             'project_id' => $expense_details['project_id'],
             'distribution_id' => $expense_details['distribution_id'],
             'vendor_id' => $this->vendor_id,
@@ -317,8 +316,12 @@ class ExpenseForm extends Form
         // Handle existing check
         $check = $this->expense->check;
         
-        // Create or update check when bank_account_id, check_type, and check_number are set
-        if (empty($this->paid_by) && isset($this->component->bank_account_id) && isset($this->component->check_type)) {
+        // Only create or update check when bank_account_id is set (required for a check)
+        if (empty($this->paid_by) && 
+            isset($this->component->bank_account_id) && 
+            !empty($this->component->bank_account_id) && 
+            isset($this->component->check_type)) {
+            
             // Calculate distribution user ID if needed
             if ($expense_details['distribution_id']) {
                 $distribution_user_id = Distribution::findOrFail($expense_details['distribution_id'])->user_id;
@@ -328,6 +331,7 @@ class ExpenseForm extends Form
             }
 
             // Look for an existing check with the same details
+            $existing_check = null;
             if (!is_null($this->component->check_number)) {
                 $existing_check = Check::where('deleted_at', null)
                     ->where('bank_account_id', $this->component->bank_account_id)
@@ -349,9 +353,13 @@ class ExpenseForm extends Form
                 $check->amount = $check->amount + $this->amount;
                 $check->save();
             } 
-            // Otherwise create a new check
-            else if (!$check || $check->check_number != $this->component->check_number || 
-                     $check->bank_account_id != $this->component->bank_account_id) {
+            // Otherwise create a new check only if we have all required values
+            elseif (isset($this->component->bank_account_id) && 
+                    isset($this->component->check_type) && 
+                    (!$check || 
+                     $check->check_number != $this->component->check_number || 
+                     $check->bank_account_id != $this->component->bank_account_id)) {
+                
                 // Create new check
                 $check = Check::create([
                     'check_type' => $this->component->check_type,
@@ -367,9 +375,11 @@ class ExpenseForm extends Form
             }
             
             // Update the expense with the new check_id
-            $this->expense->update([
-                'check_id' => $check->id,
-            ]);
+            if (isset($check)) {
+                $this->expense->update([
+                    'check_id' => $check->id,
+                ]);
+            }
         } else if ($check) {
             // If there's no bank account or check details but there was a check previously,
             // detach the check from this expense

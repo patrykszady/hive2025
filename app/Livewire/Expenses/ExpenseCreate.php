@@ -37,7 +37,6 @@ class ExpenseCreate extends Component
     public $employees = [];
     public $via_vendor_employees = [];
     
-    // public $bank_accounts = [];
     public $vendors  = [];
     public $projects  = [];
     public $distributions  = [];
@@ -58,7 +57,6 @@ class ExpenseCreate extends Component
         $this->employees = $team_members->get();
         $this->via_vendor_employees = $team_members->wherePivotNotNull('via_vendor_id')->get();
 
-        // $this->bank_accounts = BankAccount::latestCheckingAccounts()->get();
         $this->vendors = Vendor::orderBy('business_name')->get(['id', 'business_name']);
 
         //use Computed projects method below instead of loading here?
