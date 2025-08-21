@@ -252,8 +252,7 @@
                                                 <flux:table.row>
                                                     <flux:table.cell colspan="4" class="text-center py-4">
                                                         <div class="text-gray-500">
-                                                            <p class="font-medium">No itemized receipt data available</p>
-                                                            <p>{{$expense->business_name}}: {{money($expense->amount)}}</p>
+                                                            <p class="font-medium">No itemized receipt data available.<br>See Original Receipt for details.</p>
                                                         </div>
                                                     </flux:table.cell>
                                                 </flux:table.row>
