@@ -308,6 +308,7 @@ class CompanyEmailController extends Controller
 
                         $nodePath = trim(shell_exec('which node'));
                         $npmPath = trim(shell_exec('which npm'));
+                        dd($nodePath, $npmPath);
                         Browsershot::html($view)->setNodeBinary($nodePath)->setNpmBinary($npmPath)->newHeadless()->format('A4')->margins(20, 0, 20, 20)->save($location);
 
                     } elseif (isset($receipt->options['pdf_html'])) {

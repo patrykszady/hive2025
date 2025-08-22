@@ -24,7 +24,7 @@
         "@tailwindcss/vite": "^4.0.7",
         "@zoon/puphpeteer": "github:zoonru/puphpeteer",
         "esbuild": "^0.25.0",
-        "puppeteer": "^14.4.1",
+        "puppeteer": "^24.17.0",
         "puppeteer-extra": "^3.3.6",
         "puppeteer-extra-plugin-adblocker": "^2.13.6",
         "puppeteer-extra-plugin-recaptcha": "^3.6.8",
