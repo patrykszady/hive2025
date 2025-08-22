@@ -7,7 +7,7 @@ Schedule::call(function () {
     app(\App\Http\Controllers\CompanyEmailController::class)->fetchMessagesForGrantId();
     })
     ->everyTenMinutes()
-    ->between('7:00', '20:00')
+    // ->between('7:00', '20:00')
     ->name('fetch-messages-for-grant-id')
     ->withoutOverlapping()
     ->onOneServer();
