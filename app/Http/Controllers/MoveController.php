@@ -42,6 +42,17 @@ class MoveController extends Controller
 {
     public function move()
     {
+        //get all expenses that have splits and a recepit but no receipt line items.
+        // $expenses = Expense::whereHas('splits') // Has at least one split
+        //     ->whereHas('receipts') // Has at least one receipt
+        //     ->whereDoesntHave('receipts', function($query) {
+        //         $query->whereNotNull('receipt_items')
+        //             ->whereRaw("JSON_LENGTH(receipt_items->'$.items') > 0");
+        //     }) // Doesn't have any receipts with line items
+        //     ->orderBy('date', 'desc')->take(10)->get();
+
+        // dd($expenses);
+        
         // $transactions = Transaction::withoutGlobalScopes()->where('vendor_id', 317)->get();
         // foreach($transactions as $transaction){
         //     $transaction->vendor_id = 218;

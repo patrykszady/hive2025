@@ -6,6 +6,7 @@ use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 
 class ExpenseReceipts extends Model
 {
@@ -13,48 +14,49 @@ class ExpenseReceipts extends Model
 
     protected $table = 'expense_receipts_data';
 
-    protected $guarded = [];
+    protected $fillable = ['expense_id', 'receipt_filename', 'receipt_html', 'receipt_items', 'notes', 'belongs_to_vendor_id', 'date', 'created_at', 'updated_at'];
 
-    protected function casts(): array
-    {
-        return [
-            'receipt_items' => 'json',
-        ];
-    }
-
-    // protected $fillable = ['expense_id', 'receipt_html' , 'receipt_filename'];
+    protected $casts = [
+        'receipt_items' => 'object',
+        'date' => 'date',
+    ];
 
     public function expense(): BelongsTo
     {
         return $this->belongsTo(Expense::class);
     }
 
-    public function getNotesAttribute($value)
+    protected function notes(): Attribute
     {
-        // Normalize handwritten_notes and purchase_order as arrays
-        $handwritten_notes = isset($this->receipt_items->handwritten_notes)
-            ? (array) $this->receipt_items->handwritten_notes
-            : [];
+        return Attribute::make(
+            get: function ($value) {
+                // Normalize handwritten_notes and purchase_order as arrays
+                $handwritten_notes = isset($this->receipt_items->handwritten_notes)
+                    ? (array) $this->receipt_items->handwritten_notes
+                    : [];
 
-        $purchase_order = isset($this->receipt_items->purchase_order)
-            ? (array) $this->receipt_items->purchase_order
-            : [];
+                $purchase_order = isset($this->receipt_items->purchase_order)
+                    ? (array) $this->receipt_items->purchase_order
+                    : [];
 
-        // Combine, filter, and implode the notes
-        $notes = implode(' | ', array_filter(array_merge($handwritten_notes, $purchase_order)));
-
-        return $notes;
+                // Combine, filter, and implode the notes
+                return implode(' | ', array_filter(array_merge($handwritten_notes, $purchase_order)));
+            }
+        );
     }
 
-    public function getReceiptItemsAttribute($value)
+    // Add this scope for ordering receipts
+    public function scopeOrdered($query)
     {
-        if ($value == null) {
-            $receipt_items = null;
-        } else {
-            $receipt_items = json_decode($value);
-        }
-
-        return $receipt_items;
+        // First check if receipts have line items, then sort by date (newest first)
+        return $query->orderByRaw("
+            CASE 
+                WHEN JSON_CONTAINS_PATH(receipt_items, 'one', '$.items') 
+                AND JSON_LENGTH(JSON_EXTRACT(receipt_items, '$.items')) > 0 
+                THEN 1 
+                ELSE 0 
+            END DESC
+        ")->latest();
     }
 
     // public function getReceiptItemsAttribute($value)

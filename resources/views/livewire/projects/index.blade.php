@@ -37,43 +37,57 @@
         <div class="space-y-2">
             <flux:table :paginate="$this->projects">
                 <flux:table.columns>
-                    <flux:table.column>Address</flux:table.column>
-                    @if($view != 'clients.index')
-                        <flux:table.column>Client</flux:table.column>
+                    @if($view == 'clients.index')
+                        {{-- Order for client view: Name, Address, Status --}}
+                        <flux:table.column>Name</flux:table.column>
+                        <flux:table.column>Address</flux:table.column>
+                    @else
+                        {{-- Original order: Address, Client, Name, Status --}}
+                        <flux:table.column>Address</flux:table.column>
+                        @if($view != 'clients.index')
+                            <flux:table.column>Client</flux:table.column>
+                        @endif
+                        <flux:table.column>Name</flux:table.column>
                     @endif
-                    <flux:table.column>Name</flux:table.column>
-                    {{-- <flux:table.column sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')">Date</flux:table.column>
-                    @if($view != 'checks.show')
-                        <flux:table.column >Vendor</flux:table.column>
-                    @endif
-
-                    @if($view != 'projects.show')
-                        <flux:table.column>Project</flux:table.column>
-                    @endif --}}
                     <flux:table.column>Status</flux:table.column>
                 </flux:table.columns>
 
                 <flux:table.rows>
                     @foreach ($this->projects as $project)
                         <flux:table.row :key="$project->id">
-                            <flux:table.cell
-                                wire:navigate.hover
-                                href="{{route('projects.show', $project->id)}}"
-                                variant="strong"
-                                class="cursor-pointer"
-                                >
-                                {{ $project->address }}
-                            </flux:table.cell>
-                            @if($view != 'clients.index')
+                            @if($view == 'clients.index')
+                                {{-- Order for client view: Name (bold & clickable), Address (regular), Status --}}
                                 <flux:table.cell
                                     wire:navigate.hover
-                                    href="{{route('clients.show', $project->client->id)}}"
+                                    href="{{route('projects.show', $project->id)}}"
+                                    variant="strong" 
+                                    class="cursor-pointer">
+                                    {{ $project->project_name }}
+                                </flux:table.cell>
+                                <flux:table.cell>
+                                    {{ $project->address }}
+                                </flux:table.cell>
+                            @else
+                                {{-- Original order: Address (bold), Client, Name, Status --}}
+                                <flux:table.cell
+                                    wire:navigate.hover
+                                    href="{{route('projects.show', $project->id)}}"
+                                    variant="strong"
                                     class="cursor-pointer"
                                     >
-                                    {{ $project->client->name }}
+                                    {{ $project->address }}
                                 </flux:table.cell>
+                                @if($view != 'clients.index')
+                                    <flux:table.cell
+                                        wire:navigate.hover
+                                        href="{{route('clients.show', $project->client->id)}}"
+                                        class="cursor-pointer"
+                                        >
+                                        {{ $project->client->name }}
+                                    </flux:table.cell>
+                                @endif
+                                <flux:table.cell>{{ $project->project_name }}</flux:table.cell>
                             @endif
-                            <flux:table.cell>{{ $project->project_name }}</flux:table.cell>
                             <flux:table.cell>
                                 <flux:badge size="sm" :color="$project->latestStatus->title == 'Complete' ? 'green' : ($project->latestStatus->title == 'Active' ? 'blue' : ($project->latestStatus->title == 'Cancelled' ? 'red' : 'yellow'))" inset="top bottom">{{ $project->latestStatus->title }}</flux:badge>
                             </flux:table.cell>

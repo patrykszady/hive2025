@@ -16,17 +16,11 @@ class ProjectFinances extends Component
 
     public $finances = [];
 
-    protected $listeners = ['refreshComponent' => '$refresh', 'refresh'];
+    protected $listeners = ['refreshComponent' => '$refresh'];
 
     public function mount()
     {
         $this->finances = $this->project->finances;
-    }
-
-    public function refresh()
-    {
-        $this->mount();
-        $this->render();
     }
 
     //Reimbursement print
@@ -54,12 +48,13 @@ class ProjectFinances extends Component
             $split->business_name = $split->expense->vendor->business_name;
             $split->date = $split->expense->date;
             $split->project_name = $split->project->name;
-
+            $split->selectedSplit = $split;
+                        
             $expenses->add($split);
         }
 
         $expenses = $expenses->sortBy('date');
-
+ 
         $title = 'Reimbursements | '.$this->project->client->name.' | '.$this->project->project_name.' | '.$this->project->id;
         $title_file = 'Reimbursements - '.$this->project->id.' - '.$this->project->client->name.' - '.$this->project->project_name;
 

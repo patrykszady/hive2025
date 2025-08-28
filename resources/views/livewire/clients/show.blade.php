@@ -1,5 +1,5 @@
 <div>
-    <div class="grid grid-cols-4 gap-4 lg:max-w-5xl">
+    <div class="grid grid-cols-4 gap-4 max-w-3xl">
         <div class="col-span-4 lg:col-span-2">
             {{-- CLIENT DETAILS --}}
             <x-details.card 

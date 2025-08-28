@@ -44,7 +44,8 @@
                     <flux:select.option value="{{$vendor->id}}">{{$vendor->name}}</flux:select.option>
                 @endforeach
             </flux:select>
-            @if(isset($form->merchant_name))
+            
+            @if($this->shouldShowMerchantName)
                 <flux:description><i class="text-sky-800">{{$form->merchant_name}}</i></flux:description>
             @endif
 
@@ -122,7 +123,7 @@
             >
             <flux:select label="Paid By" wire:model.live="form.paid_by" placeholder="Choose who paid...">
                 <flux:select.option value="">{{auth()->user()->vendor->name}}</flux:select.option>
-                @foreach($employees as $employee)
+                @foreach($this->employees as $employee)
                     <flux:select.option value="{{$employee->id}}">{{$employee->first_name}}</flux:select.option>
                 @endforeach
             </flux:select>
@@ -176,7 +177,7 @@
                     {{--  x-bind:selected="split == true ? true : false" --}}
                     <flux:select.option value="">None</flux:select.option>
                     <flux:select.option x-bind:disabled="project_completed" value="Client">Client</flux:select.option>
-                    @foreach ($via_vendor_employees as $employee)
+                    @foreach ($this->via_vendor_employees as $employee)
                         <flux:select.option value="{{$employee->id}}">{{$employee->first_name}}</flux:select.option>
                     @endforeach
                 </flux:select>

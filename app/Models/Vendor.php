@@ -30,6 +30,7 @@ class Vendor extends Model
     {
         return [
             'registration' => 'object', //array
+            'options'=> 'object',
         ];
     }
 
@@ -216,6 +217,23 @@ class Vendor extends Model
                 // Extract first part before ',' if available
                 $nameParts = explode(',', $attributes['business_name']);
                 return trim($nameParts[0]);
+            }
+        );
+    }
+
+        /**
+     * Get the SKU search URL from the options JSON column
+     */
+    protected function skuSearchUrl(): Attribute
+    {
+        return Attribute::make(
+            get: function ($value, array $attributes) {
+                // Get from options if it exists
+                if (isset($this->options) && isset($this->options->sku_search_url)) {
+                    return $this->options->sku_search_url;
+                }
+                
+                return null;
             }
         );
     }

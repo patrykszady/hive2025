@@ -29,23 +29,17 @@
                     <x-details.row title="Date" content="{{ $expense->date->format('m/d/Y') }}" />
                     <x-details.row 
                         title="Vendor" 
-                        content="{{ $expense->vendor->business_name . ', ' . $expense->vendor->business_type }}"
+                        {{-- . ', ' . $expense->vendor->business_type  --}}
+                        content="{{ $expense->vendor->business_name }}"
                         href="{{ isset($expense->vendor->id) ? route('vendors.show', $expense->vendor->id) : null }}"
                     />
+                    
                     <x-details.row 
                         title="Project" 
                         content="{{ $expense->project->name }}"
+                        secondary_content="{{ $this->notesSummary }}"
                         href="{{ isset($expense->project->id) ? route('projects.show', $expense->project->id) : null }}"
                     />
-                    
-                    @if($expense->note)
-                        <flux:description><i class="text-sky-800">{{$expense->note}}</i></flux:description>
-                    @endif
-                    @if($expense->has('receipts'))
-                        @if(isset($expense->receipts()->first()->notes))
-                            <flux:description><i class="text-sky-800">{{$expense->receipts()->first()->notes}}</i></flux:description>
-                        @endif
-                    @endif
 
                     @if($expense->reimbursment)
                         <x-details.row title="Reimbursment" content="{{ $expense->reimbursment }}" />
@@ -81,6 +75,11 @@
                     :transactions="$expense->transactions" 
                     :title="$expense->check?->transactions->isNotEmpty() ? 'Check Transactions' : 'Transactions'"
                 />
+            @endif
+
+            {{-- CHECK --}}
+            @if($expense->check)
+                <livewire:checks.checks-index :expense_check_id="$expense->check->id" :view="'expenses.show'"/>
             @endif
         </div>
 
@@ -121,96 +120,137 @@
             @endif
 
             {{-- SPLITS --}}
-            @if(!$expense->splits->isEmpty())
-                <flux:card class="space-y-6">
-                    <div>
-                        <flux:heading size="lg">Splits</flux:heading>
-                    </div>
-
-                    <flux:separator variant="subtle" />
-
-                    <div class="space-y-6">
-                        <flux:table>
-                            <flux:table.columns>
-                                <flux:table.column>Amount</flux:table.column>
-                                <flux:table.column>Project</flux:table.column>
-                                <flux:table.column>Reimb.</flux:table.column>
-                            </flux:table.columns>
-
-                            <flux:table.rows>
-                                @foreach($expense->splits as $split)
-                                    <flux:table.row>
-                                        <flux:table.cell variant="strong">{{money($split->amount)}}</flux:table.cell>
-
-                                        <flux:table.cell>
-                                            @if($split->distribution)
-                                                {{$split->distribution->name }}
+            @if($expense->splits()->exists())
+                <x-details.card 
+                    title="Expense Splits"
+                    subheading="How this expense is divided across different projects"
+                    details_text="Split Details"
+                >
+                    <x-slot:details>
+                        <div class="-mx-5">
+                            <flux:table class="w-full">
+                                <flux:table.columns>
+                                    @if($this->hasReceiptLineItems)
+                                        <flux:table.column class="w-[20%] !pl-5 pr-5" title="Highlight this Split receipt items below">Items</flux:table.column>
+                                        <flux:table.column class="w-[20%]">Amount</flux:table.column>
+                                    @else
+                                        <flux:table.column class="!pl-5 pr-5">Amount</flux:table.column>
+                                    @endif
+                                    <flux:table.column class="w-[35%]">Project</flux:table.column>
+                                    <flux:table.column title="Reimbursement">Reimb.</flux:table.column>
+                                </flux:table.columns>
+                                
+                                <flux:table.rows>
+                                    @foreach($expense->splits as $split)
+                                        <flux:table.row :class="$selectedSplitId == $split->id ? 'bg-blue-50 dark:bg-blue-900/10' : ''">
+                                            @if($this->hasReceiptLineItems)
+                                                <flux:table.cell class="!pl-5 pr-5">
+                                                    <flux:button 
+                                                        wire:click="toggleSplit({{ $split->id }})"
+                                                        class="w-full justify-center"
+                                                        size="xs"
+                                                        :loading="false"
+                                                        :variant="$selectedSplitId == $split->id ? 'primary' : 'outline'"
+                                                        :color="$selectedSplitId == $split->id ? 'green' : null"
+                                                        aria-label="Toggle split selection"
+                                                    >
+                                                        {{ $selectedSplitId == $split->id ? 'Selected' : 'Select' }}
+                                                    </flux:button>
+                                                </flux:table.cell>
+                                                <flux:table.cell variant="strong">{{money($split->amount)}}</flux:table.cell>
                                             @else
-                                                <a wire:navigate.hover href="{{route('projects.show', $split->project->id)}}">{{ $split->project->address }}</a>
+                                                <flux:table.cell variant="strong" class="!pl-5 pr-5">{{money($split->amount)}}</flux:table.cell>
                                             @endif
-                                        </flux:table.cell>
+                                            
+                                            <flux:table.cell class="truncate">
+                                                @if($split->distribution)
+                                                    {{$split->distribution->name }}
+                                                @else
+                                                    <a wire:navigate.hover href="{{route('projects.show', $split->project->id)}}">{{ $split->project->address }}</a>
+                                                @endif
+                                            </flux:table.cell>
 
-                                        <flux:table.cell>{{$split->reimbursment}}</flux:table.cell>
-                                    </flux:table.row>
-                                @endforeach
-                            </flux:table.rows>
-                        </flux:table>
-                    </div>
-                </flux:card>
-            @endif
-
-            {{-- CHECK --}}
-            @if($expense->check)
-                <livewire:checks.checks-index :expense_check_id="$expense->check->id" :view="'expenses.show'"/>
+                                            <flux:table.cell>{{$split->reimbursment}}</flux:table.cell>
+                                        </flux:table.row>
+                                    @endforeach
+                                </flux:table.rows>
+                            </flux:table>
+                        </div>
+                    </x-slot:details>
+                </x-details.card>
             @endif
 
             {{-- RECEIPTS --}}
-            @if(!$expense->receipts->isEmpty())
-                <flux:card class="space-y-6">
-                    <div class="flex justify-between">
-                        <flux:heading size="lg">Receipt</flux:heading>
-                        {{-- receipt link button on the right --}}
-                        {{-- 10-17-2022..make this a modal --}}
-                        @foreach($expense->receipts->whereNotNull('receipt_filename') as $original_receipt)
-                            {{-- 09-28-2024 ... if one BUTTON ... if multiple buttton + dropdown on the right  --}}
-                            <flux:button
-                                href="{{ route('expenses.original_receipt', ['receipts', $original_receipt->receipt_filename]) }}"
+            @if($expense->receipts()->exists())
+                <x-details.card 
+                    title="Receipts"
+                    subheading="Receipt details and information"
+                    details_text="Receipt Items"
+                >
+                    @if($expense->receipts->count() === 1 && !empty($expense->receipts->first()->receipt_filename))
+                        <x-slot:header_buttons>
+                            <a
+                                href="{{ route('expenses.original_receipt', ['receipts', $expense->receipts->first()->receipt_filename]) }}"
                                 target="_blank"
-                                >
-                                View Receipt
-                            </flux:button>
-                        @endforeach
-                    </div>
+                                title="View Receipt"
+                                aria-label="View Receipt"
+                                class="inline-flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 hover:text-zinc-700 hover:bg-zinc-950/5 dark:hover:bg-white/10"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-4 w-4">
+                                    <path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/>
+                                    <circle cx="12" cy="12" r="2.5"/>
+                                </svg>
+                            </a>
+                        </x-slot:header_buttons>
+                    @endif
+                    
 
-                    <flux:separator variant="subtle" />
-
-                    <div class="space-y-6">
-                        @if($expense->receipts()->latest()->first()->receipt_items == NULL)
-                            <div class="flow-root">
-                                <div class="m-2">
-                                    <pre style="background-color:transparent; overflow: auto;" >{!! $expense->receipts()->latest()->first()->receipt_html !!}</pre>
-                                </div>
-                            </div>
+                    <x-slot:details>
+                        @if($expense->receipts->count() > 1)
+                            {{-- Show tabs for multiple receipts --}}
+                            <flux:tab.group>
+                                <flux:tabs>
+                                    @foreach($expense->receipts as $receipt)
+                                        <flux:tab :name="$receipt->id" class="group">
+                                            <span class="inline-flex items-center gap-2">
+                                                <span>Receipt {{ $loop->iteration }}</span>
+                        @if(!empty($receipt->receipt_filename))
+                                                    <a
+                                                        href="{{ route('expenses.original_receipt', ['receipts', $receipt->receipt_filename]) }}"
+                                                        target="_blank"
+                                                        title="View Receipt"
+                                                        aria-label="View Receipt"
+                            class="hidden group-aria-selected:inline-flex items-center text-zinc-500 hover:text-zinc-700"
+                                                    >
+                                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-4 w-4">
+                                                            <path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/>
+                                                            <circle cx="12" cy="12" r="2.5"/>
+                                                        </svg>
+                                                    </a>
+                                                @endif
+                                            </span>
+                                        </flux:tab>
+                                    @endforeach
+                                </flux:tabs>
+                                @foreach($expense->receipts as $receipt)
+                                    <flux:tab.panel :name="$receipt->id" class="!pt-2">
+                                        <x-expenses.receipt :receipt="$receipt" :selectedSplit="$this->selectedSplit" />
+                                    </flux:tab.panel>
+                                @endforeach
+                            </flux:tab.group>
                         @else
-                            @if($expense->receipts()->latest()->first()->receipt_items->items == NULL)
-                                <div class="flow-root">
-                                    <div class="m-2">
-                                        <pre style="background-color:transparent; overflow: auto;" >{!! $expense->receipts()->latest()->first()->receipt_html !!}</pre>
-                                    </div>
-                                </div>
-                            @else
-                                @include('livewire.expenses._receipt')
-                            @endif
+                            {{-- Show single receipt without tabs --}}
+                            <x-expenses.receipt :receipt="$expense->receipts->first()" :selectedSplit="$this->selectedSplit" />
                         @endif
-                    </div>
-                </flux:card>
+                    </x-slot:details>
+                </x-details.card>
             @endif
         </div>
     </div>
 
 	{{-- top level so content is in front of everything on page --}}
     @can('update', $expense)
-	    <livewire:expenses.expense-create />
+        <livewire:expenses.expense-create />
         <livewire:expenses.expenses-associated />
     @endif
 </div>

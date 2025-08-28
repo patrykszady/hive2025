@@ -3,7 +3,6 @@
 namespace App\Livewire\Expenses;
 
 use App\Livewire\Forms\ExpenseForm;
-
 use App\Models\BankAccount;
 use App\Models\Check;
 use App\Models\Distribution;
@@ -11,13 +10,9 @@ use App\Models\Expense;
 use App\Models\Project;
 use App\Models\Transaction;
 use App\Models\Vendor;
-
 use App\Traits\HandlesChecks;
-
 use Flux;
-
 use Illuminate\Support\Facades\Route;
-
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 use Livewire\WithFileUploads;
@@ -27,19 +22,11 @@ class ExpenseCreate extends Component
     use WithFileUploads, HandlesChecks;
 
     public ExpenseForm $form;
-
     public Expense $expense;
 
     public $split = false;
     public $splits = false;
     public $expense_splits = [];
-
-    public $employees = [];
-    public $via_vendor_employees = [];
-    
-    public $vendors  = [];
-    public $projects  = [];
-    public $distributions  = [];
 
     public $view_text = [
         'card_title' => 'Create Expense',
@@ -52,54 +39,41 @@ class ExpenseCreate extends Component
     public function mount()
     {
         $this->expense = Expense::make();
-
-        $team_members = auth()->user()->vendor->users()->employed();
-        $this->employees = $team_members->get();
-        $this->via_vendor_employees = $team_members->wherePivotNotNull('via_vendor_id')->get();
-
-        $this->vendors = Vendor::orderBy('business_name')->get(['id', 'business_name']);
-
-        //use Computed projects method below instead of loading here?
-        $this->projects = Project::orderBy('created_at', 'desc')->get();
-        $this->distributions = Distribution::all(['id', 'name']);
+        // No data loading here - we'll use computed properties instead
     }
 
-    // #[Computed]
-    // public function vendors()
-    // {
-    //     $vendors = Vendor::orderBy('business_name')->get(['id', 'business_name']);
-    //     return $vendors;
-    // }
+    #[Computed]
+    public function employees()
+    {
+        return auth()->user()->vendor->users()->employed()->get();
+    }
 
-    // #[Computed]
-    // public function projects()
-    // {
-    //     $projects = Project::status(['Active', 'Complete', 'Service Call', 'Service Call Complete'])
-    //         ->whereHas('statuses', function ($query) {
-    //             $query->where('title', 'Active');
-    //         })
-    //         ->with(['statuses' => function ($query) {
-    //             $query->where('title', 'Active')->orderBy('start_date', 'desc');
-    //         }])
-    //         ->orderByDesc(function ($query) {
-    //             $query->select('start_date')
-    //                 ->from('project_status')
-    //                 ->whereColumn('project_status.project_id', 'projects.id')
-    //                 ->where('title', 'Active')
-    //                 ->latest('start_date')
-    //                 ->limit(1);
-    //         })
-    //         ->get();
+    #[Computed]
+    public function via_vendor_employees()
+    {
+        return auth()->user()->vendor->users()->employed()->wherePivotNotNull('via_vendor_id')->get();
+    }
 
-    //     return $projects;
-    // }
+    #[Computed]
+    public function vendors()
+    {
+        return Vendor::orderBy('business_name')->get(['id', 'business_name']);
+    }
 
-    // #[Computed]
-    // public function distributions()
-    // {
-    //     $distributions = Distribution::all(['id', 'name']);
-    //     return $distributions;
-    // }
+    #[Computed]
+    public function projects()
+    {
+        return Project::orderBy('created_at', 'desc')->get();
+    }
+
+    #[Computed]
+    public function distributions()
+    {
+        return Distribution::all(['id', 'name']);
+    }
+
+    // Your existing methods don't need to change since they'll now 
+    // automatically access the computed properties when needed
 
     public function updated($field, $value)
     {
@@ -168,7 +142,8 @@ class ExpenseCreate extends Component
 
     public function newExpense($amount)
     {
-        $this->dispatch('resetSplits')->to('expenses.expense-splits-create');
+        $this->expense = Expense::make();
+       
         $this->form->amount = $amount;
         $this->view_text = [
             'card_title' => 'Create Expense',
@@ -182,15 +157,15 @@ class ExpenseCreate extends Component
     public function editExpense(Expense $expense)
     {
         $this->resetModal();
-        $this->dispatch('resetSplits')->to('expenses.expense-splits-create');
 
         $this->expense = $expense;
+        $this->form->setExpense($expense);
 
         if (! $expense->splits->isEmpty()) {
             $this->hasSplits($expense->splits);
         }
 
-        $this->form->setExpense($expense);
+    
 
         $this->view_text = [
             'card_title' => 'Update Expense',
@@ -218,6 +193,21 @@ class ExpenseCreate extends Component
         // $this->transaction = NULL;
         // $this->check = Check::make();
         // $this->resetValidation();
+    }
+
+    #[Computed]
+    public function shouldShowMerchantName()
+    {
+        if (!isset($this->form->merchant_name) || empty($this->form->merchant_name)) {
+            return false;
+        }
+        
+        if (!$this->form->vendor_id) {
+            return true;
+        }
+        
+        $selectedVendor = $this->vendors->firstWhere('id', $this->form->vendor_id);
+        return !$selectedVendor || $this->form->merchant_name != $selectedVendor->business_name;
     }
 
     public function createExpenseFromTransaction(Transaction $transaction)
