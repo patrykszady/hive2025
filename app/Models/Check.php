@@ -68,12 +68,45 @@ class Check extends Model
         return $this->hasMany(Expense::class);
     }
 
+    /**
+     * Label to display next to the number, based on type.
+     * - Check => "Check #"
+     * - Transfer => "Transfer #"
+     * - Cash => "Cash"
+     */
+    protected function numberLabel(): Attribute
+    {
+        return Attribute::make(
+            get: fn () => match ($this->check_type) {
+                'Check' => 'Check #',
+                'Transfer' => 'Transfer #',
+                'Cash' => 'Cash',
+                default => '',
+            }
+        );
+    }
+
     protected function checkNumber(): Attribute
     {
         return Attribute::make(
             get: fn ($value) => $this->check_type === 'Check' ? $value : $this->id,
         );
         //->shouldCache();
+    }
+
+    /**
+     * Display payment type for UI: Check, Transaction, or Cash.
+     */
+    protected function paymentType(): Attribute
+    {
+        return Attribute::make(
+            get: fn () => match ($this->check_type) {
+                'Transfer' => 'Transaction',
+                'Check' => 'Check',
+                'Cash' => 'Cash',
+                default => (string) $this->check_type,
+            }
+        );
     }
 
     public function getAmountDifferenceAttribute()
@@ -102,7 +135,7 @@ class Check extends Model
                             ->first();
                             
                         if ($viaVendor) {
-                            return $viaVendor->business_name . ' (' . $viaVendor->business_type . ')';
+                return trim($viaVendor->business_name . ($viaVendor->business_type ? ' - ' . $viaVendor->business_type : ''));
                         }
                     }
                     
@@ -111,7 +144,7 @@ class Check extends Model
                 } 
                 // If check has a vendor, use vendor name
                 elseif ($this->vendor) {
-                    return $this->vendor->business_name . ' (' . $this->vendor->business_type . ')';
+            return trim($this->vendor->business_name . ($this->vendor->business_type ? ' - ' . $this->vendor->business_type : ''));
                 }
                 
                 // Fallback if neither user nor vendor are valid

@@ -5,30 +5,35 @@ namespace App\Livewire\VendorDocs;
 use App\Models\Bank;
 use App\Models\Check;
 use App\Models\Transaction;
+use Carbon\Carbon;
 use Livewire\Component;
 
 class AuditIndex extends Component
 {
     public $banks = [];
-
-    // public $audit = [];
+    public $start_date = '';
     public $end_date = '';
-
     public $type = '';
 
     protected function rules()
     {
         return [
-            // 'banks' => 'required',
             'banks.*.checked' => 'nullable', // multiple checkbox
-            'end_date' => 'required',
+            'start_date' => 'nullable|date',
+            'end_date' => 'required|date',
             'type' => 'required', //workers or liablity | dropfown
         ];
     }
 
     public function updated($field, $value)
     {
-        // dd($field);
+        if ($field === 'start_date' && !empty($value) && empty($this->end_date)) {
+            try {
+                $this->end_date = Carbon::createFromFormat('Y-m-d', $value)->addYear()->format('Y-m-d');
+            } catch (\Throwable $e) {
+                // ignore formatting issues; validation will handle
+            }
+        }
         $this->validateOnly($field);
     }
 
@@ -82,6 +87,7 @@ class AuditIndex extends Component
         //     ->take(5);
 
         return redirect()->route('vendor_docs.audit', [
+            'start_date' => $this->start_date,
             'end_date' => $this->end_date,
             'bank_account_ids' => $bank_account_ids,
             'audit_type' => $this->type,
@@ -108,6 +114,7 @@ class AuditIndex extends Component
 
         // dd($transactions->first());
     }
+
 
     public function render()
     {

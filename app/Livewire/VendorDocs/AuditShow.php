@@ -7,118 +7,273 @@ use App\Models\Transaction;
 use App\Models\Vendor;
 use Carbon\Carbon;
 use Ilovepdf\Ilovepdf;
+use Illuminate\Support\Collection;
+use Illuminate\View\View;
+// SimpleExcelWriter was used previously; now using OpenSpout directly for per-cell styles
+use OpenSpout\Common\Entity\Style\Border;
+use OpenSpout\Common\Entity\Style\BorderPart;
+use OpenSpout\Common\Entity\Style\Color;
+use OpenSpout\Common\Entity\Style\Style;
+use OpenSpout\Writer\XLSX\Writer as XLSXWriter;
+use OpenSpout\Common\Entity\Row;
+use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 
 class AuditShow extends Component
 {
-    public $bank_account_ids = null;
+    #[Url(except: '')]
+    public ?string $end_date = null;
 
-    public $end_date = null;
+    #[Url(except: '')]
+    public ?string $audit_type = null;
 
-    public $audit_type = null;
+    #[Url(as: 'bank_account_ids', except: '')]
+    public array $bank_account_ids = [];
 
-    public $vendors_grouped_checks = null;
+    public ?string $view = null;
 
-    public $transactions_no_check = null;
+    // Only used to render a static sort indicator in the header
+    public array $vendorSortDir = [];
 
-    public $vendor_docs = [];
-
-    public $view = null;
-
-    protected $queryString = [
-        'end_date' => ['except' => ''],
-        'bank_account_ids' => ['except' => ''],
-        'audit_type' => ['except' => ''],
-    ];
-
-    public function mount()
+    public function mount(): void
     {
-        $start_date = Carbon::parse($this->end_date)->subYear()->format('Y-m-d');
-        $end_date = Carbon::parse($this->end_date)->format('Y-m-d');
+        // No heavy work here; computed properties will handle data.
+        // You can set default sort directions if desired.
+    }
 
-        //check transactions with no CHECK set
-        $this->transactions_no_check =
-            Transaction::whereBetween('transaction_date', [$start_date, $end_date])
-                ->whereIn('bank_account_id', $this->bank_account_ids)
-                ->whereNotNull('check_number')
-                ->whereNull('check_id')
-                ->whereNull('expense_id')
-                ->get();
+    #[Computed]
+    public function transactions_no_check(): Collection
+    {
+        if (!$this->end_date || empty($this->bank_account_ids)) {
+            return collect();
+        }
+        $start = Carbon::parse($this->end_date)->subYear()->toDateString();
+        $end = Carbon::parse($this->end_date)->toDateString();
 
-        $this->vendors_grouped_checks =
-            Check::whereBetween('date', [$start_date, $end_date])
-                ->whereIn('bank_account_id', $this->bank_account_ids)
-                ->whereNotNull('vendor_id')
-                // ->where('vendor_id', 48)
-                // ->with(['vendor'])
-                ->where('vendor_id', '!=', auth()->user()->vendor->id)
-                ->where('check_type', '!=', 'Cash')
-                ->orderBy('date')
-                ->get()
-                ->groupBy('vendor_id')
-                ->toBase();
+        return Transaction::whereBetween('transaction_date', [$start, $end])
+            ->whereIn('bank_account_id', $this->bank_account_ids)
+            ->whereNotNull('check_number')
+            ->whereNull('check_id')
+            ->whereNull('expense_id')
+            ->orderBy('transaction_date')
+            ->get();
+    }
 
-        $this->vendor_docs = collect();
-        foreach ($this->vendors_grouped_checks as $vendor_id => $vendor_checks) {
-            $vendor = Vendor::findOrFail($vendor_id);
-            // $vendor_checks->vendor = $vendor;
-            $vendor_docs = $vendor->vendor_docs()->where('type', $this->audit_type)->get();
+    #[Computed]
+    public function vendors_grouped_checks(): Collection
+    {
+        if (!$this->end_date || empty($this->bank_account_ids)) {
+            return collect();
+        }
 
+        $start = Carbon::parse($this->end_date)->subYear()->toDateString();
+        $end = Carbon::parse($this->end_date)->toDateString();
+
+        $grouped = Check::whereBetween('date', [$start, $end])
+            ->whereIn('bank_account_id', $this->bank_account_ids)
+            ->whereNotNull('vendor_id')
+            ->whereNull('user_id')
+            ->where('vendor_id', '!=', auth()->user()->vendor->id)
+            ->where('check_type', '!=', 'Cash')
+            ->with('vendor')
+            ->orderBy('date')
+            ->get()
+            ->groupBy('vendor_id')
+            ->sortBy(function ($checks) {
+                $vendor = $checks->first()->vendor;
+                return $vendor ? strtolower($vendor->business_name) : '';
+            });
+
+        $auditEnd = Carbon::parse($end);
+
+        return $grouped->map(function ($checks) use ($auditEnd) {
+            $group = [
+                'vendor' => $checks->first()->vendor,
+                'checks' => $checks->values(),
+            ];
+
+            // Attach active Professional policy (if any)
+            $vendor = $group['vendor'];
+            $professional = $vendor->vendor_docs()
+                ->where('type', 'professional')
+                ->orderByDesc('effective_date')
+                ->first();
+            if ($professional) {
+                $effective = Carbon::parse($professional->effective_date);
+                $expires = Carbon::parse($professional->expiration_date);
+                if ($effective->lte($auditEnd) && $expires->gte($auditEnd)) {
+                    $group['professional_doc'] = $professional;
+                }
+            }
+
+            // Mark covered checks for the selected audit type documents
+            if ($this->audit_type) {
+                $vendor_docs = $vendor->vendor_docs()->where('type', $this->audit_type)->get();
+                foreach ($vendor_docs as $vendor_doc) {
+                    $doc_checks = $group['checks']->whereBetween('date', [$vendor_doc->effective_date, $vendor_doc->expiration_date]);
+                    foreach ($doc_checks as $vendor_check) {
+                        $vendor_check->covered = true;
+                    }
+                }
+            }
+
+            return $group;
+        })->values();
+    }
+
+    #[Computed]
+    public function vendor_docs(): array
+    {
+        // Build a unique list of file paths for the current audit_type
+        $files = collect();
+        foreach ($this->vendors_grouped_checks as $group) {
+            $vendor = $group['vendor'];
+            $vendor_docs = $this->audit_type ? $vendor->vendor_docs()->where('type', $this->audit_type)->get() : collect();
             foreach ($vendor_docs as $vendor_doc) {
-                $doc_checks = $vendor_checks->whereBetween('date', [$vendor_doc->effective_date, $vendor_doc->expiration_date]);
-                foreach ($doc_checks as $vendor_check) {
-                    $vendor_check->covered = true;
-                    $this->vendor_docs->push(storage_path('files/vendor_docs/'.$vendor_doc->doc_filename));
+                // Only include if any checks fall within the doc window
+                $hasCovered = $group['checks']->whereBetween('date', [$vendor_doc->effective_date, $vendor_doc->expiration_date])->isNotEmpty();
+                if ($hasCovered) {
+                    $files->push(storage_path('files/vendor_docs/' . $vendor_doc->doc_filename));
                 }
             }
         }
-
-        $this->vendors_grouped_checks = $this->vendors_grouped_checks->values();
-        $this->vendor_docs = $this->vendor_docs->unique()->toArray();
-        //also need GS COnstruction checks ...why gs to gs? no idea
+        return $files->unique()->values()->toArray();
     }
 
     public function download_documents()
     {
-        // app('App\Http\Controllers\VendorDocsController')->audit_docs_pdf($this->vendor_docs);
-        $filename = 'audit-'.auth()->user()->vendor->id.'-'.date('Y-m-d-h-m-s');
+        // Gather source files to merge (must exist on disk)
+        $sources = collect($this->vendor_docs)
+            ->filter(fn ($p) => is_string($p) && file_exists($p))
+            ->values();
 
-        //10-15-2023 Create cover page
-        ///////cover page here/// use audit view? csv? table?
-
-        $ilovepdf = new Ilovepdf(env('I_LOVE_PDF_PUBLIC'), env('I_LOVE_PDF_SECRET'));
-        // Create a new task
-        $myTaskMerge = $ilovepdf->newTask('merge');
-
-        // Add files to task for upload
-        foreach ($this->vendor_docs as $key => $file) {
-            ${'merged_'.$key} = $myTaskMerge->addFile($file);
+        if ($sources->isEmpty()) {
+            $this->addError('vendor_docs', 'No vendor documents found on disk to download.');
+            return;
         }
 
-        // dd($myTaskMerge);
-        // $file1 = $myTaskMerge->addFile('/home/vagrant/web/gs/storage/files/vendor_docs/elm_r3.pdf');
-        // $file2 = $myTaskMerge->addFile('/home/vagrant/web/gs/storage/files/vendor_docs/elm_r3.pdf');
-        // Execute the task
-        $myTaskMerge->setOutputFilename($filename);
-        $myTaskMerge->execute();
-        // $myTaskMerge->download();
-        // Download the package files
-        //storage_path('files/vendor_docs/')
-        $myTaskMerge->download(storage_path('files/vendor_docs/'));
+        // Use a timestamped filename; we'll stream directly to the browser
+        $filename = 'audit-'.auth()->user()->vendor->id.'-'.date('Y-m-d-H-i-s');
 
-        // //stream/download
-        $path = storage_path('files/vendor_docs/'.$filename.'.pdf');
-        // $response = Response::make(file_get_contents($path), 200, [
-        //     'Content-Type' => 'application/pdf'
-        // ]);
+        try {
+            $ilovepdf = new Ilovepdf(env('I_LOVE_PDF_PUBLIC'), env('I_LOVE_PDF_SECRET'));
+            $task = $ilovepdf->newTask('merge');
 
-        // $response;
-        return response()->download($path);
+            foreach ($sources as $file) {
+                $task->addFile($file);
+            }
+
+            $task->setOutputFilename($filename);
+            $task->execute();
+
+            // Get merged PDF bytes in memory (no disk write)
+            $content = $task->blob();
+        } catch (\Throwable $e) {
+            $this->addError('vendor_docs', 'Failed to build PDF: '.$e->getMessage());
+            return;
+        }
+
+        if (!is_string($content) || $content === '') {
+            $this->addError('vendor_docs', 'Merged PDF content is empty.');
+            return;
+        }
+
+        // Stream the file to the browser as a download (no disk write)
+        return response()->streamDownload(function () use ($content) {
+            echo $content;
+        }, $filename.'.pdf', [
+            'Content-Type' => 'application/pdf',
+            'Content-Length' => strlen($content),
+            'Cache-Control' => 'no-store, no-cache, must-revalidate, max-age=0',
+            'Pragma' => 'no-cache',
+        ]);
+    }
+
+    public function export_xlsx()
+    {
+        $filename = 'Audit-'.auth()->user()->vendor->id.'-'.date('Y-m-d-H-i-s').'.xlsx';
+
+        return response()->streamDownload(function () use ($filename) {
+            // Styles
+            $underlineBorder = new Border(
+                new BorderPart(Border::BOTTOM, Color::BLACK, Border::WIDTH_THICK, Border::STYLE_SOLID)
+            );
+            $vendorHeaderStyle = (new Style())->setBorder($underlineBorder)->setFontBold();
+
+            // Coverage cell-only styles (provide RGB; OpenSpout will convert to ARGB internally)
+            $coverageGreen = (new Style())->setFontColor(Color::GREEN);
+            $coverageOrange = (new Style())->setFontColor('C05621'); // dark orange
+            $coverageRed = (new Style())->setFontColor(Color::RED);
+
+            // OpenSpout writer (per-cell styling capability)
+            $writer = new XLSXWriter();
+            $writer->openToFile('php://output');
+
+            // Header row
+            $writer->addRow(Row::fromValues([
+                'Vendor', 'Date', 'Payment', 'Amount', 'Coverage',
+            ]));
+
+            foreach ($this->vendors_grouped_checks as $group) {
+                $vendor = $group['vendor'];
+
+                // Vendor header row (underline across all columns)
+                $writer->addRow(Row::fromValues([
+                    $vendor->business_name, null, null, null, null,
+                ], $vendorHeaderStyle));
+
+                // Optional subheading row (Retail or Professional policy)
+                if ($vendor->business_type === 'Retail') {
+                    $writer->addRow(Row::fromValues([
+                        $vendor->business_name." is Retail and doesn't require coverage.", null, null, null, null,
+                    ]));
+                } elseif (isset($group['professional_doc'])) {
+                    $doc = $group['professional_doc'];
+                    $writer->addRow(Row::fromValues([
+                        'Professional policy active ('
+                            . $doc->effective_date->format('m/d/Y')
+                            . '–' . $doc->expiration_date->format('m/d/Y') . ')',
+                        null, null, null, null,
+                    ]));
+                }
+
+                // Detail rows
+                foreach ($group['checks'] as $check) {
+                    $coverage = $check->covered
+                        ? 'Covered'
+                        : ((isset($group['professional_doc']) || $vendor->business_type === 'Retail') ? 'Not Applicable' : 'Not Covered');
+
+                    // Build values array (Coverage will be styled per-cell)
+                    $values = [
+                        null,
+                        $check->date->format('m/d/Y'),
+                        $check->payment_type,
+                        money($check->amount),
+                        $coverage,
+                    ];
+
+                    // Coverage cell with per-cell color style (column index 4)
+                    $coverageStyle = match ($coverage) {
+                        'Covered' => $coverageGreen,
+                        'Not Applicable' => $coverageOrange,
+                        default => $coverageRed,
+                    };
+                    $writer->addRow(Row::fromValuesWithStyles($values, null, [4 => $coverageStyle]));
+                }
+
+                // Spacer row between vendors
+                $writer->addRow(Row::fromValues(['', '', '', '', '']));
+            }
+            $writer->close();
+        }, $filename, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ]);
     }
 
     #[Title('Audit')]
-    public function render()
+    public function render(): View
     {
         return view('livewire.vendor-docs.audit-show');
     }

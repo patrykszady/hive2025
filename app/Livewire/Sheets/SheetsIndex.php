@@ -2,12 +2,13 @@
 
 namespace App\Livewire\Sheets;
 
-// use Livewire\Component\Sheets\SheetShow;
 use App\Models\Bank;
 use App\Models\Sheet;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
+use Illuminate\Support\Carbon;
 
 class SheetsIndex extends Component
 {
@@ -15,15 +16,31 @@ class SheetsIndex extends Component
 
     public $start_date = '';
     public $end_date = '';
+    public $cash = 'include';
 
-    public $banks = [];
-
+    public $banks = []; // Keep track of selected banks
     protected function rules()
     {
         return [
-            'banks.*.checked' => 'nullable', // multiple checkbox, at least one required
-            'start_date' => 'required',
-            'end_date' => 'required',
+            'banks' => [
+                'required',
+                'array',
+                function ($attribute, $value, $fail) {
+                    $hasSelected = false;
+                    foreach ((array) $value as $bank) {
+                        if (!empty($bank['checked'])) {
+                            $hasSelected = true;
+                            break;
+                        }
+                    }
+                    if (! $hasSelected) {
+                        $fail('Please select at least one bank account.');
+                    }
+                },
+            ],
+            'banks.*.checked' => 'boolean',
+            'start_date' => 'required|date',
+            'end_date' => 'required|date|after:start_date',
         ];
     }
 
@@ -37,18 +54,41 @@ class SheetsIndex extends Component
         if (empty($this->end_date)) {
             $this->end_date = date('Y-m-d'); // Today's date
         }
-        
-        $this->banks =
-            Bank::whereNotNull('plaid_access_token')
-                ->with(['accounts'])
-                ->whereHas('accounts', function ($query) {
-                    return $query->whereIn('type', ['Checking', 'Savings']);
-                })
-                ->get()
-                ->each(function ($item, $key) {
-                    $item->checked = false;
-                })
-                ->keyBy('id');
+
+        // Initialize selection map if empty (keep UI state separate from computed data)
+        if (empty($this->banks)) {
+            foreach ($this->availableBanks() as $bank) {
+                $this->banks[$bank->id]['checked'] = false;
+            }
+        }
+    }
+
+    public function updated($propertyName)
+    {
+        if ($propertyName === 'start_date' && !empty($this->start_date)) {
+            try {
+                $start = Carbon::parse($this->start_date);
+                // Set end date to one year minus one day from start (e.g., 2024-01-01 -> 2024-12-31)
+                $this->end_date = $start->copy()->addYear()->subDay()->format('Y-m-d');
+            } catch (\Throwable $e) {
+                // Ignore parse issues; validation will handle errors
+            }
+        }
+        $this->validateOnly($propertyName);
+    }
+
+    #[Computed]
+    public function availableBanks()
+    {
+        return Bank::whereNotNull('plaid_access_token')
+            ->with(['accounts' => function ($query) {
+                $query->whereIn('type', ['Checking', 'Savings']);
+            }])
+            ->whereHas('accounts', function ($query) {
+                return $query->whereIn('type', ['Checking', 'Savings']);
+            })
+            ->get()
+            ->keyBy('id');
     }
 
     public function run()
@@ -56,8 +96,10 @@ class SheetsIndex extends Component
         $this->validate();
         $bank_accounts = collect();
 
-        foreach ($this->banks->where('checked', true) as $bank) {
-            $bank_accounts->put($bank->id, $bank->accounts->pluck('id'));
+        foreach ($this->availableBanks() as $bank) {
+            if (!empty($this->banks[$bank->id]['checked'])) {
+                $bank_accounts->put($bank->id, $bank->accounts->pluck('id'));
+            }
         }
         $bank_account_ids = $bank_accounts->flatten()->toArray();
 
@@ -66,6 +108,7 @@ class SheetsIndex extends Component
             'bank_account_ids' => $bank_account_ids,
             'start_date' => $this->start_date,
             'end_date' => $this->end_date,
+            'cash' => $this->cash,
         ]);
 
         // $this->dispatch('sheet_info')->to(SheetShow::class);

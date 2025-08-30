@@ -1,198 +1,113 @@
-<div>
-    <x-cards class="{{$view == NULL ? 'w-full px-4 sm:px-6 lg:max-w-2xl lg:px-8 pb-5 mb-1' : ''}}">
-        {{-- HEADING --}}
-        <x-cards.heading>
-            <x-slot name="left">
-                <h1>Audit</h1>
-            </x-slot>
-
-            <x-slot name="right">
-                <div class="space-x-2">
-                    {{-- disabled when clicked --}}
-                    <x-cards.button
-                        {{-- {{$vendor->id}} --}}
-                        {{-- wire:click="$dispatchTo('vendor-docs.vendor-doc-create', 'downloadDocuments', { doc_filenames: [{{$vendor_docs}}] })" --}}
-                        wire:click="download_documents"
-                        :button_color="'indigo'"
-                        >
-                        Download Certificates
-                    </x-cards.button>
-                    {{-- @if(isset($vendor->expired_docs))
-                        <x-cards.button
-                            wire:click="$emitTo('vendor-docs.vendor-docs-form', 'requestDocument', {{$vendor->id}})"
-                            button_color=red
-                            >
-                            Request
-                        </x-cards.button>
-                    @endif --}}
-                </div>
-            </x-slot>
-        </x-cards.heading>
-    </x-cards>
-    {{-- <x-cards class="{{$view == NULL ? 'w-full px-4 sm:px-6 lg:max-w-2xl lg:px-8 pb-5 mb-1' : ''}}">
-    @livewire('vendor-docs.audit-index')
-    </x-cards> --}}
+<div class="max-w-lg space-y-4">
+    <div class="print:hidden">
+    <x-details.card title="Audit" :accordion="false">
+        <x-slot:header_buttons>
+            <flux:button wire:click="download_documents" variant="primary">
+                Download Certificates
+            </flux:button>
+            <flux:button wire:click="export_xlsx">
+                Export XLSX
+            </flux:button>
+        </x-slot:header_buttons>
+    </x-details.card>
+    </div>
 
     {{-- TRANSACTIONS NO CHECKS --}}
-    <x-cards class="{{$view == NULL ? 'w-full px-4 sm:px-6 lg:max-w-2xl lg:px-8 mb-2' : ''}}">
-        <x-cards.heading>
-            <x-slot name="left">
-                <h1>Transactions </h1>
-                <span class="text-sm italic">
-                    These Check Transactions have not beed added to Vendors or Projects. Please add checks before comleting this Audit.
-                </span>
-            </x-slot>
-            <x-slot name="right">
-                <div class="space-x-2">
-                    {{-- <x-cards.button
-                        wire:click="$emitTo('vendor-docs.vendor-docs-form', 'addDocument', {{$vendor->id}})"
-                        button_color=white
-                        >
-                        Add
-                    </x-cards.button>
-                    @if(isset($vendor->expired_docs))
-                        <x-cards.button
-                            wire:click="$emitTo('vendor-docs.vendor-docs-form', 'requestDocument', {{$vendor->id}})"
-                            button_color=red
-                            >
-                            Request
-                        </x-cards.button>
-                    @endif --}}
-                </div>
-            </x-slot>
-        </x-cards.heading>
+    <x-details.card title="Transactions" :expanded="false" details_text="Missing Expenses">
+        <x-slot name="subheading">
+            <span class="text-sm italic">
+                These Check Transactions have not beed added to Vendors or Projects. Please add checks before comleting this Audit.
+            </span>
+        </x-slot>
 
-        <x-cards.body>
-            <table class="min-w-full divide-y divide-gray-300 break-after-all">
-                <thead class="text-gray-900 border-b border-gray-400">
-                    <tr>
-                        {{-- first th --}}
-                        {{-- <th
-                            scope="col"
-                            class="hidden px-3 py-3.5 text-right text-sm font-semibold text-gray-900 sm:table-cell"
-                            >
-                        </th> --}}
-                        <th
-                            scope="col"
-                            class="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-6 sm:w-1/2"
-                            >
-                            Withdrawal Date
-                        </th>
-                        <th
-                            scope="col"
-                            class="px-3 py-3.5 text-right text-sm font-semibold text-gray-900 sm:table-cell"
-                            >
-                            Check #
-                        </th>
-                        <th
-                            scope="col"
-                            class="px-3 py-3.5 text-right text-sm font-semibold text-gray-900 sm:table-cell"
-                            >
-                            Amount
-                        </th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach($transactions_no_check as $transaction)
-                    {{-- hover:bg-red-100  --}}
-                        <tr class="border-t border-gray-600 bg-gray-50">
-                            <td class="px-3 py-1 text-left text-gray-700 align-text-top text-md sm:table-cell">{{$transaction->transaction_date->format('m/d/Y')}}</td>
-                            <td class="px-3 py-1 text-right text-gray-700 align-text-top text-md sm:table-cell">{{$transaction->check_number == '1010101' ? 'Transfer' : ($transaction->check_number == '2020202' ? 'Cash' : $transaction->check_number)}}</td>
-                            <td class="px-3 py-1 text-right text-gray-700 align-text-top text-md sm:table-cell">{{money($transaction->amount)}}</td>
-                        </tr>
-                        <tr>
-                            <td class="px-3 py-1 italic text-right text-gray-500 align-text-top text-md sm:table-cell" colspan="3">{{$transaction->plaid_merchant_description}}</td>
-                        </tr>
+        <x-slot name="details">
+            <flux:table class="w-full">
+                <flux:table.columns>
+                    <flux:table.column 
+                        sortable 
+                        :sorted="true" 
+                        :direction="'asc'"
+                        class="w-1/4"
+                    >
+                        Date
+                    </flux:table.column>
+                    <flux:table.column>Payment</flux:table.column>
+                    <flux:table.column>Amount</flux:table.column>
+                </flux:table.columns>
+
+                <flux:table.rows>
+                    @foreach($this->transactions_no_check as $transaction)
+                        <flux:table.row :key="$transaction->id" class="border-b-0">
+                            <flux:table.cell class="pb-0">
+                                {{ $transaction->transaction_date->format('m/d/Y') }}
+                            </flux:table.cell>
+                            <flux:table.cell class="pb-0">
+                                {{ $transaction->check_number == '1010101' ? 'Transfer' : ($transaction->check_number == '2020202' ? 'Cash' : $transaction->check_number) }}
+                            </flux:table.cell>
+                            <flux:table.cell class="pb-0">{{ money($transaction->amount) }}</flux:table.cell>
+                        </flux:table.row>
+                        @if(!empty($transaction->plaid_merchant_description))
+                            <flux:table.row :key="'desc-' . $transaction->id" class="border-t-0">
+                                <flux:table.cell class="pt-0"></flux:table.cell>
+                                <flux:table.cell class="pt-0 border-t border-gray-200" colspan="2">
+                                    <div class="italic whitespace-normal break-words leading-tight" title="{{ $transaction->plaid_merchant_description }}">
+                                        {{ $transaction->plaid_merchant_description }}
+                                    </div>
+                                </flux:table.cell>
+                            </flux:table.row>
+                        @endif
                     @endforeach
-                </tbody>
-            </table>
-        </x-cards.body>
-    </x-cards>
+                </flux:table.rows>
+            </flux:table>
+        </x-slot>
+    </x-details.card>
 
     {{-- VENDOR CHECKS --}}
-    {{-- @if(!is_null($vendors_grouped_checks)) --}}
-        {{-- @dd($vendors_grouped_checks) --}}
-        @foreach($vendors_grouped_checks as $vendor_id => $vendor_checks)
-            <x-cards class="{{$view == NULL ? 'w-full px-4 sm:px-6 lg:max-w-2xl lg:px-8 mb-2' : ''}}">
-                <x-cards.heading>
-                    <x-slot name="left">
-                        <h1>{{$vendor_checks->first()->vendor->business_name}}</h1>
-                        @if($vendor_checks->first()->vendor->business_type == 'Retail')
-                            <span class="text-sm italic">
-                                Vendor is Retail and doesn't require coverage.
-                            </span>
-                        @endif
-                    </x-slot>
-                    <x-slot name="right">
-                        <div class="space-x-2">
-                            {{-- <x-cards.button
-                                wire:click="$emitTo('vendor-docs.vendor-docs-form', 'addDocument', {{$vendor->id}})"
-                                button_color=white
-                                >
-                                Add
-                            </x-cards.button>
-                            @if(isset($vendor->expired_docs))
-                                <x-cards.button
-                                    wire:click="$emitTo('vendor-docs.vendor-docs-form', 'requestDocument', {{$vendor->id}})"
-                                    button_color=red
-                                    >
-                                    Request
-                                </x-cards.button>
-                            @endif --}}
-                        </div>
-                    </x-slot>
-                </x-cards.heading>
+    @foreach($this->vendors_grouped_checks as $group)
+        <x-details.card :title="$group['vendor']->business_name" :title_href="route('vendors.show', $group['vendor']->id)" :accordion="false">
+            <x-slot name="subheading">
+                <span class="text-sm italic">
+                    @if($group['vendor']->business_type == 'Retail')
+                        {{ $group['vendor']->business_name }} is Retail and doesn't require coverage.
+                    @elseif(isset($group['professional_doc']))
+                        Professional policy active ({{ $group['professional_doc']->effective_date->format('m/d/Y') }}–{{ $group['professional_doc']->expiration_date->format('m/d/Y') }})
+                    @endif
+                </span>
+            </x-slot>
 
-                <x-cards.body>
-                    <table class="min-w-full divide-y divide-gray-300 break-after-all">
-                        <thead class="text-gray-900 border-b border-gray-400">
-                            <tr>
-                                {{-- first th --}}
-                                {{-- <th
-                                    scope="col"
-                                    class="hidden px-3 py-3.5 text-right text-sm font-semibold text-gray-900 sm:table-cell"
-                                    >
-                                </th> --}}
-                                <th
-                                    scope="col"
-                                    class="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-6 sm:w-1/3"
-                                    >
-                                    Withdrawal Date
-                                </th>
-                                <th
-                                    scope="col"
-                                    class="px-3 py-3.5 text-right text-sm font-semibold text-gray-900 sm:table-cell"
-                                    >
-                                    Check #
-                                </th>
-                                <th
-                                    scope="col"
-                                    class="px-3 py-3.5 text-right text-sm font-semibold text-gray-900 sm:table-cell"
-                                    >
-                                    Amount
-                                </th>
-                                <th
-                                    scope="col"
-                                    class="hidden px-3 py-3.5 text-right text-sm font-semibold text-gray-900 sm:table-cell"
-                                    >
-                                    Coverage
-                                </th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach($vendor_checks as $check)
-                            {{-- hover:bg-red-100  --}}
-                                <tr class="sm:border-b sm:border-gray-400 {{$check->covered == true ? 'bg-green-50' : ($vendor_checks->first()->vendor->business_type == 'Retail' ? 'bg-yellow-50' : 'bg-red-50')}}">
-                                    <td class="px-3 py-1 text-left text-gray-500 align-text-top text-md sm:table-cell">{{$check->date->format('m/d/Y')}}</td>
-                                    <td class="px-3 py-1 text-right text-gray-500 align-text-top text-md sm:table-cell">{{isset($check->check_number) ? $check->check_number : $check->check_type}}</td>
-                                    <td class="px-3 py-1 text-right text-gray-500 align-text-top text-md sm:table-cell">{{money($check->amount)}}</td>
-                                    <td class="hidden px-3 py-1 text-right align-text-top text-md sm:table-cell {{$check->covered == true ? 'text-green-600' : ($vendor_checks->first()->vendor->business_type == 'Retail' ? 'text-yellow-600' : 'text-red-600')}} ">{{$check->covered == true ? 'Covered' : 'Not Covered'}}</td>
-                                </tr>
-                            @endforeach
-                        </tbody>
-                    </table>
-                </x-cards.body>
-            </x-cards>
-        @endforeach
-    {{-- @endif --}}
+            <x-slot name="details">
+                <flux:table class="w-full">
+                    <flux:table.columns>
+                        <flux:table.column 
+                            sortable 
+                            :sorted="true" 
+                            :direction="$this->vendorSortDir[$group['vendor']->id] ?? 'asc'"
+                        >
+                            Date
+                        </flux:table.column>
+                        <flux:table.column>Payment</flux:table.column>
+                        <flux:table.column>Amount</flux:table.column>
+                        <flux:table.column><span class="block text-right">Coverage</span></flux:table.column>
+                    </flux:table.columns>
+
+                    <flux:table.rows>
+                        @foreach($group['checks'] as $check)
+                            <flux:table.row :key="$check->id">
+                                <flux:table.cell>{{ $check->date->format('m/d/Y') }}</flux:table.cell>
+                                <flux:table.cell>
+                                    {{ $check->payment_type }}
+                                </flux:table.cell>
+                                <flux:table.cell>{{ money($check->amount) }}</flux:table.cell>
+                                <flux:table.cell>
+                                    <flux:badge size="sm" :color="$check->covered ? 'green' : ((isset($group['professional_doc']) || $group['vendor']->business_type == 'Retail') ? 'yellow' : 'red')" inset="top bottom">
+                                        {{ $check->covered ? 'Covered' : ((isset($group['professional_doc']) || $group['vendor']->business_type == 'Retail') ? 'Not Applicable' : 'Not Covered') }}
+                                    </flux:badge>
+                                </flux:table.cell>
+                            </flux:table.row>
+                        @endforeach
+                    </flux:table.rows>
+                </flux:table>
+            </x-slot>
+        </x-details.card>
+    @endforeach
 </div>

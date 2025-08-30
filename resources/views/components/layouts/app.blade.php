@@ -6,7 +6,7 @@
     {{-- BODY --}}
     {{-- $fullscreenClasses prop in render of Planner/Board --}}
     <body class="{{isset($fullscreenClasses) ? 'h-screen ' : 'min-h-screen '}} bg-gray-100 dark:bg-gray-800">
-        <flux:sidebar sticky stashable class="bg-gray-50 dark:bg-zinc-900 border-r rtl:border-r-0 rtl:border-l border-gray-200 dark:border-gray-700">
+    <flux:sidebar sticky stashable class="bg-gray-50 dark:bg-zinc-900 border-r rtl:border-r-0 rtl:border-l border-gray-200 dark:border-gray-700 print:hidden">
             @php
                 $isVendorRoute = Route::is(['vendor_selection', 'vendor_registration']);
                 $href = $isVendorRoute ? null : route('dashboard'); // Set href for non-vendor routes
@@ -14,7 +14,7 @@
                 $name = $isVendorRoute ? env('APP_NAME') : auth()->user()->vendor->name; // Automatically decoded via model accessor
             @endphp
 
-            <flux:sidebar.toggle class="lg:hidden" icon="x-mark" />
+            <flux:sidebar.toggle class="lg:hidden print:hidden" icon="x-mark" />
 
             <flux:brand href="{{ $href }}" logo="{{ $logo }}" name="{!! $name !!}" class="px-2 dark:hidden" />
             {{-- DARK MODE LOGO --}}
@@ -148,7 +148,7 @@
             {{ $slot }}
         </flux:main>
 
-        <div class="fixed top-4 left-6 lg:hidden">
+    <div class="fixed top-4 left-6 lg:hidden print:hidden">
             <flux:sidebar.toggle
                 icon="bars-2"
                 class="backdrop-blur-lg shadow-lg shadow-gray-500/50 bg-black/5 ring-1 ring-black/15 hover:bg-black/10 hover:shadow-xl transition-all duration-200"

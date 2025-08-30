@@ -656,15 +656,19 @@ class TransactionController extends Controller
                 Transaction::withoutGlobalScopes()
                     ->whereNull('deleted_at')
                     ->whereIn('bank_account_id', $hive_vendor_bank_account_ids)
-                    ->whereIn('vendor_id', $vendors_with_category->pluck('id'))
                     ->whereHas('expense', function ($query) {
                         return $query->whereDoesntHave('category');
                     })
+                    ->with(['expense.vendor.category'])
                     ->get();
 
             foreach ($transactions as $transaction) {
-                if ($transaction->expense->category) {
-                    $transaction->expense->category()->associate($vendors_with_category->find($transaction->expense->vendor_id)->category);
+                if (!$transaction->expense) { continue; }
+
+                // Prefer the vendor's category if present; otherwise leave for next pass
+                $vendorCategory = optional(optional($transaction->expense)->vendor)->category;
+                if ($vendorCategory) {
+                    $transaction->expense->category()->associate($vendorCategory);
                     $transaction->expense->timestamps = false;
                     $transaction->expense->save();
                 }
@@ -678,29 +682,60 @@ class TransactionController extends Controller
                     ->whereHas('expense', function ($query) {
                         return $query->whereDoesntHave('category');
                     })
+                    ->with(['expense.vendor.category'])
                     ->get();
 
             foreach ($transactions as $transaction) {
-                if ($transaction->expense) {
-                    if (! $transaction->expense->category) {
-                        $transaction_category = $transaction->details['personal_finance_category']['detailed'];
-                        $category = $categories->where('detailed', $transaction_category)->first();
-
-                        $transaction->expense->category()->associate($category);
+                if ($transaction->expense && ! $transaction->expense->category) {
+                    // 1) Use vendor's category if available
+                    $vendorCategory = optional(optional($transaction->expense)->vendor)->category;
+                    if ($vendorCategory) {
+                        $transaction->expense->category()->associate($vendorCategory);
                         $transaction->expense->timestamps = false;
                         $transaction->expense->save();
+                        continue;
+                    }
+
+                    // 2) Otherwise, map from Plaid detailed category
+                    $transaction_category = $transaction->details['personal_finance_category']['detailed'] ?? null;
+                    if ($transaction_category) {
+                        $category = $categories->where('detailed', $transaction_category)->first();
+                        if ($category) {
+                            $transaction->expense->category()->associate($category);
+                            $transaction->expense->timestamps = false;
+                            $transaction->expense->save();
+                        }
                     }
                 }
 
                 if ($transaction->check) {
                     foreach ($transaction->check->expenses as $expense) {
-                        if (! $expense->category) {
-                            $transaction_category = $transaction->details['personal_finance_category']['detailed'];
-                            $category = $categories->where('detailed', $transaction_category)->first();
+                        if ($expense->category) { continue; }
 
-                            $expense->category()->associate($category);
+                        // Prefer the expense vendor category; else fallback to the transaction's expense category; else Plaid mapping
+                        $expenseVendorCategory = optional($expense->vendor)->category;
+                        if ($expenseVendorCategory) {
+                            $expense->category()->associate($expenseVendorCategory);
                             $expense->timestamps = false;
                             $expense->save();
+                            continue;
+                        }
+
+                        if ($transaction->expense && $transaction->expense->category) {
+                            $expense->category()->associate($transaction->expense->category);
+                            $expense->timestamps = false;
+                            $expense->save();
+                            continue;
+                        }
+
+                        $transaction_category = $transaction->details['personal_finance_category']['detailed'] ?? null;
+                        if ($transaction_category) {
+                            $category = $categories->where('detailed', $transaction_category)->first();
+                            if ($category) {
+                                $expense->category()->associate($category);
+                                $expense->timestamps = false;
+                                $expense->save();
+                            }
                         }
                     }
                 }
@@ -734,18 +769,6 @@ class TransactionController extends Controller
                             return $category->count();
                         })
                         ->sort()->keys()->last();
-
-                // $expenses->each(function($expense, $key) use($category) {
-                //     // $expense->timestamps = false;
-                //     $expense->update(['category_id' => $category]);
-                //     $expense->save();
-                // });
-
-                // foreach($expenses as $expense){
-                //     $expense->timestamps = false;
-                //     $expense->update(['category_id' => $category]);
-                // }
-
                 $expenses->timestamps = false;
                 $expenses->update(['category_id' => $category]);
             }

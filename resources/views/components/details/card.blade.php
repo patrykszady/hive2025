@@ -1,5 +1,6 @@
 @props([
     'title' => null,
+    'title_href' => null,
     'subheading' => null,
     'canEdit' => null,
     'expanded' => true,
@@ -10,7 +11,13 @@
 <flux:card class="!px-5 py-2">
     {{-- HEADER - Always outside the accordion --}}
     <div class="flex justify-between items-center min-h-[2.25rem]">
-        <flux:heading size="lg" class="mb-0 truncate">{!! $title !!}</flux:heading>
+        <flux:heading size="lg" class="mb-0 truncate">
+            @if($title_href)
+                <flux:link href="{{ $title_href }}" external variant="ghost" :accent="false" class="hover:underline">{{ html_entity_decode((string) $title, ENT_QUOTES, 'UTF-8') }}</flux:link>
+            @else
+                {{ html_entity_decode((string) $title, ENT_QUOTES, 'UTF-8') }}
+            @endif
+        </flux:heading>
         <div class="flex items-center min-h-[2.25rem]">
             {{-- Show buttons if canEdit is null or true --}}
             @if($canEdit === null || $canEdit)

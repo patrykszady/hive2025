@@ -24,33 +24,49 @@ class SheetShow extends Component
     public $start_date = null;
     public $end_date = null;
     public $bank_account_ids = [];
+    public $cash = 'include';
 
     protected $queryString = [
         'start_date' => ['except' => ''],
         'end_date' => ['except' => ''],
         'bank_account_ids' => ['except' => ''],
+        'cash' => ['except' => ''],
     ];
-
-    public function mount()
-    {
-        // Keep only initialization logic here
-        // All calculations now moved to computed properties
-    }
 
     #[Computed]
     public function revenue()
     {
-        return Payment::whereBetween('date', [$this->start_date, $this->end_date])
-            ->with(['transaction', 'project'])
+        // Build base payment scope for date and valid projects
+        $base = Payment::whereBetween('date', [$this->start_date, $this->end_date])
             ->whereHas('project', function ($query) {
                 $query->whereHas('latestStatus', function ($query) {
                     $query->where('title', '!=', 'VIEW ONLY');
                 });
-            })
+            });
+
+        if ($this->cash === 'hide') {
+            // Exclude cash payments and require transactions for non-cash in selected bank accounts
+            return (clone $base)
+                ->where('reference', '!=', 'Cash')
+                ->whereHas('transaction', function ($query) {
+                    $query->whereIn('bank_account_id', $this->bank_account_ids);
+                })
+                ->sum('amount');
+        }
+
+        // Include cash payments (no bank account filter) + non-cash payments with bank transactions
+        $nonCash = (clone $base)
+            ->where('reference', '!=', 'Cash')
             ->whereHas('transaction', function ($query) {
                 $query->whereIn('bank_account_id', $this->bank_account_ids);
             })
             ->sum('amount');
+
+        $cashSum = (clone $base)
+            ->where('reference', '=', 'Cash')
+            ->sum('amount');
+
+        return $nonCash + $cashSum;
     }
 
     #[Computed]
@@ -68,15 +84,21 @@ class SheetShow extends Component
     #[Computed]
     public function costOfLaborVendors()
     {
-        $vendors = Check::whereBetween('date', [$this->start_date, $this->end_date])
-            ->whereNot('check_type', 'Cash')
+        $checksQuery = Check::whereBetween('date', [$this->start_date, $this->end_date])
             ->whereHas('vendor', function ($query) {
                 $query->where('business_type', '!=', 'Retail')
                       ->where('id', '!=', auth()->user()->vendor->id);
             })
             ->whereHas('transactions', function ($query) {
                 $query->whereIn('bank_account_id', $this->bank_account_ids);
-            })
+            });
+
+        // Apply Cash filter only when hiding cash payments
+        if ($this->cash === 'hide') {
+            $checksQuery->whereNot('check_type', 'Cash');
+        }
+
+        $vendors = $checksQuery
             ->get()
             ->groupBy('vendor.business_name')
             ->toBase();
@@ -219,6 +241,10 @@ class SheetShow extends Component
             $formatMoney = function($amount) {
                 return number_format($amount, 2, '.', '');
             };
+            // Treat very small amounts as zero if they round to $0.00
+            $isZero = function($amount) {
+                return round((float)$amount, 2) == 0.0;
+            };
             
             // Create Excel file using PHPSpreadsheet since SimpleExcelWriter::createFromString() doesn't exist
             $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
@@ -250,10 +276,12 @@ class SheetShow extends Component
             $sheet->getStyle('B' . $row . ':D' . $row)->getFont()->setBold(true);
             $row++;
             
-            // Materials vendors
+            // Materials vendors (skip zero-sum vendors)
             foreach ($this->costOfMaterialsVendors() as $vendorName => $costOfMaterialsVendor) {
+                $vendorSum = (float) $costOfMaterialsVendor->sum('amount');
+                if ($isZero($vendorSum)) { continue; }
                 $sheet->setCellValue('C' . $row, $vendorName);
-                $sheet->setCellValue('D' . $row, $formatMoney($costOfMaterialsVendor->sum('amount')));
+                $sheet->setCellValue('D' . $row, $formatMoney($vendorSum));
                 $row++;
             }
             
@@ -265,10 +293,12 @@ class SheetShow extends Component
             $sheet->getStyle('B' . $row . ':D' . $row)->getFont()->setBold(true);
             $row++;
             
-            // Labor vendors
+            // Labor vendors (skip zero-sum vendors)
             foreach ($this->costOfLaborVendors() as $vendorName => $costOfLaborVendor) {
+                $vendorSum = (float) $costOfLaborVendor->sum('amount');
+                if ($isZero($vendorSum)) { continue; }
                 $sheet->setCellValue('C' . $row, $vendorName);
-                $sheet->setCellValue('D' . $row, $formatMoney($costOfLaborVendor->sum('amount')));
+                $sheet->setCellValue('D' . $row, $formatMoney($vendorSum));
                 $row++;
             }
             
@@ -286,22 +316,31 @@ class SheetShow extends Component
             $sheet->getStyle('A' . $row . ':D' . $row)->getFont()->setBold(true);
             $row += 2;
             
-            // Export categories following sort order
+            // Export categories following sort order (skip zero-sum groups)
             foreach ($this->sortedExpenseCategories() as $categoryName => $categoryData) {
+                $categorySum = (float) $categoryData['sum'];
+                if ($isZero($categorySum)) { continue; }
+
                 $sheet->setCellValue('A' . $row, $categoryName);
-                $sheet->setCellValue('D' . $row, $formatMoney($categoryData['sum']));
+                $sheet->setCellValue('D' . $row, $formatMoney($categorySum));
                 $sheet->getStyle('A' . $row . ':D' . $row)->getFont()->setBold(true);
                 $row++;
                 
                 foreach ($categoryData['subcategories'] as $subcategory) {
+                    $subSum = (float) $subcategory['sum'];
+                    if ($isZero($subSum)) { continue; }
+
                     $sheet->setCellValue('B' . $row, $subcategory['name']);
-                    $sheet->setCellValue('D' . $row, $formatMoney($subcategory['sum']));
+                    $sheet->setCellValue('D' . $row, $formatMoney($subSum));
                     $sheet->getStyle('B' . $row . ':D' . $row)->getFont()->setItalic(true);
                     $row++;
                     
                     foreach ($subcategory['vendors'] as $vendor) {
+                        $vendSum = (float) $vendor['sum'];
+                        if ($isZero($vendSum)) { continue; }
+
                         $sheet->setCellValue('C' . $row, $vendor['name']);
-                        $sheet->setCellValue('D' . $row, $formatMoney($vendor['sum']));
+                        $sheet->setCellValue('D' . $row, $formatMoney($vendSum));
                         $row++;
                     }
                 }

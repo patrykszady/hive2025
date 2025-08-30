@@ -21,7 +21,7 @@
                         <x-details.row title="Bank" :content="$check->bank_account->getNameAndType()" />
                     @endif
                     <x-details.row
-                        title="{{ $check->check_type === 'Check' ? 'Check #' : ($check->check_type === 'Transfer' ? 'Transfer ID' : ($check->check_type === 'Cash' ? 'Cash ID' : '')) }}"
+                        :title="$check->number_label"
                         :content="$check->check_number"
                     />
                 </x-slot:details>

@@ -36,9 +36,13 @@
                     <x-details.card title="Cost of Labor" :expanded="false" :details_text="false">
                         <x-slot:details>
                             @foreach($this->costOfLaborVendors() as $vendor_name => $cost_of_labor_vendor)
+                                @php $laborSum = round((float) $cost_of_labor_vendor->sum('amount'), 2); @endphp
+                                @if($laborSum == 0.0)
+                                    @continue
+                                @endif
                                 <x-details.row 
                                     title="{!! $vendor_name !!}" 
-                                    :content="money($cost_of_labor_vendor->sum('amount'))"
+                                    :content="money($laborSum)"
                                     :right-align="true"
                                     :href="route('vendors.show', $cost_of_labor_vendor->first()->vendor_id)"
                                 />
@@ -60,9 +64,13 @@
                     <x-details.card title="Cost of Materials" :expanded="false" :details_text="false">
                         <x-slot:details>
                             @foreach($this->costOfMaterialsVendors() as $vendor_name => $cost_of_materials_vendors)
+                                @php $materialsSum = round((float) $cost_of_materials_vendors->sum('amount'), 2); @endphp
+                                @if($materialsSum == 0.0)
+                                    @continue
+                                @endif
                                 <x-details.row 
                                     title="{!! $vendor_name !!}" 
-                                    :content="money($cost_of_materials_vendors->sum('amount'))" 
+                                    :content="money($materialsSum)" 
                                     :right-align="true"
                                     :href="route('vendors.show', $cost_of_materials_vendors->first()->vendor_id)"
                                 />
@@ -116,6 +124,10 @@
         <x-slot:details>
             <div class="space-y-2"> {{-- Space between primary categories --}}
                 @foreach($this->sortedExpenseCategories() as $category_primary_name => $category_data)
+                    @php $categorySum = round((float) $category_data['sum'], 2); @endphp
+                    @if($categorySum == 0.0)
+                        @continue
+                    @endif
                     {{-- PRIMARY CATEGORY AS CARD --}}
                     <div>
                         <x-details.card title="{{ $category_primary_name }}" :expanded="false" :details_text="false" class="!shadow-none !border-none !bg-transparent">
@@ -123,14 +135,22 @@
                                 {{-- Add padding container for nested cards --}}
                                 <div class="space-y-2"> {{-- Added space-y-6 for subcategories --}}
                                     @foreach($category_data['subcategories'] as $subcategory)
+                                        @php $subSum = round((float) $subcategory['sum'], 2); @endphp
+                                        @if($subSum == 0.0)
+                                            @continue
+                                        @endif
                                         {{-- Make each detailed category its own card with margin --}}
                                         <div>
-                                            <x-details.card title="{!! $subcategory['name'] !!}" :expanded="false" :details_text="false" class="!shadow-none !border-none !bg-transparent">
+                                            <x-details.card title="{!! $subcategory['name'] !!}" :expanded="true" :details_text="false" class="!shadow-none !border-none !bg-transparent">
                                                 <x-slot:details>
                                                     @foreach($subcategory['vendors'] as $vendor_data)
+                                                        @php $vendSum = round((float) $vendor_data['sum'], 2); @endphp
+                                                        @if($vendSum == 0.0)
+                                                            @continue
+                                                        @endif
                                                         <x-details.row 
                                                             title="{!! $vendor_data['name'] !!}" 
-                                                            :content="money($vendor_data['sum'])" 
+                                                            :content="money($vendSum)" 
                                                             :right-align="true"
                                                             :href="isset($vendor_data['vendor_id']) ? route('vendors.show', $vendor_data['vendor_id']) : null"
                                                         />
@@ -142,7 +162,7 @@
                                                         size="sm"
                                                         disabled
                                                     >
-                                                        {{ money($subcategory['sum']) }}
+                                                        {{ money($subSum) }}
                                                     </flux:button>
                                                 </x-slot:footer>
                                             </x-details.card>
@@ -156,7 +176,7 @@
                                     size="sm"
                                     disabled
                                 >
-                                    {{ money($category_data['sum']) }}
+                                    {{ money($categorySum) }}
                                 </flux:button>
                             </x-slot:footer>
                         </x-details.card>

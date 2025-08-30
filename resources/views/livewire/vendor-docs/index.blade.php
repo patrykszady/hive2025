@@ -1,4 +1,4 @@
-<div class="max-w-2xl">
+<div class="max-w-3xl">
     @livewire('vendor-docs.audit-index')
 
     @foreach($this->vendors as $vendor)
