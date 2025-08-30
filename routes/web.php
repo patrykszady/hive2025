@@ -61,8 +61,6 @@ use App\Livewire\Vendors\VendorShow;
 use App\Livewire\Vendors\VendorsIndex;
 use Illuminate\Support\Facades\Route;
 
-
-
 //if guests go to '/', if logged in go to dashboard (or to /vendor_selection if not set and User has multiple)
 Route::middleware('guest')->group(function () {
     Route::get('/', function () {
@@ -75,8 +73,6 @@ Route::middleware('guest')->group(function () {
     Route::get('verify-reset-code/{token}', VerifyResetCode::class)->name('verify.reset.code');
 
     Route::get('registration', Registration::class)->name('registration');
-    // Route::get('/registration-not-ready', Registration::class)->name('registration-not-ready');
-
 });
 
 Route::middleware('auth')->group(function () {
@@ -111,8 +107,8 @@ Route::get('/leads/leads_in_email', [LeadController::class, 'leads_in_email'])->
 
 Route::get('vendor_docs/verifyWorkersComp', [ReceiptController::class, 'verifyWorkersComp'])->name('vendor_docs.verifyWorkersComp');
 Route::get('files/{folder}/{filename}', [ReceiptController::class, 'original_receipt'])->name('expenses.original_receipt');
+
 Route::get('expenses/temp_receipt/{receipt}', [ReceiptController::class, 'temp_receipt'])->name('receipts.temp_receipt');
-Route::get('vendor_docs/{document}', [VendorDocsController::class, 'document'])->name('vendor_docs.document');
 
 Route::get('receipts/azure_receipts', [ReceiptController::class, 'azure_receipts'])->name('azure_receipts');
 Route::get('receipts/goutte_crawl', [ReceiptController::class, 'goutte_crawl'])->name('goutte_crawl');
@@ -142,8 +138,6 @@ Route::get('receipts/amazon_login', [ReceiptController::class, 'amazon_login'])-
 Route::get('receipts/amazon_auth_response', [ReceiptController::class, 'amazon_auth_response']);
 Route::get('receipts/amazon_orders_api', [ReceiptController::class, 'amazon_orders_api']);
 
-Route::get('insurance/find_insurance_dates', [VendorDocsController::class, 'find_insurance_dates']);
-
 Route::get('transactions/bulk_match', BulkMatchIndex::class)->name('transactions.bulk_match');
 //plaid webhooks
 // Route::post('plaid_webhooks', 'TransactionController@plaid_webhooks');
@@ -157,16 +151,15 @@ Route::middleware(['auth', 'vendor.access'])->group(function () {
     // All protected routes
     Route::get('/dashboard', DashboardShow::class)->name('dashboard');
 
+    // Stream vendor docs with case-insensitive lookup and proper headers
+    Route::get('files/vendor_docs/{filename}', [VendorDocsController::class, 'document'])->name('vendor_docs.show');
     //USERS
-    // Route::get('/users/{user}', UsersShow::class)->name('users.show');
     //Log In As User for Admins (User id # 1 right now only)
     //Only User #1 / Patryk can access this route / middleware
     Route::get('/users/admin_login_as_user', AdminLoginAsUser::class)->name('admin_login_as_user');
 
     //EXPENSES
     Route::get('/expenses', ExpenseIndex::class)->name('expenses.index');
-    // Route::get('/expenses/new', ExpensesNewForm::class)->name('expenses.new');
-    // Route::get('/expenses/find', ExpensesFind::class)->name('expenses.find');
     Route::get('/expenses/{expense}', ExpenseShow::class)->name('expenses.show');
     // Route::resource('expenses', ExpenseController::class);
 
@@ -239,7 +232,6 @@ Route::middleware(['auth', 'vendor.access'])->group(function () {
     //PAYMENTS
     Route::get('/payments', PaymentsIndex::class)->name('payments.index');
     Route::get('/payments/{payment}', PaymentShow::class)->name('payments.show');
-    // Route::get('/payments/create/{client}', PaymentCreate::class)->name('payments.create');
 
     //SHEETS
     Route::get('/sheets', SheetsIndex::class)->name('sheets.index');

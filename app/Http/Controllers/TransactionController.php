@@ -1205,6 +1205,7 @@ class TransactionController extends Controller
 
             $bank_account_ids = $check->bank_account_id ? $check->bank_account->bank->accounts->pluck('id') : NULL;
 
+            //$transactions match the check amount.
             $transactions = Transaction::withoutGlobalScopes()
                 ->whereNull('deleted_at')
                 ->whereNull('check_id')
@@ -1221,10 +1222,17 @@ class TransactionController extends Controller
                 ->orderBy('id', 'DESC')
                 ->get();
 
-            //if check_number matches, that's the one
-            //NOPE: if not BUT if amount matches, that's the one
-            if ($transactions->count() == 1) {
+            //if amount matches and is only one, that's the one
+            if ($transactions->count() === 1) {
                 $transactions->first()->check()->associate($check)->save();
+            } elseif ($transactions->count() > 1) {
+                // Pick the closest-by-days without mutating attributes
+                $closest = $transactions
+                    ->sortBy(fn ($t) => $t->transaction_date->diffInDays($check->date))
+                    ->first();
+
+                $closest?->check()->associate($check)->save();
+                continue; // done with this check
             } else {
                 if ($check->check_type === 'Transfer') {
                     $transactions_by_name = Transaction::withoutGlobalScopes()
@@ -1247,7 +1255,7 @@ class TransactionController extends Controller
                             $transaction->transfer_name = substr($transaction->plaid_merchant_description, strpos($transaction->plaid_merchant_description, 'ORG ID') + 7);
                         })
                         ->groupBy('transfer_name');
-
+            
                     foreach ($transactions_by_name as $transactions) {
                         //summy
                         //clear array before next foreach statement
@@ -1274,13 +1282,11 @@ class TransactionController extends Controller
                                     }
                                 }
 
-                                // dd($transaction_results);
-
                                 if (isset($transaction_results['transactions'])) {
                                     $transaction_results = collect($transaction_results['transactions']);
 
                                     foreach ($transaction_results as $transaction) {
-                                        $transaction = Transaction::findOrFail($transaction['transaction_id']);
+                                        // $transaction = Transaction::findOrFail($transaction['transaction_id']);
                                         $transaction->check()->associate($check);
                                         $transaction->save();
                                     }

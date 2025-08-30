@@ -69,19 +69,16 @@ class Check extends Model
     }
 
     /**
-     * Label to display next to the number, based on type.
-     * - Check => "Check #"
-     * - Transfer => "Transfer #"
-     * - Cash => "Cash"
+     * Unified, human-friendly payment label for UI.
      */
-    protected function numberLabel(): Attribute
+    protected function paymentLabel(): Attribute
     {
         return Attribute::make(
             get: fn () => match ($this->check_type) {
-                'Check' => 'Check #',
-                'Transfer' => 'Transfer #',
-                'Cash' => 'Cash',
-                default => '',
+                'Transfer' => 'Transfer',
+                'Check'    => 'Check',
+                'Cash'     => 'Cash',
+                default    => (string) $this->check_type,
             }
         );
     }
@@ -92,21 +89,6 @@ class Check extends Model
             get: fn ($value) => $this->check_type === 'Check' ? $value : $this->id,
         );
         //->shouldCache();
-    }
-
-    /**
-     * Display payment type for UI: Check, Transaction, or Cash.
-     */
-    protected function paymentType(): Attribute
-    {
-        return Attribute::make(
-            get: fn () => match ($this->check_type) {
-                'Transfer' => 'Transaction',
-                'Check' => 'Check',
-                'Cash' => 'Cash',
-                default => (string) $this->check_type,
-            }
-        );
     }
 
     public function getAmountDifferenceAttribute()

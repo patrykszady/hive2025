@@ -880,22 +880,37 @@ class ReceiptController extends Controller
 
     //1-18-2023 combine the next 2 functions into one. Pass type = original or temp
     //Show full-size receipt to anyone with a link
-    // No Middleware or Policies
-    //PUBLIC AS FUCK! BE CAREFUL!
     public function original_receipt($folder, $filename)
     {
-        $filename = strtolower($filename);
-        $path = storage_path('files/' . $folder . '/'.$filename);
+        // Build candidate paths preserving case and with common fallbacks
+        $candidates = [
+            $filename,
+            strtolower($filename),
+            strtoupper($filename),
+        ];
 
-        if (strtolower(File::extension($filename)) === 'pdf') {
-            $response = Response::make(file_get_contents($path), 200, [
-                'Content-Type' => 'application/pdf',
-            ]);
-        } else {
-            $response = Image::make($path)->response();
+        $resolvedPath = null;
+        foreach ($candidates as $name) {
+            $try = storage_path('files/'.$folder.'/'.$name);
+            if (file_exists($try)) {
+                $resolvedPath = $try;
+                $filename = $name; // normalize for extension checks
+                break;
+            }
         }
 
-        return $response;
+        if (! $resolvedPath) {
+            return response('File not found', 404);
+        }
+
+        $ext = strtolower(File::extension($filename));
+        if ($ext === 'pdf') {
+            return Response::make(file_get_contents($resolvedPath), 200, [
+                'Content-Type' => 'application/pdf',
+            ]);
+        }
+
+        return Image::make($resolvedPath)->response();
     }
 
     public function temp_receipt($filename)
