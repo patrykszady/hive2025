@@ -12,11 +12,8 @@ class PaymentShow extends Component
     use AuthorizesRequests;
     public Payment $payment;
     
-    public function mount(Payment $payment)
-    {
-        $this->payment = $payment;
-    }
-    
+    protected $listeners = ['refreshComponent' => '$refresh'];
+
     #[Title('Payment')]
     public function render()
     {

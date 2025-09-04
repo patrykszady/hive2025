@@ -9,6 +9,7 @@
                 <x-slot:header_buttons>
                     <flux:button
                         size="sm"
+                        wire:click="$dispatchTo('payments.payment-create', 'editPayment', { payment: {{ $payment->id }} })"
                         >
                         Edit Payment
                     </flux:button>
@@ -113,4 +114,7 @@
             </flux:card>
         </div>    
     </div>
+    <livewire:payments.payment-create />
 </div>
+
+

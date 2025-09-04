@@ -40,13 +40,6 @@ class VendorDocCreate extends Component
         $this->modal('vendor_doc_form_modal')->show();
     }
 
-    public function downloadDocuments($doc_filenames)
-    {
-        dd('in downloadDocuments');
-        $this->vendor = $vendor;
-        $this->modal('vendor_doc_form_modal')->show();
-    }
-
     public function requestDocument(Vendor $vendor)
     {
         $doc_types = $vendor->vendor_docs()->orderBy('expiration_date', 'DESC')->with('agent')->get()->groupBy('type');

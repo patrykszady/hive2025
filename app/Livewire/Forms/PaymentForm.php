@@ -26,23 +26,24 @@ class PaymentForm extends Form
     {
         $this->payment = $payment;
 
-        if ($this->payment->payments_grouped->isEmpty()) {
-            // $payments = $this->payment->payments_grouped;
-            // $payments->push($this->payment);
-            $parent_payment = Payment::where('parent_client_payment_id', $this->payment->id)->get();
-            $parent_payment->push($this->payment);
-            $payments->push($parent_payment);
-        } else {
-            $payments = $this->payment->payments_grouped;
-        }
-
-        dd($payments);
-        // $this->payment = $payment;
-        dd('in past');
-
+        // Prefill form fields
         $this->date = $this->payment->date->format('Y-m-d');
         $this->invoice = $this->payment->reference;
         $this->note = $this->payment->note;
+
+        // Prefill project amounts for the edit modal.
+        // Assumes the component (PaymentCreate) has already loaded $projects for the client.
+        $component = $this->component; // Livewire component using this form
+        if (isset($component->projects) && !empty($component->projects)) {
+            $group = $this->payment->payments; // Collection of grouped payments (parent+children or transaction group)
+            // Map: project_id => amount
+            $amountsByProject = $group->mapWithKeys(fn($p) => [$p->project_id => $p->amount]);
+
+            // Assign amounts to matching projects; leave others null
+            foreach ($component->projects as $proj) {
+                $proj->amount = $amountsByProject[$proj->id] ?? null;
+            }
+        }
     }
 
     public function store()
@@ -72,5 +73,88 @@ class PaymentForm extends Form
         }
 
         return $payment;
+    }
+
+    public function update()
+    {
+        $this->validate();
+
+        // Determine the group root id (parent) for grouping
+        $rootId = $this->payment->parent_client_payment_id ?: $this->payment->id;
+
+        // Current grouped payments (collection)
+        $currentGroup = $this->payment->payments; // includes parent+children
+
+        // Build a quick index of existing payments by project_id
+        $existingByProject = $currentGroup->keyBy('project_id');
+
+        // Gather selected projects with an amount
+        $component = $this->component;
+        $selected = collect($component->projects ?? [])
+            ->filter(fn($p) => isset($p->amount) && $p->amount !== null && $p->amount !== '')
+            ->unique('id')
+            ->values();
+        $selectedProjectIds = $selected->pluck('id')->all();
+
+        // If switching to a single project, just update this payment record in place.
+        if (count($selectedProjectIds) === 1) {
+            $proj = $selected->first();
+            $this->payment->fill([
+                'amount' => $proj->amount,
+                'project_id' => $proj->id,
+                'date' => $this->date,
+                'reference' => $this->invoice,
+                'note' => $this->note,
+                'belongs_to_vendor_id' => auth()->user()->vendor->id,
+                'parent_client_payment_id' => null,
+            ])->save();
+
+            return $this->payment->fresh();
+        }
+
+        // Update existing or create new payments for selected projects
+        foreach ($selected as $proj) {
+            $payload = [
+                'amount' => $proj->amount,
+                'project_id' => $proj->id,
+                'date' => $this->date,
+                'reference' => $this->invoice,
+                'note' => $this->note,
+                'belongs_to_vendor_id' => auth()->user()->vendor->id,
+            ];
+
+            if ($existingByProject->has($proj->id)) {
+                // Update existing payment for this project
+                $existing = $existingByProject[$proj->id];
+                $existing->fill($payload)->save();
+            } else {
+                // Extra guard: check DB for existing payment in this group with same project
+                $dbExisting = Payment::where(function ($q) use ($rootId) {
+                        $q->where('id', $rootId)->orWhere('parent_client_payment_id', $rootId);
+                    })
+                    ->where('project_id', $proj->id)
+                    ->first();
+
+                if ($dbExisting) {
+                    $dbExisting->fill($payload)->save();
+                } else {
+                    // Create a new child payment in this group
+                    Payment::create(array_merge($payload, [
+                        'parent_client_payment_id' => $rootId,
+                        'created_by_user_id' => auth()->id(),
+                    ]));
+                }
+            }
+        }
+
+        // Delete payments that are no longer selected (only within this group)
+        foreach ($currentGroup as $existing) {
+            if (!in_array($existing->project_id, $selectedProjectIds, true)) {
+                $existing->delete();
+            }
+        }
+
+        // Return the parent (or current) payment fresh for redirection context
+        return Payment::find($rootId) ?? $this->payment->fresh();
     }
 }

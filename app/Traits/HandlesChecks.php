@@ -2,10 +2,10 @@
 
 namespace App\Traits;
 
-use App\Models\Check;
+use \Illuminate\Validation\Rule;
 use App\Models\BankAccount;
 
-use Illuminate\Validation\Rule;
+use App\Models\Check;
 
 trait HandlesChecks
 {
@@ -23,9 +23,33 @@ trait HandlesChecks
     {
         return [
             'bank_account_id' => 'required_without:form.paid_by',
-            'check_type'      => ['required_with:bank_account_id'],
-            'next_check_auto' => ['nullable'],
-            'check_number'    => ['required_if:check_type,Check', 'nullable', 'numeric'],
+            'check_type'      => 'required_with:bank_account_id',
+            'next_check_auto' => 'nullable',
+            // Must be unique across ALL bank accounts under the same bank (for paper checks only)
+            'check_number'    => [
+                'required_if:check_type,Check',
+                'nullable',
+                'numeric',
+                Rule::unique('checks', 'check_number')->where(function ($query) {
+                    // Only apply to paper checks
+                    $query->where('check_type', 'Check');
+                    $query->whereNull('deleted_at');
+
+                    // If we have a selected bank account, scope to all accounts under its bank
+                    $selectedAccount = $this->bank_accounts->find($this->bank_account_id ?? null);
+                    if ($selectedAccount && $selectedAccount->bank) {
+                        $accountIds = $selectedAccount->bank
+                            ->accounts()
+                            ->withoutGlobalScopes()
+                            ->pluck('id')
+                            ->toArray();
+
+                        if (! empty($accountIds)) {
+                            $query->whereIn('bank_account_id', $accountIds);
+                        }
+                    }
+                }),
+            ],
         ];
     }
 
@@ -93,6 +117,10 @@ trait HandlesChecks
             $this->check_number = null;
             $this->auto_check_number = null;
             $this->next_check_auto = false;
+            // Re-validate check number uniqueness if present
+            if (! is_null($this->check_number)) {
+                $this->validateOnly('check_number');
+            }
         }
 
         if ($field === 'check_type') {
@@ -112,6 +140,10 @@ trait HandlesChecks
             if ($this->auto_check_number != $value) {
                 $this->next_check_auto = false;
             }
+        }
+
+        if ($field === 'check_number') {
+            $this->validateOnly('check_number');
         }
     }
 

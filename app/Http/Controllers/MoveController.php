@@ -42,6 +42,8 @@ class MoveController extends Controller
 {
     public function move()
     {
+        $payments = Payment::whereDoesntHave('transaction')->orderBy('created_at', 'desc')->take(10)->get();
+        dd($payments);
         //get all expenses that have splits and a recepit but no receipt line items.
         // $expenses = Expense::whereHas('splits') // Has at least one split
         //     ->whereHas('receipts') // Has at least one receipt

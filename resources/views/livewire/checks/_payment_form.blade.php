@@ -68,7 +68,7 @@
                     <flux:error name="check_number" />
                     @if(property_exists($this, 'next_check_auto') && $next_check_auto)
                         <flux:description>
-                            <i class="text-indigo-600">Automatic Next Check Number</i>
+                            <i class="text-accent">Automatic Next Check Number</i>
                         </flux:description>
                     @endif
                 </div>
@@ -102,7 +102,7 @@
                         <flux:error name="check_number" />
                         @if(property_exists($this, 'next_check_auto') && $next_check_auto)
                             <flux:description>
-                                <i class="text-indigo-600">Automatic Next Check Number</i>
+                                <i class="text-accent">Automatic Next Check Number</i>
                             </flux:description>
                         @endif
                     </x-forms.one_line>

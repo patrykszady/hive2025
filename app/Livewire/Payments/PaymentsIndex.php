@@ -21,6 +21,8 @@ class PaymentsIndex extends Component
     public $sortBy = 'date';
     public $sortDirection = 'desc';
 
+    protected $listeners = ['refreshComponent' => '$refresh'];
+
     #[Computed]
     public function payments()
     {

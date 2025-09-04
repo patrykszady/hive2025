@@ -286,7 +286,9 @@ class TaskReminderController extends Controller
                 ->get();
             
             // Send notification
-            $user->notify(new TaskUpdateNotification($currentTasks, $removedTasks, $today));
+            if (app()->environment('production')) {
+                $user->notify(new TaskUpdateNotification($currentTasks, $removedTasks, $today));
+            }
             
             // Remove from Redis
             Redis::hdel($redisKey, $userId);
@@ -364,7 +366,9 @@ class TaskReminderController extends Controller
             $userTaskList = $userData['tasks'];
 
             try {
-                $user->notify(new TaskReminderNotification($userTaskList, $tomorrow));
+                if (app()->environment('production')) {
+                    $user->notify(new TaskReminderNotification($userTaskList, $tomorrow));
+                }
                 $successCount++;
             } catch (\Exception $e) {
                 $errorCount++;

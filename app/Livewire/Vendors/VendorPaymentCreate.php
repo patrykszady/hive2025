@@ -36,6 +36,9 @@ class VendorPaymentCreate extends Component
 
     public $saved_expenses = [];
 
+    // Backing field for custom validation to enforce check total > $0
+    public $check_total_min = null;
+
     public $view_text = [
         'card_title' => 'Create Vendor Payments',
         'button_text' => 'Create Vendor Check',
@@ -57,6 +60,12 @@ class VendorPaymentCreate extends Component
                 'projects.*.vendor_bids_sum' => 'nullable',
                 'projects.*.balance' => 'nullable',
                 'projects.*.amount' => 'nullable|numeric|min:0.01|regex:/^-?\d+(\.\d{1,2})?$/',
+                // Validate that at least one project has a positive amount, and the total is > 0
+                'check_total_min' => [function (string $attribute, $value, \Closure $fail): void {
+                    if ($this->getVendorCheckSumProperty() <= 0) {
+                        $fail('Check total needs to be greater than $0 and include at least 1 project.');
+                    }
+                }],
             ]
         );
     }
@@ -96,6 +105,8 @@ class VendorPaymentCreate extends Component
         if (preg_match('/^projects\.(\d+)\.amount$/', $field, $matches)) {
             $project_id = $matches[1];
             $this->updateProjectBalance($project_id);
+            // Re-validate check total as amounts change
+            $this->validateOnly('check_total_min');
         }
         
         $this->validateOnly($field);
@@ -113,8 +124,6 @@ class VendorPaymentCreate extends Component
         $project->vendor_bids_sum = $project->bids()->vendorBids($this->vendor->id)->sum('amount');
         $project->balance = $project->vendor_bids_sum - $project->vendor_expenses_sum;
 
-        // dd($this->projects);
-        // $this->projects->reload();
         $this->project_id = '';
     }
 
@@ -161,14 +170,8 @@ class VendorPaymentCreate extends Component
 
     public function save()
     {
-        //validate check total is greater than $0
-        //if less than or equal to 0... send back with error
-        if ($this->getVendorCheckSumProperty() <= 0) {
-            return $this->addError('check_total_min', 'Check total needs to be greater than $0 and include at least 1 project.');
-        } else {
-            $this->validate();
-            $check = $this->form->store();
-        }
+        $this->validate();
+        $check = $this->form->store();
 
         //09-06-2023 move somewhere else?
         //send email to vendor being paid...
@@ -178,10 +181,9 @@ class VendorPaymentCreate extends Component
             $check->amount = $check->expenses->sum('amount');
             $check->save();
 
-            //queue
+            //queue email job
             $auth_user = auth()->user();
             $vendor = $this->vendor;
-
             SendVendorPaymentEmailJob::dispatch($auth_user, $vendor, $check);
 
             return redirect()->route('checks.show', $check->id);

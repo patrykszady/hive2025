@@ -36,13 +36,13 @@
                     <flux:select.option value="">ALL PROJECTS</flux:select.option>
                     <flux:select.option value="NO_PROJECT">NO PROJECT</flux:select.option>
                     <flux:select.option value="SPLIT">SPLIT</flux:select.option>
+                    <flux:select.option disabled>---------</flux:select.option>                                        
+                    @foreach ($distributions as $distribution)
+                        <flux:select.option value="D:{{$distribution->id}}">{{ $distribution->name }}</flux:select.option>
+                    @endforeach
                     <flux:select.option disabled>---------</flux:select.option>
                     @foreach ($projects as $project)
                         <flux:select.option value="{{$project->id}}"><div>{{$project->address}} <br> <i class="font-normal">{{$project->project_name}}</i></div></flux:select.option>
-                    @endforeach
-                    <flux:select.option disabled>---------</flux:select.option>
-                    @foreach ($distributions as $distribution)
-                        <flux:select.option value="D:{{$distribution->id}}">{{ $distribution->name }}</flux:select.option>
                     @endforeach
                 </flux:select>
 
@@ -105,7 +105,7 @@
 
                             @if($view != 'projects.show')
                                 <flux:table.cell>
-                                    {{ $expense->project['project_name'] }}
+                                    {{ isset($expense->project['address']) ? $expense->project['address'] . ' | ' . $expense->project['project_name'] : $expense->project['project_name'] }}
                                 </flux:table.cell>
                             @endif
                             <flux:table.cell>

@@ -14,6 +14,7 @@ use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
+use Flux;
 
 class PaymentCreate extends Component
 {
@@ -43,7 +44,19 @@ class PaymentCreate extends Component
     {
         return [
             'client_id' => 'nullable',
-            'projects.*.amount' => 'required|numeric|regex:/^-?\d+(\.\d{1,2})?$/',
+            'projects.*.amount' => [
+                'nullable',
+                'numeric',
+                'regex:/^-?\d+(\.\d{1,2})?$/',
+                function ($attribute, $value, $fail) {
+                    if ($value === null || $value === '') {
+                        return; // allow empty; handled by sum check separately
+                    }
+                    if ((float) $value == 0.0) {
+                        $fail('Amount cannot be 0.00');
+                    }
+                },
+            ],
         ];
     }
 
@@ -55,6 +68,7 @@ class PaymentCreate extends Component
 
     public function updated($field)
     {
+        // $this->validate();
         $this->validateOnly($field);
     }
 
@@ -115,17 +129,10 @@ class PaymentCreate extends Component
         $this->modal('payment_form_modal')->show();
     }
 
-    // public function removeProject($project_id_to_remove)
-    // {
-    //     $project = $this->projects->where('id', $project_id_to_remove)->first();
-    //     $project->show = false;
-    //     $project->amount = 0;
-
-    //     $this->form->project_id = "";
-    // }
-
     public function save()
     {
+    // Validate field-level rules first (allows null per-project amounts, enforces numeric and not zero when filled)
+    $this->validate();
         //validate payment total is greater than $0
         //if less than or equal to 0... send back with error
         if ($this->getClientPaymentSumProperty() === 0) {
@@ -134,7 +141,45 @@ class PaymentCreate extends Component
             $payment = $this->form->store();
         }
 
-        return redirect()->route('projects.show', $payment->project_id);
+        $this->modal('payment_form_modal')->close();
+        $this->dispatch('refreshComponent')->to('payments.payments-index');
+    }
+
+    public function update()
+    {
+        // $this->authorize('update', $this->payment ?? Payment::class);
+
+    // Validate field-level rules first
+    $this->validate();
+        // Optional: allow zero if editing? Keep same validation as save for consistency
+        if ($this->getClientPaymentSumProperty() === 0) {
+            return $this->addError('payment_total_min', 'Payment total needs to include at least 1 project and not equal $0.00');
+        }
+
+        $payment = $this->form->update();
+
+        $this->modal('payment_form_modal')->close();
+        $this->dispatch('refreshComponent')->to('payments.payment-show');
+    }
+
+    public function remove()
+    {
+        // $this->authorize('delete', $this->payment);
+
+        $projectId = $this->payment->project_id;
+        $this->payment->delete();
+
+        // Close modal and redirect away from a possibly stale page
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Payment Deleted',
+            text: 'Payment removed successfully.',
+        );
+        $this->modal('payment_form_modal')->close();
+
+        return $this->redirectRoute('projects.show', ['project' => $projectId], navigate: true);
     }
 
     #[Title('Payment')]

@@ -1,4 +1,4 @@
-<flux:modal name="task_create_form_modal" class="!mt-8 w-full max-w-sm" x-on:modal-show.window="$dispatch('reset-tabs')">
+<flux:modal name="task_create_form_modal" class="!mt-8 w-full max-w-sm" x-on:modal-show.window="$dispatch('reset-tabs'); window.dispatchEvent(new CustomEvent('task-modal-opened'))">
     <flux:heading size="lg" class="!mb-0">{{$view_text['card_title']}}</flux:heading>
     @if(isset($form->task))
         <flux:subheading>{{$form->task->title}}</flux:subheading>
@@ -86,7 +86,7 @@
                         clearable
                         placeholder="Assign vendor..."
                     >
-                        @foreach($vendors as $vendor)
+                        @foreach($this->vendors as $vendor)
                             <flux:select.option wire:key="{{$vendor->id}}" value="{{$vendor->id}}">
                                 <div class="flex items-center gap-2 whitespace-nowrap">
                                     <flux:avatar size="xs" name="{{ $vendor->name }}" color="auto" color:seed="{{ $vendor->id }}" />
@@ -98,7 +98,7 @@
 
                     {{-- USERS --}}
                     <flux:select wire:model.blur="form.user_ids" multiple label="Team Members" variant="listbox" placeholder="Assign team members...">
-                        @foreach($employees as $employee)
+                        @foreach($this->employees as $employee)
                             <flux:select.option wire:key="{{$employee->id}}" value="{{$employee->id}}">
                                 <div class="flex items-center gap-2 whitespace-nowrap">
                                     <flux:avatar size="xs" name="{{ $employee->full_name }}" color="auto" color:seed="{{ $employee->id }}"  />

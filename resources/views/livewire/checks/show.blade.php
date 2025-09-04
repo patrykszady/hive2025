@@ -16,12 +16,12 @@
                     <x-details.row title="Amount" :content="money($check->amount)" />
                     <x-details.row title="Payee" :content="$check->owner" href="{{$check->vendor_id ? route('vendors.show', $check->vendor->id) : ($check->user_id ? route('users.show', $check->user->id) : '')}}"/>
                     <x-details.row title="Date" :content="$check->date->format('m/d/Y')" />
-                    <x-details.row title="Type" :content="$check->check_type" />
                     @if($check->bank_account)
                         <x-details.row title="Bank" :content="$check->bank_account->getNameAndType()" />
                     @endif
+                    <x-details.row title="Type" :content="$check->check_type" />
                     <x-details.row
-                        :title="$check->number_label"
+                        :title="$check->payment_label"
                         :content="$check->check_number"
                     />
                 </x-slot:details>

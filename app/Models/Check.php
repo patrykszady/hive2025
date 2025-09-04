@@ -126,7 +126,7 @@ class Check extends Model
                 } 
                 // If check has a vendor, use vendor name
                 elseif ($this->vendor) {
-            return trim($this->vendor->business_name . ($this->vendor->business_type ? ' - ' . $this->vendor->business_type : ''));
+            return trim($this->vendor->business_name);
                 }
                 
                 // Fallback if neither user nor vendor are valid

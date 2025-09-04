@@ -1,4 +1,4 @@
-<div class="max-w-3xl">
+<div class="max-w-4xl">
     <flux:card class="space-y-2">
         <div class="flex justify-between">
             <flux:heading size="lg">Payments</flux:heading>

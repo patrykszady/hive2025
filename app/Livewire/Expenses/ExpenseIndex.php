@@ -50,7 +50,6 @@ class ExpenseIndex extends Component
         'expense_vendor' => ['except' => ''],
         'project_id' => ['except' => ''],
         'expense_statuses' => ['except' => []],
-        // 'bank_plaid_ins_id' => ['except' => ''],
     ];
 
     public function updating()
@@ -58,17 +57,6 @@ class ExpenseIndex extends Component
         $this->resetPage('expenses-page');
         $this->resetPage('transactions-page');
     }
-
-    // public function updated($field, $value)
-    // {
-    //     if($field == 'project_id'){
-    //         $this->expense_vendor = null;
-    //     }
-
-    //     if($field == 'expense_vendor'){
-    //         $this->project_id = NULL;
-    //     }
-    // }
 
     public function mount()
     {
@@ -79,16 +67,6 @@ class ExpenseIndex extends Component
         $this->vendors = Vendor::whereHas('expenses')->orWhereHas('transactions')->orderBy('business_name')->get();
         $this->projects = Project::whereHas('expenses')->orderBy('created_at', 'DESC')->get();
         $this->distributions = Distribution::all(['id', 'name']);
-        // $this->banks = Bank::with('accounts')->get()->groupBy('plaid_ins_id')
-        //     ->each(function ($banks, $bank_plaid_ins_id) {
-        //         $this->bank_account_ids[$bank_plaid_ins_id] = [];
-        //         foreach ($banks as $bank) {
-        //             array_push($this->bank_account_ids[$bank_plaid_ins_id], $bank->accounts->pluck('id')->toArray());
-        //         }
-
-        //         $this->bank_account_ids[$bank_plaid_ins_id] = array_merge(...$this->bank_account_ids[$bank_plaid_ins_id]);
-        //     })
-        //     ->toBase();
     }
 
     public function sort($column)
@@ -201,7 +179,6 @@ class ExpenseIndex extends Component
     public function render()
     {        
         $this->authorize('viewAny', Expense::class);
-
         return view('livewire.expenses.index');
     }
 }

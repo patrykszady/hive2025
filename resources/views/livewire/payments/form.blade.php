@@ -83,7 +83,12 @@
                     {{money($this->client_payment_sum)}}
                 </flux:button>
 
-                <flux:button type="submit" variant="primary">{{$view_text['button_text']}}</flux:button>
+                <div class="space-x-2">
+                    @if($view_text['form_submit'] === 'update')
+                        <flux:button wire:click.prevent="remove" variant="danger" icon="trash">Delete</flux:button>
+                    @endif
+                    <flux:button type="submit" variant="primary">{{$view_text['button_text']}}</flux:button>
+                </div>
             </div>
 
             <flux:error name="payment_total_min" />

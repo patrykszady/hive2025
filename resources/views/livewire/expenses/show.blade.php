@@ -109,8 +109,8 @@
                                             </a>
                                         </flux:table.cell>
                                         <flux:table.cell>{{ $associated_expense->date->format('m/d/Y') }}</flux:table.cell>
-                                        <flux:table.cell>{{ !$associated_expense->transactions->isEmpty() ? $associated_expense->transactions()->first()->bank_account->bank->name : '' }}</flux:table.cell>
-                                        <flux:table.cell>{{ !$associated_expense->transactions->isEmpty() ? $associated_expense->transactions()->first()->bank_account->account_number : '' }}</flux:table.cell>
+                                        <flux:table.cell>{{ $associated_expense->transactions->isNotEmpty() ? $associated_expense->transactions->first()->bank_account->bank->name : '' }}</flux:table.cell>
+                                        <flux:table.cell>{{ $associated_expense->transactions->isNotEmpty() ? $associated_expense->transactions->first()->bank_account->account_number : '' }}</flux:table.cell>
                                     </flux:table.row>
                                 @endforeach
                             </flux:table.rows>

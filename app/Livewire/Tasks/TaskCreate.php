@@ -3,6 +3,7 @@
 namespace App\Livewire\Tasks;
 
 use App\Models\Task;
+use App\Models\Vendor;
 use App\Models\TaskDependency;
 use App\Livewire\Forms\TaskForm;
 use App\Livewire\Planner\GanttIndex;
@@ -20,10 +21,8 @@ class TaskCreate extends Component
 
     public TaskForm $form;
 
-    //$projects & $vendors & $employees come from the Planner Component
+    //$projects  come from the Planner Component
     public $projects = [];
-    public $vendors = [];
-    public $employees = [];
     public $selectedPredecessorId = null;
     public $dependencyType = 'finish_to_start';
     public $lagDays = 0;
@@ -35,6 +34,21 @@ class TaskCreate extends Component
     ];
 
     protected $listeners = ['editTask', 'addTask'];
+
+    #[Computed]
+    public function vendors()
+    {
+        // Use Scout search to sort by ytd_expense_sum
+        return Vendor::search('*')
+            ->orderBy('ytd_expense_sum', 'desc')
+            ->get();
+    }
+
+    #[Computed]
+    public function employees()
+    {
+        return auth()->user()->vendor->users()->employed()->get();
+    }
 
     #[Computed]
     public function duration()
