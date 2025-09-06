@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Scopes\ExpenseScope;
+use App\Models\Distribution;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -133,36 +134,40 @@ class Expense extends Model
         });
     }
 
+    // (removed duplicate basic project() definition)
+
     public function project(): BelongsTo
     {
         return $this->belongsTo(Project::class)
-        
-        ->withDefault(function ($project, $expense) {
-            // Prefer attributes provided by search payload to avoid extra queries
-            $hasSplitsAttr = array_key_exists('has_splits', $expense->getAttributes()) ? (bool) $expense->getAttribute('has_splits') : null;
-            $hasSplits = $hasSplitsAttr !== null ? $hasSplitsAttr : ($expense->relationLoaded('splits') ? $expense->splits->isNotEmpty() : $expense->splits()->exists());
+            ->withDefault(function ($project, $expense) {
+                // Prefer attributes provided by search payload to avoid extra queries
+                $hasSplitsAttr = array_key_exists('has_splits', $expense->getAttributes()) ? (bool) $expense->getAttribute('has_splits') : null;
+                $hasSplits = $hasSplitsAttr !== null
+                    ? $hasSplitsAttr
+                    : ($expense->relationLoaded('splits') ? $expense->splits->isNotEmpty() : $expense->splits()->exists());
 
-            if ($hasSplits) {
-                $project->project_name = 'EXPENSE SPLIT';
-                return;
-            }
-
-            // If a distribution is present, prefer already-loaded relation; otherwise avoid extra hit when only ID is known
-            if (! is_null($expense->distribution_id)) {
-                if ($expense->relationLoaded('distribution') && $expense->distribution) {
-                    $project->project_name = $expense->distribution->name;
-                } elseif (is_array($expense->distribution)) {
-                    $project->project_name = $expense->distribution['name'] ?? 'Distribution';
-                } else {
-                    // Fallback label without triggering a query
-                    $project->project_name = 'Distribution';
+                if ($hasSplits) {
+                    // Set a lightweight flag; Project::name will render the final label
+                    $project->split = true;
+                    return;
                 }
-                $project->distribution = true;
-                return;
-            }
 
-            $project->project_name = 'NO PROJECT';
-        });
+                // If a distribution is present, set attributes for Project::name accessor
+                if (! is_null($expense->distribution_id)) {
+                    // Provide only distribution context; Project::name decides the display
+                    $project->distribution = true;
+                    $project->distribution_id = $expense->distribution_id;
+                    // If distribution is preloaded or present as array, pass along the name for free
+                    if ($expense->relationLoaded('distribution') && $expense->distribution) {
+                        $project->distribution_name = $expense->distribution->name;
+                    } elseif (is_array($expense->distribution ?? null)) {
+                        $project->distribution_name = $expense->distribution['name'] ?? null;
+                    }
+                    return;
+                }
+
+                // Leave project_name unset so Project::name returns "No Project"
+            });
     }
 
     public function check(): BelongsTo

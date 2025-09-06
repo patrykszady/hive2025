@@ -42,6 +42,27 @@ class MoveController extends Controller
 {
     public function move()
     {
+        // Expenses where the sum of directly attached transactions exceeds the expense amount (cleaner Eloquent)
+            $expenses = Expense::query()
+                ->whereDate('date', '>=', '2023-01-01')
+                ->withSum([
+                    'transactions' => function ($q) {
+                        $q->withoutGlobalScopes()->whereNull('deleted_at');
+                    },
+                ], 'amount') // alias: transactions_sum_amount
+                ->withCount([
+                    'transactions as tx_count' => function ($q) {
+                        $q->withoutGlobalScopes()->whereNull('deleted_at');
+                    },
+                ])
+                ->having('transactions_sum_amount', '>', DB::raw('amount'))
+                ->having('tx_count', '>=', 2)
+            ->with(['transactions:id,expense_id,amount'])
+            ->orderByDesc('date')
+            ->limit(5)
+            ->get(['id', 'amount', 'date', 'vendor_id']);
+
+        dd($expenses);
         $payments = Payment::whereDoesntHave('transaction')->orderBy('created_at', 'desc')->take(10)->get();
         dd($payments);
         //get all expenses that have splits and a recepit but no receipt line items.

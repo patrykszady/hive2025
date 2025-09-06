@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Client;
+use App\Models\Distribution;
 use App\Models\ProjectVendor;
 use App\Scopes\ProjectScope;
 use App\Traits\HasAddress;
@@ -168,29 +169,46 @@ class Project extends Model
     {
         return Attribute::make(
             get: function ($value, array $attributes) {
-                // Check if project_name exists
-                if (!isset($attributes['project_name'])) {
+                $projectName = $attributes['project_name'] ?? null;
+
+                // Split sentinel always wins (via flag or literal name)
+                if (!empty($attributes['split']) || $projectName === 'EXPENSE SPLIT') {
+                    return 'EXPENSE SPLIT';
+                }
+
+                // Distribution-backed synthetic project
+                $hasDistribution = (!empty($attributes['distribution']) && $attributes['distribution'] == true)
+                    || (!empty($attributes['distribution_id']));
+                if ($hasDistribution) {
+                    // Prefer injected name when present to avoid extra queries
+                    if (!empty($attributes['distribution_name'])) {
+                        return $attributes['distribution_name'];
+                    }
+                    if (!empty($projectName) && $projectName !== 'Distribution') {
+                        return $projectName;
+                    }
+
+                    // Fallback: query by distribution_id only if needed
+                    if (!empty($attributes['distribution_id'])) {
+                        $name = Distribution::query()->whereKey($attributes['distribution_id'])->value('name');
+                        return $name ?: 'No Project';
+                    }
+
+                    return $projectName ?: 'No Project';
+                }
+
+                // No project
+                if (empty($projectName) || strtoupper($projectName) === 'NO PROJECT') {
                     return 'No Project';
                 }
-                
-                // Special project names
-                $specialNames = ['EXPENSE SPLIT', 'No Project', 'NO PROJECT'];
-                if (in_array($attributes['project_name'], $specialNames, true)) {
-                    return $attributes['project_name'] === 'NO PROJECT' ? 'No Project' : $attributes['project_name'];
+
+                // Standard: address + project name if address present
+                $address = $attributes['address'] ?? null;
+                if (!empty($address)) {
+                    return $address.' | '.$projectName;
                 }
-                
-                // Distribution projects
-                if (isset($attributes['distribution']) && $attributes['distribution'] == true) {
-                    return $attributes['project_name'];
-                }
-                
-                // Standard projects with address
-                if (!empty($attributes['address'])) {
-                    return $attributes['address'].' | '.$attributes['project_name'];
-                }
-                
-                // Default to just project name
-                return $attributes['project_name'];
+
+                return $projectName;
             }
         );
     }

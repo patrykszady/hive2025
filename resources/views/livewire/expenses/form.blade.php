@@ -138,8 +138,8 @@
             >
             @include('livewire.checks._payment_form', [
                 'hideBasicFields' => true,
-                // Disable when creating from a transaction OR editing an expense that already has a check
-                'disableChecks' => (!empty($form->transaction)) || (!empty($expense?->check_id)),
+                // Disable when the transaction has any check type (has check_number) or the expense already has a check
+                'disableChecks' => (!empty($expense?->check_id)) || (!empty($form->transaction?->check_number)),
             ])
         </div>
 

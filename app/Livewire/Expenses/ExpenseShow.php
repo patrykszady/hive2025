@@ -23,9 +23,13 @@ class ExpenseShow extends Component
         $this->expense = $expense;
         
         // Eager load with ordered receipts
-        $this->expense->load(['receipts' => function($query) {
-            $query->ordered();
-        }]);
+        $this->expense->load([
+            'receipts' => function($query) {
+                $query->ordered();
+            },
+            // Load distribution so Expense::project() withDefault can use the real name
+            'distribution',
+        ]);
 
     }
     

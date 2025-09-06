@@ -105,7 +105,7 @@
 
                             @if($view != 'projects.show')
                                 <flux:table.cell>
-                                    {{ isset($expense->project['address']) ? $expense->project['address'] . ' | ' . $expense->project['project_name'] : $expense->project['project_name'] }}
+                                    {{ $expense->project->name }}
                                 </flux:table.cell>
                             @endif
                             <flux:table.cell>
