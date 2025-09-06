@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Log;
 trait ProcessesVendorDocs
 {
     protected $googlePlacesService;
+    protected bool $updatedExistingDoc = false;
 
     protected function getGooglePlacesService()
     {
@@ -31,8 +32,10 @@ trait ProcessesVendorDocs
         $messageId = null,
         $grantId = null
     ) {
-        // Normalize the file path
+    // Normalize the file path
         $normalizedFilePath = ltrim($filePath, 'files/');
+    // Reset per-run flag
+    $this->updatedExistingDoc = false;
 
         try {
             // 1. Extract OCR data
@@ -94,13 +97,20 @@ trait ProcessesVendorDocs
 
             // 10. Cleanup
             if ($newPolicyCreated) {
+                // New record(s) created: keep permanent file, delete temp
                 Storage::disk('files')->delete($normalizedFilePath);
-                return true;
-            } else {
-                // No policies created (duplicate) - cleanup permanent file but keep temp file for debugging
-                Storage::disk('files')->delete($newFilePath);
-                return false;
+                return true; // created
             }
+
+            if ($this->updatedExistingDoc) {
+                // Existing records updated to reference the new file: keep permanent and delete temp
+                Storage::disk('files')->delete($normalizedFilePath);
+                return 'updated';
+            }
+
+            // Pure duplicate: remove the new permanent file, keep temp for debugging trace if needed
+            Storage::disk('files')->delete($newFilePath);
+            return 'duplicate';
 
         } catch (\Exception $e) {
             Log::channel('vendor_docs')->error('Exception during document processing', [
@@ -221,6 +231,13 @@ trait ProcessesVendorDocs
                     'doc_filename' => $fileName,
                 ]
             );
+
+            // If it already existed, ensure it points to the latest uploaded file
+            if (! $vendorDoc->wasRecentlyCreated && $vendorDoc->doc_filename !== $fileName) {
+                $vendorDoc->doc_filename = $fileName;
+                $vendorDoc->save();
+                $this->updatedExistingDoc = true;
+            }
 
             // Associate agent if available
             if ($vendorDoc->wasRecentlyCreated && $agent) {

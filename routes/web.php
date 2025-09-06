@@ -59,6 +59,7 @@ use App\Livewire\Vendors\VendorSheetsTypeIndex;
 
 use App\Livewire\Vendors\VendorShow;
 use App\Livewire\Vendors\VendorsIndex;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 
 //if guests go to '/', if logged in go to dashboard (or to /vendor_selection if not set and User has multiple)
@@ -113,8 +114,6 @@ Route::get('expenses/temp_receipt/{receipt}', [ReceiptController::class, 'temp_r
 Route::get('receipts/azure_receipts', [ReceiptController::class, 'azure_receipts'])->name('azure_receipts');
 Route::get('receipts/goutte_crawl', [ReceiptController::class, 'goutte_crawl'])->name('goutte_crawl');
 // Route::get('new_ocr_status', [ReceiptController::class, 'new_ocr_status'])->name('new_ocr_status');
-
-Route::get('projects/reimbursments/print/{project}', [ReceiptController::class, 'printReimbursment'])->name('print_reimbursment');
 
 // Route::get('plaid_transactions_scheduled', [TransactionController::class, 'plaid_transactions_scheduled']);
 Route::get('plaid_statements_list', [TransactionController::class, 'plaid_statements_list']);
@@ -210,6 +209,7 @@ Route::middleware(['auth', 'vendor.access'])->group(function () {
     //PROJECTS
     Route::get('/projects', ProjectsIndex::class)->name('projects.index');
     Route::get('/projects/{project}', ProjectShow::class)->name('projects.show');
+    // Route::get('projects/reimbursments/print/{project}', [ReceiptController::class, 'printReimbursment'])->name('print_reimbursment');
 
     //TIMESHEETS
     Route::get('/timesheets', TimesheetsIndex::class)

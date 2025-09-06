@@ -41,7 +41,7 @@
                     <flux:select.search placeholder="Search..." />
                 </x-slot>
                 @foreach($this->vendors as $vendor)
-                    <flux:select.option value="{{$vendor->id}}">{{$vendor->name}}</flux:select.option>
+                    <flux:select.option value="{{$vendor->id}}">{{$vendor->business_name}}</flux:select.option>
                 @endforeach
             </flux:select>
             
@@ -132,11 +132,15 @@
         {{-- CHECK --}}
         {{-- SHOULD Be a component here --}}
         <div
-            x-data="{ open: @entangle('form.paid_by'), project_id: @entangle('form.project_id'), splits: @entangle('splits') }"
-            x-show="(project_id || splits) && !open"
+            x-data="{ open: @entangle('form.paid_by'), project_id: @entangle('form.project_id'), splits: @entangle('splits'), bank_account_id: @entangle('bank_account_id') }"
+            x-show="(project_id || splits || bank_account_id) && !open"
             x-transition
             >
-            @include('livewire.checks._payment_form', ['hideBasicFields' => true])
+            @include('livewire.checks._payment_form', [
+                'hideBasicFields' => true,
+                // Disable when creating from a transaction OR editing an expense that already has a check
+                'disableChecks' => (!empty($form->transaction)) || (!empty($expense?->check_id)),
+            ])
         </div>
 
         {{-- RECEIPT --}}

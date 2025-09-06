@@ -34,7 +34,7 @@ class Expense extends Model
      */
     public function searchableAs(): string
     {
-        return env('APP_ENV') == 'local' ? 'expenses_index_dev' : 'expenses_index';
+    return app()->environment('local') ? 'expenses_index_dev' : 'expenses_index';
     }
 
     /**
@@ -43,36 +43,55 @@ class Expense extends Model
     public function toSearchableArray(): array
     {
         // Calculate status before indexing
-        $status = $this->calculateStatus(); // Create a private method for this
-        
-        return array_merge($this->toArray(), [
+        $status = $this->calculateStatus();
+
+        // Index only the fields we actually use for search, filtering, and sorting
+        return [
             'id' => (string) $this->id,
-            'date' => $this->date->timestamp,
-            'has_splits' => $this->splits->isEmpty() ? false : true,
+            'amount' => (float) $this->amount,
+            'date' => $this->date?->timestamp ?? 0,
+            'vendor_id' => $this->vendor_id,
+            'project_id' => $this->project_id,
+            'distribution_id' => $this->distribution_id,
+            'check_id' => $this->check_id,
+            'has_splits' => $this->splits()->exists(),
             'expense_status' => $status,
             'belongs_to_vendor_id' => (int) $this->belongs_to_vendor_id,
-        ]);
+            'paid_by' => $this->paid_by,
+        ];
     }
 
     // Add this private method to calculate status for indexing
     private function calculateStatus(): string
     {
-        if ($this->check && $this->check->status === 'Complete') {
-            return 'Complete';
+        // Determine "No Project" using DB fields to avoid relation hydration
+        $noProject = (is_null($this->project_id) || (int) $this->project_id === 0)
+            && is_null($this->distribution_id)
+            && ! $this->splits()->exists();
+
+        // A transaction can be directly attached to the expense or via a related check
+        $hasTransactions = $this->transactions()->exists()
+            || $this->check()->whereHas('transactions')->exists()
+            || ! is_null($this->paid_by);
+
+        // Rules:
+        // - If project is "No Project" AND no transactions => Missing Info
+        if ($noProject && ! $hasTransactions) {
+            return 'Missing Info';
         }
-        
-        $projectName = strtoupper($this->project->project_name ?? '');
-        if ($projectName === 'NO PROJECT') {
+
+        // - If project is "No Project" AND has transactions => No Project
+        if ($noProject && $hasTransactions) {
             return 'No Project';
         }
-        
-        if ($this->transactions->isNotEmpty() || $this->paid_by !== null) {
-            return 'Complete';
-        } elseif ($this->transactions->isEmpty()) {
+
+        // - If project is NOT "No Project" AND no transactions => No Transaction
+        if (! $noProject && ! $hasTransactions) {
             return 'No Transaction';
         }
-        
-        return 'Missing Info';
+
+        // - If project is NOT "No Project" AND has transactions => Complete
+        return 'Complete';
     }
 
     /**
@@ -80,7 +99,7 @@ class Expense extends Model
      */
     public static function scopedSearch($query = '', $filterConditions = [], $sortBy = 'date', $sortDirection = 'desc')
     {
-        return self::search($query, function ($meilisearch, $searchQuery, $options) use ($filterConditions, $sortBy, $sortDirection) {
+    return self::search($query, function ($meilisearch, $searchQuery, $options) use ($filterConditions, $sortBy, $sortDirection) {
             // Apply base security filters
             $user = auth()->user();
             $baseFilter = "__soft_deleted = 0 AND belongs_to_vendor_id = {$user->vendor->id}";
@@ -107,6 +126,10 @@ class Expense extends Model
             }
             
             return $meilisearch->search($searchQuery, $options);
+        })
+        // Narrow the columns fetched from the database when hydrating models
+        ->query(function ($eloquent) {
+            $eloquent->select(['id', 'amount', 'date', 'vendor_id', 'project_id', 'distribution_id', 'check_id', 'paid_by']);
         });
     }
 
@@ -115,19 +138,30 @@ class Expense extends Model
         return $this->belongsTo(Project::class)
         
         ->withDefault(function ($project, $expense) {
-            if ($expense->splits()->exists()) {
+            // Prefer attributes provided by search payload to avoid extra queries
+            $hasSplitsAttr = array_key_exists('has_splits', $expense->getAttributes()) ? (bool) $expense->getAttribute('has_splits') : null;
+            $hasSplits = $hasSplitsAttr !== null ? $hasSplitsAttr : ($expense->relationLoaded('splits') ? $expense->splits->isNotEmpty() : $expense->splits()->exists());
+
+            if ($hasSplits) {
                 $project->project_name = 'EXPENSE SPLIT';
-            } elseif ($expense->distribution) {
-                // Check if distribution is an array (from MeiliSearch) or an object
-                if (is_array($expense->distribution)) {
-                    $project->project_name = $expense->distribution['name'] ?? 'Unknown Distribution';
-                } else {
+                return;
+            }
+
+            // If a distribution is present, prefer already-loaded relation; otherwise avoid extra hit when only ID is known
+            if (! is_null($expense->distribution_id)) {
+                if ($expense->relationLoaded('distribution') && $expense->distribution) {
                     $project->project_name = $expense->distribution->name;
+                } elseif (is_array($expense->distribution)) {
+                    $project->project_name = $expense->distribution['name'] ?? 'Distribution';
+                } else {
+                    // Fallback label without triggering a query
+                    $project->project_name = 'Distribution';
                 }
                 $project->distribution = true;
-            } else {
-                $project->project_name = 'NO PROJECT';
+                return;
             }
+
+            $project->project_name = 'NO PROJECT';
         });
     }
 
@@ -230,6 +264,8 @@ class Expense extends Model
                 if (array_key_exists('expense_status', $attributes)) {
                     return $attributes['expense_status'];
                 }
+                // Fallback to computed status if not present (avoid heavy relation loads)
+                return $this->calculateStatus();
             }
         );
     }

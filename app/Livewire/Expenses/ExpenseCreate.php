@@ -143,6 +143,7 @@ class ExpenseCreate extends Component
     public function newExpense($amount)
     {
         $this->expense = Expense::make();
+    $this->clearCheckFields();
        
         $this->form->amount = $amount;
         $this->view_text = [
@@ -159,13 +160,21 @@ class ExpenseCreate extends Component
         $this->resetModal();
 
         $this->expense = $expense;
-        $this->form->setExpense($expense);
+    $this->clearCheckFields();
+    $this->form->setExpense($expense);
+
+        // If the expense already has a check, prefill the component-level check fields
+        if ($expense->check) {
+            $this->bank_account_id = $expense->check->bank_account_id;
+            $this->check_type = $expense->check->check_type;
+            $this->check_number = $expense->check->check_number;
+            $this->next_check_auto = false;
+            $this->auto_check_number = null;
+        }
 
         if (! $expense->splits->isEmpty()) {
             $this->hasSplits($expense->splits);
-        }
-
-    
+        }    
 
         $this->view_text = [
             'card_title' => 'Update Expense',
@@ -180,10 +189,11 @@ class ExpenseCreate extends Component
     {
         $this->expense = Expense::make();
         $this->form->reset();
+    $this->clearCheckFields();
         $this->dispatch('resetSplits')->to('expenses.expense-splits-create');
         $this->split = false;
         $this->splits = false;
-        $this->expense_splits = [];
+    $this->expense_splits = [];
         // Public functions should be reset here
         // $this->dispatch('resetSplits')->to('expenses.expenses-splits-form');
         // $this->dispatch('refreshComponent')->to('expenses.expenses-splits-form');
@@ -214,36 +224,9 @@ class ExpenseCreate extends Component
     {
         $this->resetModal();
         $this->dispatch('resetSplits')->to('expenses.expense-splits-create');
-        // {
-        //6-14-2022 this only works for Retail vendors.. really need a Modal from MatchVendor or VendorCreate forms and taken back here
-        //create Retail vendor here if doesnt exist yet
-        // if(is_null($transaction->vendor_id)){
-        //     $vendor = Vendor::create([
-        //         'business_type' => 'Retail',
-        //         'business_name' => $transaction->plaid_merchant_name,
-        //     ]);
+        $this->clearCheckFields();
 
-        //     $vendor_id = $vendor->id;
-
-        //     //USED IN MULTIPLE OF PLACES TransactionController@add_vendor_to_transactions, MatchVendor@store
-        //     //add if vendor is not part of the currently logged in vendor
-        //     if(!$transaction->bank_account->vendor->vendors->contains($vendor_id)){
-        //         $transaction->bank_account->vendor->vendors()->attach($vendor_id);
-        //     }
-
-        //     //add this vendor to the existing $this->vendors collection
-        //     $this->vendors->add($vendor);
-
-        //     //6-8-2022 run in a queue?
-        //     app('App\Http\Controllers\TransactionController')->add_vendor_to_transactions();
-        // }else{
-        //     $vendor_id = $transaction->vendor_id;
-        // }
-        // }
-
-        // $this->expense_splits = [];
-
-        //2/18/2023 if check_number .. expense->vendor_id = GS Construction / logged in vendor?
+        // If the transaction has a check_number, derive check_type and prefill fields
         if ($transaction->check_number) {
             if ($transaction->check_number === '1010101') {
                 $check_type = 'Transfer';
@@ -253,12 +236,15 @@ class ExpenseCreate extends Component
                 $check_type = 'Check';
             }
 
-            $this->form->bank_account_id = $transaction->bank_account_id;
-            $this->form->check_type = $check_type;
+            // Populate component-level check fields used by the partial
+            $this->bank_account_id = $transaction->bank_account_id;
+            $this->check_type = $check_type;
+            $this->next_check_auto = false;
+            $this->auto_check_number = null;
+            $this->check_number = null;
 
-            //2/18/2023 dont allow changes to $this->check if coming from a transaction...
-            if ($check_type === 'Check') {
-                $this->form->check_number = $transaction->check_number;
+            if ($check_type === 'Check' && !in_array($transaction->check_number, ['1010101', '2020202'])) {
+                $this->check_number = $transaction->check_number;
             }
         }
 

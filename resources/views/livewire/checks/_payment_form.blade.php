@@ -1,6 +1,7 @@
 @props([
     'disablePaidBy' => false,
-    'hideBasicFields' => false
+    'hideBasicFields' => false,
+    'disableChecks' => false,
 ])
 
 @unless($hideBasicFields)
@@ -34,6 +35,7 @@
                 wire:model.live="bank_account_id" 
                 label="Bank"
                 placeholder="Choose bank..."
+                :disabled="$disableChecks"
             >
                 @foreach ($this->bank_accounts as $bank_account)
                     <flux:select.option value="{{ $bank_account->id }}">
@@ -49,6 +51,7 @@
                     wire:model.live="check_type" 
                     label="Payment Type"
                     placeholder="Choose payment type..."
+                    :disabled="$disableChecks"
                 >
                     <flux:select.option value="Check">Check</flux:select.option>
                     <flux:select.option value="Transfer">Transfer</flux:select.option>
@@ -64,6 +67,8 @@
                         type="number" 
                         inputmode="numeric" 
                         step="1" 
+                        :disabled="$disableChecks"
+                        :readonly="$disableChecks"
                     />
                     <flux:error name="check_number" />
                     @if(property_exists($this, 'next_check_auto') && $next_check_auto)
@@ -76,7 +81,8 @@
         @else
             {{-- Original implementation with x-forms.one_line --}}
             <x-forms.one_line label="Bank">
-                <flux:select name="bank_account_id" wire:model.live="bank_account_id" placeholder="Choose bank...">
+                <flux:select name="bank_account_id" wire:model.live="bank_account_id" placeholder="Choose bank..." :disabled="$disableChecks">
+                    
                     @foreach ($this->bank_accounts as $bank_account)
                         <flux:select.option value="{{ $bank_account->id }}">
                             {{ $bank_account->bank->name }}
@@ -88,7 +94,7 @@
 
             <div x-show="$wire.bank_account_id" x-transition class="mt-2 space-y-2">
                 <x-forms.one_line label="Payment Type">
-                    <flux:select wire:model.live="check_type" placeholder="Choose payment type...">
+                    <flux:select wire:model.live="check_type" placeholder="Choose payment type..." :disabled="$disableChecks">
                         <flux:select.option value="Check">Check</flux:select.option>
                         <flux:select.option value="Transfer">Transfer</flux:select.option>
                         <flux:select.option value="Cash">Cash</flux:select.option>
@@ -98,7 +104,7 @@
 
                 <div x-data="{ check_type: @entangle('check_type') }" x-show="check_type == 'Check'" x-transition>
                     <x-forms.one_line label="Check Number">
-                        <flux:input wire:model.live="check_number" type="number" inputmode="numeric" step="1" />
+                        <flux:input wire:model.live="check_number" type="number" inputmode="numeric" step="1" :disabled="$disableChecks" :readonly="$disableChecks" />
                         <flux:error name="check_number" />
                         @if(property_exists($this, 'next_check_auto') && $next_check_auto)
                             <flux:description>

@@ -58,12 +58,6 @@ class ExpenseForm extends Form
     // #[Validate('nullable', as: 'bank account')]
     // public $bank_account_id = null;
 
-    // #[Validate('required_with:bank_account_id', as: 'type')]
-    // public $check_type = null;
-
-    // // #[Validate('required_if:check_type,Check')]
-    // public $check_number = null;
-
     // #[Validate]
     public $merchant_name = null;
 

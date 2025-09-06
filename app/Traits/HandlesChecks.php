@@ -160,6 +160,19 @@ trait HandlesChecks
         $this->auto_check_number = $next_check_number; // Store the auto-generated value
         $this->next_check_auto = true;
     }
+
+    /**
+     * Clear all check-related fields on the component to avoid stale values
+     * when opening the form for a different expense/transaction.
+     */
+    public function clearCheckFields(): void
+    {
+        $this->bank_account_id = '';
+        $this->check_type = '';
+        $this->check_number = null;
+        $this->next_check_auto = false;
+        $this->auto_check_number = null;
+    }
     
     /**
      * Associate expense(s) with a check

@@ -138,7 +138,7 @@ return [
         'key' => env('MEILISEARCH_KEY'),
         'timeout' => env('MEILISEARCH_TIMEOUT', 1200), // Increase timeout
         'chunk' => [
-            \App\Models\Expense::class => 5, // Very small chunks for expenses
+            Expense::class => 5, // Very small chunks for expenses
         ],
         'index-settings' => [
             Expense::class => [
@@ -152,7 +152,7 @@ return [
                 'typoTolerance' => ['enabled' => false],
                 'rankingRules' => ['sort', 'exactness'],
                 'displayedAttributes' => [
-                    '*', 'expense_status', 'status'
+                    'id', 'amount', 'date', 'vendor_id', 'project_id', 'distribution_id', 'has_splits', 'expense_status'
                 ],
             ],
             

@@ -182,44 +182,37 @@ class EstimateShow extends Component
     }
 
     //$type = [estimate, invoice, work order]
-    public function print($type)
+    public function create_pdf($type)
     {
+        // Force component refresh before PDF generation
+        $this->estimate = $this->estimate->fresh();
+        $this->sections = $this->estimate->estimate_sections;
+        
+        $estimate = $this->estimate;
+        $sections = $this->sections;
+        $type = ucwords(strtolower($type));
+        $estimate_total = $sections->sum('total');
 
-        return $this->create_pdf($this->estimate, $this->sections, $type);
-        // return Response::download($data[0], $data[1].'.pdf', $headers);
+        $estimate_total_words =
+        ucwords(
+            Number::spell((int)$estimate_total) . ' dollars and ' .
+            Number::spell((int)(($estimate_total - (int)$estimate_total) * 100)) . ' cents'
+        );
 
-        //2024-12-25
-        // if($type == 'estimate'){
-        //     // SendInitialEstimateEmail::dispatch($this->estimate, $this->sections, $type);
-        //}
-    }
+        $payments = $estimate->project->payments->where('belongs_to_vendor_id', $estimate->vendor->id);
 
-public function create_pdf($estimate, $sections, $type)
-{
-    $estimate_total = $sections->sum('total');
-    $type = ucwords(strtolower($type));
+        $title = $estimate->client->name.' - '.$type.' - '.$estimate->project->project_name.' - '.$estimate->number;
+        $view = view('misc.estimate', compact(['estimate', 'sections', 'payments', 'title', 'estimate_total', 'estimate_total_words', 'type']))->render();
 
-    $estimate_total_words =
-    ucwords(
-        Number::spell((int)$estimate_total) . ' dollars and ' .
-        Number::spell((int)(($estimate_total - (int)$estimate_total) * 100)) . ' cents'
-    );
-
-    $payments = $estimate->project->payments->where('belongs_to_vendor_id', $estimate->vendor->id);
-
-    $title = $estimate->client->name.' | '.$type.' | '.$estimate->project->project_name.' | '.$estimate->number;
-    $title_file = $estimate->client->name.' - '.$type.' - '.$estimate->project->project_name.' - '.$estimate->number;
-
-    $view = view('misc.estimate', compact(['estimate', 'sections', 'payments', 'title', 'estimate_total', 'estimate_total_words', 'type']))->render();
-    $location = storage_path('files/pdfs/'.$title_file.'.pdf');
-        // Try multiple ways to find node and npm
-   $nodePath = trim(shell_exec('which node'));
-        $npmPath = trim(shell_exec('which npm'));
-
-        Browsershot::html($view)
-            ->setNodeBinary($nodePath)
-            ->setNpmBinary($npmPath)
+        $pdf = Browsershot::html($view)
             ->newHeadless()
+            ->addChromiumArguments([
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--single-process',
+            ])
             ->scale(0.8)
             ->showBrowserHeaderAndFooter()
             ->showBackground()
@@ -227,15 +220,22 @@ public function create_pdf($estimate, $sections, $type)
             // ->footerHtml('<span class="pageNumber"></span>')
             //->margins($top, $right, $bottom, $left)
             ->margins(10, 5, 10, 5)
-            ->save($location);
+            ->pdf();
 
-        $headers = [
-            'Content-Type: application/pdf',
-        ];
+        // Force immediate component state preservation before download
+        $this->skipRender();
 
-        return Response::download($location, $title_file.'.pdf', $headers);
-}
+        return response()->streamDownload(function () use ($pdf) {
+            echo $pdf;
+        }, $title.'.pdf', [
+            'Content-Type' => 'application/pdf',
+        ]);
 
+          //     //2024-12-25
+    //     // if($type == 'estimate'){
+    //     //     // SendInitialEstimateEmail::dispatch($this->estimate, $this->sections, $type);
+    //     //}
+    }
 
     public function sort_sections($key, $position)
     {

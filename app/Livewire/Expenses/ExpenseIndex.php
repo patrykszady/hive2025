@@ -9,6 +9,7 @@ use App\Models\Transaction;
 use App\Models\Vendor;
 
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\Facades\Cache;
 
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Lazy;
@@ -16,7 +17,7 @@ use Livewire\Attributes\Title;
 use Livewire\Component;
 use Livewire\WithPagination;
 
-#[Lazy]
+// #[Lazy]
 class ExpenseIndex extends Component
 {
     use AuthorizesRequests, WithPagination;
@@ -42,6 +43,7 @@ class ExpenseIndex extends Component
     public $paginate_number = 8;
     public $sortBy = 'date';
     public $sortDirection = 'desc';
+    public bool $transactionsReady = false;
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 
@@ -64,9 +66,24 @@ class ExpenseIndex extends Component
             $this->paginate_number = 5;
         }
 
-        $this->vendors = Vendor::whereHas('expenses')->orWhereHas('transactions')->orderBy('business_name')->get();
-        $this->projects = Project::whereHas('expenses')->orderBy('created_at', 'DESC')->get();
-        $this->distributions = Distribution::all(['id', 'name']);
+        $vendorId = auth()->user()->vendor->id;
+
+        $this->vendors = Cache::remember("filters:v{$vendorId}:vendors", 600, function () {
+            return Vendor::whereHas('expenses')
+                ->orWhereHas('transactions')
+                ->orderBy('business_name')
+                ->get(['id', 'business_name', 'business_type']);
+        });
+
+        $this->projects = Cache::remember("filters:v{$vendorId}:projects", 600, function () {
+            return Project::whereHas('expenses')
+                ->orderBy('created_at', 'DESC')
+                ->get(['id', 'project_name', 'address']);
+        });
+
+        $this->distributions = Cache::remember("filters:v{$vendorId}:distributions", 600, function () {
+            return Distribution::all(['id', 'name']);
+        });
     }
 
     public function sort($column)
@@ -85,6 +102,11 @@ class ExpenseIndex extends Component
         $this->resetPage('expenses-page');
     }
 
+    public function loadTransactions(): void
+    {
+        $this->transactionsReady = true;
+    }
+
     #[Computed]
     public function expenses()
     {
@@ -96,9 +118,22 @@ class ExpenseIndex extends Component
             $this->sortDirection
         )->paginateWithSearchData($this->paginate_number, pageName: 'expenses-page');
         
-        // Then load relationships on the collection
+        // Then load only the relationships needed for the current view on the collection
         if ($expenses->count() > 0) {
-            $expenses->load(['vendor', 'project']);
+            $relations = [];
+            if (! in_array($this->view, ['checks.show', 'vendors.show'])) {
+                $relations['vendor'] = function ($q) { $q->select('id', 'business_name', 'business_type'); };
+            }
+            if ($this->view !== 'projects.show') {
+                $relations['project'] = function ($q) { $q->select('id', 'project_name', 'address'); };
+            }
+            // If any expense has a distribution_id, eager-load distribution to avoid per-item queries
+            if ($expenses->getCollection()->contains(fn ($e) => !is_null($e->distribution_id))) {
+                $relations['distribution'] = function ($q) { $q->select('id', 'name'); };
+            }
+            if (! empty($relations)) {
+                $expenses->getCollection()->load($relations);
+            }
         }
 
         return $expenses;
@@ -127,7 +162,7 @@ class ExpenseIndex extends Component
         if (is_numeric($this->project_id)) {
             $filterConditions[] = "project_id = {$this->project_id}";
         } elseif ($this->project_id === 'NO_PROJECT') {
-            $filterConditions[] = "project_id IS NULL";
+            $filterConditions[] = "(project_id = 0 OR project_id IS NULL)";
             $filterConditions[] = "distribution_id IS NULL";
             $filterConditions[] = "has_splits = false";
         } elseif ($this->project_id === 'SPLIT') {
@@ -166,9 +201,9 @@ class ExpenseIndex extends Component
         
         // Then load the relationships on the collection
         if ($transactions->count() > 0) {
-            $transactions->load([
-                'vendor',
-                'bank_account.bank'
+            $transactions->getCollection()->load([
+                'vendor:id,business_name',
+                'bank_account.bank',
             ]);
         }
 

@@ -27,7 +27,6 @@ use Illuminate\Support\Facades\URL;
 use Intervention\Image\Facades\Image;
 use Nesk\Puphpeteer\Puppeteer;
 use setasign\Fpdi\Fpdi;
-use Spatie\Browsershot\Browsershot;
 use Symfony\Component\DomCrawler\Crawler;
 
 class ReceiptController extends Controller
@@ -556,7 +555,8 @@ class ReceiptController extends Controller
         $azure_api_version = env('AZURE_DI_VERSION');
 
         //,JobName
-        curl_setopt($ch, CURLOPT_URL, 'https://'.env('AZURE_DI_ENDPOINT').'/documentintelligence/documentModels/'.$document_model.':analyze?api-version='.$azure_api_version.'&features=queryFields&queryFields=PurchaseOrder');
+        // .'&features=queryFields&queryFields=PurchaseOrder'
+        curl_setopt($ch, CURLOPT_URL, 'https://'.env('AZURE_DI_ENDPOINT').'/documentintelligence/documentModels/'.$document_model.':analyze?api-version='.$azure_api_version);
         curl_setopt($ch, CURLOPT_POSTFIELDS, $file);
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');

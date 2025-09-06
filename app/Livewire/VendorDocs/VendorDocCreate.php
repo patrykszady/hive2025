@@ -110,6 +110,23 @@ class VendorDocCreate extends Component
                     heading: 'Processing Failed',
                     text: 'Unable to match vendor information from the document. Please verify the document contains correct vendor details.',
                 );
+            } elseif ($result === 'duplicate') {
+                // Duplicate policy(s) detected — not an error, inform user
+                Flux::toast(
+                    duration: 5000,
+                    position: 'top right',
+                    variant: 'warning',
+                    heading: 'No New Documents',
+                    text: 'This document appears to be a duplicate. No new policies were added.',
+                );
+            } elseif ($result === 'updated') {
+                Flux::toast(
+                    duration: 5000,
+                    position: 'top right',
+                    variant: 'success',
+                    heading: 'Document Updated',
+                    text: 'Existing policy records were updated to reference the new file.',
+                );
             } else {
                 Flux::toast(
                     duration: 5000,

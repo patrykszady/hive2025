@@ -31,14 +31,15 @@
             <flux:table.row>
                 <flux:table.cell>
                     Reimbursements
-                    <flux:badge
-                        as="button" icon="arrow-down-on-square" size="lg" color="sky" inset="top bottom"
+                    <flux:button
+                        icon="arrow-down-on-square"
+                        size="sm"
+                        variant="primary"
+                        color="accent"
                         wire:click="print_reimbursements"
-                        wire:loading.attr="disabled"
-                        wire:loading.class="opacity-50 disabled:pointer-events-none"
-                        >
+                    >
                         Download
-                    </flux:badge>
+                    </flux:button>
                 </flux:table.cell>
                 <flux:table.cell>{{money($finances['reimbursments'])}}</flux:table.cell>
             </flux:table.row>
@@ -75,3 +76,5 @@
         </flux:table.rows>
     </flux:table>
 </flux:card>
+
+

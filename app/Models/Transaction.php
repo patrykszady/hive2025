@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Laravel\Scout\Searchable;
+use Illuminate\Support\Facades\Cache;
 
 class Transaction extends Model
 {
@@ -64,9 +65,11 @@ class Transaction extends Model
             $user = auth()->user();
             
             // Get bank account IDs that belong to the current vendor
-            $bankAccountIds = BankAccount::where('vendor_id', $user->vendor->id)
-                ->pluck('id')
-                ->toArray();
+            $bankAccountIds = Cache::remember("vendor:{$user->vendor->id}:bank_account_ids", 600, function () use ($user) {
+                return BankAccount::where('vendor_id', $user->vendor->id)
+                    ->pluck('id')
+                    ->toArray();
+            });
             
             // Convert bank account IDs array to MeiliSearch filter format
             $bankAccountFilter = "bank_account_id IN [" . implode(',', $bankAccountIds) . "]";

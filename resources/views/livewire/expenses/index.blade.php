@@ -122,12 +122,13 @@
     </flux:card>
 
     @if($view === NULL && auth()->user()->can('create', App\Models\Expense::class))
-        <flux:card>
+        <flux:card wire:init="loadTransactions">
             <div>
                 <flux:heading size="lg">Transactions</flux:heading>
             </div>
 
             <div>
+                @if($this->transactionsReady)
                     <flux:table :paginate="$this->transactions" wire:loading.class="opacity-50 text-opacity-50">
                         <flux:table.columns>
                             <flux:table.column>Amount</flux:table.column>
@@ -174,6 +175,9 @@
                             @endforeach
                         </flux:table.rows>
                     </flux:table>
+                @else
+                    <div class="p-4 text-sm text-zinc-500">Loading transactions…</div>
+                @endif
             </div>
         </flux:card>
     @endif

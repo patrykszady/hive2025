@@ -306,9 +306,18 @@ class CompanyEmailController extends Controller
                         $ocr_path = '_temp_ocr/' . $ocr_filename;
                         $location = Storage::disk('files')->path($ocr_path);
 
-                        $nodePath = trim(shell_exec('which node'));
-                        $npmPath = trim(shell_exec('which npm'));
-                        Browsershot::html($view)->setNodeBinary($nodePath)->setNpmBinary($npmPath)->newHeadless()->format('A4')->margins(20, 0, 20, 20)->save($location);
+                        Browsershot::html($view)
+                            ->newHeadless()
+                            ->addChromiumArguments([
+                                '--no-sandbox',
+                                '--disable-setuid-sandbox',
+                                '--disable-dev-shm-usage',
+                                '--disable-gpu',
+                                '--single-process',
+                            ])
+                            ->format('A4')
+                            ->margins(20, 0, 20, 20)
+                            ->save($location);
 
                     } elseif (isset($receipt->options['pdf_html'])) {
                         // PDF attachment processing
@@ -371,7 +380,7 @@ class CompanyEmailController extends Controller
                     $ocr_receipt_extracted = app(\App\Http\Controllers\ReceiptController::class)->azure_receipts($ocr_path, $doc_type, $document_model);
                     //pass receipt info to ocr_extract method
                     $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->ocr_extract($ocr_receipt_extracted, null, 'email');
-
+       
                     $receipt_account =
                         ReceiptAccount::withoutGlobalScopes()
                             ->where('belongs_to_vendor_id', $companyEmail->vendor_id)
@@ -440,30 +449,121 @@ class CompanyEmailController extends Controller
 
                     //FIND duplicates
                     //confirm expense does not yet exist
-                    //1-18-2023 | 9/30/2023 NEED TO ACCOUNT FOR SAME VENDOR, AMOUNT, AND DATE being saved multiple of times (accounted for in old $duplicates in $this->dirty_work)
+                    //1-18-2023 | 9/30/2023 NEED TO ACCOUNT FOR SAME VENDOR, AMOUNT, AND DATE being saved multiple of times
                     //maybe by adding date_TIME to 'date'? or checking time in the expense_receipt_data json?
 
-                    $duplicates =
-                        Expense::where('belongs_to_vendor_id', $receipt_account->belongs_to_vendor_id)->
-                            where('vendor_id', $receipt->vendor_id)->
-                            whereNull('deleted_at')->
-                            where('amount', $amount)->
-                            // where('invoice', $invoice)->
-                            where('date', $date)->
-                            // whereBetween('date', [Carbon::create($date)->subDay(), Carbon::create($date)->addDays(4)])->
-                            get();
+                    // Prefer matching by invoice number when available to avoid
+                    // false positives on same-day/same-amount receipts.
+                    $invoice = isset($invoice) ? trim((string) $invoice) : '';
+
+                    if ($invoice !== '') {
+                        $duplicates = Expense::where('belongs_to_vendor_id', $receipt_account->belongs_to_vendor_id)
+                            ->where('vendor_id', $receipt->vendor_id)
+                            ->where('invoice', $invoice)
+                            ->get();
+                    } else {
+                        // Candidate pool by amount + date (eager-load receipts to avoid N+1)
+                        $candidates = Expense::with('receipts')
+                            ->where('belongs_to_vendor_id', $receipt_account->belongs_to_vendor_id)
+                            ->where('vendor_id', $receipt->vendor_id)
+                            ->whereNull('deleted_at')
+                            ->where('amount', $amount)
+                            ->where('date', $date)
+                            ->get();
+
+                        $duplicates = collect();
+
+                        if ($candidates->isNotEmpty()) {
+                            // Build current receipt signals
+                            $currentItemsSig = $this->buildItemsSignature($ocr_receipt_data['fields'] ?? []);
+                            $currentTime = $this->extractReceiptTime($ocr_receipt_data['content'] ?? '', $date);
+
+                            foreach ($candidates as $candidate) {
+                                // Prefer skipping if candidate has a different known invoice
+                                if (!empty($candidate->invoice)) {
+                                    // If candidate has invoice but current doesn't, don't auto-mark duplicate
+                                    // unless items overlap or time is near-identical.
+                                }
+
+                                $receiptRecord = $candidate->receipts()->latest('id')->first();
+                                if (!$receiptRecord) {
+                                    continue;
+                                }
+
+                                $storedFields = is_array($receiptRecord->receipt_items)
+                                    ? $receiptRecord->receipt_items
+                                    : json_decode($receiptRecord->receipt_items ?? '[]', true);
+
+                                $storedItemsSig = $this->buildItemsSignature($storedFields ?? []);
+                                $itemsOverlap = $this->itemsOverlap($currentItemsSig, $storedItemsSig);
+
+                                // If product codes/descriptions don't overlap, assume not duplicate.
+                                if (!$itemsOverlap) {
+                                    continue;
+                                }
+
+                                // Time equality gating: if both have time, they must be identical to be duplicate.
+                                $storedTime = $this->extractReceiptTime($receiptRecord->receipt_html ?? '', $candidate->date);
+                                $timeEqual = false;
+                                if ($currentTime && $storedTime) {
+                                    // times must match exactly to the minute
+                                    $timeEqual = $currentTime->equalTo($storedTime) || $currentTime->format('H:i') === $storedTime->format('H:i');
+                                    if (! $timeEqual) {
+                                        // Different times -> not a duplicate
+                                        continue;
+                                    }
+                                }
+
+                                // If items overlap OR time is identical, consider it a duplicate.
+                                if ($itemsOverlap || $timeEqual) {
+                                    $duplicates->push($candidate);
+                                }
+                            }
+                        }
+                    }
 
                     if ($duplicates->isNotEmpty()) {
-                        // 1-22-2023! WHAT IF THERE IS MULTIPLE?! -- diff in days!
-                        $duplicate_expense = $duplicates->first();
+                        // Choose the best matching duplicate.
+                        if ($invoice !== '') {
+                            // With invoice, prefer the closest date to the OCR date.
+                            $duplicate_expense = $duplicates->sortBy(function ($d) use ($date) {
+                                return abs(Carbon::parse($d->date)->diffInDays(Carbon::parse($date)));
+                            })->first();
+                        } else {
+                            // Without invoice: if we captured time for current receipt, prefer identical-time matches.
+                            $chosen = $duplicates;
+
+                            if (isset($currentTime) && $currentTime instanceof \Carbon\Carbon) {
+                                $withTimeEqual = $duplicates->filter(function ($candidate) use ($currentTime) {
+                                    $receiptRecord = $candidate->receipts()->latest('id')->first();
+                                    if (!$receiptRecord) {
+                                        return false;
+                                    }
+                                    $storedTime = $this->extractReceiptTime($receiptRecord->receipt_html ?? '', $candidate->date);
+                                    if (!$storedTime) {
+                                        return false;
+                                    }
+                                    return $currentTime->format('H:i') === $storedTime->format('H:i');
+                                });
+
+                                if ($withTimeEqual->isNotEmpty()) {
+                                    $chosen = $withTimeEqual;
+                                }
+                            }
+
+                            // Then pick the one with the closest date as a final tie-breaker.
+                            $duplicate_expense = $chosen->sortBy(function ($d) use ($date) {
+                                return abs(Carbon::parse($d->date)->diffInDays(Carbon::parse($date)));
+                            })->first();
+                        }
 
                         //ATTACHMENTS
                         $this->saveExpenseReceipt($duplicate_expense->id, $ocr_receipt_data, $ocr_filename, $message);
 
                         //add po and add invoice from ocr
-                        $duplicate_expense->invoice = $invoice;
-                        $duplicate_expense->date = $date;
-                        $duplicate_expense->save();
+                        // $duplicate_expense->invoice = $invoice;
+                        // $duplicate_expense->date = $date;
+                        // $duplicate_expense->save();
 
                         //move email receipt to Duplicate folder
                         $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Duplicate'], $grantId);
@@ -846,5 +946,87 @@ class CompanyEmailController extends Controller
 
         // Return the best match only if it meets the threshold.
         return ($bestScore >= $threshold) ? $bestVendor : null;
+    }
+
+    /**
+     * Build a simple signature of line items using product codes and descriptions.
+     *
+     * @param array $fields
+     * @return array{codes: string[], descriptions: string[]}
+     */
+    protected function buildItemsSignature(array $fields): array
+    {
+        $items = $fields['items'] ?? [];
+        $codes = [];
+        $descriptions = [];
+
+        foreach ($items as $item) {
+            if (!empty($item['ProductCode'])) {
+                $codes[] = strtolower(trim((string) $item['ProductCode']));
+            }
+            if (!empty($item['Description'])) {
+                // Normalize and strip extra whitespace
+                $descriptions[] = preg_replace('/\s+/', ' ', strtolower(trim((string) $item['Description'])));
+            }
+        }
+
+        return [
+            'codes' => array_values(array_unique($codes)),
+            'descriptions' => array_values(array_unique($descriptions)),
+        ];
+    }
+
+    /**
+     * Determine if two item signatures overlap by code or description.
+     */
+    protected function itemsOverlap(array $sigA, array $sigB): bool
+    {
+        // Code intersection
+        $codeOverlap = count(array_intersect($sigA['codes'] ?? [], $sigB['codes'] ?? [])) > 0;
+
+        if ($codeOverlap) {
+            return true;
+        }
+
+        // Fallback: description similarity
+        foreach ($sigA['descriptions'] ?? [] as $descA) {
+            foreach ($sigB['descriptions'] ?? [] as $descB) {
+                // Quick exact match
+                if ($descA === $descB) {
+                    return true;
+                }
+
+                // Loose similarity check
+                similar_text($descA, $descB, $pct);
+                if ($pct >= 90) { // very close
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Extract a Carbon time from receipt content. Falls back to null.
+     * Accepts content and the date (Y-m-d) to bind time onto.
+     */
+    protected function extractReceiptTime(?string $content, ?string $date): ?\Carbon\Carbon
+    {
+        if (empty($content) || empty($date)) {
+            return null;
+        }
+
+        // Match formats like "11:31 AM" or "12:26 PM"
+        if (preg_match('/\b(1[0-2]|0?[1-9]):([0-5][0-9])\s?(AM|PM)\b/i', $content, $m)) {
+            $timeStr = sprintf('%02d:%02d %s', (int) $m[1], (int) $m[2], strtoupper($m[3]));
+            try {
+                return \Carbon\Carbon::parse(trim($date) . ' ' . $timeStr);
+            } catch (\Throwable $e) {
+                return null;
+            }
+        }
+
+        return null;
     }
 }
