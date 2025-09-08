@@ -110,9 +110,23 @@ class Expense extends Model
                 $baseFilter .= " AND paid_by = {$user->id}";
             }
             
-            // Add custom filters if any
-            if (!empty($filterConditions)) {
-                $filterString = implode(' AND ', $filterConditions);
+            // Detect numeric search queries (e.g., "150" or "150.00") and treat them as exact amount filters
+            $actualQuery = $searchQuery;
+            $augmentedFilters = $filterConditions;
+            if (is_string($searchQuery)) {
+                $candidate = trim($searchQuery);
+                if ($candidate !== '' && preg_match('/^-?\d+(?:\.\d+)?$/', $candidate)) {
+                    // Convert to float for Meilisearch numeric filter. Keep simple equality.
+                    $amountValue = (float) $candidate;
+                    $augmentedFilters[] = "amount = {$amountValue}";
+                    // Use filter-only query to avoid text token matching issues on numeric fields.
+                    $actualQuery = '';
+                }
+            }
+
+            // Add custom filters if any (including exact-amount if applied)
+            if (!empty($augmentedFilters)) {
+                $filterString = implode(' AND ', $augmentedFilters);
                 $options['filter'] = "({$baseFilter}) AND ({$filterString})";
             } else {
                 $options['filter'] = $baseFilter;
@@ -122,11 +136,11 @@ class Expense extends Model
             $options['sort'] = [$sortBy . ':' . $sortDirection];
             
             // Use 'all' matching strategy for exact prefix matching
-            if (!empty($searchQuery)) {
+            if (!empty($actualQuery)) {
                 $options['matchingStrategy'] = 'all';
             }
             
-            return $meilisearch->search($searchQuery, $options);
+            return $meilisearch->search($actualQuery, $options);
         })
         // Narrow the columns fetched from the database when hydrating models
         ->query(function ($eloquent) {

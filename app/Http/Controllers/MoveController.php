@@ -44,7 +44,8 @@ class MoveController extends Controller
     {
         // Expenses where the sum of directly attached transactions exceeds the expense amount (cleaner Eloquent)
             $expenses = Expense::query()
-                ->whereDate('date', '>=', '2023-01-01')
+                // ->whereDate('date', '<=', '2023-01-01')
+                // ->where('amount', '>=', 0)
                 ->withSum([
                     'transactions' => function ($q) {
                         $q->withoutGlobalScopes()->whereNull('deleted_at');
@@ -59,8 +60,9 @@ class MoveController extends Controller
                 ->having('tx_count', '>=', 2)
             ->with(['transactions:id,expense_id,amount'])
             ->orderByDesc('date')
-            ->limit(5)
-            ->get(['id', 'amount', 'date', 'vendor_id']);
+            // ->skip(0)
+            // ->limit(5)
+            ->pluck('amount', 'id');
 
         dd($expenses);
         $payments = Payment::whereDoesntHave('transaction')->orderBy('created_at', 'desc')->take(10)->get();

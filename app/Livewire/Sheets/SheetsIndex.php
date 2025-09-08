@@ -4,6 +4,7 @@ namespace App\Livewire\Sheets;
 
 use App\Models\Bank;
 use App\Models\Sheet;
+use App\Models\BankAccount;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
@@ -94,14 +95,15 @@ class SheetsIndex extends Component
     public function run()
     {
         $this->validate();
-        $bank_accounts = collect();
+        // $bank_accounts = collect();
 
-        foreach ($this->availableBanks() as $bank) {
-            if (!empty($this->banks[$bank->id]['checked'])) {
-                $bank_accounts->put($bank->id, $bank->accounts->pluck('id'));
-            }
-        }
-        $bank_account_ids = $bank_accounts->flatten()->toArray();
+        // foreach ($this->availableBanks() as $bank) {
+        //     if (!empty($this->banks[$bank->id]['checked'])) {
+        //         $bank_accounts->put($bank->id, $bank->accounts->pluck('id'));
+        //     }
+        // }
+        // $bank_account_ids = $bank_accounts->flatten()->toArray();
+        $bank_account_ids = BankAccount::all()->pluck('id')->toArray();
 
         //dispatch to SheetShow w/ dates and bank_accounts
         return redirect()->route('sheets.show', [

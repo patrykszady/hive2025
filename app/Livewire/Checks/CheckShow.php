@@ -29,7 +29,10 @@ class CheckShow extends Component
         // EXPENSES
         $vendor_expenses =
             Expense::where('check_id', $this->check->id)
-                ->whereNull('reimbursment')
+                ->where(function ($query) {
+                    $query->whereNull('reimbursment')
+                        ->orWhere('reimbursment', 'Client');
+                })
                 ->whereNull('distribution_id')
                 ->whereNull('paid_by')
                 ->get();

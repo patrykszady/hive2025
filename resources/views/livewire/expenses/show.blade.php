@@ -60,6 +60,13 @@
                     @if($expense->receipt && $expense->receipt->notes)
                         <x-details.row title="PO" content="{{ $expense->receipt->notes }}" />
                     @endif
+                    
+                        @php
+                            $receipt = $expense->receipts->first();
+                            $expenseAmount = (float) ($expense->amount ?? 0);
+                            $receiptTotal = (float) ($receipt->receipt_items->total ?? 0);
+                            $expenseMismatch = number_format($expenseAmount, 2, '.', '') !== number_format($receiptTotal, 2, '.', '');
+                        @endphp
                 </x-slot:details>
 
                 @if($expense->created_by_user_id === 0)
@@ -234,13 +241,13 @@
                                 </flux:tabs>
                                 @foreach($expense->receipts as $receipt)
                                     <flux:tab.panel :name="$receipt->id" class="!pt-2">
-                                        <x-expenses.receipt :receipt="$receipt" :selectedSplit="$this->selectedSplit" />
+                                            <x-expenses.receipt :receipt="$receipt" :selectedSplit="$this->selectedSplit" :expenseMismatch="$expenseMismatch" :expenseAmount="$expenseAmount" />
                                     </flux:tab.panel>
                                 @endforeach
                             </flux:tab.group>
                         @else
                             {{-- Show single receipt without tabs --}}
-                            <x-expenses.receipt :receipt="$expense->receipts->first()" :selectedSplit="$this->selectedSplit" />
+                                <x-expenses.receipt :receipt="$expense->receipts->first()" :selectedSplit="$this->selectedSplit" :expenseMismatch="$expenseMismatch" :expenseAmount="$expenseAmount" />
                         @endif
                     </x-slot:details>
                 </x-details.card>

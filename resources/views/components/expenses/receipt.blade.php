@@ -1,4 +1,4 @@
-@props(['receipt', 'selectedSplit' => null])
+@props(['receipt', 'selectedSplit' => null, 'expenseMismatch' => false, 'expenseAmount' => null])
 
 @if(!$receipt->receipt_items || empty($receipt->receipt_items->items))
     <div class="flow-root">
@@ -77,15 +77,22 @@
                     <flux:table.cell class="!pr-5" align="end">{{money($receipt->receipt_items->total_tax)}}</flux:table.cell>
                 </flux:table.row>
 
+
+
                 <flux:table.row>
-                    <flux:table.cell colspan="3" align="end" class="font-medium {{ ($selectedSplit && isset($selectedSplit->amount)) ? '!text-gray-300 line-through' : '' }}">Total</flux:table.cell>
-                    <flux:table.cell variant="strong" class="!pr-5 {{ ($selectedSplit && isset($selectedSplit->amount)) ? '!text-gray-300 line-through' : '' }}" align="end">{{money($receipt->receipt_items->total)}}</flux:table.cell>
+                    <flux:table.cell colspan="3" align="end" class="font-medium {{ (($selectedSplit && isset($selectedSplit->amount)) || $expenseMismatch) ? '!text-gray-300 line-through' : '' }}">Total</flux:table.cell>
+                    <flux:table.cell variant="strong" class="!pr-5 {{ (($selectedSplit && isset($selectedSplit->amount)) || $expenseMismatch) ? '!text-gray-300 line-through' : '' }}" align="end">{{money($receipt->receipt_items->total)}}</flux:table.cell>
                 </flux:table.row>
 
                 @if($selectedSplit && isset($selectedSplit->amount))
                     <flux:table.row>
                         <flux:table.cell colspan="3" align="end" class="font-medium">Split Total</flux:table.cell>
                         <flux:table.cell variant="strong" class="!pr-5" align="end">{{ money($selectedSplit->amount) }}</flux:table.cell>
+                    </flux:table.row>
+                @elseif($expenseMismatch)
+                    <flux:table.row>
+                        <flux:table.cell colspan="3" align="end" class="font-medium">Expense Total</flux:table.cell>
+                        <flux:table.cell variant="strong" class="!pr-5" align="end">{{ money($expenseAmount) }}</flux:table.cell>
                     </flux:table.row>
                 @endif
             </flux:table.rows>

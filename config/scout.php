@@ -137,9 +137,7 @@ return [
         'host' => env('MEILISEARCH_HOST', 'http://localhost:7700'),
         'key' => env('MEILISEARCH_KEY'),
         'timeout' => env('MEILISEARCH_TIMEOUT', 1200), // Increase timeout
-        'chunk' => [
-            Expense::class => 5, // Very small chunks for expenses
-        ],
+        
         'index-settings' => [
             Expense::class => [
                 'filterableAttributes'=> [
