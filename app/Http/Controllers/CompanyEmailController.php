@@ -188,7 +188,6 @@ class CompanyEmailController extends Controller
                 $allMessages = array_merge($allMessages, $data);
             }
 
-            Log::channel('nylas')->info("Fetched " . count($allMessages) . " messages for CompanyEmail ID {$companyEmail->id} ({$companyEmail->email})");
             // dd($allMessages);
             foreach($allMessages as $message) {
                 $messageId = $message['id'];
@@ -389,9 +388,20 @@ class CompanyEmailController extends Controller
                             ->where('vendor_id', $receipt->vendor_id)
                             ->first();
 
-                    //missing receipt_account..receipt and companyemail exist but receipt/companyemail combo does not
+                    // Missing receipt_account.. receipt and company email exist but this pairing does not
                     if (is_null($receipt_account)) {
-                        $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Add'], $grantId);
+                        // Clean up temp OCR file if it exists
+                        if (!empty($ocr_filename)) {
+                            $sourcePath = '_temp_ocr/' . $ocr_filename;
+                            Storage::disk('files')->delete($sourcePath);
+                        }
+
+                        // Move this email to the "Add" folder and skip to next message
+                        $this->nylasService->moveEmailToFolder(
+                            $messageId,
+                            $companyEmail->api_json['folders']['Add'],
+                            $grantId
+                        );
                         continue;
                     }
 

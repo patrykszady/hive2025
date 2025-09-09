@@ -271,6 +271,26 @@ class Expense extends Model
     }
 
     /**
+     * Normalize invoice input: if null or blank string, persist as NULL.
+     */
+    protected function invoice(): Attribute
+    {
+        return Attribute::make(
+            set: function ($value) {
+                if ($value === null) {
+                    return null;
+                }
+
+                if (is_string($value) && trim($value) === '') {
+                    return null;
+                }
+
+                return $value;
+            }
+        );
+    }
+
+    /**
      * Get the status attribute, preferring indexed value when available
      */
     protected function status(): Attribute
