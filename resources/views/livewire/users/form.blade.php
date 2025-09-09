@@ -43,14 +43,14 @@
             >
             <flux:input
                 wire:model.live="form.first_name"
-                x-bind:disabled="$wire.model.type != 'user' && $wire.form.user"
+                x-bind:disabled="$wire.model.type != 'user' && $wire.form.user_id"
                 label="First Name"
                 type="text"
                 placeholder="First Name"
             />
             <flux:input
                 wire:model.live="form.last_name"
-                x-bind:disabled="$wire.model.type != 'user' && $wire.form.user"
+                x-bind:disabled="$wire.model.type != 'user' && $wire.form.user_id"
                 label="Last Name"
                 type="text"
                 placeholder="Last Name"
@@ -58,14 +58,14 @@
             <flux:input
                 wire:model.live.debounce.250ms="form.email"
                 {{-- ) || $wire.isRegistered --}}
-                x-bind:disabled="$wire.model.type != 'user' && $wire.form.user"
+                x-bind:disabled="$wire.model.type != 'user' && $wire.form.user_id"
                 label="Email"
                 placeholder="Email"
             />
 
             {{-- save/create User here if not yet saved --}}
             <div
-                x-show="!$wire.form.user"
+                x-show="!$wire.form.user_id && $wire.model.id != 'NEW'"
                 class="my-4 space-y-4"
                 >
                 <flux:button
@@ -147,9 +147,11 @@
         {{-- FOOTER --}}
         <div 
             class="flex space-x-2 sticky bottom-0 justify-end"             
-            x-show="$wire.user_form && $wire.form.user && 
-                    ($wire.model.type == 'client' || 
-                    ($wire.model.type == 'vendor' && (($wire.form.via_vendor && $wire.form.via_vendor != 'NEW_VIA') || $wire.form.role == 1)))"
+            x-show="$wire.user_form && 
+                    ($wire.model.id == 'NEW' || 
+                    ($wire.form.user && 
+                        ($wire.model.type == 'client' || 
+                        ($wire.model.type == 'vendor' && (($wire.form.via_vendor && $wire.form.via_vendor != 'NEW_VIA') || $wire.form.role == 1)))))"
             x-transition
             >
 

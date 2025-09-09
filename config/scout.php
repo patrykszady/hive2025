@@ -142,7 +142,7 @@ return [
             Expense::class => [
                 'filterableAttributes'=> [
                     'vendor_id', 'project_id', 'distribution_id', 'check_id', 
-                    'has_splits', 'belongs_to_vendor_id', 'expense_status', // Added this
+                    'has_splits', 'belongs_to_vendor_id', 'expense_status', 'amount',
                     'paid_by', '__soft_deleted'
                 ],
                 'sortableAttributes' => ['date', 'amount', 'expense_status'],

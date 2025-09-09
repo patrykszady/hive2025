@@ -13,6 +13,7 @@ use App\Models\Vendor;
 use App\Traits\HandlesChecks;
 use Flux;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 use Livewire\WithFileUploads;
@@ -160,8 +161,8 @@ class ExpenseCreate extends Component
         $this->resetModal();
 
         $this->expense = $expense;
-    $this->clearCheckFields();
-    $this->form->setExpense($expense);
+        $this->clearCheckFields();
+        $this->form->setExpense($expense);
 
         // If the expense already has a check, prefill the component-level check fields
         if ($expense->check) {
@@ -222,50 +223,54 @@ class ExpenseCreate extends Component
 
     public function createExpenseFromTransaction(Transaction $transaction)
     {
-        $this->resetModal();
-        $this->dispatch('resetSplits')->to('expenses.expense-splits-create');
-        $this->clearCheckFields();
+        try {
+            $this->resetModal();
+            $this->dispatch('resetSplits')->to('expenses.expense-splits-create');
+            $this->clearCheckFields();
 
-        // If the transaction has a check_number, derive check_type and prefill fields
-        if ($transaction->check_number) {
-            if ($transaction->check_number === '1010101') {
-                $check_type = 'Transfer';
-            } elseif ($transaction->check_number === '2020202') {
-                $check_type = 'Cash';
+            // If the transaction has a check_number, derive check_type and prefill fields
+            if ($transaction->check_number) {
+                if ($transaction->check_number === '1010101') {
+                    $check_type = 'Transfer';
+                } elseif ($transaction->check_number === '2020202') {
+                    $check_type = 'Cash';
+                } else {
+                    $check_type = 'Check';
+                }
+
+                // Populate component-level check fields used by the partial
+                $this->bank_account_id = $transaction->bank_account_id;
+                $this->check_type = $check_type;
+                $this->next_check_auto = false;
+                $this->auto_check_number = null;
+                $this->check_number = null;
+
+                if ($check_type === 'Check' && !in_array($transaction->check_number, ['1010101', '2020202'])) {
+                    $this->check_number = $transaction->check_number;
+                }
+            }
+
+            $this->form->transaction = $transaction;
+
+            $this->view_text = [
+                'card_title' => 'Create Expense from Transaction',
+                'button_text' => 'Create',
+                'form_submit' => 'save',
+            ];
+
+            $this->form->amount = $transaction->amount;
+            $this->form->date = $transaction->transaction_date->format('Y-m-d');
+
+            if (is_null($transaction->vendor_id)) {
+                $this->form->vendor_id = null;
             } else {
-                $check_type = 'Check';
+                $this->form->vendor_id = $transaction->vendor_id;
             }
 
-            // Populate component-level check fields used by the partial
-            $this->bank_account_id = $transaction->bank_account_id;
-            $this->check_type = $check_type;
-            $this->next_check_auto = false;
-            $this->auto_check_number = null;
-            $this->check_number = null;
-
-            if ($check_type === 'Check' && !in_array($transaction->check_number, ['1010101', '2020202'])) {
-                $this->check_number = $transaction->check_number;
-            }
+            $this->modal('expenses_form_modal')->show();
+        } catch (\Throwable $e) {
+            throw $e; // rethrow to preserve existing behavior
         }
-
-        $this->form->transaction = $transaction;
-
-        $this->view_text = [
-            'card_title' => 'Create Expense from Transaction',
-            'button_text' => 'Create',
-            'form_submit' => 'save',
-        ];
-
-        $this->form->amount = $transaction->amount;
-        $this->form->date = $transaction->transaction_date->format('Y-m-d');
-
-        if (is_null($transaction->vendor_id)) {
-            $this->form->vendor_id = null;
-        } else {
-            $this->form->vendor_id = $transaction->vendor_id;
-        }
-
-        $this->modal('expenses_form_modal')->show();
     }
 
     public function edit()

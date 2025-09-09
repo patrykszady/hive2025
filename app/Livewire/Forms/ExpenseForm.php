@@ -7,7 +7,6 @@ use App\Models\Distribution;
 use App\Models\Expense;
 use App\Models\ExpenseSplits;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
-// use Livewire\Attributes\Rule;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Validate;
 
@@ -74,57 +73,35 @@ class ExpenseForm extends Form
         return [];
     }
 
-    protected $messages =
-        [
-            'amount.regex' => 'Amount format is incorrect. Format is 2145.36. No commas and only two digits after decimal allowed. If amount is under $1.00, use 00.XX',
-            'project_id.required_unless' => 'Project is required unless Expense is Split.',
-            'date.before_or_equal' => 'Date cannot be in the future. Make sure Date is before or equal to today.',
-            'date.after' => 'Date cannot be before 2017. Make sure Date is after or equal to 01/01/2017.',
-            'receipt_file.required_if' => 'Receipt is required if Expense is Reimbursed or has Splits',
-        ];
+    protected $messages = [
+        'amount.regex' => 'Amount format is incorrect. Format is 2145.36. No commas and only two digits after decimal allowed. If amount is under $1.00, use 00.XX',
+        'project_id.required_unless' => 'Project is required unless Expense is Split.',
+        'date.before_or_equal' => 'Date cannot be in the future. Make sure Date is before or equal to today.',
+        'date.after' => 'Date cannot be before 2017. Make sure Date is after or equal to 01/01/2017.',
+    ];
 
-    public function setExpense($expense)
+    public function setExpense(Expense $expense): void
     {
         $this->expense = $expense;
 
-        if ($this->expense->receipts) {
-            $receipt = $this->expense->receipts()->latest()->first();
-
-            if (! is_null($receipt)) {
-                $this->receipts = true;
-                $this->note = $receipt->note;
-                // if(!is_null($receipt->receipt_html)){
-                // if(isset($receipt->receipt_items->handwritten_notes)){
-                //     $this->handwritten = implode(", ", $receipt->receipt_items->handwritten_notes);
-                // }
-
-                // if(isset($receipt->receipt_items->purchase_order)){
-                //     $this->purchase_order = $receipt->receipt_items->purchase_order;
-                // }
-
-                if (isset($receipt->receipt_items->merchant_name)) {
-                    $this->merchant_name = $receipt->receipt_items->merchant_name;
-                }
+        // Populate receipt-derived hints when available
+        $latestReceipt = $this->expense->receipts()->latest()->first();
+        if ($latestReceipt) {
+            $this->receipts = true;
+            if (isset($latestReceipt->receipt_items->merchant_name)) {
+                $this->merchant_name = $latestReceipt->receipt_items->merchant_name;
             }
         }
 
         $this->amount = $this->expense->amount;
-        $this->date = $expense->date->format('Y-m-d');
+        $this->date = $expense->date ? \Illuminate\Support\Carbon::parse($expense->date)->format('Y-m-d') : null;
         $this->vendor_id = $expense->vendor_id;
 
-        // 8-29-23 this can go into Expense model... getter ... get
-        if ($expense->distribution_id) {
-            $this->project_id = 'D:'.$expense->distribution_id;
+        // If distribution is set, encode project selector as "D:{id}"
+        if (!empty($expense->distribution_id)) {
+            $this->project_id = 'D:' . $expense->distribution_id;
         } else {
             $this->project_id = $expense->project_id;
-            // dd($this->project_id);
-            // //if existing project is not SPLIT
-            // if (! is_null($this->project_id) && $this->project_id != 0) {
-            //     $project_title = $this->component->projects->where('id', $this->project_id)->first()->last_status->title;
-            //     if ($project_title == 'Complete') {
-            //         $this->project_completed = true;
-            //     }
-            // }
         }
 
         $this->reimbursment = $expense->reimbursment;
@@ -132,20 +109,9 @@ class ExpenseForm extends Form
         $this->note = $expense->note;
         $this->paid_by = $expense->paid_by;
 
-        if ($this->expense->check) {
-            $this->bank_account_id = $this->expense->check->bank_account_id;
-            $this->check_type = $this->expense->check->check_type;
-            $this->check_number = $this->expense->check->check_number;
-            $this->transaction = true;
-            // if(!$this->expense->check->transactions->isEmpty()){
-            //     $this->transaction = TRUE;
-            // }
-        }
-
-        //09-05-2023 need to get the file extention here... not a boolen
-        // $this->receipt_file = $this->expense->receipts()->exists();
-
-        $this->expense_transactions_sum = $this->expense->transactions->sum('amount') == $this->expense->amount && $this->expense->transactions->sum('amount') != '0.00' ? true : false;
+        // Convenience flag used by the UI to indicate if transactions match the amount
+        $transactionsSum = $this->expense->transactions->sum('amount');
+        $this->expense_transactions_sum = ($transactionsSum == $this->expense->amount) && ($transactionsSum != '0.00');
     }
 
     public function expenseDetails()
@@ -154,7 +120,7 @@ class ExpenseForm extends Form
             $project_id = $this->project_id;
             $distribution_id = null;
             $dist_user = null;
-        }elseif(isset($this->project_id)){
+        } elseif (isset($this->project_id)) {
             $project_id = null;
             $distribution_id = substr($this->project_id, 2);
             $dist_user = null;
@@ -163,27 +129,10 @@ class ExpenseForm extends Form
             $distribution_id = null;
             $dist_user = null;
         } else {
-            Log::error('ExpenseForm expenseDetails error', [
-                'expense' => $this->expense,
-                'project_id' => $this->project_id,
-                'vendor_id' => $this->vendor_id,
-            ]);
-
-            dd('in else');
-
-            // } elseif (is_null($this->project_id)) {
-            // dd('in elseif');
-            // $project_id = null;
-            // $distribution_id = null;
-            // $dist_user = $this->vendor_id;
-
-            //for checks
-            // $distribution = Distribution::findOrFail($distribution_id)->user_id;
-            // if($distribution != 0){
-            //     $dist_user = $distribution;
-            // }else{
-            //     $dist_user = NULL;
-            // }
+            // Default when no project/distribution and not a split
+            $project_id = null;
+            $distribution_id = null;
+            $dist_user = null;
         }
 
         return [
@@ -246,45 +195,43 @@ class ExpenseForm extends Form
 
     public function delete()
     {
-        if ($this->transaction) {
-            $this->transaction->delete();
-        } else {
-            //CHECK
-            // $check = $this->expense->check;
+        // if ($this->transaction) {
+        //     $this->transaction->delete();
+        // }
 
-            // if($check){
-            //     if($check->amount == $this->expense->amount){
-            //         //if has transactions, remove
-            //         $check->delete();
-            //     }else{
-            //         //edit check
-            //     }
-            // }
-            //ASSOCIATED EXPENSES
-            $associated_expenses = $this->expense->associated;
-            foreach ($associated_expenses as $associated_expenses) {
-                $associated_expenses->parent_expense_id = null;
-                $associated_expenses->save();
-            }
+        //CHECK
+        // $check = $this->expense->check;
 
-            //SPLITS
-            $splits = $this->expense->splits;
-            foreach ($splits as $split) {
-                $split->delete();
-            }
-
-            //TRANSACTIONS
-            $transactions = $this->expense->transactions;
-            foreach ($transactions as $transaction) {
-                $transaction->expense_id = null;
-                $transaction->save();
-            }
-
-            //RECEIPTS
-            $this->expense->receipts()->delete();
-
-            $this->expense->delete();
+        // if($check){
+        //     if($check->amount == $this->expense->amount){
+        //         //if has transactions, remove
+        //         $check->delete();
+        //     }else{
+        //         //edit check
+        //     }
+        // }
+        //ASSOCIATED EXPENSES
+        $associated_expenses = $this->expense->associated;
+        foreach ($associated_expenses as $associated_expenses) {
+            $associated_expenses->parent_expense_id = null;
+            $associated_expenses->save();
         }
+
+        //SPLITS
+        $splits = $this->expense->splits;
+        foreach ($splits as $split) {
+            $split->delete();
+        }
+
+        //TRANSACTIONS
+        $transactions = $this->expense->transactions;
+        foreach ($transactions as $transaction) {
+            $transaction->expense_id = null;
+            $transaction->vendor_id = null;
+            $transaction->save();
+        }
+
+        $this->expense->delete();
     }
 
     public function update()
@@ -403,48 +350,79 @@ class ExpenseForm extends Form
         $this->authorize('create', Expense::class);
         $this->validate();
 
-        $expense_details = $this->expenseDetails();
+        $expense_details = $this->expenseDetails();        
 
-        //validate check...
-        if (empty($this->paid_by) && isset($this->bank_account_id)) {
+        // Determine if we should create/reuse a check
+        $shouldCreateCheck = empty($this->paid_by);
+        
+        // Prefer component-level fields set by the component; fallback to transaction
+        $bankAccountId = $this->component->bank_account_id ?? null;
+        $checkType = $this->component->check_type ?? null;
+        $checkNumber = $this->component->check_number ?? null;
+
+        // Fallback from transaction if component fields are missing
+        if (!$bankAccountId && $this->transaction?->bank_account_id) {
+            $bankAccountId = $this->transaction->bank_account_id;
+        }
+
+        if (!$checkType && $this->transaction?->check_number) {
+            if ($this->transaction->check_number === '1010101') {
+                $checkType = 'Transfer';
+            } elseif ($this->transaction->check_number === '2020202') {
+                $checkType = 'Cash';
+            } else {
+                $checkType = 'Check';
+            }
+        }
+
+        if ($checkType === 'Check' && !$checkNumber && $this->transaction?->check_number && !in_array($this->transaction->check_number, ['1010101','2020202'])) {
+            $checkNumber = $this->transaction->check_number;
+        }
+
+        // Validate and create/reuse check when applicable
+        if ($shouldCreateCheck && $bankAccountId && $checkType) {
+            // Calculate distribution user if distribution selected
             if ($expense_details['distribution_id']) {
                 $distribution_user_id = Distribution::findOrFail($expense_details['distribution_id'])->user_id;
-                if ($distribution_user_id != 0) {
-                    $dist_user = $distribution_user_id;
-                } else {
-                    $dist_user = null;
-                }
+                $dist_user = ($distribution_user_id != 0) ? $distribution_user_id : null;
             } else {
                 $dist_user = null;
             }
 
-            if (!is_null($this->check_number)) {
-                $existing_check = Check::where('deleted_at', null)
-                    ->where('bank_account_id', $this->bank_account_id)
-                    ->where('check_type', $this->check_type)
-                    ->where('check_number', $this->check_number)
+            $check = null;
+            $existing_check = null;
+
+            // Only attempt dedupe on paper checks with a specific check number
+            if ($checkType === 'Check' && !is_null($checkNumber)) {
+                $existing_check = Check::whereNull('deleted_at')
+                    ->where('bank_account_id', $bankAccountId)
+                    ->where('check_type', $checkType)
+                    ->where('check_number', $checkNumber)
                     ->where('vendor_id', $this->vendor_id)
                     ->first();
             }
 
-            if (isset($existing_check)) {
+            if ($existing_check) {
                 $check = $existing_check;
                 $check->amount = $check->amount + $this->amount;
                 $check->save();
+                
             } else {
                 $check = Check::create([
-                    'check_type' => $this->check_type,
-                    'check_number' => $this->check_number,
+                    'check_type' => $checkType,
+                    'check_number' => $checkNumber, // may be null for non-paper types
                     'date' => $this->date,
-                    'bank_account_id' => $this->bank_account_id,
+                    'bank_account_id' => $bankAccountId,
                     'amount' => $this->amount,
-                    //user_id if expense project = distribution
                     'user_id' => $dist_user,
                     'vendor_id' => $this->vendor_id,
                     'belongs_to_vendor_id' => auth()->user()->vendor->id,
                     'created_by_user_id' => auth()->user()->id,
                 ]);
+                
             }
+        } else {
+            
         }
 
         $expense = Expense::create([
@@ -463,11 +441,13 @@ class ExpenseForm extends Form
             'created_by_user_id' => auth()->user()->id,
         ]);
 
+        
+
         if ($this->transaction) {
             $this->transaction->check_id = isset($check) ? $check->id : null;
             $this->transaction->expense_id = isset($expense) ? $expense->id : null;
             $this->transaction->vendor_id = isset($this->vendor_id) ? $this->vendor_id : null;
-            $this->transaction->save();
+            $this->transaction->save();            
         }
 
         if ($this->receipt_file) {

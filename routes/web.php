@@ -241,3 +241,15 @@ Route::middleware(['auth', 'vendor.access'])->group(function () {
     Route::get('/planner/gantt', GanttIndex::class)->name('planner.gantt');
     Route::get('/planner/cards', CardsIndex::class)->name('planner.cards');    
 });
+
+// Development login bypass for testing (only in local environment)
+if (env('APP_ENV') === 'local') {
+    Route::get('/dev-login', function () {
+        $user = \App\Models\User::find(1);
+        if ($user) {
+            \Illuminate\Support\Facades\Auth::login($user, true);
+            return redirect('/vendors')->with('success', 'Logged in as ' . $user->full_name . ' for testing');
+        }
+        return redirect('/login')->with('error', 'Test user not found');
+    })->name('dev.login');
+}

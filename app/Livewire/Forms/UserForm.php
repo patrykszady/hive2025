@@ -14,6 +14,7 @@ class UserForm extends Form
     use AuthorizesRequests;
 
     public ?User $user;
+    public ?int $user_id = null;
 
     #[Validate('required|min:2')]
     public $first_name = null;
@@ -34,11 +35,6 @@ class UserForm extends Form
 
     public function rules()
     {
-        // Don't validate anything if the form hasn't been properly initialized
-        if (!isset($this->user) && empty($this->email) && empty($this->first_name)) {
-            return [];
-        }
-
         return [
             'email' => [
                 'required',
@@ -85,6 +81,7 @@ class UserForm extends Form
     public function setUser(User $user)
     {
         $this->user = $user;
+    $this->user_id = $user->id;
 
         $this->first_name = $user->first_name;
         $this->last_name = $user->last_name;

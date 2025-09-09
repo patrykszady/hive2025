@@ -16,7 +16,7 @@ class UserFinances extends Component
 
     public User $user;
 
-    public $year = 2025;
+    public $year = 2024;
 
     public $timesheets_paid = 0;
     public $timesheets_paid_by = 0;

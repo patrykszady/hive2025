@@ -35,7 +35,7 @@
                 <div>
                     <x-details.card title="Cost of Labor" :expanded="false" :details_text="false">
                         <x-slot:details>
-                            @foreach($this->costOfLaborVendors() as $vendor_name => $cost_of_labor_vendor)
+                            @foreach($this->costOfLaborVendors as $vendor_name => $cost_of_labor_vendor)
                                 @php $laborSum = round((float) $cost_of_labor_vendor->sum('amount'), 2); @endphp
                                 @if($laborSum == 0.0)
                                     @continue

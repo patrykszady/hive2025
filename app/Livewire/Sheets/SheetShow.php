@@ -7,6 +7,7 @@ use App\Models\Expense;
 use App\Models\Payment;
 use App\Models\Sheet;
 use App\Models\Vendor;
+use App\Models\Timesheet;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
@@ -15,7 +16,8 @@ use OpenSpout\Common\Entity\Style\Border;
 use OpenSpout\Common\Entity\Style\BorderPart;
 use OpenSpout\Common\Entity\Style\Color;
 use OpenSpout\Common\Entity\Style\Style;
-use Spatie\SimpleExcel\SimpleExcelWriter;
+use OpenSpout\Writer\XLSX\Writer as XLSXWriter;
+use OpenSpout\Common\Entity\Row;
 
 class SheetShow extends Component
 {
@@ -81,9 +83,10 @@ class SheetShow extends Component
         return Vendor::whereNot('business_type', 'Retail')->pluck('id');
     }
 
-    #[Computed]
+    #[Computed(cache: false)]
     public function costOfLaborVendors()
     {
+        // Get checks for non-retail subcontractors
         $checksQuery = Check::whereBetween('date', [$this->start_date, $this->end_date])
             ->whereHas('vendor', function ($query) {
                 $query->where('business_type', '!=', 'Retail')
@@ -93,18 +96,138 @@ class SheetShow extends Component
                 $query->whereIn('bank_account_id', $this->bank_account_ids);
             });
 
-        // Apply Cash filter only when hiding cash payments
-        if ($this->cash === 'hide') {
-            $checksQuery->whereNot('check_type', 'Cash');
-        }
-
-        $vendors = $checksQuery
+        $checkVendors = $checksQuery
             ->get()
             ->groupBy('vendor.business_name')
             ->toBase();
+
+        // Get timesheets for users who work via via_vendor_id relationship
+        $viaVendorUsers = \DB::table('user_vendor')
+            ->where('vendor_id', auth()->user()->vendor->id)
+            ->whereNotNull('via_vendor_id')
+            ->get(['user_id', 'via_vendor_id']);
+
+        $timesheetVendors = collect();
+        
+        if ($viaVendorUsers->isNotEmpty()) {
+            // Group by user_id first to avoid duplicates when users have multiple via_vendor relationships
+            $userIds = $viaVendorUsers->pluck('user_id')->unique()->toArray();
+            
+            // Calculate net amounts per user using exact UserFinances logic
+            foreach ($userIds as $userId) {
+                $userVendorRel = $viaVendorUsers->where('user_id', $userId)->first();
+                if ($userVendorRel) {
+                    $viaVendor = \App\Models\Vendor::find($userVendorRel->via_vendor_id);
+                    if ($viaVendor) {
+                        // Use exact UserFinances "TOTAL CHECKS FOR USER" logic
+                        $timesheetsPaid = Timesheet::where('user_id', $userId)
+                            ->where('vendor_id', auth()->user()->vendor->id)
+                            ->whereNull('paid_by')
+                            ->whereHas('check', function ($query) {
+                                $query->whereBetween('date', [$this->start_date, $this->end_date]);
+                            })
+                            ->sum('amount');
+                        
+                        $timesheetsPaidBy = Timesheet::withoutGlobalScopes()
+                            ->where('user_id', $userId)
+                            ->where('vendor_id', auth()->user()->vendor->id)
+                            ->whereNotNull('paid_by')
+                            ->whereHas('check', function ($query) {
+                                $query->withoutGlobalScopes()->whereBetween('date', [$this->start_date, $this->end_date]);
+                            })
+                            ->sum('amount');
+                        
+                        $userReimbursementExpenses = Expense::whereNull('paid_by')
+                            ->where('reimbursment', $userId)
+                            ->whereHas('check', function ($query) {
+                                $query->whereBetween('date', [$this->start_date, $this->end_date]);
+                            })
+                            ->sum('amount');
+                        
+                        $userReimbursementPaidBy = Expense::whereNotNull('paid_by')
+                            ->where('reimbursment', $userId)
+                            ->whereHas('check', function ($query) {
+                                $query->whereBetween('date', [$this->start_date, $this->end_date]);
+                            })
+                            ->sum('amount');
+                        
+                        $user = \App\Models\User::find($userId);
+                        $userDistribution = $user->distributions->first()->id ?? null;
+                        $distributionChecks = $userDistribution
+                            ? Expense::where('distribution_id', $userDistribution)
+                                ->whereHas('check', function ($query) {
+                                    $query->whereBetween('date', [$this->start_date, $this->end_date]);
+                                })
+                                ->sum('amount')
+                            : 0;
+                        
+                        // Calculate "TOTAL CHECKS FOR USER" using exact UserFinances formula
+                        $totalChecksForUser = $timesheetsPaid 
+                            + $timesheetsPaidBy 
+                            + $distributionChecks
+                            - $userReimbursementExpenses 
+                            - $userReimbursementPaidBy;
+                        
+                        // Check if user has expenses paid
+                        $expensesPaid = Expense::where('paid_by', $userId)
+                            ->whereHas('check', function ($query) {
+                                $query->whereBetween('date', [$this->start_date, $this->end_date]);
+                            })
+                            ->sum('amount');
+                        
+                        // If user has expenses paid, use "TOTAL FOR USER" calculation
+                        // Otherwise use "TOTAL CHECKS FOR USER" calculation
+                        if ($expensesPaid > 0) {
+                            // Use "TOTAL FOR USER" calculation (like Cezary)
+                            $distributionExpenses = $userDistribution
+                                ? Expense::where('distribution_id', $userDistribution)
+                                    ->whereNull('check_id')
+                                    ->whereBetween('date', [$this->start_date, $this->end_date])
+                                    ->sum('amount')
+                                : 0;
+                            
+                            $finalAmount = $timesheetsPaid
+                                - $expensesPaid
+                                + $distributionChecks
+                                + $distributionExpenses
+                                + $timesheetsPaidBy;
+                        } else {
+                            // Use "TOTAL CHECKS FOR USER" calculation (like Klaudiusz)
+                            $finalAmount = $totalChecksForUser;
+                        }
+                        
+                        if ($finalAmount > 0) {
+                            $netEntry = (object) [
+                                'amount' => $finalAmount,
+                                'user_id' => $userId,
+                                'vendor_id' => $viaVendor->id,
+                            ];
+                            
+                            if (!$timesheetVendors->has($viaVendor->business_name)) {
+                                $timesheetVendors->put($viaVendor->business_name, collect());
+                            }
+                            
+                            $timesheetVendors->get($viaVendor->business_name)->push($netEntry);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Merge check vendors and timesheet vendors
+        $allVendors = $checkVendors;
+        foreach ($timesheetVendors as $vendorName => $timesheets) {
+            if ($allVendors->has($vendorName)) {
+                // If vendor already exists from checks, add timesheet amounts
+                $allVendors->get($vendorName)->push(...$timesheets);
+            } else {
+                // New vendor from timesheets only
+                $allVendors->put($vendorName, $timesheets);
+            }
+        }
             
         // Sort vendors by sum
-        return $vendors->sortByDesc(function($vendor) {
+        return $allVendors->sortByDesc(function($vendor) {
             return $vendor->sum('amount');
         })->toBase();
     }
@@ -112,7 +235,7 @@ class SheetShow extends Component
     #[Computed]
     public function costOfLaborSum()
     {
-        return $this->costOfLaborVendors()->flatten()->sum('amount');
+        return $this->costOfLaborVendors->flatten()->sum('amount');
     }
 
     #[Computed]
@@ -225,145 +348,134 @@ class SheetShow extends Component
 
     public function export_csv()
     {
-        $border = new Border(
-            new BorderPart(Border::BOTTOM, Color::BLACK, Border::WIDTH_THICK, Border::STYLE_SOLID)
-        );
-        $border_thin = new Border(
-            new BorderPart(Border::BOTTOM, Color::BLACK, Border::WIDTH_THIN, Border::STYLE_SOLID)
-        );
-
         // Create filename
         $filename = 'financial-report-' . date('Y-m-d', strtotime($this->start_date)) . '-to-' . 
                     date('Y-m-d', strtotime($this->end_date)) . '.xlsx';
                     
-        return response()->streamDownload(function() use ($border, $border_thin) {
-            // Format money values correctly without currency symbols
+        return response()->streamDownload(function() {
+            // Format money values correctly
             $formatMoney = function($amount) {
-                return number_format($amount, 2, '.', '');
+                return money($amount);
             };
+            
             // Treat very small amounts as zero if they round to $0.00
             $isZero = function($amount) {
                 return round((float)$amount, 2) == 0.0;
             };
+
+            // Styles
+            $border = new Border(
+                new BorderPart(Border::BOTTOM, Color::BLACK, Border::WIDTH_THICK, Border::STYLE_SOLID)
+            );
+            $headerStyle = (new Style())->setBorder($border)->setFontBold();
+            $boldStyle = (new Style())->setFontBold();
+            $italicStyle = (new Style())->setFontItalic();
             
-            // Create Excel file using PHPSpreadsheet since SimpleExcelWriter::createFromString() doesn't exist
-            $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
-            $sheet = $spreadsheet->getActiveSheet();
+            // OpenSpout writer
+            $writer = new XLSXWriter();
+            $writer->openToFile('php://output');
             
-            // Add header row
-            $sheet->setCellValue('A1', 'Category');
-            $sheet->setCellValue('B1', 'Sub-Category');
-            $sheet->setCellValue('C1', 'Vendor');
-            $sheet->setCellValue('D1', 'Amount');
-            
-            $row = 2;
+            // Name the sheet
+            $writer->getCurrentSheet()->setName('Financial Report');
             
             // REVENUE
-            $sheet->setCellValue('A' . $row, 'REVENUE');
-            $sheet->setCellValue('D' . $row, $formatMoney($this->revenue()));
-            $sheet->getStyle('A' . $row . ':D' . $row)->getFont()->setBold(true);
-            $row += 2;
+            $writer->addRow(Row::fromValues([
+                'REVENUE', '', '', '', $formatMoney($this->revenue())
+            ], $headerStyle));
+            $writer->addRow(Row::fromValues(['', '', '', '', ''])); // spacer
             
             // COST OF REVENUE
-            $sheet->setCellValue('A' . $row, 'COST OF REVENUE');
-            $sheet->setCellValue('D' . $row, $formatMoney($this->costOfMaterialsSum() + $this->costOfLaborSum()));
-            $sheet->getStyle('A' . $row . ':D' . $row)->getFont()->setBold(true);
-            $row += 2;
+            $writer->addRow(Row::fromValues([
+                'COST OF REVENUE', '', '', '', $formatMoney($this->costOfMaterialsSum() + $this->costOfLaborSum())
+            ], $headerStyle));
+            $writer->addRow(Row::fromValues(['', '', '', '', ''])); // spacer
             
             // COST OF MATERIALS
-            $sheet->setCellValue('B' . $row, 'COST OF MATERIALS');
-            $sheet->setCellValue('D' . $row, $formatMoney($this->costOfMaterialsSum()));
-            $sheet->getStyle('B' . $row . ':D' . $row)->getFont()->setBold(true);
-            $row++;
+            $writer->addRow(Row::fromValues([
+                '', 'COST OF MATERIALS', '', '', $formatMoney($this->costOfMaterialsSum())
+            ], $boldStyle));
             
             // Materials vendors (skip zero-sum vendors)
             foreach ($this->costOfMaterialsVendors() as $vendorName => $costOfMaterialsVendor) {
                 $vendorSum = (float) $costOfMaterialsVendor->sum('amount');
                 if ($isZero($vendorSum)) { continue; }
-                $sheet->setCellValue('C' . $row, $vendorName);
-                $sheet->setCellValue('D' . $row, $formatMoney($vendorSum));
-                $row++;
+                $writer->addRow(Row::fromValues([
+                    '', '', $vendorName, '', $formatMoney($vendorSum)
+                ]));
             }
             
-            $row++;
+            $writer->addRow(Row::fromValues(['', '', '', '', ''])); // spacer
             
             // COST OF LABOR
-            $sheet->setCellValue('B' . $row, 'COST OF LABOR');
-            $sheet->setCellValue('D' . $row, $formatMoney($this->costOfLaborSum()));
-            $sheet->getStyle('B' . $row . ':D' . $row)->getFont()->setBold(true);
-            $row++;
+            $writer->addRow(Row::fromValues([
+                '', 'COST OF LABOR', '', '', $formatMoney($this->costOfLaborSum())
+            ], $boldStyle));
             
             // Labor vendors (skip zero-sum vendors)
             foreach ($this->costOfLaborVendors() as $vendorName => $costOfLaborVendor) {
                 $vendorSum = (float) $costOfLaborVendor->sum('amount');
                 if ($isZero($vendorSum)) { continue; }
-                $sheet->setCellValue('C' . $row, $vendorName);
-                $sheet->setCellValue('D' . $row, $formatMoney($vendorSum));
-                $row++;
+                $writer->addRow(Row::fromValues([
+                    '', '', $vendorName, '', $formatMoney($vendorSum)
+                ]));
             }
             
-            $row++;
+            $writer->addRow(Row::fromValues(['', '', '', '', ''])); // spacer
             
             // GROSS PROFIT
-            $sheet->setCellValue('A' . $row, 'GROSS PROFIT');
-            $sheet->setCellValue('D' . $row, $formatMoney($this->revenue() - $this->costOfLaborSum() - $this->costOfMaterialsSum()));
-            $sheet->getStyle('A' . $row . ':D' . $row)->getFont()->setBold(true);
-            $row += 2;
+            $writer->addRow(Row::fromValues([
+                'GROSS PROFIT', '', '', '', $formatMoney($this->revenue() - $this->costOfLaborSum() - $this->costOfMaterialsSum())
+            ], $headerStyle));
+            $writer->addRow(Row::fromValues(['', '', '', '', ''])); // spacer
             
             // GENERAL & ADMINISTRATIVE EXPENSES
-            $sheet->setCellValue('A' . $row, 'GENERAL & ADMINISTRATIVE EXPENSES');
-            $sheet->setCellValue('D' . $row, $formatMoney($this->generalExpenses()));
-            $sheet->getStyle('A' . $row . ':D' . $row)->getFont()->setBold(true);
-            $row += 2;
+            $writer->addRow(Row::fromValues([
+                'GENERAL & ADMINISTRATIVE EXPENSES', '', '', '', $formatMoney($this->generalExpenses())
+            ], $headerStyle));
+            $writer->addRow(Row::fromValues(['', '', '', '', ''])); // spacer
             
             // Export categories following sort order (skip zero-sum groups)
             foreach ($this->sortedExpenseCategories() as $categoryName => $categoryData) {
                 $categorySum = (float) $categoryData['sum'];
                 if ($isZero($categorySum)) { continue; }
 
-                $sheet->setCellValue('A' . $row, $categoryName);
-                $sheet->setCellValue('D' . $row, $formatMoney($categorySum));
-                $sheet->getStyle('A' . $row . ':D' . $row)->getFont()->setBold(true);
-                $row++;
+                $writer->addRow(Row::fromValues([
+                    $categoryName, '', '', '', $formatMoney($categorySum)
+                ], $boldStyle));
                 
                 foreach ($categoryData['subcategories'] as $subcategory) {
                     $subSum = (float) $subcategory['sum'];
                     if ($isZero($subSum)) { continue; }
 
-                    $sheet->setCellValue('B' . $row, $subcategory['name']);
-                    $sheet->setCellValue('D' . $row, $formatMoney($subSum));
-                    $sheet->getStyle('B' . $row . ':D' . $row)->getFont()->setItalic(true);
-                    $row++;
+                    $writer->addRow(Row::fromValuesWithStyles([
+                        '', '', $subcategory['name'], '', $formatMoney($subSum)
+                    ], null, [4 => $italicStyle]));
                     
                     foreach ($subcategory['vendors'] as $vendor) {
                         $vendSum = (float) $vendor['sum'];
                         if ($isZero($vendSum)) { continue; }
 
-                        $sheet->setCellValue('C' . $row, $vendor['name']);
-                        $sheet->setCellValue('D' . $row, $formatMoney($vendSum));
-                        $row++;
+                        $writer->addRow(Row::fromValues([
+                            '', '', '', $vendor['name'], $formatMoney($vendSum)
+                        ]));
                     }
+                    
+                    // Add empty row after each subcategory
+                    $writer->addRow(Row::fromValues(['', '', '', '', '']));
                 }
+                
+                // Add empty row after each category
+                $writer->addRow(Row::fromValues(['', '', '', '', '']));
             }
             
-            $row++;
+            $writer->addRow(Row::fromValues(['', '', '', '', ''])); // spacer
             
             // NET INCOME
-            $sheet->setCellValue('A' . $row, 'NET INCOME');
-            $sheet->setCellValue('D' . $row, $formatMoney($this->revenue() - $this->costOfLaborSum() - $this->costOfMaterialsSum() - $this->generalExpenses()));
-            $sheet->getStyle('A' . $row . ':D' . $row)->getFont()->setBold(true);
+            $writer->addRow(Row::fromValues([
+                'NET INCOME', '', '', '', $formatMoney($this->revenue() - $this->costOfLaborSum() - $this->costOfMaterialsSum() - $this->generalExpenses())
+            ], $headerStyle));
             
-            // Format amount column as currency
-            $sheet->getStyle('D2:D' . $row)->getNumberFormat()->setFormatCode('$#,##0.00');
-            
-            // Auto-size columns
-            foreach(range('A', 'D') as $col) {
-                $sheet->getColumnDimension($col)->setAutoSize(true);
-            }
-            
-            // Output spreadsheet directly
-            $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
-            $writer->save('php://output');
+            $writer->close();
         }, $filename, [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         ]);

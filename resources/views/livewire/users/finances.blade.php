@@ -80,8 +80,8 @@
                         $timesheets_paid->sum('amount')
                         + $distribution_checks->sum('amount')
                         + $timesheets_paid_by->sum('amount')
-                        // - $expenses_paid->sum('amount')
-                        //  - ($paid_other_user_reimbursements->sum('amount'))
+                        - $user_reimbursement_expenses->sum('amount')
+                        - $user_reimbursement_paid_by->sum('amount')
                         )}}
                 </flux:table.cell>
             </flux:table.row>

@@ -29,10 +29,10 @@ class ExpenseObserver
             UpdateVendorSearchIndex::dispatch($expense->vendor_id);
         }
 
-        // If vendor changed, also update the old vendor's index
-        if ($expense->isDirty('vendor_id') && $expense->getOriginal('vendor_id')) {
-            UpdateVendorSearchIndex::dispatch($expense->getOriginal('vendor_id'));
-        }
+        // // If vendor changed, also update the old vendor's index
+        // if ($expense->isDirty('vendor_id') && $expense->getOriginal('vendor_id')) {
+        //     UpdateVendorSearchIndex::dispatch($expense->getOriginal('vendor_id'));
+        // }
     }
 
     /**
@@ -43,6 +43,9 @@ class ExpenseObserver
         if ($expense->vendor_id) {
             UpdateVendorSearchIndex::dispatch($expense->vendor_id);
         }
+
+        //RECEIPTS
+        $expense->receipts()->delete();
     }
 
     /**

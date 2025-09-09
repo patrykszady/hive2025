@@ -5,7 +5,12 @@
 
     <flux:separator variant="subtle" />
 
-    <div x-data="{ activeTab: 'details' }">
+    <div x-data="{ 
+        activeTab: 'details',
+        business_type: @entangle('form.business_type'), 
+        via_vendor: @entangle('via_vendor'),
+        open_vendor_form: @entangle('open_vendor_form')
+    }">
         <!-- Only show tabs when editing an existing vendor -->
         <div class="border-b border-gray-200 mb-4" x-show="$wire.view_text['form_submit'] === 'edit'">
             <nav class="-mb-px flex space-x-8">
@@ -122,7 +127,7 @@
                                 @if(optional($existing_vendors)->isEmpty() && optional($new_vendors_for_company)->isEmpty())
                                     <flux:button
                                         class="w-full font-extrabold"
-                                        @click="$wire.open_vendor_form = true"
+                                        wire:click="openVendorForm"
                                         variant="primary"
                                         color="blue"
                                         >
@@ -132,7 +137,7 @@
                                     {{-- Show default button when there are existing vendors --}}
                                     <flux:button
                                         class="w-full font-extrabold"
-                                        @click="$wire.open_vendor_form = true"
+                                        wire:click="openVendorForm"
                                         >
                                         Create New Vendor
                                     </flux:button>
@@ -151,6 +156,7 @@
                             class="my-4 space-y-4"
                             x-transition
                             >
+                            
                             <flux:input
                                 wire:model.live="form.business_name"
                                 label="Business Name"
@@ -175,8 +181,7 @@
 
                         {{-- USER --}}
                         <div
-                            x-data="{ user: @entangle('user'), business_type: @entangle('form.business_type'), via_vendor: @entangle('via_vendor') }"
-                            x-show="business_type == 'Sub' || business_type == '1099' || business_type == 'DBA'"
+                            x-show="['Sub','DBA','1099'].includes(business_type)"
                             x-transition
                             >
 
@@ -195,9 +200,9 @@
                             @endif
                         </div>
 
-                        {{-- ADDRESS / BUSINESS EMAIL AND PHONE--}}
+                        {{-- ADDRESS / BUSINESS EMAIL AND PHONE --}}
                         <div
-                            x-show="$wire.user && $wire.form.business_type != 'Retail'"
+                            x-show="business_type !== 'Retail' && ($wire.view_text['form_submit'] === 'edit' || $wire.has_user)"
                             x-transition
                             class="space-y-4"
                             >

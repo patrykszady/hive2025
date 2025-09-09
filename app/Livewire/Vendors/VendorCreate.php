@@ -31,6 +31,7 @@ class VendorCreate extends Component
 
     public Vendor $vendor;
     public User $user;
+    public bool $has_user = false;
 
     public $business_name_text = null;
     public $vendor_add_type = null;
@@ -67,6 +68,18 @@ class VendorCreate extends Component
         return [
             'business_name_text' => 'nullable|min:3|max:255',
         ];
+    }
+
+    #[Computed]
+    public function showUserSection(): bool
+    {
+        return in_array($this->form->business_type, ['Sub', 'DBA', '1099'], true);
+    }
+
+    #[Computed]
+    public function showAddressSection(): bool
+    {
+        return (bool) $this->user && ($this->form->business_type !== 'Retail');
     }
 
     #[Computed]
@@ -142,6 +155,9 @@ class VendorCreate extends Component
         // Only set user for non-Retail vendors
         if ($vendor->business_type != 'Retail') {
             $this->user = $vendor->users()->first() ?? new User();
+            $this->has_user = (bool) ($this->user->id ?? false);
+        } else {
+            $this->has_user = false;
         }
         
         $this->business_name_text = $vendor->business_name;
@@ -191,6 +207,7 @@ class VendorCreate extends Component
     public function viaVendor(User $user, $business_name)
     {
         $this->user = $user;
+        $this->has_user = true;
         $this->form->business_name = $business_name;
         $this->business_name_text = $business_name;
         $this->form->business_type = '1099';
@@ -207,6 +224,11 @@ class VendorCreate extends Component
     {
         $this->vendor_add_type = 'NEW';
         $this->modal('vendors_form_modal')->show();
+    }
+
+    public function openVendorForm()
+    {
+        $this->open_vendor_form = true;
     }
 
     //add Existing Vendor to auth->user->vendor (Company)
@@ -235,6 +257,7 @@ class VendorCreate extends Component
     public function userVendor($user_info)
     {
         $this->user = User::findOrFail($user_info['id']);
+        $this->has_user = true;
         $this->form->user_hourly_rate = $user_info['hourly_rate'];
         $this->form->user_role = $user_info['role'];
     }
@@ -250,9 +273,9 @@ class VendorCreate extends Component
             duration: 5000,
             position: 'top right',
             variant: 'success',
-            heading: 'Vendor Updated.',
+            heading: 'Updated',
             // route / href / wire:click
-            text: '',
+            text: $vendor->name,
         );
     }
 
@@ -288,12 +311,19 @@ class VendorCreate extends Component
             $this->dispatch('ViaVendorId', via_vendor_id: $vendor->id)->to('users.user-create');
         }
 
+        // Notify VendorsIndex to prepend a highlighted row for this new vendor (session-only)
+        $this->dispatch('VendorCreated', vendor: [
+            'id' => $vendor->id,
+            'name' => $vendor->name,
+            'business_type' => $vendor->business_type,
+            'ytd_expense_sum' => (float) ($vendor->ytd_expense_sum ?? 0),
+        ])->to('vendors.vendors-index');
+
         //reset component
         $this->modal('vendors_form_modal')->close();
         $this->dispatch('refreshComponent')->self();
         $this->form->reset();
 
-        $this->dispatch('refreshComponent')->to('vendors.vendors-index');
 
         // route: 'vendors/' . $vendor->id
         Flux::toast(
@@ -302,7 +332,7 @@ class VendorCreate extends Component
             variant: 'success',
             heading: 'Vendor Added.',
             // route / href / wire:click
-            text: '',
+            text: $vendor->name . ' was created.',
         );
     }
 
