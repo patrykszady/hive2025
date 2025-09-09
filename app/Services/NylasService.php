@@ -148,7 +148,7 @@ class NylasService
                     'parent_id' => $parentId,
                 ],
                 'headers' => [
-                    'Authorization' => 'Bearer ' . config('services.nylas.secret'),
+                    'Authorization' => 'Bearer ' . env('NYLAS_API_KEY'),
                 ],
             ]);
 
@@ -240,6 +240,68 @@ class NylasService
             Log::error("Error fetching messages for Grant ID {$grantId}: " . $e->getMessage());
             return null;
         }
+    }
+
+    /**
+     * Retry policy per Nylas v3 guidance:
+     * - Initial attempt with provided limit (e.g., 45)
+     * - First retry with limit = 10
+     * - Second retry with limit = 5
+     * - No third retry
+     * Returns the `data` array or [] when all attempts fail.
+     */
+    public function getMessagesWithRetry(array $queryParams, string $grantId, int $maxAttempts = 3, ?string $folderName = null): array
+    {
+        // 0-based attempt index per request: 0,1,2; then stop
+        $params = $queryParams;
+        $max = min($maxAttempts, 3);
+
+        for ($idx = 0; $idx < $max; $idx++) {
+            // Enforce limits: 0->original (or 45 default), 1->10, 2->5
+            if ($idx === 0) {
+                // Default to 45 if caller didn't specify
+                if (!isset($params['limit']) || !is_numeric($params['limit'])) {
+                    $params['limit'] = 20;
+                }
+            } elseif ($idx === 1) {
+                $params['limit'] = 10;
+            } else /* $idx === 2 */ {
+                $params['limit'] = 5;
+            }
+
+            try {
+                $resp = $this->getMessages($params, $grantId);
+                if (is_array($resp) && array_key_exists('data', $resp)) {
+                    return $resp['data'] ?? [];
+                }
+
+                throw new Exception('Nylas getMessages returned null or invalid payload.');
+            } catch (Exception $e) {
+                Log::warning('Nylas getMessages attempt failed', [
+                    'grant_id' => $grantId,
+                    'folder' => $folderName ?? ($params['in'] ?? null),
+                    'attempt' => $idx, // 0-based attempt index in logs
+                    'limit' => $params['limit'] ?? null,
+                    'message' => $e->getMessage(),
+                ]);
+
+                // Small backoff with jitter before next retry, except after final attempt
+                if ($idx < $max - 1) {
+                    $delayMs = $idx === 0 ? 400 : 800; // ~0.4s then ~0.8s
+                    $jitterMs = random_int(50, 150);
+                    usleep(($delayMs + $jitterMs) * 1000);
+                }
+            }
+        }
+
+        // Final failure: log to dedicated channel and throw
+        Log::channel('nylas')->error('Nylas getMessages final failure', [
+            'grant_id' => $grantId,
+            'folder' => $folderName ?? ($params['in'] ?? null),
+            'attempts' => $max,
+            'final_limit' => $params['limit'] ?? null,
+        ]);
+        throw new Exception('Nylas getMessages failed after retries');
     }
 
     public function downloadAttachment($attachmentId, $grantId, $messageId)

@@ -6,13 +6,14 @@ return [
             'driver' => 'daily',
             'path'   => storage_path('logs/schedule.log'),
             'level'  => 'error',
-            'days'   => 14, // or however many you want to keep
+            'days'   => 30,
         ],
 
         'move_channel' => [
-            'driver' => 'single',
+            'driver' => 'daily',
             'path' => storage_path('logs/move_channel.log'),
             'level' => 'debug',
+            'days' => 30,
         ],
 
         'company_emails_login_error' => [
@@ -58,44 +59,52 @@ return [
         ],
 
         'leads_in_email_error' => [
-            'driver' => 'single',
+            'driver' => 'daily',
             'path' => storage_path('logs/leads_in_email_error.log'),
             'level' => 'debug',
             'days' => 30,
         ],
 
         'plaid_transaction_removal' => [
-            'driver' => 'single',
+            'driver' => 'daily',
             'path' => storage_path('logs/plaid_transaction_removal.log'),
             'level' => 'debug',
             'days' => 30,
         ],
 
         'vendor_docs' => [
-            'driver' => 'single',
+            'driver' => 'daily',
             'path' => storage_path('logs/vendor_docs.log'),
             'level' => 'debug',
             'days' => 30,
         ],
 
         'google_places' => [
-            'driver' => 'single',
+            'driver' => 'daily',
             'path' => storage_path('logs/google_places.log'),
             'level' => 'debug',
             'days' => 30,
         ],
 
         'task_reminder' => [
-            'driver' => 'single',
+            'driver' => 'daily',
             'path' => storage_path('logs/task_reminder.log'),
             'level' => 'debug',
             'days' => 30,
         ],
 
         'receipt_processing' => [
-            'driver' => 'single',
+            'driver' => 'daily',
             'path' => storage_path('logs/receipt_processing.log'),
             'level' => 'debug',
+            'days' => 30,
+        ],
+
+        // Dedicated channel for Nylas API issues and final failures
+        'nylas' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/nylas.log'),
+            'level' => 'info',
             'days' => 30,
         ],
     ],

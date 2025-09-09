@@ -23,6 +23,7 @@ use Intervention\Image\Facades\Image;
 
 use Exception;
  
+
 class CompanyEmailController extends Controller
 {
     private $nylasService;
@@ -176,17 +177,18 @@ class CompanyEmailController extends Controller
             foreach ($folders as $folder) {
                 // Define query parameters for the Nylas API.
                 $queryParams = [
-                    'limit' => 45,      // Fetch a limited number of messages.
-                    'in'    => $folder, // Specify the folder to filter messages from.
+                    'limit' => 45,      // Initial page size; helper may reduce on retries.
+                    'in'    => $folder, // Folder to filter messages from.
                 ];
 
-                // Fetch messages for the current folder.
-                $messages = $this->nylasService->getMessages($queryParams, $grantId);
+                // Fetch with retry/backoff to handle 504s and provider timeouts gracefully
+                $data = $this->nylasService->getMessagesWithRetry($queryParams, $grantId, 3, $folder);
 
                 // Merge messages from the current folder.
-                $allMessages = array_merge($allMessages, $messages['data'] ?? []);
+                $allMessages = array_merge($allMessages, $data);
             }
 
+            Log::channel('nylas')->info("Fetched " . count($allMessages) . " messages for CompanyEmail ID {$companyEmail->id} ({$companyEmail->email})");
             // dd($allMessages);
             foreach($allMessages as $message) {
                 $messageId = $message['id'];
@@ -490,9 +492,8 @@ class CompanyEmailController extends Controller
                                     continue;
                                 }
 
-                                $storedFields = is_array($receiptRecord->receipt_items)
-                                    ? $receiptRecord->receipt_items
-                                    : json_decode($receiptRecord->receipt_items ?? '[]', true);
+                                // receipt_items is cast to object on ExpenseReceipts; convert to array
+                                $storedFields = json_decode(json_encode($receiptRecord->receipt_items), true) ?? [];
 
                                 $storedItemsSig = $this->buildItemsSignature($storedFields ?? []);
                                 $itemsOverlap = $this->itemsOverlap($currentItemsSig, $storedItemsSig);
@@ -503,7 +504,10 @@ class CompanyEmailController extends Controller
                                 }
 
                                 // Time equality gating: if both have time, they must be identical to be duplicate.
-                                $storedTime = $this->extractReceiptTime($receiptRecord->receipt_html ?? '', $candidate->date);
+                                $candidateDate = $candidate->date instanceof \Carbon\Carbon
+                                    ? $candidate->date->toDateString()
+                                    : (is_string($candidate->date) ? $candidate->date : null);
+                                $storedTime = $this->extractReceiptTime($receiptRecord->receipt_html ?? '', $candidateDate);
                                 $timeEqual = false;
                                 if ($currentTime && $storedTime) {
                                     // times must match exactly to the minute
@@ -539,7 +543,10 @@ class CompanyEmailController extends Controller
                                     if (!$receiptRecord) {
                                         return false;
                                     }
-                                    $storedTime = $this->extractReceiptTime($receiptRecord->receipt_html ?? '', $candidate->date);
+                                    $candidateDate = $candidate->date instanceof \Carbon\Carbon
+                                        ? $candidate->date->toDateString()
+                                        : (is_string($candidate->date) ? $candidate->date : null);
+                                    $storedTime = $this->extractReceiptTime($receiptRecord->receipt_html ?? '', $candidateDate);
                                     if (!$storedTime) {
                                         return false;
                                     }
@@ -605,16 +612,16 @@ class CompanyEmailController extends Controller
             $email_vendor_bank_account_ids = $email_vendor->bank_accounts->pluck('id');
 
             $queryParams = [
-                'limit'   => 99,
+                'limit'   => 45, // per Nylas guidance; will reduce on retries
                 'in'      => 'inbox',
                 'from'    => 'noreply@print.epsonconnect.com',
                 'subject' => 'Receipt Scans',
             ];
 
-            // Fetch messages for the company email.
-            $messages = $this->nylasService->getMessages($queryParams, $grantId);
+            // Fetch messages for the company email with retries/backoff.
+            $messages = $this->nylasService->getMessagesWithRetry($queryParams, $grantId, 3, 'inbox');
 
-            foreach ($messages['data'] as $message) {
+            foreach ($messages as $message) {
                 $messageId = $message['id'];
 
                 if (!empty($message['attachments'])) {

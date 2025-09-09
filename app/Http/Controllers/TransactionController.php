@@ -237,7 +237,6 @@ class TransactionController extends Controller
 
     public function plaid_transactions_sync()
     {
-        // ->where('id', 22)
         $banks = Bank::withoutGlobalScopes()->whereNotNull('plaid_access_token')->get();
 
         //if not in error state...
@@ -262,10 +261,12 @@ class TransactionController extends Controller
         // Continue with your existing code below
         $bank_account_ids = $bank->accounts->pluck('id')->toArray();
     
-        if($result['transactions_update_status'] ?? 'HISTORICAL_UPDATE_COMPLETE') {
-            $transactions_last_date = Transaction::whereIn('bank_account_id', $bank_account_ids)->latest()->first()->transaction_date->subWeeks(3)->format('Y-m-d');
-        }else{
-            $transactions_last_date = '2025-01-01';
+        // Determine a cutoff date to skip very old adds; widen window if no prior txns exist
+        $lastTxn = Transaction::whereIn('bank_account_id', $bank_account_ids)->latest('transaction_date')->first();
+        if (($result['transactions_update_status'] ?? 'HISTORICAL_UPDATE_COMPLETE') === 'HISTORICAL_UPDATE_COMPLETE') {
+            $transactions_last_date = $lastTxn ? \Carbon\Carbon::parse($lastTxn->transaction_date)->subWeeks(3)->toDateString() : '2023-01-01';
+        } else {
+            $transactions_last_date = '2023-01-01';
         }
 
         if (!empty($result['added']) or !empty($result['modified']) or !empty($result['removed']) or isset($result['error_code'])) {
@@ -287,49 +288,139 @@ class TransactionController extends Controller
             //ADDED
             foreach ($result['added'] as $index => $new_transaction) {
                 if ($new_transaction['date'] <= $transactions_last_date) {
+                    Log::channel('plaid_adds')->debug('ADDED skipped due to cutoff', [
+                        'bank_id' => $bank->id,
+                        'plaid_account_id' => $new_transaction['account_id'] ?? null,
+                        'date' => $new_transaction['date'] ?? null,
+                        'amount' => $new_transaction['amount'] ?? null,
+                        'cutoff' => $transactions_last_date,
+                    ]);
                     continue;
                 } else {
+                    Log::channel('plaid_adds')->debug('ADDED start', [
+                        'bank_id' => $bank->id,
+                        'bank_account_ids' => $bank_account_ids,
+                        'new_transaction' => $new_transaction,
+                    ]);
                     //make sure transaction_id does not exist yet.. if it does..update..
-                    if (Transaction::whereNotNull('plaid_transaction_id')->where('plaid_transaction_id', $new_transaction['pending_transaction_id'])->get()->isNotEmpty()) {
-                        $transaction = Transaction::where('plaid_transaction_id', $new_transaction['pending_transaction_id'])->first();
-                    } elseif (Transaction::whereNotNull('plaid_transaction_id')->where('plaid_transaction_id', $new_transaction['transaction_id'])->get()->isNotEmpty()) {
-                        $transaction = Transaction::where('plaid_transaction_id', $new_transaction['transaction_id'])->first();
-                    } elseif (Transaction::whereDate('posted_date', $new_transaction['date'])->whereNotNull('plaid_transaction_id')->where('owner', $new_transaction['account_owner'])->where('amount', $new_transaction['amount'])->get()->isNotEmpty()) {
-                        //11/14/2024 ...used in multiple places on this Controller
-                        //->where('plaid_transaction_id', $new_transaction['transaction_id'])
-                        $existing_transactions = Transaction::whereDate('posted_date', $new_transaction['date'])->whereIn('bank_account_id', $bank_account_ids)->where('owner', $new_transaction['account_owner'])->where('amount', $new_transaction['amount'])->get();
+                    if (!empty($new_transaction['pending_transaction_id']) && Transaction::query()
+                        ->whereIn('bank_account_id', $bank_account_ids)
+                        ->whereNotNull('plaid_transaction_id')
+                        ->where('plaid_transaction_id', $new_transaction['pending_transaction_id'])
+                        ->exists()) {
+                        $transaction = Transaction::query()
+                            ->whereIn('bank_account_id', $bank_account_ids)
+                            ->where('plaid_transaction_id', $new_transaction['pending_transaction_id'])
+                            ->first();
+                        Log::channel('plaid_adds')->debug('ADDED matched by pending_transaction_id', [
+                            'pending_transaction_id' => $new_transaction['pending_transaction_id'],
+                            'matched_transaction_id' => $transaction?->id,
+                        ]);
+                    } elseif (Transaction::query()
+                        ->whereIn('bank_account_id', $bank_account_ids)
+                        ->whereNotNull('plaid_transaction_id')
+                        ->where('plaid_transaction_id', $new_transaction['transaction_id'])
+                        ->exists()) {
+                        $transaction = Transaction::query()
+                            ->whereIn('bank_account_id', $bank_account_ids)
+                            ->where('plaid_transaction_id', $new_transaction['transaction_id'])
+                            ->first();
+                        Log::channel('plaid_adds')->debug('ADDED matched by transaction_id', [
+                            'transaction_id' => $new_transaction['transaction_id'],
+                            'matched_transaction_id' => $transaction?->id,
+                        ]);
+                    } else {
+                        // 11/14/2024 ...used in multiple places on this Controller
+                        // Consider legacy same-day matches, but only for this exact bank account and by date + amount
+                        $localAccount = $bank->accounts->firstWhere('plaid_account_id', $new_transaction['account_id']);
+                        $existing_transactions = Transaction::query()
+                            ->when($localAccount, function ($q) use ($localAccount) {
+                                return $q->where('bank_account_id', $localAccount->id);
+                            }, function ($q) use ($bank_account_ids) {
+                                return $q->whereIn('bank_account_id', $bank_account_ids);
+                            })
+                            ->whereDate('posted_date', $new_transaction['date'])
+                            ->where('amount', $new_transaction['amount'])
+                            ->get();
+                        if (is_null($new_transaction['account_owner'])) {
+                            Log::channel('plaid_adds')->warning(['ADDED fallback match w/ null owner' => [
+                                'new' => [
+                                    'date' => $new_transaction['date'],
+                                    'amount' => $new_transaction['amount'],
+                                    'account_id' => $new_transaction['account_id'] ?? null,
+                                ],
+                                'matches' => $existing_transactions->pluck('id'),
+                            ]]);
+                        }
 
                         if ($existing_transactions->count() === 1) {
                             $transaction = $existing_transactions->first();
+                            Log::channel('plaid_adds')->debug('ADDED selected single fallback match', [
+                                'selected_transaction_id' => $transaction?->id,
+                                'matches' => $existing_transactions->pluck('id'),
+                            ]);
                         } else {
                             if ($existing_transactions->isEmpty()) {
                                 $transaction = new Transaction;
+                                Log::channel('plaid_adds')->debug('ADDED creating new transaction (no fallback matches)');
                             } else {
                                 //LOG
                                 //DiffInDays / Carbon
                                 Log::channel('plaid_adds')->error(['ADDED in TransactionController' => [$new_transaction, $existing_transactions], $result]);
                             }
                         }
-                    } else {
-                        $transaction = new Transaction;
                     }
 
+                    $before = $transaction->exists ? $transaction->toArray() : null;
                     $this->plaid_add_transaction($transaction, $new_transaction);
+                    $after = $transaction->toArray();
+                    Log::channel('plaid_adds')->debug('ADDED saved transaction', [
+                        'bank_id' => $bank->id,
+                        'before' => $before,
+                        'after' => $after,
+                        'incoming' => $new_transaction,
+                    ]);
                 }
             }
 
             //MODIFIED  / SYNC
             foreach ($result['modified'] as $new_transaction) {
-                //make sure transaction_id does not exist yet.. if it does..update..
-                if (Transaction::whereDate('transaction_date', '>=', '2023-01-01')->whereNotNull('plaid_transaction_id')->where('plaid_transaction_id', $new_transaction['pending_transaction_id'])->get()->isNotEmpty()) {
-                    $transaction = Transaction::whereDate('transaction_date', '>=', '2023-01-01')->where('plaid_transaction_id', $new_transaction['pending_transaction_id'])->first();
-                } elseif (Transaction::whereDate('transaction_date', '>=', '2023-01-01')->whereNotNull('plaid_transaction_id')->where('plaid_transaction_id', $new_transaction['transaction_id'])->get()->isNotEmpty()) {
-                    $transaction = Transaction::whereDate('transaction_date', '>=', '2023-01-01')->where('plaid_transaction_id', $new_transaction['transaction_id'])->first();
-                //same bank, different bank_account_id
-                } elseif (Transaction::whereDate('transaction_date', $new_transaction['authorized_date'])->where('amount', $new_transaction['amount'])->whereNotNull('plaid_transaction_id')->whereNot('plaid_transaction_id', $new_transaction['transaction_id'])->get()->isNotEmpty()) {
-                    $transaction = Transaction::whereDate('transaction_date', $new_transaction['authorized_date'])->where('amount', $new_transaction['amount'])->whereNotNull('plaid_transaction_id')->whereNot('plaid_transaction_id', $new_transaction['transaction_id'])->first();
+                Log::channel('plaid_adds')->debug('MODIFIED start', [
+                    'bank_id' => $bank->id,
+                    'bank_account_ids' => $bank_account_ids,
+                    'incoming' => $new_transaction,
+                ]);
+                // make sure transaction_id does not exist yet.. if it does..update..
+                // Always restrict lookups to this bank's accounts to avoid cross-item mismatches
+                if (!empty($new_transaction['pending_transaction_id']) && Transaction::query()
+                    ->whereIn('bank_account_id', $bank_account_ids)
+                    ->whereNotNull('plaid_transaction_id')
+                    ->where('plaid_transaction_id', $new_transaction['pending_transaction_id'])
+                    ->exists()) {
+                    $transaction = Transaction::query()
+                        ->whereIn('bank_account_id', $bank_account_ids)
+                        ->where('plaid_transaction_id', $new_transaction['pending_transaction_id'])
+                        ->first();
+                    Log::channel('plaid_adds')->debug('MODIFIED matched by pending_transaction_id', [
+                        'pending_transaction_id' => $new_transaction['pending_transaction_id'],
+                        'matched_transaction_id' => $transaction?->id,
+                    ]);
+                } elseif (Transaction::query()
+                    ->whereIn('bank_account_id', $bank_account_ids)
+                    ->whereNotNull('plaid_transaction_id')
+                    ->where('plaid_transaction_id', $new_transaction['transaction_id'])
+                    ->exists()) {
+                    $transaction = Transaction::query()
+                        ->whereIn('bank_account_id', $bank_account_ids)
+                        ->where('plaid_transaction_id', $new_transaction['transaction_id'])
+                        ->first();
+                    Log::channel('plaid_adds')->debug('MODIFIED matched by transaction_id', [
+                        'transaction_id' => $new_transaction['transaction_id'],
+                        'matched_transaction_id' => $transaction?->id,
+                    ]);
                 } else {
-                    Log::channel('plaid_adds')->error(['MODIFIED in TransactionController' => [$new_transaction], $result]);
+                    // Do NOT attempt fuzzy matching on amount/date for modified events — it's too risky and can mis-associate records.
+                    Log::channel('plaid_adds')->error(['MODIFIED no direct match (skipped risky fallback)' => [$new_transaction], $result]);
                     continue;
                 }
 
@@ -367,9 +458,20 @@ class TransactionController extends Controller
                 $transaction->amount = $new_transaction['amount'];
                 $transaction->plaid_merchant_description = $new_transaction['name'];
                 $transaction->plaid_transaction_id = $new_transaction['transaction_id'];
-                $transaction->bank_account_id = $bank->accounts->where('plaid_account_id', $new_transaction['account_id'])->first()->id;
+                $account = $bank->accounts->where('plaid_account_id', $new_transaction['account_id'])->first();
+                if ($account) {
+                    $transaction->bank_account_id = $account->id;
+                }
                 $transaction->details = $new_transaction;
+                $before = $transaction->getOriginal();
                 $transaction->save();
+                $after = $transaction->toArray();
+                Log::channel('plaid_adds')->debug('MODIFIED saved transaction', [
+                    'bank_id' => $bank->id,
+                    'before' => $before,
+                    'after' => $after,
+                    'incoming' => $new_transaction,
+                ]);
             }
 
             //REMOVED
@@ -378,6 +480,11 @@ class TransactionController extends Controller
                 $transaction = Transaction::whereDate('transaction_date', '>=', '2023-01-01')->whereNotNull('plaid_transaction_id')->where('plaid_transaction_id', $old_transaction['transaction_id'])->first();
 
                 if (! is_null($transaction)) {
+                    Log::channel('plaid_transaction_removal')->debug('REMOVED start', [
+                        'plaid_transaction_id' => $old_transaction['transaction_id'],
+                        'transaction_snapshot' => $transaction->toArray(),
+                        'payments_count' => $transaction->payments()->count(),
+                    ]);
                     //transaction has payments ...disassociate
                     $transaction->payments()->get()->each(function ($payment) {
                         $payment->transaction()->dissociate();
@@ -387,7 +494,11 @@ class TransactionController extends Controller
                     $transaction->deleted_at = now();
                     $transaction->save();
 
-                    Log::channel('plaid_transaction_removal')->info([$transaction->id, $transaction->plaid_transaction_id]);
+                    Log::channel('plaid_transaction_removal')->info('REMOVED saved', [
+                        'transaction_id' => $transaction->id,
+                        'plaid_transaction_id' => $transaction->plaid_transaction_id,
+                        'deleted_at' => $transaction->deleted_at,
+                    ]);
                 }
             }
         } else {
@@ -437,6 +548,7 @@ class TransactionController extends Controller
     //03-07-2025 use after updating an Item so transactions are in sync between different bank_account_ids for each/same bank
     public function plaid_transactions_get()
     {
+        dd('plaid_transactions_get');
         $banks = Bank::withoutGlobalScopes()->whereNotNull('plaid_access_token')->get();
 
         foreach ($banks as $bank) {

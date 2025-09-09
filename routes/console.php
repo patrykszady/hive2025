@@ -23,7 +23,7 @@ Schedule::call(function () {
     app(\App\Http\Controllers\CompanyEmailController::class)->fetchAutoReceipts();
     })
     ->everyTenMinutes()
-    ->between('7:00', '22:00')
+    // ->between('7:00', '22:00')
     ->name('fetch-auto-receipts')
     ->environments(['production'])
     ->withoutOverlapping()
@@ -32,7 +32,7 @@ Schedule::call(function () {
 Schedule::call(function () {
     app(\App\Http\Controllers\VendorDocsController::class)->fetchMessagesFromInsuranceMailbox();
     })->hourly()
-    ->between('7:00', '20:00')
+    // ->between('7:00', '20:00')
     ->name('fetch-insurance-mailbox')
     ->environments(['production'])
     ->withoutOverlapping()
@@ -123,7 +123,7 @@ Schedule::call(function () {
     app(\App\Http\Controllers\ReceiptController::class)->amazon_orders_api();
     })
     ->hourly()
-    ->between('7:00', '23:00')
+    // ->between('7:00', '23:00')
     ->name('amazon-orders-api')
     ->withoutOverlapping()
     ->onOneServer();
