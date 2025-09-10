@@ -15,8 +15,8 @@ class SheetsIndex extends Component
 {
     use AuthorizesRequests;
 
-    public $start_date = '';
-    public $end_date = '';
+    public $start_date = '2024-01-01';
+    public $end_date = '2024-12-31';
     public $cash = 'include';
 
     public $banks = []; // Keep track of selected banks

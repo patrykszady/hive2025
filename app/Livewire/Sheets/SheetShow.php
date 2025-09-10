@@ -7,6 +7,7 @@ use App\Models\Expense;
 use App\Models\Payment;
 use App\Models\Sheet;
 use App\Models\Vendor;
+use App\Models\Transaction;
 use App\Models\Timesheet;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
@@ -34,6 +35,32 @@ class SheetShow extends Component
         'bank_account_ids' => ['except' => ''],
         'cash' => ['except' => ''],
     ];
+
+    #[Computed]
+    public function transactions_no_associations()
+    {
+        if (!$this->end_date || empty($this->bank_account_ids)) {
+            return collect();
+        }
+
+        $start = $this->start_date;
+        $end = $this->end_date;
+
+        return Transaction::whereBetween('transaction_date', [$start, $end])
+            ->whereIn('bank_account_id', $this->bank_account_ids)
+            ->whereNull('check_id')
+            ->whereNull('expense_id')
+            ->where(function ($q) {
+                // Include non-deposits OR deposits without payments
+                $q->whereNull('deposit')
+                  ->orWhere('deposit', 0)
+                  ->orWhere(function ($qq) {
+                      $qq->where('deposit', 1)->doesntHave('payments');
+                  });
+            })
+            ->orderBy('transaction_date')
+            ->get();
+    }
 
     #[Computed]
     public function revenue()

@@ -209,4 +209,47 @@
             </flux:button>
         </x-slot:header_buttons>
     </x-details.card>
+
+    {{-- UNASSIGNED TRANSACTIONS --}}
+    {{-- <x-details.card title="Unassigned Transactions" :expanded="false" details_text="Create Expense">
+        <x-slot name="subheading">
+            <span class="text-sm italic">
+                Transactions without a Check or Expense. Assign or create expenses to keep reports accurate.
+            </span>
+        </x-slot>
+
+        <x-slot name="details">
+            <flux:table class="w-full">
+                <flux:table.columns>
+                    <flux:table.column sortable :sorted="true">Date</flux:table.column>
+                    <flux:table.column>Description</flux:table.column>
+                    <flux:table.column>Amount</flux:table.column>
+                </flux:table.columns>
+
+                <flux:table.rows>
+                    @foreach($this->transactions_no_associations as $transaction)
+                        <flux:table.row :key="$transaction->id" class="border-b-0">
+                            <flux:table.cell class="pb-0">
+                                {{ $transaction->transaction_date->format('m/d/Y') }}
+                            </flux:table.cell>
+                            <flux:table.cell class="pb-0">
+                                <div class="italic whitespace-normal break-words leading-tight" title="{{ $transaction->plaid_merchant_description }}">
+                                    {{ $transaction->plaid_merchant_description ?? '—' }}
+                                </div>
+                            </flux:table.cell>
+                            <flux:table.cell class="pb-0">
+                                <flux:button
+                                    variant="ghost"
+                                    size="sm"
+                                    wire:click="$dispatchTo('expenses.expense-create', 'createExpenseFromTransaction', { transaction: {{ $transaction->id }} })"
+                                >
+                                    {{ money($transaction->amount) }}
+                                </flux:button>
+                            </flux:table.cell>
+                        </flux:table.row>
+                    @endforeach
+                </flux:table.rows>
+            </flux:table>
+        </x-slot>
+    </x-details.card> --}}
 </div>

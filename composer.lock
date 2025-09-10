@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "2e4c2b12b0bf5e073f5b5b3e90c5355d",
+    "content-hash": "c900918afe31ffc4befb716c4af72dba",
     "packages": [
         {
             "name": "2captcha/2captcha",
@@ -135,16 +135,16 @@
         },
         {
             "name": "aws/aws-sdk-php",
-            "version": "3.356.12",
+            "version": "3.356.13",
             "source": {
                 "type": "git",
                 "url": "https://github.com/aws/aws-sdk-php.git",
-                "reference": "0068088fed44e2bed3a2e82f2c7a0bb9e356b3c3"
+                "reference": "ec28d17cc940a4f996638050ab95dcc2a07f1a6b"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/aws/aws-sdk-php/zipball/0068088fed44e2bed3a2e82f2c7a0bb9e356b3c3",
-                "reference": "0068088fed44e2bed3a2e82f2c7a0bb9e356b3c3",
+                "url": "https://api.github.com/repos/aws/aws-sdk-php/zipball/ec28d17cc940a4f996638050ab95dcc2a07f1a6b",
+                "reference": "ec28d17cc940a4f996638050ab95dcc2a07f1a6b",
                 "shasum": ""
             },
             "require": {
@@ -226,9 +226,9 @@
             "support": {
                 "forum": "https://github.com/aws/aws-sdk-php/discussions",
                 "issues": "https://github.com/aws/aws-sdk-php/issues",
-                "source": "https://github.com/aws/aws-sdk-php/tree/3.356.12"
+                "source": "https://github.com/aws/aws-sdk-php/tree/3.356.13"
             },
-            "time": "2025-09-05T18:10:41+00:00"
+            "time": "2025-09-08T18:37:19+00:00"
         },
         {
             "name": "barryvdh/laravel-snappy",
@@ -3043,16 +3043,16 @@
         },
         {
             "name": "laravel/nightwatch",
-            "version": "v1.13.2",
+            "version": "v1.13.3",
             "source": {
                 "type": "git",
                 "url": "https://github.com/laravel/nightwatch.git",
-                "reference": "a9585c7f2af7ebb11468bd6a8a41340baf979067"
+                "reference": "3d9cb2efed2dcd49ce0dc22942cdfe60812708d9"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/laravel/nightwatch/zipball/a9585c7f2af7ebb11468bd6a8a41340baf979067",
-                "reference": "a9585c7f2af7ebb11468bd6a8a41340baf979067",
+                "url": "https://api.github.com/repos/laravel/nightwatch/zipball/3d9cb2efed2dcd49ce0dc22942cdfe60812708d9",
+                "reference": "3d9cb2efed2dcd49ce0dc22942cdfe60812708d9",
                 "shasum": ""
             },
             "require": {
@@ -3125,7 +3125,7 @@
                 "issues": "https://github.com/laravel/nightwatch/issues",
                 "source": "https://github.com/laravel/nightwatch"
             },
-            "time": "2025-08-25T07:31:52+00:00"
+            "time": "2025-09-08T06:09:38+00:00"
         },
         {
             "name": "laravel/prompts",
@@ -4011,16 +4011,16 @@
         },
         {
             "name": "livewire/flux",
-            "version": "v2.2.6",
+            "version": "v2.3.2",
             "source": {
                 "type": "git",
                 "url": "https://github.com/livewire/flux.git",
-                "reference": "a0e8f33a5cd54ead4d8e27721961425ccbae2e33"
+                "reference": "e0704b125d5f9544aa32e0cfccb11baaf44d77a0"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/livewire/flux/zipball/a0e8f33a5cd54ead4d8e27721961425ccbae2e33",
-                "reference": "a0e8f33a5cd54ead4d8e27721961425ccbae2e33",
+                "url": "https://api.github.com/repos/livewire/flux/zipball/e0704b125d5f9544aa32e0cfccb11baaf44d77a0",
+                "reference": "e0704b125d5f9544aa32e0cfccb11baaf44d77a0",
                 "shasum": ""
             },
             "require": {
@@ -4071,25 +4071,25 @@
             ],
             "support": {
                 "issues": "https://github.com/livewire/flux/issues",
-                "source": "https://github.com/livewire/flux/tree/v2.2.6"
+                "source": "https://github.com/livewire/flux/tree/v2.3.2"
             },
-            "time": "2025-08-27T02:05:01+00:00"
+            "time": "2025-09-08T01:11:34+00:00"
         },
         {
             "name": "livewire/flux-pro",
-            "version": "2.2.6",
+            "version": "2.3.2",
             "dist": {
                 "type": "zip",
-                "url": "https://composer.fluxui.dev/download/9fbb214c-691f-4ab0-91bf-995206ce2a00/flux-pro-2.2.6.zip",
-                "reference": "8540565d8ee23743dc6d580bff926afd38ad037b",
-                "shasum": "289c4be1edb19d257e76742cc08de94055a852a1"
+                "url": "https://composer.fluxui.dev/download/9fd33076-beb0-4f3b-a1c7-3dd5e606dfe2/flux-pro-2.3.2.zip",
+                "reference": "9a9d6fc027e1e34df9bfa32f105455dc641be585",
+                "shasum": "38da379ced75160a71612bd37bd707c8d2f0aaef"
             },
             "require": {
                 "illuminate/console": "^10.0|^11.0|^12.0",
                 "illuminate/support": "^10.0|^11.0|^12.0",
                 "illuminate/view": "^10.0|^11.0|^12.0",
                 "laravel/prompts": "^0.1.24|^0.2|^0.3",
-                "livewire/flux": "2.2.6|dev-main",
+                "livewire/flux": "2.3.2|dev-main",
                 "livewire/livewire": "^3.6.2",
                 "php": "^8.1",
                 "symfony/console": "^6.0|^7.0"
@@ -4130,7 +4130,7 @@
                 "livewire",
                 "ui"
             ],
-            "time": "2025-08-27T02:11:05+00:00"
+            "time": "2025-09-08T01:13:22+00:00"
         },
         {
             "name": "livewire/livewire",
@@ -4819,16 +4819,16 @@
         },
         {
             "name": "nesbot/carbon",
-            "version": "3.10.2",
+            "version": "3.10.3",
             "source": {
                 "type": "git",
                 "url": "https://github.com/CarbonPHP/carbon.git",
-                "reference": "76b5c07b8a9d2025ed1610e14cef1f3fd6ad2c24"
+                "reference": "8e3643dcd149ae0fe1d2ff4f2c8e4bbfad7c165f"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/CarbonPHP/carbon/zipball/76b5c07b8a9d2025ed1610e14cef1f3fd6ad2c24",
-                "reference": "76b5c07b8a9d2025ed1610e14cef1f3fd6ad2c24",
+                "url": "https://api.github.com/repos/CarbonPHP/carbon/zipball/8e3643dcd149ae0fe1d2ff4f2c8e4bbfad7c165f",
+                "reference": "8e3643dcd149ae0fe1d2ff4f2c8e4bbfad7c165f",
                 "shasum": ""
             },
             "require": {
@@ -4846,13 +4846,13 @@
             "require-dev": {
                 "doctrine/dbal": "^3.6.3 || ^4.0",
                 "doctrine/orm": "^2.15.2 || ^3.0",
-                "friendsofphp/php-cs-fixer": "^3.75.0",
+                "friendsofphp/php-cs-fixer": "^v3.87.1",
                 "kylekatarnls/multi-tester": "^2.5.3",
                 "phpmd/phpmd": "^2.15.0",
                 "phpstan/extension-installer": "^1.4.3",
-                "phpstan/phpstan": "^2.1.17",
-                "phpunit/phpunit": "^10.5.46",
-                "squizlabs/php_codesniffer": "^3.13.0"
+                "phpstan/phpstan": "^2.1.22",
+                "phpunit/phpunit": "^10.5.53",
+                "squizlabs/php_codesniffer": "^3.13.4"
             },
             "bin": [
                 "bin/carbon"
@@ -4920,7 +4920,7 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2025-08-02T09:36:06+00:00"
+            "time": "2025-09-06T13:39:36+00:00"
         },
         {
             "name": "nette/schema",

@@ -84,6 +84,29 @@ class ExpenseShow extends Component
             ->isNotEmpty();
     }
 
+    #[Computed]
+    public function expenseAmount(): float
+    {
+        return (float) $this->expense->amount;
+    }
+
+    #[Computed]
+    public function expenseMismatch(): bool
+    {
+        // Only consider mismatch when there is exactly one receipt with parsed line items
+        if ($this->expense->receipts->count() !== 1) {
+            return false;
+        }
+
+        $receipt = $this->expense->receipts->first();
+        if (!$receipt || !$receipt->receipt_items) {
+            return false;
+        }
+
+        // Compare totals as floats
+        return (float) $receipt->receipt_items->total !== (float) $this->expense->amount;
+    }
+
     #[Title('Expense')]
     public function render()
     {

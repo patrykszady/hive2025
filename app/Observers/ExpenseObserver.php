@@ -29,10 +29,18 @@ class ExpenseObserver
             UpdateVendorSearchIndex::dispatch($expense->vendor_id);
         }
 
-        // // If vendor changed, also update the old vendor's index
+        // If vendor changed, also update the old vendor's index
         // if ($expense->isDirty('vendor_id') && $expense->getOriginal('vendor_id')) {
         //     UpdateVendorSearchIndex::dispatch($expense->getOriginal('vendor_id'));
         // }
+
+        // If paid_by is set (regardless of whether it changed in this update), detach any directly-associated transactions
+        if (! empty($expense->paid_by)) {
+            // Only detach transactions linked via expense_id; check-attached txns are unaffected
+            if ($expense->transactions()->exists()) {
+                $expense->transactions()->update(['expense_id' => null]);
+            }
+        }
     }
 
     /**

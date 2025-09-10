@@ -1055,6 +1055,7 @@ class TransactionController extends Controller
             $expenses = Expense::with('transactions')
                 ->with('receipts')
                 ->whereNull('deleted_at')
+                ->whereNull('paid_by')
                 ->where('belongs_to_vendor_id', $hive_vendor->id)
                 ->whereNotNull('vendor_id')
                 //where transacitons->sum != $expense(item)->sum  \\ whereNull checked_at (transactions add up to expense)
@@ -1107,14 +1108,13 @@ class TransactionController extends Controller
                     $transactions = $transactions->where('vendor_id', $expense->vendor_id);
                 }
 
-                // if($expense->amount == 0){
-                //     $transactions = $transactions->where('amount', '!=', 0)->get();
-                // //if negative
-                // }elseif (substr($expense->amount, 0, 1) == '-') {
-                //     $transactions = $transactions->where('amount', '>=', $transaction_amount_outstanding)->where('amount', 'LIKE', '-%')->get();
-                // } else {
-                //     $transactions = $transactions->where('amount', '<=', $transaction_amount_outstanding)->where('amount', 'NOT LIKE', '-%')->get();
-                // }
+                // Do not mix returns (negative amounts) with purchases (positive amounts)
+                $expenseAmount = (float) $expense->amount;
+                if ($expenseAmount > 0) {
+                    $transactions = $transactions->where('amount', '>', 0);
+                } elseif ($expenseAmount < 0) {
+                    $transactions = $transactions->where('amount', '<', 0);
+                }
 
                 $transactions = $transactions->get();
 

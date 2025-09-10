@@ -1,6 +1,6 @@
 <div>
     <div class="grid max-w-xl grid-cols-4 gap-4 xl:relative lg:max-w-5xl sm:px-6">
-        <div class="col-span-4 space-y-4 lg:col-span-2 lg:h-32 lg:sticky lg:top-5">
+    <div class="col-span-4 space-y-4 lg:col-span-2 lg:sticky lg:top-5">
             {{-- EXPENSE DETAILS --}}
             <x-details.card 
                 title="Expense Details"
@@ -60,13 +60,6 @@
                     @if($expense->receipt && $expense->receipt->notes)
                         <x-details.row title="PO" content="{{ $expense->receipt->notes }}" />
                     @endif
-                    
-                        @php
-                            $receipt = $expense->receipts->first();
-                            $expenseAmount = (float) ($expense->amount ?? 0);
-                            $receiptTotal = (float) ($receipt->receipt_items->total ?? 0);
-                            $expenseMismatch = number_format($expenseAmount, 2, '.', '') !== number_format($receiptTotal, 2, '.', '');
-                        @endphp
                 </x-slot:details>
 
                 @if($expense->created_by_user_id === 0)
@@ -76,17 +69,17 @@
                 @endif
             </x-details.card>
 
-            {{-- TRANSACTIONS --}}
-            @if($expense->transactions->isNotEmpty())
-                <x-transactions.list_card 
-                    :transactions="$expense->transactions" 
-                    :title="$expense->check?->transactions->isNotEmpty() ? 'Check Transactions' : 'Transactions'"
-                />
-            @endif
-
             {{-- CHECK --}}
             @if($expense->check)
                 <livewire:checks.checks-index :expense_check_id="$expense->check->id" :view="'expenses.show'"/>
+            @endif
+
+            {{-- TRANSACTIONS (uses allTransactions() fallback: own -> check) --}}
+        @if($expense->allTransactions()->isNotEmpty())
+                <x-transactions.list_card 
+            :transactions="$expense->allTransactions()" 
+                    :title="$expense->transactions()->exists() ? 'Transactions' : ($expense->check?->transactions()->exists() ? 'Check Transactions' : 'Transactions')"
+                />
             @endif
         </div>
 
@@ -116,8 +109,8 @@
                                             </a>
                                         </flux:table.cell>
                                         <flux:table.cell>{{ $associated_expense->date->format('m/d/Y') }}</flux:table.cell>
-                                        <flux:table.cell>{{ $associated_expense->transactions->isNotEmpty() ? $associated_expense->transactions->first()->bank_account->bank->name : '' }}</flux:table.cell>
-                                        <flux:table.cell>{{ $associated_expense->transactions->isNotEmpty() ? $associated_expense->transactions->first()->bank_account->account_number : '' }}</flux:table.cell>
+                                        <flux:table.cell>{{ $associated_expense->allTransactions()->isNotEmpty() ? $associated_expense->allTransactions()->first()->bank_account->bank->name : '' }}</flux:table.cell>
+                                        <flux:table.cell>{{ $associated_expense->allTransactions()->isNotEmpty() ? $associated_expense->allTransactions()->first()->bank_account->account_number : '' }}</flux:table.cell>
                                     </flux:table.row>
                                 @endforeach
                             </flux:table.rows>
@@ -241,13 +234,23 @@
                                 </flux:tabs>
                                 @foreach($expense->receipts as $receipt)
                                     <flux:tab.panel :name="$receipt->id" class="!pt-2">
-                                            <x-expenses.receipt :receipt="$receipt" :selectedSplit="$this->selectedSplit" :expenseMismatch="$expenseMismatch" :expenseAmount="$expenseAmount" />
+                                            <x-expenses.receipt 
+                                                :receipt="$receipt" 
+                                                :selectedSplit="$this->selectedSplit" 
+                                                :expenseMismatch="$this->expenseMismatch" 
+                                                :expenseAmount="$this->expenseAmount" 
+                                            />
                                     </flux:tab.panel>
                                 @endforeach
                             </flux:tab.group>
                         @else
                             {{-- Show single receipt without tabs --}}
-                                <x-expenses.receipt :receipt="$expense->receipts->first()" :selectedSplit="$this->selectedSplit" :expenseMismatch="$expenseMismatch" :expenseAmount="$expenseAmount" />
+                                <x-expenses.receipt 
+                                    :receipt="$expense->receipts->first()" 
+                                    :selectedSplit="$this->selectedSplit" 
+                                    :expenseMismatch="$this->expenseMismatch" 
+                                    :expenseAmount="$this->expenseAmount" 
+                                />
                         @endif
                     </x-slot:details>
                 </x-details.card>

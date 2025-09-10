@@ -42,6 +42,7 @@ class MoveController extends Controller
 {
     public function move()
     {
+        dd('start');
         // Expenses where the sum of directly attached transactions exceeds the expense amount (cleaner Eloquent)
             $expenses = Expense::query()
                 // ->whereDate('date', '<=', '2023-01-01')
@@ -61,7 +62,7 @@ class MoveController extends Controller
             ->with(['transactions:id,expense_id,amount'])
             ->orderByDesc('date')
             // ->skip(0)
-            // ->limit(5)
+            ->limit(10)
             ->pluck('amount', 'id');
 
         dd($expenses);

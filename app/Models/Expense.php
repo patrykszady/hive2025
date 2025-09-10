@@ -245,28 +245,46 @@ class Expense extends Model
             return $this->associated;
         }
     }
-
-    public function getTransactionsAttribute()
+    /**
+     * Unified accessor for "all" transactions relevant to this expense.
+     * Returns this expense's own transactions if present; otherwise falls back
+     * to transactions on the related check; empty collection if none.
+     */
+    public function allTransactions()
     {
-        // If the expense has its own transactions, return them
         $own = $this->transactions()->get();
         if ($own->isNotEmpty()) {
             return $own;
         }
-
-        // If the check exists and has transactions, return those
         if ($this->check && $this->check->transactions()->exists()) {
             return $this->check->transactions;
         }
-
-        // Otherwise, return an empty collection
         return collect();
     }
 
     protected function reimbursment(): Attribute
     {
         return Attribute::make(
-            get: fn ($value) => is_numeric($value) ? User::findOrFail($value)->first_name : $value,
+            get: function ($value) {
+                // Treat empty string or whitespace as null
+                if ($value === null || (is_string($value) && trim($value) === '')) {
+                    return null;
+                }
+                if (is_numeric($value)) {
+                    $u = User::query()->select('id','first_name')->find($value);
+                    return $u?->first_name ?? ('User #' . $value);
+                }
+                return $value;
+            },
+            set: function ($value) {
+                if ($value === null) {
+                    return null;
+                }
+                if (is_string($value) && trim($value) === '') {
+                    return null;
+                }
+                return $value;
+            }
         );
     }
 
