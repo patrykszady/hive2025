@@ -47,13 +47,13 @@ Schedule::call(function () {
   ->withoutOverlapping()
   ->onOneServer();
 
-Schedule::call(function () {
-    app(\App\Http\Controllers\TransactionController::class)->plaid_transactions_sync();
-})->hourly()
-  ->name('plaid-transactions-sync')
-  ->environments(['production'])
-  ->withoutOverlapping()
-  ->onOneServer();
+// Schedule::call(function () {
+//     app(\App\Http\Controllers\TransactionController::class)->plaid_transactions_sync();
+// })->hourly()
+//   ->name('plaid-transactions-sync')
+//   ->environments(['production'])
+//   ->withoutOverlapping()
+//   ->onOneServer();
 
 Schedule::call(function () {
     app(\App\Http\Controllers\TransactionController::class)->add_check_deposit_to_transactions();
