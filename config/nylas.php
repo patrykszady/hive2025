@@ -9,4 +9,5 @@ return [
     
     // Message fetching limits
     'message_limit' => 25,
+    'message_limit_days' => 10,
 ];

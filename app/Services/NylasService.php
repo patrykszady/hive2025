@@ -250,17 +250,29 @@ class NylasService
             $url .= (empty($queryParams) ? '?' : '&') . 'fields=include_headers';
         }
 
-        // Perform the HTTP GET request using the HTTP client
-        $response = $this->httpClient->get($url, [
-            'headers' => [
-                'Authorization' => 'Bearer ' . $this->apiKey,
-                'Accept' => 'application/json',
-                'Content-Type' => 'application/json',
-            ],
-        ]);
+        try {
+            // Perform the HTTP GET request using the HTTP client
+            $response = $this->httpClient->get($url, [
+                'headers' => [
+                    'Authorization' => 'Bearer ' . $this->apiKey,
+                    'Accept' => 'application/json',
+                    'Content-Type' => 'application/json',
+                ],
+            ]);
 
-        // Decode the response body into an associative array
-        return json_decode($response->getBody(), true) ?? [];
+            // Decode the response body into an associative array
+            return json_decode($response->getBody(), true) ?? [];
+        } catch (RequestException $e) {
+            // Log the error but return empty array so sync can continue
+            Log::channel('nylas')->error('Get Messages API Error', ApiErrorFormatter::format($e, [
+                'grant_id' => $grantId,
+                'with_headers' => $withHeaders,
+                'query_params' => $queryParams,
+            ]));
+            
+            // Return empty array instead of error array to allow processing to continue
+            return [];
+        }
     }
 
     /**
@@ -274,23 +286,34 @@ class NylasService
 
         try {
             // Pass false for $withHeaders while listing; include_headers seems rejected (400) on list queries.
-            $resp = $this->getMessages($params, $grantId, true);
+            $allMessages = [];
+            $nextCursor = null;
             
-            if (is_array($resp) && array_key_exists('data', $resp)) {
-                $messages = $resp['data'];
-                Log::channel('nylas')->info($companyEmail->id . ' messages fetched', [
-                    'grant_id' => $grantId,
-                    'folder' => $folderName,
-                    'count' => count($messages),
-                    'received_after_timestamp' => $params['received_after'] ?? null,
-                ]);
-                return $messages;
-            }
+            do {
+                // Add cursor to params if we have one for pagination
+                $currentParams = $params;
+                if ($nextCursor) {
+                    $currentParams['page_token'] = $nextCursor;
+                }
+                
+                $resp = $this->getMessages($currentParams, $grantId, false);
+                
+                if (is_array($resp) && array_key_exists('data', $resp)) {
+                    $messages = $resp['data'];
+                    $allMessages = array_merge($allMessages, $messages);
+                    
+                    // Check if there's a next page
+                    $nextCursor = $resp['next_cursor'] ?? null;
+                } else {
+                    Log::channel('nylas')->warning($companyEmail->id . ' Invalid response format', [
+                        'grant_id' => $grantId
+                    ]);
+                    break;
+                }
+                
+            } while ($nextCursor);
             
-            Log::channel('nylas')->warning($companyEmail->id . ' Invalid response format', [
-                'grant_id' => $grantId
-            ]);
-            return [];
+            return $allMessages;
             
         } catch (RequestException $e) {            
             Log::channel('nylas')->error($companyEmail->id . ' API request failed', 
@@ -319,6 +342,7 @@ class NylasService
         $allMessages = [];
         $existingCursors = $companyEmail->api_json['cursors'] ?? [];
         $newCursors = $existingCursors;
+        $folderResults = [];
         
         // Create a mapping from folder IDs to friendly names
         $folderIdToName = array_flip($companyEmail->api_json['folders'] ?? []);
@@ -330,50 +354,15 @@ class NylasService
             $params = [
                 'limit' => config('nylas.message_limit'),
                 'in' => $folderKey,
+                'received_after' => Carbon::now()->subDays(config('nylas.message_limit_days'))->timestamp,
             ];
             
-            // Determine the earliest date to fetch from
-            $isFirstSync = !isset($existingCursors[$friendlyName]);
-            
-            if ($isFirstSync) {
-                // First sync - always fetch last 10 days
-                $params['received_after'] = Carbon::now()->subDays(10)->timestamp;
-                
-                Log::channel('nylas')->info($companyEmail->id . " First sync for folder {$friendlyName}", [
-                    'grant_id' => $grantId,
-                    'folder' => $friendlyName,
-                    'folder_id' => $folderKey,
-                    'received_after_timestamp' => $params['received_after'],
-                    'received_after_date' => Carbon::createFromTimestamp($params['received_after'])->toISOString(),
-                ]);
-            } else {
-                // Subsequent sync - always fetch last 3 days
-                $params['received_after'] = Carbon::now()->subDays(3)->timestamp;
-                
-                Log::channel('nylas')->info($companyEmail->id . " Subsequent sync for folder {$friendlyName}", [
-                    'grant_id' => $grantId,
-                    'folder' => $friendlyName,
-                    'folder_id' => $folderKey,
-                    'received_after_timestamp' => $params['received_after'],
-                    'received_after_date' => Carbon::createFromTimestamp($params['received_after'])->toISOString(),
-                ]);
-            }
-            
             $messages = $this->getMessagesForFolder($params, $grantId, $friendlyName, $companyEmail);
+            $messageCount = count($messages);
             
-            // If folder has less than 25 items, fetch all messages regardless of received_after
-            if (count($messages) < 25) {
-                $paramsAll = $params;
-                unset($paramsAll['received_after']); // Remove date filter to get all messages
-                
-                Log::channel('nylas')->info($companyEmail->id . " Fetching all messages for folder {$friendlyName}", [
-                    'grant_id' => $grantId,
-                    'folder' => $friendlyName,
-                    'initial_count' => count($messages),
-                ]);
-                
-                $messages = $this->getMessagesForFolder($paramsAll, $grantId, $friendlyName, $companyEmail);
-            }
+            $folderResults[$friendlyName] = [
+                'count' => $messageCount,
+            ];
             
             if (!empty($messages)) {
                 // Update cursor to latest message date to prevent re-fetching
@@ -396,6 +385,13 @@ class NylasService
                 }
             }
         }
+        
+        // Single summary log instead of per-folder logs
+        Log::channel('nylas')->info($companyEmail->id . " Sync completed", [
+            'grant_id' => $grantId,
+            'total_messages' => count($allMessages),
+            'folders_synced' => $folderResults,
+        ]);
         
         // Update cursors in the CompanyEmail model
         if ($newCursors !== $existingCursors) {

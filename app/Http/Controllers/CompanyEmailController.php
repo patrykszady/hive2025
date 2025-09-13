@@ -174,12 +174,12 @@ class CompanyEmailController extends Controller
             // Define the folders to query based on the environment.
             $folders = env('APP_ENV') === 'production'
                 ? ['inbox', $companyEmail->api_json['folders']['Retry']] // For non-production, use both inbox and retry folder.
-                : [$companyEmail->api_json['folders']['Test']];           // For production, use the test folder.
+                //$companyEmail->api_json['folders']['Test']
+                : ['inbox'];          // For production, use the test folder.
 
             $syncResult = $this->nylasService->syncMessages($folders, $companyEmail);
             $allMessages = $syncResult['messages'];
 
-            // dd($allMessages);
             foreach($allMessages as $message) {
                 // Display message structure without rendering HTML body
                 $messageDisplay = $message;
