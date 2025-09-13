@@ -644,7 +644,6 @@ class TransactionController extends Controller
                                         $pattern = '/(?<!\d)'.$intPart.'(?:[\.,]\s*|\s*)'.$decPart.'(?!\d)/m';
                                         preg_match($pattern, $str, $matches, PREG_OFFSET_CAPTURE);
 
-                                        dd($matches);
                                         if (!empty($matches)) {
                                             $transaction = Transaction::findOrFail($transaction->id);
                                             $transaction->expense()->associate($expense);
