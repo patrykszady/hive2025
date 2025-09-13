@@ -148,8 +148,10 @@ class LeadController extends Controller
             $api_data['access_token'] = $email_account_tokens->access_token;
             $api_data['refresh_token'] = $email_account_tokens->refresh_token;
 
-            $company_email->update([
-                'api_json' => $api_data,
+            // Patch only the updated token keys instead of overwriting entire api_json
+            $company_email->api_json->update([
+                'access_token' => $email_account_tokens->access_token,
+                'refresh_token' => $email_account_tokens->refresh_token,
             ]);
 
             $this->ms_graph = new Graph;

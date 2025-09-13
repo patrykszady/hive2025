@@ -23,7 +23,6 @@ use Intervention\Image\Facades\Image;
 
 use Exception;
  
-
 class CompanyEmailController extends Controller
 {
     private $nylasService;
@@ -81,8 +80,9 @@ class CompanyEmailController extends Controller
                 $folders = $this->nylasService->ensureFoldersExist($nylasAccount['grant_id']);
 
                 // Update the CompanyEmail record's api_json column with the folder data
+                // Merge new folders into existing api_json without wiping other metadata
                 CompanyEmail::where('grant_id', $nylasAccount['grant_id'])
-                    ->update(['api_json' => json_encode(['folders' => $folders])]);
+                    ->first()?->api_json->update(['folders' => $folders], true); // explicit allow overwrite
 
                 return redirect(route('company_emails.index'))->with('success', 'Nylas account connected successfully.');
             } else {
@@ -172,21 +172,11 @@ class CompanyEmailController extends Controller
                 ? ['inbox', $companyEmail->api_json['folders']['Retry']] // For non-production, use both inbox and retry folder.
                 : [$companyEmail->api_json['folders']['Test']];           // For production, use the test folder.
 
-            $allMessages = []; // Array to store all messages
-
-            foreach ($folders as $folder) {
-                // Define query parameters for the Nylas API.
-                $queryParams = [
-                    'limit' => 45,      // Initial page size; helper may reduce on retries.
-                    'in'    => $folder, // Folder to filter messages from.
-                ];
-
-                // Fetch with retry/backoff to handle 504s and provider timeouts gracefully
-                $data = $this->nylasService->getMessagesWithRetry($queryParams, $grantId, 3, $folder);
-
-                // Merge messages from the current folder.
-                $allMessages = array_merge($allMessages, $data);
-            }
+            $syncResult = $this->nylasService->syncFolders($grantId, $companyEmail->api_json, $folders, 45, 3, 15);
+            $allMessages = $syncResult['messages'];
+            // Safely merge sync metadata (cursors, failures, etc.)
+            // Merge updated sync metadata directly on the current instance
+            $companyEmail->api_json->update($syncResult['api_json']); // folders protected implicitly
 
             // dd($allMessages);
             foreach($allMessages as $message) {
@@ -621,15 +611,14 @@ class CompanyEmailController extends Controller
             $email_vendor = $company_email->vendor;
             $email_vendor_bank_account_ids = $email_vendor->bank_accounts->pluck('id');
 
-            $queryParams = [
-                'limit'   => 45, // per Nylas guidance; will reduce on retries
-                'in'      => 'inbox',
-                'from'    => 'noreply@print.epsonconnect.com',
-                'subject' => 'Receipt Scans',
-            ];
-
-            // Fetch messages for the company email with retries/backoff.
-            $messages = $this->nylasService->getMessagesWithRetry($queryParams, $grantId, 3, 'inbox');
+            $syncResult = $this->nylasService->syncFolders($grantId, $company_email->api_json, ['inbox'], 45, 3, 15);
+            $messages = collect($syncResult['messages'])
+                ->filter(fn($m) => isset($m['from'][0]['email'], $m['subject']) &&
+                    strcasecmp($m['from'][0]['email'], 'noreply@print.epsonconnect.com') === 0 &&
+                    stripos($m['subject'], 'Receipt Scans') !== false)
+                ->values()
+                ->all();
+            $company_email->api_json->update($syncResult['api_json']);
 
             foreach ($messages as $message) {
                 $messageId = $message['id'];

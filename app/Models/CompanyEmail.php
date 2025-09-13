@@ -17,7 +17,7 @@ class CompanyEmail extends Model
     protected function casts(): array
     {
         return [
-            'api_json' => 'array',
+            'api_json' => \App\Casts\ApiJson::class,
         ];
     }
 
