@@ -30,6 +30,13 @@ return [
             'days' => 30,
         ],
 
+        'plaid_skips' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/plaid_skips.log'),
+            'level' => 'debug',
+            'days' => 30,
+        ],
+
         'plaid_statements' => [
             'driver' => 'daily',
             'path' => storage_path('logs/plaid_statements.log'),
@@ -61,13 +68,6 @@ return [
         'leads_in_email_error' => [
             'driver' => 'daily',
             'path' => storage_path('logs/leads_in_email_error.log'),
-            'level' => 'debug',
-            'days' => 30,
-        ],
-
-        'plaid_transaction_removal' => [
-            'driver' => 'daily',
-            'path' => storage_path('logs/plaid_transaction_removal.log'),
             'level' => 'debug',
             'days' => 30,
         ],

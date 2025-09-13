@@ -56,16 +56,16 @@
 
             {{-- CLIENT PROJECTS --}}
             @foreach ($projects as $index => $project)
-                <flux:field>
+                <flux:field wire:key="payment-project-{{$project['id']}}">
                     <div class="grid gap-2 grid-cols-2">
                         <div>
-                            <flux:label>{{$project->address}}</flux:label>
-                            <flux:description><i>{{$project->project_name}}</i></flux:description>
+                            <flux:label>{{$project['address']}}</flux:label>
+                            <flux:description><i>{{$project['project_name']}}</i></flux:description>
                         </div>
                         <div>
                             <flux:input.group>
                                 <flux:input.group.prefix>$</flux:input.group.prefix>
-                                <flux:input wire:model.live="projects.{{$index}}.amount" :key="$index" type="number" inputmode="decimal" step="0.01" placeholder="99.99" />
+                                <flux:input wire:model.live="projects.{{$index}}.amount" type="number" inputmode="decimal" step="0.01" placeholder="99.99" />
                             </flux:input.group>
                         </div>
                     </div>

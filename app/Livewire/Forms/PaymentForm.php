@@ -36,12 +36,11 @@ class PaymentForm extends Form
         $component = $this->component; // Livewire component using this form
         if (isset($component->projects) && !empty($component->projects)) {
             $group = $this->payment->payments; // Collection of grouped payments (parent+children or transaction group)
-            // Map: project_id => amount
             $amountsByProject = $group->mapWithKeys(fn($p) => [$p->project_id => $p->amount]);
-
-            // Assign amounts to matching projects; leave others null
-            foreach ($component->projects as $proj) {
-                $proj->amount = $amountsByProject[$proj->id] ?? null;
+            foreach ($component->projects as $pid => $proj) {
+                if (is_array($proj)) {
+                    $component->projects[$pid]['amount'] = $amountsByProject[$pid] ?? ($component->projects[$pid]['amount'] ?? null);
+                }
             }
         }
     }
@@ -49,30 +48,36 @@ class PaymentForm extends Form
     public function store()
     {
         $this->validate();
+        $projects = collect($this->component->projects ?? [])
+            ->filter(function ($p) {
+                if (!is_array($p)) { return false; }
+                return isset($p['amount']) && $p['amount'] !== null && $p['amount'] !== '' && (float)$p['amount'] != 0.0;
+            })
+            ->values();
 
-        $parent_payment_id = null;
-        foreach ($this->component->projects->where('amount', '!=', null) as $key => $project) {
-            if ($key == 0) {
-                $parent_payment_id = null;
-            } else {
-                $parent_payment_id = $parent_payment_id;
-            }
+        if ($projects->isEmpty()) {
+            return null; // upstream component enforces non-zero total
+        }
 
-            $payment = Payment::create([
-                'amount' => $project->amount,
-                'project_id' => $project->id,
+        $parentPaymentId = null;
+        $lastPayment = null;
+        foreach ($projects as $index => $project) {
+            $payload = [
+                'amount' => $project['amount'],
+                'project_id' => $project['id'],
                 'date' => $this->date,
                 'reference' => $this->invoice,
                 'belongs_to_vendor_id' => auth()->user()->vendor->id,
                 'note' => $this->note,
                 'created_by_user_id' => auth()->user()->id,
-                'parent_client_payment_id' => $parent_payment_id,
-            ]);
-
-            $parent_payment_id = $payment->id;
+                'parent_client_payment_id' => $parentPaymentId,
+            ];
+            $lastPayment = Payment::create($payload);
+            if ($index === 0) {
+                $parentPaymentId = $lastPayment->id; // Subsequent become children of first
+            }
         }
-
-        return $payment;
+        return $lastPayment;
     }
 
     public function update()
@@ -91,7 +96,7 @@ class PaymentForm extends Form
         // Gather selected projects with an amount
         $component = $this->component;
         $selected = collect($component->projects ?? [])
-            ->filter(fn($p) => isset($p->amount) && $p->amount !== null && $p->amount !== '')
+            ->filter(fn($p) => is_array($p) && isset($p['amount']) && $p['amount'] !== null && $p['amount'] !== '' && (float)$p['amount'] != 0.0)
             ->unique('id')
             ->values();
         $selectedProjectIds = $selected->pluck('id')->all();
@@ -100,39 +105,38 @@ class PaymentForm extends Form
         if (count($selectedProjectIds) === 1) {
             $proj = $selected->first();
             $this->payment->fill([
-                'amount' => $proj->amount,
-                'project_id' => $proj->id,
+                'amount' => $proj['amount'],
+                'project_id' => $proj['id'],
                 'date' => $this->date,
                 'reference' => $this->invoice,
                 'note' => $this->note,
                 'belongs_to_vendor_id' => auth()->user()->vendor->id,
                 'parent_client_payment_id' => null,
             ])->save();
-
             return $this->payment->fresh();
         }
 
         // Update existing or create new payments for selected projects
         foreach ($selected as $proj) {
             $payload = [
-                'amount' => $proj->amount,
-                'project_id' => $proj->id,
+                'amount' => $proj['amount'],
+                'project_id' => $proj['id'],
                 'date' => $this->date,
                 'reference' => $this->invoice,
                 'note' => $this->note,
                 'belongs_to_vendor_id' => auth()->user()->vendor->id,
             ];
 
-            if ($existingByProject->has($proj->id)) {
+            if ($existingByProject->has($proj['id'])) {
                 // Update existing payment for this project
-                $existing = $existingByProject[$proj->id];
+                $existing = $existingByProject[$proj['id']];
                 $existing->fill($payload)->save();
             } else {
                 // Extra guard: check DB for existing payment in this group with same project
                 $dbExisting = Payment::where(function ($q) use ($rootId) {
                         $q->where('id', $rootId)->orWhere('parent_client_payment_id', $rootId);
                     })
-                    ->where('project_id', $proj->id)
+                    ->where('project_id', $proj['id'])
                     ->first();
 
                 if ($dbExisting) {

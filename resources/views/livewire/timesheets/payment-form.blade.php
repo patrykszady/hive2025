@@ -60,9 +60,7 @@
                                             @foreach($weekly_project_timesheets as $timesheet_id => $project_timesheet)
                                                 <flux:table.row :key="$project_timesheet->id">
                                                     <flux:table.cell>
-                                                        <flux:checkbox
-                                                            wire:model.live="weekly_timesheets.{{$project_timesheet->id}}.checkbox"
-                                                        />
+                                                        <flux:checkbox wire:model.live="selectedWeeklyTimesheets.{{$project_timesheet->id}}" />
                                                     </flux:table.cell>
                                                     <flux:table.cell variant="strong">
                                                         <a wire:navigate.hover href="{{route('timesheets.show', $project_timesheet->id)}}">{{ money($project_timesheet->amount) }}</a>
@@ -107,12 +105,10 @@
                                     </flux:table.columns>
 
                                     <flux:table.rows>
-                                        @foreach($weekly_project_timesheets as $timesheet_id => $project_timesheet)
+                                            @foreach($weekly_project_timesheets as $timesheet_id => $project_timesheet)
                                             <flux:table.row :key="$project_timesheet->id">
                                                 <flux:table.cell>
-                                                    <flux:checkbox
-                                                        wire:model.live="employee_weekly_timesheets.{{$project_timesheet->id}}.checkbox"
-                                                    />
+                                                    <flux:checkbox wire:model.live="selectedEmployeeWeeklyTimesheets.{{$project_timesheet->id}}" />
                                                 </flux:table.cell>
                                                 <flux:table.cell variant="strong">
                                                     <a wire:navigate.hover href="{{route('timesheets.show', $project_timesheet->id)}}">{{ money($project_timesheet->amount) }}</a>
@@ -153,9 +149,7 @@
                                 @foreach($user_paid_expenses as $key => $expense)
                                     <flux:table.row :key="$expense->id">
                                         <flux:table.cell>
-                                            <flux:checkbox
-                                                wire:model.live="user_paid_expenses.{{$expense->id}}.checkbox"
-                                            />
+                                            <flux:checkbox wire:model.live="selectedUserPaidExpenses.{{$expense->id}}" />
                                         </flux:table.cell>
                                         <flux:table.cell variant="strong">
                                             <a wire:navigate.hover href="{{route('expenses.show', $expense->id)}}">{{ money($expense->amount) }}</a>
@@ -199,9 +193,7 @@
                                 @foreach($user_reimbursement_expenses as $key => $expense)
                                     <flux:table.row :key="$expense->id">
                                         <flux:table.cell>
-                                            <flux:checkbox
-                                                wire:model.live="user_reimbursement_expenses.{{$expense->id}}.checkbox"
-                                            />
+                                            <flux:checkbox wire:model.live="selectedUserReimbursementExpenses.{{$expense->id}}" />
                                         </flux:table.cell>
                                         <flux:table.cell variant="strong">
                                             <a wire:navigate.hover href="{{route('expenses.show', $expense->id)}}">{{ money($expense->amount) }}</a>

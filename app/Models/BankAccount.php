@@ -60,6 +60,12 @@ class BankAccount extends Model
             });
     }
 
+    // New scope for filtering by subtype/type reuse
+    public function scopeOfSubtype($query, string $subtype)
+    {
+        return $query->where('type', $subtype);
+    }
+
     public function getNameAndType()
     {
         return $this->bank->name.' | '.$this->type;

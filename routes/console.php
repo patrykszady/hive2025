@@ -39,16 +39,16 @@ Schedule::call(function () {
     ->onOneServer();
 
 // Plaid/Transaction tasks
-Schedule::call(function () {
-    app(\App\Http\Controllers\TransactionController::class)->plaid_item_status();
-})->hourly()
-  ->name('plaid-item-status')
-  ->environments(['production'])
-  ->withoutOverlapping()
-  ->onOneServer();
+// Schedule::call(function () {
+//     app(\App\Http\Controllers\TransactionController::class)->plaid_item_status();
+// })->hourly()
+//   ->name('plaid-item-status')
+//   ->environments(['production'])
+//   ->withoutOverlapping()
+//   ->onOneServer();
 
 // Schedule::call(function () {
-//     app(\App\Http\Controllers\TransactionController::class)->plaid_transactions_sync();
+//     app(\App\Http\Controllers\PlaidTransactionSyncController::class)->syncAllBanks();
 // })->hourly()
 //   ->name('plaid-transactions-sync')
 //   ->environments(['production'])

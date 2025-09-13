@@ -10,16 +10,15 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Laravel\Scout\Searchable;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 
 class Transaction extends Model
 {
     use HasFactory, Searchable, SoftDeletes;
 
     // protected $dates = ['transaction_date', 'posted_date', 'date', 'deleted_at'];
-
     protected $guarded = [];
-
-    protected $with = ['vendor', 'bank_account.bank'];
+    // protected $with = ['vendor', 'bank_account.bank'];
 
     protected function casts(): array
     {
@@ -142,12 +141,6 @@ class Transaction extends Model
         return $this->belongsTo(Check::class);
     }
 
-    //bank_accountBank
-    // public function bank()
-    // {
-    //     return $this->hasOneThrough(BankAccount::class, Bank::class);
-    // }
-
     //used in TransactionController::add_vendor_to_transactions
     //used in Livewire/Transactions/MatchVendor::mount
     public function scopeTransactionsSinVendor($query)
@@ -157,5 +150,30 @@ class Transaction extends Model
             ->whereNull('deposit')
             ->whereNull('check_number')
             ->whereNull('deleted_at');
+    }
+
+    /**
+     * Attribute accessor/mutator for owner.
+     * Ensures 3 digit numeric values are stored with a leading zero.
+     * Examples:
+     *  - 123 => 0123
+     *  - "123" => "0123"
+     *  - "0123" unchanged
+     *  - null / '' => null
+     */
+    public function owner(): Attribute
+    {
+        return Attribute::make(
+            set: function ($value) {
+                if ($value === null || $value === '') {
+                    return null;
+                }
+                $string = (string) $value;
+                if (ctype_digit($string) && strlen($string) === 3) {
+                    $string = '0' . $string;
+                }
+                return $string;
+            }
+        );
     }
 }

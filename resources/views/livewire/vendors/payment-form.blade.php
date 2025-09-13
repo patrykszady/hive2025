@@ -34,8 +34,8 @@
                                 <flux:select.search placeholder="Search..." />
                             </x-slot>
 
-                            @foreach($projects->where('disabled', false) as $project)
-                                <flux:select.option value="{{$project->id}}"><div>{{$project->address}} <br> <i class="font-normal">{{$project->project_name}}</i></div></flux:select.option>
+                            @foreach(collect($projects)->where('disabled', false) as $project)
+                                <flux:select.option value="{{$project['id']}}"><div>{{$project['address']}} <br> <i class="font-normal">{{$project['project_name']}}</i></div></flux:select.option>
                             @endforeach
                         </flux:select>
 
@@ -47,15 +47,15 @@
             </div>
             <div class="col-span-4 space-y-2 lg:col-span-2">
                 {{-- PAYMENT PROJECTS --}}
-                @foreach($projects->where('show', true)->sortBy('order') as $project_id => $project)
+                @foreach(collect($projects)->where('show', true)->sortBy('order') as $project_id => $project)
                     <flux:card class="space-y-2" wire:key="{{$project_id}}">
                         <div class="flex justify-between">
                             <div>
-                                <flux:heading size="lg"><a href="{{route('projects.show', $project->id)}}" target="_blank">{{ $project->address }}</a></flux:heading>
-                                <flux:subheading>{{ $project->project_name}}</flux:subheading>
+                                <flux:heading size="lg"><a href="{{route('projects.show', $project['id'])}}" target="_blank">{{ $project['address'] }}</a></flux:heading>
+                                <flux:subheading>{{ $project['project_name']}}</flux:subheading>
                             </div>
                             <flux:button.group>
-                                <flux:button size="sm" wire:click="$dispatchTo('bids.bid-create', 'addBids', { vendor: {{$vendor->id}}, project: {{$project->id}} })">Edit Bids</flux:button>
+                                <flux:button size="sm" wire:click="$dispatchTo('bids.bid-create', 'addBids', { vendor: {{$vendor->id}}, project: {{$project['id']}} })">Edit Bids</flux:button>
                                 <flux:button size="sm" wire:click="removeProject({{$project_id}})">Remove</flux:button>
                             </flux:button.group>
                         </div>

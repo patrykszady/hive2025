@@ -5,6 +5,7 @@ use App\Http\Controllers\LeadController;
 use App\Http\Controllers\MoveController;
 use App\Http\Controllers\ReceiptController;
 use App\Http\Controllers\TransactionController;
+use App\Http\Controllers\PlaidTransactionSyncController;
 use App\Http\Controllers\VendorDocsController;
 use App\Http\Controllers\WebhookController;
 
@@ -115,12 +116,10 @@ Route::get('receipts/azure_receipts', [ReceiptController::class, 'azure_receipts
 Route::get('receipts/goutte_crawl', [ReceiptController::class, 'goutte_crawl'])->name('goutte_crawl');
 // Route::get('new_ocr_status', [ReceiptController::class, 'new_ocr_status'])->name('new_ocr_status');
 
-// Route::get('plaid_transactions_scheduled', [TransactionController::class, 'plaid_transactions_scheduled']);
+Route::get('plaid_transactions_sync', [PlaidTransactionSyncController::class, 'syncAllBanks']);
 Route::get('plaid_statements_list', [TransactionController::class, 'plaid_statements_list']);
 Route::get('plaid_transactions_refresh', [TransactionController::class, 'plaid_transactions_refresh']);
-Route::get('plaid_transactions_sync', [TransactionController::class, 'plaid_transactions_sync']);
 Route::get('plaid_item_status', [TransactionController::class, 'plaid_item_status']);
-Route::get('plaid_transactions_get', [TransactionController::class, 'plaid_transactions_get']);
 Route::get('plaid_transactions_enrich', [TransactionController::class, 'plaid_transactions_enrich']);
 Route::get('add_vendor_to_transactions', [TransactionController::class, 'add_vendor_to_transactions']);
 Route::get('add_expense_to_transactions', [TransactionController::class, 'add_expense_to_transactions']);
@@ -241,15 +240,3 @@ Route::middleware(['auth', 'vendor.access'])->group(function () {
     Route::get('/planner/gantt', GanttIndex::class)->name('planner.gantt');
     Route::get('/planner/cards', CardsIndex::class)->name('planner.cards');    
 });
-
-// Development login bypass for testing (only in local environment)
-if (env('APP_ENV') === 'local') {
-    Route::get('/dev-login', function () {
-        $user = \App\Models\User::find(1);
-        if ($user) {
-            \Illuminate\Support\Facades\Auth::login($user, true);
-            return redirect('/vendors')->with('success', 'Logged in as ' . $user->full_name . ' for testing');
-        }
-        return redirect('/login')->with('error', 'Test user not found');
-    })->name('dev.login');
-}

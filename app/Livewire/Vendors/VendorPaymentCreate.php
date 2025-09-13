@@ -28,7 +28,12 @@ class VendorPaymentCreate extends Component
 
     public $project_id = '';
 
-    public $projects = [];
+    /**
+     * Projects keyed by id as plain arrays so UI state (show, disabled, order, amounts) persists across requests.
+     * [ project_id => [ 'id'=>int, 'address'=>string, 'project_name'=>string, 'show'=>bool, 'disabled'=>bool, 'order'=>int,
+     *   'vendor_expenses_sum'=>float, 'vendor_bids_sum'=>float, 'balance'=>float, 'amount'=>float|null ] ]
+     */
+    public array $projects = [];
 
     public $employees = [];
 
@@ -73,21 +78,31 @@ class VendorPaymentCreate extends Component
     public function mount()
     {
         //09-05-2023 if proejct not active ...add in dropdown
-        $this->projects = Project::where('created_at', '>', Carbon::now()->subYears(2)->format('Y-m-d'))
-            ->status(['Active', 'Complete', 'Service Call', 'Service Call Complete']) // Using your scope
-            ->with('latestStatus') // Eager load the latest status for efficiency
-            ->get() // Fetch projects into a collection
+        $projectsCollection = Project::where('created_at', '>', Carbon::now()->subYears(2)->format('Y-m-d'))
+            ->status(['Active', 'Complete', 'Service Call', 'Service Call Complete'])
+            ->with('latestStatus')
+            ->get()
             ->sortBy([
-                ['latestStatus.title', 'asc'], // Sort by title (ascending)
-                ['latestStatus.start_date', 'desc'], // Then by start_date (descending)
-            ])
-            ->each(function ($item) {
-                $item->show = false;
-                $item->name = $item->name;
-                $item->disabled = false;
-                $item->order = 0;
-            })
-            ->keyBy('id');
+                ['latestStatus.title', 'asc'],
+                ['latestStatus.start_date', 'desc'],
+            ]);
+
+        $this->projects = $projectsCollection->mapWithKeys(function ($p) {
+            return [
+                $p->id => [
+                    'id' => $p->id,
+                    'address' => $p->address,
+                    'project_name' => $p->project_name,
+                    'show' => false,
+                    'disabled' => false,
+                    'order' => 0,
+                    'vendor_expenses_sum' => 0.0,
+                    'vendor_bids_sum' => 0.0,
+                    'balance' => 0.0,
+                    'amount' => null,
+                ],
+            ];
+        })->toArray();
 
         $this->form->date = today()->format('Y-m-d');
         $this->employees = auth()->user()->vendor->users()->where('is_employed', 1)->get();
@@ -116,46 +131,47 @@ class VendorPaymentCreate extends Component
     {
         $this->validateOnly('project_id');
 
-        $project = $this->projects[$this->project_id];
-        $project->show = true;
-        $project->disabled = true;
-        $project->order = $this->payment_projects_count++;
-        $project->vendor_expenses_sum = $project->expenses()->where('vendor_id', $this->vendor->id)->sum('amount');
-        $project->vendor_bids_sum = $project->bids()->vendorBids($this->vendor->id)->sum('amount');
-        $project->balance = $project->vendor_bids_sum - $project->vendor_expenses_sum;
+    $id = (int) $this->project_id;
+    if (!isset($this->projects[$id])) { return; }
+    $expensesSum = Project::find($id)?->expenses()->where('vendor_id', $this->vendor->id)->sum('amount') ?? 0;
+    $bidsSum = Project::find($id)?->bids()->vendorBids($this->vendor->id)->sum('amount') ?? 0;
+    $this->projects[$id]['show'] = true;
+    $this->projects[$id]['disabled'] = true;
+    $this->projects[$id]['order'] = $this->payment_projects_count++;
+    $this->projects[$id]['vendor_expenses_sum'] = (float) $expensesSum;
+    $this->projects[$id]['vendor_bids_sum'] = (float) $bidsSum;
+    $this->projects[$id]['balance'] = (float) ($bidsSum - $expensesSum);
 
         $this->project_id = '';
     }
 
     public function updateProjectBids($project_id)
     {
-        $project = $this->projects[$project_id];
-        $project['vendor_bids_sum'] = $project->bids()->vendorBids($this->vendor->id)->sum('amount');
-
-        $this->updateProjectBalance($project_id);
+    $id = (int) $project_id;
+    if (!isset($this->projects[$id])) { return; }
+    $bidsSum = Project::find($id)?->bids()->vendorBids($this->vendor->id)->sum('amount') ?? 0;
+    $this->projects[$id]['vendor_bids_sum'] = (float) $bidsSum;
+    $this->updateProjectBalance($id);
     }
 
     public function updateProjectBalance($project_id)
     {
-        if ($this->projects[$project_id]->amount == null || $this->projects[$project_id]->amount <= 0) {
-            $amount = 0;
-        } else {
-            $amount = $this->projects[$project_id]->amount;
-        }
-
-        $total_paid = $this->projects[$project_id]->vendor_expenses_sum;
-        $bids_amount = $this->projects[$project_id]->vendor_bids_sum;
-        $balance = round (($bids_amount - $total_paid) - $amount, 2);
-
-        $this->projects[$project_id]->balance = $balance;
+        $id = (int) $project_id;
+        if (!isset($this->projects[$id])) { return; }
+        $amount = ($this->projects[$id]['amount'] ?? 0) > 0 ? $this->projects[$id]['amount'] : 0;
+        $totalPaid = $this->projects[$id]['vendor_expenses_sum'];
+        $bidsAmount = $this->projects[$id]['vendor_bids_sum'];
+        $balance = round(($bidsAmount - $totalPaid) - $amount, 2);
+        $this->projects[$id]['balance'] = $balance;
     }
 
     public function removeProject($project_id_to_remove)
     {
-        $project = $this->projects[$project_id_to_remove];
-        $project->show = false;
-        $project->amount = null;
-        $project->disabled = false;
+    $id = (int) $project_id_to_remove;
+    if (!isset($this->projects[$id])) { return; }
+    $this->projects[$id]['show'] = false;
+    $this->projects[$id]['amount'] = null;
+    $this->projects[$id]['disabled'] = false;
 
         $this->project_id = '';
     }
@@ -163,7 +179,10 @@ class VendorPaymentCreate extends Component
     public function getVendorCheckSumProperty()
     {
         $total = 0;
-        $total += $this->projects->where('show', true)->where('amount', '>', 0)->sum('amount');
+        $total += collect($this->projects)
+            ->where('show', true)
+            ->filter(fn($p) => ($p['amount'] ?? 0) > 0)
+            ->sum('amount');
 
         return $total;
     }

@@ -28,7 +28,11 @@ class PaymentCreate extends Component
 
     public $client_id = null;
 
-    public $projects = [];
+    /**
+     * Projects keyed by id as plain arrays so transient UI state (amount) persists across requests.
+     * [ project_id => ['id'=>int,'address'=>string,'project_name'=>string,'amount'=>float|null] ]
+     */
+    public array $projects = [];
 
     public $view = false;
 
@@ -75,7 +79,21 @@ class PaymentCreate extends Component
     public function updatedClientId(Client $client)
     {
         $this->client = $client;
-        $this->projects = $client->projects()->orderBy('projects.created_at', 'DESC')->status(['Active', 'Complete', 'Service Call', 'Service Call Complete'])->get();
+        $projectsCollection = $client->projects()
+            ->orderBy('projects.created_at', 'DESC')
+            ->status(['Active', 'Complete', 'Service Call', 'Service Call Complete'])
+            ->get();
+
+        $this->projects = $projectsCollection->mapWithKeys(function ($p) {
+            return [
+                $p->id => [
+                    'id' => $p->id,
+                    'address' => $p->address,
+                    'project_name' => $p->project_name,
+                    'amount' => null,
+                ],
+            ];
+        })->toArray();
     }
 
     public function editPayment(Payment $payment)
@@ -84,6 +102,10 @@ class PaymentCreate extends Component
         $this->client = $payment->project->client;
         $this->client_id = $payment->project->client->id;
         $this->updatedClientId($this->client);
+        // Prefill amount for the project tied to this payment if present
+        if (isset($this->projects[$payment->project_id])) {
+            $this->projects[$payment->project_id]['amount'] = $payment->amount;
+        }
         $this->form->setPayment($this->payment);
 
         $this->view_text = [
@@ -106,7 +128,9 @@ class PaymentCreate extends Component
 
     public function getClientPaymentSumProperty()
     {
-        return collect($this->projects)->where('amount', '!=', null)->sum('amount');
+        return collect($this->projects)
+            ->filter(fn($p) => $p['amount'] !== null && $p['amount'] !== '')
+            ->sum('amount');
     }
 
     // 8-31-2022 | 9-10-2023 similar on VendorPaymentForm

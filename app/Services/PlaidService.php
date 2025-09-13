@@ -90,7 +90,7 @@ class PlaidService
         return $this->makeRequest($url, $data);
     }
 
-    public function syncTransactions($accessToken, $cursor = null, $count = 200)
+    public function syncTransactions($accessToken, $cursor = null, $count = 100, bool $includeOriginalDescription = true)
     {
         $url = $this->baseUrl . '/transactions/sync';
         $data = [
@@ -99,6 +99,10 @@ class PlaidService
             'access_token' => $accessToken,
             'cursor' => $cursor,
             'count' => $count,
+            'options' => [
+                // Request Plaid to return original_description field in each transaction
+                'include_original_description' => $includeOriginalDescription,
+            ],
         ];
 
         return $this->makeRequest($url, $data);

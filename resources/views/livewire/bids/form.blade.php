@@ -21,7 +21,7 @@
 
                     <flux:input
                         wire:model.live.debounce.500ms="bids.{{$bid_index}}.amount"
-                        x-bind:disabled="{{$bid['has_estimate_sections']}}"
+                        {{-- x-bind:disabled="{{$bid['has_estimate_sections']}}" --}}
                         icon="currency-dollar"
                         type="number"
                         size="lg"

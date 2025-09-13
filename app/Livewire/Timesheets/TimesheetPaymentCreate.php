@@ -24,10 +24,17 @@ class TimesheetPaymentCreate extends Component
 
     public User $user;
 
+    // Source collections (Eloquent collections) for display
     public $weekly_timesheets = [];
     public $employee_weekly_timesheets = [];
     public $user_paid_expenses = [];
     public $user_reimbursement_expenses = [];
+
+    // Separate selection state arrays keyed by model id to avoid Livewire collection key loss
+    public array $selectedWeeklyTimesheets = [];
+    public array $selectedEmployeeWeeklyTimesheets = [];
+    public array $selectedUserPaidExpenses = [];
+    public array $selectedUserReimbursementExpenses = [];
     public $employees = [];
     public $view_text = [];
 
@@ -76,11 +83,8 @@ class TimesheetPaymentCreate extends Component
                 ->whereNull('paid_by')
                 ->whereNull('deleted_at')
                 ->orderBy('date', 'DESC')
-                ->get()
-                ->each(function ($item, $key) {
-                    $item->checkbox = true;
-                })
-                ->keyBy('id');
+                ->get();
+        $this->selectedWeeklyTimesheets = $this->weekly_timesheets->pluck('id')->mapWithKeys(fn ($id) => [$id => true])->toArray();
 
         $this->employee_weekly_timesheets =
                 Timesheet::with('user')
@@ -88,11 +92,8 @@ class TimesheetPaymentCreate extends Component
                     ->whereNull('check_id')
                     ->whereNull('deleted_at')
                     ->orderBy('date', 'DESC')
-                    ->get()
-                    ->each(function ($item, $key) {
-                        $item->checkbox = true;
-                    })
-                    ->keyBy('id');
+                    ->get();
+        $this->selectedEmployeeWeeklyTimesheets = $this->employee_weekly_timesheets->pluck('id')->mapWithKeys(fn ($id) => [$id => true])->toArray();
 
         $this->user_paid_expenses =
             Expense::where('paid_by', $this->user->id)
@@ -101,22 +102,16 @@ class TimesheetPaymentCreate extends Component
                 })
                 ->whereNull('check_id')
                 ->orderBy('date', 'DESC')
-                ->get()
-                ->each(function ($item, $key) {
-                    $item->checkbox = false;
-                })
-                ->keyBy('id');
+                ->get();
+        $this->selectedUserPaidExpenses = $this->user_paid_expenses->pluck('id')->mapWithKeys(fn ($id) => [$id => false])->toArray();
 
         $this->user_reimbursement_expenses =
             Expense::where('reimbursment', $this->user->id)
                 ->whereNull('paid_by')
                 ->whereNull('check_id')
                 ->orderBy('date', 'DESC')
-                ->get()
-                ->each(function ($item, $key) {
-                    $item->checkbox = false;
-                })
-                ->keyBy('id');
+                ->get();
+        $this->selectedUserReimbursementExpenses = $this->user_reimbursement_expenses->pluck('id')->mapWithKeys(fn ($id) => [$id => false])->toArray();
 
         // $this->user_paid_by_reimbursements =
         //     Expense::where('paid_by', $this->user->id)
@@ -132,21 +127,11 @@ class TimesheetPaymentCreate extends Component
         // dd($this->user_paid_by_reimbursements);
 
 
-        if ($this->weekly_timesheets->isEmpty()) {
-            $this->weekly_timesheets = collect();
-        }
-
-        if ($this->employee_weekly_timesheets->isEmpty()) {
-            $this->employee_weekly_timesheets = collect();
-        }
-
-        if ($this->user_paid_expenses->isEmpty()) {
-            $this->user_paid_expenses = collect();
-        }
-
-        if ($this->user_reimbursement_expenses->isEmpty()) {
-            $this->user_reimbursement_expenses = collect();
-        }
+        // Ensure empty collections are still Collections for grouping logic
+        if ($this->weekly_timesheets->isEmpty()) { $this->weekly_timesheets = collect(); }
+        if ($this->employee_weekly_timesheets->isEmpty()) { $this->employee_weekly_timesheets = collect(); }
+        if ($this->user_paid_expenses->isEmpty()) { $this->user_paid_expenses = collect(); }
+        if ($this->user_reimbursement_expenses->isEmpty()) { $this->user_reimbursement_expenses = collect(); }
 
         // if ($this->user_paid_by_reimbursements->isEmpty()) {
         //     $this->user_paid_by_reimbursements = collect();
@@ -165,18 +150,18 @@ class TimesheetPaymentCreate extends Component
         $total = 0;
 
         //weekly_timesheets
-        $total += $this->weekly_timesheets->where('checkbox', true)->sum('amount');
+    $total += $this->weekly_timesheets->filter(fn ($t) => $this->selectedWeeklyTimesheets[$t->id] ?? false)->sum('amount');
 
         //employee_weekly_timesheets
-        $employee_weekly_timesheets_total = $this->employee_weekly_timesheets->where('checkbox', true)->sum('amount');
+    $employee_weekly_timesheets_total = $this->employee_weekly_timesheets->filter(fn ($t) => $this->selectedEmployeeWeeklyTimesheets[$t->id] ?? false)->sum('amount');
         $total += $employee_weekly_timesheets_total;
 
         //user_paid_expenses
-        $user_paid_expenses_total = $this->user_paid_expenses->where('checkbox', true)->sum('amount');
+    $user_paid_expenses_total = $this->user_paid_expenses->filter(fn ($e) => $this->selectedUserPaidExpenses[$e->id] ?? false)->sum('amount');
         $total += $user_paid_expenses_total;
 
         //user_reimbursement_expenses
-        $total -= $this->user_reimbursement_expenses->where('checkbox', true)->sum('amount');
+    $total -= $this->user_reimbursement_expenses->filter(fn ($e) => $this->selectedUserReimbursementExpenses[$e->id] ?? false)->sum('amount');
 
         // //user_paid_by_reimbursements
         // $user_paid_by_reimbursements = $this->user_paid_by_reimbursements->where('checkbox', true)->sum('amount');
@@ -192,8 +177,8 @@ class TimesheetPaymentCreate extends Component
     public function getDisablePaidByProperty()
     {
         return
-        $this->user_paid_expenses->where('checkbox', true)->isNotEmpty()
-        || $this->user_reimbursement_expenses->where('checkbox', true)->isNotEmpty();
+            $this->user_paid_expenses->filter(fn ($e) => $this->selectedUserPaidExpenses[$e->id] ?? false)->isNotEmpty()
+            || $this->user_reimbursement_expenses->filter(fn ($e) => $this->selectedUserReimbursementExpenses[$e->id] ?? false)->isNotEmpty();
     }
 
     public function save()

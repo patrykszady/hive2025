@@ -17,19 +17,19 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Casts\Attribute;
+use Carbon\Carbon;
 
 class Vendor extends Model
 {
     use HasFactory, Searchable, HasAddress;
 
     protected $fillable = ['business_name', 'business_type', 'sheets_type', 'category_id', 'address', 'address_2', 'city', 'state', 'zip_code', 'business_phone', 'business_email', 'created_at', 'updated_at'];
-
     // protected $appends = ['name'];
 
     protected function casts(): array
     {
         return [
-            'registration' => 'object', //array
+            'registration' => 'object',
             'options'=> 'object',
         ];
     }
@@ -320,6 +320,31 @@ class Vendor extends Model
                 
                 // Convert to all lowercase
                 return strtolower($value);
+            }
+        );
+    }
+
+    /**
+     * Accessor for the vendor's registration date as a Carbon instance.
+     * Falls back to null if unavailable or unparsable.
+     */
+    protected function registrationDate(): Attribute
+    {
+        return Attribute::make(
+            get: function ($value, array $attributes) {
+                // When cast as object, $this->registration may be stdClass or null
+                if (!isset($this->registration) || !isset($this->registration->registration_date)) {
+                    return null;
+                }
+                $raw = $this->registration->registration_date;
+                if (empty($raw)) {
+                    return null;
+                }
+                try {
+                    return Carbon::parse($raw);
+                } catch (\Throwable $e) {
+                    return null;
+                }
             }
         );
     }
