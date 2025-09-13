@@ -9,6 +9,7 @@ use App\Services\GooglePlacesService;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
+use App\Support\ApiErrorFormatter;
 
 trait ProcessesVendorDocs
 {
@@ -113,11 +114,10 @@ trait ProcessesVendorDocs
             return 'duplicate';
 
         } catch (\Exception $e) {
-            Log::channel('vendor_docs')->error('Exception during document processing', [
+            Log::channel('vendor_docs')->error('Exception during document processing', ApiErrorFormatter::format($e, [
                 'file' => $normalizedFilePath,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
+                'trace' => $e->getTraceAsString(),
+            ]));
 
             // Keep temp file for debugging, only cleanup permanent file if it exists
             if (isset($newFilePath)) {

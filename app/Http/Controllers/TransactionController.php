@@ -26,6 +26,7 @@ use GuzzleHttp\Exception\RequestException;
 
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use App\Support\ApiErrorFormatter;
 
 class TransactionController extends Controller
 {
@@ -107,8 +108,11 @@ class TransactionController extends Controller
             } else {
                 $error = $e->getMessage();
             }
-            $error = json_decode($error, true);
-            Log::channel('plaid_statements')->error($error);
+            $decoded = json_decode($error, true);
+            Log::channel('plaid_statements')->error('Plaid statements list API error', ApiErrorFormatter::format($e, [
+                'has_response' => $e->hasResponse(),
+                'decoded_error' => $decoded,
+            ]));
             return;
         }
         // TODO: implement list/selection logic (kept lean to remove syntax errors)

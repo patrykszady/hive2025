@@ -22,16 +22,6 @@ class VendorPaymentForm extends Form
         ];
     }
 
-    // protected $messages =
-    // [
-    //     'payment_projects.*.amount.required' => 'Project Amount is required if included. "Remove Project" if not included in this Payment',
-    //     'payment_projects.*.amount.numeric' => 'Project Amount must be a number if included.',
-    //     'payment_projects.*.amount.min' => 'Project Amount must be at least $0.01 if included.',
-    //     'payment_projects.*.amount.regex' => 'Amount format is incorrect. Format is 2145.36. No commas and only two digits after decimal allowed. If amount is under $1.00, use 0.XX',
-    //     'check.check_number.required_if' => 'Check Number is required if Payment Type is Check',
-    //     'check.check_number.unique' => 'Check Number is already taken.',
-    // ];
-
     public function store()
     {
         //create expense for each $payment_projects. create one Check for all Expenses and associate with the Check.
@@ -49,18 +39,22 @@ class VendorPaymentForm extends Form
             $check = null;
         }
 
-        foreach ($this->component->projects->where('show', 'true')->where('amount', '>', 0) as $project) {
-            //ignore 'show' attribute when saving
-            $project->offsetUnset('show');
+        // Projects are stored on the component as a plain array (not a Collection of models)
+        // Iterate over visible projects that have a positive amount.
+        foreach ($this->component->projects as $project) {
+            if (!($project['show'] ?? false)) { continue; }
+            $amount = $project['amount'] ?? null;
+            if (!is_numeric($amount) || $amount <= 0) { continue; }
+
             Expense::create([
-                'amount' => $project->amount,
+                'amount' => $amount,
                 'date' => $this->date,
-                'invoice' => $this->invoice,
-                'project_id' => $project->id,
-                'vendor_id' => $this->component->vendor->id,
-                'check_id' => isset($check) ? $check->id : null,
-                'paid_by' => isset($check) ? null : $this->paid_by,
+                // If paying by check (no paid_by value) invoice should be null, otherwise include invoice
                 'invoice' => isset($check) ? null : $this->invoice,
+                'project_id' => $project['id'],
+                'vendor_id' => $this->component->vendor->id,
+                'check_id' => $check?->id,
+                'paid_by' => $check?->id ? null : $this->paid_by,
                 'belongs_to_vendor_id' => auth()->user()->vendor->id,
                 'created_by_user_id' => auth()->user()->id,
             ]);

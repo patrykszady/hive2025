@@ -22,6 +22,7 @@ use Spatie\Browsershot\Browsershot;
 use Intervention\Image\Facades\Image;
 
 use Exception;
+use App\Support\ApiErrorFormatter;
  
 class CompanyEmailController extends Controller
 {
@@ -48,7 +49,7 @@ class CompanyEmailController extends Controller
             $authUrl = $this->nylasService->getAuthUrl();
             return redirect($authUrl['authentication_url']);
         } catch (Exception $e) {
-            Log::error(["Failed to retrieve Nylas authentication URL: ", $e->getMessage()]);
+            Log::channel('nylas')->error('Failed to retrieve Nylas authentication URL', ApiErrorFormatter::format($e));
             return redirect()->back()->withErrors(['error' => 'Unable to initiate authentication with Nylas.']);
         }
     }
@@ -62,7 +63,7 @@ class CompanyEmailController extends Controller
     public function nylasAuthResponse(Request $request)
     {
         if ($request->has('error')) {
-            Log::error(["Failed to nylasAuthResponse: ", $request->all()]);
+            Log::channel('nylas')->error(["Failed to nylasAuthResponse: ", $request->all()]);
             return redirect()->back()->withErrors(['error' => $request->query('error')]);
         }
 
@@ -89,7 +90,9 @@ class CompanyEmailController extends Controller
                 return redirect()->back()->withErrors(['error' => 'Failed to retrieve account details from Nylas.']);
             }
         } catch (\Exception $e) {
-            Log::error(["Failed to handle Nylas authentication response:", $e->getMessage()]);
+            Log::channel('nylas')->error('Failed to handle Nylas authentication response', ApiErrorFormatter::format($e, [
+                'code' => $code,
+            ]));
             return redirect()->back()->withErrors(['error' => 'An error occurred during Nylas authentication.']);
         }
     }
@@ -131,6 +134,7 @@ class CompanyEmailController extends Controller
      */
     public function fetchConsolidatedOrders()
     {
+        dd('fetchConsolidatedOrders');
         // Fetch all CompanyEmail records with a grant_id
         $companyEmails = CompanyEmail::withoutGlobalScopes()->whereNotNull('grant_id')->get();
 
@@ -172,14 +176,18 @@ class CompanyEmailController extends Controller
                 ? ['inbox', $companyEmail->api_json['folders']['Retry']] // For non-production, use both inbox and retry folder.
                 : [$companyEmail->api_json['folders']['Test']];           // For production, use the test folder.
 
-            $syncResult = $this->nylasService->syncFolders($grantId, $companyEmail->api_json, $folders, 45, 3, 15);
+            $syncResult = $this->nylasService->syncMessages($folders, $companyEmail);
             $allMessages = $syncResult['messages'];
-            // Safely merge sync metadata (cursors, failures, etc.)
-            // Merge updated sync metadata directly on the current instance
-            $companyEmail->api_json->update($syncResult['api_json']); // folders protected implicitly
 
             // dd($allMessages);
             foreach($allMessages as $message) {
+                // Display message structure without rendering HTML body
+                $messageDisplay = $message;
+                if (isset($messageDisplay['body'])) {
+                    $messageDisplay['body'] = '[HTML CONTENT - ' . strlen($message['body']) . ' chars]';
+                }
+                // echo '<pre>' . json_encode($messageDisplay, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . '</pre>';
+                // dd();
                 $messageId = $message['id'];
                 $fromEmail = $message['from'][0]['email'];
                 $subject = $message['subject'];
@@ -196,10 +204,8 @@ class CompanyEmailController extends Controller
                 if(is_null($receipt)){
                     $emailBody = strip_tags($message['body']);
                     $emailBody = html_entity_decode($emailBody); // Clean up encoded characters
-
                     preg_match('/From:\s.*?<(.*?)>/', $emailBody, $fromMatch);
                     preg_match('/Sent:\s*(.+?)\s*To:/', $emailBody, $dateMatch);
-
                     $fromEmail = trim($fromMatch[1] ?? '');
                     $date = trim($dateMatch[1] ?? '');
                     $dateEmail = Carbon::parse($date)->setTimezone('America/Chicago')->format('Y-m-d');
@@ -212,7 +218,6 @@ class CompanyEmailController extends Controller
                 }
 
                 // dd($receipt);
-
                 if ($receipt) {
                     $toEmail = $message['to'][0]['email'];
                     $string = $message['body'];
@@ -234,7 +239,6 @@ class CompanyEmailController extends Controller
                     // Determine receipt start
                     $receipt_start = 0;
                     $receipt_start_text = '';
-
                     if (!empty($receipt->options['receipt_start'])) {
                         $starts = is_array($receipt->options['receipt_start'])
                             ? $receipt->options['receipt_start']
@@ -242,7 +246,6 @@ class CompanyEmailController extends Controller
 
                         foreach ($starts as $start_text) {
                             $pos = strpos($string, $start_text);
-
                             if (is_numeric($pos)) {
                                 // Include the "receipt_start" text or start after it, based on offset
                                 $receipt_start = $pos + (isset($receipt->options['receipt_start_offset'])
@@ -309,12 +312,13 @@ class CompanyEmailController extends Controller
                             ->format('A4')
                             ->margins(20, 0, 20, 20)
                             ->save($location);
-
                     } elseif (isset($receipt->options['pdf_html'])) {
-                        // PDF attachment processing
+                        // PDF attachment download
+                        $doc_type = 'pdf';
+                        $ocr_filename .= '.' . $doc_type;
+
                         if (!empty($message['attachments'])) {
                             $attachment = $message['attachments'][0];
-                            $ocr_filename .= '.' . $doc_type;
                             $attachmentContent = $this->nylasService->downloadAttachment($attachment['id'], $grantId, $messageId);
 
                             // $attachment = collect($attachments)->first(function ($attachment_found, $loop) use ($receipt) {
@@ -329,10 +333,9 @@ class CompanyEmailController extends Controller
                             Storage::disk('files')->put($ocr_path, $attachmentContent);
                         } else {
                             // No attachments found
-                            $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Error'], $grantId);
+                            $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Error'], $grantId, $companyEmail->id);
                             continue;
                         }
-
                     } else {
                         // Image processing - override the default $doc_type
                         $doc_type = 'jpg';
@@ -348,35 +351,35 @@ class CompanyEmailController extends Controller
                                 'message_id' => $messageId ?? null
                             ]);
                             // Move to error folder or handle appropriately
-                            $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Error'], $grantId);
+                            $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Error'], $grantId, $companyEmail->id);
                             continue;
                         }
                         
                         try {
                             Image::make($image_email_url)->save($location);
                         } catch (\Exception $e) {
-                            Log::error("Failed to process image", [
-                                'error' => $e->getMessage(),
+                            Log::error('Failed to process image', ApiErrorFormatter::format($e, [
                                 'image_url' => $image_email_url,
-                                'receipt_id' => $receipt->id
-                            ]);
+                                'receipt_id' => $receipt->id,
+                            ]));
                             // Move to error folder or handle appropriately
-                            $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Error'], $grantId);
+                            $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Error'], $grantId, $companyEmail->id);
                             continue;
                         }
                     }
 
                     $document_model = $receipt->options['document_model'];
+
                     //ocr the file
                     $ocr_receipt_extracted = app(\App\Http\Controllers\ReceiptController::class)->azure_receipts($ocr_path, $doc_type, $document_model);
+
                     //pass receipt info to ocr_extract method
                     $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->ocr_extract($ocr_receipt_extracted, null, 'email');
-       
-                    $receipt_account =
-                        ReceiptAccount::withoutGlobalScopes()
-                            ->where('belongs_to_vendor_id', $companyEmail->vendor_id)
-                            ->where('vendor_id', $receipt->vendor_id)
-                            ->first();
+
+                    $receipt_account = ReceiptAccount::withoutGlobalScopes()
+                        ->where('belongs_to_vendor_id', $companyEmail->vendor_id)
+                        ->where('vendor_id', $receipt->vendor_id)
+                        ->first();
 
                     // Missing receipt_account.. receipt and company email exist but this pairing does not
                     if (is_null($receipt_account)) {
@@ -390,13 +393,14 @@ class CompanyEmailController extends Controller
                         $this->nylasService->moveEmailToFolder(
                             $messageId,
                             $companyEmail->api_json['folders']['Add'],
-                            $grantId
+                            $grantId,
+                            $companyEmail->id
                         );
                         continue;
                     }
 
                     //01-26-2023 pass rest of receipt info to ocr_extract method
-                    if (! is_null($ocr_receipt_data['fields']['transaction_date'])) {
+                    if (!is_null($ocr_receipt_data['fields']['transaction_date'])) {
                         $date = $ocr_receipt_data['fields']['transaction_date'];
                     } else {
                         $date = $dateEmail;
@@ -413,7 +417,6 @@ class CompanyEmailController extends Controller
                     if (isset($receipt->options['invoice_regex'])) {
                         $re = $receipt->options['invoice_regex'];
                         $str = $ocr_receipt_data['content'];
-
                         preg_match_all($re, $str, $matches, PREG_SET_ORDER, 0);
 
                         if (empty($matches)) {
@@ -421,7 +424,6 @@ class CompanyEmailController extends Controller
                         } else {
                             // $receipt_number = str_replace(' ', '', $matches[count($matches) - 1][0]);
                             $invoice = trim($matches[count($matches) - 1][0]);
-
                             $ocr_receipt_data['fields']['invoice_number'] = $invoice;
                         }
                     } elseif (isset($ocr_receipt_data['fields']['invoice_number'])) {
@@ -457,7 +459,6 @@ class CompanyEmailController extends Controller
                     // Prefer matching by invoice number when available to avoid
                     // false positives on same-day/same-amount receipts.
                     $invoice = isset($invoice) ? trim((string) $invoice) : '';
-
                     if ($invoice !== '') {
                         $duplicates = Expense::where('belongs_to_vendor_id', $receipt_account->belongs_to_vendor_id)
                             ->where('vendor_id', $receipt->vendor_id)
@@ -474,7 +475,6 @@ class CompanyEmailController extends Controller
                             ->get();
 
                         $duplicates = collect();
-
                         if ($candidates->isNotEmpty()) {
                             // Build current receipt signals
                             $currentItemsSig = $this->buildItemsSignature($ocr_receipt_data['fields'] ?? []);
@@ -494,7 +494,6 @@ class CompanyEmailController extends Controller
 
                                 // receipt_items is cast to object on ExpenseReceipts; convert to array
                                 $storedFields = json_decode(json_encode($receiptRecord->receipt_items), true) ?? [];
-
                                 $storedItemsSig = $this->buildItemsSignature($storedFields ?? []);
                                 $itemsOverlap = $this->itemsOverlap($currentItemsSig, $storedItemsSig);
 
@@ -507,7 +506,9 @@ class CompanyEmailController extends Controller
                                 $candidateDate = $candidate->date instanceof \Carbon\Carbon
                                     ? $candidate->date->toDateString()
                                     : (is_string($candidate->date) ? $candidate->date : null);
+
                                 $storedTime = $this->extractReceiptTime($receiptRecord->receipt_html ?? '', $candidateDate);
+
                                 $timeEqual = false;
                                 if ($currentTime && $storedTime) {
                                     // times must match exactly to the minute
@@ -536,20 +537,22 @@ class CompanyEmailController extends Controller
                         } else {
                             // Without invoice: if we captured time for current receipt, prefer identical-time matches.
                             $chosen = $duplicates;
-
                             if (isset($currentTime) && $currentTime instanceof \Carbon\Carbon) {
                                 $withTimeEqual = $duplicates->filter(function ($candidate) use ($currentTime) {
                                     $receiptRecord = $candidate->receipts()->latest('id')->first();
                                     if (!$receiptRecord) {
                                         return false;
                                     }
+
                                     $candidateDate = $candidate->date instanceof \Carbon\Carbon
                                         ? $candidate->date->toDateString()
                                         : (is_string($candidate->date) ? $candidate->date : null);
+
                                     $storedTime = $this->extractReceiptTime($receiptRecord->receipt_html ?? '', $candidateDate);
                                     if (!$storedTime) {
                                         return false;
                                     }
+
                                     return $currentTime->format('H:i') === $storedTime->format('H:i');
                                 });
 
@@ -573,7 +576,7 @@ class CompanyEmailController extends Controller
                         // $duplicate_expense->save();
 
                         //move email receipt to Duplicate folder
-                        $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Duplicate'], $grantId);
+                        $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Duplicate'], $grantId, $companyEmail->id);
                     }else{
                         //SAVE expense
                         $expense = new Expense;
@@ -592,7 +595,7 @@ class CompanyEmailController extends Controller
                         //ATTACHMENTS
                         $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, $message);
 
-                        $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Saved'], $grantId);
+                        $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Saved'], $grantId, $companyEmail->id);
                     }
                 }
             }
@@ -618,6 +621,7 @@ class CompanyEmailController extends Controller
                     stripos($m['subject'], 'Receipt Scans') !== false)
                 ->values()
                 ->all();
+
             $company_email->api_json->update($syncResult['api_json']);
 
             foreach ($messages as $message) {
@@ -664,7 +668,7 @@ class CompanyEmailController extends Controller
                             Storage::disk('files')->delete($ocr_path);
 
                             if ($attachment_key === array_key_last($message['attachments'])) {
-                                $this->nylasService->moveEmailToFolder($messageId, $company_email->api_json['folders']['SCANS'], $grantId);
+                                $this->nylasService->moveEmailToFolder($messageId, $company_email->api_json['folders']['SCANS'], $grantId, $company_email->id);
                             }
 
                             continue;
@@ -794,7 +798,8 @@ class CompanyEmailController extends Controller
                     $this->nylasService->moveEmailToFolder(
                         $messageId,
                         $company_email->api_json['folders']['SCANS'],
-                        $grantId
+                        $grantId,
+                        $company_email->id
                     );
                     continue;
                 }

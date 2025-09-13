@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Log;
 
 use GuzzleHttp\Client as GuzzleClient;
 use GuzzleHttp\Exception\RequestException;
+use App\Support\ApiErrorFormatter;
 
 class PlaidService
 {
@@ -68,7 +69,7 @@ class PlaidService
 
             return $result;
         } catch (\Exception $e) {
-            Log::error('Plaid API error during link token creation.', ['error' => $e->getMessage()]);
+            Log::error('Plaid API error during link token creation.', ApiErrorFormatter::format($e));
             return [
                 'error' => true,
                 'error_message' => $e->getMessage(),

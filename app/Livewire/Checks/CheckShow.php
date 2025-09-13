@@ -37,16 +37,19 @@ class CheckShow extends Component
                 ->whereNull('paid_by')
                 ->get();
 
-        $weekly_timesheets =
-            Timesheet::where('check_id', $this->check->id)
+        $weekly_timesheets = $this->check->user_id
+            ? Timesheet::where('check_id', $this->check->id)
                 ->where('user_id', $this->check->user_id)
-                ->get();
+                ->get()
+            : collect();
 
-        $employee_weekly_timesheets =
-            Timesheet::where('paid_by', $this->check->user_id)
+        $employee_weekly_timesheets = $this->check->user_id
+            ? Timesheet::where('paid_by', $this->check->user_id)
+                ->whereNotNull('paid_by')
                 ->where('check_id', $this->check->id)
                 ->get()
-                ->groupBy(['user_id', 'date']);
+                ->groupBy(['user_id', 'date'])
+            : collect();
 
         $user_distributions =
             Expense::whereNotNull('distribution_id')
@@ -56,8 +59,9 @@ class CheckShow extends Component
                 ->get();
 
         // Paid Expenses
-        $user_paid_expenses =
-            Expense::where('paid_by', $this->check->user_id)
+        $user_paid_expenses = $this->check->user_id
+            ? Expense::where('paid_by', $this->check->user_id)
+                ->whereNotNull('paid_by')
                 ->where('check_id', $this->check->id)
                 ->where(function ($query) {
                     $query->whereNull('reimbursment')
@@ -67,15 +71,18 @@ class CheckShow extends Component
                                 ->whereRaw('LEFT(reimbursment, 2) != "V:"');
                         });
                 })
-                ->get();
+                ->get()
+            : collect();
 
-        $user_paid_by_reimbursements =
-            Expense::where('paid_by', $this->check->user_id)
+        $user_paid_by_reimbursements = $this->check->user_id
+            ? Expense::where('paid_by', $this->check->user_id)
+                ->whereNotNull('paid_by')
                 ->where('check_id', $this->check->id)
                 ->whereNotNull('reimbursment')
                 ->where('reimbursment', '!=', 'Client')
                 ->orderBy('date', 'DESC')
-                ->get();
+                ->get()
+            : collect();
 
         $user_reimbursement_expenses = $this->check->user_id
             ? Expense::where('reimbursment', $this->check->user_id)
@@ -91,7 +98,6 @@ class CheckShow extends Component
             'user_paid_expenses' => $user_paid_expenses,
             'user_reimbursement_expenses' => $user_reimbursement_expenses,
             'user_paid_by_reimbursements' => $user_paid_by_reimbursements,
-            // 'vendor_paid_expenses' => $vendor_paid_expenses,
             'weekly_timesheets' => $weekly_timesheets,
             'employee_weekly_timesheets' => $employee_weekly_timesheets,
             'user_distributions' => $user_distributions,

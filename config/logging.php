@@ -100,13 +100,11 @@ return [
             'days' => 30,
         ],
 
-        // Dedicated channel for Nylas API issues and final failures
         'nylas' => [
             'driver' => 'daily',
             'path' => storage_path('logs/nylas.log'),
             'level' => 'info',
-            'days' => 30,
+            'days' => 30
         ],
     ],
-
 ];

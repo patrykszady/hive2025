@@ -7,6 +7,7 @@ use GuzzleHttp\Client;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
+use App\Support\ApiErrorFormatter;
 
 class GooglePlacesService
 {
@@ -64,8 +65,9 @@ class GooglePlacesService
             // Return filtered predictions
             return $filteredPredictions;
         } catch (RequestException $e) {
-            // Log the error and return an empty array
-            Log::error("Google Places API Error: " . $e->getMessage());
+            Log::channel('google_places')->error('Google Places Autocomplete API Error', ApiErrorFormatter::format($e, [
+                'input' => $input,
+            ]));
             return [];
         }
     }
@@ -130,7 +132,9 @@ class GooglePlacesService
             return $defaultLocation;
             
         } catch (\Exception $e) {
-            Log::error("Error getting vendor location: " . $e->getMessage());
+            Log::channel('google_places')->error('Error getting vendor location', ApiErrorFormatter::format($e, [
+                'default_location' => $defaultLocation,
+            ]));
             return $defaultLocation;
         }
     }
@@ -216,8 +220,9 @@ class GooglePlacesService
             return $addressArray;
 
         } catch (RequestException $e) {
-            // Log the error and return an empty array
-            Log::channel('google_places')->error("Google Place Details API Error: " . $e->getMessage());
+            Log::channel('google_places')->error('Google Place Details API Error', ApiErrorFormatter::format($e, [
+                'place_id' => $placeId,
+            ]));
             return [];
         }
     }

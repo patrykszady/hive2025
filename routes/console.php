@@ -19,24 +19,24 @@ Schedule::call(function () {
 //   ->withoutOverlapping()
 //   ->onOneServer();
 
-Schedule::call(function () {
-    app(\App\Http\Controllers\CompanyEmailController::class)->fetchAutoReceipts();
-    })
-    ->everyTenMinutes()
-    // ->between('7:00', '22:00')
-    ->name('fetch-auto-receipts')
-    ->environments(['production'])
-    ->withoutOverlapping()
-    ->onOneServer();
+// Schedule::call(function () {
+//     app(\App\Http\Controllers\CompanyEmailController::class)->fetchAutoReceipts();
+//     })
+//     ->everyTenMinutes()
+//     // ->between('7:00', '22:00')
+//     ->name('fetch-auto-receipts')
+//     ->environments(['production'])
+//     ->withoutOverlapping()
+//     ->onOneServer();
 
-Schedule::call(function () {
-    app(\App\Http\Controllers\VendorDocsController::class)->fetchMessagesFromInsuranceMailbox();
-    })->hourly()
-    // ->between('7:00', '20:00')
-    ->name('fetch-insurance-mailbox')
-    ->environments(['production'])
-    ->withoutOverlapping()
-    ->onOneServer();
+// Schedule::call(function () {
+//     app(\App\Http\Controllers\VendorDocsController::class)->fetchMessagesFromInsuranceMailbox();
+//     })->hourly()
+//     // ->between('7:00', '20:00')
+//     ->name('fetch-insurance-mailbox')
+//     ->environments(['production'])
+//     ->withoutOverlapping()
+//     ->onOneServer();
 
 // Plaid/Transaction tasks
 // Schedule::call(function () {

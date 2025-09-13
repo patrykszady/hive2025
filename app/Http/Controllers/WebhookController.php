@@ -19,7 +19,7 @@ class WebhookController extends Controller
             return response($challenge, 200)->header('Content-Type', 'text/plain');
         }
 
-        Log::error("Nylas email receipt " . $request->all());
+    Log::channel('nylas')->error("Nylas email receipt ", $request->all());
         return response(200)->header('Content-Type', 'text/plain');
         // // Respond with a 400 error if 'challenge' is missing
         // return response('Bad Request', 400)->header('Content-Type', 'text/plain');

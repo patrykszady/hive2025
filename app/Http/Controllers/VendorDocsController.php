@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 use File;
 use Response;
 use Exception;
+use App\Support\ApiErrorFormatter;
 
 use Ilovepdf\Ilovepdf;
 use Intervention\Image\Facades\Image;
@@ -95,18 +96,16 @@ class VendorDocsController extends Controller
             try {
                 $this->nylasService->moveEmailToFolder($messageId, $failedFolderId, $grantId);
             } catch (\Exception $failedMoveException) {
-                Log::channel('vendor_docs')->error('Failed to move email to any folder', [
+                Log::channel('vendor_docs')->error('Failed to move email to any folder', ApiErrorFormatter::format($failedMoveException, [
                     'message_id' => $messageId,
                     'original_error' => $e->getMessage(),
-                    'failed_move_error' => $failedMoveException->getMessage()
-                ]);
+                ]));
                 return;
             }
 
-            Log::channel('vendor_docs')->error('Failed to move email to intended folder, moved to failed folder instead', [
+            Log::channel('vendor_docs')->error('Failed to move email to intended folder, moved to failed folder instead', ApiErrorFormatter::format($e, [
                 'message_id' => $messageId,
-                'error' => $e->getMessage()
-            ]);
+            ]));
         }
     }
 

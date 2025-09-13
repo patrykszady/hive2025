@@ -8,6 +8,7 @@ use App\Models\Transaction;
 use App\Services\PlaidService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
+use App\Support\ApiErrorFormatter;
 
 class PlaidTransactionSyncController extends Controller
 {
@@ -193,12 +194,11 @@ class PlaidTransactionSyncController extends Controller
                 $res = $handler($payload, $subtype);
                 if ($res) { $records[] = $res; }
             } catch (\Throwable $e) {
-                Log::channel('plaid_skips')->error('Group handler exception', [
+                Log::channel('plaid_skips')->error('Group handler exception', ApiErrorFormatter::format($e, [
                     'label' => $label,
                     'bank_id' => $bank->id,
-                    'exception' => $e->getMessage(),
                     'request_id' => $requestId,
-                ]);
+                ]));
             }
         }
         return $records;
@@ -240,12 +240,11 @@ class PlaidTransactionSyncController extends Controller
                 payload: $newTransaction
             );
         } catch (\Throwable $e) {
-            Log::channel('plaid_skips')->error('ADD Failed processing transaction', [
+            Log::channel('plaid_skips')->error('ADD Failed processing transaction', ApiErrorFormatter::format($e, [
                 'bank_id' => $bank->id,
-                'exception' => $e->getMessage(),
                 'plaid_transaction_id' => $newTransaction['transaction_id'] ?? null,
                 'request_id' => $requestId,
-            ]);
+            ]));
             return null;
         }
     }
@@ -275,13 +274,12 @@ class PlaidTransactionSyncController extends Controller
                 matchVia: $matchedVia
             );
         } catch (\Throwable $e) {
-            Log::channel('plaid_skips')->error('Failed processing modified transaction', [
+            Log::channel('plaid_skips')->error('Failed processing modified transaction', ApiErrorFormatter::format($e, [
                 'bank_id' => $bank->id,
-                'exception' => $e->getMessage(),
                 'plaid_transaction_id' => $modTransaction['transaction_id'] ?? null,
                 'pending_transaction_id' => $modTransaction['pending_transaction_id'] ?? null,
                 'request_id' => $requestId,
-            ]);
+            ]));
             return null;
         }
     }
@@ -341,21 +339,19 @@ class PlaidTransactionSyncController extends Controller
                     ]
                 );
             } catch (\Throwable $inner) {
-                Log::channel('plaid_skips')->warning('Removed transaction delete failed', [
+                Log::channel('plaid_skips')->warning('Removed transaction delete failed', ApiErrorFormatter::format($inner, [
                     'transaction_id' => $t->id,
                     'plaid_transaction_id' => $plaidTransactionId,
                     'bank_id' => $bank->id,
-                    'error' => $inner->getMessage(),
                     'request_id' => $requestId,
-                ]);
+                ]));
             }
         } catch (\Throwable $e) {
-            Log::channel('plaid_skips')->error('Removed transaction exception', [
+            Log::channel('plaid_skips')->error('Removed transaction exception', ApiErrorFormatter::format($e, [
                 'plaid_transaction_id' => $removedTransaction['transaction_id'] ?? null,
                 'bank_id' => $bank->id,
-                'exception' => $e->getMessage(),
                 'request_id' => $requestId,
-            ]);
+            ]));
             return null;
         }
         return null;

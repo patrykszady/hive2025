@@ -3,14 +3,13 @@
         <div class="grid max-w-xl grid-cols-5 gap-4 xl:relative lg:max-w-5xl sm:px-6">
             <div class="col-span-5 space-y-4 lg:col-span-2 lg:h-32 lg:sticky lg:top-5">
                 <flux:card>
-                    <flux:heading size="lg">{{$form->payee_name}} Payment</flux:heading>
-                    <flux:subheading><i>Create a Payment for {{$form->payee_name}}</i></flux:subheading>
+                    <flux:heading size="lg">{{$payeeName}} Payment</flux:heading>
+                    <flux:subheading><i>Create a Payment for {{$payeeName}}</i></flux:subheading>
                     <flux:separator variant="subtle" />
                     <x-cards.body :class="'space-y-2 my-2'">
                         {{-- PAYEE --}}
                         <x-forms.one_line label="Payee">
-                            <flux:input wire:model.live="form.payee_name" type="text" disabled />
-                            <flux:error name="form.payee_name" />
+                            <flux:input type="text" disabled value="{{$payeeName}}" />
                         </x-forms.one_line>
 
                         @can('viewAnyPayment', App\Models\Timesheet::class)
@@ -27,7 +26,7 @@
                         @endcan
                     </div>
 
-                    <flux:error name="weekly_timesheets_total" />
+                    <flux:error name="payment_total" />
                 </flux:card>
             </div>
             <div class="col-span-5 space-y-2 lg:col-span-3 lg:col-start-3">
@@ -43,7 +42,7 @@
                                 <div class="flex justify-between">
                                     <flux:heading size="lg">{{'Week of ' . $weekly_project_timesheets->first()->date->startOfWeek()->toFormattedDateString()}}</flux:heading>
                                     <flux:button disabled>
-                                        {{ money($weekly_project_timesheets->where('checkbox', true)->sum('amount')) }}
+                                        {{ money($weekly_project_timesheets->filter(fn($t) => ($selectedWeeklyTimesheets[$t->id] ?? false))->sum('amount')) }}
                                     </flux:button>
                                 </div>
 
@@ -91,7 +90,7 @@
                                 <div class="flex justify-between">
                                     <flux:heading size="lg">{{'Week of ' . $weekly_project_timesheets->first()->date->startOfWeek()->toFormattedDateString()}}</flux:heading>
                                     <flux:button disabled>
-                                        {{ money($weekly_project_timesheets->where('checkbox', true)->sum('amount')) }}
+                                        {{ money($weekly_project_timesheets->filter(fn($t) => ($selectedEmployeeWeeklyTimesheets[$t->id] ?? false))->sum('amount')) }}
                                     </flux:button>
                                 </div>
 
@@ -133,7 +132,7 @@
                         <div class="flex justify-between">
                             <flux:heading size="lg">{{ $user->first_name }}</b> Paid For Expenses</flux:heading>
                             <flux:button disabled>
-                                {{ money($user_paid_expenses->where('checkbox', true)->sum('amount')) }}
+                                {{ money($user_paid_expenses->filter(fn($e) => ($selectedUserPaidExpenses[$e->id] ?? false))->sum('amount')) }}
                             </flux:button>
                         </div>
 
@@ -177,7 +176,7 @@
                         <div class="flex justify-between">
                             <flux:heading size="lg">{{ $user->first_name }}</b> owns for Expenses</flux:heading>
                             <flux:button disabled>
-                                -{{ money($user_reimbursement_expenses->where('checkbox', true)->sum('amount')) }}
+                                -{{ money($user_reimbursement_expenses->filter(fn($e) => ($selectedUserReimbursementExpenses[$e->id] ?? false))->sum('amount')) }}
                             </flux:button>
                         </div>
 

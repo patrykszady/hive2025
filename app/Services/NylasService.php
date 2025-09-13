@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\CompanyEmail;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
 
@@ -11,14 +12,20 @@ use Carbon\Carbon;
 
 use Exception;
 use App\Support\ApiJsonProxy;
+use App\Support\ApiErrorFormatter;
 
 class NylasService
 {
     private $httpClient;
+    private $baseUrl;
+    private $apiKey;
+
 
     public function __construct(Client $client)
     {
         $this->httpClient = $client;
+        $this->baseUrl = 'https://api.us.nylas.com/v3';
+        $this->apiKey = config('nylas.api_key');
     }
 
     /**
@@ -29,10 +36,10 @@ class NylasService
     public function getAuthUrl(): array
     {
         // Manually build the authentication URL
-        $url = 'https://api.us.nylas.com/v3/connect/auth';
+        $url = $this->baseUrl . '/connect/auth';
         $params = [
-            'client_id' => env('NYLAS_CLIENT_ID'),
-            'redirect_uri' => env('NYLAS_REDIRECT_URI'),
+            'client_id' => config('nylas.client_id'),
+            'redirect_uri' => config('nylas.redirect_uri'),
             'response_type' => 'code',
             'access_type' => 'online',
         ];
@@ -50,16 +57,16 @@ class NylasService
     public function exchangeAuthCodeForToken($code): array
     {
         try {
-            $url = "https://api.us.nylas.com/v3/connect/token";
+            $url = $this->baseUrl . '/connect/token';
 
             $response = $this->httpClient->post($url, [
                 'form_params' => [
-                    'client_id' => env('NYLAS_CLIENT_ID'),
-                    'client_secret' => env('NYLAS_API_KEY'),
+                    'client_id' => config('nylas.client_id'),
+                    'client_secret' => $this->apiKey,
                     'grant_type' => 'authorization_code',
                     'code' => $code,
-                    'redirect_uri' => env('NYLAS_REDIRECT_URI'),
-                    'code_verifier' => 'nylas',
+                    'redirect_uri' => config('nylas.redirect_uri'),
+                    'code_verifier' => config('nylas.pkce_code_verifier', 'nylas'),
                 ],
             ]);
 
@@ -67,7 +74,10 @@ class NylasService
 
             return $data;
         } catch (\Exception $e) {
-            Log::error("Token Exchange Failed: " . $e->getMessage());
+            Log::channel('nylas')->error('Token Exchange Failed', ApiErrorFormatter::format($e, [
+                'code' => $code,
+                'data' => $data ?? null,
+            ]));
             return ['error' => $e->getMessage()];
         }
     }
@@ -106,12 +116,12 @@ class NylasService
     {
         try {
             // Endpoint for fetching existing folders
-            $url = "https://api.us.nylas.com/v3/grants/{$grantId}/folders";
+            $url = $this->baseUrl . "/grants/{$grantId}/folders";
 
             // Make the HTTP request
             $response = $this->httpClient->get($url, [
                 'headers' => [
-                    'Authorization' => 'Bearer ' . env('NYLAS_API_KEY'),
+                    'Authorization' => 'Bearer ' . $this->apiKey,
                 ],
             ]);
 
@@ -128,8 +138,11 @@ class NylasService
 
             return $matchedFolder ?: null;
         } catch (RequestException $e) {
-            // Log the error and return null
-            Log::error("Nylas Get Folder API Error: " . $e->getMessage());
+            Log::channel('nylas')->error('Get Folder API Error', ApiErrorFormatter::format($e, [
+                'grant_id' => $grantId,
+                'folder_name' => $folderName,
+                'parent_id' => $parentId,
+            ]));
             return null;
         }
     }
@@ -141,7 +154,7 @@ class NylasService
     {
         try {
             // Endpoint for Nylas Folder Creation API
-            $url = "https://api.us.nylas.com/v3/grants/{$grantId}/folders";
+            $url = $this->baseUrl . "/grants/{$grantId}/folders";
 
             // Make the HTTP request to create the folder
             $response = $this->httpClient->post($url, [
@@ -150,7 +163,7 @@ class NylasService
                     'parent_id' => $parentId,
                 ],
                 'headers' => [
-                    'Authorization' => 'Bearer ' . env('NYLAS_API_KEY'),
+                    'Authorization' => 'Bearer ' . $this->apiKey,
                 ],
             ]);
 
@@ -160,31 +173,40 @@ class NylasService
             // Return the created folder's data
             return $data ?? [];
         } catch (RequestException $e) {
-            // Log the error and return an empty array
-            Log::error("Nylas Folder API Error: " . $e->getMessage());
+            Log::channel('nylas')->error('Folder API Error', ApiErrorFormatter::format($e, [
+                'grant_id' => $grantId,
+                'folder_name' => $folderName,
+                'parent_id' => $parentId,
+            ]));
             return ['error' => $e->getMessage()];
         }
     }
 
-    public function moveEmailToFolder($messageId, $folderId, $grantId)
+    public function moveEmailToFolder($messageId, $folderId, $grantId, int $companyEmailId): bool
     {
-        $apiKey = env('NYLAS_API_KEY');
-        $url = "https://api.us.nylas.com/v3/grants/{$grantId}/messages/{$messageId}";
+        $url = $this->baseUrl . "/grants/{$grantId}/messages/{$messageId}";
 
         // Build the request body dynamically
         $body = ['folders' => [$folderId]];
 
         $response = Http::withHeaders([
-            'Authorization' => "Bearer {$apiKey}",
+            'Authorization' => "Bearer {$this->apiKey}",
             'Content-Type' => 'application/json'
         ])->patch($url, $body);
 
         if (!$response->successful()) {
-            Log::error("Failed to move email: " . $response->body());
-            // throw new Exception('Failed to move email: ' . $response->status());
+            Log::channel('nylas')->error($companyEmailId . " Email move failed", [
+                'message_id' => $messageId,
+                'folder_id' => $folderId,
+                'grant_id' => $grantId,
+                'status_code' => $response->status(),
+                'response_body' => $response->body(),
+            ]);
+            return false;
         }
+        
+        return true;
     }
-
     /**
      * Fetch consolidated order details for a given grant ID.
      *
@@ -194,11 +216,11 @@ class NylasService
     public function getConsolidatedOrder(string $grantId): ?array
     {
         try {
-            $url = "https://api.us.nylas.com/v3/grants/{$grantId}/consolidated-order";
+            $url = $this->baseUrl . "/grants/{$grantId}/consolidated-order";
 
             $response = $this->httpClient->get($url, [
                 'headers' => [
-                    'Authorization' => 'Bearer ' . env('NYLAS_API_KEY'),
+                    'Authorization' => 'Bearer ' . $this->apiKey,
                     'Accept' => 'application/json, application/gzip',
                     'Content-Type' => 'application/json',
                 ],
@@ -206,234 +228,198 @@ class NylasService
 
             return json_decode($response->getBody(), true); // Parse and return the response
         } catch (Exception $e) {
-            // Log error for debugging
-            Log::error("Error fetching consolidated order for Grant ID {$grantId}: " . $e->getMessage());
-            return null; // Return null in case of an error
-        }
-    }
-
-    public function getMessages(array $queryParams = [], string $grantId): ?array
-    {
-        try {
-            // Base URL for Nylas API to fetch messages with included headers
-            $url = "https://api.us.nylas.com/v3/grants/{$grantId}/messages";
-
-            // Append query parameters to the URL if provided
-            if (!empty($queryParams)) {
-                $url .= '?' . http_build_query($queryParams);
-            }
-
-            // Add the specific 'fields' parameter to include headers
-            $url .= (empty($queryParams) ? '?' : '&') . 'fields=include_headers';
-
-            // Perform the HTTP GET request using the HTTP client
-            $response = $this->httpClient->get($url, [
-                'headers' => [
-                    'Authorization' => 'Bearer ' . env('NYLAS_API_KEY'),
-                    'Accept' => 'application/json',
-                    'Content-Type' => 'application/json',
-                ],
-            ]);
-
-            // Decode the response body into an associative array
-            return json_decode($response->getBody(), true);
-        } catch (Exception $e) {
-            // Log the error with Grant ID and the exception message
-            Log::error("Error fetching messages for Grant ID {$grantId}: " . $e->getMessage());
+            Log::channel('nylas')->error('Error fetching consolidated order', ApiErrorFormatter::format($e, [
+                'grant_id' => $grantId,
+            ]));
             return null;
         }
     }
 
-    /**
-     * Retry policy per Nylas v3 guidance:
-     * - Initial attempt with provided limit (e.g., 45)
-     * - First retry with limit = 10
-     * - Second retry with limit = 5
-     * - No third retry
-     * Returns the `data` array or [] when all attempts fail.
-     */
-    public function getMessagesWithRetry(array $queryParams, string $grantId, int $maxAttempts = 3, ?string $folderName = null): array
+    public function getMessages(array $queryParams = [], string $grantId, bool $withHeaders = false): array
     {
-        /**
-         * Strategy improvements:
-         *  - Adaptive limit taper: start at provided (capped 50) -> 15 -> 7 -> 3 (if extra attempts requested)
-         *  - Detect 504 provider_timeout_error: immediately reduce limit & add received_after (last 2 days) constraint if not set.
-         *  - Detect 429 rate_limit_error: respect Retry-After header (if any) or exponential backoff with jitter.
-         *  - Optional incremental sync: if caller passed 'since' (Carbon|string) we map to received_after timestamp.
-         *  - Never throw in final failure (controller can continue other folders) – return []. Log enriched context.
-         */
-        $params = $queryParams;
-        if (isset($params['since'])) {
-            try {
-                $sinceTs = $params['since'] instanceof Carbon ? $params['since'] : Carbon::parse($params['since']);
-                $params['received_after'] = $sinceTs->timestamp; // Nylas expects UNIX seconds
-            } catch (\Exception $e) {
-                // Ignore invalid since
-            }
-            unset($params['since']);
+        // Base URL for Nylas API to fetch messages
+        $url = $this->baseUrl . "/grants/{$grantId}/messages";
+
+        // Append query parameters to the URL if provided
+        if (!empty($queryParams)) {
+            $url .= '?' . http_build_query($queryParams);
         }
 
-        $configuredLimits = collect(explode(',', (string) config('nylas.sync.limits', '45,15,7,3')))
-            ->map(fn($v) => (int) trim($v))
-            ->filter(fn($v) => $v > 0)
-            ->values()
-            ->all();
-        if (empty($configuredLimits)) {
-            $configuredLimits = [45,15,7,3];
-        }
-        $initialLimit = isset($params['limit']) && is_numeric($params['limit'])
-            ? (int) $params['limit']
-            : $configuredLimits[0];
-        $initialLimit = min(max($initialLimit, 5), 50);
-        // Replace first element with caller-provided initial limit while keeping fallbacks
-        $adaptiveLimits = $configuredLimits;
-        $adaptiveLimits[0] = $initialLimit;
-        $max = min($maxAttempts, count($adaptiveLimits));
-
-        $lastError = null;
-        $lastStatus = null;
-        $lastRateLimit = null;
-        $baseRateMs = (int) config('nylas.rate_limit.base_backoff_ms', 1500);
-        $maxBackoff = (int) config('nylas.rate_limit.max_backoff_ms', 30000);
-
-        for ($idx = 0; $idx < $max; $idx++) {
-            $params['limit'] = $adaptiveLimits[$idx];
-            try {
-                $resp = $this->getMessages($params, $grantId);
-                if (is_array($resp) && array_key_exists('data', $resp)) {
-                    return [
-                        'messages' => $resp['data'] ?? [],
-                        'failed' => false,
-                        'attempts' => $idx + 1,
-                        'limit_used' => $params['limit'],
-                        'received_after' => $params['received_after'] ?? null,
-                        'status' => $lastStatus,
-                    ];
-                }
-                throw new Exception('Nylas getMessages returned null or invalid payload.');
-            } catch (RequestException $e) {
-                $response = $e->getResponse();
-                $lastStatus = $response?->getStatusCode();
-                $retryAfterHeader = $response?->getHeaderLine('Retry-After');
-                $remaining = $response?->getHeaderLine('X-RateLimit-Remaining');
-                $reset = $response?->getHeaderLine('X-RateLimit-Reset');
-                $bodySnippet = null;
-                if ($response) {
-                    try { $bodySnippet = substr($response->getBody()->getContents(), 0, 300); } catch (\Throwable $t) {}
-                }
-                $msg = $e->getMessage();
-                $lastError = $msg;
-                $is429 = $lastStatus === 429;
-                $is504 = $lastStatus === 504;
-                $is5xx = $lastStatus && $lastStatus >= 500 && $lastStatus < 600;
-                $retryable = $is429 || $is504 || $is5xx;
-
-                if ($is504 && !isset($params['received_after'])) {
-                    $params['received_after'] = now()->subHours(48)->timestamp;
-                }
-
-                Log::channel('nylas')->warning('Nylas getMessages attempt failed', [
-                    'grant_id' => $grantId,
-                    'folder' => $folderName ?? ($params['in'] ?? null),
-                    'attempt' => $idx,
-                    'limit' => $params['limit'],
-                    'status' => $lastStatus,
-                    'received_after' => $params['received_after'] ?? null,
-                    'retry_after_header' => $retryAfterHeader,
-                    'rate_limit_remaining' => $remaining,
-                    'rate_limit_reset' => $reset,
-                    'timeout' => $is504,
-                    'rate_limited' => $is429,
-                    'retryable' => $retryable,
-                    'body_snippet' => $bodySnippet,
-                    'message' => $msg,
-                ]);
-
-                if (!$retryable) {
-                    break; // Do not continue attempts for non-retryable errors
-                }
-
-                if ($is429) {
-                    // Track last rate limit encounter
-                    $lastRateLimit = [
-                        'at' => now()->timestamp,
-                        'retry_after' => $retryAfterHeader,
-                        'remaining' => $remaining,
-                        'reset' => $reset,
-                    ];
-                }
-
-                if ($idx < $max - 1) {
-                    $sleepMs = 0;
-                    if ($is429 && $retryAfterHeader) {
-                        // Retry-After can be seconds or HTTP date
-                        if (is_numeric($retryAfterHeader)) {
-                            $sleepMs = (int) $retryAfterHeader * 1000;
-                        } else {
-                            try {
-                                $sleepMs = max(0, Carbon::parse($retryAfterHeader)->diffInMilliseconds(now()));
-                            } catch (\Throwable $t) {
-                                $sleepMs = $baseRateMs * ($idx + 1);
-                            }
-                        }
-                    } elseif ($is429) {
-                        $sleepMs = $baseRateMs * ($idx + 1);
-                    } elseif ($is504) {
-                        $sleepMs = 700 + ($idx * 350);
-                    } elseif ($is5xx) {
-                        $sleepMs = 500 + ($idx * 300);
-                    } else {
-                        $sleepMs = 400 + ($idx * 200);
-                    }
-                    $sleepMs = (int) min($sleepMs + random_int(100, 600), $maxBackoff);
-                    usleep($sleepMs * 1000);
-                }
-            } catch (Exception $e) {
-                // Non-HTTP exception (parse, runtime)
-                $lastError = $e->getMessage();
-                $lastStatus = null;
-                Log::channel('nylas')->warning('Nylas getMessages internal error', [
-                    'grant_id' => $grantId,
-                    'folder' => $folderName ?? ($params['in'] ?? null),
-                    'attempt' => $idx,
-                    'limit' => $params['limit'],
-                    'message' => $lastError,
-                ]);
-                if ($idx >= $max -1) { break; }
-            }
+        // Add the specific 'fields' parameter to include headers (using URL approach)
+        if ($withHeaders) {
+            $url .= (empty($queryParams) ? '?' : '&') . 'fields=include_headers';
         }
 
-        Log::channel('nylas')->error('Nylas getMessages final failure', [
-            'grant_id' => $grantId,
-            'folder' => $folderName ?? ($params['in'] ?? null),
-            'attempts' => $max,
-            'final_limit' => $params['limit'] ?? null,
-            'received_after' => $params['received_after'] ?? null,
-            'last_error' => $lastError,
-            'last_status' => $lastStatus,
-            'last_rate_limit' => $lastRateLimit,
+        // Perform the HTTP GET request using the HTTP client
+        $response = $this->httpClient->get($url, [
+            'headers' => [
+                'Authorization' => 'Bearer ' . $this->apiKey,
+                'Accept' => 'application/json',
+                'Content-Type' => 'application/json',
+            ],
         ]);
-        // Return meta indicating failure instead of throwing
+
+        // Decode the response body into an associative array
+        return json_decode($response->getBody(), true) ?? [];
+    }
+
+    /**
+     * Fetch messages for a specific folder with date filtering.
+     * Uses 'received_after' timestamp parameter directly.
+     */
+    public function getMessagesForFolder(array $queryParams, string $grantId, string $folderName, CompanyEmail $companyEmail): array
+    {
+        $params = $queryParams;
+        $params['limit'] = config('nylas.message_limit');
+
+        try {
+            // Pass false for $withHeaders while listing; include_headers seems rejected (400) on list queries.
+            $resp = $this->getMessages($params, $grantId, true);
+            
+            if (is_array($resp) && array_key_exists('data', $resp)) {
+                $messages = $resp['data'];
+                Log::channel('nylas')->info($companyEmail->id . ' messages fetched', [
+                    'grant_id' => $grantId,
+                    'folder' => $folderName,
+                    'count' => count($messages),
+                    'received_after_timestamp' => $params['received_after'] ?? null,
+                ]);
+                return $messages;
+            }
+            
+            Log::channel('nylas')->warning($companyEmail->id . ' Invalid response format', [
+                'grant_id' => $grantId
+            ]);
+            return [];
+            
+        } catch (RequestException $e) {            
+            Log::channel('nylas')->error($companyEmail->id . ' API request failed', 
+                ApiErrorFormatter::format($e, [
+                    'grant_id' => $grantId,
+                    'folder' => $folderName,
+                ]));
+            return [];
+            
+        } catch (Exception $e) {
+            Log::channel('nylas')->error($companyEmail->id . ' request error', ApiErrorFormatter::format($e, [
+                'grant_id' => $grantId,
+                'folder' => $folderName,
+            ]));
+            return [];
+        }
+    }
+
+    /**
+     * Multi-folder sync with automatic cursor management.
+     * Handles cursor persistence and incremental fetching internally.
+     */
+    public function syncMessages(array $folders, CompanyEmail $companyEmail): array
+    {
+        $grantId = $companyEmail->grant_id;
+        $allMessages = [];
+        $existingCursors = $companyEmail->api_json['cursors'] ?? [];
+        $newCursors = $existingCursors;
+        
+        // Create a mapping from folder IDs to friendly names
+        $folderIdToName = array_flip($companyEmail->api_json['folders'] ?? []);
+        
+        foreach ($folders as $folder) {
+            $folderKey = (string) $folder;
+            $friendlyName = $folderIdToName[$folderKey] ?? $folderKey;
+            
+            $params = [
+                'limit' => config('nylas.message_limit'),
+                'in' => $folderKey,
+            ];
+            
+            // Determine the earliest date to fetch from
+            $isFirstSync = !isset($existingCursors[$friendlyName]);
+            
+            if ($isFirstSync) {
+                // First sync - always fetch last 10 days
+                $params['received_after'] = Carbon::now()->subDays(10)->timestamp;
+                
+                Log::channel('nylas')->info($companyEmail->id . " First sync for folder {$friendlyName}", [
+                    'grant_id' => $grantId,
+                    'folder' => $friendlyName,
+                    'folder_id' => $folderKey,
+                    'received_after_timestamp' => $params['received_after'],
+                    'received_after_date' => Carbon::createFromTimestamp($params['received_after'])->toISOString(),
+                ]);
+            } else {
+                // Subsequent sync - always fetch last 3 days
+                $params['received_after'] = Carbon::now()->subDays(3)->timestamp;
+                
+                Log::channel('nylas')->info($companyEmail->id . " Subsequent sync for folder {$friendlyName}", [
+                    'grant_id' => $grantId,
+                    'folder' => $friendlyName,
+                    'folder_id' => $folderKey,
+                    'received_after_timestamp' => $params['received_after'],
+                    'received_after_date' => Carbon::createFromTimestamp($params['received_after'])->toISOString(),
+                ]);
+            }
+            
+            $messages = $this->getMessagesForFolder($params, $grantId, $friendlyName, $companyEmail);
+            
+            // If folder has less than 25 items, fetch all messages regardless of received_after
+            if (count($messages) < 25) {
+                $paramsAll = $params;
+                unset($paramsAll['received_after']); // Remove date filter to get all messages
+                
+                Log::channel('nylas')->info($companyEmail->id . " Fetching all messages for folder {$friendlyName}", [
+                    'grant_id' => $grantId,
+                    'folder' => $friendlyName,
+                    'initial_count' => count($messages),
+                ]);
+                
+                $messages = $this->getMessagesForFolder($paramsAll, $grantId, $friendlyName, $companyEmail);
+            }
+            
+            if (!empty($messages)) {
+                // Update cursor to latest message date to prevent re-fetching
+                $latestDate = collect($messages)
+                    ->pluck('date')
+                    ->filter()
+                    ->map(fn($d) => is_numeric($d) ? (int) $d : Carbon::parse($d)->timestamp)
+                    ->filter()
+                    ->max();
+                    
+                if ($latestDate) {
+                    $newCursors[$friendlyName] = $latestDate;
+                }
+                
+                $allMessages = array_merge($allMessages, $messages);
+            } else {
+                // No new messages, but keep the existing cursor
+                if (isset($existingCursors[$friendlyName])) {
+                    $newCursors[$friendlyName] = $existingCursors[$friendlyName];
+                }
+            }
+        }
+        
+        // Update cursors in the CompanyEmail model
+        if ($newCursors !== $existingCursors) {
+            $apiJson = $companyEmail->api_json;
+            $apiJson['cursors'] = $newCursors;
+            $companyEmail->update(['api_json' => $apiJson]);
+        }
+        
         return [
-            'messages' => [],
-            'failed' => true,
-            'attempts' => $max,
-            'limit_used' => $params['limit'] ?? null,
-            'received_after' => $params['received_after'] ?? null,
-            'error' => $lastError,
-            'status' => $lastStatus,
-            'rate_limit' => $lastRateLimit,
+            'messages' => $allMessages,
+            'cursors' => $newCursors,
         ];
     }
 
-    public function downloadAttachment($attachmentId, $grantId, $messageId)
+    /**
+     * Download an attachment from Nylas API.
+     */
+    public function downloadAttachment(string $attachmentId, string $grantId, string $messageId): string
     {
-        $apiKey = env('NYLAS_API_KEY');
-        $url = "https://api.us.nylas.com/v3/grants/{$grantId}/attachments/{$attachmentId}/download?message_id={$messageId}";
+        $url = $this->baseUrl . "/grants/{$grantId}/attachments/{$attachmentId}/download?message_id={$messageId}";
 
         // Make the GET request
         $response = Http::withHeaders([
-            'Authorization' => "Bearer {$apiKey}",
+            'Authorization' => "Bearer {$this->apiKey}",
             'Accept' => 'application/octet-stream',
         ])->get($url);
 
@@ -442,108 +428,5 @@ class NylasService
         } else {
             throw new Exception('Failed to download attachment: ' . $response->status());
         }
-    }
-
-    /**
-     * Perform a multi-folder sync with circuit breaker & incremental cursors.
-     *
-     * @param string $grantId
-     * @param array $apiJson Current api_json structure from CompanyEmail (normalized).
-     * @param array $folders List of folder identifiers to sync (names or IDs depending on usage).
-     * @param int $baseLimit Initial fetch limit to attempt.
-     * @param int $failureThreshold Number of consecutive failures before pausing a folder.
-     * @param int $pauseMinutes Minutes to pause a folder after threshold reached.
-    * @return array{messages: array, api_json: array} Aggregated messages and ONLY the changed api_json fragments (not the full column) to patch.
-     */
-    public function syncFolders(
-        string $grantId,
-        array|ApiJsonProxy $apiJson,
-        array $folders,
-        int $baseLimit = 45,
-        int $failureThreshold = 3,
-        int $pauseMinutes = 15
-    ): array {
-        // Support being passed the ApiJsonProxy directly from the model cast.
-        if ($apiJson instanceof ApiJsonProxy) {
-            $apiJson = $apiJson->toArray();
-        }
-        $all = [];
-
-        foreach ($folders as $folder) {
-            $folderKey = (string) $folder;
-            $apiJson['failures'] = $apiJson['failures'] ?? [];
-            $apiJson['sync_cursors'] = $apiJson['sync_cursors'] ?? [];
-
-            // Normalize failure metadata to ensure expected keys exist
-            $failureMeta = $apiJson['failures'][$folderKey] ?? [];
-            if (! isset($failureMeta['count']) || ! is_int($failureMeta['count'])) {
-                $failureMeta['count'] = (int) ($failureMeta['count'] ?? 0);
-            }
-            if (! array_key_exists('paused_until', $failureMeta)) {
-                $failureMeta['paused_until'] = null; // epoch timestamp when folder unpauses
-            }
-            // Persist normalization back if original structure was incomplete
-            if (! isset($apiJson['failures'][$folderKey]) || array_diff_key(['count'=>0,'paused_until'=>null], $apiJson['failures'][$folderKey])) {
-                $apiJson['failures'][$folderKey] = $failureMeta;
-                $fragmentsToPersist['failures'][$folderKey] = $failureMeta;
-            }
-            if ($failureMeta['paused_until'] && now()->timestamp < $failureMeta['paused_until']) {
-                Log::channel('nylas')->info('Skipping folder due to circuit breaker', [
-                    'grant_id' => $grantId,
-                    'folder' => $folderKey,
-                    'resume_in_s' => $failureMeta['paused_until'] - now()->timestamp,
-                ]);
-                continue;
-            }
-
-            $sinceTs = $apiJson['sync_cursors'][$folderKey] ?? null;
-            $params = [
-                'limit' => $baseLimit,
-                'in' => $folderKey,
-            ];
-            if ($sinceTs) {
-                try {
-                    $params['since'] = Carbon::createFromTimestamp($sinceTs)->subMinute();
-                } catch (\Throwable $e) {
-                    // ignore invalid timestamp
-                }
-            }
-
-            $result = $this->getMessagesWithRetry($params, $grantId, 3, $folderKey);
-            $messages = $result['messages'] ?? [];
-
-            if ($result['failed'] ?? false) {
-                $failureMeta['count'] = ($failureMeta['count'] ?? 0) + 1;
-                if ($failureMeta['count'] >= $failureThreshold) {
-                    $failureMeta['paused_until'] = now()->addMinutes($pauseMinutes)->timestamp;
-                    $failureMeta['count'] = 0;
-                }
-                $apiJson['failures'][$folderKey] = $failureMeta;
-                continue; // skip processing failed folder
-            } else {
-                $apiJson['failures'][$folderKey] = ['count' => 0, 'paused_until' => null];
-            }
-
-            if (!empty($messages)) {
-                $maxDate = collect($messages)->max(fn($m) => isset($m['date']) ? Carbon::parse($m['date'])->timestamp : 0);
-                if ($maxDate) {
-                    $apiJson['sync_cursors'][$folderKey] = max(($apiJson['sync_cursors'][$folderKey] ?? 0), $maxDate);
-                }
-            }
-
-            $all = array_merge($all, $messages);
-        }
-
-        // Only return keys that actually changed so callers can patch them without
-        // resending the entire stored JSON column (protects unrelated metadata).
-        $apiPatch = [
-            'sync_cursors' => $apiJson['sync_cursors'] ?? [],
-            'failures' => $apiJson['failures'] ?? [],
-        ];
-
-        return [
-            'messages' => $all,
-            'api_json' => $apiPatch,
-        ];
     }
 }

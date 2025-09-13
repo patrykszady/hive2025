@@ -22,8 +22,7 @@ class ApiJson implements CastsAttributes
         // Provide stable defaults
         $normalized = [
             'folders' => $decoded['folders'] ?? [],
-            'sync_cursors' => $decoded['sync_cursors'] ?? [],
-            'failures' => $decoded['failures'] ?? [],
+            'cursors' => $decoded['cursors'] ?? [],
         ] + $decoded;
 
         return new ApiJsonProxy($model, $key, $normalized);

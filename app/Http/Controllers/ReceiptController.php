@@ -28,6 +28,7 @@ use Intervention\Image\Facades\Image;
 use Nesk\Puphpeteer\Puppeteer;
 use setasign\Fpdi\Fpdi;
 use Symfony\Component\DomCrawler\Crawler;
+use App\Support\ApiErrorFormatter;
 
 class ReceiptController extends Controller
 {
@@ -188,7 +189,11 @@ class ReceiptController extends Controller
                     $receipt_account->options += ['errors' => json_decode($error, true)];
                     $receipt_account->save();
 
-                    Log::channel('company_emails_login_error')->error($error);
+                    Log::channel('company_emails_login_error')->error('Amazon token refresh failed', ApiErrorFormatter::format($e, [
+                        'receipt_account_id' => $receipt_account->id,
+                        'belongs_to_vendor_id' => $receipt_account->belongs_to_vendor_id,
+                        'has_response' => $e->hasResponse(),
+                    ]));
                     continue;
                 }
 

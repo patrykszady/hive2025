@@ -9,9 +9,7 @@ use Livewire\Form;
 
 class TimesheetPaymentForm extends Form
 {
-    public $payee_name = '';
     public $first_name = '';
-    public $via_vendor_back = null;
     public $date = null;
     public $paid_by = null;
     public $invoice = null;
@@ -22,9 +20,7 @@ class TimesheetPaymentForm extends Form
     public function rules(): array
     {
         return [
-            'payee_name'      => 'nullable',
             'first_name'      => 'nullable',
-            'via_vendor_back' => 'nullable',
             'date'            => 'required|date|before_or_equal:today|after:2017-01-01',
             'paid_by' => "required_if:bank_account_id,\"\"",
             'invoice' => 'required_with:paid_by',
@@ -33,25 +29,17 @@ class TimesheetPaymentForm extends Form
 
     public function setUser($user)
     {
-        $this->payee_name = $user->payee_name;
         $this->first_name = $user->first_name;
-        $this->via_vendor_back = $user->via_vendor_back;
 
         $this->date = today()->format('Y-m-d');
     }
 
     public function store()
     {
-        //complete this on CheckObserver
-        if (! is_null($this->component->user->pivot_user_vendor)) {
-            $via_vendor = Vendor::findOrFail($this->component->user->pivot_user_vendor);
-            if ($via_vendor->registration) {
-                if ($via_vendor->registration['registered']) {
-                }
-            }
-        }
+        // Use resolved viaVendor from parent component (if present) instead of dynamic pivot property
+        $via_vendor = $this->component->viaVendor; // may be null
 
-        if (isset($via_vendor)) {
+        if ($via_vendor) {
             $check_user_id = null;
             $check_vendor_id = $via_vendor->id;
         } else {
@@ -73,82 +61,71 @@ class TimesheetPaymentForm extends Form
             ]);
         }
 
-        //weekly_timesheets
-        foreach ($this->component->weekly_timesheets->where('checkbox', 'true') as $weekly_timesheet) {
-            //ignore 'checkbox' attribute when saving
-            $weekly_timesheet->offsetUnset('checkbox');
+        // Helper closures to test selection arrays (safe default false)
+        $isSelectedTimesheet = fn($id) => (bool) ($this->component->selectedWeeklyTimesheets[$id] ?? false);
+        $isSelectedEmployeeTimesheet = fn($id) => (bool) ($this->component->selectedEmployeeWeeklyTimesheets[$id] ?? false);
+        $isSelectedPaidExpense = fn($id) => (bool) ($this->component->selectedUserPaidExpenses[$id] ?? false);
+        $isSelectedReimbExpense = fn($id) => (bool) ($this->component->selectedUserReimbursementExpenses[$id] ?? false);
+
+        // Weekly timesheets (user's own)
+        foreach ($this->component->weekly_timesheets as $weekly_timesheet) {
+            if (! $isSelectedTimesheet($weekly_timesheet->id)) { continue; }
             $weekly_timesheet->check_id = isset($check) ? $check->id : null;
             $weekly_timesheet->paid_by = isset($check) ? null : $this->paid_by;
             $weekly_timesheet->invoice = isset($check) ? null : $this->invoice;
             $weekly_timesheet->save();
         }
 
-        //employee_weekly_timesheets
-        //09-05-2023 can we get here if check is not set ? shouldnt... validate if $employee_weekly_timesheets ? addError ..has to be paid by a Check not Paid by.
-        foreach ($this->component->employee_weekly_timesheets->where('checkbox', 'true') as $weekly_timesheet) {
-            //ignore 'checkbox'
-            $weekly_timesheet->offsetUnset('checkbox');
-            $weekly_timesheet->check_id = $check->id;
-            $weekly_timesheet->save();
+        // Employee timesheets paid by user (must always attach to created check when paying)
+        if (isset($check)) {
+            foreach ($this->component->employee_weekly_timesheets as $weekly_timesheet) {
+                if (! $isSelectedEmployeeTimesheet($weekly_timesheet->id)) { continue; }
+                $weekly_timesheet->check_id = $check->id;
+                $weekly_timesheet->save();
+            }
         }
 
-        //user_paid_expenses
-        foreach ($this->component->user_paid_expenses->where('checkbox', 'true') as $expense) {
-            //ignore 'checkbox'
-            $expense->offsetUnset('checkbox');
+        // User paid expenses
+        foreach ($this->component->user_paid_expenses as $expense) {
+            if (! $isSelectedPaidExpense($expense->id)) { continue; }
             $expense->check_id = isset($check) ? $check->id : null;
-            // $expense->paid_by = isset($check) ? NULL : $this->paid_by;
             $expense->save();
         }
 
-        //user_reimbursement_expenses
-        foreach ($this->component->user_reimbursement_expenses->where('checkbox', 'true') as $expense) {
-            //ignore 'checkbox'
-            $expense->offsetUnset('checkbox');
+        // User reimbursement expenses (deductions)
+        foreach ($this->component->user_reimbursement_expenses as $expense) {
+            if (! $isSelectedReimbExpense($expense->id)) { continue; }
             $expense->check_id = isset($check) ? $check->id : null;
             $expense->paid_by = isset($check) ? null : $this->paid_by;
             $expense->save();
         }
 
-        //user_paid_by_reimbursements
-        // foreach ($this->component->user_paid_by_reimbursements->where('checkbox', 'true') as $expense) {
-        //     //ignore 'checkbox'
-        //     $expense->offsetUnset('checkbox');
-        //     $expense->check_id = isset($check) ? $check->id : null;
-        //     // $expense->paid_by = isset($check) ? NULL : $this->paid_by;
-        //     $expense->save();
+        // Observer logic for via vendor
+        // if ($via_vendor) {
+        //     if ($via_vendor->registration && ($via_vendor->registration['registered'] ?? false)) {
+        //         app(\App\Http\Controllers\VendorRegisteredController::class)
+        //             ->create_payment_from_check(
+        //                 $check,
+        //                 $check->timesheets,
+        //                 $via_vendor
+        //             );
+        //     }
         // }
 
-        //find Check and create_payment_from_check if via_vendor?
-        //06-01-2023 should be done in observer
-        if (isset($via_vendor)) {
-            if ($via_vendor->registration) {
-                if ($via_vendor->registration['registered']) {
-                    app(\App\Http\Controllers\VendorRegisteredController::class)
-                        ->create_payment_from_check(
-                            $check,
-                            $check->timesheets,
-                            $via_vendor
-                        );
-                }
-            }
-        }
-
         if (isset($check)) {
-            $expenses = $check->expenses;
+            $expenses = $check->expenses; // reload attached expenses (after loops)
             foreach ($expenses as $expense) {
                 if ($expense->reimbursment != null && $expense->reimbursment != 'Client') {
-                    $expense->amount = substr($expense->amount, 0, 1) == '-' ? $expense->amount : '-'.$expense->amount;
+                    // Ensure reimbursements reflect as negative for total if not already
+                    $expense->amount = str_starts_with((string) $expense->amount, '-') ? $expense->amount : '-'.$expense->amount;
                 }
             }
-
-            //$check->expenses->whereNotNull('paid_by')->whereNull('reimbursment')->sum('amount') +
+            // Recalculate check amount from attached relations
             $check->amount = $check->timesheets->sum('amount') + $expenses->sum('amount');
             $check->save();
-
             return $check;
-        } else {
-            return 'timesheets';
         }
+
+        return 'timesheets';
     }
 }

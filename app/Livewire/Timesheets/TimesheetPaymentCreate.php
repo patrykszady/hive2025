@@ -2,7 +2,7 @@
 
 namespace App\Livewire\Timesheets;
 
-use App\Models\BankAccount;
+// Removed unused BankAccount import (not referenced in this component)
 use App\Models\Expense;
 use App\Models\Timesheet;
 use App\Models\User;
@@ -37,45 +37,58 @@ class TimesheetPaymentCreate extends Component
     public array $selectedUserReimbursementExpenses = [];
     public $employees = [];
     public $view_text = [];
+    // Resolved via vendor (if user is payable through an intermediary vendor)
+    public ?Vendor $viaVendor = null;
+    // Mirror of computed weekly total for validation purposes
+    public float $payment_total = 0.0;
+    // Display-only computed payee name (mirrors future Check::owner semantics)
+    public string $payeeName = '';
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 
     protected function rules(): array
     {
-        return $this->componentMergedRules(
-            $this->form->rules(),
+        // Re-introduce prefixed form rules so Livewire validates nested form.* fields
+        // and merge with check-related rules from HandlesChecks trait.
+        return array_merge(
+            // prefix each form field with form.
+            collect($this->form->rules())
+                ->mapWithKeys(fn($rule, $key) => ["form.$key" => $rule])
+                ->toArray(),
+            $this->handlesChecksRules(),
             [
-                'weekly_timesheets.*.checkbox'         => 'nullable',
-                'employee_weekly_timesheets.*.checkbox'  => 'nullable',
-                'user_paid_expenses.*.checkbox'          => 'nullable',
-                'user_reimbursement_expenses.*.checkbox' => 'nullable',
-                // 'user_paid_by_reimbursements.*.checkbox' => 'nullable',
-                // You can also add other top-level rules here if needed.
+                'payment_total' => 'numeric|gt:0',
             ]
         );
+    }
+
+    protected function messages(): array
+    {
+        return [
+            'payment_total.gt' => 'Payment needs to be greater than $0.00',
+        ];
     }
 
     public function mount()
     {
         $this->authorize('viewPayment', [Timesheet::class, $this->user]);
         $this->view_text = [
-            'card_title' => 'Create Daily Hours',
             'button_text' => 'Pay '.$this->user->first_name,
             'form_submit' => 'save',
         ];
 
-        $this->employees = auth()->user()->vendor->users()->where('is_employed', 1)->whereNot('users.id', $this->user->id)->get();
+        // Use scopeEmployed() and whereKeyNot() for clarity
+        $this->employees = auth()->user()->vendor
+            ->users()
+            ->employed()
+            ->whereKeyNot($this->user->getKey())
+            ->get();
 
-        $this->user->pivot_user_vendor = $this->user->vendors()->where('vendors.id', auth()->user()->vendor->id)->first()->pivot->via_vendor_id;
-
-        if (! is_null($this->user->pivot_user_vendor)) {
-            $via_vendor_back = Vendor::withoutGlobalScopes()->findOrFail($this->user->pivot_user_vendor);
-            $this->user->payee_name = $via_vendor_back->business_name;
-            $this->user->via_vendor_back = auth()->user()->vendor;
-        } else {
-            $this->user->payee_name = $this->user->full_name;
-            $this->user->via_vendor_back = $this->user->vendor;
-        }
+        // Resolve via vendor once using accessor (may be null)
+        $this->viaVendor = $this->user->via_vendor;
+        $this->payeeName = $this->viaVendor
+            ? trim($this->viaVendor->business_name)
+            : $this->user->full_name;
 
         $this->weekly_timesheets =
             Timesheet::where('user_id', $this->user->id)
@@ -113,64 +126,27 @@ class TimesheetPaymentCreate extends Component
                 ->get();
         $this->selectedUserReimbursementExpenses = $this->user_reimbursement_expenses->pluck('id')->mapWithKeys(fn ($id) => [$id => false])->toArray();
 
-        // $this->user_paid_by_reimbursements =
-        //     Expense::where('paid_by', $this->user->id)
-        //         ->whereNotIn('reimbursment', ['', 'Client'])
-        //         ->whereNull('check_id')
-        //         ->orderBy('date', 'DESC')
-        //         ->get()
-        //         ->each(function ($item, $key) {
-        //             $item->checkbox = true;
-        //             // $item->amount = -$item->amount;
-        //         })
-        //         ->keyBy('id');
-        // dd($this->user_paid_by_reimbursements);
-
-
-        // Ensure empty collections are still Collections for grouping logic
         if ($this->weekly_timesheets->isEmpty()) { $this->weekly_timesheets = collect(); }
         if ($this->employee_weekly_timesheets->isEmpty()) { $this->employee_weekly_timesheets = collect(); }
         if ($this->user_paid_expenses->isEmpty()) { $this->user_paid_expenses = collect(); }
         if ($this->user_reimbursement_expenses->isEmpty()) { $this->user_reimbursement_expenses = collect(); }
-
-        // if ($this->user_paid_by_reimbursements->isEmpty()) {
-        //     $this->user_paid_by_reimbursements = collect();
-        // }
 
         $this->form->setUser($this->user);
     }
 
     public function updated($field, $value)
     {
+        // Minimal: removed transient checkbox mirroring; selection arrays drive UI & totals directly.
         $this->handleChecksUpdated($field, $value);
     }
 
     public function getWeeklyTimesheetsTotalProperty()
     {
         $total = 0;
-
-        //weekly_timesheets
-    $total += $this->weekly_timesheets->filter(fn ($t) => $this->selectedWeeklyTimesheets[$t->id] ?? false)->sum('amount');
-
-        //employee_weekly_timesheets
-    $employee_weekly_timesheets_total = $this->employee_weekly_timesheets->filter(fn ($t) => $this->selectedEmployeeWeeklyTimesheets[$t->id] ?? false)->sum('amount');
-        $total += $employee_weekly_timesheets_total;
-
-        //user_paid_expenses
-    $user_paid_expenses_total = $this->user_paid_expenses->filter(fn ($e) => $this->selectedUserPaidExpenses[$e->id] ?? false)->sum('amount');
-        $total += $user_paid_expenses_total;
-
-        //user_reimbursement_expenses
-    $total -= $this->user_reimbursement_expenses->filter(fn ($e) => $this->selectedUserReimbursementExpenses[$e->id] ?? false)->sum('amount');
-
-        // //user_paid_by_reimbursements
-        // $user_paid_by_reimbursements = $this->user_paid_by_reimbursements->where('checkbox', true)->sum('amount');
-        // if ($user_paid_by_reimbursements != '0.00') {
-        //     $confirm_disable[] = true;
-        // }
-        // dd($user_paid_by_reimbursements);
-        // $total -= $user_paid_by_reimbursements;
-
+        $total += $this->weekly_timesheets->filter(fn ($t) => $this->selectedWeeklyTimesheets[$t->id] ?? false)->sum('amount');
+        $total += $this->employee_weekly_timesheets->filter(fn ($t) => $this->selectedEmployeeWeeklyTimesheets[$t->id] ?? false)->sum('amount');
+        $total += $this->user_paid_expenses->filter(fn ($e) => $this->selectedUserPaidExpenses[$e->id] ?? false)->sum('amount');
+        $total -= $this->user_reimbursement_expenses->filter(fn ($e) => $this->selectedUserReimbursementExpenses[$e->id] ?? false)->sum('amount');
         return $total;
     }
 
@@ -184,32 +160,21 @@ class TimesheetPaymentCreate extends Component
     public function save()
     {
         $this->authorize('viewAnyPayment', Timesheet::class);
+        // Sync computed total into a concrete property for validation
+        $this->payment_total = (float) $this->weekly_timesheets_total;
 
-        //validate Pay User Total Check is greater than $0 / $this->weekly_timesheets has at least one Item in Collection
-        if ($this->weekly_timesheets_total <= 0) {
-            $this->addError('weekly_timesheets_total', 'Payment needs to be greater than $0.00');
+        $this->validate();
+
+
+        $redirect_route = $this->form->store();
+
+        if ($redirect_route == 'timesheets') {
+            return redirect()->route('timesheets.payments');
         } else {
-            $this->validate();
-            $redirect_route = $this->form->store();
-
-            if ($redirect_route == 'timesheets') {
-                return redirect()->route('timesheets.payments');
-            } else {
-                $check = $redirect_route;
-                // $expenses = $check->expenses;
-                // foreach($expenses as $expense){
-                //     if(is_numeric($expense->reimbursment)){
-                //         $expense->amount = $expense->amount;
-                //     }
-                // }
-
-                //$check->expenses->whereNotNull('paid_by')->whereNull('reimbursment')->sum('amount')
-                // $check->amount = $check->timesheets->sum('amount') + $expenses->sum('amount');
-                $check->amount = $check->amount;
-                $check->save();
-
-                return redirect()->route('checks.show', $check->id);
-            }
+            $check = $redirect_route;
+            $check->amount = $check->amount; // already recalculated in form->store
+            $check->save();
+            return redirect()->route('checks.show', $check->id);
         }
     }
 
@@ -217,7 +182,6 @@ class TimesheetPaymentCreate extends Component
     public function render()
     {
         $this->authorize('viewPayment', [Timesheet::class, $this->user]);
-
         return view('livewire.timesheets.payment-form');
     }
 }

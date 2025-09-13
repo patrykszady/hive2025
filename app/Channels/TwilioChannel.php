@@ -5,6 +5,7 @@ namespace App\Channels;
 use Illuminate\Notifications\Notification;
 use Illuminate\Support\Facades\Log;
 use Twilio\Rest\Client;
+use App\Support\ApiErrorFormatter;
 
 class TwilioChannel
 {
@@ -40,11 +41,10 @@ class TwilioChannel
                 ]
             );
         } catch (\Exception $e) {
-            Log::channel('task_reminder')->error("SMS failed to send", [
+            Log::channel('task_reminder')->error('SMS failed to send', ApiErrorFormatter::format($e, [
                 'user_id' => $notifiable->id,
                 'phone' => $phone,
-                'error' => $e->getMessage()
-            ]);
+            ]));
 
             throw $e;
         }

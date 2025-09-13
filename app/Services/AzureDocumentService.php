@@ -4,6 +4,7 @@ namespace App\Services;
 
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
+use App\Support\ApiErrorFormatter;
 
 use setasign\Fpdi\Fpdi;
 
@@ -141,8 +142,10 @@ class AzureDocumentService
                 }
             }
         } catch (\Exception $e) {
-            // Log the error and retain default model
-            Log::error("Error in getDocumentModel: " . $e->getMessage());
+            Log::error('Error in getDocumentModel', ApiErrorFormatter::format($e, [
+                'file_path' => $file_path,
+                'doc_type' => $doc_type,
+            ]));
         }
 
         // Return the determined or default document model

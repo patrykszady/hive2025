@@ -9,6 +9,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Notification;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use App\Support\ApiErrorFormatter;
 
 class TaskUpdateNotification extends Notification implements ShouldQueue
 {
@@ -85,11 +86,10 @@ class TaskUpdateNotification extends Notification implements ShouldQueue
      */
     public function failed($exception)
     {
-        Log::channel('task_reminder')->error("Task update notification failed", [
+        Log::channel('task_reminder')->error('Task update notification failed', ApiErrorFormatter::format($exception, [
             'current_tasks' => count($this->currentTasks),
             'removed_tasks' => count($this->removedTasks),
             'date' => $this->date->format('Y-m-d'),
-            'error' => $exception->getMessage()
-        ]);
+        ]));
     }
 }

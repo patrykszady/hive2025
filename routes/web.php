@@ -105,7 +105,7 @@ Route::get('/company-email/login', [CompanyEmailController::class, 'nylasLogin']
 Route::get('/company-email/auth-response', [CompanyEmailController::class, 'nylasAuthResponse'])->name('company-email.auth-response');
 
 //1-18-2023 combine the next 3 functions into one. Pass type = original or temp
-Route::get('/leads/leads_in_email', [LeadController::class, 'leads_in_email'])->name('leads.leads_in_email');
+// Route::get('/leads/leads_in_email', [LeadController::class, 'leads_in_email'])->name('leads.leads_in_email');
 
 Route::get('vendor_docs/verifyWorkersComp', [ReceiptController::class, 'verifyWorkersComp'])->name('vendor_docs.verifyWorkersComp');
 Route::get('files/{folder}/{filename}', [ReceiptController::class, 'original_receipt'])->name('expenses.original_receipt');

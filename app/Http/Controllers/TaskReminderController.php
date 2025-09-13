@@ -9,6 +9,7 @@ use App\Notifications\TaskUpdateNotification;
 use Carbon\Carbon;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Log;
+use App\Support\ApiErrorFormatter;
 use Illuminate\Support\Facades\Redis;
 
 class TaskReminderController extends Controller
@@ -110,10 +111,9 @@ class TaskReminderController extends Controller
                 }
             } catch (\Exception $e) {
                 $stats['errors']++;
-                Log::channel('task_reminder')->error("Failed to queue task update", [
+                Log::channel('task_reminder')->error('Failed to queue task update', ApiErrorFormatter::format($e, [
                     'user_id' => $userId,
-                    'error' => $e->getMessage()
-                ]);
+                ]));
             }
         }
         
@@ -301,10 +301,9 @@ class TaskReminderController extends Controller
             $result['sent'] = true;
         } catch (\Exception $e) {
             $result['error'] = true;
-            Log::channel('task_reminder')->error("Failed to process notification", [
+            Log::channel('task_reminder')->error('Failed to process notification', ApiErrorFormatter::format($e, [
                 'user_id' => $userId,
-                'error' => $e->getMessage()
-            ]);
+            ]));
         }
         
         return $result;
@@ -372,12 +371,11 @@ class TaskReminderController extends Controller
                 $successCount++;
             } catch (\Exception $e) {
                 $errorCount++;
-                Log::channel('task_reminder')->error("Failed to queue task reminder notification", [
+                Log::channel('task_reminder')->error('Failed to queue task reminder notification', ApiErrorFormatter::format($e, [
                     'user_id' => $user->id,
                     'user_name' => $user->full_name,
                     'phone' => $user->cell_phone,
-                    'error' => $e->getMessage()
-                ]);
+                ]));
             }
         }
 
