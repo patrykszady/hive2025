@@ -869,19 +869,29 @@ class CompanyEmailController extends Controller
                         $targetFilename = $expense_id . '-' . $currentFilename;
                         $destinationPath = 'receipts/' . $targetFilename;
                         
+                        // Determine receipt content and items for duplicate checking
+                        $receipt_html = ($attachmentIndex === array_key_first($nonInlineAttachments) && isset($ocr_receipt_data['content'])) 
+                            ? $ocr_receipt_data['content'] 
+                            : $current_ocr_data['content'];
+                        $receipt_items = ($attachmentIndex === array_key_first($nonInlineAttachments) && isset($ocr_receipt_data['content'])) 
+                            ? ($ocr_receipt_data['fields'] ?? $current_ocr_data['fields']) 
+                            : $current_ocr_data['fields'];
+                        
+                        // Check for duplicate receipts based on content and invoice number
+                        $isDuplicate = $this->isDuplicateReceipt($expense_id, $receipt_html, $receipt_items);
+                        
+                        if ($isDuplicate) {
+                            // Skip saving this duplicate receipt and clean up temp file
+                            Storage::disk('files')->delete($ocr_path);
+                            continue;
+                        }
+                        
                         // Create receipt record in database
                         $expense_receipt = new ExpenseReceipts;
                         $expense_receipt->expense_id = $expense_id;
                         $expense_receipt->receipt_filename = $targetFilename;
-                        
-                        // Use original OCR data for the first attachment if it exists
-                        if ($attachmentIndex === array_key_first($nonInlineAttachments) && isset($ocr_receipt_data['content'])) {
-                            $expense_receipt->receipt_html = $ocr_receipt_data['content'];
-                            $expense_receipt->receipt_items = $ocr_receipt_data['fields'] ?? $current_ocr_data['fields'];
-                        } else {
-                            $expense_receipt->receipt_html = $current_ocr_data['content'];
-                            $expense_receipt->receipt_items = $current_ocr_data['fields'];
-                        }
+                        $expense_receipt->receipt_html = $receipt_html;
+                        $expense_receipt->receipt_items = $receipt_items;
                         
                         $expense_receipt->save();
                         
@@ -908,6 +918,15 @@ class CompanyEmailController extends Controller
         $filename = $expense_id . '-' . $ocr_filename;
         $sourcePath = '_temp_ocr/' . $ocr_filename;
         $destinationPath = 'receipts/' . $filename;
+
+        // Check for duplicate receipts based on content and invoice number
+        $isDuplicate = $this->isDuplicateReceipt($expense_id, $ocr_receipt_data['content'], $ocr_receipt_data['fields']);
+        
+        if ($isDuplicate) {
+            // Skip saving this duplicate receipt and clean up temp file
+            Storage::disk('files')->delete($sourcePath);
+            return [];
+        }
 
         // Save expense receipt data to the database
         $expense_receipt = new ExpenseReceipts;
@@ -1039,5 +1058,46 @@ class CompanyEmailController extends Controller
         }
 
         return null;
+    }
+
+    /**
+     * Check if a receipt is a duplicate based on content and invoice number.
+     */
+    protected function isDuplicateReceipt(int $expense_id, string $receipt_html, $receipt_items): bool
+    {
+        // Decode receipt_items if it's a string
+        if (is_string($receipt_items)) {
+            $receipt_items = json_decode($receipt_items, true);
+        }
+        
+        // Extract invoice number from receipt items
+        $new_invoice_number = null;
+        if (is_array($receipt_items) && isset($receipt_items['invoice_number'])) {
+            $new_invoice_number = $receipt_items['invoice_number'];
+        }
+        
+        // Get existing receipts for this expense
+        $existing_receipts = ExpenseReceipts::where('expense_id', $expense_id)->get();
+        
+        foreach ($existing_receipts as $existing_receipt) {
+            // Check for exact HTML content match
+            if ($existing_receipt->receipt_html === $receipt_html) {
+                return true;
+            }
+            
+            // Check for invoice number match if both have invoice numbers
+            if ($new_invoice_number && $existing_receipt->receipt_items) {
+                $existing_items = is_string($existing_receipt->receipt_items) 
+                    ? json_decode($existing_receipt->receipt_items, true) 
+                    : (array) $existing_receipt->receipt_items;
+                    
+                if (isset($existing_items['invoice_number']) && 
+                    $existing_items['invoice_number'] === $new_invoice_number) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
     }
 }
