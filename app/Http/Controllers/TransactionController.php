@@ -538,7 +538,6 @@ class TransactionController extends Controller
                 ->whereNull('paid_by')
                 ->where('belongs_to_vendor_id', $hive_vendor->id)
                 ->whereNotNull('vendor_id')
-                ->whereId(25207)
                 //where transacitons->sum != $expense(item)->sum  \\ whereNull checked_at (transactions add up to expense)
                 ->whereDate('date', '>=', Carbon::now()->subMonths(12))
                 ->get();
