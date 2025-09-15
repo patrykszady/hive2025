@@ -1099,7 +1099,6 @@ class TransactionController extends Controller
                     // dd($payments);
                     if (! $payments->isEmpty()) {
                         //try any of $payments->payment_total ($payment->sum('amount')) == $transaction->amount? if so and only one result..that's our guy.
-
                         //clear array before next foreach statement
                         $payment_results = [];
 

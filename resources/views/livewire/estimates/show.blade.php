@@ -90,7 +90,7 @@
         {{-- SECTIONS --}}
         <div x-sort="$wire.sort_sections($key, $position)" class="space-y-2">
             @foreach($sections as $index => $section)
-                <flux:card class="space-y-2" x-sort:item="{{$section->id}}" :key="$section->id">
+                <flux:card class="space-y-2" x-sort:item="{{$section['id']}}" x-bind:key="{{$section['id']}}">
                     {{-- HEADING --}}
                     <flux:heading>
                         <div class="flex justify-between">
@@ -99,12 +99,11 @@
                                     {{-- on clickaway sectionUpdate --}}
                                     <flux:input
                                         wire:keydown.enter="sectionUpdate({{$index}})"
-                                        wire:model.blur="sections.{{$index}}.name"
-                                        name="sections.{{$index}}.name"
+                                        wire:blur="sectionUpdate({{$index}})"
+                                        wire:model.live="sections.{{$index}}.name"
                                         type="text"
                                         required
                                         placeholder="Section Name"
-                                        value="{{$section->name}}"
                                         kbd="Enter"
                                     />
 
@@ -117,9 +116,9 @@
                                             <flux:menu.item wire:click="sectionDuplicate({{$index}})">Duplicate Section</flux:menu.item>
                                             <flux:menu.separator />
                                             {{-- wire:click="sectionDuplicateToEstimate({{$index}})" --}}
-                                            <flux:menu.item wire:click="$dispatchTo('estimates.estimate-duplicate', 'duplicateToEstimateModal', { section: {{$section->id}} })">Duplicate Section to Estimate</flux:menu.item>
+                                            <flux:menu.item wire:click="$dispatchTo('estimates.estimate-duplicate', 'duplicateToEstimateModal', { section: {{$section['id']}} })">Duplicate Section to Estimate</flux:menu.item>
                                             <flux:menu.separator />
-                                            <flux:menu.item wire:click="sectionRemove({{$index}})" variant="danger">Delete Section</flux:menu.item>
+                                            <flux:menu.item wire:click="sectionDelete({{$index}})" variant="danger">Delete Section</flux:menu.item>
                                         </flux:menu>
                                     </flux:dropdown>
                                 </flux:input.group>
@@ -148,9 +147,9 @@
                                         </flux:table.columns>
 
                                         <flux:table.rows x-sort="$wire.sort_line_item($key, $position)">
-                                            @foreach($section->estimate_line_items as $line_item_index => $line_item)
+                                            @foreach($estimate->estimate_sections->find($section['id'])->estimate_line_items as $line_item_index => $line_item)
                                                 <div>
-                                                    <flux:table.row x-sort:item="{{$line_item->id}}" :key="$line_item->id">
+                                                    <flux:table.row x-sort:item="{{$line_item->id}}" x-bind:key="$line_item->id">
                                                         {{-- Use the loop index instead of database order --}}
                                                         <flux:table.cell x-sort:handle>{{$index + 1}}.{{$line_item_index + 1}}</flux:table.cell>
                                                         <flux:table.cell variant="strong">
@@ -180,13 +179,13 @@
                     <flux:separator variant="subtle"/>
                     <div class="flex justify-between">
                         <flux:button
-                            wire:click="$dispatchTo('line-items.estimate-line-item-create', 'addToEstimate', { section_id: {{$section->id}} })"
+                            wire:click="$dispatchTo('line-items.estimate-line-item-create', 'addToEstimate', { section_id: {{$section['id']}} })"
                             icon="plus"
                             >
                             Item
                         </flux:button>
                         <flux:button disabled>
-                            {{money($section->total)}}
+                            {{money($section['total'])}}
                         </flux:button>
                     </div>
                 </flux:card>

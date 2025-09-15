@@ -46,11 +46,11 @@ class EstimateShow extends Component
 
     public function mount()
     {
-        $this->sections = $this->estimate->estimate_sections;
+        $this->sections = $this->estimate->estimate_sections->toArray();
 
         //11-1-2023 MOVE to EstiamteCreate
         //start with one section and an ADD card/button for line items
-        if ($this->sections->isEmpty()) {
+        if (empty($this->sections)) {
             $this->create_new_section();
             $this->estimate_refresh();
         }
@@ -59,14 +59,14 @@ class EstimateShow extends Component
     public function estimate_refresh()
     {
         $this->estimate->refresh();
-        $this->sections = $this->estimate->estimate_sections;
+        $this->sections = $this->estimate->estimate_sections->toArray();
     }
 
     public function create_new_section($name = null, $estimate_id = null)
     {
         return EstimateSection::create([
             'estimate_id' => $this->estimate->id ?? $estimate_id,
-            'index' => $this->sections->isEmpty() ? 0 : $this->sections->max('order') + 1,
+            'order' => empty($this->sections) ? 0 : collect($this->sections)->max('order') + 1,
             'name' => $name,
             'total' => 0.00,
             'deleted_at' => null,
@@ -88,36 +88,37 @@ class EstimateShow extends Component
         );
     }
 
-    public function sectionRemove($section_index)
+    public function sectionDelete($section_index)
     {
-        $section = $this->sections[$section_index];
-        $estimate_line_items = $this->estimate->estimate_line_items()->where('section_id', $section->id)->get();
+        $section_data = $this->sections[$section_index];
+        $section = EstimateSection::findOrFail($section_data['id']);
 
-        foreach ($estimate_line_items as $estimate_line_item) {
-            $estimate_line_item->delete();
+        // Get all line items for this section
+        $line_items = $this->estimate->estimate_line_items()->where('section_id', $section->id)->get();
+
+        // Delete all line items first
+        foreach ($line_items as $line_item) {
+            $line_item->delete();
         }
 
+        // Delete the section
         $section->delete();
+
         $this->estimate_refresh();
 
         Flux::toast(
-            duration: 5000,
+            duration: 10000,
             position: 'top right',
             variant: 'success',
-            heading: 'Section Removed',
-            // route / href / wire:click
-            text: 'Section Removed',
+            heading: 'Section Deleted',
+            text: 'Section and all its line items have been deleted.',
         );
-
-        //dispatch to refresh on project finances
-        $this->dispatch('refresh')->to(ProjectFinances::class);
     }
 
     public function sectionUpdate($section_index)
     {
         $section = EstimateSection::findOrFail($this->sections[$section_index]['id']);
         $section->name = $this->sections[$section_index]['name'];
-        //ignore 'bid_index' attribute when saving
         $section->save();
         $this->estimate_refresh();
 
@@ -139,18 +140,18 @@ class EstimateShow extends Component
 
     public function sectionDuplicate($section_index)
     {
-        $section = $this->sections[$section_index];
+        $section_data = $this->sections[$section_index];
+        $section = EstimateSection::findOrFail($section_data['id']);
         $line_items = $this->estimate->estimate_line_items()->where('section_id', $section->id)->get();
-        $section_to_duplicate = $this->estimate->estimate_sections()->where('id', $section->id)->first();
 
-        $section = $this->create_new_section($section_to_duplicate->name.' -Copy');
+        $new_section = $this->create_new_section($section->name.' -Copy');
 
         //create new estimate section
         foreach ($line_items as $duplicate_section_line) {
             EstimateLineItem::create([
                 'estimate_id' => $this->estimate->id,
                 'line_item_id' => $duplicate_section_line->line_item_id,
-                'section_id' => $section->id,
+                'section_id' => $new_section->id,
                 'order' => $duplicate_section_line->order,
                 'name' => $duplicate_section_line->name,
                 'category' => $duplicate_section_line->category,
@@ -172,13 +173,13 @@ class EstimateShow extends Component
             variant: 'success',
             heading: 'Section Duplicated',
             // route / href / wire:click
-            text: 'Section '.$section->name,
+            text: 'Section '.$new_section->name,
         );
     }
 
     public function getEstimateTotalProperty()
     {
-        return $this->sections->sum('total');
+        return collect($this->sections)->sum('total');
     }
 
     //$type = [estimate, invoice, work order]
