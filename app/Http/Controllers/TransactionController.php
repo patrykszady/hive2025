@@ -826,7 +826,7 @@ class TransactionController extends Controller
                     $check->date->addDays($add_days)->format('Y-m-d'),
                 ])
                 ->where('amount', $check->amount)
-                ->orderBy('id', 'DESC')
+                ->orderBy('transaction_date', 'DESC')
                 ->get();
 
             //if amount matches and is only one, that's the one
@@ -835,7 +835,7 @@ class TransactionController extends Controller
             } elseif ($transactions->count() > 1) {
                 // Pick the closest-by-days without mutating attributes
                 $closest = $transactions
-                    ->sortBy(fn ($t) => $t->transaction_date->diffInDays($check->date))
+                    ->sortBy(fn ($t) => abs($t->transaction_date->diffInDays($check->date)))
                     ->first();
 
                 $closest?->check()->associate($check)->save();
