@@ -1044,92 +1044,102 @@ class TransactionController extends Controller
 
     public function add_payments_to_transaction()
     {
-        //where doesnt have clientpayment
-        //1-26-2023 why does 2019/older transactions/client_payments not work?
-        $transactions = Transaction::where('transaction_date', '>', '2019-01-01')
-            // ->where('deposit', 1)
-            ->whereDoesntHave('payments')
-            ->whereNull('expense_id')
-            ->where('amount', 'LIKE', '-%') // Only get negative transactions
-            ->orderBy('transaction_date', 'DESC')
-            ->take(3)
-            ->get();
+        $oneYearAgo = Carbon::now()->subYear();
+        $hive_vendors = Vendor::hiveVendors()->get();
 
-        foreach ($transactions as $transaction) {
-            $vendor_id = $transaction->bank_account->bank->vendor_id;
+        foreach ($hive_vendors as $hive_vendor) {
+            $hive_vendor_bank_account_ids = $hive_vendor->bank_accounts->pluck('id');
+            
+            // Use vendor registration date or 1 year ago, whichever is more recent
+            $cutoffDate = $hive_vendor->created_at < $oneYearAgo 
+                ? $hive_vendor->created_at 
+                : $oneYearAgo;
+            
+            $transactions = Transaction::whereIn('bank_account_id', $hive_vendor_bank_account_ids)
+                ->where('transaction_date', '>=', $cutoffDate)
+                ->where('deposit', 1)
+                ->whereDoesntHave('payments')
+                ->whereNull('expense_id')
+                ->whereNull('check_id')
+                ->where('amount', 'LIKE', '-%') // Only get negative transactions
+                ->orderBy('transaction_date', 'DESC')
+                ->get();
 
-            $payments = Payment::
-                whereBetween('date', [$transaction->transaction_date->subDays(21), $transaction->transaction_date->addDays(4)])
-                //where bank_id belongs_to same vendor_id as this payment
-                    ->where('belongs_to_vendor_id', $vendor_id)
-                    ->whereNull('transaction_id');
+            foreach ($transactions as $transaction) {
+                $vendor_id = $transaction->bank_account->bank->vendor_id;
 
-            //06-21-2021 json store which $transactions have been checked against which $payments so it doesnt check again?
-            //where parent_client_payment_id is not in json for this $transaction
-            // ->groupBy('parent_client_payment_id');
-
-            // if first character is -
-            $single_payments = $payments->where('amount', is_numeric(substr($transaction->amount, 0, 1)) ? '-'.$transaction->amount : substr($transaction->amount, 1))->orderBy('date', 'DESC')->get();
-
-            if ($single_payments->isNotEmpty()) {
-                //closest date. diffInDays
-                $save_payment = $single_payments->first(); // Just use the first match without date comparison
-                
-                // Associate and save in one step using the relationship
-                $transaction->payments()->save($save_payment);
-                
-                //so Searchable gets send to Scout/TypeSense
-                $transaction->save();
-            } else {
-                $payments = Payment::whereBetween('date', [$transaction->transaction_date->subDays(21), $transaction->transaction_date->addDays(4)])
+                $payments = Payment::
+                    whereBetween('date', [$transaction->transaction_date->subDays(21), $transaction->transaction_date->addDays(4)])
                     //where bank_id belongs_to same vendor_id as this payment
-                    ->where('belongs_to_vendor_id', $vendor_id)
-                    ->where('transaction_id', null)
-                    ->get();
-                // dd($payments);
-                if (! $payments->isEmpty()) {
-                    //try any of $payments->payment_total ($payment->sum('amount')) == $transaction->amount? if so and only one result..that's our guy.
+                        ->where('belongs_to_vendor_id', $vendor_id)
+                        ->whereNull('transaction_id');
 
-                    //clear array before next foreach statement
-                    $payment_results = [];
+                //06-21-2021 json store which $transactions have been checked against which $payments so it doesnt check again?
+                //where parent_client_payment_id is not in json for this $transaction
+                // ->groupBy('parent_client_payment_id');
 
-                    $client_payment_ids = $payments->pluck('id')->toArray();
-                    $client_payments_plucked = $payments->pluck('amount')->toArray();
+                // if first character is -
+                $single_payments = $payments->where('amount', is_numeric(substr($transaction->amount, 0, 1)) ? '-'.$transaction->amount : substr($transaction->amount, 1))->orderBy('date', 'DESC')->get();
 
-                    $arr = array_values(array_filter($client_payments_plucked));
-                    $n = count($arr);
-                    $ids = $client_payment_ids;
+                if ($single_payments->isNotEmpty()) {
+                    //closest date. diffInDays
+                    $save_payment = $single_payments->first(); // Just use the first match without date comparison
+                    
+                    // Associate and save in one step using the relationship
+                    $transaction->payments()->save($save_payment);
+                    
+                    //so Searchable gets send to Scout/TypeSense
+                    $transaction->save();
+                } else {
+                    $payments = Payment::whereBetween('date', [$transaction->transaction_date->subDays(21), $transaction->transaction_date->addDays(4)])
+                        //where bank_id belongs_to same vendor_id as this payment
+                        ->where('belongs_to_vendor_id', $vendor_id)
+                        ->where('transaction_id', null)
+                        ->get();
+                    // dd($payments);
+                    if (! $payments->isEmpty()) {
+                        //try any of $payments->payment_total ($payment->sum('amount')) == $transaction->amount? if so and only one result..that's our guy.
 
-                    $results = collect($this->subsetSums($arr, $n, $ids, 'client_payment'))->sortBy('sum');
-                    // dd($results);
+                        //clear array before next foreach statement
+                        $payment_results = [];
 
-                    foreach ($results as $key => $result) {
-                        $sum = number_format($result['sum'], 2, '.', '');
-                        //this can happen multiple of times.. eg transaction_id 6230
+                        $client_payment_ids = $payments->pluck('id')->toArray();
+                        $client_payments_plucked = $payments->pluck('amount')->toArray();
 
-                        //is this Transaction a RETURN CHECK "DEPOSIT"?
-                        if ($sum === substr($transaction->amount, 1) or $sum === '-'.$transaction->amount) {
-                            $payment_results[] = $result;
-                        } else {
-                            //06/10/2021 if not found... create json array for $transaction with all parent_client_payment_id s so that we dont have to run this heavy program for those payments again.
-                            //06/10/2021 we do the above line already with add_transactions_to_expenses... data is put into database... need it here too
+                        $arr = array_values(array_filter($client_payments_plucked));
+                        $n = count($arr);
+                        $ids = $client_payment_ids;
+
+                        $results = collect($this->subsetSums($arr, $n, $ids, 'client_payment'))->sortBy('sum');
+                        // dd($results);
+
+                        foreach ($results as $key => $result) {
+                            $sum = number_format($result['sum'], 2, '.', '');
+                            //this can happen multiple of times.. eg transaction_id 6230
+
+                            //is this Transaction a RETURN CHECK "DEPOSIT"?
+                            if ($sum === substr($transaction->amount, 1) or $sum === '-'.$transaction->amount) {
+                                $payment_results[] = $result;
+                            } else {
+                                //06/10/2021 if not found... create json array for $transaction with all parent_client_payment_id s so that we dont have to run this heavy program for those payments again.
+                                //06/10/2021 we do the above line already with add_transactions_to_expenses... data is put into database... need it here too
+                            }
                         }
-                    }
 
-                    $payment_results = collect($payment_results);
-                    // dd($payment_results);
+                        $payment_results = collect($payment_results);
+                        // dd($payment_results);
 
-                    if (! $payment_results->isEmpty()) {
-                        $payment_array = $payment_results[0]['client_payments'];
+                        if (! $payment_results->isEmpty()) {
+                            $payment_array = $payment_results[0]['client_payments'];
 
-                        foreach ($payment_array as $payment) {
-                            $save_payment = Payment::findOrFail($payment['client_payment_id']);
-                            $save_payment->transaction_id = $transaction->id;
-                            $save_payment->save();
+                            foreach ($payment_array as $payment) {
+                                $save_payment = Payment::findOrFail($payment['client_payment_id']);
+                                $save_payment->transaction_id = $transaction->id;
+                                $save_payment->save();
 
-                            //so Searchable gets send to Scout/TypeSense
-                            $transaction->save();
-                            // $payments->fresh();
+                                //so Searchable gets send to Scout/TypeSense
+                                $transaction->save();
+                            }
                         }
                     }
                 }
