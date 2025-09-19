@@ -702,11 +702,12 @@ class CompanyEmailController extends Controller
                         }
 
                         // Duplicate expense checking.
+                        // Use a symmetric ±5 day window to better match transactions posted a few days before/after
                         $duplicate_start_date = Carbon::parse($ocr_receipt_data['fields']['transaction_date'])
-                            ->subDays(1)
+                            ->subDays(5)
                             ->format('Y-m-d');
                         $duplicate_end_date = Carbon::parse($ocr_receipt_data['fields']['transaction_date'])
-                            ->addDays(4)
+                            ->addDays(5)
                             ->format('Y-m-d');
 
                         $duplicates = Expense::where('belongs_to_vendor_id', $email_vendor->id)
@@ -727,14 +728,48 @@ class CompanyEmailController extends Controller
                             // If the latest receipt HTML is different, update; otherwise, skip.
                             if (isset($expense_duplicate->receipts()->latest()->first()->receipt_html)) {
                                 if ($expense_duplicate->receipts()->latest()->first()->receipt_html != $ocr_receipt_data['content']) {
+                                    // Update existing expense fields from OCR data before attaching receipt
                                     $expense = $expense_duplicate;
+                                    $newDate = Carbon::parse($ocr_receipt_data['fields']['transaction_date'])->toDateString();
+                                    if ($expense->date !== $newDate) {
+                                        $expense->date = $newDate;
+                                    }
+                                    $incomingInvoice = trim((string)($ocr_receipt_data['fields']['invoice_number'] ?? ''));
+                                    if ($incomingInvoice !== '') {
+                                        // Only set invoice if it's empty to avoid clobbering a known value
+                                        if (empty($expense->invoice)) {
+                                            $expense->invoice = $incomingInvoice;
+                                        }
+                                    }
+                                    $expense->save();
+                                    // Link a single matched transaction to this expense if found earlier
+                                    if (isset($transaction) && $transaction && is_null($transaction->expense_id)) {
+                                        $transaction->expense_id = $expense->id;
+                                        $transaction->save();
+                                    }
                                 } else {
                                     // Clean up the temporary OCR file before skipping
                                     Storage::disk('files')->delete($ocr_path);
                                     continue; // Skip if the receipt is an exact duplicate.
                                 }
                             } else {
+                                // No previous receipts recorded; update and use this expense
                                 $expense = $expense_duplicate;
+                                $newDate = Carbon::parse($ocr_receipt_data['fields']['transaction_date'])->toDateString();
+                                if ($expense->date !== $newDate) {
+                                    $expense->date = $newDate;
+                                }
+                                $incomingInvoice = trim((string)($ocr_receipt_data['fields']['invoice_number'] ?? ''));
+                                if ($incomingInvoice !== '') {
+                                    if (empty($expense->invoice)) {
+                                        $expense->invoice = $incomingInvoice;
+                                    }
+                                }
+                                $expense->save();
+                                if (isset($transaction) && $transaction && is_null($transaction->expense_id)) {
+                                    $transaction->expense_id = $expense->id;
+                                    $transaction->save();
+                                }
                             }
                         } elseif ($duplicates->isEmpty()) {
                             // Use fuzzy matching to determine vendor in the "no duplicate" branch.
@@ -760,6 +795,12 @@ class CompanyEmailController extends Controller
                                 'created_by_user_id'   => 0,
                                 'invoice'              => $ocr_receipt_data['fields']['invoice_number'] ?: null,
                             ]);
+
+                            // If exactly one bank transaction matched earlier, link it now
+                            if (isset($transaction) && $transaction && is_null($transaction->expense_id)) {
+                                $transaction->expense_id = $expense->id;
+                                $transaction->save();
+                            }
                         } else {
                             // Fallback branch for ambiguous situations.
                             $transaction = null;
