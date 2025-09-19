@@ -10,6 +10,9 @@ use App\Models\Receipt;
 use App\Models\ReceiptAccount;
 use App\Models\Transaction;
 use App\Models\Vendor;
+use App\Services\NylasService;
+use App\Services\GiftCardService;
+use App\Http\Requests\GetGiftCardRequest;
 
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
@@ -32,70 +35,28 @@ use App\Support\ApiErrorFormatter;
 
 class ReceiptController extends Controller
 {
-    public function verifyWorkersComp()
+    private NylasService $nylasService;
+    private GiftCardService $giftCardService;
+
+    public function __construct(NylasService $nylasService, GiftCardService $giftCardService)
     {
-        $puppeteer = new Puppeteer;
-        $browser = $puppeteer->launch();
+        $this->nylasService = $nylasService;
+        $this->giftCardService = $giftCardService;
+    }
 
-        $page = $browser->newPage();
-        $page->goto('https://google.com');
-        $page->screenshot(['path' => 'example.png']);
+    /**
+     * Return latest Home Depot gift card redeem URL + screenshot path (JSON response).
+     */
+    public function getHomeDepotMessages(GetGiftCardRequest $request)
+    {
+        $companyEmailId = (int) $request->validated()['company_email_id'];
+        $result = $this->giftCardService->captureLatest($companyEmailId);
 
-        $browser->close();
+        if (!$result['success']) {
+            return response()->json($result, 422);
+        }
 
-        dd('saved');
-        // Example usage
-        $employerName = 'Faza';
-        // $results = verifyWorkersComp($employerName);
-
-        // foreach ($results as $result) {
-        //     echo $result . PHP_EOL;
-        // }
-        // $url = ;
-
-        $client = new Client;
-        $url = 'http://www.ewccv.com/cvs/'; // Replace with the URL you want to fetch
-
-        // Send a GET request to the URL
-        $response = $client->get($url);
-        // dd($response->getBody());
-        // Get the HTML content of the response
-        $htmlContent = (string) $response->getBody();
-        print_r($htmlContent);
-        dd();
-
-        $puppeteer = new Puppeteer;
-        $browser = $puppeteer->launch();
-        $page = $browser->newPage();
-        $page->goto('https://www.homedepotrebates11percent.com/#/home');
-        $page->waitForTimeout(500);
-        $page->screenshot(['path' => 'example.png']);
-        dd('here');
-
-        $client = new Client;
-        // Replace with the actual URL
-
-        // Send a POST request to the search form
-        $response = $client->post($url, [
-            'form_params' => [
-                'employer' => $employerName, // Replace with the actual form field name
-            ],
-        ]);
-
-        // Get the HTML content of the response
-        $html = (string) $response->getBody();
-
-        // Parse the HTML using Symfony DOMCrawler
-        $crawler = new Crawler($html);
-
-        // Extract relevant information from the results
-        $results = $crawler->filter('.result-class')->each(function (Crawler $node, $i) { // Replace with the actual CSS selector
-            return $node->text();
-        });
-
-        dd($results);
-
-        return $results;
+        return response()->json($result);
     }
 
     public function amazon_login()
@@ -541,6 +502,7 @@ class ReceiptController extends Controller
         return $document_model;
     }
 
+
     public function azure_docs_api($file_location, $document_model, $doc_type)
     {
         if (in_array(strtolower($doc_type), ['jpg', 'jpeg'])) {
@@ -776,13 +738,9 @@ class ReceiptController extends Controller
 
         //SUBTOTAL
         if (isset($ocr_receipt_extract_prefix['SubTotal'])) {
-            $subtotal = $ocr_receipt_extract_prefix['SubTotal']['valueCurrency']['amount'];
+            $subtotal = $this->extractCurrencyAmount($ocr_receipt_extract_prefix['SubTotal']);
         } elseif (isset($ocr_receipt_extract_prefix['Subtotal'])) {
-            if (isset($ocr_receipt_extract_prefix['Subtotal']['valueCurrency'])) {
-                $subtotal = $ocr_receipt_extract_prefix['Subtotal']['valueCurrency']['amount'];
-            } else {
-                $subtotal = null;
-            }
+            $subtotal = $this->extractCurrencyAmount($ocr_receipt_extract_prefix['Subtotal']);
         } else {
             $subtotal = null;
         }
@@ -793,31 +751,37 @@ class ReceiptController extends Controller
 
             $formatted_items = [];
             foreach($items as $key => $line_item) {
-                // if($key == 1){
-                // dd($line_item['valueObject']);
-                $formatted_items[$key]['Description'] = $line_item['valueObject']['Description']['valueString'] ?? null;
-                $formatted_items[$key]['ProductCode'] = $line_item['valueObject']['ProductCode']['valueString'] ?? null;
-
-                if(isset($line_item['valueObject']['TotalPrice'])){
-                    $formatted_items[$key]['TotalPrice'] = $line_item['valueObject']['TotalPrice']['valueCurrency']['amount'];
-                }elseif(isset($line_item['valueObject']['Amount'])){
-                    $formatted_items[$key]['TotalPrice'] = $line_item['valueObject']['Amount']['valueCurrency']['amount'];
-                }else{
-                    $formatted_items[$key]['TotalPrice'] = NULL;
+                // Guard against unexpected shapes
+                if (!isset($line_item['valueObject']) || !is_array($line_item['valueObject'])) {
+                    continue;
                 }
 
-                if (isset($line_item['valueObject']['Quantity'])) {
-                    $formatted_items[$key]['Quantity'] = $line_item['valueObject']['Quantity']['valueNumber'];
+                $line = $line_item['valueObject'];
+
+                $formatted_items[$key]['Description'] = $line['Description']['valueString'] ?? null;
+                $formatted_items[$key]['ProductCode'] = $line['ProductCode']['valueString'] ?? null;
+
+                // TotalPrice / Amount with robust fallbacks
+                if (isset($line['TotalPrice'])) {
+                    $formatted_items[$key]['TotalPrice'] = $this->extractCurrencyAmount($line['TotalPrice']);
+                } elseif (isset($line['Amount'])) {
+                    $formatted_items[$key]['TotalPrice'] = $this->extractCurrencyAmount($line['Amount']);
+                } else {
+                    $formatted_items[$key]['TotalPrice'] = null;
+                }
+
+                if (isset($line['Quantity'])) {
+                    $formatted_items[$key]['Quantity'] = $line['Quantity']['valueNumber'] ?? $this->extractCurrencyAmount($line['Quantity']);
                 } else {
                     $formatted_items[$key]['Quantity'] = 1;
                 }
 
-                //price each
-                if(isset($line_item['valueObject']['Price'])){
-                    $formatted_items[$key]['Price'] = $line_item['valueObject']['Price']['valueCurrency']['amount'];
-                }elseif(isset($line_item['valueObject']['UnitPrice'])){
-                    $formatted_items[$key]['Price'] = $line_item['valueObject']['UnitPrice']['valueCurrency']['amount'];
-                }else{
+                // price each with fallbacks
+                if (isset($line['Price'])) {
+                    $formatted_items[$key]['Price'] = $this->extractCurrencyAmount($line['Price']);
+                } elseif (isset($line['UnitPrice'])) {
+                    $formatted_items[$key]['Price'] = $this->extractCurrencyAmount($line['UnitPrice']);
+                } else {
                     $formatted_items[$key]['Price'] = $formatted_items[$key]['TotalPrice'];
                 }
             }
@@ -828,11 +792,11 @@ class ReceiptController extends Controller
         //AMOUNT
         $amount = NULL;
         if (isset($ocr_receipt_extract_prefix['Total'])) {
-            $amount = $ocr_receipt_extract_prefix['Total']['valueCurrency']['amount'];
+            $amount = $this->extractCurrencyAmount($ocr_receipt_extract_prefix['Total']);
         } elseif (isset($ocr_receipt_extract_prefix['InvoiceTotal'])) {
-            $amount = $ocr_receipt_extract_prefix['InvoiceTotal']['valueCurrency']['amount'];
+            $amount = $this->extractCurrencyAmount($ocr_receipt_extract_prefix['InvoiceTotal']);
         } elseif (isset($ocr_receipt_extract_prefix['SubTotal']) && isset($ocr_receipt_extract_prefix['TotalTax'])) {
-            $amount = $ocr_receipt_extract_prefix['SubTotal']['valueCurrency']['amount'] + $ocr_receipt_extract_prefix['TotalTax']['valueCurrency']['amount'];
+            $amount = (float) ($this->extractCurrencyAmount($ocr_receipt_extract_prefix['SubTotal']) ?? 0) + (float) ($this->extractCurrencyAmount($ocr_receipt_extract_prefix['TotalTax']) ?? 0);
         } elseif (isset($key_value_pairs)) {
             if (! $key_value_pairs->where('key.content', 'Authorized Amount:')->isEmpty()) {
                 $amount = $key_value_pairs->where('key.content', 'Authorized Amount:')->first()->value->content;
@@ -881,6 +845,76 @@ class ReceiptController extends Controller
         ];
 
         return $ocr_receipt_data;
+    }
+
+    /**
+     * Safely extract a currency/number amount from a flexible OCR field shape.
+     * Accepts arrays like ['valueCurrency' => ['amount' => 12.34]],
+     * ['valueNumber' => 12.34], ['valueString' => '$12.34'], ['content' => '12,34'],
+     * or raw numeric/string values.
+     */
+    private function extractCurrencyAmount(mixed $field): ?float
+    {
+        if (is_array($field)) {
+            if (isset($field['valueCurrency']['amount'])) {
+                return (float) $field['valueCurrency']['amount'];
+            }
+
+            if (isset($field['valueNumber'])) {
+                return is_numeric($field['valueNumber']) ? (float) $field['valueNumber'] : $this->parseAmountFromString((string) $field['valueNumber']);
+            }
+
+            if (isset($field['valueString'])) {
+                return $this->parseAmountFromString((string) $field['valueString']);
+            }
+
+            if (isset($field['content'])) {
+                return $this->parseAmountFromString((string) $field['content']);
+            }
+        } elseif (is_numeric($field)) {
+            return (float) $field;
+        } elseif (is_string($field)) {
+            return $this->parseAmountFromString($field);
+        }
+
+        return null;
+    }
+
+    /**
+     * Parse a numeric amount from a string, handling commas, currency symbols,
+     * and parentheses for negatives.
+     */
+    private function parseAmountFromString(string $value): ?float
+    {
+        $value = trim($value);
+        $negative = false;
+
+        // Handle parentheses indicating negatives, e.g., (12.34)
+        if (preg_match('/^\((.*)\)$/', $value, $m)) {
+            $negative = true;
+            $value = $m[1];
+        }
+
+        // Strip everything except digits, comma, dot, and minus
+        $value = preg_replace('/[^0-9,.-]/', '', $value) ?? '';
+
+        if ($value === '' || $value === '-' || $value === '.') {
+            return null;
+        }
+
+        // If both comma and dot present, assume comma is thousands sep
+        if (str_contains($value, ',') && str_contains($value, '.')) {
+            $value = str_replace(',', '', $value);
+        } elseif (str_contains($value, ',') && ! str_contains($value, '.')) {
+            // If only comma present, assume it's the decimal separator
+            $value = str_replace(',', '.', $value);
+        } else {
+            // No commas or only dot: ensure no stray commas
+            $value = str_replace(',', '', $value);
+        }
+
+        $number = (float) $value;
+        return $negative ? -$number : $number;
     }
 
     //1-18-2023 combine the next 2 functions into one. Pass type = original or temp

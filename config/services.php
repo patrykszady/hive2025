@@ -11,4 +11,8 @@ return [
         'token' => env('TWILIO_TOKEN'),
         'from' => env('TWILIO_FROM'), // Your Twilio phone number
     ],
+
+    'two_captcha' => [
+        'api_key' => env('TWOCAPTCHA_API_KEY'),
+    ],
 ];

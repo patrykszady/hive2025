@@ -148,6 +148,46 @@ class NylasService
     }
 
     /**
+     * Get all folders from Nylas API
+     */
+    public function getAllFolders(string $grantId): array
+    {
+        try {
+            $url = $this->baseUrl . "/grants/{$grantId}/folders";
+            
+            $response = $this->httpClient->get($url, [
+                'headers' => [
+                    'Authorization' => 'Bearer ' . $this->apiKey,
+                    'Accept' => 'application/json',
+                ],
+            ]);
+
+            if ($response->getStatusCode() !== 200) {
+                Log::channel('nylas')->error('Failed to fetch folders from Nylas API', [
+                    'grant_id' => $grantId,
+                    'status' => $response->getStatusCode(),
+                    'body' => $response->getBody()->getContents()
+                ]);
+                return [];
+            }
+
+            $data = json_decode($response->getBody(), true);
+            return $data['data'] ?? [];
+            
+        } catch (RequestException $e) {
+            Log::channel('nylas')->error('Get All Folders API Error', ApiErrorFormatter::format($e, [
+                'grant_id' => $grantId,
+            ]));
+            return [];
+        } catch (\Exception $e) {
+            Log::channel('nylas')->error('Exception fetching all folders: ' . $e->getMessage(), [
+                'grant_id' => $grantId,
+            ]);
+            return [];
+        }
+    }
+
+    /**
      * Create a folder within a mailbox using Nylas' API.
      */
     private function createFolder(string $grantId, string $folderName, ?string $parentId = null): array
@@ -271,6 +311,35 @@ class NylasService
             ]));
             
             // Return empty array instead of error array to allow processing to continue
+            return [];
+        }
+    }
+
+    /**
+     * Fetch a single message with full details.
+     */
+    public function getMessage(string $grantId, string $messageId, bool $withHeaders = false): array
+    {
+        $url = $this->baseUrl . "/grants/{$grantId}/messages/{$messageId}";
+        if ($withHeaders) {
+            $url .= '?fields=include_headers';
+        }
+
+        try {
+            $response = $this->httpClient->get($url, [
+                'headers' => [
+                    'Authorization' => 'Bearer ' . $this->apiKey,
+                    'Accept' => 'application/json',
+                ],
+            ]);
+
+            return json_decode($response->getBody(), true) ?? [];
+        } catch (RequestException $e) {
+            Log::channel('nylas')->error('Get Single Message API Error', ApiErrorFormatter::format($e, [
+                'grant_id' => $grantId,
+                'message_id' => $messageId,
+                'with_headers' => $withHeaders,
+            ]));
             return [];
         }
     }

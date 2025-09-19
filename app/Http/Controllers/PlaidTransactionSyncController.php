@@ -210,11 +210,38 @@ class PlaidTransactionSyncController extends Controller
             $plaidTransactionId = $newTransaction['transaction_id'];
             $pendingPlaidTransactionId = $newTransaction['pending_transaction_id'] ?? null;
             $amount = $newTransaction['amount'];
-            $institutionAccountIds = $bank->institution_accounts()->ofSubtype($accountType)->pluck('bank_accounts.id');
+            // Prefer precise account match by Plaid account_id
+            $targetAccountId = BankAccount::where('plaid_account_id', $newTransaction['account_id'])->value('id');
+            if ($targetAccountId) {
+                $institutionAccountIds = collect([$targetAccountId]);
+            } else {
+                $institutionAccountIds = $bank->institution_accounts()->ofSubtype($accountType)->pluck('bank_accounts.id');
+                if ($institutionAccountIds->isEmpty()) {
+                    // Fallback to any institution account for this bank
+                    Log::channel('plaid_skips')->info('Subtype account match empty; falling back to all institution accounts', [
+                        'bank_id' => $bank->id,
+                        'account_type' => $accountType,
+                        'request_id' => $requestId,
+                    ]);
+                    $institutionAccountIds = $bank->institution_accounts()->pluck('bank_accounts.id');
+                }
+            }
             [$candidates] = $this->resolveCandidateTransactions($institutionAccountIds, $plaidTransactionId, $pendingPlaidTransactionId);
+            if ($candidates->count() === 0) {
+                $heuristic = $this->chooseBestHeuristicCandidate(
+                    $this->findHeuristicCandidates($institutionAccountIds, $newTransaction),
+                    $newTransaction
+                );
+                if ($heuristic) { $candidates = collect([$heuristic]); }
+            }
             $match = $this->evaluateDeterministicMatch($candidates, $amount, $plaidTransactionId, $pendingPlaidTransactionId, $bank->id, 'ADD', $requestId);
-            if ($match === 'AMBIGUOUS' || $match === 'AMOUNT_MISMATCH') { return null; }
+            // If ambiguous, fall through to insert as a new transaction (previous behavior)
+            if ($match === 'AMBIGUOUS' || $match === 'AMOUNT_MISMATCH') { /* fall-through to insert */ }
             if ($match instanceof Transaction) {
+                if (method_exists($match, 'trashed') && $match->trashed()) {
+                    // Bring back the soft-deleted pending record to upgrade it
+                    $match->restore();
+                }
                 $matchedTransaction = $match;
                 $matchedVia = $this->determineMatchVia($matchedTransaction, $plaidTransactionId, $pendingPlaidTransactionId);
                 $upgradeMeta = $this->determineUpgradeDates($matchedTransaction, $newTransaction);
@@ -230,6 +257,14 @@ class PlaidTransactionSyncController extends Controller
                     matchVia: $matchedVia
                 );
             }
+            Log::channel('plaid_skips')->info('No match found; inserting new transaction', [
+                'bank_id' => $bank->id,
+                'request_id' => $requestId,
+                'plaid_transaction_id' => $plaidTransactionId,
+                'pending_transaction_id' => $pendingPlaidTransactionId,
+                'account_id' => $newTransaction['account_id'] ?? null,
+                'candidate_ids' => [$plaidTransactionId, $pendingPlaidTransactionId],
+            ]);
             $transaction = $this->insertNewTransaction($bank, $newTransaction, $amount, $accountType, $institutionAccountIds, $plaidTransactionId);
             return $this->buildAggregate(
                 status: 'inserted',
@@ -255,10 +290,33 @@ class PlaidTransactionSyncController extends Controller
             $plaidTransactionId = $modTransaction['transaction_id'];
             $pendingPlaidTransactionId = $modTransaction['pending_transaction_id'] ?? null;
             $amount = $modTransaction['amount'];
-            $institutionAccountIds = $bank->institution_accounts()->ofSubtype($accountType)->pluck('bank_accounts.id');
+            $targetAccountId = BankAccount::where('plaid_account_id', $modTransaction['account_id'])->value('id');
+            if ($targetAccountId) {
+                $institutionAccountIds = collect([$targetAccountId]);
+            } else {
+                $institutionAccountIds = $bank->institution_accounts()->ofSubtype($accountType)->pluck('bank_accounts.id');
+                if ($institutionAccountIds->isEmpty()) {
+                    Log::channel('plaid_skips')->info('Subtype account match empty (modified); falling back to all institution accounts', [
+                        'bank_id' => $bank->id,
+                        'account_type' => $accountType,
+                        'request_id' => $requestId,
+                    ]);
+                    $institutionAccountIds = $bank->institution_accounts()->pluck('bank_accounts.id');
+                }
+            }
             [$candidates] = $this->resolveCandidateTransactions($institutionAccountIds, $plaidTransactionId, $pendingPlaidTransactionId);
+            if ($candidates->count() === 0) {
+                $heuristic = $this->chooseBestHeuristicCandidate(
+                    $this->findHeuristicCandidates($institutionAccountIds, $modTransaction),
+                    $modTransaction
+                );
+                if ($heuristic) { $candidates = collect([$heuristic]); }
+            }
             $match = $this->evaluateDeterministicMatch($candidates, $amount, $plaidTransactionId, $pendingPlaidTransactionId, $bank->id, 'MODIFIED', $requestId, false);
             if (!($match instanceof Transaction)) { return null; }
+            if (method_exists($match, 'trashed') && $match->trashed()) {
+                $match->restore();
+            }
             $matchedTransaction = $match;
             $matchedVia = $this->determineMatchVia($matchedTransaction, $plaidTransactionId, $pendingPlaidTransactionId);
             $upgradeMeta = $this->determineUpgradeDates($matchedTransaction, $modTransaction);
@@ -289,8 +347,9 @@ class PlaidTransactionSyncController extends Controller
         try {
             $plaidTransactionId = $removedTransaction['transaction_id'];
             $institutionAccountIds = $bank->institution_accounts()->pluck('bank_accounts.id');
-            $matches = Transaction::whereIn('bank_account_id', $institutionAccountIds)
-                ->whereNull('deleted_at')
+            // Allow matching both active and recently soft-deleted records to avoid double-deletes/races
+            $matches = Transaction::withTrashed()
+                ->whereIn('bank_account_id', $institutionAccountIds)
                 ->where('plaid_transaction_id', $plaidTransactionId)
                 ->limit(2)
                 ->get();
@@ -313,6 +372,44 @@ class PlaidTransactionSyncController extends Controller
                 return null;
             }
             $t = $matches->first();
+            // If any active transaction references this removed transaction as its pending_transaction_id,
+            // then this is a legitimate pending->posted upgrade: do NOT delete the pending record.
+            $hasUpgradeReference = Transaction::query()
+                ->whereIn('bank_account_id', $institutionAccountIds)
+                ->whereNull('deleted_at')
+                ->whereJsonContains('details->pending_transaction_id', $plaidTransactionId)
+                ->exists();
+            if ($hasUpgradeReference) {
+                Log::channel('plaid_skips')->info('Removed event skipped due to existing upgraded posted transaction referencing pending id', [
+                    'plaid_transaction_id' => $plaidTransactionId,
+                    'pending_transaction_id' => $plaidTransactionId,
+                    'bank_id' => $bank->id,
+                    'request_id' => $requestId,
+                    'referenced_by_transaction' => true,
+                ]);
+                return $this->buildAggregate(
+                    status: 'removed_skipped_due_to_upgrade',
+                    transactionId: $t->id,
+                    plaidTransactionId: $plaidTransactionId,
+                    pendingPlaidTransactionId: null,
+                    amount: (float) $t->amount,
+                    payload: [
+                        'date' => optional($t->transaction_date)->toDateString(),
+                        'authorized_date' => null,
+                        'pending' => false,
+                    ]
+                );
+            }
+            // If already soft-deleted, do not delete again
+            if ($t->deleted_at) {
+                Log::channel('plaid_skips')->info('Removed transaction already soft-deleted (skipping)', [
+                    'transaction_id' => $t->id,
+                    'plaid_transaction_id' => $plaidTransactionId,
+                    'bank_id' => $bank->id,
+                    'request_id' => $requestId,
+                ]);
+                return null;
+            }
             try {
                 $snapshot = [
                     'id' => $t->id,
@@ -354,7 +451,6 @@ class PlaidTransactionSyncController extends Controller
             ]));
             return null;
         }
-        return null;
     }
 
     private function resolveCandidateTransactions($institutionAccountIds, string $plaidTransactionId, ?string $pendingPlaidTransactionId)
@@ -362,8 +458,8 @@ class PlaidTransactionSyncController extends Controller
         $candidateIds = collect([$plaidTransactionId, $pendingPlaidTransactionId])->filter()->unique()->values();
         $candidates = collect();
         if ($candidateIds->isNotEmpty() && $institutionAccountIds->isNotEmpty()) {
-            $query = Transaction::whereIn('bank_account_id', $institutionAccountIds)
-                ->whereNull('deleted_at')
+            $query = Transaction::withTrashed()
+                ->whereIn('bank_account_id', $institutionAccountIds)
                 ->where(function ($q) use ($candidateIds) {
                     $q->whereIn('plaid_transaction_id', $candidateIds->all());
                     foreach ($candidateIds as $cid) {
@@ -382,7 +478,10 @@ class PlaidTransactionSyncController extends Controller
             if ((float) $candidate->amount === (float) $incomingAmount) {
                 return $candidate;
             }
-            Log::channel('plaid_skips')->error(($type === 'ADD' ? 'ADD Rejected' : 'Modified rejected') . ' due to amount mismatch', [
+            // Pending->Posted upgrades can legitimately change amount (tips, finalization, fees).
+            // Because candidates were pre-filtered by plaid ids chain (posted id / pending id / details->pending_transaction_id),
+            // we accept the upgrade even if the amount changed. We'll update amount during persistUpgrade.
+            Log::channel('plaid_adds')->warning(($type === 'ADD' ? 'ADD upgrading with amount change' : 'MODIFIED upgrading with amount change'), [
                 'bank_id' => $bankId,
                 'candidate_id' => $candidate->id,
                 'candidate_amount' => $candidate->amount,
@@ -391,7 +490,7 @@ class PlaidTransactionSyncController extends Controller
                 'pending_transaction_id' => $pendingPlaidTransactionId,
                 'request_id' => $requestId,
             ]);
-            return 'AMOUNT_MISMATCH';
+            return $candidate;
         } elseif ($candidates->count() > 1) {
             Log::channel('plaid_skips')->warning(($type === 'ADD' ? 'ADDAmbiguous chain skipped' : 'Modified ambiguous chain skipped'), [
                 'bank_id' => $bankId,
@@ -429,6 +528,10 @@ class PlaidTransactionSyncController extends Controller
         }
         if ($upgradeMeta['after_posted_date'] !== $upgradeMeta['before_posted_date']) {
             $matchedTransaction->posted_date = $upgradeMeta['after_posted_date'];
+        }
+        // Always update amount to incoming amount on upgrade (pending -> posted can change amount)
+        if (isset($payload['amount']) && (float) $matchedTransaction->amount !== (float) $payload['amount']) {
+            $matchedTransaction->amount = $payload['amount'];
         }
         $matchedTransaction->plaid_transaction_id = $newPlaidTransactionId;
         $matchedTransaction->details = $payload;
@@ -555,27 +658,37 @@ class PlaidTransactionSyncController extends Controller
         ];
     }
 
-    private function determineUpgradeDates(Transaction $existing, array $tx): array
+    private function determineUpgradeDates($existing, array $tx): array
     {
         $pendingFlag = $tx['pending'] ?? false;
         $incomingDate = $tx['date'] ?? $tx['authorized_date'] ?? null;
         $incomingSource = isset($tx['date']) ? 'date' : (isset($tx['authorized_date']) ? 'authorized_date' : null);
-        $beforeTxn = $existing->transaction_date?->toDateString();
-        $beforePosted = $existing->posted_date?->toDateString();
+        // Support either an Eloquent model or a simple array/object carrying the values
+        $existingTxn = null;
+        $existingPosted = null;
+        if (is_array($existing)) {
+            $existingTxn = $existing['transaction_date'] ?? null;
+            $existingPosted = $existing['posted_date'] ?? null;
+        } elseif (is_object($existing)) {
+            $existingTxn = $existing->transaction_date ?? null;
+            $existingPosted = $existing->posted_date ?? null;
+        }
+        $beforeTxn = $existingTxn instanceof \Carbon\CarbonInterface ? $existingTxn->toDateString() : ($existingTxn ? (string) $existingTxn : null);
+        $beforePosted = $existingPosted instanceof \Carbon\CarbonInterface ? $existingPosted->toDateString() : ($existingPosted ? (string) $existingPosted : null);
         $afterTxn = $beforeTxn;
         $afterPosted = $beforePosted;
         $updatedField = null;
         $keptEarlier = null;
-        if ($incomingDate && $existing->transaction_date) {
-            if ($pendingFlag && !$existing->posted_date) {
+        if ($incomingDate && $beforeTxn) {
+            if ($pendingFlag && !$beforePosted) {
                 if ($beforeTxn === null) {
                     $afterTxn = $incomingDate;
                     $updatedField = 'transaction_date';
                 } else {
-                    if (Carbon::parse($beforeTxn)->gt(Carbon::parse($incomingDate))) {
+                    if (\Carbon\Carbon::parse($beforeTxn)->gt(\Carbon\Carbon::parse($incomingDate))) {
                         $afterTxn = $incomingDate;
                         $updatedField = 'transaction_date';
-                    } elseif (Carbon::parse($beforeTxn)->lt(Carbon::parse($incomingDate))) {
+                    } elseif (\Carbon\Carbon::parse($beforeTxn)->lt(\Carbon\Carbon::parse($incomingDate))) {
                         $keptEarlier = true;
                     }
                 }
@@ -599,6 +712,59 @@ class PlaidTransactionSyncController extends Controller
             'incoming_source' => $incomingSource,
             'was_pending' => $pendingFlag,
         ];
+    }
+
+    /**
+     * Heuristic fallback when Plaid ID chain doesn't link pending->posted.
+     */
+    private function findHeuristicCandidates($institutionAccountIds, array $tx)
+    {
+        $amount = (float) ($tx['amount'] ?? 0);
+        $date = $tx['date'] ?? $tx['authorized_date'] ?? null;
+        if (!$date || !$amount || !$institutionAccountIds || $institutionAccountIds->isEmpty()) {
+            return collect();
+        }
+        $start = Carbon::parse($date)->copy()->subDays(5)->toDateString();
+        $end = Carbon::parse($date)->copy()->addDays(5)->toDateString();
+        return Transaction::withTrashed()
+            ->whereIn('bank_account_id', $institutionAccountIds)
+            ->whereNull('posted_date')
+            ->whereBetween('transaction_date', [$start, $end])
+            ->where(function ($q) use ($amount) {
+                $q->where('amount', (float) $amount)
+                  ->orWhere('amount', (float) (-1 * $amount));
+            })
+            ->orderBy('transaction_date')
+            ->get();
+    }
+
+    private function chooseBestHeuristicCandidate($candidates, array $incoming)
+    {
+        if (!$candidates || $candidates->isEmpty()) { return null; }
+        $incomingName = $incoming['name'] ?? null;
+        $incomingOrig = $incoming['original_description'] ?? null;
+        $incomingMerchant = $incoming['merchant_name'] ?? null;
+        $incomingDate = $incoming['date'] ?? $incoming['authorized_date'] ?? null;
+        return $candidates->sortByDesc(function ($t) use ($incomingName, $incomingOrig, $incomingMerchant, $incomingDate) {
+            $score = 0;
+            $details = is_array($t->details ?? null) ? $t->details : (is_object($t->details ?? null) ? (array) $t->details : json_decode(json_encode($t->details ?? []), true));
+            $tName = $details['name'] ?? null;
+            $tOrig = $details['original_description'] ?? null;
+            $tMerchant = $t->plaid_merchant_name ?? null;
+            if ($incomingOrig && $tOrig && strcasecmp($incomingOrig, $tOrig) === 0) { $score += 10; }
+            if ($incomingName && $tName && strcasecmp($incomingName, $tName) === 0) { $score += 8; }
+            if ($incomingMerchant && $tMerchant && strcasecmp($incomingMerchant, $tMerchant) === 0) { $score += 5; }
+            // Penalize soft-deleted slightly
+            if ($t->deleted_at) { $score -= 1; }
+            // Closer dates are better
+            if ($incomingDate && $t->transaction_date) {
+                try {
+                    $diff = abs(\Carbon\Carbon::parse($incomingDate)->diffInDays(\Carbon\Carbon::parse($t->transaction_date)));
+                    $score += max(0, 5 - min($diff, 5));
+                } catch (\Throwable $e) {}
+            }
+            return $score;
+        })->first();
     }
 
     private function updateBankAccountBalances(array $accountsData): void

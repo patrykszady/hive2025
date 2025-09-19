@@ -614,15 +614,16 @@ class CompanyEmailController extends Controller
             $email_vendor = $company_email->vendor;
             $email_vendor_bank_account_ids = $email_vendor->bank_accounts->pluck('id');
 
-            $syncResult = $this->nylasService->syncFolders($grantId, $company_email->api_json, ['inbox'], 45, 3, 15);
-            $messages = collect($syncResult['messages'])
+            // Fetch messages from the inbox using the incremental sync helper
+            $syncResult = $this->nylasService->syncMessages(['inbox'], $company_email);
+            $messages = collect($syncResult['messages'] ?? [])
                 ->filter(fn($m) => isset($m['from'][0]['email'], $m['subject']) &&
                     strcasecmp($m['from'][0]['email'], 'noreply@print.epsonconnect.com') === 0 &&
                     stripos($m['subject'], 'Receipt Scans') !== false)
                 ->values()
                 ->all();
-
-            $company_email->api_json->update($syncResult['api_json']);
+            // NylasService::syncMessages already persists cursors into CompanyEmail->api_json when changed.
+            // No need to mutate api_json here.
 
             foreach ($messages as $message) {
                 $messageId = $message['id'];

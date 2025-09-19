@@ -19,15 +19,15 @@ Schedule::call(function () {
 //   ->withoutOverlapping()
 //   ->onOneServer();
 
-// Schedule::call(function () {
-//     app(\App\Http\Controllers\CompanyEmailController::class)->fetchAutoReceipts();
-//     })
-//     ->everyTenMinutes()
-//     // ->between('7:00', '22:00')
-//     ->name('fetch-auto-receipts')
-//     ->environments(['production'])
-//     ->withoutOverlapping()
-//     ->onOneServer();
+Schedule::call(function () {
+    app(\App\Http\Controllers\CompanyEmailController::class)->fetchAutoReceipts();
+    })
+    ->everyTenMinutes()
+    // ->between('7:00', '22:00')
+    ->name('fetch-auto-receipts')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer();
 
 // Schedule::call(function () {
 //     app(\App\Http\Controllers\VendorDocsController::class)->fetchMessagesFromInsuranceMailbox();
@@ -47,13 +47,13 @@ Schedule::call(function () {
 //   ->withoutOverlapping()
 //   ->onOneServer();
 
-// Schedule::call(function () {
-//     app(\App\Http\Controllers\PlaidTransactionSyncController::class)->syncAllBanks();
-// })->hourly()
-//   ->name('plaid-transactions-sync')
-//   ->environments(['production'])
-//   ->withoutOverlapping()
-//   ->onOneServer();
+Schedule::call(function () {
+    app(\App\Http\Controllers\PlaidTransactionSyncController::class)->syncAllBanks();
+})->hourly()
+  ->name('plaid-transactions-sync')
+  ->environments(['production'])
+  ->withoutOverlapping()
+  ->onOneServer();
 
 Schedule::call(function () {
     app(\App\Http\Controllers\TransactionController::class)->add_check_deposit_to_transactions();

@@ -108,6 +108,7 @@ Route::get('/company-email/auth-response', [CompanyEmailController::class, 'nyla
 // Route::get('/leads/leads_in_email', [LeadController::class, 'leads_in_email'])->name('leads.leads_in_email');
 
 Route::get('vendor_docs/verifyWorkersComp', [ReceiptController::class, 'verifyWorkersComp'])->name('vendor_docs.verifyWorkersComp');
+Route::get('receipts/home-depot-messages', [ReceiptController::class, 'getHomeDepotMessages'])->name('receipts.home-depot-messages');
 Route::get('files/{folder}/{filename}', [ReceiptController::class, 'original_receipt'])->name('expenses.original_receipt');
 
 Route::get('expenses/temp_receipt/{receipt}', [ReceiptController::class, 'temp_receipt'])->name('receipts.temp_receipt');
