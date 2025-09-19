@@ -11,8 +11,7 @@ use App\Models\ReceiptAccount;
 use App\Models\Transaction;
 use App\Models\Vendor;
 use App\Services\NylasService;
-use App\Services\GiftCardService;
-use App\Http\Requests\GetGiftCardRequest;
+// use App\Http\Requests\GetGiftCardRequest;
 
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
@@ -36,28 +35,26 @@ use App\Support\ApiErrorFormatter;
 class ReceiptController extends Controller
 {
     private NylasService $nylasService;
-    private GiftCardService $giftCardService;
 
-    public function __construct(NylasService $nylasService, GiftCardService $giftCardService)
+    public function __construct(NylasService $nylasService)
     {
         $this->nylasService = $nylasService;
-        $this->giftCardService = $giftCardService;
     }
 
     /**
      * Return latest Home Depot gift card redeem URL + screenshot path (JSON response).
      */
-    public function getHomeDepotMessages(GetGiftCardRequest $request)
-    {
-        $companyEmailId = (int) $request->validated()['company_email_id'];
-        $result = $this->giftCardService->captureLatest($companyEmailId);
+    // public function getHomeDepotMessages(GetGiftCardRequest $request)
+    // {
+    //     $companyEmailId = (int) $request->validated()['company_email_id'];
+    //     $result = $this->giftCardService->captureLatest($companyEmailId);
 
-        if (!$result['success']) {
-            return response()->json($result, 422);
-        }
+    //     if (!$result['success']) {
+    //         return response()->json($result, 422);
+    //     }
 
-        return response()->json($result);
-    }
+    //     return response()->json($result);
+    // }
 
     public function amazon_login()
     {
