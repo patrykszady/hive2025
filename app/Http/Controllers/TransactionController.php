@@ -592,13 +592,9 @@ class TransactionController extends Controller
                     $transactions = $transactions->where('vendor_id', $expense->vendor_id);
                 }
 
-                // Do not mix returns (negative amounts) with purchases (positive amounts)
-                $expenseAmount = (float) $expense->amount;
-                if ($expenseAmount > 0) {
-                    $transactions = $transactions->where('amount', '>', 0);
-                } elseif ($expenseAmount < 0) {
-                    $transactions = $transactions->where('amount', '<', 0);
-                }
+                // Include both positive and negative transactions; we'll match by absolute value and receipt content
+                // Exclude deposits explicitly to avoid accidental matches
+                $transactions = $transactions->whereNull('deposit');
 
                 $transactions = $transactions->get();
 
@@ -608,7 +604,12 @@ class TransactionController extends Controller
                         $transaction->date_diff = $transaction->transaction_date->floatDiffInDays($expense->date);
                     }
 
-                    $transactions_full_amount = $transactions->where('amount', $transaction_amount_outstanding);
+                    // Full-amount match by absolute value (handles refunds/credits appearing on receipts)
+                    $normalizedOutstanding = number_format(abs((float) $transaction_amount_outstanding), 2, '.', '');
+                    $transactions_full_amount = $transactions->filter(function ($t) use ($normalizedOutstanding) {
+                        $tAmount = number_format(abs((float) $t->amount), 2, '.', '');
+                        return $tAmount === $normalizedOutstanding;
+                    });
                  
                     if (!$transactions_full_amount->isEmpty()) {
                         // dd($transaction->makeHidden('date_diff'));
@@ -636,19 +637,45 @@ class TransactionController extends Controller
                                         }
 
                                         // Flexible amount pattern: match 5.29, 5,29, 5 29, 5 . 29, etc.
-                                        $rawAmount = ltrim($transaction->amount, '-');
-                                        $normalized = number_format((float) $rawAmount, 2, '.', ''); // ensure two decimals
-                                        [$intPart, $decPart] = explode('.', $normalized);
-                                        // Pattern explanation:
-                                        // (?<!\d)    - left boundary not a digit (prevents matching inside larger numbers like 25.29 when seeking 5.29)
-                                        // intPart     - the integer portion
-                                        // (?:[\.,]\s*|\s*) - either a dot or comma (optionally followed by spaces) OR just whitespace (to allow '5 29') OR nothing (rare OCR case)
-                                        // decPart     - the decimal portion
-                                        // (?!\d)     - right boundary not a digit
-                                        $pattern = '/(?<!\d)'.$intPart.'(?:[\.,]\s*|\s*)'.$decPart.'(?!\d)/m';
-                                        preg_match($pattern, $str, $matches, PREG_OFFSET_CAPTURE);
+                                        $tryAmounts = [
+                                            number_format(abs((float) $transaction->amount), 2, '.', ''),
+                                        ];
 
-                                        if (!empty($matches)) {
+                                        $found = false;
+                                        foreach ($tryAmounts as $normalized) {
+                                            if (strpos($normalized, '.') === false) {
+                                                $normalized = $normalized . '.00';
+                                            }
+                                            [$intPart, $decPart] = explode('.', $normalized);
+                                            // Pattern explanation:
+                                            // (?<!\d)    - left boundary not a digit (prevents matching inside larger numbers like 25.29 when seeking 5.29)
+                                            // intPart     - the integer portion
+                                            // (?:[\.,]\s*|\s*) - either a dot or comma (optionally followed by spaces) OR just whitespace (to allow '5 29') OR nothing (rare OCR case)
+                                            // decPart     - the decimal portion
+                                            // (?!\d)     - right boundary not a digit
+                                            $pattern = '/(?<!\d)'.$intPart.'(?:[\.,]\s*|\s*)'.$decPart.'(?!\d)/m';
+                                            if (preg_match($pattern, $str)) {
+                                                $found = true;
+                                                break;
+                                            }
+                                        }
+
+                                        // Fallback: search entire receipt HTML if not found in the sliced portion
+                                        if (!$found) {
+                                            foreach ($tryAmounts as $normalized) {
+                                                if (strpos($normalized, '.') === false) {
+                                                    $normalized = $normalized . '.00';
+                                                }
+                                                [$intPart, $decPart] = explode('.', $normalized);
+                                                $pattern = '/(?<!\d)'.$intPart.'(?:[\.,]\s*|\s*)'.$decPart.'(?!\d)/m';
+                                                if (preg_match($pattern, $receipt->receipt_html)) {
+                                                    $found = true;
+                                                    break;
+                                                }
+                                            }
+                                        }
+
+                                        if ($found) {
                                             $transaction = Transaction::findOrFail($transaction->id);
                                             $transaction->expense()->associate($expense);
                                             $transaction->save();

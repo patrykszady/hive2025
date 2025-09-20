@@ -16,6 +16,7 @@ use App\Services\AzureDocumentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\DB;
 
 use Carbon\Carbon;
 use Spatie\Browsershot\Browsershot;
@@ -992,32 +993,114 @@ class CompanyEmailController extends Controller
 
     public function fuzzyMatchVendor($ocrName, $vendors, $threshold = 75.0)
     {
-        // Normalize by converting to lowercase and removing punctuation,
-        // but retain spaces so we can be word sensitive.
-        $ocrNormalized = preg_replace('/[^\w\s]+/', '', strtolower($ocrName)); // e.g. "menards mount pros"
+        // Unicode-safe normalize: lowercase, remove punctuation/symbols, collapse whitespace
+        $normalize = static function (?string $s): string {
+            if ($s === null) {
+                return '';
+            }
+            $s = mb_strtolower($s, 'UTF-8');
+            // Remove all punctuation and symbols but keep letters, numbers and spaces
+            $s = preg_replace('/[^\p{L}\p{N}\s]+/u', '', $s) ?? '';
+            // Collapse whitespace
+            $s = preg_replace('/\s+/u', ' ', trim($s)) ?? '';
+            return $s;
+        };
+
+        $ocrNormalized = $normalize($ocrName);          // e.g. "the home depot"
+        $ocrCompact    = str_replace(' ', '', $ocrNormalized); // e.g. "thehomedepot"
+        $ocrTokens     = $ocrNormalized !== '' ? explode(' ', $ocrNormalized) : [];
+
+        // Build dynamic alias map from vendor_transactions.desc
+        // Cache per unique set of vendor IDs for this request to avoid repeat queries.
+        $vendorList = is_array($vendors) ? $vendors : (is_iterable($vendors) ? $vendors : []);
+        $vendorIds = [];
+        foreach ($vendorList as $v) {
+            if (is_object($v) && isset($v->id)) {
+                $vendorIds[] = (int) $v->id;
+            }
+        }
+        sort($vendorIds);
+        $aliasCacheKey = implode(',', $vendorIds);
+        static $aliasCache = [];
+        if (!isset($aliasCache[$aliasCacheKey])) {
+            $aliasRows = [];
+            if (!empty($vendorIds)) {
+                try {
+                    $aliasRows = DB::table('vendor_transactions')
+                        ->select(['vendor_id', DB::raw('`desc` as pattern')])
+                        ->whereIn('vendor_id', $vendorIds)
+                        ->get();
+                } catch (\Throwable $e) {
+                    // If the table is missing or any error occurs, fall back to no aliases.
+                    $aliasRows = collect();
+                }
+            }
+
+            $map = [];
+            foreach ($aliasRows as $row) {
+                $pat = $normalize((string) ($row->pattern ?? ''));
+                if ($pat === '') {
+                    continue;
+                }
+                $map[(int) $row->vendor_id][] = [
+                    'norm' => $pat,
+                    'compact' => str_replace(' ', '', $pat),
+                ];
+            }
+            $aliasCache[$aliasCacheKey] = $map;
+        }
+        $aliasMap = $aliasCache[$aliasCacheKey];
 
         $bestVendor = null;
-        $bestScore = 0;
+        $bestScore = -INF;
 
         foreach ($vendors as $vendor) {
-            // Normalize the vendor name similarly.
-            $normalizedVendor = preg_replace('/[^\w\s]+/', '', strtolower($vendor->business_name));
+            $vendorName = (string) $vendor->business_name;
+            $vendorNorm = $normalize($vendorName);
+            $vendorCompact = str_replace(' ', '', $vendorNorm);
+            $vendorTokens = $vendorNorm !== '' ? explode(' ', $vendorNorm) : [];
 
-            // // Look for an immediate substring match.
-            // if (stripos($ocrNormalized, $normalizedVendor) !== false) {
-            //     return $vendor;
-            // }
+            // Base similarity (spaced and compact forms)
+            $percentA = 0.0; $percentB = 0.0;
+            if ($ocrNormalized !== '' && $vendorNorm !== '') {
+                similar_text($ocrNormalized, $vendorNorm, $percentA);
+            }
+            if ($ocrCompact !== '' && $vendorCompact !== '') {
+                similar_text($ocrCompact, $vendorCompact, $percentB);
+            }
+            $score = max($percentA, $percentB);
 
-            // If not an immediate match, calculate similarity.
-            similar_text($ocrNormalized, $normalizedVendor, $percent);
-            if ($percent > $bestScore) {
-                $bestScore = $percent;
+            // Token overlap bonus: each overlapping token adds weight
+            if (!empty($ocrTokens) && !empty($vendorTokens)) {
+                $overlap = array_intersect($ocrTokens, $vendorTokens);
+                if (!empty($overlap)) {
+                    // Give a small boost per exact token match
+                    $score += min(20, count($overlap) * 5);
+                }
+            }
+
+            // Dynamic alias boost based on vendor_transactions entries
+            $vid = (int) ($vendor->id ?? 0);
+            if ($vid && isset($aliasMap[$vid])) {
+                foreach ($aliasMap[$vid] as $alias) {
+                    $aNorm = $alias['norm'];
+                    $aComp = $alias['compact'];
+                    if (($aNorm !== '' && str_contains($ocrNormalized, $aNorm)) ||
+                        ($aComp !== '' && str_contains($ocrCompact, $aComp))) {
+                        // Strong boost if an alias appears in OCR text
+                        $score += 35;
+                        break; // one hit is enough
+                    }
+                }
+            }
+
+            if ($score > $bestScore) {
+                $bestScore = $score;
                 $bestVendor = $vendor;
             }
         }
 
-        // Return the best match only if it meets the threshold.
-        return ($bestScore >= $threshold) ? $bestVendor : null;
+        return ($bestVendor && $bestScore >= $threshold) ? $bestVendor : null;
     }
 
     /**

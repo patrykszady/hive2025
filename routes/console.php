@@ -29,23 +29,23 @@ Schedule::call(function () {
     ->withoutOverlapping()
     ->onOneServer();
 
-// Schedule::call(function () {
-//     app(\App\Http\Controllers\VendorDocsController::class)->fetchMessagesFromInsuranceMailbox();
-//     })->hourly()
-//     // ->between('7:00', '20:00')
-//     ->name('fetch-insurance-mailbox')
-//     ->environments(['production'])
-//     ->withoutOverlapping()
-//     ->onOneServer();
+Schedule::call(function () {
+    app(\App\Http\Controllers\VendorDocsController::class)->fetchMessagesFromInsuranceMailbox();
+    })->hourly()
+    // ->between('7:00', '20:00')
+    ->name('fetch-insurance-mailbox')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer();
 
-// Plaid/Transaction tasks
-// Schedule::call(function () {
-//     app(\App\Http\Controllers\TransactionController::class)->plaid_item_status();
-// })->hourly()
-//   ->name('plaid-item-status')
-//   ->environments(['production'])
-//   ->withoutOverlapping()
-//   ->onOneServer();
+//Plaid/Transaction tasks
+Schedule::call(function () {
+    app(\App\Http\Controllers\TransactionController::class)->plaid_item_status();
+})->hourly()
+  ->name('plaid-item-status')
+  ->environments(['production'])
+  ->withoutOverlapping()
+  ->onOneServer();
 
 Schedule::call(function () {
     app(\App\Http\Controllers\PlaidTransactionSyncController::class)->syncAllBanks();
