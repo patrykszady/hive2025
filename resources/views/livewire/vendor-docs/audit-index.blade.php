@@ -32,28 +32,28 @@
                 <div class="col-span-1 sm:col-span-1 lg:col-span-1 min-w-0">
                         <div class="space-y-2 ![&_[data-flux-label]]:font-normal">
                         <flux:heading>Bank Accounts</flux:heading>
-                        @foreach($banks as $bank_id => $bank)
+                        @foreach($this->banks as $bank_id => $bank)
                             <div class="flex items-center gap-2" wire:key="bank-row-{{$bank_id}}">
-                                <flux:checkbox
-                                    wire:key="bank-{{$bank_id}}"
-                                    name="bank-{{$bank_id}}"
-                                    wire:model.live="banks.{{$bank_id}}.checked"
+                                    <flux:checkbox
+                                        wire:key="bank-{{$bank_id}}"
+                                        name="bank-{{$bank_id}}"
+                                        value="{{$bank_id}}"
+                                        wire:model.live="selected_bank_ids"
                                 />
-                                <span class="text-sm font-normal text-zinc-800 dark:text-white">{{$bank->name}}</span>
+                                <span class="text-sm font-normal text-zinc-800 dark:text-white">{{ $bank['name'] ?? 'Bank '.$bank_id }}</span>
                             </div>
                         @endforeach
                     </div>
                 </div>
-            </div>
-
-            
+            </div>            
         </form>
     </x-slot>
     
     <x-slot name="footer">
-        <div x-data x-cloak
-             x-show="$wire.start_date && $wire.end_date && $wire.type && Object.values($wire.banks || {}).some(b => b.checked)"
-             x-transition.opacity.duration.250ms>
+       <div
+            x-show="$wire.start_date && $wire.end_date && $wire.type && ($wire.selected_bank_ids?.length > 0)"
+            x-transition.opacity.duration.200ms
+            >
             <flux:button type="submit" form="audit-form" variant="primary">Run Audit</flux:button>
         </div>
     </x-slot>

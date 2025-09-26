@@ -13,7 +13,6 @@ use App\Models\Vendor;
 use App\Traits\HandlesChecks;
 use Flux;
 use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 use Livewire\WithFileUploads;
@@ -144,7 +143,6 @@ class ExpenseCreate extends Component
     public function newExpense($amount)
     {
         $this->expense = Expense::make();
-    $this->clearCheckFields();
        
         $this->form->amount = $amount;
         $this->view_text = [
@@ -161,21 +159,13 @@ class ExpenseCreate extends Component
         $this->resetModal();
 
         $this->expense = $expense;
-        $this->clearCheckFields();
         $this->form->setExpense($expense);
-
-        // If the expense already has a check, prefill the component-level check fields
-        if ($expense->check) {
-            $this->bank_account_id = $expense->check->bank_account_id;
-            $this->check_type = $expense->check->check_type;
-            $this->check_number = $expense->check->check_number;
-            $this->next_check_auto = false;
-            $this->auto_check_number = null;
-        }
 
         if (! $expense->splits->isEmpty()) {
             $this->hasSplits($expense->splits);
-        }    
+        }
+
+    
 
         $this->view_text = [
             'card_title' => 'Update Expense',
@@ -190,11 +180,10 @@ class ExpenseCreate extends Component
     {
         $this->expense = Expense::make();
         $this->form->reset();
-    $this->clearCheckFields();
         $this->dispatch('resetSplits')->to('expenses.expense-splits-create');
         $this->split = false;
         $this->splits = false;
-    $this->expense_splits = [];
+        $this->expense_splits = [];
         // Public functions should be reset here
         // $this->dispatch('resetSplits')->to('expenses.expenses-splits-form');
         // $this->dispatch('refreshComponent')->to('expenses.expenses-splits-form');
@@ -223,54 +212,74 @@ class ExpenseCreate extends Component
 
     public function createExpenseFromTransaction(Transaction $transaction)
     {
-        try {
-            $this->resetModal();
-            $this->dispatch('resetSplits')->to('expenses.expense-splits-create');
-            $this->clearCheckFields();
+        $this->resetModal();
+        $this->dispatch('resetSplits')->to('expenses.expense-splits-create');
+        // {
+        //6-14-2022 this only works for Retail vendors.. really need a Modal from MatchVendor or VendorCreate forms and taken back here
+        //create Retail vendor here if doesnt exist yet
+        // if(is_null($transaction->vendor_id)){
+        //     $vendor = Vendor::create([
+        //         'business_type' => 'Retail',
+        //         'business_name' => $transaction->plaid_merchant_name,
+        //     ]);
 
-            // If the transaction has a check_number, derive check_type and prefill fields
-            if ($transaction->check_number) {
-                if ($transaction->check_number === '1010101') {
-                    $check_type = 'Transfer';
-                } elseif ($transaction->check_number === '2020202') {
-                    $check_type = 'Cash';
-                } else {
-                    $check_type = 'Check';
-                }
+        //     $vendor_id = $vendor->id;
 
-                // Populate component-level check fields used by the partial
-                $this->bank_account_id = $transaction->bank_account_id;
-                $this->check_type = $check_type;
-                $this->next_check_auto = false;
-                $this->auto_check_number = null;
-                $this->check_number = null;
+        //     //USED IN MULTIPLE OF PLACES TransactionController@add_vendor_to_transactions, MatchVendor@store
+        //     //add if vendor is not part of the currently logged in vendor
+        //     if(!$transaction->bank_account->vendor->vendors->contains($vendor_id)){
+        //         $transaction->bank_account->vendor->vendors()->attach($vendor_id);
+        //     }
 
-                if ($check_type === 'Check' && !in_array($transaction->check_number, ['1010101', '2020202'])) {
-                    $this->check_number = $transaction->check_number;
-                }
-            }
+        //     //add this vendor to the existing $this->vendors collection
+        //     $this->vendors->add($vendor);
 
-            $this->form->transaction = $transaction;
+        //     //6-8-2022 run in a queue?
+        //     app('App\Http\Controllers\TransactionController')->add_vendor_to_transactions();
+        // }else{
+        //     $vendor_id = $transaction->vendor_id;
+        // }
+        // }
 
-            $this->view_text = [
-                'card_title' => 'Create Expense from Transaction',
-                'button_text' => 'Create',
-                'form_submit' => 'save',
-            ];
+        // $this->expense_splits = [];
 
-            $this->form->amount = $transaction->amount;
-            $this->form->date = $transaction->transaction_date->format('Y-m-d');
-
-            if (is_null($transaction->vendor_id)) {
-                $this->form->vendor_id = null;
+        //2/18/2023 if check_number .. expense->vendor_id = GS Construction / logged in vendor?
+        if ($transaction->check_number) {
+            if ($transaction->check_number === '1010101') {
+                $check_type = 'Transfer';
+            } elseif ($transaction->check_number === '2020202') {
+                $check_type = 'Cash';
             } else {
-                $this->form->vendor_id = $transaction->vendor_id;
+                $check_type = 'Check';
             }
 
-            $this->modal('expenses_form_modal')->show();
-        } catch (\Throwable $e) {
-            throw $e; // rethrow to preserve existing behavior
+            $this->form->bank_account_id = $transaction->bank_account_id;
+            $this->form->check_type = $check_type;
+
+            //2/18/2023 dont allow changes to $this->check if coming from a transaction...
+            if ($check_type === 'Check') {
+                $this->form->check_number = $transaction->check_number;
+            }
         }
+
+        $this->form->transaction = $transaction;
+
+        $this->view_text = [
+            'card_title' => 'Create Expense from Transaction',
+            'button_text' => 'Create',
+            'form_submit' => 'save',
+        ];
+
+        $this->form->amount = $transaction->amount;
+        $this->form->date = $transaction->transaction_date->format('Y-m-d');
+
+        if (is_null($transaction->vendor_id)) {
+            $this->form->vendor_id = null;
+        } else {
+            $this->form->vendor_id = $transaction->vendor_id;
+        }
+
+        $this->modal('expenses_form_modal')->show();
     }
 
     public function edit()

@@ -13,8 +13,8 @@
         {{-- USER FINANCES --}}
         @can('update', $user)
             @if($user->isEmployed())
-                <div class="space-y-2 col-span-4 lg:col-span-2">
-                    <livewire:users.user-finances :user="$user">
+                <div class="space-y-2 col-span-4 lg:col-span-4">
+                    <livewire:users.user-finances :user="$user" lazy>
                 </div>
             @endif
         @endcan

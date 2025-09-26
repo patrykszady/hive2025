@@ -444,10 +444,29 @@ class ExpenseForm extends Form
         
 
         if ($this->transaction) {
-            $this->transaction->check_id = isset($check) ? $check->id : null;
-            $this->transaction->expense_id = isset($expense) ? $expense->id : null;
-            $this->transaction->vendor_id = isset($this->vendor_id) ? $this->vendor_id : null;
-            $this->transaction->save();            
+            // Determine final check association for the transaction.
+            $finalCheckId = isset($check)
+                ? $check->id
+                : ($this->transaction->check_id ?? null);
+
+            if ($finalCheckId) {
+                // Prefer linking transaction to a check; do not also link directly to the expense.
+                $this->transaction->check_id = $finalCheckId;
+                $this->transaction->expense_id = null;
+            } else {
+                // Only when no check is involved, associate the transaction directly to the expense.
+                $this->transaction->expense_id = $expense->id;
+            }
+
+            if (isset($this->vendor_id)) {
+                $authVendorId = auth()->user()->vendor->id ?? null;
+                // Only set the transaction vendor when it's different from the auth vendor
+                if ($authVendorId === null || (int) $this->vendor_id !== (int) $authVendorId) {
+                    $this->transaction->vendor_id = $this->vendor_id;
+                }
+            }
+
+            $this->transaction->save();
         }
 
         if ($this->receipt_file) {

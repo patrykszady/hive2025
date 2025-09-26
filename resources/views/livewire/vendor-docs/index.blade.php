@@ -1,5 +1,5 @@
 <div class="max-w-3xl">
-    @livewire('vendor-docs.audit-index')
+    <livewire:vendor-docs.audit-index />
 
     @foreach($this->vendors as $vendor)
         <livewire:vendor-docs.vendor-docs-card :$vendor :key="$vendor->id" />

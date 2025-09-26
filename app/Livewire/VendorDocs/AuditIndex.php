@@ -6,11 +6,13 @@ use App\Models\Bank;
 use App\Models\Check;
 use App\Models\Transaction;
 use Carbon\Carbon;
+use Livewire\Attributes\Computed;
 use Livewire\Component;
 
 class AuditIndex extends Component
 {
-    public $banks = [];
+    // Computed list of banks; selection tracked as array of bank IDs
+    public array $selected_bank_ids = [];
     public $start_date = '';
     public $end_date = '';
     public $type = '';
@@ -18,8 +20,9 @@ class AuditIndex extends Component
     protected function rules()
     {
         return [
-            'banks.*.checked' => 'nullable', // multiple checkbox
-            'start_date' => 'nullable|date',
+            'selected_bank_ids' => ['required','array','min:1'],
+            'selected_bank_ids.*' => ['integer','distinct'],
+            'start_date' => 'required|date',
             'end_date' => 'required|date',
             'type' => 'required', //workers or liablity | dropfown
         ];
@@ -29,7 +32,9 @@ class AuditIndex extends Component
     {
         if ($field === 'start_date' && !empty($value) && empty($this->end_date)) {
             try {
-                $this->end_date = Carbon::createFromFormat('Y-m-d', $value)->addYear()->format('Y-m-d');
+                $this->end_date = Carbon::createFromFormat('Y-m-d', $value)
+                    ->addYear()
+                    ->format('Y-m-d');
             } catch (\Throwable $e) {
                 // ignore formatting issues; validation will handle
             }
@@ -37,54 +42,40 @@ class AuditIndex extends Component
         $this->validateOnly($field);
     }
 
-    public function mount()
+    #[Computed]
+    public function banks(): array
     {
-        // $this->authorize('viewAny', Expense::class);
+        // [bankId => ['name' => string, 'accounts' => array<int>]]
+        return Bank::whereNotNull('plaid_access_token')
+            ->whereNotNull('plaid_ins_id')
+            ->get()
+            ->keyBy('id')
+            ->map(function (Bank $bank) {
+                $accountIds = $bank->institution_accounts()
+                    ->whereIn('bank_accounts.type', ['Checking', 'Savings'])
+                    ->pluck('bank_accounts.id')
+                    ->all();
 
-        $this->banks =
-            Bank::whereNotNull('plaid_access_token')
-                ->with(['accounts'])
-                ->whereHas('accounts', function ($query) {
-                    return $query->whereIn('type', ['Checking', 'Savings']);
-                })
-                ->get()
-                ->each(function ($item, $key) {
-                    $item->checked = false;
-                })
-                ->keyBy('id');
+                return [
+                    'name' => $bank->name,
+                    'accounts' => $accountIds,
+                ];
+            })
+            ->filter(fn (array $b) => !empty($b['accounts']))
+            ->toArray();
     }
 
     public function audit_submit()
     {
-        // $this->authorize('update', $this->expense);
         $this->validate();
-        // $this->redirect(AuditShow::class, audit_type: 'workers');
-        // return redirect(view('livewire.vendor-docs.audit-show'));
-        // dd("audit audit_submit");
-        // $this->dispatch('audit')->to(AuditShow::class);
-        $banks = $this->banks->where('checked', true);
-        $bank_account_ids = $banks->pluck('accounts')->flatten()->pluck('id')->toArray();
-
-        // $vendor_checks =
-        //     Check::whereBetween('date', [$start_date, $end_date])
-        //         ->with(['vendor'])
-        //         ->whereIn('bank_account_id', $bank_account_ids)
-        //         ->whereNot('check_type', 'Cash')
-        //         ->whereNotNull('vendor_id')
-        //         ->get()
-        //         ->groupBy('vendor_id');
-
-        // dd($vendor_checks);
-
-        // $checks =
-        // Check::whereBetween('date', [$start_date, $end_date])
-        //     ->with(['vendor', 'user'])
-        //     ->whereIn('bank_account_id', $bank_account_ids)
-        //     ->whereNot('check_type', 'Cash')
-        //     ->whereNotNull('user_id')
-        //     ->get()
-        //     ->groupBy('user_id')
-        //     ->take(5);
+        // Collect selected bank account IDs from chosen banks
+        $selected = collect($this->selected_bank_ids)->map(fn ($id) => (int)$id)->all();
+        $bank_account_ids = collect($this->banks)
+            ->only($selected)
+            ->flatMap(fn ($b) => $b['accounts'] ?? [])
+            ->unique()
+            ->values()
+            ->all();
 
         return redirect()->route('vendor_docs.audit', [
             'start_date' => $this->start_date,
@@ -92,33 +83,10 @@ class AuditIndex extends Component
             'bank_account_ids' => $bank_account_ids,
             'audit_type' => $this->type,
         ]);
-
-        //emitTo AuditShow audit method
-
-        // dd($end_date);
-
-        // return redirect(view('livewire.vendor-docs.audit-show'));
-
-        // $transactions =
-        //     Transaction::
-        //         whereIn('bank_account_id', $bank_accounts)
-        //         ->whereNotNull('check_number')
-        //         ->whereHas('check', function ($query) {
-        //             return $query->whereNull('user_id')->groupBy('vendor_id');
-        //             })
-        //         ->where('check_number', '!=', '2020202')
-        //         ->whereBetween('posted_date', [
-        //             $start_date, $end_date ])
-        //         ->with(['check'])
-        //         ->get();
-
-        // dd($transactions->first());
     }
-
 
     public function render()
     {
-        // vendor-docs.audit-index
         return view('livewire.vendor-docs.audit-index');
     }
 }
