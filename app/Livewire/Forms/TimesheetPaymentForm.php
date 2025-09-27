@@ -39,9 +39,15 @@ class TimesheetPaymentForm extends Form
         // Use resolved viaVendor from parent component (if present) instead of dynamic pivot property
         $via_vendor = $this->component->viaVendor; // may be null
 
+        // Previous behavior: when a user was payable "via" a vendor we created the check with vendor_id only
+        // (user_id null). This caused checks (e.g. 3521 / 3522) to lack the direct employee user_id reference.
+        // Updated behavior: always attribute the check to the user (user_id) so downstream logic (timesheets,
+        // ownership, filtering) consistently finds the employee. We intentionally leave vendor_id null here to
+        // preserve the invariant that a payment check is either to a user OR a vendor, not both, unless we later
+        // introduce an explicit via_vendor_id column.
         if ($via_vendor) {
-            $check_user_id = null;
-            $check_vendor_id = $via_vendor->id;
+            $check_user_id = $this->component->user->id;    // ensure employee captured
+            $check_vendor_id = null;                        // do not set intermediary vendor on the check
         } else {
             $check_user_id = $this->component->user->id;
             $check_vendor_id = null;

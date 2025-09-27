@@ -1462,16 +1462,26 @@ class TransactionController extends Controller
             // ->groupBy('parent_client_payment_id');
 
             // if first character is -
-            $single_payments = $payments->where('amount', is_numeric(substr($transaction->amount, 0, 1)) ? '-'.$transaction->amount : substr($transaction->amount, 1))->orderBy('date', 'DESC')->get();
+            $single_payments = $payments->where('amount', is_numeric(substr($transaction->amount, 0, 1)) ? '-'.$transaction->amount : substr($transaction->amount, 1))->get();
 
             if ($single_payments->isNotEmpty()) {
-                //closest date. diffInDays
-                $save_payment = $single_payments->first(); // Just use the first match without date comparison
-                
-                // Associate and save in one step using the relationship
+                // Choose the payment whose date is CLOSEST (absolute diff) to the transaction date.
+                // Tie-breakers:
+                //  1) Prefer a payment on or before the transaction date over one after (if same diff)
+                //  2) Then earlier calendar date (stable ordering)
+                $txDate = $transaction->transaction_date->copy();
+                $save_payment = $single_payments
+                    ->sortBy(function ($p) use ($txDate) {
+                        $diff = abs($p->date->diffInDays($txDate));
+                        $afterFlag = $p->date->greaterThan($txDate) ? 1 : 0; // prefer <= tx date
+                        return sprintf('%05d-%d-%s', $diff, $afterFlag, $p->date->toDateString());
+                    })
+                    ->first();
+
+                // Associate and save
                 $transaction->payments()->save($save_payment);
-                
-                //so Searchable gets send to Scout/TypeSense
+
+                // Trigger Searchable / indexing side-effects
                 $transaction->save();
             } else {
                 $payments = Payment::whereBetween('date', [$transaction->transaction_date->subDays(21), $transaction->transaction_date->addDays(4)])

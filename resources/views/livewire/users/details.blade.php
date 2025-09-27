@@ -2,6 +2,7 @@
     title="User Details"
     subheading="User and related details."
     :canEdit="auth()->user()->can('update', $user)"
+    wire:init="$refresh"
 >
     <x-slot:header_buttons>
         @can('update', $user->vendor)
@@ -38,9 +39,11 @@
     </x-slot:header_buttons>
 
     <x-slot:details>
-        <x-details.row title="Name" :content="$user->full_name" />
-        <x-details.row title="Email" :content="$user->email" copyable />
-        <x-details.row title="Cell Phone" :content="$user->cell_phone" copyable />
+    {{-- Lightweight skeleton guard to avoid flash before hydration --}}
+    @php($hydrated = isset($user) && $user->id)
+    <x-details.row title="Name" :content="$hydrated ? $user->full_name : 'Loading...'" />
+    <x-details.row title="Email" :content="$hydrated ? $user->email : 'Loading...'" copyable />
+    <x-details.row title="Cell Phone" :content="$hydrated ? $user->cell_phone : 'Loading...'" copyable />
 
         @if($user->isEmployed())
             <x-details.row title="" :content="auth()->user()->vendor->name . ' Details:'" />

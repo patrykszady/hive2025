@@ -16,7 +16,14 @@
     $shouldTruncate = !$attributes->has('no-truncate') && $truncate;
 @endphp
 
-<div class="relative flex flex-col sm:grid sm:grid-cols-4 gap-1 items-start py-2 sm:py-3 [&:not(:last-child)]:border-b [&:not(:last-child)]:border-zinc-800/15 dark:[&:not(:last-child)]:border-white/20">
+@php
+    // Allow opting out of cloaking with a `no-cloak` attribute
+    $useCloak = ! $attributes->has('no-cloak');
+@endphp
+<div
+    class="relative flex flex-col sm:grid sm:grid-cols-4 gap-1 items-start py-2 sm:py-3 [&:not(:last-child)]:border-b [&:not(:last-child)]:border-zinc-800/15 dark:[&:not(:last-child)]:border-white/20"
+    @if($useCloak) x-data="{}" x-cloak @endif
+>
     @if($isRight)
         {{-- RIGHT-ALIGNED: title is clickable --}}
         <div class="hidden sm:block sm:col-span-1"></div>

@@ -11,7 +11,7 @@ use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Session;
+// Session caching removed (was previously used to cache computed finances per session)
 use Livewire\Component;
 
 class UserFinances extends Component
@@ -55,20 +55,7 @@ class UserFinances extends Component
         // Build years range from first employment year with this vendor to current (descending)
         $vendorId = auth()->user()->vendor->id;
 
-        // Session cache key (scoped per-auth-session, per viewed user, and per vendor)
-        $sessionKey = 'user_finances:' . session()->getId() . ':' . $this->user->id . ':' . $vendorId;
-
-        // If cached for this session, hydrate properties and return early
-        if (Session::has($sessionKey)) {
-            $cached = Session::get($sessionKey);
-            $this->years = $cached['years'] ?? [];
-            $this->sumsByYear = $cached['sumsByYear'] ?? [];
-            $this->visibility = $cached['visibility'] ?? [];
-            $this->prepared_conflicting_by_year = $cached['prepared_conflicting_by_year'] ?? [];
-            // currentYear may be used by the view for YTD label; keep server truth as well
-            $this->currentYear = (int) ($cached['currentYear'] ?? $this->currentYear);
-            return;
-        }
+        // Always compute fresh (caching removed to ensure real-time accuracy after data changes)
         // Prefer the pivot from the User↔Vendor relationship (table: user_vendor)
         $startYear = null;
         $pivot = $this->user->vendors()
@@ -164,15 +151,7 @@ class UserFinances extends Component
                 ->some(fn ($yr) => !empty($this->sumsByYear[$yr][$key]) && $this->sumsByYear[$yr][$key] != 0.0);
         }
 
-        // Store computed results in the session for this browsing session
-        Session::put($sessionKey, [
-            'years' => $this->years,
-            'currentYear' => $this->currentYear,
-            'sumsByYear' => $this->sumsByYear,
-            'visibility' => $this->visibility,
-            'prepared_conflicting_by_year' => $this->prepared_conflicting_by_year,
-            'computedAt' => now()->toIso8601String(),
-        ]);
+        // (No caching) — deliberate removal for immediate reflection of financial changes within same session.
     }
 
     /**
@@ -345,5 +324,12 @@ class UserFinances extends Component
     public function render()
     {
         return view('livewire.users.finances');
+    }
+    /**
+     * View-based placeholder (skeleton) while lazy loading. Mirrors card/table layout visually.
+     */
+    public function placeholder()
+    {
+        return view('livewire.users.finances-placeholder');
     }
 }

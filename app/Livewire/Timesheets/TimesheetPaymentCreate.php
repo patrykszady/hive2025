@@ -77,6 +77,12 @@ class TimesheetPaymentCreate extends Component
             'form_submit' => 'save',
         ];
 
+        // NOTE: As of refactor (maintaining audit trail for employees paid via an intermediary vendor),
+        // we ALWAYS attribute newly created timesheet payment checks to the employee's user_id.
+        // Previous behavior stored vendor_id (= viaVendor) and left user_id null, which obscured
+        // direct user relationships on checks  (e.g. timesheet detail views & policies relying on user_id).
+        // The form logic now ignores viaVendor for the actual Check record; payee display still uses viaVendor.
+
         // Use scopeEmployed() and whereKeyNot() for clarity
         $this->employees = auth()->user()->vendor
             ->users()
