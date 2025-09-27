@@ -12,7 +12,7 @@ use Livewire\Component;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Lazy;
 
-#[Lazy]
+// #[Lazy]
 class CardsIndex extends Component
 {
     public $vendors = [];

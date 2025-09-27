@@ -23,6 +23,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'vendor.access' => \App\Http\Middleware\VendorAccessControl::class,
+            'vendor.own-redirect' => \App\Http\Middleware\RedirectOwnVendorToDashboard::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

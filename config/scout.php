@@ -137,27 +137,29 @@ return [
         'host' => env('MEILISEARCH_HOST', 'http://localhost:7700'),
         'key' => env('MEILISEARCH_KEY'),
         'timeout' => env('MEILISEARCH_TIMEOUT', 1200), // Increase timeout
-        
+        'chunk' => [
+            Expense::class => 5, // Very small chunks for expenses
+        ],
         'index-settings' => [
             Expense::class => [
                 'filterableAttributes'=> [
                     'vendor_id', 'project_id', 'distribution_id', 'check_id', 
-                    'has_splits', 'belongs_to_vendor_id', 'expense_status', 'amount',
-                    'paid_by', '__soft_deleted'
+                    'has_splits', 'belongs_to_vendor_id', 'expense_status', // Added this
+                    'paid_by', '__soft_deleted', 'amount'
                 ],
                 'sortableAttributes' => ['date', 'amount', 'expense_status'],
                 'searchableAttributes' => ['amount'],
                 'typoTolerance' => ['enabled' => false],
                 'rankingRules' => ['sort', 'exactness'],
                 'displayedAttributes' => [
-                    'id', 'amount', 'date', 'vendor_id', 'project_id', 'distribution_id', 'has_splits', 'expense_status'
+                    '*', 'expense_status', 'status'
                 ],
             ],
             
             Transaction::class => [
                 'filterableAttributes'=> [
                     'vendor_id', 'deposit', 'transaction_date', 'posted_date', 
-                    'expense_id', 'check_id', 'bank_account_id', '__soft_deleted'
+                    'expense_id', 'check_id', 'bank_account_id', '__soft_deleted', 'amount'
                 ],
                 'sortableAttributes' => ['transaction_date', 'amount'],
                 'searchableAttributes' => ['amount'],

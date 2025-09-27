@@ -8,26 +8,30 @@ use Livewire\Component;
 
 class Login extends Component
 {
-    public $email = '';
-    public $password = '';
-    public $remember = false; // Uncomment this line
+    public string $email = '';
+    public string $password = '';
+    public bool $remember = false; // Remember-me toggle
     
     protected $rules = [
         'email' => 'required|email',
         'password' => 'required',
     ];
 
-    public function login()
+    public function login(): void
     {
         $this->validate();
 
-        // Add the remember parameter to Auth::attempt
-        if (Auth::attempt(['email' => $this->email, 'password' => $this->password], $this->remember)) {
+        $remember = (bool) $this->remember;
+
+        if (Auth::attempt(['email' => $this->email, 'password' => $this->password], $remember)) {
             session()->regenerate();
-            return $this->redirect(route('dashboard'));
+
+            // Force a full browser navigation so the remember cookie (Set-Cookie header) is applied visibly.
+            // Livewire 3 provides redirectIntended via component helper.
+            $this->redirectIntended(default: route('dashboard'), navigate: true);
+            return;
         }
-        
-        // Authentication failed
+
         $this->addError('email', __('auth.failed'));
     }
 

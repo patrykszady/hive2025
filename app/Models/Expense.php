@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Scopes\ExpenseScope;
 use App\Models\Distribution;
+use App\Traits\HasNumericSearch;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -14,7 +15,7 @@ use Laravel\Scout\Searchable;
 
 class Expense extends Model
 {
-    use HasFactory, Searchable, SoftDeletes;
+    use HasFactory, Searchable, SoftDeletes, HasNumericSearch;
 
     protected $fillable = ['amount', 'date', 'invoice', 'note', 'project_id', 'distribution_id', 'vendor_id', 'check_id', 'reimbursment', 'belongs_to_vendor_id', 'created_by_user_id', 'paid_by', 'created_at', 'updated_at', 'deleted_at'];
 
@@ -100,7 +101,7 @@ class Expense extends Model
      */
     public static function scopedSearch($query = '', $filterConditions = [], $sortBy = 'date', $sortDirection = 'desc')
     {
-    return self::search($query, function ($meilisearch, $searchQuery, $options) use ($filterConditions, $sortBy, $sortDirection) {
+        return self::search($query, function ($meilisearch, $searchQuery, $options) use ($filterConditions, $sortBy, $sortDirection) {
             // Apply base security filters
             $user = auth()->user();
             $baseFilter = "__soft_deleted = 0 AND belongs_to_vendor_id = {$user->vendor->id}";
@@ -110,35 +111,11 @@ class Expense extends Model
                 $baseFilter .= " AND paid_by = {$user->id}";
             }
             
-            // Detect numeric search queries (e.g., "150" or "150.00") and treat them as exact amount filters
-            $actualQuery = $searchQuery;
-            $augmentedFilters = $filterConditions;
-            if (is_string($searchQuery)) {
-                $candidate = trim($searchQuery);
-                if ($candidate !== '' && preg_match('/^-?\d+(?:\.\d+)?$/', $candidate)) {
-                    // Convert to float for Meilisearch numeric filter. Keep simple equality.
-                    $amountValue = (float) $candidate;
-                    $augmentedFilters[] = "amount = {$amountValue}";
-                    // Use filter-only query to avoid text token matching issues on numeric fields.
-                    $actualQuery = '';
-                }
-            }
-
-            // Add custom filters if any (including exact-amount if applied)
-            if (!empty($augmentedFilters)) {
-                $filterString = implode(' AND ', $augmentedFilters);
-                $options['filter'] = "({$baseFilter}) AND ({$filterString})";
-            } else {
-                $options['filter'] = $baseFilter;
-            }
+            // Process numeric search queries using shared trait logic
+            [$actualQuery, $augmentedFilters] = self::processNumericSearch($searchQuery, $filterConditions);
             
-            // Always apply sorting to maintain order
-            $options['sort'] = [$sortBy . ':' . $sortDirection];
-            
-            // Use 'all' matching strategy for exact prefix matching
-            if (!empty($actualQuery)) {
-                $options['matchingStrategy'] = 'all';
-            }
+            // Apply search options using shared trait logic
+            $options = self::applySearchOptions($options, $baseFilter, $augmentedFilters, $actualQuery, $sortBy, $sortDirection);
             
             return $meilisearch->search($actualQuery, $options);
         })

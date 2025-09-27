@@ -139,6 +139,36 @@ class ExpenseIndex extends Component
         return $expenses;
     }
 
+    #[Computed]
+    public function transactions()
+    {        
+        // Only vendor & check filters are meaningful for transactions right now
+        $filterConditions = [];
+        if (is_numeric($this->expense_vendor)) {
+            $filterConditions[] = "vendor_id = {$this->expense_vendor}";
+        }
+        if (is_numeric($this->check)) {
+            $filterConditions[] = "check_id = {$this->check}";
+        }
+
+        $transactions = Transaction::scopedSearch(
+            $this->amount,
+            $filterConditions,
+            'transaction_date',
+            'desc'
+        )->paginate(100, pageName: 'transactions-page');
+        
+        // Then load the relationships on the collection
+        if ($transactions->count() > 0) {
+            $transactions->getCollection()->load([
+                'vendor:id,business_name',
+                'bank_account.bank',
+            ]);
+        }
+
+        return $transactions;
+    }
+
     private function buildFilterConditions()
     {
         // Build filter conditions for non-search filters
@@ -179,37 +209,7 @@ class ExpenseIndex extends Component
         
         return $filterConditions;
     }
-
-    #[Computed]
-    public function transactions()
-    {        
-        // Build filter conditions
-        $filterConditions = [];
-        
-        // Only add vendor filter if a numeric value is selected
-        if (is_numeric($this->expense_vendor)) {
-            $filterConditions[] = "vendor_id = {$this->expense_vendor}";
-        }
-        
-        // Get paginated results from Scout first
-        $transactions = Transaction::scopedSearch(
-            $this->amount,
-            $filterConditions,
-            'transaction_date',
-            'desc'
-        )->paginate(100, pageName: 'transactions-page');
-        
-        // Then load the relationships on the collection
-        if ($transactions->count() > 0) {
-            $transactions->getCollection()->load([
-                'vendor:id,business_name',
-                'bank_account.bank',
-            ]);
-        }
-
-        return $transactions;
-    }
-
+    
     #[Title('Expenses')]
     public function render()
     {        

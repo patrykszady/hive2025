@@ -3,6 +3,8 @@
 namespace App\Models;
 
 use App\Scopes\TransactionScope;
+use App\Models\BankAccount;
+use App\Traits\HasNumericSearch;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -10,15 +12,16 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Laravel\Scout\Searchable;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Database\Eloquent\Casts\Attribute;
 
 class Transaction extends Model
 {
-    use HasFactory, Searchable, SoftDeletes;
+    use HasFactory, Searchable, SoftDeletes, HasNumericSearch;
 
     // protected $dates = ['transaction_date', 'posted_date', 'date', 'deleted_at'];
+
     protected $guarded = [];
-    // protected $with = ['vendor', 'bank_account.bank'];
+
+    protected $with = ['vendor', 'bank_account.bank'];
 
     protected function casts(): array
     {
@@ -49,6 +52,9 @@ class Transaction extends Model
         $array['transaction_date'] = $this->transaction_date->timestamp;
         $array['posted_date'] = $this->posted_date ? $this->posted_date->timestamp : null;
         $array['deposit'] = $this->deposit ? ($this->payments->isEmpty() ? 'NO_PAYMENTS' : 'HAS_PAYMENTS') : 'NOT_DEPOSIT';
+        
+        // Ensure amount is consistently cast to float like Expense model
+        $array['amount'] = (float) $this->amount;
 
         return $array;
     }
@@ -84,23 +90,13 @@ class Transaction extends Model
             
             $baseFilter = implode(' AND ', $baseFilters);
             
-            // Add custom filters if any
-            if (!empty($filterConditions)) {
-                $filterString = implode(' AND ', $filterConditions);
-                $options['filter'] = "({$baseFilter}) AND ({$filterString})";
-            } else {
-                $options['filter'] = $baseFilter;
-            }
+            // Process numeric search queries using shared trait logic
+            [$actualQuery, $augmentedFilters] = self::processNumericSearch($searchQuery, $filterConditions);
             
-            // Apply sorting
-            $options['sort'] = [$sortBy . ':' . $sortDirection];
+            // Apply search options using shared trait logic
+            $options = self::applySearchOptions($options, $baseFilter, $augmentedFilters, $actualQuery, $sortBy, $sortDirection);
             
-            // Use 'all' matching strategy for exact prefix matching
-            if (!empty($searchQuery)) {
-                $options['matchingStrategy'] = 'all';
-            }
-            
-            return $meilisearch->search($searchQuery, $options);
+            return $meilisearch->search($actualQuery, $options);
         });
     }
 
@@ -141,6 +137,12 @@ class Transaction extends Model
         return $this->belongsTo(Check::class);
     }
 
+    //bank_accountBank
+    // public function bank()
+    // {
+    //     return $this->hasOneThrough(BankAccount::class, Bank::class);
+    // }
+
     //used in TransactionController::add_vendor_to_transactions
     //used in Livewire/Transactions/MatchVendor::mount
     public function scopeTransactionsSinVendor($query)
@@ -150,30 +152,5 @@ class Transaction extends Model
             ->whereNull('deposit')
             ->whereNull('check_number')
             ->whereNull('deleted_at');
-    }
-
-    /**
-     * Attribute accessor/mutator for owner.
-     * Ensures 3 digit numeric values are stored with a leading zero.
-     * Examples:
-     *  - 123 => 0123
-     *  - "123" => "0123"
-     *  - "0123" unchanged
-     *  - null / '' => null
-     */
-    public function owner(): Attribute
-    {
-        return Attribute::make(
-            set: function ($value) {
-                if ($value === null || $value === '') {
-                    return null;
-                }
-                $string = (string) $value;
-                if (ctype_digit($string) && strlen($string) === 3) {
-                    $string = '0' . $string;
-                }
-                return $string;
-            }
-        );
     }
 }

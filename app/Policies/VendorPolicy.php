@@ -27,13 +27,21 @@ class VendorPolicy
      */
     public function view(User $user, Vendor $vendor): bool
     {
-        // Prevent users from viewing their own vendor page
-        if ($user->vendor->id === $vendor->id) {
-            return false;
+        if (!$user->vendor) {
+            return false; // no primary vendor context
         }
-        
-        // Allow all other vendor views
-        return true;
+
+        // Own vendor always allowed (middleware will redirect display to dashboard)
+        if ($user->vendor->id === $vendor->id) {
+            return true;
+        }
+
+        // Allow any vendor that belongs to the user's primary vendor (company tree)
+        if ($user->vendor->relationLoaded('vendors')) {
+            return $user->vendor->vendors->contains('id', $vendor->id);
+        }
+
+        return $user->vendor->vendors()->where('vendors.id', $vendor->id)->exists();
     }
 
     /**

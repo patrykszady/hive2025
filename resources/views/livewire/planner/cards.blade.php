@@ -4,27 +4,25 @@
         class="mx-auto h-full overflow-auto p-0 isolate"
         x-data="{
             scrollToToday() {
-                // Find today's element
-                const todayElement = this.$el.querySelector('[data-today]');
-                if (todayElement) {
-                    // Get the previous sibling (yesterday)
-                    const yesterdayElement = todayElement.previousElementSibling;
-                    if (yesterdayElement) {
-                        // Scroll to yesterday's element with smooth behavior
-                        yesterdayElement.scrollIntoView({
-                            behavior: 'smooth',
-                            block: 'center',
-                            inline: 'nearest'
-                        });
-                    } else {
-                        // If no previous sibling (today is first day), scroll to today
-                        todayElement.scrollIntoView({
-                            behavior: 'smooth',
-                            block: 'center',
-                            inline: 'nearest'
-                        });
+                const container = this.$el;
+                const todayElement = container.querySelector('[data-today]');
+                if (!todayElement) { return; }
+
+                // We want today's row to appear as roughly the 3rd visible row.
+                // So, if possible, scroll so that the element two rows BEFORE today is at the top.
+                let target = todayElement;
+                if (todayElement.previousElementSibling) {
+                    target = todayElement.previousElementSibling; // one before
+                    if (target.previousElementSibling) {
+                        target = target.previousElementSibling; // two before
                     }
                 }
+
+                // Compute desired top position relative to container.
+                let top = target.offsetTop - container.offsetTop;
+                if (top < 0) { top = 0; }
+
+                container.scrollTo({ top, behavior: 'auto' });
             }
         }"
         x-init="$nextTick(() => scrollToToday())"

@@ -16,7 +16,7 @@
             {{-- EXPENSES --}}
             @if(in_array($vendor->business_type, ["Retail"]))
                 <div class="col-span-4 lg:col-span-2 space-y-4">
-                    <livewire:expenses.expense-index :expense_vendor="$vendor->id" :view="'vendors.show'" lazy />
+                    <livewire:expenses.expense-index :expense_vendor="$vendor->id" :view="'vendors.show'" />
                 </div>
             @endif
         </div>
@@ -28,14 +28,14 @@
 
                 {{-- VENDOR CHECKS --}}
                 @if($vendor->checks()->count() > 0 )
-                    <livewire:checks.checks-index :vendor="$vendor->id" :view="'vendors.show'" lazy />
+                    <livewire:checks.checks-index :vendor="$vendor->id" :view="'vendors.show'" />
                 @endif
 
                 {{-- VENDOR FINANCES --}}
                 {{-- INSURANCE --}}
                 @can('update', $vendor)
                     @if(in_array($vendor->business_type, ["Sub", "DBA"]))
-                        <livewire:vendor-docs.vendor-docs-card :vendor="$vendor" :view="true" lazy />
+                        <livewire:vendor-docs.vendor-docs-card :vendor="$vendor" :view="true" />
                     @endif 
                     {{-- <livewire:vendors.vendor-finances :vendor="$vendor" /> --}}
                 @endcan
