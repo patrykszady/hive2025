@@ -11,7 +11,7 @@ class ScoutReindex extends Command
      *
      * @var string
      */
-    protected $signature = 'scout:reindex {--models=* : Specific models to reindex (default: all)} {--sync : Run imports synchronously}';
+    protected $signature = 'scout:reindex {--models=* : Specific models to reindex (default: all)}';
 
     /**
      * The console command description.
@@ -61,12 +61,12 @@ class ScoutReindex extends Command
             
             $importOptions = ['model' => $model];
             
-            // Use sync flag for deployment or when explicitly requested
-            if ($this->option('sync') || app()->environment('production')) {
-                $importOptions['--sync'] = true;
-                $this->line("   🔄 Importing {$model} synchronously...");
+            // Use smaller chunks for better performance and stability
+            if (app()->environment('production')) {
+                $importOptions['--chunk'] = 100;
+                $this->line("   🔄 Importing {$model} (chunk size: 100)...");
             } else {
-                $this->line("   🔄 Importing {$model} via queue...");
+                $this->line("   🔄 Importing {$model}...");
             }
             
             $this->call('scout:import', $importOptions);
