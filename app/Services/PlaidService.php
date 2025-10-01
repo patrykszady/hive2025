@@ -121,6 +121,57 @@ class PlaidService
         return $this->makeRequest($url, $data);
     }
 
+    public function getStatements($accessToken, $accountId = null)
+    {
+        $url = $this->baseUrl . '/statements/list';
+        $data = [
+            'client_id' => $this->clientId,
+            'secret' => $this->secret,
+            'access_token' => $accessToken,
+        ];
+
+        if ($accountId) {
+            $data['account_id'] = $accountId;
+        }
+
+        return $this->makeRequest($url, $data);
+    }
+
+    public function downloadStatement($accessToken, $statementId)
+    {
+        $url = $this->baseUrl . '/statements/download';
+        $data = [
+            'client_id' => $this->clientId,
+            'secret' => $this->secret,
+            'access_token' => $accessToken,
+            'statement_id' => $statementId,
+        ];
+
+        try {
+            $response = $this->client->post($url, [
+                'json' => $data,
+            ]);
+
+            return $response->getBody()->getContents();
+        } catch (RequestException $e) {
+            // Return the error details
+            if ($e->hasResponse()) {
+                return [
+                    'error' => true,
+                    'error_code' => $e->getResponse()->getStatusCode(),
+                    'error_message' => $e->getResponse()->getReasonPhrase(),
+                    'error_body' => json_decode($e->getResponse()->getBody()->getContents(), true),
+                ];
+            }
+
+            return [
+                'error' => true,
+                'error_code' => $e->getCode(),
+                'error_message' => $e->getMessage(),
+            ];
+        }
+    }
+
     public function processPlaidItem($itemData)
     {
         $data = [

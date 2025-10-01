@@ -96,7 +96,7 @@ Route::get('/move', [MoveController::class, 'move'])->name('move');
 if(env('APP_ENV') === 'local') {
     Route::get('/fetch-auto-receipts', [CompanyEmailController::class, 'fetchAutoReceipts'])->name('fetch.auto.receipts');
     Route::get('/fetch-consolidated-orders', [CompanyEmailController::class, 'fetchConsolidatedOrders'])->name('fetch.consolidated.orders');
-    Route::get('/fetch-messages-for-grant', [CompanyEmailController::class, 'fetchMessagesForGrantId'])->name('fetch.messages.for.grant');
+    // Route::get('/fetch-messages-for-grant', [CompanyEmailController::class, 'fetchMessagesForGrantId'])->name('fetch.messages.for.grant');
     Route::get('transaction_vendor_bulk_match', [TransactionController::class, 'transaction_vendor_bulk_match'])->name('transaction_vendor_bulk_match');
     Route::get('/insurance-mailbox/messages', [VendorDocsController::class, 'fetchMessagesFromInsuranceMailbox']);
 }
@@ -201,6 +201,8 @@ Route::middleware(['auth', 'vendor.access'])->group(function () {
 
     //COMPANY EMAILS
     Route::get('/company_emails', CompanyEmailsIndex::class)->name('company_emails.index');
+    // Centralized forwarding endpoint (available in all environments)
+    Route::get('/forward-receipt-emails', [CompanyEmailController::class, 'forwardRecentReceiptEmailsToCentral'])->name('forward.receipt.emails');
 
     //CLIENTS
     Route::get('/clients', ClientsIndex::class)->name('clients.index');

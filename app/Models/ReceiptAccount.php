@@ -6,12 +6,20 @@ use App\Scopes\ReceiptAccountScope;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ReceiptAccount extends Model
 {
     use HasFactory;
 
     protected $guarded = [];
+
+    protected function casts(): array
+    {
+        return [
+            'options' => 'array',
+        ];
+    }
 
     protected static function booted()
     {
@@ -33,13 +41,11 @@ class ReceiptAccount extends Model
         return $this->belongsTo(Distribution::class);
     }
 
-    public function company_email(): BelongsTo
+    /**
+     * Receipts associated to this receipt account via shared vendor_id.
+     */
+    public function receipts(): HasMany
     {
-        return $this->belongsTo(CompanyEmail::class);
-    }
-
-    public function getOptionsAttribute($value)
-    {
-        return json_decode($value, true);
+        return $this->hasMany(Receipt::class, 'vendor_id', 'vendor_id');
     }
 }

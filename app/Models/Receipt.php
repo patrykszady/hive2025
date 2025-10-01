@@ -13,21 +13,16 @@ class Receipt extends Model
 
     protected $guarded = [];
 
+    protected function casts(): array
+    {
+        return [
+            'options' => 'array',
+        ];
+    }
+
     public function vendor(): BelongsTo
     {
         return $this->belongsTo(Vendor::class);
     }
 
-    public function getOptionsAttribute($value)
-    {
-        return json_decode($value, true);
-    }
-
-    // protected function purchaseOrder(): Attribute
-    // {
-    //     return Attribute::make(
-    //         // get: fn (string $value) => ucfirst($value),
-    //         set: fn (string $value) => strtolower($value),
-    //     );
-    // }
 }

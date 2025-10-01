@@ -14,11 +14,13 @@ return new class extends Migration
         Schema::create('receipts', function (Blueprint $table) {
             $table->id();
             $table->integer('vendor_id');
+            //REMOVE ON NEXT MIGRATION
             $table->integer('from_type');
             $table->string('from_address')->nullable();
             $table->string('from_subject')->nullable();
             $table->json('options');
             $table->integer('receipt_width');
+            //receipt_type: 0 = API, 1 = PURCHASE, 2 = REFUND
             $table->integer('receipt_type');
             $table->timestamps();
         });

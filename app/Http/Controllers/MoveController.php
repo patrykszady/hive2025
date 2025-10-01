@@ -42,55 +42,6 @@ class MoveController extends Controller
 {
     public function move()
     {
-        dd('start');
-        // Expenses where the sum of directly attached transactions exceeds the expense amount (cleaner Eloquent)
-            $expenses = Expense::query()
-                // ->whereDate('date', '<=', '2023-01-01')
-                // ->where('amount', '>=', 0)
-                ->withSum([
-                    'transactions' => function ($q) {
-                        $q->withoutGlobalScopes()->whereNull('deleted_at');
-                    },
-                ], 'amount') // alias: transactions_sum_amount
-                ->withCount([
-                    'transactions as tx_count' => function ($q) {
-                        $q->withoutGlobalScopes()->whereNull('deleted_at');
-                    },
-                ])
-                ->having('transactions_sum_amount', '>', DB::raw('amount'))
-                ->having('tx_count', '>=', 2)
-            ->with(['transactions:id,expense_id,amount'])
-            ->orderByDesc('date')
-            // ->skip(0)
-            ->limit(10)
-            ->pluck('amount', 'id');
-
-        dd($expenses);
-        $payments = Payment::whereDoesntHave('transaction')->orderBy('created_at', 'desc')->take(10)->get();
-        dd($payments);
-        //get all expenses that have splits and a recepit but no receipt line items.
-        // $expenses = Expense::whereHas('splits') // Has at least one split
-        //     ->whereHas('receipts') // Has at least one receipt
-        //     ->whereDoesntHave('receipts', function($query) {
-        //         $query->whereNotNull('receipt_items')
-        //             ->whereRaw("JSON_LENGTH(receipt_items->'$.items') > 0");
-        //     }) // Doesn't have any receipts with line items
-        //     ->orderBy('date', 'desc')->take(10)->get();
-
-        // dd($expenses);
-        
-        // $transactions = Transaction::withoutGlobalScopes()->where('vendor_id', 317)->get();
-        // foreach($transactions as $transaction){
-        //     $transaction->vendor_id = 218;
-        //     $transaction->save();
-        // }
-
-        // $expenses = Expense::where('vendor_id', 317)->get();
-        // foreach($expenses as $expense){
-        //     $expense->vendor_id = 218;
-        //     $expense->save();
-        // }
-
         dd('jere');
 
         $tasks = Task::withoutGlobalScopes()->get();

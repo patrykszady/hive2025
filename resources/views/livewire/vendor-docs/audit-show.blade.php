@@ -20,6 +20,12 @@
                         >
                             Export Excel
                         </flux:menu.item>
+                        <flux:menu.item
+                            wire:click="download_bank_statements"
+                            size="sm"
+                        >
+                            Download Bank Statements
+                        </flux:menu.item>
                     </flux:menu>
                 </flux:dropdown>
             </flux:button.group>

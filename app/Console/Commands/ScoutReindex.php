@@ -3,7 +3,6 @@
 namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Artisan;
 
 class ScoutReindex extends Command
 {
@@ -12,14 +11,14 @@ class ScoutReindex extends Command
      *
      * @var string
      */
-    protected $signature = 'scout:reindex {--models=* : Specific models to reindex (default: all)}';
+    protected $signature = 'scout:reindex {--models=* : Specific models to reindex (default: all)} {--sync : Run imports synchronously}';
 
     /**
      * The console command description.
      *
      * @var string
      */
-    protected $description = 'Complete Scout reindexing: delete indexes, flush models, sync settings, and reimport';
+    protected $description = 'Reindex all Scout models with proper cleanup and settings sync';
 
     /**
      * Execute the console command.
@@ -28,59 +27,69 @@ class ScoutReindex extends Command
     {
         $this->info('🚀 Starting Scout reindexing process...');
         
-        // Get models to process - use config if no models specified
-        $models = $this->option('models') ?: $this->getSearchableModels();
+        // Get models from configuration or command option
+        $models = $this->getModelsToProcess();
         
         if (empty($models)) {
-            $this->error('❌ No searchable models found in configuration!');
-            return Command::FAILURE;
+            $this->error('❌ No searchable models found in Scout configuration.');
+            return self::FAILURE;
         }
         
-        $this->info("📋 Processing models: " . implode(', ', array_map('class_basename', $models)));
+        $this->info('📋 Processing models: ' . implode(', ', array_map(fn($model) => class_basename($model), $models)));
         
         // Step 1: Delete all indexes
         $this->info('📥 Step 1: Deleting all indexes...');
-        Artisan::call('scout:delete-all-indexes');
-        $this->line(Artisan::output());
+        $this->call('scout:delete-all-indexes');
         
-        // Step 2: Flush individual models
-        $this->info('🗑️  Step 2: Flushing individual models...');
+        // Step 2: Flush each model
+        $this->info('🧹 Step 2: Flushing models...');
         foreach ($models as $model) {
-            $this->line("   Flushing {$model}...");
-            Artisan::call('scout:flush', ['model' => $model]);
+            $start = microtime(true);
+            $this->call('scout:flush', ['model' => $model]);
+            $duration = round((microtime(true) - $start) * 1000, 2);
+            $this->line("   ✅ Flushed {$model} ({$duration}ms)");
         }
         
         // Step 3: Sync index settings
         $this->info('⚙️  Step 3: Syncing index settings...');
-        Artisan::call('scout:sync-index-settings');
-        $this->line(Artisan::output());
+        $this->call('scout:sync-index-settings');
         
-        // Step 4: Import models
+        // Step 4: Import each model
         $this->info('📤 Step 4: Importing models...');
-        
         foreach ($models as $model) {
-            $this->line("   Importing {$model}...");
+            $start = microtime(true);
             
-            $startTime = microtime(true);
-            Artisan::call('scout:import', ['model' => $model]);
-            $endTime = microtime(true);
+            $importOptions = ['model' => $model];
             
-            $duration = round($endTime - $startTime, 2);
-            $this->info("   ✅ {$model} imported successfully ({$duration}s)");
+            // Use sync flag for deployment or when explicitly requested
+            if ($this->option('sync') || app()->environment('production')) {
+                $importOptions['--sync'] = true;
+                $this->line("   🔄 Importing {$model} synchronously...");
+            } else {
+                $this->line("   🔄 Importing {$model} via queue...");
+            }
+            
+            $this->call('scout:import', $importOptions);
+            
+            $duration = round((microtime(true) - $start) * 1000, 2);
+            $this->line("   ✅ Imported {$model} ({$duration}ms)");
         }
         
         $this->info('🎉 Scout reindexing completed successfully!');
         
-        return Command::SUCCESS;
+        return self::SUCCESS;
     }
-
-    /**
-     * Get searchable models from Scout configuration
-     */
-    protected function getSearchableModels(): array
+    
+    private function getModelsToProcess(): array
     {
-        $indexSettings = config('scout.meilisearch.index-settings', []);
+        // If specific models provided via command option
+        if (!empty($this->option('models'))) {
+            return $this->option('models');
+        }
         
-        return array_keys($indexSettings);
+        // Get models from Scout configuration
+        $scoutConfig = config('scout.meilisearch.index-settings', []);
+        
+        return array_keys($scoutConfig);
     }
 }

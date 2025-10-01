@@ -118,90 +118,10 @@ class TransactionController extends Controller
 
     public function plaid_statements_list()
     {
-        dd($plaid_statements_list);
-        try {
-            $client = new Client;
-            $response = $client->post('https://'.env('PLAID_ENV').'.plaid.com/statements/list', [
-                'headers' => [
-                    'Content-Type' => 'application/json',
-                ],
-                'json' => [
-                    'client_id' => env('PLAID_CLIENT_ID'),
-                    'secret' => env('PLAID_SECRET'),
-                    'access_token' => 'access-production-ee3181e2-45b1-430a-a202-8d881aa1ff7c',
-                ],
-            ]);
-        } catch (RequestException $e) {
-            if ($e->hasResponse()) {
-                $response = $e->getResponse();
-                $responseBody = $response->getBody()->getContents();
-                $error = $responseBody;
-            } else {
-                $error = $e->getMessage();
-            }
-            $error = json_decode($error, true);
-            Log::channel('plaid_statements')->error($error);
-        }
-
-        $body = $response->getBody()->getContents();
-        dd($response);
-        $statement_id = json_decode($body, true)['accounts'][0]['statements'][1]['statement_id'];
-
-        $client = new Client;
-        $response = $client->post('https://'.env('PLAID_ENV').'.plaid.com/statements/download', [
-            'headers' => [
-                'Content-Type' => 'application/json',
-            ],
-            'json' => [
-                'client_id' => env('PLAID_CLIENT_ID'),
-                'secret' => env('PLAID_SECRET'),
-                'access_token' => 'access-production-b19234d9-d3d1-475f-9a02-7db2c88259a5',
-                'statement_id' => $statement_id,
-            ],
-        ]);
-
-        return Storage::disk('files')->put('/_temp_ocr/TESTSTATEMENT12.pdf', $response->getBody()->getContents());
-        dd();
-        // dd($response->getBody()->getContents());
-        print_r($response->getBody()->getContents());
-        dd();
-        dd($response);
-
-        $new_data = [
-            'client_id' => env('PLAID_CLIENT_ID'),
-            'secret' => env('PLAID_SECRET'),
-            'access_token' => 'access-production-b19234d9-d3d1-475f-9a02-7db2c88259a5',
-            'statement_id' => $statement_id,
-        ];
-
-        $new_data = json_encode($new_data);
-        //initialize session
-        $ch = curl_init('https://'.env('PLAID_ENV').'.plaid.com/statements/download');
-        //set options
-        curl_setopt($ch, CURLOPT_HTTPHEADER, [
-            'Content-Type: application/json',
-        ]);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $new_data);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        //execute session
-        $result = curl_exec($ch);
-        //close session
-        curl_close($ch);
-
-        // echo $result;
-        // dd();
-
-        // dd($result);
-        // $result = json_decode($result, true);
-        // print_r($result);
-        // dd();
-
-        // dd($result);
-        $contents = base64_decode($result);
-        dd($contents);
-
-        return Storage::disk('files')->put('/_temp_ocr/TESTSTATEMENT12.pdf', $contents);
+        // This method has been replaced by the Plaid statements functionality in AuditShow Livewire component
+        // Using PlaidService->getStatements() and PlaidService->downloadStatement()
+        
+        return redirect()->route('audit.show')->with('message', 'Please use the bank statements download feature in the audit page.');
     }
 
     public function plaid_transactions_refresh()

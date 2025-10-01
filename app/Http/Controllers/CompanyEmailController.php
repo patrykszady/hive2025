@@ -78,13 +78,8 @@ class CompanyEmailController extends Controller
                 // Save the account to the database
                 $this->saveAccountToDatabase($nylasAccount);
 
-                // Ensure required folders exist and get their data
-                $folders = $this->nylasService->ensureFoldersExist($nylasAccount['grant_id']);
-
-                // Update the CompanyEmail record's api_json column with the folder data
-                // Merge new folders into existing api_json without wiping other metadata
-                CompanyEmail::where('grant_id', $nylasAccount['grant_id'])
-                    ->first()?->api_json->update(['folders' => $folders], true); // explicit allow overwrite
+                // Single HIVE RECEIPTS folder is created during company email setup
+                // Folder ID is stored in api_json['HIVE_RECEIPTS_FOLDER'] for reference
 
                 return redirect(route('company_emails.index'))->with('success', 'Nylas account connected successfully.');
             } else {
@@ -119,52 +114,100 @@ class CompanyEmailController extends Controller
             Log::warning(["Nylas account already exists:", $nylasAccount]);
             return redirect(route('company_emails.index'));
         } else {
-            CompanyEmail::create([
+            // Create the CompanyEmail record
+            $companyEmail = CompanyEmail::create([
                 'email' => $nylasAccount['email'],
                 'grant_id' => $nylasAccount['grant_id'],
-                // 'api_json' => $nylasAccount, // Store all account details as JSON
                 'vendor_id' => auth()->user()->vendor->id, // Associate with the authenticated user's vendor
             ]);
+
+            // Create the "HIVE RECEIPTS" folder and store its ID in api_json
+            $this->createHiveReceiptsFolder($companyEmail);
+        }
+    }
+
+    /**
+     * Create the "HIVE RECEIPTS" folder for a company email and store the folder ID
+     */
+    private function createHiveReceiptsFolder(CompanyEmail $companyEmail): void
+    {
+        try {
+            $folderResult = $this->nylasService->createFolder($companyEmail->grant_id, 'HIVE RECEIPTS');
+            
+            if ($folderResult['status'] === 200 || $folderResult['status'] === 201) {
+                $folderId = $folderResult['data']['id'] ?? null;
+                
+                if ($folderId) {
+                    // Update the api_json with the folder information using HIVE_RECEIPTS_FOLDER key
+                    $apiJson = $companyEmail->api_json ?? [];
+                    $apiJson['HIVE_RECEIPTS_FOLDER'] = $folderId;
+                    
+                    $companyEmail->update(['api_json' => $apiJson]);
+                    
+                    Log::channel('nylas')->info('HIVE RECEIPTS folder created successfully', [
+                        'company_email_id' => $companyEmail->id,
+                        'grant_id' => $companyEmail->grant_id,
+                        'folder_id' => $folderId,
+                    ]);
+                } else {
+                    Log::channel('nylas')->warning('Folder created but no ID returned', [
+                        'company_email_id' => $companyEmail->id,
+                        'grant_id' => $companyEmail->grant_id,
+                        'response' => $folderResult,
+                    ]);
+                }
+            } else {
+                Log::channel('nylas')->error('Failed to create HIVE RECEIPTS folder', [
+                    'company_email_id' => $companyEmail->id,
+                    'grant_id' => $companyEmail->grant_id,
+                    'status' => $folderResult['status'],
+                    'error' => $folderResult['error'] ?? 'Unknown error',
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::channel('nylas')->error('Exception creating HIVE RECEIPTS folder', ApiErrorFormatter::format($e, [
+                'company_email_id' => $companyEmail->id,
+                'grant_id' => $companyEmail->grant_id,
+            ]));
         }
     }
 
     /**
      * Fetch consolidated orders for all emails with grant_id.
-     *
-     * @return \Illuminate\Http\JsonResponse
      */
-    public function fetchConsolidatedOrders()
-    {
-        dd('fetchConsolidatedOrders');
-        // Fetch all CompanyEmail records with a grant_id
-        $companyEmails = CompanyEmail::withoutGlobalScopes()->whereNotNull('grant_id')->get();
+    // public function fetchConsolidatedOrders()
+    // {
+    //     dd('fetchConsolidatedOrders');
+    //     // Fetch all CompanyEmail records with a grant_id
+    //     $companyEmails = CompanyEmail::withoutGlobalScopes()->whereNotNull('grant_id')->get();
 
-        $results = []; // Array to store responses
+    //     $results = []; // Array to store responses
 
-        foreach ($companyEmails as $companyEmail) {
-            $grantId = $companyEmail->grant_id; // Extract the grant_id
+    //     foreach ($companyEmails as $companyEmail) {
+    //         $grantId = $companyEmail->grant_id; // Extract the grant_id
 
-            // Call the NylasService's method for each grant_id
-            $consolidatedOrder = $this->nylasService->getConsolidatedOrder($grantId);
+    //         // Call the NylasService's method for each grant_id
+    //         $consolidatedOrder = $this->nylasService->getConsolidatedOrder($grantId);
 
-            dd($consolidatedOrder); // Debugging: dump the consolidated order
-            // Append the result
-            $results[] = [
-                'email_id' => $companyEmail->id,
-                'grant_id' => $grantId,
-                'consolidated_order' => $consolidatedOrder,
-            ];
-        }
+    //         dd($consolidatedOrder); // Debugging: dump the consolidated order
+    //         // Append the result
+    //         $results[] = [
+    //             'email_id' => $companyEmail->id,
+    //             'grant_id' => $grantId,
+    //             'consolidated_order' => $consolidatedOrder,
+    //         ];
+    //     }
 
-        // Return results as a JSON response
-        return response()->json([
-            'success' => true,
-            'data' => $results,
-        ]);
-    }
+    //     // Return results as a JSON response
+    //     return response()->json([
+    //         'success' => true,
+    //         'data' => $results,
+    //     ]);
+    // }
 
     public function fetchMessagesForGrantId()
     {
+        dd('fetchMessagesForGrantId');
         // Retrieve all CompanyEmail records with a grant_id
         $companyEmails = CompanyEmail::withoutGlobalScopes()->whereNotNull('grant_id')->get();
         $receipts = Receipt::all();
@@ -1224,5 +1267,121 @@ class CompanyEmailController extends Controller
         }
         
         return false;
+    }
+
+    /**
+     * Build receipt criteria from company email receipts
+     */
+    protected function buildReceiptCriteria($receipts): array
+    {
+        $receiptCriteria = []; // address => [subjects]
+        
+        foreach ($receipts as $receipt) {
+            $address = strtolower(trim((string) $receipt->from_address));
+            $subject = strtolower(trim((string) $receipt->from_subject ?? ''));
+            
+            // Only process valid addresses (domain patterns start with @, emails contain @)
+            if (str_starts_with($address, '@') || str_contains($address, '@')) {
+                if (!isset($receiptCriteria[$address])) {
+                    $receiptCriteria[$address] = [];
+                }
+                if ($subject !== '' && !in_array($subject, $receiptCriteria[$address])) {
+                    $receiptCriteria[$address][] = $subject;
+                }
+            }
+        }
+        
+        return $receiptCriteria;
+    }
+
+    /**
+     * Forward (copy) recent receipt candidate emails from each connected grant/mailbox
+    * into the central receipts mailbox (NYLAS_HIVE_RECEIPTS_GRANT_ID / NYLAS_HIVE_RECEIPTS_EMAIL).
+     * This gives us a single place to process and control receipts instead of per-user folders.
+     *
+     * Strategy:
+     *  - Iterate all CompanyEmail records with a grant_id.
+     *  - For each, fetch recent messages (limit + last X days defined by nylas config).
+     *  - Filter to likely receipt emails (simple heuristic: has attachments OR subject contains keywords).
+     *  - Call NylasService::forwardMessage for each candidate.
+     *  - Log successes/failures; skip duplicates within this run.
+     *
+     * NOTE: This does NOT mark or move the original message; it only forwards a copy.
+     * Idempotency heuristic: keep an in-memory set of forwarded message IDs per execution.
+     */
+    public function forwardRecentReceiptEmailsToCentral()
+    {
+        $companyEmails = CompanyEmail::withoutGlobalScopes()
+            ->with(['receipts' => function($query) {
+                // Only load receipts we'll actually use
+                $query->whereNotNull('from_address')->where('from_address', '!=', '');
+            }, 'vendor'])
+            ->whereNotNull('grant_id')
+            ->get();
+
+        if ($companyEmails->isEmpty()) {
+            return;
+        }
+
+        // Pre-calculate global date filter once
+        $messageLimitDate = Carbon::now()->subDays(config('nylas.message_limit_days', 10));
+
+        foreach ($companyEmails as $companyEmail) {
+            $this->processCompanyEmailForwarding($companyEmail, $messageLimitDate);
+        }
+    }
+
+    /**
+     * Process forwarding for a single company email
+     */
+    protected function processCompanyEmailForwarding(CompanyEmail $companyEmail, Carbon $messageLimitDate): void
+    {
+        if ($companyEmail->receipts->isEmpty()) {
+            return;
+        }
+
+        $grantId = $companyEmail->grant_id;
+        
+        // Build receipt criteria for filtering
+        $receiptCriteria = $this->buildReceiptCriteria($companyEmail->receipts);
+        if (empty($receiptCriteria)) {
+            return;
+        }
+
+        // Calculate received_after date for this company email
+        $receivedAfter = $this->calculateReceivedAfterDate($companyEmail, $messageLimitDate);
+        
+        // Fetch and filter messages using NylasService
+        $matchingMessages = $this->nylasService->getMessagesMatchingCriteria(
+            $grantId, 
+            $receiptCriteria, 
+            $receivedAfter
+        );
+
+        // Forward each matching message
+        foreach ($matchingMessages as $message) {
+            $this->nylasService->sendForwardCopy(
+                $grantId,
+                $message['id'],
+                true,
+                $companyEmail->id
+            );
+        }
+    }
+
+    /**
+     * Calculate the received_after date for message filtering
+     */
+    protected function calculateReceivedAfterDate(CompanyEmail $companyEmail, Carbon $messageLimitDate): Carbon
+    {
+        $vendorRegistrationDate = $companyEmail->vendor->registrationDate;
+        
+        if ($vendorRegistrationDate) {
+            return $messageLimitDate->greaterThan($vendorRegistrationDate) 
+                ? $messageLimitDate 
+                : $vendorRegistrationDate;
+        }
+        
+        return $messageLimitDate;
     }
 }

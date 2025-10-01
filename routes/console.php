@@ -2,16 +2,6 @@
 
 use Illuminate\Support\Facades\Schedule;
 
-// Email processing tasks
-Schedule::call(function () {
-    app(\App\Http\Controllers\CompanyEmailController::class)->fetchMessagesForGrantId();
-    })
-    ->everyTenMinutes()
-    // ->between('7:00', '20:00')
-    ->name('fetch-messages-for-grant-id')
-    ->withoutOverlapping()
-    ->onOneServer();
-
 // Schedule::call(function () {
 //     app(\App\Http\Controllers\LeadController::class)->leads_in_email();
 // })->everyTenMinutes()

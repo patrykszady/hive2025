@@ -33,8 +33,7 @@ class VendorDocsController extends Controller
 
     public function fetchMessagesFromInsuranceMailbox()
     {
-        // Fetch grant ID from environment variable
-        $grantId = env('HIVE_INSURANCE_GRANT_ID');
+        $grantId = config('nylas.insurance_grant_id');
 
         // Define query parameters for the Nylas API
         $queryParams = [

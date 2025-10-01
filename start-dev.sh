@@ -86,9 +86,36 @@ else
   echo "❌ Vite failed → check logs: $LOG_DIR/vite.log"
 fi
 
+# 6) ngrok tunnel (optional)
+if command -v ngrok >/dev/null 2>&1; then
+  echo "🔄 Starting ngrok tunnel..."
+  nohup ngrok http 8000 >"$LOG_DIR/ngrok.log" 2>&1 &
+  NGROK_PID=$!
+  sleep 2
+  if ps -p "$NGROK_PID" >/dev/null 2>&1; then
+    # Try to extract the public URL from ngrok API
+    NGROK_URL=$(curl -s http://127.0.0.1:4040/api/tunnels 2>/dev/null | grep -o '"public_url":"https://[^"]*' | cut -d'"' -f4 | head -1)
+    if [ -n "$NGROK_URL" ]; then
+      echo "✅ ngrok tunnel started (pid: $NGROK_PID) → $NGROK_URL"
+      echo "   • Web interface: http://127.0.0.1:4040"
+    else
+      echo "✅ ngrok tunnel started (pid: $NGROK_PID) → logs: $LOG_DIR/ngrok.log"
+    fi
+  else
+    echo "❌ ngrok failed → check logs: $LOG_DIR/ngrok.log"
+    NGROK_PID=""
+  fi
+else
+  echo "ℹ️  ngrok not found, skipping tunnel setup"
+  NGROK_PID=""
+fi
+
 echo "🎉 Done! Services running:"
 echo "   • Redis ✅"
 echo "   • Meilisearch ✅ → $MEILI_HOST"
 echo "   • Horizon pid: ${HORIZON_PID:-n/a}"
 echo "   • PHP server pid: ${SERVE_PID:-n/a} → http://127.0.0.1:8000"
 echo "   • Vite pid: ${VITE_PID:-n/a} → http://127.0.0.1:5173"
+if [ -n "$NGROK_PID" ]; then
+  echo "   • ngrok pid: $NGROK_PID → ${NGROK_URL:-'check http://127.0.0.1:4040'}"
+fi
