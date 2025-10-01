@@ -713,7 +713,7 @@ class CompanyEmailController extends Controller
                             Storage::disk('files')->delete($ocr_path);
 
                             if ($attachment_key === array_key_last($message['attachments'])) {
-                                $this->nylasService->moveOriginalMessageToHiveFolder($messageId, $grantId, $company_email->id);
+                                $this->nylasService->moveOriginalMessageToHiveFolder($grantId, $messageId, $company_email->id);
                             }
 
                             continue;
@@ -882,8 +882,8 @@ class CompanyEmailController extends Controller
 
                     // After processing all attachments for the message, move the email to the HIVE folder.
                     $this->nylasService->moveOriginalMessageToHiveFolder(
-                        $messageId,
                         $grantId,
+                        $messageId,
                         $company_email->id
                     );
                     continue;

@@ -580,7 +580,7 @@ class NylasService
     /**
      * Move the original message to HIVE_RECEIPTS_FOLDER after successful forwarding
      */
-    protected function moveOriginalMessageToHiveFolder(string $sourceGrantId, string $messageId, int $companyEmailId, ?string $sentMessageId = null, ?string $receiptsGrantId = null): void
+    public function moveOriginalMessageToHiveFolder(string $sourceGrantId, string $messageId, int $companyEmailId, ?string $sentMessageId = null, ?string $receiptsGrantId = null): void
     {
         try {
             // Get the company email to access the HIVE_RECEIPTS_FOLDER ID
