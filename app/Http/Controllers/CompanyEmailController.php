@@ -713,7 +713,7 @@ class CompanyEmailController extends Controller
                             Storage::disk('files')->delete($ocr_path);
 
                             if ($attachment_key === array_key_last($message['attachments'])) {
-                                $this->nylasService->moveEmailToFolder($messageId, $company_email->api_json['folders']['SCANS'], $grantId, $company_email->id);
+                                $this->nylasService->moveOriginalMessageToHiveFolder($messageId, $grantId, $company_email->id);
                             }
 
                             continue;
@@ -763,11 +763,11 @@ class CompanyEmailController extends Controller
                             ->get();
 
                         if ($duplicates->count() >= 1) {
-                            // Calculate date differences and find the closest match without modifying model attributes
-                            $expense_duplicate = $duplicates->sortBy(function ($duplicate) use ($ocr_receipt_data) {
-                                return abs(Carbon::parse($ocr_receipt_data['fields']['transaction_date'])
-                                    ->floatDiffInDays($duplicate->date));
-                            })->first();
+                            foreach ($duplicates as $duplicate) {
+                                $duplicate->date_diff = Carbon::parse($ocr_receipt_data['fields']['transaction_date'])
+                                    ->floatDiffInDays($duplicate->date);
+                            }
+                            $expense_duplicate = $duplicates->sortBy('date_diff')->first();
 
                             // If the latest receipt HTML is different, update; otherwise, skip.
                             if (isset($expense_duplicate->receipts()->latest()->first()->receipt_html)) {
@@ -880,10 +880,9 @@ class CompanyEmailController extends Controller
                         $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename);
                     } // end foreach attachment
 
-                    // After processing all attachments for the message, move the email to the SCANS folder.
-                    $this->nylasService->moveEmailToFolder(
+                    // After processing all attachments for the message, move the email to the HIVE folder.
+                    $this->nylasService->moveOriginalMessageToHiveFolder(
                         $messageId,
-                        $company_email->api_json['folders']['SCANS'],
                         $grantId,
                         $company_email->id
                     );
