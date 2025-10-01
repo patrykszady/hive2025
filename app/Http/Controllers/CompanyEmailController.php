@@ -763,11 +763,11 @@ class CompanyEmailController extends Controller
                             ->get();
 
                         if ($duplicates->count() >= 1) {
-                            foreach ($duplicates as $duplicate) {
-                                $duplicate->date_diff = Carbon::parse($ocr_receipt_data['fields']['transaction_date'])
-                                    ->floatDiffInDays($duplicate->date);
-                            }
-                            $expense_duplicate = $duplicates->sortBy('date_diff')->first();
+                            // Calculate date differences and find the closest match without modifying model attributes
+                            $expense_duplicate = $duplicates->sortBy(function ($duplicate) use ($ocr_receipt_data) {
+                                return abs(Carbon::parse($ocr_receipt_data['fields']['transaction_date'])
+                                    ->floatDiffInDays($duplicate->date));
+                            })->first();
 
                             // If the latest receipt HTML is different, update; otherwise, skip.
                             if (isset($expense_duplicate->receipts()->latest()->first()->receipt_html)) {
