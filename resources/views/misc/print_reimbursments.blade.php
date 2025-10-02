@@ -73,14 +73,14 @@
                                     </span>
                                 </li>
 
-                                @if($expense->receipt->receipt_items->invoice_number)
+                                @if(isset($expense->receipt->receipt_items['invoice_number']) && $expense->receipt->receipt_items['invoice_number'])
                                     <li>
                                         <span class="text-gray-500 text-sm">
                                             Invoice
                                         </span>
                                         <br>
                                         <span class="text-gray-700 text-sm">
-                                            {{$expense->receipt->receipt_items->invoice_number}}
+                                            {{$expense->receipt->receipt_items['invoice_number']}}
                                         </span>
                                     </li>
                                 @endif
@@ -118,7 +118,7 @@
                             @endif
 
                             <x-slot:details>
-                                @if(!$expense->receipt || !$expense->receipt->receipt_items || empty($expense->receipt->receipt_items->items))
+                                @if(!$expense->receipt || !$expense->receipt->receipt_items || empty($expense->receipt->receipt_items['items'] ?? []))
                                     <p class="text-sm text-zinc-600 dark:text-zinc-300">No Receipt line items. See <i>Original Receipt</i> for a receipt copy.</p>
                                 @else
                                     <x-expenses.receipt 

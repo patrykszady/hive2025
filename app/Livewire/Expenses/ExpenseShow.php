@@ -79,7 +79,7 @@ class ExpenseShow extends Component
     {
         return $this->expense->receipts
             ->filter(function($receipt) {
-                return $receipt->receipt_items && !empty($receipt->receipt_items->items);
+                return $receipt->receipt_items && !empty($receipt->receipt_items['items'] ?? []);
             })
             ->isNotEmpty();
     }
@@ -104,7 +104,7 @@ class ExpenseShow extends Component
         }
 
         // Compare totals as floats
-        return (float) $receipt->receipt_items->total !== (float) $this->expense->amount;
+        return (float) ($receipt->receipt_items['total'] ?? 0) !== (float) $this->expense->amount;
     }
 
     #[Title('Expense')]

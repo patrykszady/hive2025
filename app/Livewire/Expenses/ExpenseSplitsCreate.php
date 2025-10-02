@@ -160,12 +160,12 @@ class ExpenseSplitsCreate extends Component
 
         $receipt = $expense->receipts()->latest()->first();
 
-        if (! is_null($receipt) && ! is_null($receipt->receipt_items->items)) {
+        if (! is_null($receipt) && ! is_null($receipt->receipt_items['items'] ?? null)) {
             $this->expense_line_items = $receipt->receipt_items;
 
             // Default items structure for a new split (all unchecked)
             $defaultItems = [];
-            foreach ($this->expense_line_items->items as $item_index => $line_item) {
+            foreach ($this->expense_line_items['items'] as $item_index => $line_item) {
                 $defaultItems[$item_index] = ['checkbox' => false];
             }
         } else {
@@ -260,9 +260,9 @@ class ExpenseSplitsCreate extends Component
     {
         $receipt = $this->expense->receipts()->latest()->first();
 
-        if (! is_null($receipt) && ! is_null($receipt->receipt_items->items)) {
+        if (! is_null($receipt) && ! is_null($receipt->receipt_items['items'] ?? null)) {
             $items = [];
-            foreach ($this->expense_line_items->items as $item_index => $line_item) {
+            foreach ($this->expense_line_items['items'] as $item_index => $line_item) {
                 $items[$item_index] = ['checkbox' => false];
             }
         } else {

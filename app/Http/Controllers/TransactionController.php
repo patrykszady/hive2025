@@ -948,8 +948,10 @@ class TransactionController extends Controller
                                     $receipt = $expense->receipts->last();
 
                                     if ($receipt->receipt_html) {
-                                        if ($receipt->receipt_items->items) {
-                                            $last_item_str = htmlspecialchars(end($receipt->receipt_items->items)->Description);
+                                        if (isset($receipt->receipt_items['items']) && !empty($receipt->receipt_items['items'])) {
+                                            $items = $receipt->receipt_items['items'];
+                                            $lastItem = end($items);
+                                            $last_item_str = htmlspecialchars($lastItem['Description'] ?? '');
                                             $last_item_str_length = strlen($last_item_str);
                                             $offset_chars = stripos($receipt->receipt_html, $last_item_str) + $last_item_str_length;
                                             $str = substr($receipt->receipt_html, $offset_chars);
@@ -967,8 +969,8 @@ class TransactionController extends Controller
                                             $transaction->save();
                                         }
                                     } else {
-                                        if (isset($receipt->receipt_items->charges)) {
-                                            $matches = collect($receipt->receipt_items->charges)->where('amount', $transaction->amount);
+                                        if (isset($receipt->receipt_items['charges'])) {
+                                            $matches = collect($receipt->receipt_items['charges'])->where('amount', $transaction->amount);
                                             if (! $matches->isEmpty()) {
                                                 $transaction = Transaction::findOrFail($transaction->id);
                                                 $transaction->expense()->associate($expense);

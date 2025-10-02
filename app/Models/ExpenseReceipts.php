@@ -31,12 +31,12 @@ class ExpenseReceipts extends Model
         return Attribute::make(
             get: function ($value) {
                 // Normalize handwritten_notes and purchase_order as arrays
-                $handwritten_notes = isset($this->receipt_items->handwritten_notes)
-                    ? (array) $this->receipt_items->handwritten_notes
+                $handwritten_notes = isset($this->receipt_items['handwritten_notes'])
+                    ? (array) $this->receipt_items['handwritten_notes']
                     : [];
 
-                $purchase_order = isset($this->receipt_items->purchase_order)
-                    ? (array) $this->receipt_items->purchase_order
+                $purchase_order = isset($this->receipt_items['purchase_order'])
+                    ? (array) $this->receipt_items['purchase_order']
                     : [];
 
                 // Combine, filter, and implode the notes

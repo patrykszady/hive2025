@@ -124,10 +124,12 @@ class MoveController extends Controller
             $receiptItems = $receipt->receipt_items;
 
             // Check if total_tax is an object or array and has a valueNumber
-            if (isset($receiptItems->total_tax->valueNumber)) {
-                $receiptItems->total_tax = $receiptItems->total_tax->valueNumber; // Update total_tax to valueNumber
-            }elseif (isset($receiptItems->total_tax->valueCurrency)) {
-                $receiptItems->total_tax = $receiptItems->total_tax->valueCurrency->amount; // Update total_tax to valueNumber
+            if (isset($receiptItems['total_tax']) && is_array($receiptItems['total_tax'])) {
+                if (isset($receiptItems['total_tax']['valueNumber'])) {
+                    $receiptItems['total_tax'] = $receiptItems['total_tax']['valueNumber']; // Update total_tax to valueNumber
+                } elseif (isset($receiptItems['total_tax']['valueCurrency']['amount'])) {
+                    $receiptItems['total_tax'] = $receiptItems['total_tax']['valueCurrency']['amount']; // Update total_tax to amount
+                }
             }
 
             // Save the updated receipt_items back to the database
@@ -145,8 +147,8 @@ class MoveController extends Controller
             $receiptItems = $receipt->receipt_items;
 
             // Update subtotal to the value of total
-            if (isset($receiptItems->total)) {
-                $receiptItems->subtotal = $receiptItems->total;
+            if (isset($receiptItems['total'])) {
+                $receiptItems['subtotal'] = $receiptItems['total'];
             }
 
             // Save the updated receipt_items back to the database
@@ -225,8 +227,8 @@ class MoveController extends Controller
             // $total_tax = $receipt->receipt_items->total_tax;
             // dd($receipt->receipt_items->total->valueNumber);
             $formatted_items = [];
-            if ($receipt->receipt_items->items) {
-                foreach ($receipt->receipt_items->items as $item_key => $item) {
+            if (isset($receipt->receipt_items['items']) && !empty($receipt->receipt_items['items'])) {
+                foreach ($receipt->receipt_items['items'] as $item_key => $item) {
                     if (isset($item->valueObject)) {
                         // dd($receipt->receipt_items, $item);
                         //$item->content
@@ -283,41 +285,43 @@ class MoveController extends Controller
 
                 // dd($formatted_items);
 
-                $total = $receipt->receipt_items->total ?? null;
-                // $subtotal = $receipt->receipt_items->subtotal ?? NULL;
+                $total = $receipt->receipt_items['total'] ?? null;
+                // $subtotal = $receipt->receipt_items['subtotal'] ?? NULL;
                 //SUBTOTAL
-                if (isset($receipt->receipt_items->subtotal)) {
-                    if (isset($receipt->receipt_items->subtotal->valueCurrency)) {
-                        $subtotal = $receipt->receipt_items->subtotal->valueCurrency->amount;
-                    } elseif (isset($receipt->receipt_items->subtotal->valueNumber)) {
-                        $subtotal = $receipt->receipt_items->subtotal->valueNumber;
+                if (isset($receipt->receipt_items['subtotal'])) {
+                    $subtotalValue = $receipt->receipt_items['subtotal'];
+                    if (is_array($subtotalValue) && isset($subtotalValue['valueCurrency'])) {
+                        $subtotal = $subtotalValue['valueCurrency']['amount'] ?? $subtotalValue['valueCurrency'];
+                    } elseif (is_array($subtotalValue) && isset($subtotalValue['valueNumber'])) {
+                        $subtotal = $subtotalValue['valueNumber'];
                     } else {
-                        $subtotal = $receipt->receipt_items->subtotal;
+                        $subtotal = $subtotalValue;
                     }
                 } else {
                     // dd($receipt->receipt_items);
                     $subtotal = null;
                 }
 
-                $total_tax = $receipt->receipt_items->total_tax ?? null;
-                $merchant_name = $receipt->receipt_items->merchant_name ?? null;
-                // $transaction_date = $receipt->receipt_items->transaction_date ?? NULL;
-                if (isset($receipt->receipt_items->transaction_date)) {
-                    if (isset($receipt->receipt_items->transaction_date->valueDate)) {
-                        $transaction_date = $receipt->receipt_items->transaction_date->valueDate;
+                $total_tax = $receipt->receipt_items['total_tax'] ?? null;
+                $merchant_name = $receipt->receipt_items['merchant_name'] ?? null;
+                // $transaction_date = $receipt->receipt_items['transaction_date'] ?? NULL;
+                if (isset($receipt->receipt_items['transaction_date'])) {
+                    $transactionDateValue = $receipt->receipt_items['transaction_date'];
+                    if (is_array($transactionDateValue) && isset($transactionDateValue['valueDate'])) {
+                        $transaction_date = $transactionDateValue['valueDate'];
                     } else {
-                        $transaction_date = $receipt->receipt_items->transaction_date;
+                        $transaction_date = $transactionDateValue;
                     }
                 } else {
                     $transaction_date = null;
                 }
 
-                $invoice_number = $receipt->receipt_items->invoice_number ?? null;
-                $purchase_order = $receipt->receipt_items->purchase_order ?? null;
-                $handwritten_notes = $receipt->receipt_items->handwritten_notes ?? null;
+                $invoice_number = $receipt->receipt_items['invoice_number'] ?? null;
+                $purchase_order = $receipt->receipt_items['purchase_order'] ?? null;
+                $handwritten_notes = $receipt->receipt_items['handwritten_notes'] ?? null;
 
                 $receipt->receipt_items = [
-                    'items' => $formatted_items ?? $receipt->receipt_items->items,
+                    'items' => $formatted_items ?? $receipt->receipt_items['items'],
                     'subtotal' => $subtotal,
                     'total' => $total,
                     'total_tax' => $total_tax,
