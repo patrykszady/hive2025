@@ -194,12 +194,9 @@ class EstimateShow extends Component
     //$type = [estimate, invoice, work order]
     public function create_pdf($type)
     {
-        // Force component refresh before PDF generation
-        $this->estimate = $this->estimate->fresh();
-        $this->sections = $this->estimate->estimate_sections;
-        
-        $estimate = $this->estimate;
-        $sections = $this->sections;
+        // Get fresh data for PDF without overwriting component state
+        $estimate = $this->estimate->fresh(['estimate_sections.estimate_line_items']);
+        $sections = $estimate->estimate_sections;
         $type = ucwords(strtolower($type));
         $estimate_total = $sections->sum('total');
 
