@@ -3,7 +3,6 @@
 namespace App\Models;
 
 use App\Models\Client;
-use App\Models\Distribution;
 use App\Models\ProjectVendor;
 use App\Scopes\ProjectScope;
 use App\Traits\HasAddress;
@@ -169,46 +168,29 @@ class Project extends Model
     {
         return Attribute::make(
             get: function ($value, array $attributes) {
-                $projectName = $attributes['project_name'] ?? null;
-
-                // Split sentinel always wins (via flag or literal name)
-                if (!empty($attributes['split']) || $projectName === 'EXPENSE SPLIT') {
-                    return 'EXPENSE SPLIT';
-                }
-
-                // Distribution-backed synthetic project
-                $hasDistribution = (!empty($attributes['distribution']) && $attributes['distribution'] == true)
-                    || (!empty($attributes['distribution_id']));
-                if ($hasDistribution) {
-                    // Prefer injected name when present to avoid extra queries
-                    if (!empty($attributes['distribution_name'])) {
-                        return $attributes['distribution_name'];
-                    }
-                    if (!empty($projectName) && $projectName !== 'Distribution') {
-                        return $projectName;
-                    }
-
-                    // Fallback: query by distribution_id only if needed
-                    if (!empty($attributes['distribution_id'])) {
-                        $name = Distribution::query()->whereKey($attributes['distribution_id'])->value('name');
-                        return $name ?: 'No Project';
-                    }
-
-                    return $projectName ?: 'No Project';
-                }
-
-                // No project
-                if (empty($projectName) || strtoupper($projectName) === 'NO PROJECT') {
+                // Check if project_name exists
+                if (!isset($attributes['project_name'])) {
                     return 'No Project';
                 }
-
-                // Standard: address + project name if address present
-                $address = $attributes['address'] ?? null;
-                if (!empty($address)) {
-                    return $address.' | '.$projectName;
+                
+                // Special project names
+                $specialNames = ['EXPENSE SPLIT', 'No Project', 'NO PROJECT'];
+                if (in_array($attributes['project_name'], $specialNames, true)) {
+                    return $attributes['project_name'] === 'NO PROJECT' ? 'No Project' : $attributes['project_name'];
                 }
-
-                return $projectName;
+                
+                // Distribution projects
+                if (isset($attributes['distribution']) && $attributes['distribution'] == true) {
+                    return $attributes['project_name'];
+                }
+                
+                // Standard projects with address
+                if (!empty($attributes['address'])) {
+                    return $attributes['address'].' | '.$attributes['project_name'];
+                }
+                
+                // Default to just project name
+                return $attributes['project_name'];
             }
         );
     }
@@ -224,7 +206,22 @@ class Project extends Model
                 $splits_sum = $this->expenseSplits()->where('reimbursment', 'Client')->sum('amount');
 
                 $finances = [];
-                $finances['estimate'] = (float) $this->bids()->where('type', 1)->sum('amount');
+                $bid_estimate_total = (float) $this->bids()->where('type', 1)->sum('amount');
+                
+                // If no finalized bids exist, calculate from estimate sections
+                if ($bid_estimate_total == 0) {
+                    $unfinalized_estimate_total = $this->estimates()
+                        ->with('estimate_sections')
+                        ->get()
+                        ->flatMap(function ($estimate) {
+                            return $estimate->estimate_sections;
+                        })
+                        ->sum('total');
+                    $finances['estimate'] = (float) $unfinalized_estimate_total;
+                } else {
+                    $finances['estimate'] = $bid_estimate_total;
+                }
+                
                 $finances['change_orders'] = $this->bids()->where('type', '!=', 1)->sum('amount');
                 $finances['total_bid'] = $finances['estimate'] + $finances['change_orders'];
                 $finances['reimbursments'] = $splits_sum + $expenses_sum;

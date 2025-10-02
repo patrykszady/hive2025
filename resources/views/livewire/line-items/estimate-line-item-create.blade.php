@@ -92,8 +92,8 @@
         <div class="flex space-x-2 sticky bottom-0">
             <flux:spacer />
             <div
-                x-data="{ estimate_line_item: @entangle('estimate_line_item') }"
-                x-show="estimate_line_item"
+                x-data="{ edit_line_item: @entangle('edit_line_item') }"
+                x-show="edit_line_item"
                 >
                 <flux:button wire:click="removeFromEstimate" variant="danger">Remove</flux:button>
             </div>

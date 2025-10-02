@@ -35,7 +35,7 @@ class EstimateShow extends Component
 
     public $sections = [];
 
-    protected $listeners = ['refreshComponent' => '$refresh'];
+    protected $listeners = ['refreshComponent' => 'estimate_refresh'];
 
     protected function rules()
     {
@@ -58,8 +58,17 @@ class EstimateShow extends Component
 
     public function estimate_refresh()
     {
-        $this->estimate->refresh();
-        $this->sections = $this->estimate->estimate_sections->toArray();
+        // Refresh the estimate model and eager load relationships
+        $this->estimate = $this->estimate->fresh(['estimate_sections.estimate_line_items']);
+        
+        // Get fresh section data with updated totals from database
+        $this->sections = $this->estimate->estimate_sections()
+            ->with('estimate_line_items')
+            ->get()
+            ->toArray();
+            
+        // Notify EstimateAccept component to refresh its data
+        $this->dispatch('refreshComponent')->to('estimates.estimate-accept');
     }
 
     public function create_new_section($name = null, $estimate_id = null)

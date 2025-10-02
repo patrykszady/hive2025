@@ -4,6 +4,7 @@ namespace App\Livewire\Projects;
 
 use App\Models\Project;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\Facades\Response;
 use Livewire\Component;
 use Spatie\Browsershot\Browsershot;
 
@@ -15,15 +16,25 @@ class ProjectFinances extends Component
 
     public $finances = [];
 
-    protected $listeners = ['refreshComponent' => '$refresh'];
+    protected $listeners = ['refresh' => 'refreshFinances', 'refreshComponent' => 'refreshFinances'];
 
     public function mount()
     {
         $this->finances = $this->project->finances;
     }
 
+    public function refreshFinances()
+    {
+        // Refresh the project model to get fresh data
+        $this->project = $this->project->fresh();
+        $this->finances = $this->project->finances;
+    }
+
+    //Reimbursement print
+    //10-16-2024 MOVE TO RECEIPT CONTROLLER
     public function print_reimbursements()
     {
+        //11-6-2022 QUEUE THIS??
         $this->authorize('view', $this->project);
 
         $expenses = $this->project->expenses()->where('reimbursment', 'Client')->get();
@@ -31,52 +42,55 @@ class ProjectFinances extends Component
 
         foreach ($expenses as $expense) {
             $expense->receipt = $expense->receipts()->latest()->first();
-            if ($expense->receipt) {
-                $expense->receipt_html = $expense->receipt->receipt_html;
-                $expense->receipt_filename = $expense->receipt->receipt_filename;
-            }
-            $expense->business_name = $expense->vendor->business_name ?? null;
-            $expense->project_name = $expense->project->name ?? null;
+            $expense->receipt_html = $expense->receipt->receipt_html;
+            $expense->receipt_filename = $expense->receipt->receipt_filename;
+            $expense->business_name = $expense->vendor->business_name;
+            $expense->project_name = $expense->project->name;
         }
 
         foreach ($splits as $split) {
             $split->receipt = $split->expense->receipts()->latest()->first();
-            if ($split->receipt) {
-                $split->receipt_html = $split->receipt->receipt_html;
-                $split->receipt_filename = $split->receipt->receipt_filename;
-            }
-            $split->business_name = optional($split->expense->vendor)->business_name;
-            $split->date = optional($split->expense)->date;
-            $split->project_name = optional($split->project)->name;
+            $split->receipt_html = $split->receipt->receipt_html;
+            $split->receipt_filename = $split->receipt->receipt_filename;
+            $split->business_name = $split->expense->vendor->business_name;
+            $split->date = $split->expense->date;
+            $split->project_name = $split->project->name;
             $split->selectedSplit = $split;
-
+                        
             $expenses->add($split);
         }
 
         $expenses = $expenses->sortBy('date');
+ 
+        $title = 'Reimbursements | '.$this->project->client->name.' | '.$this->project->project_name.' | '.$this->project->id;
+        $title_file = 'Reimbursements - '.$this->project->id.' - '.$this->project->client->name.' - '.$this->project->project_name;
 
-        $title = 'Reimbursements - '.$this->project->id.' - '.$this->project->client->name.' - '.$this->project->project_name;
         $view = view('misc.print_reimbursments', compact(['expenses', 'title']))->render();
+        $location = storage_path('files/reimbursements/'.$title_file.'.pdf');
 
-        $pdf = Browsershot::html($view)
+        $nodePath = trim(shell_exec('which node'));
+        $npmPath = trim(shell_exec('which npm'));
+
+        Browsershot::html($view)
+            ->setNodeModulePath("/home/patryk/web/hive2025/node_modules/")
+            // ->setNodeBinary($nodePath)
+            // ->setNpmBinary($npmPath)
             ->newHeadless()
-            ->addChromiumArguments([
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--single-process',
-            ])
+            // ->scale(0.8)
             ->showBrowserHeaderAndFooter()
             ->showBackground()
+            // ->headerHtml('Header')
+            // ->footerHtml('<span class="pageNumber"></span>')
+            //->margins($top, $right, $bottom, $left)
             ->margins(10, 5, 10, 5)
-            ->pdf();
+            ->save($location);
 
-        return response()->streamDownload(function () use ($pdf) {
-            echo $pdf;
-        }, $title.'.pdf', [
-            'Content-Type' => 'application/pdf',
-        ]);
+        $headers =
+            [
+                'Content-Type: application/pdf',
+            ];
+
+        return Response::download($location, $title_file.'.pdf', $headers);
     }
 
     public function render()

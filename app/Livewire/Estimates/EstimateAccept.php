@@ -27,7 +27,7 @@ class EstimateAccept extends Component
 
     public $end_date = null;
 
-    protected $listeners = ['accept', 'addPayment'];
+    protected $listeners = ['accept', 'addPayment', 'refreshComponent' => 'refreshEstimateData'];
 
     protected function rules()
     {
@@ -73,19 +73,27 @@ class EstimateAccept extends Component
             $this->end_date = $estimate->options['end_date'];
         }
 
-        $this->sections =
-            $this->estimate
-                ->estimate_sections
-                ->each(function ($item, $key) use ($bids) {
-                    if ($item->bid) {
-                        $bid_index = $bids->search(function ($bid) use ($item) {
-                            return $item->bid->id === $bid->id;
-                        });
-                        $item->bid_index = $bid_index;
-                    } else {
-                        $item->bid_index = null;
-                    }
+        $sections = $this->estimate
+            ->estimate_sections()
+            ->with('bid')
+            ->get();
+        
+        $this->sections = $sections->map(function ($item, $key) use ($bids) {
+            $sectionArray = $item->toArray();
+            
+            if ($item->bid) {
+                $bid_index = $bids->search(function ($bid) use ($item) {
+                    return $item->bid->id === $bid->id;
                 });
+                // If search returns false (not found), default to 0
+                $sectionArray['bid_index'] = $bid_index !== false ? $bid_index : 0;
+            } else {
+                // Default to the first bid (Original Bid) if no bid is associated
+                $sectionArray['bid_index'] = 0;
+            }
+            
+            return (object) $sectionArray;
+        });
         if ($this->estimate->payments) {
             $this->payments = collect($this->estimate->payments);
         } else {
@@ -103,6 +111,36 @@ class EstimateAccept extends Component
     public function accept()
     {
         $this->modal('accept_estimate_modal')->show();
+    }
+
+    public function refreshEstimateData()
+    {
+        // Refresh the estimate model to get fresh data
+        $this->estimate = $this->estimate->fresh();
+        $this->project = $this->estimate->project;
+
+        // Reload sections with fresh data
+        $sections = $this->estimate
+            ->estimate_sections()
+            ->with('bid')
+            ->get();
+        
+        $this->sections = $sections->map(function ($item, $key) {
+            $sectionArray = $item->toArray();
+            
+            if ($item->bid) {
+                $bid_index = $this->bids->search(function ($bid) use ($item) {
+                    return $item->bid->id === $bid->id;
+                });
+                // If search returns false (not found), default to 0
+                $sectionArray['bid_index'] = $bid_index !== false ? $bid_index : 0;
+            } else {
+                // Default to the first bid (Original Bid) if no bid is associated
+                $sectionArray['bid_index'] = 0;
+            }
+            
+            return (object) $sectionArray;
+        });
     }
 
     //new estiamte Bid
@@ -167,21 +205,32 @@ class EstimateAccept extends Component
             $estimate->save();
 
             foreach ($this->bids as $bid_index => $bid) {
-                $bid_sections = $this->sections->whereNotNull('bid_index')->where('bid_index', $bid_index);
+                $bid_sections = $this->sections->where('bid_index', $bid_index);
 
-                if ($bid_sections->isEmpty() && $bid_sections->sum('total') == 0.00) {
-                    $bid->delete();
-                } elseif (! $bid_sections->isEmpty()) {
+                if ($bid_sections->isEmpty()) {
+                    // If no sections assigned to this bid, delete it (except for the first bid)
+                    if ($bid_index != 0) {
+                        $bid->delete();
+                    } else {
+                        // Keep the original bid but set amount to 0
+                        $bid->amount = 0.00;
+                        $bid->save();
+                    }
+                } else {
+                    // Update bid amount and associate sections
                     $bid_amount = $bid_sections->sum('total');
                     $bid->amount = $bid_amount;
                     $bid->save();
 
                     foreach ($bid_sections as $section) {
-                        //ignore 'bid_index' attribute when saving
-                        $section->offsetUnset('bid_index');
-                        $section->bid_id = $bid->id;
-                        $section->save();
+                        // Find the actual EstimateSection model and update it
+                        $sectionModel = $this->estimate->estimate_sections()->find($section->id);
+                        if ($sectionModel) {
+                            $sectionModel->bid_id = $bid->id;
+                            $sectionModel->save();
+                        }
 
+                        // Keep the bid_index for UI purposes
                         $section->bid_index = $bid_index;
                     }
                 }
@@ -189,6 +238,7 @@ class EstimateAccept extends Component
 
             $this->modal('accept_estimate_modal')->close();
             $this->dispatch('refreshComponent')->to('estimates.estimate-show');
+            $this->dispatch('refresh')->to('projects.project-finances');
 
             $this->dispatch('notify',
                 type: 'success',

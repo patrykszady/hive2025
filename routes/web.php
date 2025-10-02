@@ -201,7 +201,6 @@ Route::middleware(['auth', 'vendor.access'])->group(function () {
 
     //COMPANY EMAILS
     Route::get('/company_emails', CompanyEmailsIndex::class)->name('company_emails.index');
-    // Centralized forwarding endpoint (available in all environments)
     Route::get('/forward-receipt-emails', [CompanyEmailController::class, 'forwardRecentReceiptEmailsToCentral'])->name('forward.receipt.emails');
 
     //CLIENTS
