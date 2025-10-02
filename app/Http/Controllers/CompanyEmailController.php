@@ -801,6 +801,8 @@ class CompanyEmailController extends Controller
                             } else {
                                 // No previous receipts recorded; update and use this expense
                                 $expense = $expense_duplicate;
+                                // Remove temporary date_diff property to avoid database save error
+                                unset($expense->date_diff);
                                 $newDate = Carbon::parse($ocr_receipt_data['fields']['transaction_date'])->toDateString();
                                 if ($expense->date !== $newDate) {
                                     $expense->date = $newDate;
