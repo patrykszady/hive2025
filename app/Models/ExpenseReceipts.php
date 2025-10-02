@@ -17,7 +17,7 @@ class ExpenseReceipts extends Model
     protected $fillable = ['expense_id', 'receipt_filename', 'receipt_html', 'receipt_items', 'notes', 'belongs_to_vendor_id', 'date', 'created_at', 'updated_at'];
 
     protected $casts = [
-        'receipt_items' => 'object',
+        'receipt_items' => 'array',
         'date' => 'date',
     ];
 

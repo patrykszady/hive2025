@@ -1232,12 +1232,9 @@ class CompanyEmailController extends Controller
     /**
      * Check if a receipt is a duplicate based on content, invoice number, and line items.
      */
-    protected function isDuplicateReceipt(int $expense_id, string $receipt_html, $receipt_items): bool
+    protected function isDuplicateReceipt(int $expense_id, string $receipt_html, array $receipt_items): bool
     {
-        // Decode receipt_items if it's a string
-        if (is_string($receipt_items)) {
-            $receipt_items = json_decode($receipt_items, true);
-        }
+        // No conversion needed - receipt_items is now always an array
         
         // Extract invoice number from receipt items
         $new_invoice_number = null;
@@ -1259,29 +1256,21 @@ class CompanyEmailController extends Controller
             
             // Check for invoice number match if both have invoice numbers
             if ($new_invoice_number && $existing_receipt->receipt_items) {
-                $existing_items = is_string($existing_receipt->receipt_items) 
-                    ? json_decode($existing_receipt->receipt_items, true) 
-                    : (array) $existing_receipt->receipt_items;
-                    
-                if (isset($existing_items['invoice_number']) && 
-                    $existing_items['invoice_number'] === $new_invoice_number) {
+                if (isset($existing_receipt->receipt_items['invoice_number']) && 
+                    $existing_receipt->receipt_items['invoice_number'] === $new_invoice_number) {
                     return true;
                 }
             }
             
             // Check for line items similarity - this is the key improvement
             if ($existing_receipt->receipt_items) {
-                $existing_items = is_string($existing_receipt->receipt_items) 
-                    ? json_decode($existing_receipt->receipt_items, true) 
-                    : (array) $existing_receipt->receipt_items;
-                
-                $existingItemsSignature = $this->buildItemsSignature($existing_items);
+                $existingItemsSignature = $this->buildItemsSignature($existing_receipt->receipt_items);
                 
                 // If line items overlap significantly, consider it a duplicate
                 if ($this->itemsOverlap($newItemsSignature, $existingItemsSignature)) {
                     // Additional check: if both have the same transaction total, it's very likely a duplicate
                     $newTotal = $receipt_items['total'] ?? null;
-                    $existingTotal = $existing_items['total'] ?? null;
+                    $existingTotal = $existing_receipt->receipt_items['total'] ?? null;
                     
                     if ($newTotal && $existingTotal && abs((float)$newTotal - (float)$existingTotal) < 0.01) {
                         return true;
