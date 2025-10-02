@@ -88,8 +88,8 @@ class ExpenseForm extends Form
         $latestReceipt = $this->expense->receipts()->latest()->first();
         if ($latestReceipt) {
             $this->receipts = true;
-            if (isset($latestReceipt->receipt_items->merchant_name)) {
-                $this->merchant_name = $latestReceipt->receipt_items->merchant_name;
+            if (is_array($latestReceipt->receipt_items) && isset($latestReceipt->receipt_items['merchant_name'])) {
+                $this->merchant_name = $latestReceipt->receipt_items['merchant_name'];
             }
         }
 

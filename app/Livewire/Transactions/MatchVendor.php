@@ -55,8 +55,8 @@ class MatchVendor extends Component
                 ->get()
                 ->each(function ($expense, $key) {
                     $receipt = $expense->receipts()->latest()->first();
-                    if (isset($receipt->receipt_items->merchant_name)) {
-                        $expense->merchant_name = $receipt->receipt_items->merchant_name;
+                    if (is_array($receipt->receipt_items) && isset($receipt->receipt_items['merchant_name'])) {
+                        $expense->merchant_name = $receipt->receipt_items['merchant_name'];
                     }
                 })
                 ->groupBy('merchant_name')

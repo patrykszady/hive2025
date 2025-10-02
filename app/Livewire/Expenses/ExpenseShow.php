@@ -79,7 +79,7 @@ class ExpenseShow extends Component
     {
         return $this->expense->receipts
             ->filter(function($receipt) {
-                return $receipt->receipt_items && !empty($receipt->receipt_items['items'] ?? []);
+                return $receipt->receipt_items && is_array($receipt->receipt_items) && !empty($receipt->receipt_items['items'] ?? []);
             })
             ->isNotEmpty();
     }
@@ -99,7 +99,7 @@ class ExpenseShow extends Component
         }
 
         $receipt = $this->expense->receipts->first();
-        if (!$receipt || !$receipt->receipt_items) {
+        if (!$receipt || !$receipt->receipt_items || !is_array($receipt->receipt_items)) {
             return false;
         }
 

@@ -2,7 +2,6 @@
 
 use App\Http\Controllers\CompanyEmailController;
 use App\Http\Controllers\LeadController;
-use App\Http\Controllers\MoveController;
 use App\Http\Controllers\ReceiptController;
 use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\PlaidTransactionSyncController;
@@ -90,8 +89,6 @@ Route::middleware('auth')->group(function () {
 
 //Nylas verify webhook
 Route::get('/webhook', [WebhookController::class, 'verify'])->name('webhook.verify');
-
-Route::get('/move', [MoveController::class, 'move'])->name('move');
 
 if(env('APP_ENV') === 'local') {
     Route::get('/fetch-auto-receipts', [CompanyEmailController::class, 'fetchAutoReceipts'])->name('fetch.auto.receipts');

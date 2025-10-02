@@ -368,13 +368,6 @@ class NylasService
             }
         }
         
-        // Single summary log instead of per-folder logs
-        Log::channel('nylas')->info($companyEmail->id . " Sync completed", [
-            'grant_id' => $grantId,
-            'total_messages' => count($allMessages),
-            'folders_synced' => $folderResults,
-        ]);
-        
         // Update cursors in the CompanyEmail model
         if ($newCursors !== $existingCursors) {
             $apiJson = $companyEmail->api_json;

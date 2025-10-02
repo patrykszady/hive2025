@@ -286,7 +286,7 @@ class ReceiptController extends Controller
 
                         if (! is_null($receipt)) {
                             $items = $receipt->receipt_items;
-                            $items->charges = $charges;
+                            $items['charges'] = $charges;
 
                             $receipt->receipt_items = $items;
                             $receipt->save();

@@ -1470,8 +1470,8 @@ class TransactionController extends Controller
 
         foreach ($expenses as $expense) {
             $receipt = $expense->receipts()->latest()->first();
-            if (isset($receipt->receipt_items->merchant_name)) {
-                $merchant_name = $receipt->receipt_items->merchant_name;
+            if (is_array($receipt->receipt_items) && isset($receipt->receipt_items['merchant_name'])) {
+                $merchant_name = $receipt->receipt_items['merchant_name'];
                 $vendor = $vendor_desc->where('desc', $merchant_name)->first();
 
                 if ($vendor) {
