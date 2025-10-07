@@ -2,35 +2,40 @@
     <flux:card class="space-y-2">
         <div class="flex justify-between">
             <flux:heading size="lg">Payments</flux:heading>
-            <div>
-                @can('create', App\Models\Payment::class)
-                    @if($view === 'projects.show')
-                        <flux:button size="sm" wire:click="$dispatchTo('payments.payment-create', 'addProject', { client: {{$project->client->id}}})">Create Payment</flux:button>
-                    @else
-                        <flux:button size="sm" wire:click="$dispatchTo('payments.payment-create', 'addProject')">Add Payment</flux:button>
-                    @endif
-                    <livewire:payments.payment-create />
-                @endcan
-            </div>
+            @if($view !== 'estimate.pdf')
+                <div>
+                    @can('create', App\Models\Payment::class)
+                        @if($view === 'projects.show' && $project->finances['balance'] > 0)
+                            <flux:button size="sm" wire:click="$dispatchTo('payments.payment-create', 'addProject', { client: {{$project->client->id}}})">Create Payment</flux:button>
+                        @elseif($view !== 'projects.show' && $this->hasClientsWithProjects)
+                            <flux:button size="sm" wire:click="$dispatchTo('payments.payment-create', 'addProject')">Add Payment</flux:button>
+                        @endif
+                        <livewire:payments.payment-create />
+                    @endcan
+                </div>
+            @endif
         </div>
 
         <div class="space-y-2">
-            <flux:table :paginate="$this->payments">
+            <flux:table :paginate="$view !== 'estimate.pdf' ? $this->payments : null">
                 <flux:table.columns>
                     <flux:table.column>Amount</flux:table.column>
-                    <flux:table.column 
-                        sortable 
-                        :sorted="$sortBy === 'date'" 
-                        :direction="$sortDirection" 
-                        wire:click="sort('date')"
-                        wire:loading.class="opacity-50"
-                        wire:loading.attr="disabled"
-                      
-                        >
-                        Date
-                    </flux:table.column>
+                    @if($view !== 'estimate.pdf')
+                        <flux:table.column 
+                            sortable 
+                            :sorted="$sortBy === 'date'" 
+                            :direction="$sortDirection" 
+                            wire:click="sort('date')"
+                            wire:loading.class="opacity-50"
+                            wire:loading.attr="disabled"
+                            >
+                            Date
+                        </flux:table.column>
+                    @else
+                        <flux:table.column>Date</flux:table.column>
+                    @endif
 
-                    @if($view != 'projects.show')
+                    @if(!in_array($view, ['projects.show', 'estimate.pdf']))
                         <flux:table.column>Project</flux:table.column>
                         <flux:table.column>Client</flux:table.column>
                     @endif
@@ -51,7 +56,7 @@
                                 {{ money($payment->amount) }}
                             </flux:table.cell>
                             <flux:table.cell>{{ $payment->date->format('m/d/Y') }}</flux:table.cell>
-                            @if($view != 'projects.show')
+                            @if(!in_array($view, ['projects.show', 'estimate.pdf']))
                                 <flux:table.cell
                                     wire:navigate.hover
                                     href="{{route('projects.show', $payment->project->id)}}"

@@ -73,7 +73,7 @@
                                     </span>
                                 </li>
 
-                                @if(isset($expense->receipt->receipt_items['invoice_number']) && $expense->receipt->receipt_items['invoice_number'])
+                                @if($expense->receipt && isset($expense->receipt->receipt_items['invoice_number']) && $expense->receipt->receipt_items['invoice_number'])
                                     <li>
                                         <span class="text-gray-500 text-sm">
                                             Invoice
@@ -86,7 +86,7 @@
                                 @endif
 
                                 {{-- $expense->receipt->receipt_items->purchase_order || $expense->receipt->receipt_items->handwritten_notes --}}
-                                @if($expense->receipt->notes)
+                                @if($expense->receipt && $expense->receipt->notes)
                                     <li>
                                         <span class="text-gray-500 text-sm">
                                             Purchase Order

@@ -39,6 +39,54 @@ class ExpenseSplitsCreate extends Component
     }
 
     /**
+     * Ensure $this->expense_line_items is an object with its items as objects so we can safely attach split_index.
+     */
+    protected function normalizeLineItemsStructure(): void
+    {
+        if (empty($this->expense_line_items)) {
+            return;
+        }
+
+        // If it's an array, cast top-level to object.
+        if (is_array($this->expense_line_items)) {
+            $this->expense_line_items = (object) $this->expense_line_items;
+        }
+
+        // If items key exists and is array, convert each item to object for property access.
+        if (isset($this->expense_line_items->items) && is_array($this->expense_line_items->items)) {
+            foreach ($this->expense_line_items->items as $idx => $raw) {
+                if (is_array($raw)) {
+                    $raw = (object) $raw;
+                }
+                if (! isset($raw->split_index)) {
+                    $raw->split_index = null;
+                }
+                $this->expense_line_items->items[$idx] = $raw;
+            }
+        }
+    }
+
+    /**
+     * Safely get (and optionally initialize) a line item object at index.
+     */
+    protected function &lineItemRef(int $index)
+    {
+        // Initialize structure if needed
+        $this->normalizeLineItemsStructure();
+        if (! isset($this->expense_line_items->items[$index])) {
+            $this->expense_line_items->items[$index] = (object) ['split_index' => null];
+        } elseif (is_array($this->expense_line_items->items[$index])) {
+            $this->expense_line_items->items[$index] = (object) $this->expense_line_items->items[$index];
+            if (! isset($this->expense_line_items->items[$index]->split_index)) {
+                $this->expense_line_items->items[$index]->split_index = null;
+            }
+        } elseif (! isset($this->expense_line_items->items[$index]->split_index)) {
+            $this->expense_line_items->items[$index]->split_index = null;
+        }
+        return $this->expense_line_items->items[$index];
+    }
+
+    /**
      * Reindex splits to contiguous numeric keys and recalc item assignments, enforcing uniqueness.
      */
     protected function reindexSplitsAndRecalc(): void
@@ -104,9 +152,8 @@ class ExpenseSplitsCreate extends Component
 
             if ($value == true) {
                 // Assign to this split and uncheck the same item in other splits
-                if (is_object($this->expense_line_items) && isset($this->expense_line_items->items[$item_index])) {
-                    $this->expense_line_items->items[$item_index]->split_index = (int)$index_split;
-                }
+                $li =& $this->lineItemRef((int)$item_index);
+                $li->split_index = (int) $index_split;
 
                 foreach ($this->expense_splits as $k => $_split) {
                     if ((int)$k !== (int)$index_split && isset($_split['items'][$item_index]['checkbox']) && $_split['items'][$item_index]['checkbox'] === true) {
@@ -115,8 +162,9 @@ class ExpenseSplitsCreate extends Component
                     }
                 }
             } else {
-                if (is_object($this->expense_line_items) && isset($this->expense_line_items->items[$item_index]) && $this->expense_line_items->items[$item_index]->split_index == $index_split) {
-                    $this->expense_line_items->items[$item_index]->split_index = null;
+                $li =& $this->lineItemRef((int)$item_index);
+                if ($li->split_index == $index_split) {
+                    $li->split_index = null;
                 }
             }
 
@@ -161,11 +209,12 @@ class ExpenseSplitsCreate extends Component
         $receipt = $expense->receipts()->latest()->first();
 
         if (! is_null($receipt) && ! is_null($receipt->receipt_items['items'] ?? null)) {
-            $this->expense_line_items = $receipt->receipt_items;
+            $this->expense_line_items = $receipt->receipt_items; // array or object
+            $this->normalizeLineItemsStructure();
 
             // Default items structure for a new split (all unchecked)
             $defaultItems = [];
-            foreach ($this->expense_line_items['items'] as $item_index => $line_item) {
+            foreach ($this->expense_line_items->items as $item_index => $line_item) {
                 $defaultItems[$item_index] = ['checkbox' => false];
             }
         } else {
@@ -192,8 +241,9 @@ class ExpenseSplitsCreate extends Component
                 // Set split_index on expense line items so UI can dim others
                 if (is_array($mappedItems)) {
                     foreach ($mappedItems as $item_index => $map) {
-                        if (!empty($map['checkbox'])) {
-                            $this->expense_line_items->items[$item_index]->split_index = $sidx;
+                        if (! empty($map['checkbox'])) {
+                            $li =& $this->lineItemRef($item_index);
+                            $li->split_index = $sidx;
                         }
                     }
                 }
@@ -230,11 +280,11 @@ class ExpenseSplitsCreate extends Component
             $this->splits_count = 2;
         } else {
             foreach ($this->expense_splits as $split_index => $split) {
-                // Split already normalized above; just reapply split_index flags for safety
                 if (isset($split['items']) && is_array($split['items'])) {
                     foreach ($split['items'] as $item_index => $item) {
-                        if (!empty($item['checkbox'])) {
-                            $this->expense_line_items->items[$item_index]->split_index = $split_index;
+                        if (! empty($item['checkbox'])) {
+                            $li =& $this->lineItemRef($item_index);
+                            $li->split_index = $split_index;
                         }
                     }
                 }
@@ -262,7 +312,7 @@ class ExpenseSplitsCreate extends Component
 
         if (! is_null($receipt) && ! is_null($receipt->receipt_items['items'] ?? null)) {
             $items = [];
-            foreach ($this->expense_line_items['items'] as $item_index => $line_item) {
+            foreach ($this->expense_line_items->items as $item_index => $line_item) {
                 $items[$item_index] = ['checkbox' => false];
             }
         } else {
@@ -281,7 +331,8 @@ class ExpenseSplitsCreate extends Component
     {
         $split_checked_items = collect($this->expense_splits[$index]['items'])->where('checkbox', true)->keys();
         foreach ($split_checked_items as $item_index) {
-            $this->expense_line_items->items[$item_index]->split_index = null;
+            $li =& $this->lineItemRef($item_index);
+            $li->split_index = null;
         }
 
         if (isset($this->expense_splits[$index]['id'])) {

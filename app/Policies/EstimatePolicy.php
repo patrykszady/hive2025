@@ -62,7 +62,22 @@ class EstimatePolicy
      */
     public function update(User $user, Estimate $estimate): bool
     {
-        //
+        // First check if user is Admin
+        if ($user->vendor_role !== 'Admin') {
+            return false;
+        }
+        
+        // Then check if user's vendor has business_type of 1099
+        if ($user->vendor && $user->vendor->business_type === '1099') {
+            return false;
+        }
+        
+        // Check if the estimate's project is in a state that allows updates
+        if (in_array($estimate->project->latestStatus->title, ['Complete', 'Service Call', 'Service Call Complete', 'Cancelled', 'VIEW_ONLY'])) {
+            return false;
+        }
+        
+        return true;
     }
 
     /**
@@ -70,7 +85,22 @@ class EstimatePolicy
      */
     public function delete(User $user, Estimate $estimate): bool
     {
-        //
+        // First check if user is Admin
+        if ($user->vendor_role !== 'Admin') {
+            return false;
+        }
+        
+        // Then check if user's vendor has business_type of 1099
+        if ($user->vendor && $user->vendor->business_type === '1099') {
+            return false;
+        }
+        
+        // Check if the estimate's project is in a state that allows deletion
+        if (in_array($estimate->project->latestStatus->title, ['Complete', 'Service Call', 'Service Call Complete', 'Cancelled', 'VIEW_ONLY'])) {
+            return false;
+        }
+        
+        return true;
     }
 
     /**

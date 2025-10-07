@@ -28,13 +28,11 @@ class PaymentCreate extends Component
 
     public $client_id = null;
 
-    /**
-     * Projects keyed by id as plain arrays so transient UI state (amount) persists across requests.
-     * [ project_id => ['id'=>int,'address'=>string,'project_name'=>string,'amount'=>float|null] ]
-     */
-    public array $projects = [];
+    public $projects = [];
 
     public $view = false;
+
+    public $from_project = false;
 
     public $view_text = [
         'card_title' => 'Create Client Payment',
@@ -72,28 +70,33 @@ class PaymentCreate extends Component
 
     public function updated($field)
     {
-        // $this->validate();
         $this->validateOnly($field);
     }
 
     public function updatedClientId(Client $client)
     {
         $this->client = $client;
-        $projectsCollection = $client->projects()
-            ->orderBy('projects.created_at', 'DESC')
+        $this->projects = $client->projects()
             ->status(['Active', 'Complete', 'Service Call', 'Service Call Complete'])
-            ->get();
-
-        $this->projects = $projectsCollection->mapWithKeys(function ($p) {
-            return [
-                $p->id => [
-                    'id' => $p->id,
-                    'address' => $p->address,
-                    'project_name' => $p->project_name,
-                    'amount' => null,
-                ],
-            ];
-        })->toArray();
+            ->with('latestStatus')
+            ->get()
+            ->filter(function ($project) {
+                // Always include Active projects
+                if ($project->latestStatus->title === 'Active') {
+                    return true;
+                }
+                
+                // For completed projects, only include if balance > 0
+                if (in_array($project->latestStatus->title, ['Complete', 'Service Call', 'Service Call Complete'])) {
+                    return $project->finances['balance'] > 0;
+                }
+                
+                return true;
+            })
+            ->sortBy([
+                ['latestStatus.title', 'asc'],
+                ['latestStatus.start_date', 'desc'],
+            ]);
     }
 
     public function editPayment(Payment $payment)
@@ -102,11 +105,8 @@ class PaymentCreate extends Component
         $this->client = $payment->project->client;
         $this->client_id = $payment->project->client->id;
         $this->updatedClientId($this->client);
-        // Prefill amount for the project tied to this payment if present
-        if (isset($this->projects[$payment->project_id])) {
-            $this->projects[$payment->project_id]['amount'] = $payment->amount;
-        }
         $this->form->setPayment($this->payment);
+        $this->from_project = true; // Always disable client selection when editing
 
         $this->view_text = [
             'card_title' => 'Update Client Payment',
@@ -126,11 +126,15 @@ class PaymentCreate extends Component
         ->get();
     }
 
+    #[Computed]
+    public function hasValidProjects()
+    {
+        return collect($this->projects)->isNotEmpty();
+    }
+
     public function getClientPaymentSumProperty()
     {
-        return collect($this->projects)
-            ->filter(fn($p) => $p['amount'] !== null && $p['amount'] !== '')
-            ->sum('amount');
+        return collect($this->projects)->where('amount', '!=', null)->sum('amount');
     }
 
     // 8-31-2022 | 9-10-2023 similar on VendorPaymentForm
@@ -144,10 +148,12 @@ class PaymentCreate extends Component
 
         if (isset($client->id)) {
             $this->view = true;
+            $this->from_project = true; // Coming from project view
             $this->client_id = $client->id;
             $this->updatedClientId($client);
         } else {
             $this->client_id = null;
+            $this->from_project = false; // Coming from payments index
         }
 
         $this->modal('payment_form_modal')->show();

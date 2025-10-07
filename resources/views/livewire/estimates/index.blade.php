@@ -31,7 +31,7 @@
                     @if($view === 'estimates.index')
                         <flux:table.column>Client</flux:table.column>
                     @endif
-                    <flux:table.column>Status</flux:table.column>
+                    {{-- <flux:table.column>Status</flux:table.column> --}}
                     <flux:table.column></flux:table.column>
                 </flux:table.columns>
 
@@ -46,15 +46,31 @@
                                     class="cursor-pointer"
                                     >
                                     # {{ $estimate->id }}
+                                    <flux:badge
+                                        size="sm"
+                                        :color="$estimate->status === 'Active' ? 'green' : 'red'"
+                                        inset="top bottom"
+                                        >
+                                        {{$estimate->status}}
+                                    </flux:badge>
                                 </flux:table.cell>
                             @else
                                 <flux:table.cell>
                                     # {{ $estimate->id }}
+                                    <flux:badge
+                                        size="sm"
+                                        :color="$estimate->status === 'Active' ? 'green' : 'red'"
+                                        inset="top bottom"
+                                        >
+                                        {{$estimate->status}}
+                                    </flux:badge>
                                 </flux:table.cell>
                             @endif
 
                             <flux:table.cell>{{ money($estimate->estimate_sections->sum('total')) }}</flux:table.cell>
+                            
                             <flux:table.cell>{{ $estimate->created_at->format('m/d/Y') }}</flux:table.cell>
+                            
                             @if($view === 'estimates.index')
                                 <flux:table.cell
                                     wire:navigate.hover
@@ -64,30 +80,6 @@
                                     {{ $estimate->project->client->name }}
                                 </flux:table.cell>
                             @endif
-
-                            {{-- <flux:table.cell
-                                wire:click="$dispatchTo('projects.expense-create', 'editExpense', { expense: {{$project->id}}})"
-                                variant="strong"
-                                class="cursor-pointer"
-                                >
-                                {{ $project->address }}
-                            </flux:table.cell>
-                            <flux:table.cell>{{ $expense->date->format('m/d/Y') }}</flux:table.cell>
-                            @if($view != 'checks.show')
-                                <flux:table.cell><a wire:navigate.hover href="{{route('vendors.show', $expense->vendor->id)}}">{{Str::limit($expense->vendor->name, 20)}}</a></flux:table.cell>
-                            @endif
-                            @if($view != 'projects.show')
-                                <flux:table.cell>{{ Str::limit($expense->project->name, 25) }}</flux:table.cell>
-                            @endif --}}
-                            <flux:table.cell>
-                                <flux:badge
-                                    size="sm"
-                                    :color="$estimate->status === 'Active' ? 'green' : 'red'"
-                                    inset="top bottom"
-                                    >
-                                    {{$estimate->status}}
-                                </flux:badge>
-                            </flux:table.cell>
 
                             <flux:table.cell>
                                 <flux:dropdown position="bottom" align="end">

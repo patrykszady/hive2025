@@ -24,6 +24,8 @@ class BidCreate extends Component
 
     public $vendor;
 
+    public $context = 'project'; // 'project' or 'payment'
+
     public $view_text = [
         'card_title' => 'Create Bid',
         'button_text' => 'Save Bids',
@@ -47,10 +49,11 @@ class BidCreate extends Component
         $this->validateOnly($field);
     }
 
-    public function addBids(Vendor $vendor, Project $project)
+    public function addBids(Vendor $vendor, Project $project, $context = 'project')
     {
         $this->vendor = $vendor;
         $this->project = $project;
+        $this->context = $context;
 
         $this->bids =
             $this->project->bids()
@@ -62,7 +65,19 @@ class BidCreate extends Component
                     if ($item->amount == 0.00) {
                         $item->amount = null;
                     }
-                    $item->has_estimate_sections = $item->estimate_sections->isEmpty() ? false : true;
+                    
+                    // In payment context, never disable bids (we need to edit vendor payment amounts)
+                    if ($this->context === 'payment') {
+                        $item->has_estimate_sections = false;
+                    } else {
+                        // In project context, only disable if this bid belongs to the authenticated user's vendor 
+                        // AND has estimate sections that reference it
+                        $belongsToAuthVendor = $item->vendor_id == auth()->user()->vendor->id;
+                        $hasEstimateSections = $item->estimate_sections->where('bid_id', $item->id)->isNotEmpty();
+                        
+                        $item->has_estimate_sections = $belongsToAuthVendor && $hasEstimateSections;
+                    }
+                    
                     $item->name = $item->name;
                 })
                 ->toArray();
@@ -93,8 +108,8 @@ class BidCreate extends Component
             'project_id' => $this->project->id,
             'vendor_id' => $this->vendor->id,
             'name' => 'Change Order '.$bid_index,
-            // 'name' => 'Change Order ' . $bid_index === 1 ? $bid_index : $bid_index + 1
-            'has_estimate_sections' => false,
+            // In payment context, always allow editing of new change orders
+            'has_estimate_sections' => $this->context === 'payment' ? false : false,
         ];
         $this->bids[] = $bid;
     }

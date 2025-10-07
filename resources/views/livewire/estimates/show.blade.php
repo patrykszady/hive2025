@@ -1,15 +1,20 @@
 <div class="grid grid-cols-5 gap-4 xl:relative sm:px-6 lg:max-w-7xl" wire:key="estimate-show-{{ $estimate->id }}">
     <div class="col-span-5 space-y-4 lg:col-span-2 lg:h-32">
         {{-- ESTIMATE DETAILS --}}
-        <flux:card class="space-y-2">
-            {{-- HEADING --}}
-            <div class="flex justify-between">
-                <flux:heading size="lg" class="mb-0">Estimate Details</flux:heading>
+        <x-details.card
+            :title="'Estimate Details'"
+            :subheading="$estimate->project->project_name . ' | ' . $estimate->client->name"
+            :canEdit="null"
+            >
+            <x-slot:header_buttons>
                 <flux:dropdown>
                     <flux:button size="sm" icon-trailing="chevron-down">Options</flux:button>
 
                     <flux:menu>
-                        <flux:menu.item wire:click="$dispatchTo('estimates.estimate-accept', 'accept')">Finalize Estimate</flux:menu.item>
+                        @can('update', $estimate)
+                            <flux:menu.item wire:click="$dispatchTo('estimates.estimate-accept', 'accept')">Finalize Estimate</flux:menu.item>
+                        @endcan
+                        
                         <flux:menu.item wire:click="$dispatchTo('estimates.estimate-duplicate', 'duplicateModal', { estimate: {{$estimate->id}} })">Duplicate Estimate</flux:menu.item>
                         {{-- <flux:menu.item wire:click="$dispatchTo('estimates.estimate-combine', 'combineModal', { existing_estimate_id: {{$estimate->id}} })">Copy to Estimate</flux:menu.item> --}}
 
@@ -22,28 +27,46 @@
                         <flux:menu.separator />
 
                         <flux:menu.item wire:click="export_csv">Export Excel Estimate</flux:menu.item>
-
-                        {{-- <flux:menu.separator /> --}}
-                        {{-- <flux:menu.item wire:click="disableEstimate"  variant="danger">Disable Estimate</flux:menu.item> --}}
                     </flux:menu>
                 </flux:dropdown>
-            </div>
+            </x-slot:header_buttons>
 
-            <flux:separator variant="subtle" />
+            <x-slot:details>
+                <x-details.row 
+                    title="Client" 
+                    :content="$estimate->client->name"
+                    :href="route('clients.show', $estimate->client->id)"
+                />
 
-            <livewire:estimates.estimate-accept :estimate="$estimate"/>
-            <livewire:estimates.estimate-duplicate />
-            {{-- <livewire:estimates.estimate-combine :client="$estimate->client"/> --}}
+                <x-details.row 
+                    title="Project Name" 
+                    :content="$estimate->project->project_name"
+                    :href="route('projects.show', $estimate->project->id)"
+                />
 
-            {{-- DETAILS --}}
-            <x-lists.details_list>
-                <x-lists.details_item title="Client" detail="{{$estimate->client->name}}" href="{{route('clients.show', $estimate->client->id)}}" />
-                <x-lists.details_item title="Project Name" detail="{{$estimate->project->project_name}}" href="{{route('projects.show', $estimate->project->id)}}" />
-                <x-lists.details_item title="Jobsite Address" detail="{!!$estimate->project->full_address!!}" href="{{$estimate->project->getAddressMapURI()}}" target="_blank" />
-                <x-lists.details_item title="Estimate Number" detail="{{$estimate->number}}" />
-                <x-lists.details_item title="Estimate Total" detail="{{money($this->estimate_total)}}" />
-            </x-lists.details_list>
-        </flux:card>
+                <x-details.row 
+                    title="Jobsite Address" 
+                    :content="$estimate->project->full_address"
+                    :href="$estimate->project->getAddressMapURI()"
+                    :copyable="true"
+                />
+
+                <x-details.row 
+                    title="Estimate Number" 
+                    :content="$estimate->number"
+                />
+
+                <x-details.row 
+                    title="Estimate Total" 
+                    :content="money($this->estimate_total)"
+                />
+            </x-slot:details>
+
+            <x-slot:footer>
+                <livewire:estimates.estimate-accept :estimate="$estimate"/>
+                <livewire:estimates.estimate-duplicate />
+            </x-slot:footer>
+        </x-details.card>
 
         {{-- PAYMENT SCHEDULE --}}
         @if($estimate->payments)
@@ -76,9 +99,6 @@
                 </flux:accordion>
             </flux:card>
         @endif
-
-        {{-- PROJECT PAYMENTS --}}
-        {{-- <livewire:payments.payments-index :project="$estimate->project" :view="'estimate.show'" /> --}}
 
         {{-- PROJECT FIANCES --}}
         @if($estimate->options)

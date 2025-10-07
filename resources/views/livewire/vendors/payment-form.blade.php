@@ -55,7 +55,7 @@
                                 <flux:subheading>{{ $project['project_name']}}</flux:subheading>
                             </div>
                             <flux:button.group>
-                                <flux:button size="sm" wire:click="$dispatchTo('bids.bid-create', 'addBids', { vendor: {{$vendor->id}}, project: {{$project['id']}} })">Edit Bids</flux:button>
+                                <flux:button size="sm" wire:click="$dispatchTo('bids.bid-create', 'addBids', { vendor: {{$vendor->id}}, project: {{$project['id']}}, context: 'payment' })">Edit Bids</flux:button>
                                 <flux:button size="sm" wire:click="removeProject({{$project_id}})">Remove</flux:button>
                             </flux:button.group>
                         </div>

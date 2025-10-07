@@ -7,11 +7,11 @@
             </div>
 
             {{-- VENDOR TIMELINE --}}
-            @if($vendor->business_type != 'Retail')
+            {{-- @if($vendor->business_type != 'Retail')
                 <div class="h-100">
                     <livewire:planner.cards-index type="vendor" :vendor-id="$vendor->id" />
                 </div>
-            @endif
+            @endif --}}
 
             {{-- EXPENSES --}}
             @if(in_array($vendor->business_type, ["Retail"]))

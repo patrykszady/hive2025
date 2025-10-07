@@ -63,7 +63,15 @@ class ExpenseCreate extends Component
     #[Computed]
     public function projects()
     {
-        return Project::orderBy('created_at', 'desc')->get();
+        return Project::with('latestStatus')
+            ->get()
+            ->filter(function ($project) {
+                return $project->latestStatus->title !== 'Cancelled';
+            })
+            ->sortBy([
+                ['latestStatus.title', 'asc'],
+                ['latestStatus.start_date', 'desc'],
+            ]);
     }
 
     #[Computed]
@@ -94,15 +102,6 @@ class ExpenseCreate extends Component
         }
 
         if ($field == 'form.reimbursment') {
-            // if($value == NULL){
-            //     $this->form->reimbursment = NULL;
-            // }elseif($value == 'client_reimbursement'){
-            //     // dd('Client');
-            //     $this->form->reimbursment = 'client_reimbursement';
-            // }
-
-            // if($title == 'Complete' && $this->form->reimbursment == 'Client'){
-            //     $this->addError('form.reimbursment', 'No Client reimbursment allowed when Project is Complete.');
             $this->validateOnly('form.receipt_file');
         }
 

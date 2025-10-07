@@ -46,6 +46,21 @@ class Expense extends Model
     {
         // Calculate status before indexing
         $status = $this->calculateStatus();
+        // Gather split metadata once to avoid N+1 later; lightweight fields only
+        $splitProjectIds = [];
+        $splitAmounts = [];
+        if ($this->relationLoaded('splits')) {
+            $splits = $this->splits;
+        } else {
+            // Select minimal columns to reduce query cost when indexing
+            $splits = $this->splits()->select('id','project_id','amount')->get();
+        }
+        foreach ($splits as $split) {
+            if (! is_null($split->project_id)) {
+                $splitProjectIds[] = (int) $split->project_id;
+            }
+            $splitAmounts[] = (float) $split->amount; // keep raw float for range / prefix strategies client-side later
+        }
 
         // Index only the fields we actually use for search, filtering, and sorting
         return [
@@ -60,6 +75,9 @@ class Expense extends Model
             'expense_status' => $status,
             'belongs_to_vendor_id' => (int) $this->belongs_to_vendor_id,
             'paid_by' => $this->paid_by,
+            // Denormalized split metadata
+            'split_project_ids' => $splitProjectIds,
+            'split_amounts' => $splitAmounts,
         ];
     }
 
@@ -129,33 +147,31 @@ class Expense extends Model
     {
         return $this->belongsTo(Project::class)
             ->withDefault(function ($project, $expense) {
-                // Prefer attributes provided by search payload to avoid extra queries
+                // Determine split state (prefer indexed attribute to avoid additional queries)
                 $hasSplitsAttr = array_key_exists('has_splits', $expense->getAttributes()) ? (bool) $expense->getAttribute('has_splits') : null;
                 $hasSplits = $hasSplitsAttr !== null
                     ? $hasSplitsAttr
                     : ($expense->relationLoaded('splits') ? $expense->splits->isNotEmpty() : $expense->splits()->exists());
 
                 if ($hasSplits) {
-                    // Set a lightweight flag; Project::name will render the final label
-                    $project->split = true;
+                    $project->split = true; // consumed by Project::name
+                    $project->project_name = 'EXPENSE SPLIT';
                     return;
                 }
 
-                // If a distribution is present, set attributes for Project::name accessor
                 if (! is_null($expense->distribution_id)) {
-                    // Provide only distribution context; Project::name decides the display
                     $project->distribution = true;
-                    $project->distribution_id = $expense->distribution_id;
-                    // If distribution is preloaded or present as array, pass along the name for free
                     if ($expense->relationLoaded('distribution') && $expense->distribution) {
+                        $project->project_name = $expense->distribution->name;
                         $project->distribution_name = $expense->distribution->name;
-                    } elseif (is_array($expense->distribution ?? null)) {
-                        $project->distribution_name = $expense->distribution['name'] ?? null;
+                    } else {
+                        $distributionName = optional($expense->distribution()->select('id','name')->first())->name;
+                        $project->project_name = $distributionName ?? 'Distribution';
+                        $project->distribution_name = $project->project_name;
                     }
                     return;
                 }
-
-                // Leave project_name unset so Project::name returns "No Project"
+                // else leave project_name unset so Project::name returns No Project
             });
     }
 
@@ -202,6 +218,7 @@ class Expense extends Model
     {
         return $this->hasMany(ExpenseReceipts::class);
     }
+
 
     public function associated(): HasMany
     {

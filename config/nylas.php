@@ -15,9 +15,15 @@ return [
     'receipts_grant_id' => env('NYLAS_HIVE_RECEIPTS_GRANT_ID'),
     'receipts_email' => env('NYLAS_HIVE_RECEIPTS_EMAIL'),
     'receipts_deleted_folder_id' => env('NYLAS_HIVE_RECEIPTS_DELETED_FOLDER_ID'),
+    'hive_receipts_duplicate_folder_id' => 'AAMkADM1MTY5NmIzLWY3M2EtNDY5Yi1hYzIzLWE5YzA5NTBkOWE5NgAuAAAAAACCzNgw3NROS5uKY_YOEw_FAQAA-9oxfQJ1SJZ5N89WL8dfAAABooYBAAA=',
+    'hive_receipts_error_folder_id' => 'AAMkADM1MTY5NmIzLWY3M2EtNDY5Yi1hYzIzLWE5YzA5NTBkOWE5NgAuAAAAAACCzNgw3NROS5uKY_YOEw_FAQAA-9oxfQJ1SJZ5N89WL8dfAAABooYEAAA=',
+    'hive_receipts_need_to_add_folder_id' => 'AAMkADM1MTY5NmIzLWY3M2EtNDY5Yi1hYzIzLWE5YzA5NTBkOWE5NgAuAAAAAACCzNgw3NROS5uKY_YOEw_FAQAA-9oxfQJ1SJZ5N89WL8dfAAABooYFAAA=',
+    'hive_receipts_saved_folder_id' => 'AAMkADM1MTY5NmIzLWY3M2EtNDY5Yi1hYzIzLWE5YzA5NTBkOWE5NgAuAAAAAACCzNgw3NROS5uKY_YOEw_FAQAA-9oxfQJ1SJZ5N89WL8dfAAABooYCAAA=',
+    'hive_receipts_test_folder_id' => 'AAMkADM1MTY5NmIzLWY3M2EtNDY5Yi1hYzIzLWE5YzA5NTBkOWE5NgAuAAAAAACCzNgw3NROS5uKY_YOEw_FAQAA-9oxfQJ1SJZ5N89WL8dfAAABooYIAAA=',
 
     // Insurance / certificates mailbox
     'insurance_grant_id' => env('NYLAS_HIVE_INSURANCE_GRANT_ID'),
+    'insurance_email' => env('NYLAS_HIVE_INSURANCE_EMAIL'),
 
     // OAuth scopes required (space separated). Ensure the Nylas Connect flow requests email.send for forwarding.
     // Add NYLAS_SCOPES to .env to override if needed.

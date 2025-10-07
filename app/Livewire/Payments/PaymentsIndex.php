@@ -24,6 +24,14 @@ class PaymentsIndex extends Component
     protected $listeners = ['refreshComponent' => '$refresh'];
 
     #[Computed]
+    public function hasClientsWithProjects()
+    {
+        return \App\Models\Client::withWhereHas('projects', function ($query) {
+            $query->status(['Active', 'Complete', 'Service Call', 'Service Call Complete']);
+        })->exists();
+    }
+
+    #[Computed]
     public function payments()
     {
         // Get payments without transactions
@@ -31,7 +39,7 @@ class PaymentsIndex extends Component
         // dd($no_transaction_payments);
             
         // Start with the base query based on view
-        $query = $this->view == 'projects.show'
+        $query = in_array($this->view, ['projects.show', 'estimate.pdf'])
             ? $this->project->payments()
             : Payment::query();
 
@@ -41,7 +49,12 @@ class PaymentsIndex extends Component
         }
 
         // Apply pagination with different limits based on view
-        return $query->paginate($this->view == 'projects.show' ? 25 : 15);
+        // For PDF export, don't paginate - get all results
+        if ($this->view === 'estimate.pdf') {
+            return $query->get();
+        }
+        
+        return $query->paginate(in_array($this->view, ['projects.show']) ? 25 : 15);
     }
 
     public function sort($column)

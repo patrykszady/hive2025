@@ -93,7 +93,7 @@ Route::get('/webhook', [WebhookController::class, 'verify'])->name('webhook.veri
 if(env('APP_ENV') === 'local') {
     Route::get('/fetch-auto-receipts', [CompanyEmailController::class, 'fetchAutoReceipts'])->name('fetch.auto.receipts');
     Route::get('/fetch-consolidated-orders', [CompanyEmailController::class, 'fetchConsolidatedOrders'])->name('fetch.consolidated.orders');
-    // Route::get('/fetch-messages-for-grant', [CompanyEmailController::class, 'fetchMessagesForGrantId'])->name('fetch.messages.for.grant');
+    Route::get('/fetch-receipt-messages', [CompanyEmailController::class, 'fetchReceiptMessages'])->name('fetch.receipt.messages');
     Route::get('transaction_vendor_bulk_match', [TransactionController::class, 'transaction_vendor_bulk_match'])->name('transaction_vendor_bulk_match');
     Route::get('/insurance-mailbox/messages', [VendorDocsController::class, 'fetchMessagesFromInsuranceMailbox']);
 }

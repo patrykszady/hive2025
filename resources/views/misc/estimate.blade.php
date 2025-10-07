@@ -231,7 +231,7 @@
                         {{-- PROJECT PAYMENTS --}}
                         <div class="col-span-2 space-y-4">
                             @if($payments->isNotEmpty())
-                                <livewire:payments.payments-index :project="$estimate->project" :view="'projects.show'" />
+                                <livewire:payments.payments-index :project="$estimate->project" :view="'estimate.pdf'" />
                             @endif
                         </div>
 
@@ -242,62 +242,37 @@
                                     <div class="flex justify-between">
                                         <flux:heading size="lg">{{$type}} Finances</flux:heading>
                                     </div>
-                                    {{-- wire:loading should just target the Reimbursment search_li not the entire Proejct Finances wrapper--}}
-                                    <x-lists.ul
-                                        {{-- wire:target="print"
-                                        wire:loading.attr="disabled"
-                                        wire:loading.class="opacity-50 text-opacity-40" --}}
-                                        >
-                                        <x-lists.search_li
-                                            :basic=true
-                                            :line_title="'Estimate'"
-                                            :line_data="money($estimate->project->finances['estimate'])"
-                                            >
-                                        </x-lists.search_li>
-
-                                        <x-lists.search_li
-                                            :basic=true
-                                            :line_title="'Change Order'"
-                                            :line_data="money($estimate->project->finances['change_orders'])"
-                                            >
-                                        </x-lists.search_li>
-
-                                        @if($estimate->reimbursments)
-                                            <x-lists.search_li
-                                                :basic=true
-                                                :line_title="'Reimbursements'"
-                                                :line_data="money($estimate->reimbursments)"
-                                                >
-                                            </x-lists.search_li>
-                                        @endif
-
-                                        <x-lists.search_li
-                                            :basic=true
-                                            :bold="TRUE"
-                                            {{-- make gray --}}
-                                            :line_title="'TOTAL ESTIMATE'"
-                                            :line_data="money($estimate_total + $estimate->reimbursments)"
-                                            >
-                                        </x-lists.search_li>
-
-                                        <x-lists.search_li
-                                            :basic=true
-                                            :bold="TRUE"
-                                            {{-- make gray --}}
-                                            :line_title="'TOTAL PAYMENTS'"
-                                            :line_data="'-' . money($payments->sum('amount'))"
-                                            >
-                                        </x-lists.search_li>
-
-                                        <x-lists.search_li
-                                            :basic=true
-                                            :bold="TRUE"
-                                            {{-- make gray --}}
-                                            :line_title="'BALANCE'"
-                                            :line_data="money(($estimate_total + $estimate->reimbursments) - $payments->sum('amount'))"
-                                            >
-                                        </x-lists.search_li>
-                                    </x-lists.ul>
+                                    <flux:separator variant="subtle" />
+                                    <flux:table>
+                                        <flux:table.rows>
+                                            <flux:table.row>
+                                                <flux:table.cell>Estimate</flux:table.cell>
+                                                <flux:table.cell>{{money($estimate->project->finances['estimate'])}}</flux:table.cell>
+                                            </flux:table.row>
+                                            <flux:table.row>
+                                                <flux:table.cell>Change Order</flux:table.cell>
+                                                <flux:table.cell>{{money($estimate->project->finances['change_orders'])}}</flux:table.cell>
+                                            </flux:table.row>
+                                            @if($estimate->reimbursments)
+                                                <flux:table.row>
+                                                    <flux:table.cell>Reimbursements</flux:table.cell>
+                                                    <flux:table.cell>{{money($estimate->reimbursments)}}</flux:table.cell>
+                                                </flux:table.row>
+                                            @endif
+                                            <flux:table.row>
+                                                <flux:table.cell variant="strong">TOTAL ESTIMATE</flux:table.cell>
+                                                <flux:table.cell variant="strong">{{money($estimate_total + $estimate->reimbursments)}}</flux:table.cell>
+                                            </flux:table.row>
+                                            <flux:table.row>
+                                                <flux:table.cell variant="strong">TOTAL PAYMENTS</flux:table.cell>
+                                                <flux:table.cell variant="strong">-{{money($payments->sum('amount'))}}</flux:table.cell>
+                                            </flux:table.row>
+                                            <flux:table.row>
+                                                <flux:table.cell variant="strong">BALANCE</flux:table.cell>
+                                                <flux:table.cell variant="strong">{{money(($estimate_total + $estimate->reimbursments) - $payments->sum('amount'))}}</flux:table.cell>
+                                            </flux:table.row>
+                                        </flux:table.rows>
+                                    </flux:table>
                                 </flux:card>
                             @endif
                         </div>

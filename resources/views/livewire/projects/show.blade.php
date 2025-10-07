@@ -73,9 +73,9 @@
             </x-details.card>
 
             {{-- PROJECT TIMELINE --}}
-            <div class="h-180">
+            {{-- <div class="h-180">
                 <livewire:planner.cards-index type="project" :project-id="$project->id" />
-            </div>
+            </div> --}}
 		</div>
 
         @can('viewFinancials', $project)

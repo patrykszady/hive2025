@@ -105,7 +105,11 @@
 
                             @if($view != 'projects.show')
                                 <flux:table.cell>
-                                    {{ $expense->project->name }}
+                                    @if($expense->splits->count() > 0)
+                                        SPLIT
+                                    @else
+                                        {{ $expense->project?->name ?? 'No Project' }}
+                                    @endif
                                 </flux:table.cell>
                             @endif
                             <flux:table.cell>
@@ -115,6 +119,41 @@
                                 </flux:badge>
                             </flux:table.cell>
                         </flux:table.row>
+
+                        {{-- Show split rows if expense has splits --}}
+                        @if($expense->splits->count() > 0)
+                            @foreach($expense->splits as $split)
+                                @if($view === 'projects.show' && (string)$split->project_id !== (string)$project_id)
+                                    @continue
+                                @endif
+                                <flux:table.row :key="'split-' . $split->id" class="bg-gray-50 dark:bg-gray-800/50">
+                                    <flux:table.cell class="!bg-transparent pl-10 text-sm text-gray-600 dark:text-gray-400 text-right tabular-nums">
+                                        {{ money($split->amount) }}
+                                    </flux:table.cell>
+                                    {{-- Preserve column alignment: empty date cell --}}
+                                    <flux:table.cell class="!bg-transparent"></flux:table.cell>
+                                    @if(!in_array($view, ['checks.show', 'vendors.show']))
+                                        {{-- Empty vendor cell for split rows --}}
+                                        <flux:table.cell class="!bg-transparent"></flux:table.cell>
+                                    @endif
+                                    @if($view != 'projects.show')
+                                        <flux:table.cell class="!bg-transparent text-sm text-gray-600 dark:text-gray-400">
+                                            {{-- Prefer distribution name, then project accessor; link if project exists --}}
+                                            @if(!is_null($split->distribution_id) && isset($split->distribution->name))
+                                                {{ $split->distribution->name }}
+                                            @elseif(isset($split->project->id))
+                                                {{ $split->project->name }}
+                                            @else
+                                                No Project
+                                            @endif
+                                        </flux:table.cell>
+                                    @endif
+                                    <flux:table.cell class="!bg-transparent text-sm text-gray-600 dark:text-gray-400">
+                                        <flux:badge size="sm" variant="outline" color="gray">Split</flux:badge>
+                                    </flux:table.cell>
+                                </flux:table.row>
+                            @endforeach
+                        @endif
                     @endforeach
                 </flux:table.rows>
             </flux:table>

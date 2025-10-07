@@ -168,28 +168,37 @@ class Project extends Model
     {
         return Attribute::make(
             get: function ($value, array $attributes) {
-                // Check if project_name exists
-                if (!isset($attributes['project_name'])) {
+                // Split placeholder
+                if (isset($attributes['split']) && $attributes['split']) {
+                    return 'SPLIT';
+                }
+
+                // Distribution synthetic naming
+                if (isset($attributes['distribution']) && $attributes['distribution']) {
+                    if (isset($attributes['distribution_name']) && ! empty($attributes['distribution_name'])) {
+                        return $attributes['distribution_name'];
+                    }
+                    if (isset($attributes['project_name']) && ! empty($attributes['project_name'])) {
+                        return $attributes['project_name'];
+                    }
+                }
+
+                // If we lack a project_name entirely
+                if (! isset($attributes['project_name']) || empty($attributes['project_name'])) {
                     return 'No Project';
                 }
-                
-                // Special project names
-                $specialNames = ['EXPENSE SPLIT', 'No Project', 'NO PROJECT'];
+
+                // Normalize explicit NO PROJECT strings
+                $specialNames = ['No Project', 'NO PROJECT'];
                 if (in_array($attributes['project_name'], $specialNames, true)) {
-                    return $attributes['project_name'] === 'NO PROJECT' ? 'No Project' : $attributes['project_name'];
+                    return 'No Project';
                 }
-                
-                // Distribution projects
-                if (isset($attributes['distribution']) && $attributes['distribution'] == true) {
-                    return $attributes['project_name'];
+
+                // Standard project: include address prefix if present
+                if (! empty($attributes['address'])) {
+                    return $attributes['address'] . ' | ' . $attributes['project_name'];
                 }
-                
-                // Standard projects with address
-                if (!empty($attributes['address'])) {
-                    return $attributes['address'].' | '.$attributes['project_name'];
-                }
-                
-                // Default to just project name
+
                 return $attributes['project_name'];
             }
         );

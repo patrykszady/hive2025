@@ -205,449 +205,445 @@ class CompanyEmailController extends Controller
     //     ]);
     // }
 
-    public function fetchMessagesForGrantId()
+    public function fetchReceiptMessages()
     {
-        dd('fetchMessagesForGrantId');
-        // Retrieve all CompanyEmail records with a grant_id
-        $companyEmails = CompanyEmail::withoutGlobalScopes()->whereNotNull('grant_id')->get();
         $receipts = Receipt::all();
+        $grantId = config('nylas.receipts_grant_id');
 
-        foreach ($companyEmails as $companyEmail) {
-            $grantId = $companyEmail->grant_id; // Extract the grant_id
+        // Define the folders to query based on the environment.
+        $folders = env('APP_ENV') === 'production'
+            ? ['inbox'] // For production, use both inbox folder.
+            : [config('nylas.hive_receipts_test_folder_id')];      // For dev, use the test folder.
 
-            // Define the folders to query based on the environment.
-            $folders = env('APP_ENV') === 'production'
-                ? ['inbox', $companyEmail->api_json['folders']['Retry']] // For non-production, use both inbox and retry folder.
-                //$companyEmail->api_json['folders']['Test']
-                : ['inbox'];          // For production, use the test folder.
+        $syncResult = $this->nylasService->syncMessages($folders, $grantId);
+        $allMessages = $syncResult['messages'];
 
-            $syncResult = $this->nylasService->syncMessages($folders, $companyEmail);
-            $allMessages = $syncResult['messages'];
+        foreach($allMessages as $message) {
+            // Display message structure without rendering HTML body
+            $messageDisplay = $message;
+            if (isset($messageDisplay['body'])) {
+                $messageDisplay['body'] = '[HTML CONTENT - ' . strlen($message['body']) . ' chars]';
+            }
+            // echo '<pre>' . json_encode($messageDisplay, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . '</pre>';
+            // dd();
+            $messageId = $message['id'];
+            $fromEmail = $message['from'][0]['email'];
+            $subject = $message['subject'];
+            $dateEmail = Carbon::parse($message['date'])->setTimezone('America/Chicago')->format('Y-m-d');
 
-            foreach($allMessages as $message) {
-                // Display message structure without rendering HTML body
-                $messageDisplay = $message;
-                if (isset($messageDisplay['body'])) {
-                    $messageDisplay['body'] = '[HTML CONTENT - ' . strlen($message['body']) . ' chars]';
-                }
-                // echo '<pre>' . json_encode($messageDisplay, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . '</pre>';
-                // dd();
-                $messageId = $message['id'];
-                $fromEmail = $message['from'][0]['email'];
-                $subject = $message['subject'];
-                $dateEmail = Carbon::parse($message['date'])->setTimezone('America/Chicago')->format('Y-m-d');
+            // Check if the 'from' email and 'subject' match any receipt
+            //receipt_type 0 = API
+            $receipt = $receipts->where('receipt_type', '!=', 0)->first(function ($receipt) use ($fromEmail, $subject) {
+                return strcasecmp($receipt->from_address, $fromEmail) === 0
+                    && stripos($subject, $receipt->from_subject) !== false;
+            });
 
-                // Check if the 'from' email and 'subject' match any receipt
+            //If null, check if email was forwarded
+            if(is_null($receipt)){
+                $emailBody = strip_tags($message['body']);
+                $emailBody = html_entity_decode($emailBody); // Clean up encoded characters
+                preg_match('/From:\s.*?<(.*?)>/', $emailBody, $fromMatch);
+                preg_match('/Sent:\s*(.+?)\s*To:/', $emailBody, $dateMatch);
+                $fromEmail = trim($fromMatch[1] ?? '');
+                $date = trim($dateMatch[1] ?? '');
+                $dateEmail = Carbon::parse($date)->setTimezone('America/Chicago')->format('Y-m-d');
+
                 //receipt_type 0 = API
                 $receipt = $receipts->where('receipt_type', '!=', 0)->first(function ($receipt) use ($fromEmail, $subject) {
                     return strcasecmp($receipt->from_address, $fromEmail) === 0
                         && stripos($subject, $receipt->from_subject) !== false;
                 });
+            }
 
-                //If null, check if email was forwarded
-                if(is_null($receipt)){
-                    $emailBody = strip_tags($message['body']);
-                    $emailBody = html_entity_decode($emailBody); // Clean up encoded characters
-                    preg_match('/From:\s.*?<(.*?)>/', $emailBody, $fromMatch);
-                    preg_match('/Sent:\s*(.+?)\s*To:/', $emailBody, $dateMatch);
-                    $fromEmail = trim($fromMatch[1] ?? '');
-                    $date = trim($dateMatch[1] ?? '');
-                    $dateEmail = Carbon::parse($date)->setTimezone('America/Chicago')->format('Y-m-d');
+            // dd($receipt);
+            if ($receipt) {
+                $toEmail = $message['to'][0]['email'];
+                $string = $message['body'];
 
-                    //receipt_type 0 = API
-                    $receipt = $receipts->where('receipt_type', '!=', 0)->first(function ($receipt) use ($fromEmail, $subject) {
-                        return strcasecmp($receipt->from_address, $fromEmail) === 0
-                            && stripos($subject, $receipt->from_subject) !== false;
-                    });
+                // Check if the body contains HTML
+                $bodyType = strip_tags($string) !== $string ? 'html' : 'text';
+
+                // Handle images
+                $image_email_url = null;
+                if (isset($receipt->options['receipt_image_regex'])) {
+                    // Fix JSON-loaded regex by evaluating it properly
+                    $pattern = stripslashes($receipt->options['receipt_image_regex']);
+                    preg_match($pattern, $string, $matches);
+                    $image_email_url = isset($matches[1]) ? html_entity_decode($matches[1]) : null;
+                } else {
+                    $string = preg_replace("/<img[^>]+\>/i", '', $string);
                 }
 
-                // dd($receipt);
-                if ($receipt) {
-                    $toEmail = $message['to'][0]['email'];
-                    $string = $message['body'];
+                // Determine receipt start
+                $receipt_start = 0;
+                $receipt_start_text = '';
+                if (!empty($receipt->options['receipt_start'])) {
+                    $starts = is_array($receipt->options['receipt_start'])
+                        ? $receipt->options['receipt_start']
+                        : [$receipt->options['receipt_start']];
 
-                    // Check if the body contains HTML
-                    $bodyType = strip_tags($string) !== $string ? 'html' : 'text';
-
-                    // Handle images
-                    $image_email_url = null;
-                    if (isset($receipt->options['receipt_image_regex'])) {
-                        // Fix JSON-loaded regex by evaluating it properly
-                        $pattern = stripslashes($receipt->options['receipt_image_regex']);
-                        preg_match($pattern, $string, $matches);
-                        $image_email_url = isset($matches[1]) ? html_entity_decode($matches[1]) : null;
-                    } else {
-                        $string = preg_replace("/<img[^>]+\>/i", '', $string);
-                    }
-
-                    // Determine receipt start
-                    $receipt_start = 0;
-                    $receipt_start_text = '';
-                    if (!empty($receipt->options['receipt_start'])) {
-                        $starts = is_array($receipt->options['receipt_start'])
-                            ? $receipt->options['receipt_start']
-                            : [$receipt->options['receipt_start']];
-
-                        foreach ($starts as $start_text) {
-                            $pos = strpos($string, $start_text);
-                            if (is_numeric($pos)) {
-                                // Include the "receipt_start" text or start after it, based on offset
-                                $receipt_start = $pos + (isset($receipt->options['receipt_start_offset'])
-                                    ? intval($receipt->options['receipt_start_offset']) + strlen($start_text)
-                                    : strlen($start_text));
-                                $receipt_start_text = $start_text; // Store the matched text for clarity
-                                break; // Exit the loop once a match is found
-                            }
+                    foreach ($starts as $start_text) {
+                        $pos = strpos($string, $start_text);
+                        if (is_numeric($pos)) {
+                            // Include the "receipt_start" text or start after it, based on offset
+                            $receipt_start = $pos + (isset($receipt->options['receipt_start_offset'])
+                                ? intval($receipt->options['receipt_start_offset']) + strlen($start_text)
+                                : strlen($start_text));
+                            $receipt_start_text = $start_text; // Store the matched text for clarity
+                            break; // Exit the loop once a match is found
                         }
                     }
+                }
 
-                    // Determine receipt end
-                    $receipt_end = strlen($string);
-                    if (!empty($receipt->options['receipt_end'])) {
-                        $ends = is_array($receipt->options['receipt_end']) ? $receipt->options['receipt_end'] : [$receipt->options['receipt_end']];
-                        foreach ($ends as $end_text) {
-                            if (is_numeric($pos = strpos($string, $end_text, $receipt_start))) {
-                                $receipt_end = $pos;
-                                // $receipt_end_text = $end_text; // Store the matched text for clarity
-                                break;
-                            }
+                // Determine receipt end
+                $receipt_end = strlen($string);
+                if (!empty($receipt->options['receipt_end'])) {
+                    $ends = is_array($receipt->options['receipt_end']) ? $receipt->options['receipt_end'] : [$receipt->options['receipt_end']];
+                    foreach ($ends as $end_text) {
+                        if (is_numeric($pos = strpos($string, $end_text, $receipt_start))) {
+                            $receipt_end = $pos;
+                            // $receipt_end_text = $end_text; // Store the matched text for clarity
+                            break;
                         }
                     }
+                }
 
-                    // Extract main receipt content
-                    $receipt_html_main = substr($string, $receipt_start, $receipt_end - $receipt_start);
+                // Extract main receipt content
+                $receipt_html_main = substr($string, $receipt_start, $receipt_end - $receipt_start);
 
-                    // Remove middle text if specified
-                    if (!empty($receipt->options['receipt_middle_text'])) {
-                        preg_match($receipt->options['receipt_middle_text'], $string, $matches);
-                        if (!empty($matches[1])) {
-                            $receipt_html_main = str_replace($matches[1], '', $receipt_html_main);
-                        }
+                // Remove middle text if specified
+                if (!empty($receipt->options['receipt_middle_text'])) {
+                    preg_match($receipt->options['receipt_middle_text'], $string, $matches);
+                    if (!empty($matches[1])) {
+                        $receipt_html_main = str_replace($matches[1], '', $receipt_html_main);
                     }
+                }
 
-                    //PREVIEWS HTML RECEIPT
-                    // print_r($receipt_html_main);
-                    // dd();
+                //PREVIEWS HTML RECEIPT
+                // print_r($receipt_html_main);
+                // dd();
 
-                    // Set defaults at the top
-                    $doc_type = 'pdf'; // Default to PDF for most cases
-                    $ocr_filename = date('Y-m-d-H-i-s') . '-' . rand(10, 99);
+                // Set defaults at the top
+                $doc_type = 'pdf'; // Default to PDF for most cases
+                $ocr_filename = date('Y-m-d-H-i-s') . '-' . rand(10, 99);
 
-                    if (!isset($receipt->options['receipt_image_regex']) && !isset($receipt->options['pdf_html'])) {
-                        // HTML to PDF conversion
-                        $ocr_filename .= '.' . $doc_type;
-                        $view = view('misc.create_pdf_receipt', [
-                            'receipt_html_main' => $receipt_html_main,
-                            'message_type' => $bodyType
-                        ])->render();
+                if (!isset($receipt->options['receipt_image_regex']) && !isset($receipt->options['pdf_html'])) {
+                    // HTML to PDF conversion
+                    $ocr_filename .= '.' . $doc_type;
+                    $view = view('misc.create_pdf_receipt', [
+                        'receipt_html_main' => $receipt_html_main,
+                        'message_type' => $bodyType
+                    ])->render();
+
+                    $ocr_path = '_temp_ocr/' . $ocr_filename;
+                    $location = Storage::disk('files')->path($ocr_path);
+
+                    Browsershot::html($view)
+                        ->newHeadless()
+                        ->addChromiumArguments([
+                            '--no-sandbox',
+                            '--disable-setuid-sandbox',
+                            '--disable-dev-shm-usage',
+                            '--disable-gpu',
+                            '--single-process',
+                        ])
+                        ->format('A4')
+                        ->margins(20, 0, 20, 20)
+                        ->save($location);
+                } elseif (isset($receipt->options['pdf_html'])) {
+                    // PDF attachment download
+                    $doc_type = 'pdf';
+                    $ocr_filename .= '.' . $doc_type;
+
+                    if (!empty($message['attachments'])) {
+                        $attachment = $message['attachments'][0];
+                        $attachmentContent = $this->nylasService->downloadAttachment($attachment['id'], $grantId, $messageId);
+
+                        // $attachment = collect($attachments)->first(function ($attachment_found, $loop) use ($receipt) {
+                        //     if (isset($receipt->options['attachment_name'])) {
+                        //         preg_match('/' . $receipt->options['attachment_name'] . '/', $attachment_found->getName(), $matches);
+                        //         return !empty($matches) || array_key_last($attachments) === $loop;
+                        //     }
+                        //     return true;
+                        // });
 
                         $ocr_path = '_temp_ocr/' . $ocr_filename;
-                        $location = Storage::disk('files')->path($ocr_path);
-
-                        Browsershot::html($view)
-                            ->newHeadless()
-                            ->addChromiumArguments([
-                                '--no-sandbox',
-                                '--disable-setuid-sandbox',
-                                '--disable-dev-shm-usage',
-                                '--disable-gpu',
-                                '--single-process',
-                            ])
-                            ->format('A4')
-                            ->margins(20, 0, 20, 20)
-                            ->save($location);
-                    } elseif (isset($receipt->options['pdf_html'])) {
-                        // PDF attachment download
-                        $doc_type = 'pdf';
-                        $ocr_filename .= '.' . $doc_type;
-
-                        if (!empty($message['attachments'])) {
-                            $attachment = $message['attachments'][0];
-                            $attachmentContent = $this->nylasService->downloadAttachment($attachment['id'], $grantId, $messageId);
-
-                            // $attachment = collect($attachments)->first(function ($attachment_found, $loop) use ($receipt) {
-                            //     if (isset($receipt->options['attachment_name'])) {
-                            //         preg_match('/' . $receipt->options['attachment_name'] . '/', $attachment_found->getName(), $matches);
-                            //         return !empty($matches) || array_key_last($attachments) === $loop;
-                            //     }
-                            //     return true;
-                            // });
-
-                            $ocr_path = '_temp_ocr/' . $ocr_filename;
-                            Storage::disk('files')->put($ocr_path, $attachmentContent);
-                        } else {
-                            // No attachments found
-                            $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Error'], $grantId, $companyEmail->id);
-                            continue;
-                        }
+                        Storage::disk('files')->put($ocr_path, $attachmentContent);
                     } else {
-                        // Image processing - override the default $doc_type
-                        $doc_type = 'jpg';
-                        $ocr_filename .= '.' . $doc_type;
-                        $ocr_path = '_temp_ocr/' . $ocr_filename;
-                        $location = Storage::disk('files')->path($ocr_path);
-                        
-                        // Validate image URL before processing
-                        if (empty($image_email_url)) {
-                            // Log error and skip image processing
-                            Log::error("Empty image URL for receipt", [
-                                'receipt_id' => $receipt->id,
-                                'message_id' => $messageId ?? null
-                            ]);
-                            // Move to error folder or handle appropriately
-                            $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Error'], $grantId, $companyEmail->id);
-                            continue;
-                        }
-                        
-                        try {
-                            Image::make($image_email_url)->save($location);
-                        } catch (\Exception $e) {
-                            Log::error('Failed to process image', ApiErrorFormatter::format($e, [
-                                'image_url' => $image_email_url,
-                                'receipt_id' => $receipt->id,
-                            ]));
-                            // Move to error folder or handle appropriately
-                            $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Error'], $grantId, $companyEmail->id);
-                            continue;
-                        }
-                    }
-
-                    $document_model = $receipt->options['document_model'];
-
-                    //ocr the file
-                    $ocr_receipt_extracted = app(\App\Http\Controllers\ReceiptController::class)->azure_receipts($ocr_path, $doc_type, $document_model);
-
-                    //pass receipt info to ocr_extract method
-                    $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->ocr_extract($ocr_receipt_extracted, null, 'email');
-
-                    $receipt_account = ReceiptAccount::withoutGlobalScopes()
-                        ->where('belongs_to_vendor_id', $companyEmail->vendor_id)
-                        ->where('vendor_id', $receipt->vendor_id)
-                        ->first();
-
-                    // Missing receipt_account.. receipt and company email exist but this pairing does not
-                    if (is_null($receipt_account)) {
-                        // Clean up temp OCR file if it exists
-                        if (!empty($ocr_filename)) {
-                            $sourcePath = '_temp_ocr/' . $ocr_filename;
-                            Storage::disk('files')->delete($sourcePath);
-                        }
-
-                        // Move this email to the "Add" folder and skip to next message
-                        $this->nylasService->moveEmailToFolder(
-                            $messageId,
-                            $companyEmail->api_json['folders']['Add'],
-                            $grantId,
-                            $companyEmail->id
-                        );
+                        // No attachments found
+                        $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Error'], $grantId, $companyEmail->id);
                         continue;
                     }
+                } else {
+                    // Image processing - override the default $doc_type
+                    $doc_type = 'jpg';
+                    $ocr_filename .= '.' . $doc_type;
+                    $ocr_path = '_temp_ocr/' . $ocr_filename;
+                    $location = Storage::disk('files')->path($ocr_path);
+                    
+                    // Validate image URL before processing
+                    if (empty($image_email_url)) {
+                        // Log error and skip image processing
+                        Log::error("Empty image URL for receipt", [
+                            'receipt_id' => $receipt->id,
+                            'message_id' => $messageId ?? null
+                        ]);
+                        // Move to error folder or handle appropriately
+                        $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Error'], $grantId, $companyEmail->id);
+                        continue;
+                    }
+                    
+                    try {
+                        Image::make($image_email_url)->save($location);
+                    } catch (\Exception $e) {
+                        Log::error('Failed to process image', ApiErrorFormatter::format($e, [
+                            'image_url' => $image_email_url,
+                            'receipt_id' => $receipt->id,
+                        ]));
+                        // Move to error folder or handle appropriately
+                        $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Error'], $grantId, $companyEmail->id);
+                        continue;
+                    }
+                }
 
-                    //01-26-2023 pass rest of receipt info to ocr_extract method
-                    if (!is_null($ocr_receipt_data['fields']['transaction_date'])) {
-                        $date = $ocr_receipt_data['fields']['transaction_date'];
-                    } else {
-                        $date = $dateEmail;
+                $document_model = $receipt->options['document_model'];
+
+                //ocr the file
+                $ocr_receipt_extracted = app(\App\Http\Controllers\ReceiptController::class)->azure_receipts($ocr_path, $doc_type, $document_model);
+
+                //pass receipt info to ocr_extract method
+                $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->ocr_extract($ocr_receipt_extracted, null, 'email');
+
+                $receipt_account = ReceiptAccount::withoutGlobalScopes()
+                    ->where('belongs_to_vendor_id', $companyEmail->vendor_id)
+                    ->where('vendor_id', $receipt->vendor_id)
+                    ->first();
+
+                // Missing receipt_account.. receipt and company email exist but this pairing does not
+                if (is_null($receipt_account)) {
+                    // Clean up temp OCR file if it exists
+                    if (!empty($ocr_filename)) {
+                        $sourcePath = '_temp_ocr/' . $ocr_filename;
+                        Storage::disk('files')->delete($sourcePath);
                     }
 
-                    //8-18-23 we can remove this?!
-                    if (isset($receipt->options['refund'])) {
-                        $amount = '-'.$ocr_receipt_data['fields']['total'];
-                    } else {
-                        $amount = $ocr_receipt_data['fields']['total'];
-                    }
+                    // Move this email to the "Add" folder and skip to next message
+                    $this->nylasService->moveEmailToFolder(
+                        $messageId,
+                        $companyEmail->api_json['folders']['Add'],
+                        $grantId,
+                        $companyEmail->id
+                    );
+                    continue;
+                }
 
-                    // receipt number / invoice
-                    if (isset($receipt->options['invoice_regex'])) {
-                        $re = $receipt->options['invoice_regex'];
-                        $str = $ocr_receipt_data['content'];
-                        preg_match_all($re, $str, $matches, PREG_SET_ORDER, 0);
+                //01-26-2023 pass rest of receipt info to ocr_extract method
+                if (!is_null($ocr_receipt_data['fields']['transaction_date'])) {
+                    $date = $ocr_receipt_data['fields']['transaction_date'];
+                } else {
+                    $date = $dateEmail;
+                }
 
-                        if (empty($matches)) {
-                            $invoice = null;
-                        } else {
-                            // $receipt_number = str_replace(' ', '', $matches[count($matches) - 1][0]);
-                            $invoice = trim($matches[count($matches) - 1][0]);
-                            $ocr_receipt_data['fields']['invoice_number'] = $invoice;
-                        }
-                    } elseif (isset($ocr_receipt_data['fields']['invoice_number'])) {
-                        $invoice = $ocr_receipt_data['fields']['invoice_number'];
-                    } else {
+                //8-18-23 we can remove this?!
+                if (isset($receipt->options['refund'])) {
+                    $amount = '-'.$ocr_receipt_data['fields']['total'];
+                } else {
+                    $amount = $ocr_receipt_data['fields']['total'];
+                }
+
+                // receipt number / invoice
+                if (isset($receipt->options['invoice_regex'])) {
+                    $re = $receipt->options['invoice_regex'];
+                    $str = $ocr_receipt_data['content'];
+                    preg_match_all($re, $str, $matches, PREG_SET_ORDER, 0);
+
+                    if (empty($matches)) {
                         $invoice = null;
-                    }
-
-                    // receipt po / purchase order
-                    if (isset($receipt->options['po_regex'])) {
-                        $re = $receipt->options['po_regex'];
-                        $str = $ocr_receipt_data['content'];
-                        preg_match($re, $str, $matches);
-
-                        if (empty($matches)) {
-                            $purchase_order = null;
-                        } else {
-                            $purchase_order = trim($matches[1]);
-                        }
-                    } elseif (isset($ocr_receipt_data['fields']['purchase_order'])) {
-                        $purchase_order = $ocr_receipt_data['fields']['purchase_order'];
                     } else {
+                        // $receipt_number = str_replace(' ', '', $matches[count($matches) - 1][0]);
+                        $invoice = trim($matches[count($matches) - 1][0]);
+                        $ocr_receipt_data['fields']['invoice_number'] = $invoice;
+                    }
+                } elseif (isset($ocr_receipt_data['fields']['invoice_number'])) {
+                    $invoice = $ocr_receipt_data['fields']['invoice_number'];
+                } else {
+                    $invoice = null;
+                }
+
+                // receipt po / purchase order
+                if (isset($receipt->options['po_regex'])) {
+                    $re = $receipt->options['po_regex'];
+                    $str = $ocr_receipt_data['content'];
+                    preg_match($re, $str, $matches);
+
+                    if (empty($matches)) {
                         $purchase_order = null;
-                    }
-
-                    $ocr_receipt_data['fields']['purchase_order'] = $purchase_order;
-
-                    //FIND duplicates
-                    //confirm expense does not yet exist
-                    //1-18-2023 | 9/30/2023 NEED TO ACCOUNT FOR SAME VENDOR, AMOUNT, AND DATE being saved multiple of times
-                    //maybe by adding date_TIME to 'date'? or checking time in the expense_receipt_data json?
-
-                    // Prefer matching by invoice number when available to avoid
-                    // false positives on same-day/same-amount receipts.
-                    $invoice = isset($invoice) ? trim((string) $invoice) : '';
-                    if ($invoice !== '') {
-                        $duplicates = Expense::where('belongs_to_vendor_id', $receipt_account->belongs_to_vendor_id)
-                            ->where('vendor_id', $receipt->vendor_id)
-                            ->where('invoice', $invoice)
-                            ->get();
                     } else {
-                        // Candidate pool by amount + date (eager-load receipts to avoid N+1)
-                        $candidates = Expense::with('receipts')
-                            ->where('belongs_to_vendor_id', $receipt_account->belongs_to_vendor_id)
-                            ->where('vendor_id', $receipt->vendor_id)
-                            ->whereNull('deleted_at')
-                            ->where('amount', $amount)
-                            ->where('date', $date)
-                            ->get();
+                        $purchase_order = trim($matches[1]);
+                    }
+                } elseif (isset($ocr_receipt_data['fields']['purchase_order'])) {
+                    $purchase_order = $ocr_receipt_data['fields']['purchase_order'];
+                } else {
+                    $purchase_order = null;
+                }
 
-                        $duplicates = collect();
-                        if ($candidates->isNotEmpty()) {
-                            // Build current receipt signals
-                            $currentItemsSig = $this->buildItemsSignature($ocr_receipt_data['fields'] ?? []);
-                            $currentTime = $this->extractReceiptTime($ocr_receipt_data['content'] ?? '', $date);
+                $ocr_receipt_data['fields']['purchase_order'] = $purchase_order;
 
-                            foreach ($candidates as $candidate) {
-                                // Prefer skipping if candidate has a different known invoice
-                                if (!empty($candidate->invoice)) {
-                                    // If candidate has invoice but current doesn't, don't auto-mark duplicate
-                                    // unless items overlap or time is near-identical.
+                //FIND duplicates
+                //confirm expense does not yet exist
+                //1-18-2023 | 9/30/2023 NEED TO ACCOUNT FOR SAME VENDOR, AMOUNT, AND DATE being saved multiple of times
+                //maybe by adding date_TIME to 'date'? or checking time in the expense_receipt_data json?
+
+                // Prefer matching by invoice number when available to avoid
+                // false positives on same-day/same-amount receipts.
+                $invoice = isset($invoice) ? trim((string) $invoice) : '';
+                if ($invoice !== '') {
+                    $duplicates = Expense::where('belongs_to_vendor_id', $receipt_account->belongs_to_vendor_id)
+                        ->where('vendor_id', $receipt->vendor_id)
+                        ->where('invoice', $invoice)
+                        ->get();
+                } else {
+                    // Candidate pool by amount + date (eager-load receipts to avoid N+1)
+                    $candidates = Expense::with('receipts')
+                        ->where('belongs_to_vendor_id', $receipt_account->belongs_to_vendor_id)
+                        ->where('vendor_id', $receipt->vendor_id)
+                        ->whereNull('deleted_at')
+                        ->where('amount', $amount)
+                        ->where('date', $date)
+                        ->get();
+
+                    $duplicates = collect();
+                    if ($candidates->isNotEmpty()) {
+                        // Build current receipt signals
+                        $currentItemsSig = $this->buildItemsSignature($ocr_receipt_data['fields'] ?? []);
+                        $currentTime = $this->extractReceiptTime($ocr_receipt_data['content'] ?? '', $date);
+
+                        foreach ($candidates as $candidate) {
+                            // Prefer skipping if candidate has a different known invoice
+                            if (!empty($candidate->invoice)) {
+                                // If candidate has invoice but current doesn't, don't auto-mark duplicate
+                                // unless items overlap or time is near-identical.
+                            }
+
+                            $receiptRecord = $candidate->receipts()->latest('id')->first();
+                            if (!$receiptRecord) {
+                                continue;
+                            }
+
+                            // receipt_items is cast to object on ExpenseReceipts; convert to array
+                            $storedFields = json_decode(json_encode($receiptRecord->receipt_items), true) ?? [];
+                            $storedItemsSig = $this->buildItemsSignature($storedFields ?? []);
+                            $itemsOverlap = $this->itemsOverlap($currentItemsSig, $storedItemsSig);
+
+                            // If product codes/descriptions don't overlap, assume not duplicate.
+                            if (!$itemsOverlap) {
+                                continue;
+                            }
+
+                            // Time equality gating: if both have time, they must be identical to be duplicate.
+                            $candidateDate = $candidate->date instanceof \Carbon\Carbon
+                                ? $candidate->date->toDateString()
+                                : (is_string($candidate->date) ? $candidate->date : null);
+
+                            $storedTime = $this->extractReceiptTime($receiptRecord->receipt_html ?? '', $candidateDate);
+
+                            $timeEqual = false;
+                            if ($currentTime && $storedTime) {
+                                // times must match exactly to the minute
+                                $timeEqual = $currentTime->equalTo($storedTime) || $currentTime->format('H:i') === $storedTime->format('H:i');
+                                if (! $timeEqual) {
+                                    // Different times -> not a duplicate
+                                    continue;
                                 }
+                            }
 
+                            // If items overlap OR time is identical, consider it a duplicate.
+                            if ($itemsOverlap || $timeEqual) {
+                                $duplicates->push($candidate);
+                            }
+                        }
+                    }
+                }
+
+                if ($duplicates->isNotEmpty()) {
+                    // Choose the best matching duplicate.
+                    if ($invoice !== '') {
+                        // With invoice, prefer the closest date to the OCR date.
+                        $duplicate_expense = $duplicates->sortBy(function ($d) use ($date) {
+                            return abs(Carbon::parse($d->date)->diffInDays(Carbon::parse($date)));
+                        })->first();
+                    } else {
+                        // Without invoice: if we captured time for current receipt, prefer identical-time matches.
+                        $chosen = $duplicates;
+                        if (isset($currentTime) && $currentTime instanceof \Carbon\Carbon) {
+                            $withTimeEqual = $duplicates->filter(function ($candidate) use ($currentTime) {
                                 $receiptRecord = $candidate->receipts()->latest('id')->first();
                                 if (!$receiptRecord) {
-                                    continue;
+                                    return false;
                                 }
 
-                                // receipt_items is cast to object on ExpenseReceipts; convert to array
-                                $storedFields = json_decode(json_encode($receiptRecord->receipt_items), true) ?? [];
-                                $storedItemsSig = $this->buildItemsSignature($storedFields ?? []);
-                                $itemsOverlap = $this->itemsOverlap($currentItemsSig, $storedItemsSig);
-
-                                // If product codes/descriptions don't overlap, assume not duplicate.
-                                if (!$itemsOverlap) {
-                                    continue;
-                                }
-
-                                // Time equality gating: if both have time, they must be identical to be duplicate.
                                 $candidateDate = $candidate->date instanceof \Carbon\Carbon
                                     ? $candidate->date->toDateString()
                                     : (is_string($candidate->date) ? $candidate->date : null);
 
                                 $storedTime = $this->extractReceiptTime($receiptRecord->receipt_html ?? '', $candidateDate);
-
-                                $timeEqual = false;
-                                if ($currentTime && $storedTime) {
-                                    // times must match exactly to the minute
-                                    $timeEqual = $currentTime->equalTo($storedTime) || $currentTime->format('H:i') === $storedTime->format('H:i');
-                                    if (! $timeEqual) {
-                                        // Different times -> not a duplicate
-                                        continue;
-                                    }
+                                if (!$storedTime) {
+                                    return false;
                                 }
 
-                                // If items overlap OR time is identical, consider it a duplicate.
-                                if ($itemsOverlap || $timeEqual) {
-                                    $duplicates->push($candidate);
-                                }
+                                return $currentTime->format('H:i') === $storedTime->format('H:i');
+                            });
+
+                            if ($withTimeEqual->isNotEmpty()) {
+                                $chosen = $withTimeEqual;
                             }
                         }
+
+                        // Then pick the one with the closest date as a final tie-breaker.
+                        $duplicate_expense = $chosen->sortBy(function ($d) use ($date) {
+                            return abs(Carbon::parse($d->date)->diffInDays(Carbon::parse($date)));
+                        })->first();
                     }
 
-                    if ($duplicates->isNotEmpty()) {
-                        // Choose the best matching duplicate.
-                        if ($invoice !== '') {
-                            // With invoice, prefer the closest date to the OCR date.
-                            $duplicate_expense = $duplicates->sortBy(function ($d) use ($date) {
-                                return abs(Carbon::parse($d->date)->diffInDays(Carbon::parse($date)));
-                            })->first();
-                        } else {
-                            // Without invoice: if we captured time for current receipt, prefer identical-time matches.
-                            $chosen = $duplicates;
-                            if (isset($currentTime) && $currentTime instanceof \Carbon\Carbon) {
-                                $withTimeEqual = $duplicates->filter(function ($candidate) use ($currentTime) {
-                                    $receiptRecord = $candidate->receipts()->latest('id')->first();
-                                    if (!$receiptRecord) {
-                                        return false;
-                                    }
+                    //ATTACHMENTS
+                    $this->saveExpenseReceipt($duplicate_expense->id, $ocr_receipt_data, $ocr_filename, $message);
 
-                                    $candidateDate = $candidate->date instanceof \Carbon\Carbon
-                                        ? $candidate->date->toDateString()
-                                        : (is_string($candidate->date) ? $candidate->date : null);
+                    //add po and add invoice from ocr
+                    // $duplicate_expense->invoice = $invoice;
+                    // $duplicate_expense->date = $date;
+                    // $duplicate_expense->save();
 
-                                    $storedTime = $this->extractReceiptTime($receiptRecord->receipt_html ?? '', $candidateDate);
-                                    if (!$storedTime) {
-                                        return false;
-                                    }
+                    //move email receipt to Duplicate folder
+                    $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Duplicate'], $grantId, $companyEmail->id);
+                }else{
+                    //SAVE expense
+                    $expense = new Expense;
+                    $expense->amount = $amount;
+                    $expense->reimbursment = null;
+                    $expense->project_id = $receipt_account->project_id;
+                    $expense->distribution_id = $receipt_account->distribution_id;
+                    $expense->created_by_user_id = 0; //automated
+                    $expense->date = $date;
+                    $expense->invoice = $invoice;
+                    $expense->vendor_id = $receipt->vendor_id; //Vendor_id of vendor being Queued
+                    $expense->note = null;
+                    $expense->belongs_to_vendor_id = $receipt_account->belongs_to_vendor_id;
+                    $expense->save();
 
-                                    return $currentTime->format('H:i') === $storedTime->format('H:i');
-                                });
+                    //ATTACHMENTS
+                    $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, $message);
 
-                                if ($withTimeEqual->isNotEmpty()) {
-                                    $chosen = $withTimeEqual;
-                                }
-                            }
-
-                            // Then pick the one with the closest date as a final tie-breaker.
-                            $duplicate_expense = $chosen->sortBy(function ($d) use ($date) {
-                                return abs(Carbon::parse($d->date)->diffInDays(Carbon::parse($date)));
-                            })->first();
-                        }
-
-                        //ATTACHMENTS
-                        $this->saveExpenseReceipt($duplicate_expense->id, $ocr_receipt_data, $ocr_filename, $message);
-
-                        //add po and add invoice from ocr
-                        // $duplicate_expense->invoice = $invoice;
-                        // $duplicate_expense->date = $date;
-                        // $duplicate_expense->save();
-
-                        //move email receipt to Duplicate folder
-                        $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Duplicate'], $grantId, $companyEmail->id);
-                    }else{
-                        //SAVE expense
-                        $expense = new Expense;
-                        $expense->amount = $amount;
-                        $expense->reimbursment = null;
-                        $expense->project_id = $receipt_account->project_id;
-                        $expense->distribution_id = $receipt_account->distribution_id;
-                        $expense->created_by_user_id = 0; //automated
-                        $expense->date = $date;
-                        $expense->invoice = $invoice;
-                        $expense->vendor_id = $receipt->vendor_id; //Vendor_id of vendor being Queued
-                        $expense->note = null;
-                        $expense->belongs_to_vendor_id = $receipt_account->belongs_to_vendor_id;
-                        $expense->save();
-
-                        //ATTACHMENTS
-                        $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, $message);
-
-                        $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Saved'], $grantId, $companyEmail->id);
-                    }
+                    $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Saved'], $grantId, $companyEmail->id);
                 }
             }
         }
+        
     }
 
     public function fetchAutoReceipts()
     {
+        //get folders for a grant_id
+
         // Fetch company emails with the specified conditions.
         $company_emails = CompanyEmail::withoutGlobalScopes()
             ->whereNotNull('grant_id')
@@ -1326,6 +1322,9 @@ class CompanyEmailController extends Controller
      */
     public function forwardRecentReceiptEmailsToCentral()
     {
+        $foldersResult = $this->nylasService->getFolders('957bf081-f050-459f-a4cd-7d4423113a22');
+        dd($foldersResult);
+
         $companyEmails = CompanyEmail::withoutGlobalScopes()
             ->with(['receipts' => function($query) {
                 // Only load receipts we'll actually use

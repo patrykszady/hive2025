@@ -223,8 +223,8 @@ class EstimateShow extends Component
             ->scale(0.8)
             ->showBrowserHeaderAndFooter()
             ->showBackground()
-            // ->headerHtml('Header')
-            // ->footerHtml('<span class="pageNumber"></span>')
+            ->headerHtml('<div style="font-size: 10px; width: 100%; padding: 0; margin: 0 5mm 0 10mm; display: flex; justify-content: space-between;"><span>' . $title . '</span><span>' . now()->format('m/d/Y g:i A') . '</span></div>')
+            ->footerHtml('<div style="font-size: 10px; text-align: right; width: 100%; padding: 0; margin: 0 5mm 0 10mm;"><span class="pageNumber"></span> / <span class="totalPages"></span></div>')
             //->margins($top, $right, $bottom, $left)
             ->margins(10, 5, 10, 5)
             ->pdf();
