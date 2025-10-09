@@ -20,6 +20,17 @@ class Receipt extends Model
         ];
     }
 
+    /**
+     * Normalize receipt_type: treat 0, empty string, and other "empty" values as NULL
+     */
+    protected function receiptType(): Attribute
+    {
+        return Attribute::make(
+            get: fn ($value) => in_array($value, [0, '0', '', null], true) ? null : $value,
+            // set: fn ($value) => in_array($value, [0, '0', '', null], true) ? null : $value,
+        );
+    }
+
     public function vendor(): BelongsTo
     {
         return $this->belongsTo(Vendor::class);

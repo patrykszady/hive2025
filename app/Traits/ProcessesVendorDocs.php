@@ -9,12 +9,10 @@ use App\Services\GooglePlacesService;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
-use App\Support\ApiErrorFormatter;
 
 trait ProcessesVendorDocs
 {
     protected $googlePlacesService;
-    protected bool $updatedExistingDoc = false;
 
     protected function getGooglePlacesService()
     {
@@ -33,10 +31,8 @@ trait ProcessesVendorDocs
         $messageId = null,
         $grantId = null
     ) {
-    // Normalize the file path
+        // Normalize the file path
         $normalizedFilePath = ltrim($filePath, 'files/');
-    // Reset per-run flag
-    $this->updatedExistingDoc = false;
 
         try {
             // 1. Extract OCR data
@@ -98,26 +94,20 @@ trait ProcessesVendorDocs
 
             // 10. Cleanup
             if ($newPolicyCreated) {
-                // New record(s) created: keep permanent file, delete temp
                 Storage::disk('files')->delete($normalizedFilePath);
-                return true; // created
+                return true;
+            } else {
+                // No policies created (duplicate) - cleanup permanent file but keep temp file for debugging
+                Storage::disk('files')->delete($newFilePath);
+                return false;
             }
-
-            if ($this->updatedExistingDoc) {
-                // Existing records updated to reference the new file: keep permanent and delete temp
-                Storage::disk('files')->delete($normalizedFilePath);
-                return 'updated';
-            }
-
-            // Pure duplicate: remove the new permanent file, keep temp for debugging trace if needed
-            Storage::disk('files')->delete($newFilePath);
-            return 'duplicate';
 
         } catch (\Exception $e) {
-            Log::channel('vendor_docs')->error('Exception during document processing', ApiErrorFormatter::format($e, [
+            Log::channel('vendor_docs')->error('Exception during document processing', [
                 'file' => $normalizedFilePath,
-                'trace' => $e->getTraceAsString(),
-            ]));
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
 
             // Keep temp file for debugging, only cleanup permanent file if it exists
             if (isset($newFilePath)) {
@@ -231,13 +221,6 @@ trait ProcessesVendorDocs
                     'doc_filename' => $fileName,
                 ]
             );
-
-            // If it already existed, ensure it points to the latest uploaded file
-            if (! $vendorDoc->wasRecentlyCreated && $vendorDoc->doc_filename !== $fileName) {
-                $vendorDoc->doc_filename = $fileName;
-                $vendorDoc->save();
-                $this->updatedExistingDoc = true;
-            }
 
             // Associate agent if available
             if ($vendorDoc->wasRecentlyCreated && $agent) {

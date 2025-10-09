@@ -124,7 +124,7 @@ class NylasService
     /**
      * Move or delete a message
      */
-    public function moveOrDeleteMessage(string $messageId, string $grantId, int $companyEmailId, ?string $folderId = null): bool
+    public function moveOrDeleteMessage(string $messageId, string $grantId, ?int $companyEmailId = null, ?string $folderId = null): bool
     {
         if ($folderId) {
             // Move to folder
@@ -140,7 +140,6 @@ class NylasService
 
         if (!$response['success']) {
             Log::channel('nylas')->error("Email {$action} failed", [
-                'company_email_id' => $companyEmailId,
                 'message_id' => $messageId,
                 'folder_id' => $folderId,
                 'grant_id' => $grantId,
@@ -156,7 +155,7 @@ class NylasService
     /**
      * Legacy method for backward compatibility
      */
-    public function moveEmailToFolder($messageId, $folderId, $grantId, int $companyEmailId): bool
+    public function moveEmailToFolder($messageId, $folderId, $grantId, ?int $companyEmailId = null): bool
     {
         return $this->moveOrDeleteMessage($messageId, $grantId, $companyEmailId, $folderId);
     }
@@ -229,6 +228,119 @@ class NylasService
     }
 
     /**
+     * Unified folder fetcher supporting both incremental (bounded) and full fetch.
+     * Options:
+     *  - full_fetch: bool (if true, ignores limit & received_after; fetches all pages)
+     *  - limit: int|null (default config('nylas.message_limit') when not full_fetch)
+     *  - received_after: int|Carbon|null (timestamp or Carbon instance for incremental sync)
+     *  - include_headers: bool (default false)
+     *  - raw_params: array (extra query params to merge last; unsafe / advanced usage)
+     *  - company_email: CompanyEmail|null (for logging context; when provided and NOT full_fetch)
+     */
+    public function fetchFolderMessages(string $grantId, string $folder, array $options = []): array
+    {
+        $fullFetch      = (bool)($options['full_fetch'] ?? false);
+        $limit          = $options['limit'] ?? null;
+        $receivedAfter  = $options['received_after'] ?? null;
+        $includeHeaders = (bool)($options['include_headers'] ?? false);
+        /** @var CompanyEmail|null $companyEmail */
+        $companyEmail   = $options['company_email'] ?? null;
+        $rawParams      = $options['raw_params'] ?? [];
+
+        // Normalize received_after to timestamp when provided & not full fetch
+        if (!$fullFetch && $receivedAfter instanceof Carbon) {
+            $receivedAfter = $receivedAfter->timestamp;
+        }
+
+        // Derive default limit & received_after for incremental mode
+        if (!$fullFetch) {
+            if ($limit === null) {
+                $limit = config('nylas.message_limit');
+            }
+            if ($receivedAfter === null) {
+                $receivedAfter = Carbon::now()->subDays(config('nylas.message_limit_days'))->timestamp;
+            }
+        }
+
+        // Base query params
+        $params = ['in' => $folder];
+        if (!$fullFetch) {
+            if ($limit) { $params['limit'] = $limit; }
+            if ($receivedAfter) { $params['received_after'] = $receivedAfter; }
+        }
+        // Merge raw_params last to allow explicit overrides (use cautiously)
+        if (!empty($rawParams) && is_array($rawParams)) {
+            $params = array_merge($params, $rawParams);
+        }
+
+        $all = [];
+        $next = null;
+        $page = 1;
+        do {
+            $current = $params;
+            if ($next) {
+                $current['page_token'] = $next;
+            }
+            $resp = $this->getMessages($current, $grantId, $includeHeaders);
+            $data = $resp['data'] ?? [];
+
+            if (!is_array($data)) {
+                if ($companyEmail) {
+                    Log::channel('nylas')->warning('Unexpected response format while fetching folder', [
+                        'company_email_id' => $companyEmail->id,
+                        'grant_id' => $grantId,
+                        'folder' => $folder,
+                        'page' => $page,
+                    ]);
+                } else {
+                    Log::channel('nylas')->warning('Unexpected response format while fetching folder (stateless)', [
+                        'grant_id' => $grantId,
+                        'folder' => $folder,
+                        'page' => $page,
+                    ]);
+                }
+                break;
+            }
+
+            foreach ($data as $m) {
+                if (!isset($m['id'])) { continue; }
+                $all[$m['id']] = $m; // de-dupe if overlapping pages
+            }
+
+            $next = $resp['next_cursor'] ?? null;
+            $page++;
+
+            // Safety stop (only for full fetch) if a soft cap is configured
+            if ($fullFetch) {
+                $cap = (int) config('nylas.full_fetch_soft_cap', 0); // 0 means no cap
+                if ($cap > 0 && count($all) >= $cap) {
+                    Log::channel('nylas')->info('Full fetch soft cap reached', [
+                        'grant_id' => $grantId,
+                        'folder' => $folder,
+                        'cap' => $cap,
+                        'fetched' => count($all),
+                    ]);
+                    break;
+                }
+            }
+        } while ($next);
+
+        return array_values($all);
+    }
+
+    /**
+     * Deprecated: use fetchFolderMessages($grantId, $folder, ['full_fetch'=>true]) instead.
+     */
+    public function getAllMessagesForFolder(string $grantId, string $folder, array $queryParams = []): array
+    {
+        $rawParams = $queryParams; // keep legacy behavior of passing arbitrary params
+        return $this->fetchFolderMessages($grantId, $folder, [
+            'full_fetch' => true,
+            'raw_params' => $rawParams,
+        ]);
+    }
+
+    /**
      * Fetch a single message with full details.
      */
     public function getMessage(string $grantId, string $messageId, bool $withHeaders = false): array
@@ -263,55 +375,16 @@ class NylasService
      */
     public function getMessagesForFolder(array $queryParams, string $grantId, string $folderName, CompanyEmail $companyEmail): array
     {
-        $params = $queryParams;
-        $params['limit'] = config('nylas.message_limit');
-
-        try {
-            // Pass false for $withHeaders while listing; include_headers seems rejected (400) on list queries.
-            $allMessages = [];
-            $nextCursor = null;
-            
-            do {
-                // Add cursor to params if we have one for pagination
-                $currentParams = $params;
-                if ($nextCursor) {
-                    $currentParams['page_token'] = $nextCursor;
-                }
-                
-                $resp = $this->getMessages($currentParams, $grantId, false);
-                
-                if (is_array($resp) && array_key_exists('data', $resp)) {
-                    $messages = $resp['data'];
-                    $allMessages = array_merge($allMessages, $messages);
-                    
-                    // Check if there's a next page
-                    $nextCursor = $resp['next_cursor'] ?? null;
-                } else {
-                    Log::channel('nylas')->warning($companyEmail->id . ' Invalid response format', [
-                        'grant_id' => $grantId
-                    ]);
-                    break;
-                }
-                
-            } while ($nextCursor);
-            
-            return $allMessages;
-            
-        } catch (RequestException $e) {            
-            Log::channel('nylas')->error($companyEmail->id . ' API request failed', 
-                ApiErrorFormatter::format($e, [
-                    'grant_id' => $grantId,
-                    'folder' => $folderName,
-                ]));
-            return [];
-            
-        } catch (Exception $e) {
-            Log::channel('nylas')->error($companyEmail->id . ' request error', ApiErrorFormatter::format($e, [
-                'grant_id' => $grantId,
-                'folder' => $folderName,
-            ]));
-            return [];
-        }
+        // Map legacy $queryParams to new options.
+        $limit = $queryParams['limit'] ?? null;
+        $receivedAfter = $queryParams['received_after'] ?? null;
+        return $this->fetchFolderMessages($grantId, $folderName, [
+            'full_fetch' => false,
+            'limit' => $limit,
+            'received_after' => $receivedAfter,
+            'company_email' => $companyEmail,
+            'raw_params' => $queryParams, // preserve any additional params passed previously
+        ]);
     }
 
     /**

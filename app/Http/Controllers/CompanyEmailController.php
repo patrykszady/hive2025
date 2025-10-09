@@ -207,16 +207,17 @@ class CompanyEmailController extends Controller
 
     public function fetchReceiptMessages()
     {
-        $receipts = Receipt::all();
         $grantId = config('nylas.receipts_grant_id');
 
-        // Define the folders to query based on the environment.
-        $folders = env('APP_ENV') === 'production'
-            ? ['inbox'] // For production, use both inbox folder.
-            : [config('nylas.hive_receipts_test_folder_id')];      // For dev, use the test folder.
+        // Decide single folder (priority: explicit test folder in non-prod, otherwise inbox)
+        $folder = env('APP_ENV') === 'production'
+            ? 'inbox'
+            : (config('nylas.hive_receipts_test_folder_id') ?: 'inbox');
 
-        $syncResult = $this->nylasService->syncMessages($folders, $grantId);
-        $allMessages = $syncResult['messages'];
+        $allMessages = $this->nylasService->fetchFolderMessages($grantId, $folder, [
+            'full_fetch' => true,
+            'include_headers' => true,
+        ]);
 
         foreach($allMessages as $message) {
             // Display message structure without rendering HTML body
@@ -224,40 +225,86 @@ class CompanyEmailController extends Controller
             if (isset($messageDisplay['body'])) {
                 $messageDisplay['body'] = '[HTML CONTENT - ' . strlen($message['body']) . ' chars]';
             }
-            // echo '<pre>' . json_encode($messageDisplay, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . '</pre>';
-            // dd();
             $messageId = $message['id'];
-            $fromEmail = $message['from'][0]['email'];
-            $subject = $message['subject'];
-            $dateEmail = Carbon::parse($message['date'])->setTimezone('America/Chicago')->format('Y-m-d');
 
-            // Check if the 'from' email and 'subject' match any receipt
-            //receipt_type 0 = API
-            $receipt = $receipts->where('receipt_type', '!=', 0)->first(function ($receipt) use ($fromEmail, $subject) {
-                return strcasecmp($receipt->from_address, $fromEmail) === 0
-                    && stripos($subject, $receipt->from_subject) !== false;
-            });
-
-            //If null, check if email was forwarded
-            if(is_null($receipt)){
-                $emailBody = strip_tags($message['body']);
-                $emailBody = html_entity_decode($emailBody); // Clean up encoded characters
-                preg_match('/From:\s.*?<(.*?)>/', $emailBody, $fromMatch);
-                preg_match('/Sent:\s*(.+?)\s*To:/', $emailBody, $dateMatch);
-                $fromEmail = trim($fromMatch[1] ?? '');
-                $date = trim($dateMatch[1] ?? '');
-                $dateEmail = Carbon::parse($date)->setTimezone('America/Chicago')->format('Y-m-d');
-
-                //receipt_type 0 = API
-                $receipt = $receipts->where('receipt_type', '!=', 0)->first(function ($receipt) use ($fromEmail, $subject) {
-                    return strcasecmp($receipt->from_address, $fromEmail) === 0
-                        && stripos($subject, $receipt->from_subject) !== false;
-                });
+            // Prefer X-Hive-Metadata header values if available
+            $hiveMeta = null;
+            if (isset($message['headers']) && is_array($message['headers'])) {
+                foreach ($message['headers'] as $hdr) {
+                    if (isset($hdr['name']) && strcasecmp($hdr['name'], 'X-Hive-Metadata') === 0) {
+                        $decoded = json_decode($hdr['value'] ?? '', true);
+                        if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                            $hiveMeta = $decoded;
+                        }
+                        break;
+                    }
+                }
             }
 
-            // dd($receipt);
+            if (!$hiveMeta) {
+                // hiveMeta expected; move to Error folder and skip
+                $errorFolderId = config('nylas.hive_receipts_error_folder_id');
+                if ($errorFolderId) {
+                    try {
+                        $this->nylasService->moveEmailToFolder($messageId, $errorFolderId, $grantId, null);
+                    } catch (\Throwable $e) {
+                        Log::channel('nylas')->error('Failed moving message without X-Hive-Metadata to error folder', [
+                            'grant_id' => $grantId,
+                            'message_id' => $messageId,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                } else {
+                    Log::channel('nylas')->warning('Missing error folder config for message lacking X-Hive-Metadata header', [
+                        'grant_id' => $grantId,
+                        'message_id' => $messageId,
+                    ]);
+                }
+                continue;
+            }
+
+            // Use hiveMeta directly (guaranteed present if we reach here)
+            $fromEmail = $hiveMeta['from_email'];
+            $toEmail = $hiveMeta['to_email'];
+            $subject = $hiveMeta['subject'];           
+            $dateEmail = Carbon::createFromTimestamp((int) $hiveMeta['unix_date'])
+                ->setTimezone('America/Chicago')
+                ->format('Y-m-d');
+
+            $companyEmail = CompanyEmail::withoutGlobalScopes()
+                ->where('email', $toEmail)
+                ->first();
+
+            if (! $companyEmail) {
+                $companyEmail = CompanyEmail::withoutGlobalScopes()
+                    ->where('grant_id', $grantId)
+                    ->first();
+            }
+
+            if (! $companyEmail) {
+                Log::channel('nylas')->error('Unable to resolve CompanyEmail for receipt message', [
+                    'grant_id' => $grantId,
+                    'to_email' => $toEmail,
+                    'message_id' => $messageId,
+                ]);
+                continue;
+            }
+
+            $folderMap = [
+                'Error' => data_get($companyEmail->api_json, 'folders.Error') ?? config('nylas.hive_receipts_error_folder_id'),
+                'Duplicate' => data_get($companyEmail->api_json, 'folders.Duplicate') ?? config('nylas.hive_receipts_duplicate_folder_id'),
+                'Add' => data_get($companyEmail->api_json, 'folders.Add') ?? config('nylas.hive_receipts_need_to_add_folder_id'),
+                'Saved' => data_get($companyEmail->api_json, 'folders.Saved') ?? config('nylas.hive_receipts_saved_folder_id'),
+            ];
+
+            // Find Receipt where from_address = $fromEmail and from_subject = $subject
+            // Exclude receipts where receipt_type is null
+            $receipt = Receipt::whereNotNull('receipt_type')
+                ->where('from_address', $fromEmail)
+                ->where('from_subject', $subject)
+                ->first();
+
             if ($receipt) {
-                $toEmail = $message['to'][0]['email'];
                 $string = $message['body'];
 
                 // Check if the body contains HTML
@@ -359,19 +406,19 @@ class CompanyEmailController extends Controller
                         $attachment = $message['attachments'][0];
                         $attachmentContent = $this->nylasService->downloadAttachment($attachment['id'], $grantId, $messageId);
 
-                        // $attachment = collect($attachments)->first(function ($attachment_found, $loop) use ($receipt) {
-                        //     if (isset($receipt->options['attachment_name'])) {
-                        //         preg_match('/' . $receipt->options['attachment_name'] . '/', $attachment_found->getName(), $matches);
-                        //         return !empty($matches) || array_key_last($attachments) === $loop;
-                        //     }
-                        //     return true;
-                        // });
-
                         $ocr_path = '_temp_ocr/' . $ocr_filename;
                         Storage::disk('files')->put($ocr_path, $attachmentContent);
                     } else {
                         // No attachments found
-                        $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Error'], $grantId, $companyEmail->id);
+                        if (!empty($folderMap['Error'])) {
+                            $this->nylasService->moveEmailToFolder($messageId, $folderMap['Error'], $grantId, $companyEmail->id);
+                        } else {
+                            Log::channel('nylas')->warning('Missing Error folder configuration when handling PDF-less message', [
+                                'grant_id' => $grantId,
+                                'company_email_id' => $companyEmail->id,
+                                'message_id' => $messageId,
+                            ]);
+                        }
                         continue;
                     }
                 } else {
@@ -389,7 +436,15 @@ class CompanyEmailController extends Controller
                             'message_id' => $messageId ?? null
                         ]);
                         // Move to error folder or handle appropriately
-                        $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Error'], $grantId, $companyEmail->id);
+                        if (!empty($folderMap['Error'])) {
+                            $this->nylasService->moveEmailToFolder($messageId, $folderMap['Error'], $grantId, $companyEmail->id);
+                        } else {
+                            Log::channel('nylas')->warning('Missing Error folder configuration for empty image URL', [
+                                'grant_id' => $grantId,
+                                'company_email_id' => $companyEmail->id,
+                                'message_id' => $messageId,
+                            ]);
+                        }
                         continue;
                     }
                     
@@ -401,7 +456,15 @@ class CompanyEmailController extends Controller
                             'receipt_id' => $receipt->id,
                         ]));
                         // Move to error folder or handle appropriately
-                        $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Error'], $grantId, $companyEmail->id);
+                        if (!empty($folderMap['Error'])) {
+                            $this->nylasService->moveEmailToFolder($messageId, $folderMap['Error'], $grantId, $companyEmail->id);
+                        } else {
+                            Log::channel('nylas')->warning('Missing Error folder configuration after image processing failure', [
+                                'grant_id' => $grantId,
+                                'company_email_id' => $companyEmail->id,
+                                'message_id' => $messageId,
+                            ]);
+                        }
                         continue;
                     }
                 }
@@ -413,12 +476,12 @@ class CompanyEmailController extends Controller
 
                 //pass receipt info to ocr_extract method
                 $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->ocr_extract($ocr_receipt_extracted, null, 'email');
-
+             
                 $receipt_account = ReceiptAccount::withoutGlobalScopes()
                     ->where('belongs_to_vendor_id', $companyEmail->vendor_id)
                     ->where('vendor_id', $receipt->vendor_id)
                     ->first();
-
+        
                 // Missing receipt_account.. receipt and company email exist but this pairing does not
                 if (is_null($receipt_account)) {
                     // Clean up temp OCR file if it exists
@@ -428,12 +491,20 @@ class CompanyEmailController extends Controller
                     }
 
                     // Move this email to the "Add" folder and skip to next message
-                    $this->nylasService->moveEmailToFolder(
-                        $messageId,
-                        $companyEmail->api_json['folders']['Add'],
-                        $grantId,
-                        $companyEmail->id
-                    );
+                    if (!empty($folderMap['Add'])) {
+                        $this->nylasService->moveEmailToFolder(
+                            $messageId,
+                            $folderMap['Add'],
+                            $grantId,
+                            $companyEmail->id
+                        );
+                    } else {
+                        Log::channel('nylas')->warning('Missing Add folder configuration when receipt account lookup fails', [
+                            'grant_id' => $grantId,
+                            'company_email_id' => $companyEmail->id,
+                            'message_id' => $messageId,
+                        ]);
+                    }
                     continue;
                 }
 
@@ -614,7 +685,15 @@ class CompanyEmailController extends Controller
                     // $duplicate_expense->save();
 
                     //move email receipt to Duplicate folder
-                    $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Duplicate'], $grantId, $companyEmail->id);
+                    if (!empty($folderMap['Duplicate'])) {
+                        $this->nylasService->moveEmailToFolder($messageId, $folderMap['Duplicate'], $grantId, $companyEmail->id);
+                    } else {
+                        Log::channel('nylas')->warning('Missing Duplicate folder configuration when handling duplicate receipt', [
+                            'grant_id' => $grantId,
+                            'company_email_id' => $companyEmail->id,
+                            'message_id' => $messageId,
+                        ]);
+                    }
                 }else{
                     //SAVE expense
                     $expense = new Expense;
@@ -633,7 +712,15 @@ class CompanyEmailController extends Controller
                     //ATTACHMENTS
                     $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, $message);
 
-                    $this->nylasService->moveEmailToFolder($messageId, $companyEmail->api_json['folders']['Saved'], $grantId, $companyEmail->id);
+                    if (!empty($folderMap['Saved'])) {
+                        $this->nylasService->moveEmailToFolder($messageId, $folderMap['Saved'], $grantId, $companyEmail->id);
+                    } else {
+                        Log::channel('nylas')->warning('Missing Saved folder configuration after processing receipt', [
+                            'grant_id' => $grantId,
+                            'company_email_id' => $companyEmail->id,
+                            'message_id' => $messageId,
+                        ]);
+                    }
                 }
             }
         }
