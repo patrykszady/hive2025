@@ -10,6 +10,7 @@ return [
     // Message fetching limits
     'message_limit' => 25,
     'message_limit_days' => 10,
+    'full_fetch_soft_cap' => env('NYLAS_FULL_FETCH_SOFT_CAP', 0),
 
     // Centralized receipts processing (forward target)
     'receipts_grant_id' => env('NYLAS_HIVE_RECEIPTS_GRANT_ID'),

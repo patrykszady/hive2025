@@ -19,6 +19,7 @@ class NylasService
     private $httpClient;
     private $baseUrl;
     private $apiKey;
+    protected array $folderNameCache = [];
 
 
     public function __construct(Client $client)
@@ -187,44 +188,169 @@ class NylasService
         }
     }
 
-    public function getMessages(array $queryParams = [], string $grantId, bool $withHeaders = false): array
+    public function getMessages(string $grantId, array $queryParams = [], bool $withHeaders = false): array
     {
-        // Base URL for Nylas API to fetch messages
-        $url = $this->baseUrl . "/grants/{$grantId}/messages";
+        $query = array_filter(
+            $queryParams,
+            static fn ($value) => $value !== null && $value !== ''
+        );
 
-        // Append query parameters to the URL if provided
-        if (!empty($queryParams)) {
-            $url .= '?' . http_build_query($queryParams);
+        $requestedFolder = null;
+        $resolvedFolder = null;
+
+        if (isset($query['in']) && is_string($query['in']) && $query['in'] !== '') {
+            $requestedFolder = $query['in'];
+            $resolvedFolder = $this->resolveFolderIdentifier($grantId, $query['in']);
+            if ($resolvedFolder) {
+                $query['in'] = $resolvedFolder;
+            }
         }
 
-        // Add the specific 'fields' parameter to include headers (using URL approach)
         if ($withHeaders) {
-            $url .= (empty($queryParams) ? '?' : '&') . 'fields=include_headers';
+            $query['fields'] = 'include_headers';
         }
 
         try {
-            // Perform the HTTP GET request using the HTTP client
-            $response = $this->httpClient->get($url, [
+            $response = $this->httpClient->get($this->baseUrl . "/grants/{$grantId}/messages", [
                 'headers' => [
                     'Authorization' => 'Bearer ' . $this->apiKey,
                     'Accept' => 'application/json',
                     'Content-Type' => 'application/json',
                 ],
+                'query' => $query,
             ]);
 
-            // Decode the response body into an associative array
-            return json_decode($response->getBody(), true) ?? [];
+            $decoded = json_decode($response->getBody(), true) ?? [];
+
+            if (!is_array($decoded)) {
+                Log::channel('nylas')->warning('Unexpected getMessages response payload', [
+                    'grant_id' => $grantId,
+                    'with_headers' => $withHeaders,
+                    'query_params' => $query,
+                    'requested_folder' => $requestedFolder,
+                    'resolved_folder' => $resolvedFolder,
+                ]);
+
+                return [
+                    'status' => $response->getStatusCode(),
+                    'data' => [],
+                    'next_cursor' => null,
+                    'request_id' => $response->hasHeader('x-request-id')
+                        ? $response->getHeader('x-request-id')[0]
+                        : null,
+                ];
+            }
+
+            $data = $decoded['data'] ?? [];
+
+            if (empty($data)) {
+                Log::channel('nylas')->info('getMessages returned empty dataset', [
+                    'grant_id' => $grantId,
+                    'status' => $response->getStatusCode(),
+                    'query_params' => $query,
+                    'with_headers' => $withHeaders,
+                    'requested_folder' => $requestedFolder,
+                    'resolved_folder' => $resolvedFolder,
+                    'request_id' => $decoded['request_id'] ?? ($response->hasHeader('x-request-id')
+                        ? $response->getHeader('x-request-id')[0]
+                        : null),
+                ]);
+            }
+
+            return [
+                'status' => $response->getStatusCode(),
+                'data' => $data,
+                'next_cursor' => $decoded['next_cursor'] ?? null,
+                'request_id' => $decoded['request_id'] ?? ($response->hasHeader('x-request-id')
+                    ? $response->getHeader('x-request-id')[0]
+                    : null),
+            ];
         } catch (RequestException $e) {
-            // Log the error but return empty array so sync can continue
             Log::channel('nylas')->error('Get Messages API Error', ApiErrorFormatter::format($e, [
                 'grant_id' => $grantId,
                 'with_headers' => $withHeaders,
-                'query_params' => $queryParams,
+                'query_params' => $query,
+                'requested_folder' => $requestedFolder,
+                'resolved_folder' => $resolvedFolder,
             ]));
             
-            // Return empty array instead of error array to allow processing to continue
-            return [];
+            $response = $e->getResponse();
+
+            return [
+                'status' => $response?->getStatusCode(),
+                'data' => [],
+                'next_cursor' => null,
+                'request_id' => $response && $response->hasHeader('x-request-id')
+                    ? $response->getHeader('x-request-id')[0]
+                    : null,
+            ];
         }
+    }
+
+    protected function resolveFolderIdentifier(string $grantId, string $identifier): ?string
+    {
+        $trimmed = trim($identifier);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        // Heuristic: Nylas folder IDs are long (>= 20 chars) & often start with AAk/AAMk/AQMk and contain '='
+        if (strlen($trimmed) >= 20 && str_contains($trimmed, '=')) {
+            return $trimmed;
+        }
+
+        $normalized = strtolower($trimmed);
+        $cache = $this->folderNameCache[$grantId] ?? null;
+
+        if ($cache === null) {
+            $cache = $this->buildFolderCache($grantId);
+            $this->folderNameCache[$grantId] = $cache;
+        }
+
+        return $cache[$normalized] ?? $trimmed;
+    }
+
+    protected function buildFolderCache(string $grantId): array
+    {
+        $map = [];
+
+        $foldersResponse = $this->getFolders($grantId);
+        $foldersData = [];
+
+        if (isset($foldersResponse['data']['data']) && is_array($foldersResponse['data']['data'])) {
+            $foldersData = $foldersResponse['data']['data'];
+        } elseif (isset($foldersResponse['data']) && is_array($foldersResponse['data'])) {
+            $foldersData = $foldersResponse['data'];
+        }
+
+        foreach ($foldersData as $folder) {
+            $id = $folder['id'] ?? null;
+            $name = strtolower($folder['name'] ?? '');
+
+            if (! $id) {
+                continue;
+            }
+
+            if ($name !== '') {
+                $map[$name] = $id;
+            }
+
+            if (!empty($folder['attributes']) && is_array($folder['attributes'])) {
+                foreach ($folder['attributes'] as $attribute) {
+                    $attrName = strtolower(ltrim($attribute, '\\'));
+                    if ($attrName !== '') {
+                        $map[$attrName] = $id;
+                    }
+                }
+            }
+        }
+
+        // Provide common aliases if not already mapped
+        if (isset($map['inbox'])) {
+            $map['\inbox'] = $map['inbox'];
+        }
+
+        return $map;
     }
 
     /**
@@ -281,7 +407,7 @@ class NylasService
             if ($next) {
                 $current['page_token'] = $next;
             }
-            $resp = $this->getMessages($current, $grantId, $includeHeaders);
+            $resp = $this->getMessages($grantId, $current, $includeHeaders);
             $data = $resp['data'] ?? [];
 
             if (!is_array($data)) {
@@ -757,7 +883,7 @@ class NylasService
             'received_after' => $receivedAfter->timestamp,
         ];
         
-        $resp = $this->getMessages($query, $grantId, false);
+        $resp = $this->getMessages($grantId, $query, false);
         $messages = $resp['data'] ?? [];
         
         // Fast filtering using pre-built criteria

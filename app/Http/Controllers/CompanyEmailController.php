@@ -751,7 +751,7 @@ class CompanyEmailController extends Controller
                 ->all();
             // NylasService::syncMessages already persists cursors into CompanyEmail->api_json when changed.
             // No need to mutate api_json here.
-
+         
             foreach ($messages as $message) {
                 $messageId = $message['id'];
 
@@ -1451,13 +1451,24 @@ class CompanyEmailController extends Controller
 
         // Calculate received_after date for this company email
         $receivedAfter = $this->calculateReceivedAfterDate($companyEmail, $messageLimitDate);
-        
+
+        // If received_after is in the future (shouldn't happen), skip
         // Fetch and filter messages using NylasService
         $matchingMessages = $this->nylasService->getMessagesMatchingCriteria(
             $grantId, 
             $receiptCriteria, 
             $receivedAfter
         );
+
+        if (empty($matchingMessages)) {
+            Log::channel('nylas')->info('No matching messages found for forwarding run', [
+                'grant_id' => $grantId,
+                'company_email_id' => $companyEmail->id,
+                'criteria' => array_keys($receiptCriteria),
+                'received_after' => $receivedAfter->timestamp,
+            ]);
+            return;
+        }
 
         // Forward each matching message
         foreach ($matchingMessages as $message) {

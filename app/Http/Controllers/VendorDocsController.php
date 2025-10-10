@@ -42,10 +42,10 @@ class VendorDocsController extends Controller
         ];
 
         // Fetch messages using the NylasService
-        $messages = $this->nylasService->getMessages($queryParams, $grantId);
+    $messages = $this->nylasService->getMessages($grantId, $queryParams);
 
         // Filter messages with attachments
-        foreach ($messages['data'] as $message) {
+        foreach (($messages['data'] ?? []) as $message) {
             if (!empty($message['attachments'])) {
                 $attachments = array_filter($message['attachments'], function ($attachment) {
                     return $attachment['is_inline'] === false;
