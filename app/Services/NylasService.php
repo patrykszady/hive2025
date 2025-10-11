@@ -609,6 +609,15 @@ class NylasService
             return [ 'status' => 404, 'error' => 'Message not found or invalid format' ];
         }
 
+        $companyEmail = CompanyEmail::withoutGlobalScopes()->find($companyEmailId);
+        if (!$companyEmail) {
+            Log::channel('nylas')->warning('CompanyEmail record missing while forwarding receipt', [
+                'source_grant_id' => $sourceGrantId,
+                'message_id' => $messageId,
+                'company_email_id' => $companyEmailId,
+            ]);
+        }
+
         $origSubject = $messageData['subject'] ?? '(no subject)';
         $bodyHtml = $messageData['body'] ?? '';
 
@@ -675,15 +684,17 @@ class NylasService
 
         // Extract original message metadata for custom headers
         $fromEmail = $messageData['from'][0]['email'] ?? null;
-        $toEmail   = $messageData['to'][0]['email'] ?? null;
+        $sourceMailboxEmail = $companyEmail?->email ?? ($messageData['to'][0]['email'] ?? null);
+        $originalToEmail = $messageData['to'][0]['email'] ?? null;
 
         // Build single custom header with all metadata as JSON (to avoid provider header limits)
         $metadata = [
             'from_email' => (string) $fromEmail,
-            'to_email' => (string) $toEmail,
+            'to_email' => (string) $sourceMailboxEmail,
             'subject' => (string) $origSubject,
             'unix_date' => (string) $messageData['date'],
             'company_email_id' => (string) $companyEmailId,
+            'original_to_email' => (string) $originalToEmail,
         ];
         
         $customHeaders = [

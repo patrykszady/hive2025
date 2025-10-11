@@ -1460,17 +1460,6 @@ class CompanyEmailController extends Controller
             $receivedAfter
         );
 
-        dd($matchingMessages);
-        if (empty($matchingMessages)) {
-            Log::channel('nylas')->info('No matching messages found for forwarding run', [
-                'grant_id' => $grantId,
-                'company_email_id' => $companyEmail->id,
-                'criteria' => array_keys($receiptCriteria),
-                'received_after' => $receivedAfter->timestamp,
-            ]);
-            return;
-        }
-
         // Forward each matching message
         foreach ($matchingMessages as $message) {
             $this->nylasService->sendForwardCopy(
