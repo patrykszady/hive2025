@@ -1460,6 +1460,7 @@ class CompanyEmailController extends Controller
             $receivedAfter
         );
 
+        dd($matchingMessages);
         if (empty($matchingMessages)) {
             Log::channel('nylas')->info('No matching messages found for forwarding run', [
                 'grant_id' => $grantId,

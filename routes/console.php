@@ -30,6 +30,16 @@ Schedule::call(function () {
     ->onOneServer();
 
 Schedule::call(function () {
+  app(\App\Http\Controllers\CompanyEmailController::class)->fetchReceiptMessages();
+  })
+  ->everyTenMinutes()
+  // ->between('7:00', '22:00')
+  ->name('fetch-receipt-messages')
+  ->environments(['production'])
+  ->withoutOverlapping()
+  ->onOneServer();
+
+Schedule::call(function () {
     app(\App\Http\Controllers\VendorDocsController::class)->fetchMessagesFromInsuranceMailbox();
     })->hourly()
     // ->between('7:00', '20:00')
