@@ -1409,7 +1409,7 @@ class CompanyEmailController extends Controller
      */
     public function forwardRecentReceiptEmailsToCentral()
     {
-        // $foldersResult = $this->nylasService->getFolders('957bf081-f050-459f-a4cd-7d4423113a22');
+        // $foldersResult = $this->nylasService->getFolders('649561d4-4652-4963-b23c-ce214ea58255');
         // dd($foldersResult);
 
         $companyEmails = CompanyEmail::withoutGlobalScopes()

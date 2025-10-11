@@ -243,20 +243,6 @@ class NylasService
 
             $data = $decoded['data'] ?? [];
 
-            if (empty($data)) {
-                Log::channel('nylas')->info('getMessages returned empty dataset', [
-                    'grant_id' => $grantId,
-                    'status' => $response->getStatusCode(),
-                    'query_params' => $query,
-                    'with_headers' => $withHeaders,
-                    'requested_folder' => $requestedFolder,
-                    'resolved_folder' => $resolvedFolder,
-                    'request_id' => $decoded['request_id'] ?? ($response->hasHeader('x-request-id')
-                        ? $response->getHeader('x-request-id')[0]
-                        : null),
-                ]);
-            }
-
             return [
                 'status' => $response->getStatusCode(),
                 'data' => $data,
@@ -978,31 +964,4 @@ class NylasService
             'error' => $response['error'] ?? null,
         ];
     }
-
-    /**
-     * Retrieve a grant's metadata (scopes, status, etc.).
-     */
-    // public function getGrant(string $grantId): array
-    // {
-    //     $url = $this->baseUrl . "/grants/{$grantId}";
-    //     try {
-    //         $resp = Http::withHeaders([
-    //             'Accept' => 'application/json',
-    //             'Authorization' => 'Bearer ' . $this->apiKey,
-    //         ])->get($url);
-    //         return [
-    //             'status' => $resp->status(),
-    //             'data' => $resp->json(),
-    //         ];
-    //     } catch (\Throwable $e) {
-    //         Log::channel('nylas')->error('Get Grant Failed', [
-    //             'grant_id' => $grantId,
-    //             'error' => $e->getMessage(),
-    //         ]);
-    //         return [
-    //             'status' => 500,
-    //             'error' => $e->getMessage(),
-    //         ];
-    //     }
-    // }
 }

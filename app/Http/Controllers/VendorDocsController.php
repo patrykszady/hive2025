@@ -42,10 +42,10 @@ class VendorDocsController extends Controller
         ];
 
         // Fetch messages using the NylasService
-    $messages = $this->nylasService->getMessages($grantId, $queryParams);
-
+        $messages = $this->nylasService->getMessages($grantId, $queryParams);
+    
         // Filter messages with attachments
-        foreach (($messages['data'] ?? []) as $message) {
+        foreach (($messages['data']) as $message) {
             if (!empty($message['attachments'])) {
                 $attachments = array_filter($message['attachments'], function ($attachment) {
                     return $attachment['is_inline'] === false;
@@ -78,9 +78,9 @@ class VendorDocsController extends Controller
 
     public function moveEmailBasedOnMatchingResults($messageId, $grantId, $matchedVendorId, $matchedBelongsToVendorId)
     {
-        $manualAddFolderId = 'AAMkADlmZDViM2ZhLWZkYjUtNGVlZC1iNzRhLTRjMzhmMjQ0MmNmOAAuAAAAAABj7uvVHKHMQqSEZ0xJa9c1AQCwrDriHLtHRZNuXjKXm1MrAAG9ITvDAAA=';
-        $processedFolderId = 'AAMkADlmZDViM2ZhLWZkYjUtNGVlZC1iNzRhLTRjMzhmMjQ0MmNmOAAuAAAAAABj7uvVHKHMQqSEZ0xJa9c1AQCwrDriHLtHRZNuXjKXm1MrAAG2_4hNAAA=';
-        $failedFolderId = 'AAMkADlmZDViM2ZhLWZkYjUtNGVlZC1iNzRhLTRjMzhmMjQ0MmNmOAAuAAAAAABj7uvVHKHMQqSEZ0xJa9c1AQCwrDriHLtHRZNuXjKXm1MrAAG9ITvBAAA=';
+        $manualAddFolderId = config('nylas.certificates_error_folder_id');
+        $processedFolderId = config('nylas.certificates_saved_folder_id');
+        $failedFolderId = config('nylas.certificates_error_folder_id');
 
         try {
             if (is_null($matchedVendorId) || is_null($matchedBelongsToVendorId)) {
