@@ -58,25 +58,23 @@ trait ProcessesVendorDocs
             $matchedVendorId = $calculatedVendorId ?: $vendorId;
             $matchedBelongsToVendorId = $calculatedBelongsToVendorId ?: $belongsToVendorId;
 
-            // 5. Handle email processing
-            if (isset($messageId) && isset($grantId)) {
-                $this->moveEmailBasedOnMatchingResults($messageId, $grantId, $matchedVendorId, $matchedBelongsToVendorId);
-            }
-
-            // 6. Check if we have valid vendor IDs
+            // 5. Check if we have valid vendor IDs before attempting policy processing
             if (is_null($matchedVendorId) || is_null($matchedBelongsToVendorId)) {
                 Log::channel('vendor_docs')->error('Unable to match vendor information', [
                     'file' => $normalizedFilePath,
                     'insured_name' => $insuranceInfo['insured_name']['valueString'] ?? 'not found',
                     'holder_name' => $insuranceInfo['holder_name']['valueString'] ?? 'not found'
                 ]);
+                if (isset($messageId) && isset($grantId)) {
+                    $this->moveEmailBasedOnMatchingResults($messageId, $grantId, null, null);
+                }
                 return false;
             }
 
-            // 7. Process agent if available
+            // 6. Process agent if available
             $agent = $this->processAgent($insuranceInfo);
 
-            // 8. Generate permanent filename and copy file
+            // 7. Generate permanent filename and copy file
             $fileName = "{$matchedBelongsToVendorId}-{$matchedVendorId}-" . now()->format('Y-m-d-H-i-s') . ".{$docType}";
             $newFilePath = "vendor_docs/{$fileName}";
 
@@ -89,10 +87,28 @@ trait ProcessesVendorDocs
                 return false;
             }
 
-            // 9. Process all policy types
-            $newPolicyCreated = $this->processAllPolicyTypes($insuranceInfo, $fileName, $matchedVendorId, $matchedBelongsToVendorId, $agent);
+            // 8. Process all policy types and gather validation results
+            $policyProcessingResult = $this->processAllPolicyTypes(
+                $insuranceInfo,
+                $fileName,
+                $matchedVendorId,
+                $matchedBelongsToVendorId,
+                $agent,
+                $messageId
+            );
 
-            // 10. Cleanup
+            $newPolicyCreated = $policyProcessingResult['created'];
+            $missingRequiredFields = $policyProcessingResult['missing_requirements'];
+
+            if (isset($messageId) && isset($grantId)) {
+                if ($missingRequiredFields) {
+                    $this->moveEmailBasedOnMatchingResults($messageId, $grantId, null, null);
+                } else {
+                    $this->moveEmailBasedOnMatchingResults($messageId, $grantId, $matchedVendorId, $matchedBelongsToVendorId);
+                }
+            }
+
+            // 9. Cleanup
             if ($newPolicyCreated) {
                 Storage::disk('files')->delete($normalizedFilePath);
                 return true;
@@ -147,7 +163,7 @@ trait ProcessesVendorDocs
         return $success && Storage::disk('files')->exists($to);
     }
 
-    private function processAllPolicyTypes($insuranceInfo, $fileName, $vendorId, $belongsToVendorId, $agent)
+    private function processAllPolicyTypes($insuranceInfo, $fileName, $vendorId, $belongsToVendorId, $agent, ?string $messageId = null): array
     {
         $policyTypes = [
             ['policyKey' => 'general_multi', 'type' => 'general'],
@@ -155,7 +171,10 @@ trait ProcessesVendorDocs
             ['policyKey' => 'workers_multi', 'type' => 'workers'],
         ];
 
-        $newPolicyCreated = false;
+        $aggregate = [
+            'created' => false,
+            'missing_requirements' => false,
+        ];
         foreach ($policyTypes as $policy) {
             $result = $this->processPolicies(
                 $insuranceInfo,
@@ -164,25 +183,34 @@ trait ProcessesVendorDocs
                 $fileName,
                 $vendorId,
                 $belongsToVendorId,
-                $agent
+                $agent,
+                $messageId
             );
 
-            if ($result === true) {
-                $newPolicyCreated = true;
+            if ($result['created']) {
+                $aggregate['created'] = true;
+            }
+
+            if ($result['missing_requirements']) {
+                $aggregate['missing_requirements'] = true;
             }
         }
 
-        return $newPolicyCreated;
+        return $aggregate;
     }
 
-    private function processPolicies($insuranceInfo, $policyKey, $type, $fileName, $vendorId, $belongsToVendorId, $agent = null)
+    private function processPolicies($insuranceInfo, $policyKey, $type, $fileName, $vendorId, $belongsToVendorId, $agent = null, ?string $messageId = null): array
     {
+        $result = [
+            'created' => false,
+            'missing_requirements' => false,
+        ];
+
         // Check if policy data exists
         if (empty($insuranceInfo[$policyKey]['valueArray']) || !is_array($insuranceInfo[$policyKey]['valueArray'])) {
-            return false;
+            return $result;
         }
 
-        $newPolicyCreated = false;
         foreach ($insuranceInfo[$policyKey]['valueArray'] as $policy) {
             if (!isset($policy['valueObject'])) {
                 continue;
@@ -202,8 +230,10 @@ trait ProcessesVendorDocs
                     'type' => $type,
                     'policy_number' => $policyNumber,
                     'effective_date' => $effectiveDate,
-                    'expiration_date' => $expirationDate
+                    'expiration_date' => $expirationDate,
+                    'message_id' => $messageId,
                 ]);
+                $result['missing_requirements'] = true;
                 continue;
             }
 
@@ -229,11 +259,11 @@ trait ProcessesVendorDocs
             }
 
             if ($vendorDoc->wasRecentlyCreated) {
-                $newPolicyCreated = true;
+                $result['created'] = true;
             }
         }
 
-        return $newPolicyCreated;
+        return $result;
     }
 
     private function extractDataFromFile($filePath, $docType)

@@ -1367,7 +1367,7 @@ class TransactionController extends Controller
             ->whereNull('expense_id')
             ->where('amount', 'LIKE', '-%') // Only get negative transactions
             ->orderBy('transaction_date', 'DESC')
-            ->take(3)
+            // ->take(3)
             ->get();
 
         foreach ($transactions as $transaction) {
