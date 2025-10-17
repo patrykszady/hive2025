@@ -8,6 +8,13 @@
     <body>
         <flux:main>
             {{-- <div style="page-break-before: always;"></div> --}}
+            @php
+                // Note: $vendor, $client, and $project are passed from the generator
+                // to avoid re-querying relationships with global scopes applied
+                $projectStatusTitle = $project?->latestStatus?->title;
+                $projectFinances = $project?->finances ?? [];
+            @endphp
+
             <div class="break-after-page space-y-4">
                 <div class="grid grid-cols-4 gap-4">
                     {{-- VENDOR DETAILS --}}
@@ -20,8 +27,8 @@
                                 <x-lists.search_li
                                     :basic=true
                                     :line_title="'Project Contractor'"
-                                    href="{{route('vendors.show', $estimate->vendor)}}"
-                                    :line_data="$estimate->vendor->business_name"
+                                    href="{{ $vendor ? route('vendors.show', $vendor) : '#' }}"
+                                    :line_data="optional($vendor)->business_name ?? 'Unknown Vendor'"
                                     >
                                 </x-lists.search_li>
 
@@ -29,7 +36,7 @@
                                     :basic=true
                                     :line_title="'Address'"
                                     :href_target="'blank'"
-                                    :line_data="$estimate->vendor->full_address"
+                                    :line_data="optional($vendor)->full_address ?? 'No address on file'"
                                     >
                                 </x-lists.search_li>
                             </x-lists.ul>
@@ -51,32 +58,32 @@
                                 <x-lists.search_li
                                     :basic=true
                                     :line_title="'Project Homeowner'"
-                                    href="{{route('clients.show', $estimate->client)}}"
-                                    :line_data="$estimate->client->name"
+                                    href="{{ $client ? route('clients.show', $client) : '#' }}"
+                                    :line_data="optional($client)->name ?? 'Unknown Client'"
                                     >
                                 </x-lists.search_li>
 
                                 <x-lists.search_li
                                     :basic=true
                                     :line_title="'Project Name'"
-                                    href="{{route('projects.show', $estimate->project->id)}}"
-                                    :line_data="$estimate->project->project_name"
+                                    href="{{ $project ? route('projects.show', $project->id) : '#' }}"
+                                    :line_data="optional($project)->project_name ?? 'Unknown Project'"
                                     >
                                 </x-lists.search_li>
 
                                 <x-lists.search_li
                                     :basic=true
                                     :line_title="'Jobsite Address'"
-                                    href="{{$estimate->project->getAddressMapURI()}}"
+                                    href="{{ $project?->getAddressMapURI() }}"
                                     :href_target="'blank'"
-                                    :line_data="$estimate->project->full_address"
+                                    :line_data="optional($project)->full_address ?? 'No address on file'"
                                     >
                                 </x-lists.search_li>
 
                                 <x-lists.search_li
                                     :basic=true
                                     :line_title="'Billing Address'"
-                                    :line_data="$estimate->client->full_address"
+                                    :line_data="optional($client)->full_address ?? 'No billing address on file'"
                                     >
                                 </x-lists.search_li>
 
@@ -182,10 +189,10 @@
                                             <td class="hidden sm:table-cell"></td>
                                             <td class="pb-5 pl-4 pr-3 text-md max-w-0 sm:pl-6" colspan="5">
                                                 <div class="flex flex-col hidden mt-1 sm:block">
-                                                    <span class="text-black">{{$estimate_line_item->desc}}</span>
+                                                    <span class="text-black" style="white-space: pre-line;">{{$estimate_line_item->desc}}</span>
                                                     @if($estimate_line_item->notes)
                                                         <hr>
-                                                        <span class="text-gray-500"><i>{{$estimate_line_item->notes}}</i></span>
+                                                        <span class="text-gray-500" style="white-space: pre-line;"><i>{{$estimate_line_item->notes}}</i></span>
                                                     @endif
                                                 </div>
                                             </td>
@@ -206,7 +213,7 @@
 
                 {{-- ESTIMATE TOTAL --}}
                 @if($type != 'Work Order')
-                    @if(!in_array($estimate->project->latestStatus->title, ['Active', 'Complete', 'Service Call', 'Service Call Complete']))
+                    @if($projectStatusTitle && !in_array($projectStatusTitle, ['Active', 'Complete', 'Service Call', 'Service Call Complete']))
                         <div class="flex justify-between">
                             <div></div>
                             <x-lists.ul
@@ -219,7 +226,7 @@
                                     :bold="TRUE"
                                     {{-- make gray --}}
                                     :line_title="'TOTAL ESTIMATE'"
-                                    :line_data="money($estimate_total + $estimate->reimbursments)"
+                                    :line_data="money($estimate_total + ($reimbursements ?? 0))"
                                     >
                                 </x-lists.search_li>
                             </x-lists.ul>
@@ -231,13 +238,41 @@
                         {{-- PROJECT PAYMENTS --}}
                         <div class="col-span-2 space-y-4">
                             @if($payments->isNotEmpty())
-                                <livewire:payments.payments-index :project="$estimate->project" :view="'estimate.pdf'" />
+                                <flux:card class="space-y-2">
+                                    <div class="flex justify-between">
+                                        <flux:heading size="lg">Payments</flux:heading>
+                                    </div>
+
+                                    <flux:table>
+                                        <flux:table.columns>
+                                            <flux:table.column>Amount</flux:table.column>
+                                            <flux:table.column>Date</flux:table.column>
+                                            <flux:table.column>Reference</flux:table.column>
+                                            <flux:table.column>Status</flux:table.column>
+                                        </flux:table.columns>
+
+                                        <flux:table.rows>
+                                            @foreach ($payments as $payment)
+                                                <flux:table.row>
+                                                    <flux:table.cell variant="strong">{{ money($payment->amount) }}</flux:table.cell>
+                                                    <flux:table.cell>{{ $payment->date->format('m/d/Y') }}</flux:table.cell>
+                                                    <flux:table.cell>{{ $payment->reference }}</flux:table.cell>
+                                                    <flux:table.cell>
+                                                        <flux:badge size="sm" :color="$payment->transaction_id != NULL ? 'green' : 'red'" inset="top bottom">
+                                                            {{ $payment->transaction_id != NULL ? 'Complete' : 'Missing Transaction' }}
+                                                        </flux:badge>
+                                                    </flux:table.cell>
+                                                </flux:table.row>
+                                            @endforeach
+                                        </flux:table.rows>
+                                    </flux:table>
+                                </flux:card>
                             @endif
                         </div>
 
                         {{-- PROJECT FINANCES --}}
                         <div class="col-span-2">
-                            @if(in_array($estimate->project->latestStatus->title, ['Active', 'Complete', 'Service Call', 'Service Call Complete']))
+                            @if($projectStatusTitle && in_array($projectStatusTitle, ['Active', 'Complete', 'Service Call', 'Service Call Complete']))
                                 <flux:card>
                                     <div class="flex justify-between">
                                         <flux:heading size="lg">{{$type}} Finances</flux:heading>
@@ -247,21 +282,21 @@
                                         <flux:table.rows>
                                             <flux:table.row>
                                                 <flux:table.cell>Estimate</flux:table.cell>
-                                                <flux:table.cell>{{money($estimate->project->finances['estimate'])}}</flux:table.cell>
+                                                <flux:table.cell>{{ money(data_get($projectFinances, 'estimate', 0)) }}</flux:table.cell>
                                             </flux:table.row>
                                             <flux:table.row>
                                                 <flux:table.cell>Change Order</flux:table.cell>
-                                                <flux:table.cell>{{money($estimate->project->finances['change_orders'])}}</flux:table.cell>
+                                                <flux:table.cell>{{ money(data_get($projectFinances, 'change_orders', 0)) }}</flux:table.cell>
                                             </flux:table.row>
-                                            @if($estimate->reimbursments)
+                                            @if($reimbursements)
                                                 <flux:table.row>
                                                     <flux:table.cell>Reimbursements</flux:table.cell>
-                                                    <flux:table.cell>{{money($estimate->reimbursments)}}</flux:table.cell>
+                                                    <flux:table.cell>{{money($reimbursements)}}</flux:table.cell>
                                                 </flux:table.row>
                                             @endif
                                             <flux:table.row>
                                                 <flux:table.cell variant="strong">TOTAL ESTIMATE</flux:table.cell>
-                                                <flux:table.cell variant="strong">{{money($estimate_total + $estimate->reimbursments)}}</flux:table.cell>
+                                                <flux:table.cell variant="strong">{{money($estimate_total + ($reimbursements ?? 0))}}</flux:table.cell>
                                             </flux:table.row>
                                             <flux:table.row>
                                                 <flux:table.cell variant="strong">TOTAL PAYMENTS</flux:table.cell>
@@ -269,7 +304,7 @@
                                             </flux:table.row>
                                             <flux:table.row>
                                                 <flux:table.cell variant="strong">BALANCE</flux:table.cell>
-                                                <flux:table.cell variant="strong">{{money(($estimate_total + $estimate->reimbursments) - $payments->sum('amount'))}}</flux:table.cell>
+                                                <flux:table.cell variant="strong">{{money(($estimate_total + ($reimbursements ?? 0)) - $payments->sum('amount'))}}</flux:table.cell>
                                             </flux:table.row>
                                         </flux:table.rows>
                                     </flux:table>
@@ -287,12 +322,12 @@
                             <br>
                         @endif
                         <h1 class="text-xl font-bold">CONTRACTOR AGREEMENT</h1>
-                        <p>THIS AGREEMENT made on {{today()->format('m/d/Y')}}, by and between {{$estimate->vendor->business_name}}, hereinafter called the Contractor, and {{$estimate->client->name}}, hereinafter called the Owner. WITNESSETH, that the Contractor and the Owner for the consideration named herein agree as follows:</p>
+                        <p>THIS AGREEMENT made on {{today()->format('m/d/Y')}}, by and between {{ optional($vendor)->business_name ?? 'Unknown Vendor' }}, hereinafter called the Contractor, and {{ optional($client)->name ?? 'Unknown Client' }}, hereinafter called the Owner. WITNESSETH, that the Contractor and the Owner for the consideration named herein agree as follows:</p>
                         <br>
                         <h2 class="text-lg font-semibold">ARTICLE 1. SCOPE OF THE WORK</h2>
                         <p>The Contractor shall furnish all the construction materials and perform all of the work shown on the drawings and/or described in the specifications entitled Estimate {{$estimate->number}}, as annexed hereto as it pertains to work to be performed on property located at: </p>
                         <br>
-                        <p>{!!$estimate->project->full_address!!}</p>
+                        <p>{!! optional($project)->full_address ?? 'No address on file' !!}</p>
                         <br>
                         <p>The Owner is responsible for all finish materials unless otherwire noted in the Estimate.</p>
                         <br>

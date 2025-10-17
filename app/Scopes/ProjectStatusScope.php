@@ -10,6 +10,10 @@ class ProjectStatusScope implements Scope
 {
     public function apply(Builder $builder, Model $model)
     {
+        if (auth()->guest() || ! auth()->user()->vendor) {
+            return;
+        }
+
         $builder->where('belongs_to_vendor_id', auth()->user()->vendor->id);
     }
 }

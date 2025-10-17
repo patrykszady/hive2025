@@ -24,8 +24,8 @@ use OpenSpout\Common\Entity\Style\Style;
 
 use Illuminate\Support\Number;
 
-use Spatie\Browsershot\Browsershot;
 use Spatie\SimpleExcel\SimpleExcelWriter;
+use App\Support\EstimateDocumentGenerator;
 
 class EstimateShow extends Component
 {
@@ -194,47 +194,14 @@ class EstimateShow extends Component
     //$type = [estimate, invoice, work order]
     public function create_pdf($type)
     {
-        // Get fresh data for PDF without overwriting component state
-        $estimate = $this->estimate->fresh(['estimate_sections.estimate_line_items']);
-        $sections = $estimate->estimate_sections;
-        $type = ucwords(strtolower($type));
-        $estimate_total = $sections->sum('total');
-
-        $estimate_total_words =
-        ucwords(
-            Number::spell((int)$estimate_total) . ' dollars and ' .
-            Number::spell((int)(($estimate_total - (int)$estimate_total) * 100)) . ' cents'
-        );
-
-        $payments = $estimate->project->payments->where('belongs_to_vendor_id', $estimate->vendor->id);
-
-        $title = $estimate->client->name.' - '.$type.' - '.$estimate->project->project_name.' - '.$estimate->number;
-        $view = view('misc.estimate', compact(['estimate', 'sections', 'payments', 'title', 'estimate_total', 'estimate_total_words', 'type']))->render();
-
-        $pdf = Browsershot::html($view)
-            ->newHeadless()
-            ->addChromiumArguments([
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--single-process',
-            ])
-            ->scale(0.8)
-            ->showBrowserHeaderAndFooter()
-            ->showBackground()
-            ->headerHtml('<div style="font-size: 10px; width: 100%; padding: 0; margin: 0 5mm 0 10mm; display: flex; justify-content: space-between;"><span>' . $title . '</span><span>' . now()->format('m/d/Y g:i A') . '</span></div>')
-            ->footerHtml('<div style="font-size: 10px; text-align: right; width: 100%; padding: 0; margin: 0 5mm 0 10mm;"><span class="pageNumber"></span> / <span class="totalPages"></span></div>')
-            //->margins($top, $right, $bottom, $left)
-            ->margins(10, 5, 10, 5)
-            ->pdf();
+        $document = EstimateDocumentGenerator::generate($this->estimate, $type);
 
         // Force immediate component state preservation before download
         $this->skipRender();
 
-        return response()->streamDownload(function () use ($pdf) {
-            echo $pdf;
-        }, $title.'.pdf', [
+        return response()->streamDownload(function () use ($document) {
+            echo $document['binary'];
+        }, $document['filename'], [
             'Content-Type' => 'application/pdf',
         ]);
 

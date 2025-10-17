@@ -141,6 +141,7 @@ class ExpenseCreate extends Component
 
     public function newExpense($amount)
     {
+        $this->clearCheckFields();
         $this->expense = Expense::make();
        
         $this->form->amount = $amount;
@@ -162,9 +163,7 @@ class ExpenseCreate extends Component
 
         if (! $expense->splits->isEmpty()) {
             $this->hasSplits($expense->splits);
-        }
-
-    
+        }    
 
         $this->view_text = [
             'card_title' => 'Update Expense',
@@ -179,6 +178,7 @@ class ExpenseCreate extends Component
     {
         $this->expense = Expense::make();
         $this->form->reset();
+        $this->clearCheckFields();
         $this->dispatch('resetSplits')->to('expenses.expense-splits-create');
         $this->split = false;
         $this->splits = false;

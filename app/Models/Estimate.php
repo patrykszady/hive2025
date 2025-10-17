@@ -66,7 +66,7 @@ class Estimate extends Model
 
     public function getClientAttribute()
     {
-        return $this->project->client;
+        return $this->project?->client;
     }
 
     public function getStartDateAttribute()
@@ -89,11 +89,15 @@ class Estimate extends Model
 
     public function getReimbursmentsAttribute()
     {
-        if (isset($this->options['include_reimbursement']) && $this->options['include_reimbursement'] == true) {
-            return $this->project->finances['reimbursments'];
-        } else {
+        $includeReimbursement = $this->options['include_reimbursement'] ?? false;
+
+        if (! $includeReimbursement) {
             return null;
         }
+
+        $projectFinances = $this->project?->finances;
+
+        return data_get($projectFinances, 'reimbursments');
     }
 
     public function getPaymentsAttribute()
@@ -107,12 +111,13 @@ class Estimate extends Model
 
     public function getNumberAttribute()
     {
-        $number =
-            $this->belongs_to_vendor_id.'-'.
-            $this->client->id.'-'.
-            $this->project->id.'-'.
-            $this->id;
+        $segments = array_filter([
+            $this->belongs_to_vendor_id,
+            $this->client?->id,
+            $this->project?->id,
+            $this->id,
+        ]);
 
-        return $number;
+        return implode('-', $segments);
     }
 }

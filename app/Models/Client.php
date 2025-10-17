@@ -92,6 +92,37 @@ class Client extends Model
     }
 
     /**
+     * Get just the first names for greeting purposes
+     */
+    protected function firstNames(): Attribute
+    {
+        return Attribute::make(
+            get: function ($value, array $attributes) {
+                // If client has a business_name, use that
+                if (!empty($attributes['business_name'])) {
+                    $nameParts = explode(',', $attributes['business_name']);
+                    return trim($nameParts[0]);
+                }
+
+                // Otherwise, get first names from users
+                $users = $this->users;
+
+                if ($users->count() == 0) {
+                    return 'there';
+                }
+
+                if ($users->count() == 1) {
+                    return $users->first()->first_name;
+                }
+
+                // Multiple users - combine first names with &
+                $firstNames = $users->pluck('first_name')->toArray();
+                return implode(' & ', $firstNames);
+            }
+        );
+    }
+
+    /**
      * Get the source attribute from the pivot table
      */
     protected function source(): Attribute

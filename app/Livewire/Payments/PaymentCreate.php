@@ -96,7 +96,17 @@ class PaymentCreate extends Component
             ->sortBy([
                 ['latestStatus.title', 'asc'],
                 ['latestStatus.start_date', 'desc'],
-            ]);
+            ])
+            ->map(function ($project) {
+                return [
+                    'id' => $project->id,
+                    'address' => $project->address,
+                    'project_name' => $project->project_name,
+                    'amount' => null,
+                ];
+            })
+            ->values()
+            ->toArray();
     }
 
     public function editPayment(Payment $payment)

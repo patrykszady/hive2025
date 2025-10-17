@@ -123,6 +123,26 @@ class NylasService
     }
 
     /**
+     * Send an email through Nylas for the specified grant.
+     */
+    public function sendEmail(string $grantId, array $payload): array
+    {
+        $response = $this->makeNylasRequest('POST', "/grants/{$grantId}/messages/send", $payload);
+
+        if (!($response['success'] ?? false)) {
+            Log::channel('nylas')->error('Nylas email send failed', [
+                'grant_id' => $grantId,
+                'to' => collect($payload['to'] ?? [])->pluck('email')->filter()->values()->all(),
+                'subject' => $payload['subject'] ?? null,
+                'status' => $response['status'] ?? null,
+                'error' => $response['error'] ?? $response['body'] ?? null,
+            ]);
+        }
+
+        return $response;
+    }
+
+    /**
      * Move or delete a message
      */
     public function moveOrDeleteMessage(string $messageId, string $grantId, ?int $companyEmailId = null, ?string $folderId = null): bool

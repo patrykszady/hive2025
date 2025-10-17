@@ -85,7 +85,9 @@ class ExpenseForm extends Form
         $this->expense = $expense;
 
         // Populate receipt-derived hints when available
-        $latestReceipt = $this->expense->receipts()->latest()->first();
+        $latestReceipt = $this->expense->relationLoaded('receipts')
+            ? $this->expense->receipts->sortByDesc('created_at')->first()
+            : $this->expense->receipts()->latest()->first();
         if ($latestReceipt) {
             $this->receipts = true;
             if (is_array($latestReceipt->receipt_items) && isset($latestReceipt->receipt_items['merchant_name'])) {
@@ -112,6 +114,39 @@ class ExpenseForm extends Form
         // Convenience flag used by the UI to indicate if transactions match the amount
         $transactionsSum = $this->expense->transactions->sum('amount');
         $this->expense_transactions_sum = ($transactionsSum == $this->expense->amount) && ($transactionsSum != '0.00');
+
+        if (method_exists($this->component, 'clearCheckFields')) {
+            $this->component->clearCheckFields();
+        }
+
+        $this->expense->loadMissing('check');
+        $check = $this->expense->check;
+
+        if (! $check) {
+            return;
+        }
+
+        if (property_exists($this->component, 'bank_account_id')) {
+            $this->component->bank_account_id = (string) $check->bank_account_id;
+        }
+
+        if (property_exists($this->component, 'check_type')) {
+            $this->component->check_type = $check->check_type ?? '';
+        }
+
+        if (property_exists($this->component, 'check_number')) {
+            $this->component->check_number = $check->check_type === 'Check'
+                ? ($check->check_number !== null ? (string) $check->check_number : null)
+                : null;
+        }
+
+        if (property_exists($this->component, 'next_check_auto')) {
+            $this->component->next_check_auto = false;
+        }
+
+        if (property_exists($this->component, 'auto_check_number')) {
+            $this->component->auto_check_number = null;
+        }
     }
 
     public function expenseDetails()

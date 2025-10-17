@@ -12,21 +12,21 @@
 
                     <flux:menu>
                         @can('update', $estimate)
-                            <flux:menu.item wire:click="$dispatchTo('estimates.estimate-accept', 'accept')">Finalize Estimate</flux:menu.item>
+                            <flux:menu.item icon="check-circle" wire:click="$dispatchTo('estimates.estimate-accept', 'accept')">Finalize Estimate</flux:menu.item>
                         @endcan
                         
-                        <flux:menu.item wire:click="$dispatchTo('estimates.estimate-duplicate', 'duplicateModal', { estimate: {{$estimate->id}} })">Duplicate Estimate</flux:menu.item>
+                        <flux:menu.item icon="document-duplicate" wire:click="$dispatchTo('estimates.estimate-duplicate', 'duplicateModal', { estimate: {{$estimate->id}} })">Duplicate Estimate</flux:menu.item>
+                        <flux:menu.item icon="envelope" wire:click="$dispatchTo('estimates.estimate-email', 'compose', { estimate: {{$estimate->id}} })">Email Estimate</flux:menu.item>
                         {{-- <flux:menu.item wire:click="$dispatchTo('estimates.estimate-combine', 'combineModal', { existing_estimate_id: {{$estimate->id}} })">Copy to Estimate</flux:menu.item> --}}
 
                         <flux:menu.separator />
 
-                        <flux:menu.item wire:click="create_pdf('estimate')" wire:loading.attr="disabled" wire:loading.class="opacity-50" wire:target="create_pdf">Export Estimate</flux:menu.item>
-                        <flux:menu.item wire:click="create_pdf('invoice')" wire:loading.attr="disabled" wire:loading.class="opacity-50" wire:target="create_pdf">Export Invoice</flux:menu.item>
-                        <flux:menu.item wire:click="create_pdf('work order')" wire:loading.attr="disabled" wire:loading.class="opacity-50" wire:target="create_pdf">Export Work Order</flux:menu.item>
-
-                        <flux:menu.separator />
-
-                        <flux:menu.item wire:click="export_csv">Export Excel Estimate</flux:menu.item>
+                        <flux:menu.submenu heading="Export" icon="arrow-down-tray">
+                            <flux:menu.item icon="document-text" wire:click="create_pdf('estimate')" wire:loading.attr="disabled" wire:loading.class="opacity-50" wire:target="create_pdf">Export Estimate</flux:menu.item>
+                            <flux:menu.item icon="receipt-percent" wire:click="create_pdf('invoice')" wire:loading.attr="disabled" wire:loading.class="opacity-50" wire:target="create_pdf">Export Invoice</flux:menu.item>
+                            <flux:menu.item icon="wrench-screwdriver" wire:click="create_pdf('work order')" wire:loading.attr="disabled" wire:loading.class="opacity-50" wire:target="create_pdf">Export Work Order</flux:menu.item>
+                            <flux:menu.item icon="table-cells" wire:click="export_csv">Export Excel Estimate</flux:menu.item>
+                        </flux:menu.submenu>
                     </flux:menu>
                 </flux:dropdown>
             </x-slot:header_buttons>
@@ -221,5 +221,6 @@
         </flux:button>
 
         <livewire:line-items.estimate-line-item-create :estimate="$estimate"/>
+        <livewire:estimates.estimate-email />
     </div>
 </div>
