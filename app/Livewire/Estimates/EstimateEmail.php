@@ -16,7 +16,7 @@ class EstimateEmail extends Component
 
     public ?Estimate $estimate = null;
 
-    public string $to = '';
+    public array $to = [];
 
     public string $subject = '';
 
@@ -33,21 +33,8 @@ class EstimateEmail extends Component
     protected function rules(): array
     {
         return [
-            'to' => ['required', 'string', function ($attribute, $value, $fail) {
-                $emails = $this->parseRecipientInput($value);
-
-                if (empty($emails)) {
-                    $fail('Please provide at least one email address.');
-                    return;
-                }
-
-                foreach ($emails as $email) {
-                    if (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
-                        $fail("{$email} is not a valid email address.");
-                        return;
-                    }
-                }
-            }],
+            'to' => ['required', 'array', 'min:1'],
+            'to.*' => ['required', 'email'],
             'subject' => 'required|string|max:255',
             'body' => 'required|string',
             'include_estimate_pdf' => 'boolean',
@@ -68,14 +55,12 @@ class EstimateEmail extends Component
 
         $this->estimate = $estimate->fresh(['project.client.users', 'vendor']);
 
-        $recipientEmails = $this->estimate->client->users
+        $this->to = $this->estimate->client->users
             ->pluck('email')
             ->filter()
             ->unique()
             ->values()
             ->all();
-
-        $this->to = implode(', ', $recipientEmails);
 
         $this->subject = $this->estimate->vendor->name . ' | ' . $this->estimate->client->name . ' | Estimate ' . $this->estimate->project->name;
         $this->body = EstimateEmailTemplate::defaultBody($this->estimate);
@@ -131,7 +116,7 @@ class EstimateEmail extends Component
             return;
         }
 
-        $recipients = collect($this->parseRecipientInput($this->to))
+        $recipients = collect($this->to)
             ->filter()
             ->unique()
             ->values()
@@ -167,21 +152,28 @@ class EstimateEmail extends Component
             position: 'top right',
             variant: 'success',
             heading: 'Email Queued',
-            text: 'We are sending the estimate to ' . $this->to,
+            text: 'We are sending the estimate to ' . count($this->to) . ' recipient(s)',
         );
 
         $this->reset(['to', 'subject', 'body', 'include_estimate_pdf', 'include_reimbursements_pdf', 'hasReimbursements', 'estimate']);
         $this->include_estimate_pdf = true;
         $this->include_reimbursements_pdf = false;
+        $this->to = [];
     }
 
-    private function parseRecipientInput(string $value): array
+    public function getUserDisplayName(string $email): string
     {
-        return collect(explode(',', $value))
-            ->map(fn ($email) => trim($email))
-            ->filter()
-            ->values()
-            ->all();
+        if (!$this->estimate) {
+            return $email;
+        }
+
+        $user = $this->estimate->client->users->firstWhere('email', $email);
+        
+        if (!$user) {
+            return $email;
+        }
+
+        return $user->first_name . ' (' . $email . ')';
     }
 
     public function render()

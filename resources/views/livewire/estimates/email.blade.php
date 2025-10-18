@@ -6,12 +6,11 @@
     <flux:separator variant="subtle" />
 
     <form wire:submit="send" class="space-y-4">
-        <flux:input
-            wire:model.live.debounce.500ms="to"
-            type="email"
-            label="To"
-            placeholder="client@example.com"
-        />
+        <flux:pillbox wire:model="to" label="To" placeholder="Add email address..." multiple>
+            @foreach($to as $email)
+                <flux:pillbox.option :value="$email">{{ $this->getUserDisplayName($email) }}</flux:pillbox.option>
+            @endforeach
+        </flux:pillbox>
 
         <flux:input
             wire:model.live.debounce.500ms="subject"
