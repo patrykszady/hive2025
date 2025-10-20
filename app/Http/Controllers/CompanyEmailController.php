@@ -273,13 +273,8 @@ class CompanyEmailController extends Controller
 
             $companyEmail = CompanyEmail::withoutGlobalScopes()
                 ->where('email', $toEmail)
+                // ->where('grant_id', $grantId)
                 ->first();
-
-            if (! $companyEmail) {
-                $companyEmail = CompanyEmail::withoutGlobalScopes()
-                    ->where('grant_id', $grantId)
-                    ->first();
-            }
 
             if (! $companyEmail) {
                 Log::channel('nylas')->error('Unable to resolve CompanyEmail for receipt message', [
@@ -292,7 +287,7 @@ class CompanyEmailController extends Controller
 
             $folderMap = [
                 'Error' => data_get($companyEmail->api_json, 'folders.Error') ?? config('nylas.hive_receipts_error_folder_id'),
-                'Duplicate' => data_get($companyEmail->api_json, 'folders.Duplicate') ?? config('nylas.hive_receipts_duplicate_folder_id'),
+                'Duplicate' => data_get($companyEmail->api_json, 'folders.Duplicates') ?? config('nylas.hive_receipts_duplicate_folder_id'),
                 'Add' => data_get($companyEmail->api_json, 'folders.Add') ?? config('nylas.hive_receipts_need_to_add_folder_id'),
                 'Saved' => data_get($companyEmail->api_json, 'folders.Saved') ?? config('nylas.hive_receipts_saved_folder_id'),
             ];
@@ -604,7 +599,11 @@ class CompanyEmailController extends Controller
                             }
 
                             $receiptRecord = $candidate->receipts()->latest('id')->first();
+                            
+                            // If no receipt exists on the candidate, treat it as a duplicate match
+                            // (same vendor, amount, date - very likely the same expense)
                             if (!$receiptRecord) {
+                                $duplicates->push($candidate);
                                 continue;
                             }
 
@@ -702,31 +701,58 @@ class CompanyEmailController extends Controller
                         ]);
                     }
                 }else{
-                    //SAVE expense
-                    $expense = new Expense;
-                    $expense->amount = $amount;
-                    $expense->reimbursment = null;
-                    $expense->project_id = $receipt_account->project_id;
-                    $expense->distribution_id = $receipt_account->distribution_id;
-                    $expense->created_by_user_id = 0; //automated
-                    $expense->date = $date;
-                    $expense->invoice = $invoice;
-                    $expense->vendor_id = $receipt->vendor_id; //Vendor_id of vendor being Queued
-                    $expense->note = null;
-                    $expense->belongs_to_vendor_id = $receipt_account->belongs_to_vendor_id;
-                    $expense->save();
+                    // Before creating a new expense, check if this receipt is a duplicate across all expenses
+                    $existingExpenseWithDuplicate = $this->findExpenseWithDuplicateReceipt(
+                        $receipt_account->belongs_to_vendor_id,
+                        $receipt->vendor_id,
+                        $amount,
+                        $date,
+                        $ocr_receipt_data['content'],
+                        $ocr_receipt_data['fields']
+                    );
 
-                    //ATTACHMENTS
-                    $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, $message);
-
-                    if (!empty($folderMap['Saved'])) {
-                        $this->nylasService->moveEmailToFolder($messageId, $folderMap['Saved'], $grantId, $companyEmail->id);
+                    if ($existingExpenseWithDuplicate) {
+                        // Found a duplicate - attach receipt to existing expense and move to Duplicate folder
+                        $this->saveExpenseReceipt($existingExpenseWithDuplicate->id, $ocr_receipt_data, $ocr_filename, $message);
+                        
+                        if (!empty($folderMap['Duplicate'])) {
+                            $this->nylasService->moveEmailToFolder($messageId, $folderMap['Duplicate'], $grantId, $companyEmail->id);
+                        } else {
+                            Log::channel('nylas')->warning('Missing Duplicate folder configuration after detecting duplicate receipt', [
+                                'grant_id' => $grantId,
+                                'company_email_id' => $companyEmail->id,
+                                'message_id' => $messageId,
+                                'existing_expense_id' => $existingExpenseWithDuplicate->id,
+                            ]);
+                        }
                     } else {
-                        Log::channel('nylas')->warning('Missing Saved folder configuration after processing receipt', [
-                            'grant_id' => $grantId,
-                            'company_email_id' => $companyEmail->id,
-                            'message_id' => $messageId,
-                        ]);
+                        // No duplicate found - create new expense
+                        $expense = new Expense;
+                        $expense->amount = $amount;
+                        $expense->reimbursment = null;
+                        $expense->project_id = $receipt_account->project_id;
+                        $expense->distribution_id = $receipt_account->distribution_id;
+                        $expense->created_by_user_id = 0; //automated
+                        $expense->date = $date;
+                        $expense->invoice = $invoice;
+                        $expense->vendor_id = $receipt->vendor_id; //Vendor_id of vendor being Queued
+                        $expense->note = null;
+                        $expense->belongs_to_vendor_id = $receipt_account->belongs_to_vendor_id;
+                        $expense->save();
+
+                        //ATTACHMENTS
+                        $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, $message);
+
+                        // Move to Saved folder
+                        if (!empty($folderMap['Saved'])) {
+                            $this->nylasService->moveEmailToFolder($messageId, $folderMap['Saved'], $grantId, $companyEmail->id);
+                        } else {
+                            Log::channel('nylas')->warning('Missing Saved folder configuration after processing receipt', [
+                                'grant_id' => $grantId,
+                                'company_email_id' => $companyEmail->id,
+                                'message_id' => $messageId,
+                            ]);
+                        }
                     }
                 }
             } else{
@@ -1706,6 +1732,88 @@ class CompanyEmailController extends Controller
         }
         
         // No matching receipt found
+        return null;
+    }
+
+    /**
+     * Check if a receipt is a duplicate across all expenses before creating a new expense.
+     * This prevents creating orphan expenses that would immediately be detected as duplicates.
+     *
+     * @param int $belongs_to_vendor_id
+     * @param int $vendor_id
+     * @param string $amount
+     * @param string $date
+     * @param string $receipt_html
+     * @param array $receipt_items
+     * @return Expense|null Returns the existing expense if duplicate found, null otherwise
+     */
+    protected function findExpenseWithDuplicateReceipt(
+        int $belongs_to_vendor_id,
+        int $vendor_id,
+        string $amount,
+        string $date,
+        string $receipt_html,
+        array $receipt_items
+    ): ?Expense {
+        // Get candidate expenses with same vendor, amount, and date (±5 days)
+        $startDate = Carbon::parse($date)->subDays(5)->format('Y-m-d');
+        $endDate = Carbon::parse($date)->addDays(5)->format('Y-m-d');
+
+        $candidates = Expense::with('receipts')
+            ->where('belongs_to_vendor_id', $belongs_to_vendor_id)
+            ->where('vendor_id', $vendor_id)
+            ->whereNull('deleted_at')
+            ->where('amount', $amount)
+            ->whereBetween('date', [$startDate, $endDate])
+            ->get();
+
+        if ($candidates->isEmpty()) {
+            return null;
+        }
+
+        // Build signature for the new receipt
+        $newItemsSignature = $this->buildItemsSignature($receipt_items ?? []);
+        $newInvoice = trim((string)($receipt_items['invoice_number'] ?? ''));
+
+        foreach ($candidates as $candidate) {
+            $existingReceipts = $candidate->receipts;
+
+            if ($existingReceipts->isEmpty()) {
+                // Candidate has no receipts - this is a match
+                // (same vendor, amount, date - very likely the same expense)
+                return $candidate;
+            }
+
+            foreach ($existingReceipts as $existingReceipt) {
+                // Check for exact HTML content match
+                if ($existingReceipt->receipt_html === $receipt_html) {
+                    return $candidate;
+                }
+
+                // Check for invoice number match if both have invoice numbers
+                if ($newInvoice !== '' && 
+                    isset($existingReceipt->receipt_items['invoice_number']) &&
+                    $existingReceipt->receipt_items['invoice_number'] === $newInvoice) {
+                    return $candidate;
+                }
+
+                // Check for line items similarity
+                if ($existingReceipt->receipt_items) {
+                    $existingItemsSignature = $this->buildItemsSignature($existingReceipt->receipt_items);
+
+                    // If line items overlap significantly, check the total amount
+                    if ($this->itemsOverlap($newItemsSignature, $existingItemsSignature)) {
+                        $newTotal = $receipt_items['total'] ?? null;
+                        $existingTotal = $existingReceipt->receipt_items['total'] ?? null;
+
+                        if ($newTotal && $existingTotal && abs((float)$newTotal - (float)$existingTotal) < 0.01) {
+                            return $candidate;
+                        }
+                    }
+                }
+            }
+        }
+
         return null;
     }
 }
