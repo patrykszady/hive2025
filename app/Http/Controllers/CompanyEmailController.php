@@ -297,14 +297,21 @@ class CompanyEmailController extends Controller
                 'Saved' => data_get($companyEmail->api_json, 'folders.Saved') ?? config('nylas.hive_receipts_saved_folder_id'),
             ];
 
-            // Find Receipt where from_address = $fromEmail and from_subject = $subject
-            // Exclude receipts where receipt_type is null
-            $receipt = Receipt::whereNotNull('receipt_type')
-                ->where('from_address', $fromEmail)
-                ->where('from_subject', $subject)
-                ->first();
+            // Find Receipt using intelligent matching:
+            // 1. from_address can be wildcard like "@stripe.com" (matches any email ending with @stripe.com)
+            // 2. from_subject can be partial match (e.g., "AT&T payment processed" matches "AT&T payment processed for account ending in 1733")
+            $receipt = $this->findMatchingReceipt($fromEmail, $subject);
 
-            if ($receipt) {
+            // If no matching receipt found, move to add_manually folder
+            if (!$receipt) {
+                $this->nylasService->moveEmailToFolder($messageId, $folderMap['Add'], $grantId, $companyEmail->id);
+                    Log::channel('nylas')->info('No matching receipt found - moved to add_manually folder', [
+                        'message_id' => $messageId,
+                        'from_email' => $fromEmail,
+                        'subject' => $subject,
+                    ]);
+                continue;
+            } elseif ($receipt) {
                 $string = $message['body'];
 
                 // Check if the body contains HTML
@@ -722,9 +729,10 @@ class CompanyEmailController extends Controller
                         ]);
                     }
                 }
+            } else{
+                continue;
             }
-        }
-        
+        }        
     }
 
     public function fetchAutoReceipts()
@@ -1139,7 +1147,43 @@ class CompanyEmailController extends Controller
         $ocrCompact    = str_replace(' ', '', $ocrNormalized); // e.g. "thehomedepot"
         $ocrTokens     = $ocrNormalized !== '' ? explode(' ', $ocrNormalized) : [];
 
-        // Build dynamic alias map from vendor_transactions.desc
+        // STEP 1: Check for EXACT or VERY HIGH similarity matches with Vendor.business_name
+        // This is the primary, most authoritative matching mechanism
+        foreach ($vendors as $vendor) {
+            $vendorName = (string) $vendor->business_name;
+            $vendorNorm = $normalize($vendorName);
+            $vendorCompact = str_replace(' ', '', $vendorNorm);
+            
+            // Exact match (normalized)
+            if ($ocrNormalized !== '' && $ocrNormalized === $vendorNorm) {
+                return $vendor;
+            }
+            
+            // Exact match (compact - no spaces)
+            if ($ocrCompact !== '' && $ocrCompact === $vendorCompact) {
+                return $vendor;
+            }
+            
+            // Very high similarity (95%+) on normalized names
+            if ($ocrNormalized !== '' && $vendorNorm !== '') {
+                $percentA = 0.0;
+                similar_text($ocrNormalized, $vendorNorm, $percentA);
+                if ($percentA >= 95.0) {
+                    return $vendor;
+                }
+            }
+            
+            // Very high similarity (95%+) on compact names
+            if ($ocrCompact !== '' && $vendorCompact !== '') {
+                $percentB = 0.0;
+                similar_text($ocrCompact, $vendorCompact, $percentB);
+                if ($percentB >= 95.0) {
+                    return $vendor;
+                }
+            }
+        }
+
+        // Build vendor_transactions map for BOTH direct pattern matching AND fuzzy learning
         // Cache per unique set of vendor IDs for this request to avoid repeat queries.
         $vendorList = is_array($vendors) ? $vendors : (is_iterable($vendors) ? $vendors : []);
         $vendorIds = [];
@@ -1151,12 +1195,14 @@ class CompanyEmailController extends Controller
         sort($vendorIds);
         $aliasCacheKey = implode(',', $vendorIds);
         static $aliasCache = [];
+        static $rawAliasCache = []; // Cache raw patterns with options for direct matching
+        
         if (!isset($aliasCache[$aliasCacheKey])) {
             $aliasRows = [];
             if (!empty($vendorIds)) {
                 try {
                     $aliasRows = DB::table('vendor_transactions')
-                        ->select(['vendor_id', DB::raw('`desc` as pattern')])
+                        ->select(['vendor_id', DB::raw('`desc` as pattern'), 'options'])
                         ->whereIn('vendor_id', $vendorIds)
                         ->get();
                 } catch (\Throwable $e) {
@@ -1166,19 +1212,77 @@ class CompanyEmailController extends Controller
             }
 
             $map = [];
+            $rawMap = [];
             foreach ($aliasRows as $row) {
-                $pat = $normalize((string) ($row->pattern ?? ''));
-                if ($pat === '') {
+                $vid = (int) $row->vendor_id;
+                $pattern = (string) ($row->pattern ?? '');
+                
+                if ($pattern === '') {
                     continue;
                 }
-                $map[(int) $row->vendor_id][] = [
+                
+                // Store raw pattern for direct matching
+                $rawMap[$vid][] = [
+                    'pattern' => $pattern,
+                    'options' => $row->options ?? null,
+                ];
+                
+                // Store normalized pattern for fuzzy matching
+                $pat = $normalize($pattern);
+                $map[$vid][] = [
                     'norm' => $pat,
                     'compact' => str_replace(' ', '', $pat),
                 ];
             }
             $aliasCache[$aliasCacheKey] = $map;
+            $rawAliasCache[$aliasCacheKey] = $rawMap;
         }
         $aliasMap = $aliasCache[$aliasCacheKey];
+        $rawAliasMap = $rawAliasCache[$aliasCacheKey];
+
+        // STEP 2: Check for pattern matches using vendor_transactions.desc
+        // This handles transaction-specific patterns like "MNRD-MOUN" → Menards
+        foreach ($vendors as $vendor) {
+            $vid = (int) ($vendor->id ?? 0);
+            if (!$vid || !isset($rawAliasMap[$vid])) {
+                continue;
+            }
+            
+            foreach ($rawAliasMap[$vid] as $aliasData) {
+                $pattern = $aliasData['pattern'];
+                $options = $aliasData['options'];
+                
+                // Parse regex options (e.g., "/i" for case-insensitive)
+                $modifiers = 'i'; // Default to case-insensitive
+                if ($options && is_string($options)) {
+                    // Remove quotes and extract modifiers
+                    $cleaned = trim($options, '"\'');
+                    if (preg_match('/^\/([a-z]*)$/i', $cleaned, $m)) {
+                        $modifiers = $m[1];
+                    }
+                }
+                
+                // The pattern might already be a regex or a plain string
+                // Try to detect if it's already a regex pattern by checking for regex meta-characters
+                $hasRegexChars = preg_match('/[\\\\.*+?^${}()|[\]]/', $pattern);
+                
+                if ($hasRegexChars) {
+                    // Pattern contains regex chars - use as-is (it's already a regex pattern)
+                    // Just wrap in delimiters and add modifiers
+                    $regex = '/' . $pattern . '/' . $modifiers;
+                } else {
+                    // Plain string pattern - escape it for safe regex use
+                    $regex = '/' . preg_quote($pattern, '/') . '/' . $modifiers;
+                }
+                
+                // Check if OCR text matches this pattern
+                if (@preg_match($regex, $ocrName)) {
+                    return $vendor;
+                }
+            }
+        }
+        
+        // STEP 3: Fall back to intelligent fuzzy matching if no direct match found
 
         $bestVendor = null;
         $bestScore = -INF;
@@ -1199,16 +1303,68 @@ class CompanyEmailController extends Controller
             }
             $score = max($percentA, $percentB);
 
-            // Token overlap bonus: each overlapping token adds weight
+            // Token overlap analysis: detect distinguishing differences
             if (!empty($ocrTokens) && !empty($vendorTokens)) {
                 $overlap = array_intersect($ocrTokens, $vendorTokens);
-                if (!empty($overlap)) {
-                    // Give a small boost per exact token match
+                $ocrUnique = array_diff($ocrTokens, $vendorTokens);
+                $vendorUnique = array_diff($vendorTokens, $ocrTokens);
+                
+                // Build dynamic filler words from vendor_transactions patterns
+                // This helps us understand which parts of names are generic vs specific
+                $fillerWords = ['the', 'inc', 'llc', 'corp', 'ltd', 'co', 'company', 'and', 'of', 'a', 'an'];
+                
+                // If we have vendor_transactions for this vendor, use them to identify filler words
+                $vid = (int) ($vendor->id ?? 0);
+                if ($vid && isset($aliasMap[$vid])) {
+                    // Extract all words from vendor_transactions patterns for this vendor
+                    $aliasWords = [];
+                    foreach ($aliasMap[$vid] as $alias) {
+                        $words = explode(' ', $alias['norm']);
+                        foreach ($words as $word) {
+                            if (strlen($word) > 1) {
+                                $aliasWords[] = $word;
+                            }
+                        }
+                    }
+                    
+                    // Find common words that appear in multiple aliases - these are likely filler/generic
+                    $aliasCounts = array_count_values($aliasWords);
+                    $vendorNameWords = explode(' ', $vendorNorm);
+                    
+                    // If a word appears in aliases but not in the main vendor name,
+                    // or appears very frequently across aliases, it's likely filler
+                    foreach ($aliasCounts as $word => $count) {
+                        if (!in_array($word, $vendorNameWords) || $count > 1) {
+                            $fillerWords[] = $word;
+                        }
+                    }
+                }
+                
+                $fillerWords = array_unique($fillerWords);
+                
+                // Remove filler words from unique sets
+                $ocrSignificant = array_diff($ocrUnique, $fillerWords);
+                $vendorSignificant = array_diff($vendorUnique, $fillerWords);
+                
+                // Calculate overlap ratio - what percentage of unique significant words match
+                // Use the smaller set as the denominator to be more strict
+                $minTokens = min(count($ocrTokens), count($vendorTokens));
+                $overlapRatio = $minTokens > 0 ? count($overlap) / $minTokens : 0;
+                
+                // If both have significant unique words AND low overlap ratio, it's likely different businesses
+                // This catches "Breckenridge Market" vs "Breckenridge Resort" dynamically
+                // "Chicago Pizza Kitchen" vs "Chicago Pizza Delivery" - both have unique identifiers
+                if (!empty($ocrSignificant) && !empty($vendorSignificant) && $overlapRatio < 0.75) {
+                    // Both have distinguishing words that don't match, and overall similarity is low
+                    // This indicates different businesses sharing common words
+                    $score -= 40;
+                } elseif (!empty($overlap)) {
+                    // Give a small boost per exact token match when there's good overlap
                     $score += min(20, count($overlap) * 5);
                 }
             }
 
-            // Dynamic alias boost based on vendor_transactions entries
+            // Dynamic alias boost based on vendor_transactions normalized patterns (substring matching)
             $vid = (int) ($vendor->id ?? 0);
             if ($vid && isset($aliasMap[$vid])) {
                 foreach ($aliasMap[$vid] as $alias) {
@@ -1485,5 +1641,71 @@ class CompanyEmailController extends Controller
         }
         
         return $messageLimitDate;
+    }
+
+    /**
+     * Find matching receipt using intelligent matching rules:
+     * 1. from_address can be wildcard like "@stripe.com" (matches any email ending with domain)
+     * 2. from_subject can be partial match (receipt subject must be contained in message subject)
+     * 
+     * @param string $messageFromEmail The email address from the incoming message
+     * @param string $messageSubject The subject line from the incoming message
+     * @return Receipt|null The matching receipt or null if none found
+     */
+    protected function findMatchingReceipt(string $messageFromEmail, string $messageSubject): ?Receipt
+    {
+        // Get all receipts with non-null receipt_type and non-null from_address
+        $receipts = Receipt::whereNotNull('receipt_type')
+            ->where('receipt_type', '!=', 0)
+            ->whereNotNull('from_address')
+            ->where('from_address', '!=', '')
+            ->get();
+        
+        foreach ($receipts as $receipt) {
+            $receiptFromAddress = $receipt->from_address ?? '';
+            $receiptFromSubject = $receipt->from_subject ?? '';
+            
+            // Skip if receipt has no from_address
+            if (empty($receiptFromAddress)) {
+                continue;
+            }
+            
+            // Check from_address matching
+            $emailMatches = false;
+            
+            if (str_starts_with($receiptFromAddress, '@')) {
+                // Wildcard domain match (e.g., "@stripe.com" matches "invoice@stripe.com")
+                $domain = $receiptFromAddress; // includes the @
+                $emailMatches = str_ends_with($messageFromEmail, $domain);
+            } else {
+                // Exact email match (case-insensitive)
+                $emailMatches = strcasecmp($receiptFromAddress, $messageFromEmail) === 0;
+            }
+            
+            // If email doesn't match, skip to next receipt
+            if (!$emailMatches) {
+                continue;
+            }
+            
+            // Check from_subject matching
+            $subjectMatches = false;
+            
+            if (empty($receiptFromSubject)) {
+                // If receipt has no subject requirement, email match is sufficient
+                $subjectMatches = true;
+            } else {
+                // Partial match: receipt subject must be contained in message subject (case-insensitive)
+                // Example: "AT&T payment processed for account ending in" matches "AT&T payment processed for account ending in 1733"
+                $subjectMatches = stripos($messageSubject, $receiptFromSubject) !== false;
+            }
+            
+            // If both email and subject match, return this receipt
+            if ($emailMatches && $subjectMatches) {
+                return $receipt;
+            }
+        }
+        
+        // No matching receipt found
+        return null;
     }
 }

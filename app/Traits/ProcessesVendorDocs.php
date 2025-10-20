@@ -37,12 +37,43 @@ trait ProcessesVendorDocs
         try {
             // 1. Extract OCR data
             $insuranceInfo = $this->extractDataFromFile($normalizedFilePath, $docType);
-
-            // 2. Resolve vendor IDs
+            
+            // 2. Validate required fields have sufficient confidence and data
+            $requiredFields = [
+                'insured_name' => 'Insured Name',
+                'holder_name' => 'Certificate Holder Name',
+            ];
+            
+            $missingFields = [];
+            foreach ($requiredFields as $fieldKey => $fieldLabel) {
+                $field = $insuranceInfo[$fieldKey] ?? null;
+                $hasValue = !empty($field['valueString'] ?? '');
+                $hasConfidence = ($field['confidence'] ?? 0) >= 0.5;
+                
+                if (!$hasValue || !$hasConfidence) {
+                    $missingFields[] = $fieldLabel . ' (confidence: ' . ($field['confidence'] ?? 0) . ')';
+                }
+            }
+            
+            // If required fields are missing, send to manual review
+            if (!empty($missingFields)) {
+                Log::channel('vendor_docs')->warning('Missing or low confidence required fields - sending to manual review', [
+                    'file' => $normalizedFilePath,
+                    'missing_fields' => $missingFields,
+                    'message_id' => $messageId,
+                ]);
+                
+                if (isset($messageId) && isset($grantId)) {
+                    $this->moveEmailBasedOnMatchingResults($messageId, $grantId, null, null);
+                }
+                return false;
+            }
+            
+            // 3. Resolve vendor IDs
             $calculatedVendorId = $this->resolveVendorId($insuranceInfo, 'insured_name', 'insured_address');
             $calculatedBelongsToVendorId = $this->resolveVendorId($insuranceInfo, 'holder_name', 'holder_address');
 
-            // 3. Validate vendor IDs
+            // 4. Validate vendor IDs
             if (($vendorId && $vendorId != $calculatedVendorId) || ($belongsToVendorId && $belongsToVendorId != $calculatedBelongsToVendorId)) {
                 Log::channel('vendor_docs')->warning('Vendor ID mismatch', [
                     'file' => $normalizedFilePath,
@@ -54,11 +85,11 @@ trait ProcessesVendorDocs
                 return false;
             }
 
-            // 4. Use calculated or provided IDs
+            // 5. Use calculated or provided IDs
             $matchedVendorId = $calculatedVendorId ?: $vendorId;
             $matchedBelongsToVendorId = $calculatedBelongsToVendorId ?: $belongsToVendorId;
 
-            // 5. Check if we have valid vendor IDs before attempting policy processing
+            // 6. Check if we have valid vendor IDs before attempting policy processing
             if (is_null($matchedVendorId) || is_null($matchedBelongsToVendorId)) {
                 Log::channel('vendor_docs')->error('Unable to match vendor information', [
                     'file' => $normalizedFilePath,
@@ -71,10 +102,10 @@ trait ProcessesVendorDocs
                 return false;
             }
 
-            // 6. Process agent if available
+            // 7. Process agent if available
             $agent = $this->processAgent($insuranceInfo);
 
-            // 7. Generate permanent filename and copy file
+            // 8. Generate permanent filename and copy file
             $fileName = "{$matchedBelongsToVendorId}-{$matchedVendorId}-" . now()->format('Y-m-d-H-i-s') . ".{$docType}";
             $newFilePath = "vendor_docs/{$fileName}";
 
@@ -87,7 +118,7 @@ trait ProcessesVendorDocs
                 return false;
             }
 
-            // 8. Process all policy types and gather validation results
+            // 9. Process all policy types and gather validation results
             $policyProcessingResult = $this->processAllPolicyTypes(
                 $insuranceInfo,
                 $fileName,
@@ -108,7 +139,7 @@ trait ProcessesVendorDocs
                 }
             }
 
-            // 9. Cleanup
+            // 10. Cleanup
             if ($newPolicyCreated) {
                 Storage::disk('files')->delete($normalizedFilePath);
                 return true;
@@ -277,10 +308,17 @@ trait ProcessesVendorDocs
     //Resolve the vendor ID by name with a fallback to address.
     protected function resolveVendorId(array $insuranceInfo, $nameKey, $addressKey)
     {
-        $calculatedId = $this->matchBusinessNameAndReturnId($insuranceInfo[$nameKey]['valueString'] ?? '');
-        if (empty($calculatedId) && isset($insuranceInfo[$addressKey]['valueString'])) {
-            $calculatedId = $this->fallbackToAddress($insuranceInfo[$addressKey]['valueString']);
+        $name = $insuranceInfo[$nameKey]['valueString'] ?? '';
+        $address = $insuranceInfo[$addressKey]['valueString'] ?? '';
+        
+        // Try to match by business name first (with address for disambiguation)
+        $calculatedId = $this->matchBusinessNameAndReturnId($name, $address);
+        
+        // Fallback to address matching if name matching fails
+        if (empty($calculatedId) && !empty($address)) {
+            $calculatedId = $this->fallbackToAddress($address);
         }
+        
         return $calculatedId;
     }
 
@@ -290,7 +328,7 @@ trait ProcessesVendorDocs
             return null;
         }
 
-        $vendors = Vendor::all();
+        $vendors = Vendor::withoutGlobalScopes()->get();
         $bestMatch = null;
         $highestScore = 0;
         $threshold = 0.7; // Minimum similarity score (0-1)
@@ -302,10 +340,11 @@ trait ProcessesVendorDocs
 
             $score = $this->calculateSimilarityScore($businessName, $vendor->business_name);
 
-            // Factor in address if available
+            // Factor in address if available - this helps differentiate similar names
             if (!empty($businessAddress) && !empty($vendor->business_address)) {
                 $addressScore = $this->calculateSimilarityScore($businessAddress, $vendor->business_address);
-                $score = ($score * 0.7) + ($addressScore * 0.3);
+                // Weight name heavily (85%) but use address to break ties (15%)
+                $score = ($score * 0.85) + ($addressScore * 0.15);
             }
 
             if ($score > $highestScore && $score >= $threshold) {
@@ -328,6 +367,20 @@ trait ProcessesVendorDocs
             return 1.0;
         }
 
+        // Extract key words (non-common business words)
+        $words1 = array_filter(explode(' ', $str1), function($word) {
+            return strlen($word) > 2 && !in_array($word, ['inc', 'llc', 'corp', 'ltd']);
+        });
+        $words2 = array_filter(explode(' ', $str2), function($word) {
+            return strlen($word) > 2 && !in_array($word, ['inc', 'llc', 'corp', 'ltd']);
+        });
+
+        // Check for unique distinguishing words - if one has a word the other doesn't, penalize
+        $uniqueWords1 = array_diff($words1, $words2);
+        $uniqueWords2 = array_diff($words2, $words1);
+        $totalWords = count($words1) + count($words2);
+        $uniqueWordPenalty = ($totalWords > 0) ? (count($uniqueWords1) + count($uniqueWords2)) / $totalWords : 0;
+
         // Calculate multiple similarity metrics
         $similarity = 0;
         similar_text($str1, $str2, $similarity);
@@ -343,8 +396,13 @@ trait ProcessesVendorDocs
             $substringScore = 0.8;
         }
 
-        // Return the highest score
-        return max($similarTextScore, $levenshteinScore, $substringScore);
+        // Get the best base score
+        $baseScore = max($similarTextScore, $levenshteinScore, $substringScore);
+        
+        // Apply penalty for unique words (e.g., "quality" vs "hardwood")
+        $finalScore = $baseScore * (1 - ($uniqueWordPenalty * 0.5));
+
+        return $finalScore;
     }
 
     private function normalizeString($string)
