@@ -63,10 +63,10 @@ class PaymentForm extends Form
         $lastPayment = null;
         foreach ($projects as $index => $project) {
             $payload = [
-                'amount' => $project['amount'],
+                'amount' => (float) $project['amount'],
                 'project_id' => $project['id'],
                 'date' => $this->date,
-                'reference' => $this->invoice,
+                'reference' => (string) $this->invoice,
                 'belongs_to_vendor_id' => auth()->user()->vendor->id,
                 'note' => $this->note,
                 'created_by_user_id' => auth()->user()->id,
@@ -105,10 +105,10 @@ class PaymentForm extends Form
         if (count($selectedProjectIds) === 1) {
             $proj = $selected->first();
             $this->payment->fill([
-                'amount' => $proj['amount'],
+                'amount' => (float) $proj['amount'],
                 'project_id' => $proj['id'],
                 'date' => $this->date,
-                'reference' => $this->invoice,
+                'reference' => (string) $this->invoice,
                 'note' => $this->note,
                 'belongs_to_vendor_id' => auth()->user()->vendor->id,
                 'parent_client_payment_id' => null,
@@ -119,10 +119,10 @@ class PaymentForm extends Form
         // Update existing or create new payments for selected projects
         foreach ($selected as $proj) {
             $payload = [
-                'amount' => $proj['amount'],
+                'amount' => (float) $proj['amount'],
                 'project_id' => $proj['id'],
                 'date' => $this->date,
-                'reference' => $this->invoice,
+                'reference' => (string) $this->invoice,
                 'note' => $this->note,
                 'belongs_to_vendor_id' => auth()->user()->vendor->id,
             ];

@@ -430,6 +430,18 @@ class TransactionController extends Controller
 
         $transaction->owner = $new_transaction['account_owner'];
         $transaction->details = $new_transaction;
+        
+        // Auto-assign vendor based on Plaid merchant data if available and not already set
+        // Only do this for new transactions or when updating without a vendor
+        if (empty($transaction->vendor_id) && !empty($transaction->plaid_merchant_name)) {
+            $vendors = Vendor::withoutGlobalScopes()->where('business_type', 'Retail')->get();
+            $vendor_match = app(\App\Http\Controllers\CompanyEmailController::class)->fuzzyMatchVendor($transaction->plaid_merchant_name, $vendors);
+            
+            if ($vendor_match) {
+                $transaction->vendor_id = $vendor_match->id;
+            }
+        }
+        
         $transaction->save();
     }
 
@@ -708,8 +720,10 @@ class TransactionController extends Controller
         // Extract unique plaid_ins_id values from the related Bank
         $bankInsIds = $bankAccounts->pluck('bank.plaid_ins_id')->unique()->toArray();
 
-        $transactions = Transaction::TransactionsSinVendor()->whereIn('bank_account_id', $bankAccountIds)->get()->groupBy('plaid_merchant_name');
         $vendors = Vendor::withoutGlobalScopes()->where('business_type', 'Retail')->get();
+
+        // PART 1: Process transactions WITHOUT vendors (original logic)
+        $transactions = Transaction::TransactionsSinVendor()->whereIn('bank_account_id', $bankAccountIds)->get()->groupBy('plaid_merchant_name');
 
         foreach ($transactions as $merchant_name => $merchant_transactions) {
             //find vendor where vendor->business_name is contained in $merchant_name
@@ -720,26 +734,53 @@ class TransactionController extends Controller
                     $transaction->vendor_id = $vendor_match->id;
                     $transaction->save();
                 }
-                //USED IN MULTIPLE OF PLACES MatchVendor@store, ExpesnesForm@createExpenseFromTransaction, below in CHECK VendorTransaction code in this function as well
-                //add vendor if vendor is not part of the currently logged in vendor
-                // if (! $transaction->bank_account->vendor->vendors->contains($transaction->vendor_id)) {
-                //     $transaction->bank_account->vendor->vendors()->attach($transaction->vendor_id);
-                // }
-            }else{
+            } else {
                 continue;
-                // $vendor_transaction = VendorTransaction::whereNull('deposit_check')->where('desc', $merchant_name)->first();
-                // if($vendor_transaction){
-                //     foreach ($merchant_transactions as $key => $transaction) {
-                //         dd(strtolower($transaction->plaid_merchant_description) === strtolower($merchant_name));
-                //         dd($transaction);
-                //         $transaction->vendor_id = $vendor_transaction->vendor_id;
-                //         $transaction->save();
-                //     }
+            }
+        }
 
-                    // if (! $transaction->bank_account->vendor->vendors->contains($transaction->vendor_id)) {
-                    //     $transaction->bank_account->vendor->vendors()->attach($transaction->vendor_id);
-                    // }
-                // }
+        // PART 2: Re-validate transactions WITH vendors where plaid_merchant_name doesn't match assigned vendor
+        // Get transactions with vendors assigned, from recent period
+        $transactionsWithVendor = Transaction::withoutGlobalScopes()
+            ->whereNotNull('vendor_id')
+            ->whereNotNull('plaid_merchant_name')
+            ->whereNull('deleted_at')
+            ->whereNull('check_number')
+            ->whereNull('deposit')
+            ->whereDate('transaction_date', '>=', now()->subMonths(6))
+            ->whereIn('bank_account_id', $bankAccountIds)
+            ->with('vendor')
+            ->get();
+
+        foreach ($transactionsWithVendor as $transaction) {
+            // Skip if plaid_merchant_name is empty
+            if (empty($transaction->plaid_merchant_name)) {
+                continue;
+            }
+
+            // Check if the assigned vendor's name matches the plaid merchant name
+            $vendorName = strtolower($transaction->vendor->business_name);
+            $plaidMerchantName = strtolower($transaction->plaid_merchant_name);
+
+            // If vendor name is NOT contained in plaid merchant name and vice versa, re-validate
+            if (stripos($plaidMerchantName, $vendorName) === false && stripos($vendorName, $plaidMerchantName) === false) {
+                // Try to find correct vendor using fuzzy match
+                $correctVendor = app(\App\Http\Controllers\CompanyEmailController::class)->fuzzyMatchVendor($transaction->plaid_merchant_name, $vendors);
+
+                // Only update if we found a different vendor match
+                if ($correctVendor && $correctVendor->id !== $transaction->vendor_id) {
+                    $transaction->vendor_id = $correctVendor->id;
+                    $transaction->save();
+
+                    Log::channel('plaid_adds')->info('Corrected vendor mismatch', [
+                        'transaction_id' => $transaction->id,
+                        'old_vendor_id' => $transaction->vendor_id,
+                        'old_vendor_name' => $vendorName,
+                        'new_vendor_id' => $correctVendor->id,
+                        'new_vendor_name' => $correctVendor->business_name,
+                        'plaid_merchant_name' => $transaction->plaid_merchant_name,
+                    ]);
+                }
             }
         }
 

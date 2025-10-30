@@ -1624,7 +1624,7 @@ class CompanyEmailController extends Controller
         }
 
         $grantId = $companyEmail->grant_id;
-        
+
         // Build receipt criteria for filtering
         $receiptCriteria = $this->buildReceiptCriteria($companyEmail->receipts);
         if (empty($receiptCriteria)) {
@@ -1759,7 +1759,8 @@ class CompanyEmailController extends Controller
         $startDate = Carbon::parse($date)->subDays(5)->format('Y-m-d');
         $endDate = Carbon::parse($date)->addDays(5)->format('Y-m-d');
 
-        $candidates = Expense::with('receipts')
+        $candidates = Expense::withoutGlobalScopes()
+            ->with('receipts')
             ->where('belongs_to_vendor_id', $belongs_to_vendor_id)
             ->where('vendor_id', $vendor_id)
             ->whereNull('deleted_at')

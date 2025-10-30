@@ -21,10 +21,10 @@ class VendorDocsCard extends Component
     public function render()
     {
         $this->authorize('create', VendorDoc::class);
-        $this->vendor_docs = $this->vendor->vendor_docs()->orderBy('expiration_date', 'DESC')->with('agent')->get()->groupBy('type')->toBase();
+        $this->vendor_docs = $this->vendor->vendor_docs()->orderBy('expiration_date', 'DESC')->with('agent')->get();
 
-        foreach ($this->vendor_docs as $type_certificates) {
-            if ($type_certificates->first()->expiration_date <= today()) {
+        foreach ($this->vendor_docs as $doc) {
+            if ($doc->expiration_date <= today()) {
                 $this->vendor->expired_docs = true;
             }
         }

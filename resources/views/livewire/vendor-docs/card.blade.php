@@ -33,24 +33,23 @@
             </flux:table.columns>
 
             <flux:table.rows>
-                @foreach($vendor_docs as $doc_index => $doc)
-                    <flux:table.row :key="$doc_index">
+                @foreach($vendor_docs as $doc)
+                    <flux:table.row :key="$doc->id">
                         <flux:table.cell variant="strong">
                             <a
-                                href="{{ route('expenses.original_receipt', ['vendor_docs', $doc->first()->doc_filename]) }}"
+                                href="{{ route('expenses.original_receipt', ['vendor_docs', $doc->doc_filename]) }}"
                                 target="_blank"
                                 >
-                                {{$doc->first()->type}}
+                                {{$doc->type}}
                             </a>
                         </flux:table.cell>
                         <flux:table.cell>
-                            <flux:badge size="sm" :color="$doc->first()->expiration_date > today() ? 'green' : 'red'" inset="top bottom">
-                                {{$doc->first()->expiration_date->format('m/d/Y')}}
+                            <flux:badge size="sm" :color="$doc->expiration_date > today() ? 'green' : 'red'" inset="top bottom">
+                                {{$doc->expiration_date->format('m/d/Y')}}
                             </flux:badge>
                         </flux:table.cell>
-                        <flux:table.cell>{{$doc->first()->number}}</flux:table.cell>
+                        <flux:table.cell>{{$doc->number}}</flux:table.cell>
                     </flux:table.row>
-                    {{-- <flux:badge size="sm" :color="$doc->first()->expiration_date > today() ? 'green' : 'red'" inset="top bottom">{{$doc->first()->expiration_date > today() ? 'Active' : 'Expired'}}</flux:badge> --}}
                 @endforeach
             </flux:table.rows>
         </flux:table>
