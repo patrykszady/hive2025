@@ -252,12 +252,12 @@ class ExpenseCreate extends Component
                 $check_type = 'Check';
             }
 
-            $this->form->bank_account_id = $transaction->bank_account_id;
-            $this->form->check_type = $check_type;
+            $this->bank_account_id = $transaction->bank_account_id;
+            $this->check_type = $check_type;
 
             //2/18/2023 dont allow changes to $this->check if coming from a transaction...
             if ($check_type === 'Check') {
-                $this->form->check_number = $transaction->check_number;
+                $this->check_number = $transaction->check_number;
             }
         }
 

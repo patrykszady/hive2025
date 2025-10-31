@@ -567,14 +567,71 @@ class CompanyEmailController extends Controller
                 //1-18-2023 | 9/30/2023 NEED TO ACCOUNT FOR SAME VENDOR, AMOUNT, AND DATE being saved multiple of times
                 //maybe by adding date_TIME to 'date'? or checking time in the expense_receipt_data json?
 
-                // Prefer matching by invoice number when available to avoid
-                // false positives on same-day/same-amount receipts.
+                // Match on invoice number + amount + date range to avoid false positives
+                // (invoice numbers can repeat across different transactions at same vendor)
                 $invoice = isset($invoice) ? trim((string) $invoice) : '';
+                
+                // Use ±5 day window for date matching to handle slight variations
+                $duplicate_start_date = Carbon::parse($date)->subDays(5)->format('Y-m-d');
+                $duplicate_end_date = Carbon::parse($date)->addDays(5)->format('Y-m-d');
+                
                 if ($invoice !== '') {
-                    $duplicates = Expense::where('belongs_to_vendor_id', $receipt_account->belongs_to_vendor_id)
+                    // When invoice exists, require invoice + amount + date range match
+                    $duplicates = Expense::with('receipts')
+                        ->where('belongs_to_vendor_id', $receipt_account->belongs_to_vendor_id)
                         ->where('vendor_id', $receipt->vendor_id)
                         ->where('invoice', $invoice)
+                        ->where('amount', $amount)
+                        ->whereBetween('date', [$duplicate_start_date, $duplicate_end_date])
+                        ->whereNull('deleted_at')
                         ->get();
+                    
+                    // Apply same intelligent filtering as non-invoice path
+                    if ($duplicates->isNotEmpty()) {
+                        $currentItemsSig = $this->buildItemsSignature($ocr_receipt_data['fields'] ?? []);
+                        $currentTime = $this->extractReceiptTime($ocr_receipt_data['content'] ?? '', $date);
+                        
+                        $filteredDuplicates = collect();
+                        foreach ($duplicates as $candidate) {
+                            $receiptRecord = $candidate->receipts()->latest('id')->first();
+                            
+                            // If no receipt exists, treat as duplicate
+                            if (!$receiptRecord) {
+                                $filteredDuplicates->push($candidate);
+                                continue;
+                            }
+                            
+                            // Check items and time similarity
+                            $storedFields = json_decode(json_encode($receiptRecord->receipt_items), true) ?? [];
+                            $storedItemsSig = $this->buildItemsSignature($storedFields ?? []);
+                            $itemsOverlap = $this->itemsOverlap($currentItemsSig, $storedItemsSig);
+                            
+                            if (!$itemsOverlap) {
+                                continue;
+                            }
+                            
+                            // Time equality check
+                            $candidateDate = $candidate->date instanceof \Carbon\Carbon
+                                ? $candidate->date->toDateString()
+                                : (is_string($candidate->date) ? $candidate->date : null);
+                            
+                            $storedTime = $this->extractReceiptTime($receiptRecord->receipt_html ?? '', $candidateDate);
+                            
+                            $timeEqual = false;
+                            if ($currentTime && $storedTime) {
+                                $timeEqual = $currentTime->equalTo($storedTime) || $currentTime->format('H:i') === $storedTime->format('H:i');
+                                if (!$timeEqual) {
+                                    continue;
+                                }
+                            }
+                            
+                            if ($itemsOverlap || $timeEqual) {
+                                $filteredDuplicates->push($candidate);
+                            }
+                        }
+                        
+                        $duplicates = $filteredDuplicates;
+                    }
                 } else {
                     // Candidate pool by amount + date (eager-load receipts to avoid N+1)
                     $candidates = Expense::with('receipts')
@@ -582,7 +639,7 @@ class CompanyEmailController extends Controller
                         ->where('vendor_id', $receipt->vendor_id)
                         ->whereNull('deleted_at')
                         ->where('amount', $amount)
-                        ->where('date', $date)
+                        ->whereBetween('date', [$duplicate_start_date, $duplicate_end_date])
                         ->get();
 
                     $duplicates = collect();
@@ -642,45 +699,40 @@ class CompanyEmailController extends Controller
                     }
                 }
 
+                dd($duplicates);
                 if ($duplicates->isNotEmpty()) {
-                    // Choose the best matching duplicate.
-                    if ($invoice !== '') {
-                        // With invoice, prefer the closest date to the OCR date.
-                        $duplicate_expense = $duplicates->sortBy(function ($d) use ($date) {
-                            return abs(Carbon::parse($d->date)->diffInDays(Carbon::parse($date)));
-                        })->first();
-                    } else {
-                        // Without invoice: if we captured time for current receipt, prefer identical-time matches.
-                        $chosen = $duplicates;
-                        if (isset($currentTime) && $currentTime instanceof \Carbon\Carbon) {
-                            $withTimeEqual = $duplicates->filter(function ($candidate) use ($currentTime) {
-                                $receiptRecord = $candidate->receipts()->latest('id')->first();
-                                if (!$receiptRecord) {
-                                    return false;
-                                }
-
-                                $candidateDate = $candidate->date instanceof \Carbon\Carbon
-                                    ? $candidate->date->toDateString()
-                                    : (is_string($candidate->date) ? $candidate->date : null);
-
-                                $storedTime = $this->extractReceiptTime($receiptRecord->receipt_html ?? '', $candidateDate);
-                                if (!$storedTime) {
-                                    return false;
-                                }
-
-                                return $currentTime->format('H:i') === $storedTime->format('H:i');
-                            });
-
-                            if ($withTimeEqual->isNotEmpty()) {
-                                $chosen = $withTimeEqual;
+                    // Choose the best matching duplicate using consistent logic
+                    // Prefer time-matched duplicates when time is available
+                    $chosen = $duplicates;
+                    
+                    if (isset($currentTime) && $currentTime instanceof \Carbon\Carbon) {
+                        $withTimeEqual = $duplicates->filter(function ($candidate) use ($currentTime) {
+                            $receiptRecord = $candidate->receipts()->latest('id')->first();
+                            if (!$receiptRecord) {
+                                return false;
                             }
-                        }
 
-                        // Then pick the one with the closest date as a final tie-breaker.
-                        $duplicate_expense = $chosen->sortBy(function ($d) use ($date) {
-                            return abs(Carbon::parse($d->date)->diffInDays(Carbon::parse($date)));
-                        })->first();
+                            $candidateDate = $candidate->date instanceof \Carbon\Carbon
+                                ? $candidate->date->toDateString()
+                                : (is_string($candidate->date) ? $candidate->date : null);
+
+                            $storedTime = $this->extractReceiptTime($receiptRecord->receipt_html ?? '', $candidateDate);
+                            if (!$storedTime) {
+                                return false;
+                            }
+
+                            return $currentTime->format('H:i') === $storedTime->format('H:i');
+                        });
+
+                        if ($withTimeEqual->isNotEmpty()) {
+                            $chosen = $withTimeEqual;
+                        }
                     }
+
+                    // Pick the one with the closest date as final tie-breaker
+                    $duplicate_expense = $chosen->sortBy(function ($d) use ($date) {
+                        return abs(Carbon::parse($d->date)->diffInDays(Carbon::parse($date)));
+                    })->first();
 
                     //ATTACHMENTS
                     $this->saveExpenseReceipt($duplicate_expense->id, $ocr_receipt_data, $ocr_filename, $message);
