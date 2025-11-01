@@ -704,6 +704,15 @@ class NylasService
 
         // Extract original message metadata for custom headers
         $fromEmail = $messageData['from'][0]['email'] ?? null;
+        
+        // Check if this is a forwarded email and extract original sender from body
+        if (!empty($bodyHtml) && preg_match('/From:.*?([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i', $bodyHtml, $matches)) {
+            $originalFromEmail = strtolower(trim($matches[1]));
+            if (!empty($originalFromEmail) && filter_var($originalFromEmail, FILTER_VALIDATE_EMAIL)) {
+                $fromEmail = $originalFromEmail;
+            }
+        }
+        
         $sourceMailboxEmail = $companyEmail?->email ?? ($messageData['to'][0]['email'] ?? null);
         $originalToEmail = $messageData['to'][0]['email'] ?? null;
 
