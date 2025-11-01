@@ -825,6 +825,28 @@ class ReceiptController extends Controller
             $subtotal = $amount;
         }
 
+        // Fix OCR error: if subtotal equals total but tax exists, determine which field to correct
+        if (!is_null($subtotal) && !is_null($amount) && !is_null($total_tax) && 
+            $subtotal == $amount && $total_tax > 0) {
+            
+            // If expense_amount is provided, use it to determine which field is correct
+            if (!is_null($expense_amount)) {
+                $expenseAmount = (float) $expense_amount;
+                $totalMatchesExpense = abs($amount - $expenseAmount) < 0.01;
+                
+                if ($totalMatchesExpense) {
+                    // Total is correct, fix subtotal: subtotal = total - tax
+                    $subtotal = $amount - $total_tax;
+                } else {
+                    // Subtotal is correct, fix total: total = subtotal + tax
+                    $amount = $subtotal + $total_tax;
+                }
+            } else {
+                // No expense amount to compare against, assume subtotal is correct
+                $amount = $subtotal + $total_tax;
+            }
+        }
+
         $ocr_receipt_data = [
             'content' => $ocr_receipt_extracted['content'],
             'fields' => [

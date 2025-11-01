@@ -893,16 +893,26 @@ class NylasService
             return [];
         }
         
+        // Decide single folder (priority: explicit test folder in non-prod, otherwise inbox)
+        $folder = env('APP_ENV') === 'production'
+            ? 'inbox'
+            : ('AQMkADZhOTM1NDI2LWUzMTktNDViMy05OQFhLWZlYTE2YmU3MzAyZAAuAAAD_zyyhiR0HUm0oKJuKA6AnQEA23n86TJcJU_kYhT4djVwqgAKpzgFQgAAAA==' ?: 'inbox');
+        
+        // In non-production, look back a year to test with older messages
+        $lookbackDate = env('APP_ENV') === 'production'
+            ? $receivedAfter
+            : Carbon::now()->subYear();
+        
         // Single API call to get all recent messages
         $query = [
             'limit' => 200,
-            'in' => 'inbox',
-            'received_after' => $receivedAfter->timestamp,
+            'in' => $folder,
+            'received_after' => $lookbackDate->timestamp,
         ];
         
         $resp = $this->getMessages($grantId, $query, false);
         $messages = $resp['data'] ?? [];
-        
+
         // Fast filtering using pre-built criteria
         $aggregated = [];
         foreach ($messages as $m) {
@@ -912,6 +922,19 @@ class NylasService
             
             $fromEmail = strtolower($m['from'][0]['email'] ?? '');
             $messageSubject = strtolower($m['subject'] ?? '');
+            $messageBody = $m['body'] ?? '';
+            
+            // Check if this is a forwarded email and extract original sender
+            // Look for email address immediately after "From:" in the body
+            if (preg_match('/From:.*?([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i', $messageBody, $matches)) {
+                $originalFromEmail = strtolower(trim($matches[1]));
+                if (!empty($originalFromEmail) && filter_var($originalFromEmail, FILTER_VALIDATE_EMAIL)) {
+                    $fromEmail = $originalFromEmail;
+                }
+            }
+
+            // Clean subject - remove Fw:, Fwd:, Re: prefixes for matching
+            $cleanSubject = preg_replace('/^(fw:|fwd:|re:)\s*/i', '', $messageSubject);
             
             // Check all receipt criteria (both specific emails and domain patterns)
             $messageIncluded = false;
@@ -928,9 +951,9 @@ class NylasService
                         break; // Found match, no need to check other criteria
                     }
                     
-                    // Check subject requirements
+                    // Check subject requirements (use cleaned subject)
                     foreach ($requiredSubjects as $reqSubject) {
-                        if (str_contains($messageSubject, $reqSubject)) {
+                        if (str_contains($cleanSubject, $reqSubject)) {
                             $aggregated[$m['id']] = $m;
                             $messageIncluded = true;
                             break; // Break inner loop only
@@ -944,7 +967,7 @@ class NylasService
                 }
             }
         }
-        
+ 
         return array_values($aggregated); // Return indexed array
     }
 

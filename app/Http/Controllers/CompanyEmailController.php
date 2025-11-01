@@ -1642,7 +1642,7 @@ class CompanyEmailController extends Controller
      */
     public function forwardRecentReceiptEmailsToCentral()
     {
-        // $foldersResult = $this->nylasService->getFolders('649561d4-4652-4963-b23c-ce214ea58255');
+        // $foldersResult = $this->nylasService->getFolders('023bfe85-9c79-4afa-9569-d53c8cccf25f');
         // dd($foldersResult);
 
         $companyEmails = CompanyEmail::withoutGlobalScopes()
@@ -1658,8 +1658,7 @@ class CompanyEmailController extends Controller
         }
 
         // Pre-calculate global date filter once
-        $messageLimitDate = Carbon::now()->subDays(config('nylas.message_limit_days', 10));
-
+        $messageLimitDate = Carbon::now()->subDays(config('nylas.message_limit_days', 30));
         foreach ($companyEmails as $companyEmail) {
             $this->processCompanyEmailForwarding($companyEmail, $messageLimitDate);
         }
