@@ -89,37 +89,96 @@ class NylasService
     /**
      * Make authenticated HTTP request to Nylas API
      */
+    /**
+     * Retry a callable with exponential backoff
+     * 
+     * @param callable $callback The function to retry
+     * @param int $maxAttempts Maximum number of attempts (default: 3)
+     * @param int $delayMs Initial delay in milliseconds (default: 1000)
+     * @return mixed
+     */
+    protected function retryWithBackoff(callable $callback, int $maxAttempts = 3, int $delayMs = 1000)
+    {
+        $attempt = 1;
+        
+        while ($attempt <= $maxAttempts) {
+            try {
+                $result = $callback();
+                
+                // Check if result indicates a retryable error
+                if (is_array($result) && isset($result['status'])) {
+                    $retryableStatuses = [503, 429, 502, 504]; // Service Unavailable, Too Many Requests, Bad Gateway, Gateway Timeout
+                    
+                    if (in_array($result['status'], $retryableStatuses) && $attempt < $maxAttempts) {
+                        Log::channel('nylas')->warning('Retryable error encountered, retrying...', [
+                            'attempt' => $attempt,
+                            'max_attempts' => $maxAttempts,
+                            'status' => $result['status'],
+                            'delay_ms' => $delayMs,
+                        ]);
+                        
+                        usleep($delayMs * 1000); // Convert to microseconds
+                        $delayMs *= 2; // Exponential backoff
+                        $attempt++;
+                        continue;
+                    }
+                }
+                
+                return $result;
+            } catch (\Throwable $e) {
+                if ($attempt >= $maxAttempts) {
+                    throw $e;
+                }
+                
+                Log::channel('nylas')->warning('Exception during API call, retrying...', [
+                    'attempt' => $attempt,
+                    'max_attempts' => $maxAttempts,
+                    'error' => $e->getMessage(),
+                    'delay_ms' => $delayMs,
+                ]);
+                
+                usleep($delayMs * 1000);
+                $delayMs *= 2;
+                $attempt++;
+            }
+        }
+        
+        return $callback(); // Final attempt
+    }
+
     protected function makeNylasRequest(string $method, string $endpoint, array $data = [], array $headers = []): array
     {
-        $url = $this->baseUrl . $endpoint;
-        
-        $defaultHeaders = [
-            'Authorization' => "Bearer {$this->apiKey}",
-            'Accept' => 'application/json',
-        ];
-        
-        if (in_array(strtoupper($method), ['POST', 'PATCH', 'PUT'])) {
-            $defaultHeaders['Content-Type'] = 'application/json';
-        }
-        
-        $headers = array_merge($defaultHeaders, $headers);
-        
-        try {
-            $response = Http::withHeaders($headers)->$method($url, $data);
+        return $this->retryWithBackoff(function () use ($method, $endpoint, $data, $headers) {
+            $url = $this->baseUrl . $endpoint;
             
-            return [
-                'status' => $response->status(),
-                'success' => $response->successful(),
-                'data' => $response->json(),
-                'body' => $response->body(),
+            $defaultHeaders = [
+                'Authorization' => "Bearer {$this->apiKey}",
+                'Accept' => 'application/json',
             ];
-        } catch (\Throwable $e) {
-            return [
-                'status' => 500,
-                'success' => false,
-                'error' => $e->getMessage(),
-            ];
-        }
+            
+            if (in_array(strtoupper($method), ['POST', 'PATCH', 'PUT'])) {
+                $defaultHeaders['Content-Type'] = 'application/json';
+            }
+            
+            $headers = array_merge($defaultHeaders, $headers);
+            
+            try {
+                $response = Http::withHeaders($headers)->$method($url, $data);
+                
+                return [
+                    'status' => $response->status(),
+                    'success' => $response->successful(),
+                    'data' => $response->json(),
+                    'body' => $response->body(),
+                ];
+            } catch (\Throwable $e) {
+                return [
+                    'status' => 500,
+                    'success' => false,
+                    'error' => $e->getMessage(),
+                ];
+            }
+        });
     }
 
     /**
@@ -230,55 +289,84 @@ class NylasService
             $query['fields'] = 'include_headers';
         }
 
-        try {
-            $response = $this->httpClient->get($this->baseUrl . "/grants/{$grantId}/messages", [
-                'headers' => [
-                    'Authorization' => 'Bearer ' . $this->apiKey,
-                    'Accept' => 'application/json',
-                    'Content-Type' => 'application/json',
-                ],
-                'query' => $query,
-            ]);
-
-            $decoded = json_decode($response->getBody(), true) ?? [];
-
-            if (!is_array($decoded)) {
-                Log::channel('nylas')->warning('Unexpected getMessages response payload', [
-                    'grant_id' => $grantId,
-                    'with_headers' => $withHeaders,
-                    'query_params' => $query,
-                    'requested_folder' => $requestedFolder,
-                    'resolved_folder' => $resolvedFolder,
+        return $this->retryWithBackoff(function () use ($grantId, $query, $withHeaders, $requestedFolder, $resolvedFolder) {
+            try {
+                $response = $this->httpClient->get($this->baseUrl . "/grants/{$grantId}/messages", [
+                    'headers' => [
+                        'Authorization' => 'Bearer ' . $this->apiKey,
+                        'Accept' => 'application/json',
+                        'Content-Type' => 'application/json',
+                    ],
+                    'query' => $query,
                 ]);
+
+                $decoded = json_decode($response->getBody(), true) ?? [];
+
+                if (!is_array($decoded)) {
+                    Log::channel('nylas')->warning('Unexpected getMessages response payload', [
+                        'grant_id' => $grantId,
+                        'with_headers' => $withHeaders,
+                        'query_params' => $query,
+                        'requested_folder' => $requestedFolder,
+                        'resolved_folder' => $resolvedFolder,
+                    ]);
+
+                    return [
+                        'status' => $response->getStatusCode(),
+                        'data' => [],
+                        'next_cursor' => null,
+                        'request_id' => $response->hasHeader('x-request-id')
+                            ? $response->getHeader('x-request-id')[0]
+                            : null,
+                    ];
+                }
+
+                $data = $decoded['data'] ?? [];
 
                 return [
                     'status' => $response->getStatusCode(),
+                    'data' => $data,
+                    'next_cursor' => $decoded['next_cursor'] ?? null,
+                    'request_id' => $decoded['request_id'] ?? ($response->hasHeader('x-request-id')
+                        ? $response->getHeader('x-request-id')[0]
+                        : null),
+                ];
+            } catch (RequestException $e) {
+                $statusCode = $e->hasResponse() ? $e->getResponse()->getStatusCode() : 500;
+                $isRetriableError = in_array($statusCode, [503, 429, 502, 504]);
+                
+                // Only log as error if not retriable, otherwise warning since retries were exhausted
+                if ($isRetriableError) {
+                    Log::channel('nylas')->warning('Get Messages API Error (Retries Exhausted)', ApiErrorFormatter::format($e, [
+                        'grant_id' => $grantId,
+                        'with_headers' => $withHeaders,
+                        'query_params' => $query,
+                        'requested_folder' => $requestedFolder,
+                        'resolved_folder' => $resolvedFolder,
+                    ]));
+                } else {
+                    Log::channel('nylas')->error('Get Messages API Error', ApiErrorFormatter::format($e, [
+                        'grant_id' => $grantId,
+                        'with_headers' => $withHeaders,
+                        'query_params' => $query,
+                        'requested_folder' => $requestedFolder,
+                        'resolved_folder' => $resolvedFolder,
+                    ]));
+                }
+                
+                $response = $e->getResponse();
+
+                return [
+                    'status' => $statusCode,
                     'data' => [],
-                    'next_cursor' => null,
-                    'request_id' => $response->hasHeader('x-request-id')
+                    'error' => $e->getMessage(),
+                    'request_id' => $response && $response->hasHeader('x-request-id')
                         ? $response->getHeader('x-request-id')[0]
                         : null,
                 ];
             }
-
-            $data = $decoded['data'] ?? [];
-
-            return [
-                'status' => $response->getStatusCode(),
-                'data' => $data,
-                'next_cursor' => $decoded['next_cursor'] ?? null,
-                'request_id' => $decoded['request_id'] ?? ($response->hasHeader('x-request-id')
-                    ? $response->getHeader('x-request-id')[0]
-                    : null),
-            ];
-        } catch (RequestException $e) {
-            Log::channel('nylas')->error('Get Messages API Error', ApiErrorFormatter::format($e, [
-                'grant_id' => $grantId,
-                'with_headers' => $withHeaders,
-                'query_params' => $query,
-                'requested_folder' => $requestedFolder,
-                'resolved_folder' => $resolvedFolder,
-            ]));
+        });
+    }
             
             $response = $e->getResponse();
 
@@ -306,6 +394,13 @@ class NylasService
         }
 
         $normalized = strtolower($trimmed);
+        
+        // Check config first for known grant/folder mappings (avoids API calls)
+        $configFolderId = $this->getConfigFolderId($grantId, $normalized);
+        if ($configFolderId) {
+            return $configFolderId;
+        }
+        
         $cache = $this->folderNameCache[$grantId] ?? null;
 
         if ($cache === null) {
@@ -314,6 +409,35 @@ class NylasService
         }
 
         return $cache[$normalized] ?? $trimmed;
+    }
+
+    protected function getConfigFolderId(string $grantId, string $folderName): ?string
+    {
+        // Receipts grant
+        if ($grantId === config('nylas.receipts_grant_id')) {
+            return match($folderName) {
+                'inbox' => null, // Use default inbox, no special ID needed
+                'deleted', 'deleteditems' => config('nylas.receipts_deleted_folder_id'),
+                'duplicate', 'duplicates' => config('nylas.hive_receipts_duplicate_folder_id'),
+                'error', 'errors' => config('nylas.hive_receipts_error_folder_id'),
+                'needtoadd', 'need_to_add' => config('nylas.hive_receipts_need_to_add_folder_id'),
+                'saved' => config('nylas.hive_receipts_saved_folder_id'),
+                'test' => config('nylas.hive_receipts_test_folder_id'),
+                default => null,
+            };
+        }
+        
+        // Insurance grant
+        if ($grantId === config('nylas.insurance_grant_id')) {
+            return match($folderName) {
+                'inbox' => null, // Use default inbox
+                'saved', 'certificates' => config('nylas.certificates_saved_folder_id'),
+                'error', 'errors' => config('nylas.certificates_error_folder_id'),
+                default => null,
+            };
+        }
+        
+        return null;
     }
 
     protected function buildFolderCache(string $grantId): array
@@ -1001,8 +1125,8 @@ class NylasService
         }
         
         return [
-            'status' => $response['status'],
-            'data' => $response['data'],
+            'status' => $response['status'] ?? 500,
+            'data' => $response['data'] ?? [],
             'error' => $response['error'] ?? null,
         ];
     }
@@ -1015,15 +1139,29 @@ class NylasService
         $response = $this->makeNylasRequest('GET', "/grants/{$grantId}/folders");
         
         if (!$response['success']) {
-            Log::channel('nylas')->error('Get Folders Failed', [
-                'grant_id' => $grantId,
-                'error' => $response['error'] ?? $response['body'],
-            ]);
+            // Only log if it's not a timeout/503 error (those are already retried)
+            $status = $response['status'] ?? 0;
+            $isRetriableError = in_array($status, [503, 429, 502, 504]);
+            
+            if (!$isRetriableError) {
+                Log::channel('nylas')->error('Get Folders Failed', [
+                    'grant_id' => $grantId,
+                    'error' => $response['error'] ?? $response['body'],
+                    'status' => $status,
+                ]);
+            } else {
+                // Log as warning since retries were exhausted
+                Log::channel('nylas')->warning('Get Folders Failed After Retries', [
+                    'grant_id' => $grantId,
+                    'error' => $response['error'] ?? $response['body'],
+                    'status' => $status,
+                ]);
+            }
         }
         
         return [
-            'status' => $response['status'],
-            'data' => $response['data'],
+            'status' => $response['status'] ?? 500,
+            'data' => $response['data'] ?? [],
             'error' => $response['error'] ?? null,
         ];
     }

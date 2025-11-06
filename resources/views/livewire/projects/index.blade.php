@@ -27,12 +27,45 @@
     @endif
 
     <flux:card class="space-y-2">
-        <div class="flex justify-between">
+        <div class="flex justify-between items-center">
             <flux:heading size="lg">Projects</flux:heading>
             @can('create', App\Models\Project::class)
                 <flux:button wire:click="$dispatchTo('projects.project-create', 'newProject', { client_id: '{{$view === NULL ? $client_id : $client->id}}' })">Create Project</flux:button>
             @endcan
         </div>
+
+        @if($view === NULL && $project_status_title && $project_status_title !== 'ALL')
+            @php
+                $currentStat = collect($this->stats)->firstWhere(function($stat) {
+                    $statusMap = [
+                        'Active' => 'Active',
+                        'Estimate' => 'Estimate',
+                        'Awaiting Response' => 'Response',
+                        'Scheduled' => 'Scheduled',
+                    ];
+                    return ($statusMap[$this->project_status_title] ?? null) === $stat['title'];
+                });
+            @endphp
+            @if($currentStat)
+                <flux:separator variant="subtle" />
+                <div wire:key="stat-{{ $project_status_title }}" class="relative h-32 rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden">
+                    <div class="absolute inset-0 flex items-end -mx-2 -mb-2">
+                        <flux:chart class="w-full h-full" :value="$currentStat['chartData']">
+                            <flux:chart.svg gutter="8">
+                                <flux:chart.line class="text-sky-200 dark:text-sky-400" />
+                                <flux:chart.area class="text-sky-100 dark:text-sky-400/30" />
+                            </flux:chart.svg>
+                        </flux:chart>
+                    </div>
+                    <div class="relative z-10 flex flex-col justify-start pt-4 h-full px-6 pointer-events-none">
+                        <div class="text-sm font-medium text-zinc-600 dark:text-zinc-400">{{ $currentStat['title'] }}</div>
+                        <div class="text-4xl font-semibold text-zinc-900 dark:text-zinc-100 tabular-nums">{{ $currentStat['value'] }}</div>
+                    </div>
+                </div>
+            @endif
+        @endif
+
+        <flux:separator variant="subtle" />
 
         <div class="space-y-2">
             <flux:table :paginate="$this->projects">

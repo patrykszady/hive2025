@@ -8,7 +8,7 @@ return [
     'pkce_code_verifier' => env('NYLAS_PKCE_CODE_VERIFIER', 'nylas'),
     
     // Message fetching limits
-    'message_limit' => 25,
+    'message_limit' => 15,
     'message_limit_days' => 20,
     'full_fetch_soft_cap' => env('NYLAS_FULL_FETCH_SOFT_CAP', 0),
 

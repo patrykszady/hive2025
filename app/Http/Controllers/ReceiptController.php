@@ -812,12 +812,22 @@ class ReceiptController extends Controller
 
             return $ocr_receipt_data;
         } else {
+            // Normalize values to ensure they're floats, not arrays
             if (is_array($amount)) {
                 $amount = $amount[0];
-            } else {
-                if ($amount === NULL && (!is_null($subtotal) && !is_null($total_tax))) {
-                    $amount = $subtotal + $total_tax;
-                }
+            }
+            
+            if (is_array($subtotal)) {
+                $subtotal = $subtotal[0];
+            }
+            
+            if (is_array($total_tax)) {
+                $total_tax = $total_tax[0];
+            }
+            
+            // Calculate amount if null
+            if ($amount === NULL && (!is_null($subtotal) && !is_null($total_tax))) {
+                $amount = $subtotal + $total_tax;
             }
         }
 

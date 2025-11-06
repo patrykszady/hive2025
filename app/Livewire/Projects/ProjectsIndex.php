@@ -5,7 +5,9 @@ namespace App\Livewire\Projects;
 use App\Models\Client;
 use App\Models\Project;
 use App\Models\ProjectStatus;
+use Carbon\Carbon;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Session;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
@@ -117,6 +119,128 @@ class ProjectsIndex extends Component
                 'desc'
             )
             ->paginate(20);
+    }
+
+    #[Computed]
+    public function stats()
+    {
+        // Get base query
+        $baseQuery = Project::query();
+        
+        if (! is_null($this->client)) {
+            if (isset($this->client->vendor_id)) {
+                $client_ids = Project::where('belongs_to_vendor_id', $this->client->vendor_id)->pluck('client_id')->toArray();
+            } else {
+                $client_ids = [$this->client->id];
+            }
+            $baseQuery->whereIn('client_id', $client_ids);
+        }
+
+        $projectIds = (clone $baseQuery)->pluck('id');
+
+        $projects = (clone $baseQuery)->with('latestStatus')->get();
+
+        $latestStatuses = $projects
+            ->pluck('latestStatus.title')
+            ->filter()
+            ->countBy();
+
+        $projectStatuses = $projectIds->isEmpty()
+            ? collect()
+            : ProjectStatus::select('project_id', 'title', 'start_date', 'id')
+                ->whereIn('project_id', $projectIds)
+                ->orderBy('project_id')
+                ->orderBy('start_date')
+                ->orderBy('id')
+                ->get()
+                ->groupBy('project_id')
+                ->map(function ($statuses) {
+                    return $statuses
+                        ->values()
+                        ->map(function ($status) {
+                            return [
+                                'title' => $status->title,
+                                'start_date' => $status->start_date
+                                    ? $status->start_date->copy()
+                                    : null,
+                            ];
+                        });
+                });
+
+        // Define stats in display order
+        $stats = [
+            [
+                'title' => 'Active',
+                'value' => (string) $latestStatuses->get('Active', 0),
+                'chartData' => $this->getYtdChartData('Active', $projectStatuses),
+            ],
+            [
+                'title' => 'Estimate',
+                'value' => (string) $latestStatuses->get('Estimate', 0),
+                'chartData' => $this->getYtdChartData('Estimate', $projectStatuses),
+            ],
+            [
+                'title' => 'Response',
+                'value' => (string) $latestStatuses->get('Awaiting Response', 0),
+                'chartData' => $this->getYtdChartData('Awaiting Response', $projectStatuses),
+            ],
+            [
+                'title' => 'Scheduled',
+                'value' => (string) $latestStatuses->get('Scheduled', 0),
+                'chartData' => $this->getYtdChartData('Scheduled', $projectStatuses),
+            ],
+        ];
+
+        return $stats;
+    }
+
+    protected function getYtdChartData(string $status, Collection $projectStatuses): array
+    {
+        $now = now();
+        $currentYear = $now->year;
+        $currentMonth = $now->month;
+
+        if ($projectStatuses->isEmpty()) {
+            return array_fill(0, $currentMonth, 0);
+        }
+
+        $monthlyData = [];
+        $pointers = [];
+
+        for ($month = 1; $month <= $currentMonth; $month++) {
+            $endOfMonth = $now->copy()->setDate($currentYear, $month, 1)->endOfMonth();
+            $count = 0;
+
+            foreach ($projectStatuses as $projectId => $statuses) {
+                $index = $pointers[$projectId] ?? -1;
+                $statusesCount = $statuses->count();
+
+                while (($index + 1) < $statusesCount) {
+                    $next = $statuses[$index + 1];
+                    /** @var Carbon|null $startDate */
+                    $startDate = $next['start_date'];
+
+                    if ($startDate !== null && $startDate->gt($endOfMonth)) {
+                        break;
+                    }
+
+                    $index++;
+                }
+
+                $pointers[$projectId] = $index;
+
+                if ($index >= 0) {
+                    $currentStatus = $statuses[$index]['title'];
+                    if ($currentStatus === $status) {
+                        $count++;
+                    }
+                }
+            }
+
+            $monthlyData[] = $count;
+        }
+
+        return $monthlyData;
     }
 
     #[Title('Projects')]
