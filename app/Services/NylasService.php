@@ -367,19 +367,6 @@ class NylasService
             }
         });
     }
-            
-            $response = $e->getResponse();
-
-            return [
-                'status' => $response?->getStatusCode(),
-                'data' => [],
-                'next_cursor' => null,
-                'request_id' => $response && $response->hasHeader('x-request-id')
-                    ? $response->getHeader('x-request-id')[0]
-                    : null,
-            ];
-        }
-    }
 
     protected function resolveFolderIdentifier(string $grantId, string $identifier): ?string
     {
