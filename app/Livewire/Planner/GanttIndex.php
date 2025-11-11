@@ -56,7 +56,7 @@ class GanttIndex extends Component
         }, 'latestStatus'])
         ->where(function ($query) use ($startDate, $endDate) {
             $query->whereHas('latestStatus', function ($q) {
-                $q->whereIn('title', ['Active', 'Service Call']);
+                $q->whereIn('status_code', [6, 8]); // Active, Service Call
             })
                   ->orWhereHas('tasks', function ($taskQuery) use ($startDate, $endDate) {
                       $taskQuery->where('start_date', '<=', $endDate->format('Y-m-d'))

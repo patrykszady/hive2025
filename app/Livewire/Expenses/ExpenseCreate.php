@@ -66,10 +66,10 @@ class ExpenseCreate extends Component
         return Project::with('latestStatus')
             ->get()
             ->filter(function ($project) {
-                return $project->latestStatus->title !== 'Cancelled';
+                return $project->latestStatus->status_code !== 10; // Not Cancelled
             })
             ->sortBy([
-                ['latestStatus.title', 'asc'],
+                ['latestStatus.status_code', 'asc'],
                 ['latestStatus.start_date', 'desc'],
             ]);
     }
@@ -106,9 +106,9 @@ class ExpenseCreate extends Component
         }
 
         if ($field == 'form.project_id' && is_numeric($value)) {
-            $project_title = $this->projects->where('id', $value)->first()->latestStatus->title;
+            $project_status_code = $this->projects->where('id', $value)->first()->latestStatus->status_code;
 
-            if ($project_title == 'Complete') {
+            if ($project_status_code == 7) { // Complete
                 $this->form->project_completed = true;
             } else {
                 $this->form->project_completed = false;

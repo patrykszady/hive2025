@@ -37,11 +37,15 @@ class StatusCreate extends Component
     public function update_project()
     {
         $this->validate();
+        
+        // Map label to code
+        $statusCode = \App\Support\ProjectStatusMap::codeFor($this->project_status) ?? 0;
+        
         $status =
             ProjectStatus::create([
                 'project_id' => $this->project->id,
                 'belongs_to_vendor_id' => auth()->user()->vendor->id,
-                'title' => $this->project_status,
+                'status_code' => $statusCode,
                 'start_date' => $this->project_status_date,
             ]);
 

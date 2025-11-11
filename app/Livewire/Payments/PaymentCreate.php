@@ -77,24 +77,24 @@ class PaymentCreate extends Component
     {
         $this->client = $client;
         $this->projects = $client->projects()
-            ->status(['Active', 'Complete', 'Service Call', 'Service Call Complete'])
+            ->status([6, 7, 8]) // Active, Complete, Service Call
             ->with('latestStatus')
             ->get()
             ->filter(function ($project) {
                 // Always include Active projects
-                if ($project->latestStatus->title === 'Active') {
+                if ($project->latestStatus->status_code === 6) {
                     return true;
                 }
                 
                 // For completed projects, only include if balance > 0
-                if (in_array($project->latestStatus->title, ['Complete', 'Service Call', 'Service Call Complete'])) {
+                if (in_array($project->latestStatus->status_code, [7, 8])) {
                     return $project->finances['balance'] > 0;
                 }
                 
                 return true;
             })
             ->sortBy([
-                ['latestStatus.title', 'asc'],
+                ['latestStatus.status_code', 'asc'],
                 ['latestStatus.start_date', 'desc'],
             ])
             ->map(function ($project) {
@@ -131,7 +131,7 @@ class PaymentCreate extends Component
     public function clients()
     {
         return Client::withWhereHas('projects', function ($query) {
-            $query->status(['Active', 'Complete', 'Service Call', 'Service Call Complete']); // Use the new scope to filter statuses
+            $query->status([6, 7, 8]); // Active, Complete, Service Call
         })->orderBy('created_at', 'DESC') // Order clients by their own created_at date
         ->get();
     }

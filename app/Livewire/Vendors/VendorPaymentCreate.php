@@ -79,11 +79,11 @@ class VendorPaymentCreate extends Component
     {
         //09-05-2023 if proejct not active ...add in dropdown
         $projectsCollection = Project::where('created_at', '>', Carbon::now()->subYears(2)->format('Y-m-d'))
-            ->status(['Active', 'Complete', 'Service Call', 'Service Call Complete'])
+            ->status([6, 7, 8]) // Active, Complete, Service Call
             ->with('latestStatus')
             ->get()
             ->sortBy([
-                ['latestStatus.title', 'asc'],
+                ['latestStatus.status_code', 'asc'],
                 ['latestStatus.start_date', 'desc'],
             ]);
 

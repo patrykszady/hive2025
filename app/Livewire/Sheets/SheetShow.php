@@ -69,7 +69,7 @@ class SheetShow extends Component
         $base = Payment::whereBetween('date', [$this->start_date, $this->end_date])
             ->whereHas('project', function ($query) {
                 $query->whereHas('latestStatus', function ($query) {
-                    $query->where('title', '!=', 'VIEW ONLY');
+                    $query->where('status_code', '!=', 11); // Exclude VIEW ONLY projects
                 });
             });
 

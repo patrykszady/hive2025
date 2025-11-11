@@ -24,14 +24,15 @@ class ProjectsIndex extends Component
 
     public $client = null;
 
-    public $project_status_title = 'Active';
+    // Store selected status codes from filter (as int); default to Active (6)
+    public $project_status_title = [6];
 
     public $view = null;
 
     protected $queryString = [
         'project_name_search' => ['except' => ''],
         'client_id' => ['except' => ''],
-        'project_status_title' => ['except' => ''],
+        'project_status_title' => ['except' => [6]],
     ];
 
     public function mount()
@@ -44,19 +45,38 @@ class ProjectsIndex extends Component
 
         // Special case for view mode
         if ($this->view == true) {
-            $this->project_status_title = null;
+            $this->project_status_title = [];
             return;
         }
         
         // Check URL parameters first
         if (request()->has('project_status_title')) {
+            // Ensure it's an array
+            if (!is_array($this->project_status_title)) {
+                $this->project_status_title = [$this->project_status_title];
+            }
+            // Cast to int codes and filter out invalid codes (0, 9)
+            $validCodes = [1, 2, 3, 4, 5, 6, 7, 8, 10, 11];
+            $this->project_status_title = array_values(
+                array_filter(
+                    array_map('intval', $this->project_status_title),
+                    fn($code) => in_array($code, $validCodes)
+                )
+            );
             // If URL parameter exists, store it in session
             Session::put('projects.status', $this->project_status_title);
         }
         // No URL parameter, but we have session value
-        elseif (($sessionStatus = Session::get('projects.status')) && $sessionStatus !== 'Active') {
-            // Use session value and update property
-            $this->project_status_title = $sessionStatus;
+        elseif (($sessionStatus = Session::get('projects.status')) && $sessionStatus !== [6]) {
+            // Use session value, cast to int, and filter invalid codes
+            $validCodes = [1, 2, 3, 4, 5, 6, 7, 8, 10, 11];
+            $sessionStatus = is_array($sessionStatus) ? $sessionStatus : [$sessionStatus];
+            $this->project_status_title = array_values(
+                array_filter(
+                    array_map('intval', $sessionStatus),
+                    fn($code) => in_array($code, $validCodes)
+                )
+            );
         }
     }
 
@@ -74,14 +94,14 @@ class ProjectsIndex extends Component
         
         // Reset filters logic
         if ($field === 'client_id') {
-            $this->project_status_title = '';
-            Session::put('projects.status', '');
+            $this->project_status_title = [];
+            Session::put('projects.status', []);
         }
 
         if ($field === 'project_name_search') {
-            $this->project_status_title = '';
+            $this->project_status_title = [];
             $this->client_id = '';
-            Session::put('projects.status', '');
+            Session::put('projects.status', []);
         }
     }
 
@@ -101,11 +121,21 @@ class ProjectsIndex extends Component
         }
 
         return Project::with('latestStatus')
-            ->when($this->project_status_title !== null && $this->project_status_title !== 'ALL', function ($query) {
-                $query->whereHas('latestStatus', function ($query) {
-                    $query->whereIn('title', $this->project_status_title === 'Complete'
-                        ? ['Complete', 'Service Call Complete', 'Service Call']
-                        : [$this->project_status_title]);
+            ->when(!empty($this->project_status_title), function ($query) {
+                // Expand "Complete" (7) to also include "Service Call" (8) for backwards compatibility
+                $codes = collect($this->project_status_title)
+                    ->flatMap(function ($code) {
+                        if ($code === 7) {
+                            return [7, 8]; // Complete, Service Call
+                        }
+                        return [(int)$code];
+                    })
+                    ->unique()
+                    ->values()
+                    ->all();
+                    
+                $query->whereHas('latestStatus', function ($query) use ($codes) {
+                    $query->whereIn('status_code', $codes);
                 });
             })
             ->when($this->client !== null, function ($query) use ($client_ids) {
@@ -141,13 +171,13 @@ class ProjectsIndex extends Component
         $projects = (clone $baseQuery)->with('latestStatus')->get();
 
         $latestStatuses = $projects
-            ->pluck('latestStatus.title')
+            ->pluck('latestStatus.title') // accessor provides label
             ->filter()
             ->countBy();
 
         $projectStatuses = $projectIds->isEmpty()
             ? collect()
-            : ProjectStatus::select('project_id', 'title', 'start_date', 'id')
+            : ProjectStatus::select('project_id', 'status_code', 'start_date', 'id')
                 ->whereIn('project_id', $projectIds)
                 ->orderBy('project_id')
                 ->orderBy('start_date')
@@ -159,7 +189,7 @@ class ProjectsIndex extends Component
                         ->values()
                         ->map(function ($status) {
                             return [
-                                'title' => $status->title,
+                                'title' => \App\Support\ProjectStatusMap::label((int) $status->status_code),
                                 'start_date' => $status->start_date
                                     ? $status->start_date->copy()
                                     : null,

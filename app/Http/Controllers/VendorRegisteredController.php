@@ -84,10 +84,13 @@ class VendorRegisteredController extends Controller
 
     public function add_project_status($project_id, $vendor_id, $title)
     {
+        // Map title to status_code
+        $statusCode = \App\Support\ProjectStatusMap::codeFor($title) ?? 0;
+        
         ProjectStatus::create([
             'project_id' => $project_id,
             'belongs_to_vendor_id' => $vendor_id,
-            'title' => $title,
+            'status_code' => $statusCode,
             'start_date' => today()->format('Y-m-d'),
         ]);
     }

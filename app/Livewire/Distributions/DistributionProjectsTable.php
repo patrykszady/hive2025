@@ -23,7 +23,7 @@ class DistributionProjectsTable extends Component
     public function render()
     {
         $projects = Project::with(['distributions', 'statuses' => function ($query) {
-            $query->where('title', 'Complete') // Fetch only statuses with the title "Complete"
+            $query->where('status_code', 7) // Fetch only "Complete" statuses
                   ->orderBy('start_date', 'desc'); // Sort "Complete" statuses by start_date
         }])
         ->when($this->type === 'With', function ($query) {
@@ -33,13 +33,13 @@ class DistributionProjectsTable extends Component
             $query->whereDoesntHave('distributions'); // Include projects that do not have distributions
         })
         ->whereHas('statuses', function ($query) {
-            $query->where('title', 'Complete'); // Ensure projects have at least one "Complete" status
+            $query->where('status_code', 7); // Ensure projects have at least one "Complete" status
         })
         ->orderBy(function ($query) {
             $query->select('start_date')
                   ->from('project_status')
                   ->whereColumn('project_status.project_id', 'projects.id') // Match project ID
-                  ->where('title', 'Complete') // Filter for "Complete" statuses
+                  ->where('status_code', 7) // Filter for "Complete" statuses
                   ->orderByDesc('start_date') // Order by the latest "Complete" start_date
                   ->limit(1); // Limit to the most recent start_date
         }, 'desc') // Sort projects by the latest "Complete" start_date

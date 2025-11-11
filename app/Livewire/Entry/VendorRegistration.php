@@ -412,11 +412,12 @@ class VendorRegistration extends Component
                             ['client_id' => $vendor_client->id]
                         );
                         
-                        // Create project status
+                        // Create project status using status_code
+                        $statusCode = \App\Support\ProjectStatusMap::codeFor('VIEW ONLY') ?? 11;
                         ProjectStatus::create([
                             'project_id' => $project->id,
                             'belongs_to_vendor_id' => $this->user->vendor->id,
-                            'title' => 'VIEW ONLY',
+                            'status_code' => $statusCode,
                             'start_date' => $project->created_at->format('Y-m-d'),
                         ]);
                     }

@@ -1143,6 +1143,14 @@ class TransactionController extends Controller
 
     public function add_check_id_to_transactions()
     {
+        // Match checks to transactions automatically
+        // Priority order:
+        // 1. Single exact amount match (with check_number)
+        // 2. Multiple exact matches - pick closest by date
+        // 3. Multiple transactions that sum to check amount (subset sum matching)
+        //    - Requires all transactions within 3 days of each other
+        // 4. Fallback to check-type specific matching (Transfer with name, Check by number)
+        
         $checks =
             Check::withoutGlobalScopes()
                 ->whereDoesntHave('transactions')
@@ -1197,6 +1205,62 @@ class TransactionController extends Controller
                 $closest?->check()->associate($check)->save();
                 continue; // done with this check
             } else {
+                // Try to find multiple transactions that sum to check amount
+                $transactions_for_sum = Transaction::withoutGlobalScopes()
+                    ->whereNull('deleted_at')
+                    ->whereNull('check_id')
+                    ->whereNull('expense_id')
+                    ->where('check_number', $check_number)
+                    ->when($bank_account_ids, function ($query, $bank_account_ids) {
+                        return $query->whereIn('bank_account_id', $bank_account_ids);
+                    })
+                    ->whereBetween('transaction_date', [
+                        $check->date->subDays(7)->format('Y-m-d'),
+                        $check->date->addDays($add_days)->format('Y-m-d'),
+                    ])
+                    ->orderBy('id', 'DESC')
+                    ->get();
+
+                if ($transactions_for_sum->isNotEmpty()) {
+                    $transaction_ids = $transactions_for_sum->pluck('id')->toArray();
+                    $transaction_amounts = $transactions_for_sum->pluck('amount')->toArray();
+
+                    $arr = array_values(array_filter($transaction_amounts));
+                    $n = count($arr);
+                    $ids = $transaction_ids;
+
+                    $results = collect($this->subsetSums($arr, $n, $ids, 'transaction'))->sortBy('sum');
+
+                    foreach ($results as $key => $result) {
+                        $sum = number_format($result['sum'], 2, '.', '');
+
+                        if ($sum == $check->amount) {
+                            $transaction_results = collect($result['transactions']);
+                            
+                            // Get the actual transaction models to check dates
+                            $matching_ids = $transaction_results->pluck('transaction_id');
+                            $transaction_models = $transactions_for_sum->whereIn('id', $matching_ids);
+                            
+                            // Check if all transactions are within 3 days of each other
+                            $dates = $transaction_models->pluck('transaction_date');
+                            $min_date = $dates->min();
+                            $max_date = $dates->max();
+                            $date_spread_days = $min_date->diffInDays($max_date);
+                            
+                            // Only match if transactions are within 3 days of each other
+                            if ($date_spread_days <= 3) {
+                                foreach ($transaction_models as $transaction) {
+                                    $transaction->check()->associate($check);
+                                    $transaction->save();
+                                }
+                                
+                                continue 2; // done with this check, continue to next check
+                            }
+                        }
+                    }
+                }
+            
+            // If no sum match found, continue with existing logic
                 if ($check->check_type === 'Transfer') {
                     $transactions_by_name = Transaction::withoutGlobalScopes()
                         ->whereNull('deleted_at')

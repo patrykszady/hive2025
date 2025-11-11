@@ -1,12 +1,11 @@
-<flux:select.option value="ALL">All Status</flux:select.option>
-<flux:select.option value="Invited">Invited</flux:select.option>
-<flux:select.option value="Estimate">Estimate</flux:select.option>
-<flux:select.option value="Awaiting Response">Response</flux:select.option>
-<flux:select.option value="Project Prep">Prep</flux:select.option>
-<flux:select.option value="Scheduled">Scheduled</flux:select.option>
-<flux:select.option value="Active">Active</flux:select.option>
-<flux:select.option value="Complete">Complete</flux:select.option>
-<flux:select.option value="Service Call">Service Call</flux:select.option>
-<flux:select.option value="Service Call Complete">Service Call Complete</flux:select.option>
-<flux:select.option value="Cancelled">Cancelled</flux:select.option>
-<flux:select.option value="VIEW ONLY">VIEW ONLY</flux:select.option>
+{{-- Using codes as values; Livewire will handle string->int conversion --}}
+<flux:select.option value="1"><flux:badge size="md" inset="top bottom" color="zinc">Invited</flux:badge></flux:select.option>
+<flux:select.option value="2"><flux:badge size="md" inset="top bottom" color="blue">Estimate</flux:badge></flux:select.option>
+<flux:select.option value="3"><flux:badge size="md" inset="top bottom" color="yellow">Response</flux:badge></flux:select.option>
+<flux:select.option value="4"><flux:badge size="md" inset="top bottom" color="amber">Prep</flux:badge></flux:select.option>
+<flux:select.option value="5"><flux:badge size="md" inset="top bottom" color="lime">Scheduled</flux:badge></flux:select.option>
+<flux:select.option value="6"><flux:badge size="md" inset="top bottom" color="green">Active</flux:badge></flux:select.option>
+<flux:select.option value="7"><flux:badge size="md" inset="top bottom" color="teal">Complete</flux:badge></flux:select.option>
+<flux:select.option value="8"><flux:badge size="md" inset="top bottom" color="orange">Service Call</flux:badge></flux:select.option>
+<flux:select.option value="10"><flux:badge size="md" inset="top bottom" color="red">Cancelled</flux:badge></flux:select.option>
+<flux:select.option value="11"><flux:badge size="md" inset="top bottom" color="gray">VIEW ONLY</flux:badge></flux:select.option>

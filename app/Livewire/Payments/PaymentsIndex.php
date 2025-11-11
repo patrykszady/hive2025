@@ -27,7 +27,7 @@ class PaymentsIndex extends Component
     public function hasClientsWithProjects()
     {
         return \App\Models\Client::withWhereHas('projects', function ($query) {
-            $query->status(['Active', 'Complete', 'Service Call', 'Service Call Complete']);
+            $query->status([6, 7, 8]); // Active, Complete, Service Call
         })->exists();
     }
 

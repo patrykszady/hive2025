@@ -26,7 +26,7 @@ class SheetMonthly extends Component
         $monthly_payments = Payment::whereBetween('date', [$start_date, $end_date])
             ->whereHas('project', fn($query) =>
                 $query->whereHas('latestStatus', fn($subQuery) =>
-                    $subQuery->where('title', '!=', 'VIEW ONLY') // Exclude projects with latest status title "VIEW ONLY"
+                    $subQuery->where('status_code', '!=', 11) // Exclude projects with latest status "VIEW ONLY"
                 )
             )
             ->orderBy('date', 'DESC') // Sort payments by date descending
@@ -49,7 +49,7 @@ class SheetMonthly extends Component
         $last_year_payments = Payment::whereBetween('date', [$start_date->subYear(), $end_date->subYear()])
             ->whereHas('project', fn($query) =>
                 $query->whereHas('latestStatus', fn($subQuery) =>
-                    $subQuery->where('title', '!=', 'VIEW ONLY') // Exclude projects with latest status title "VIEW ONLY"
+                    $subQuery->where('status_code', '!=', 11) // Exclude projects with latest status "VIEW ONLY"
                 )
             )
             ->orderBy('date', 'DESC') // Sort payments by date descending

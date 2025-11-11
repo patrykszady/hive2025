@@ -50,7 +50,7 @@ class EstimatePolicy
     public function create(User $user, Project $project): bool
     {
         //can create if project->latestStatus is NOT X Y and Z
-        if ($user->vendor_role === 'Admin' && ! in_array($project->latestStatus->title, ['Complete', 'Service Call', 'Service Call Complete', 'Cancelled', 'VIEW_ONLY'])) {
+        if ($user->vendor_role === 'Admin' && ! in_array($project->latestStatus->status_code, [7, 8, 10, 11])) { // Not Complete, Service Call, Cancelled, VIEW_ONLY
             return true;
         } else {
             return false;
@@ -73,7 +73,7 @@ class EstimatePolicy
         }
         
         // Check if the estimate's project is in a state that allows updates
-        if (in_array($estimate->project->latestStatus->title, ['Complete', 'Service Call', 'Service Call Complete', 'Cancelled', 'VIEW_ONLY'])) {
+        if (in_array($estimate->project->latestStatus->status_code, [7, 8, 10, 11])) { // Complete, Service Call, Cancelled, VIEW_ONLY
             return false;
         }
         
@@ -96,7 +96,7 @@ class EstimatePolicy
         }
         
         // Check if the estimate's project is in a state that allows deletion
-        if (in_array($estimate->project->latestStatus->title, ['Complete', 'Service Call', 'Service Call Complete', 'Cancelled', 'VIEW_ONLY'])) {
+        if (in_array($estimate->project->latestStatus->status_code, [7, 8, 10, 11])) { // Complete, Service Call, Cancelled, VIEW_ONLY
             return false;
         }
         

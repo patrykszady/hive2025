@@ -146,7 +146,7 @@ class Project extends Model
     public function scopeStatus($query, $status)
     {
         return $query->whereHas('latestStatus', function ($q) use ($status) {
-            $q->whereIn('title', $status); // Check if the latest status title is in the given array
+            $q->whereIn('status_code', $status); // Check if the latest status code is in the given array
         });
     }
 
