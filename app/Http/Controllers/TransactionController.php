@@ -1237,6 +1237,7 @@ class TransactionController extends Controller
                         if ($sum == $check->amount) {
                             $transaction_results = collect($result['transactions']);
                             
+                            
                             // Get the actual transaction models to check dates
                             $matching_ids = $transaction_results->pluck('transaction_id');
                             $transaction_models = $transactions_for_sum->whereIn('id', $matching_ids);
