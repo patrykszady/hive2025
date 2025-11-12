@@ -33,7 +33,7 @@ class VendorDocsController extends Controller
 
     public function fetchMessagesFromInsuranceMailbox()
     {
-        $grantId = config('nylas.insurance_grant_id');
+        $grantId = config('nylas.certificates_grant_id');
 
         // Define query parameters for the Nylas API
         $queryParams = [
@@ -44,34 +44,61 @@ class VendorDocsController extends Controller
         // Fetch messages using the NylasService
         $messages = $this->nylasService->getMessages($grantId, $queryParams);
     
-        // Filter messages with attachments
-        foreach (($messages['data']) as $message) {
-            if (!empty($message['attachments'])) {
-                $attachments = array_filter($message['attachments'], function ($attachment) {
-                    return $attachment['is_inline'] === false;
-                });
+        // move messages without usable attachments
+        $deletedFolderId = config('nylas.certificates_deleted_folder_id');
 
-                // Process attachments
-                foreach ($attachments as $attachment) {
-                    $messageId = $message['id']; // Ensure you fetch the corresponding message ID
-                    $attachmentContent = $this->nylasService->downloadAttachment($attachment['id'], $grantId, $messageId);
-                    $docType = pathinfo($attachment['filename'], PATHINFO_EXTENSION);
+        // Loop messages and process/move accordingly
+        foreach (($messages['data'] ?? []) as $message) {
+            $messageId = $message['id'] ?? null;
+            if (! $messageId) {
+                continue;
+            }
 
-                    $tempFilePath = "_temp_vendor_docs/attachment_{$attachment['id']}.{$docType}";
+            $rawAttachments = $message['attachments'] ?? [];
 
-                    // Store the file temporarily
-                    Storage::disk('files')->put($tempFilePath, $attachmentContent);
-                    $tempFilePath = 'files/'.$tempFilePath;
-                    // Process the document
-                    $this->handleVendorDocProcessing(
-                        $tempFilePath,
-                        $docType,
-                        null, // Placeholder for $vendorId
-                        null, // Placeholder for $belongsToVendorId
-                        $messageId,
-                        $grantId
-                    );
+            // Keep only non-inline attachments
+            $attachments = array_values(array_filter($rawAttachments, function ($attachment) {
+                return ($attachment['is_inline'] ?? false) === false;
+            }));
+
+            // If no non-inline attachments, move to the deleted (or error) folder
+            if (empty($attachments)) {
+                try {
+                    $this->nylasService->moveEmailToFolder($messageId, $deletedFolderId, $grantId);
+                } catch (\Exception $e) {
+                    Log::channel('vendor_docs')->error('Failed to move attachment-less insurance email', ApiErrorFormatter::format($e, [
+                        'message_id' => $messageId,
+                        'target_folder_id' => $deletedFolderId,
+                    ]));
                 }
+                continue;
+            }
+
+            // Process each non-inline attachment
+            foreach ($attachments as $attachment) {
+                $attachmentId = $attachment['id'] ?? null;
+                if (! $attachmentId) {
+                    continue;
+                }
+
+                $attachmentContent = $this->nylasService->downloadAttachment($attachmentId, $grantId, $messageId);
+                $docType = pathinfo($attachment['filename'] ?? ('attachment_'.$attachmentId), PATHINFO_EXTENSION) ?: 'pdf';
+
+                $tempFilePath = "_temp_vendor_docs/attachment_{$attachmentId}.{$docType}";
+
+                // Store the file temporarily
+                Storage::disk('files')->put($tempFilePath, $attachmentContent);
+                $tempFilePath = 'files/'.$tempFilePath;
+
+                // Process the document
+                $this->handleVendorDocProcessing(
+                    $tempFilePath,
+                    $docType,
+                    null, // Placeholder for $vendorId
+                    null, // Placeholder for $belongsToVendorId
+                    $messageId,
+                    $grantId
+                );
             }
         }
     }

@@ -44,7 +44,7 @@ class RequestInsurance extends Mailable
     public function envelope()
     {
         return new Envelope(
-            from: new Address(config('nylas.insurance_email'), 'Hive Contractors'),
+            from: new Address(config('nylas.certificates_email'), 'Hive Contractors'),
             subject: $this->vendor->name.' Insurance Certificate',
         );
     }

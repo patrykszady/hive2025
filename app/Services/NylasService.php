@@ -415,11 +415,12 @@ class NylasService
         }
         
         // Insurance grant
-        if ($grantId === config('nylas.insurance_grant_id')) {
+        if ($grantId === config('nylas.certificates_grant_id')) {
             return match($folderName) {
                 'inbox' => null, // Use default inbox
                 'saved', 'certificates' => config('nylas.certificates_saved_folder_id'),
                 'error', 'errors' => config('nylas.certificates_error_folder_id'),
+                'deleted', 'deleteditems' => config('nylas.certificates_deleted_folder_id'),
                 default => null,
             };
         }

@@ -93,14 +93,35 @@ class UserForm extends Form
     {
         $this->validate();
 
-        $user = User::create([
-            'first_name' => $this->first_name,
-            'last_name' => $this->last_name,
-            'email' => $this->email,
-            'cell_phone' => $this->component->user_cell,
-        ]);
+        // Check if user with this email already exists
+        $existingUser = User::where('email', $this->email)->first();
+        
+        if ($existingUser) {
+            // Update existing user with new information if needed
+            $existingUser->update([
+                'first_name' => $this->first_name,
+                'last_name' => $this->last_name,
+                'cell_phone' => $this->component->user_cell ?: $existingUser->cell_phone,
+            ]);
+            
+            return $existingUser;
+        }
 
-        return $user;
+        // Create new user if doesn't exist
+        try {
+            $user = User::create([
+                'first_name' => $this->first_name,
+                'last_name' => $this->last_name,
+                'email' => $this->email,
+                'cell_phone' => $this->component->user_cell,
+            ]);
+            
+            return $user;
+        } catch (\Illuminate\Database\UniqueConstraintViolationException $e) {
+            // Race condition - user was created between our check and insert
+            // Fetch and return the existing user
+            return User::where('email', $this->email)->firstOrFail();
+        }
     }
 
     public function update()

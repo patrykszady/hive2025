@@ -37,10 +37,10 @@ class GooglePlacesService
             // Endpoint for Places Autocomplete API
             $url = "https://maps.googleapis.com/maps/api/place/autocomplete/json";
 
-            // Make the HTTP request - add space at the end of input
+            // Make the HTTP request
             $response = $this->httpClient->get($url, [
                 'query' => [
-                    'input' => $input . ' ', // Added space at the end as requested
+                    'input' => $input,
                     'key' => $this->apiKey,
                     'types' => 'address', // Restrict results to addresses
                     'region' => 'us',    // Bias results to the United States

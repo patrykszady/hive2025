@@ -26,11 +26,12 @@
             />
         </div> --}}
 
+        <!-- Client selection (only when no client chosen yet) -->
         <div
-            x-data="{ open: @entangle('client_name'), address: @entangle('address_1')}"
-            x-show="!open && !address"
+            x-data="{ userClientId: @entangle('user_client_id') }"
+            x-show="!userClientId"
             x-transition
-            >
+        >
             @if(!empty($user_clients))
                 <flux:radio.group wire:model.live="user_client_id" label="Existing Clients" variant="cards" class="flex-col" :indicator="false">
                     @foreach ($user_clients as $client)
@@ -49,12 +50,13 @@
             <flux:separator variant="subtle" />
         </div>
 
+        <!-- Form details (always show for NEW or existing client, regardless of address fields) -->
         <div
-            x-data="{open: @entangle('user_client_id'), address: @entangle('address_1')}"
-            x-show="open == 'NEW' || address"
+            x-data="{ userClientId: @entangle('user_client_id') }"
+            x-show="userClientId === 'NEW' || !isNaN(parseInt(userClientId))"
             x-transition
             class="space-y-4"
-            >
+        >
 
             <flux:input
                 wire:model.live.debounce.500ms="form.business_name"
@@ -74,7 +76,7 @@
             />
         </div>
 
-        <div x-show="$wire.user_client_id != 'NEW' || $wire.address_1"
+        <div x-show="$wire.user_client_id != null"
             x-transition
             class="flex space-x-2 sticky bottom-0">
             <flux:spacer />

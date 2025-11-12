@@ -83,6 +83,8 @@ class ClientCreate extends Component
     {
         $this->client = $client;
         $this->form->setClient($this->client);
+        // Ensure user_client_id is set so form details render
+        $this->user_client_id = $client->id;
 
         $this->view_text = [
             'card_title' => 'Update Client',

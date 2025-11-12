@@ -25,9 +25,6 @@ class VendorForm extends Form
     // No Rule attribute for business_phone, we'll use rules() method instead
     public $business_phone = null;
 
-    // Category assignment (nullable until explicitly set)
-    public $category_id = null;
-
     #[Rule('nullable')]
     public $user_hourly_rate = null;
 
@@ -66,15 +63,13 @@ class VendorForm extends Form
         $this->vendor = $vendor;
         $this->business_name = $this->vendor->business_name;
         $this->business_type = $this->vendor->business_type;
-    // Populate the component's address fields (managed by HandlesAddresses trait)
-    $this->component->address_1 = $this->vendor->address;
-    $this->component->address_2 = $this->vendor->address_2;
-    $this->component->city = $this->vendor->city;
-    $this->component->state = $this->vendor->state;
-    $this->component->zip_code = $this->vendor->zip_code;
+        $this->component->address_1 = $this->vendor->address;
+        $this->component->address_2 = $this->vendor->address_2;
+        $this->component->city = $this->vendor->city;
+        $this->component->state = $this->vendor->state;
+        $this->component->zip_code = $this->vendor->zip_code;
         $this->business_phone = $this->vendor->business_phone;
         $this->business_email = $this->vendor->business_email;
-    $this->category_id = $this->vendor->category_id;
     }
 
     public function update()
@@ -84,15 +79,14 @@ class VendorForm extends Form
         $this->vendor->update([
             'business_name' => $this->business_name,
             'business_type' => $this->business_type,
-            // Address fields are managed on the component (HandlesAddresses)
-            'address' => $this->component->address_1,
-            'address_2' => $this->component->address_2,
-            'city' => $this->component->city,
-            'state' => $this->component->state,
-            'zip_code' => $this->component->zip_code,
+            'address' => $this->address,
+            'address_2' => $this->address_2,
+            'city' => $this->city,
+            'state' => $this->state,
+            'zip_code' => $this->zip_code,
             'business_phone' => $this->business_phone,
             'business_email' => $this->business_email,
-            'category_id' => $this->category_id, // Ensure persisted
+            'category_id' => $this->category_id, // Make sure this is included
         ]);
         
         return $this->vendor;
@@ -114,7 +108,6 @@ class VendorForm extends Form
             'zip_code' => $this->component->zip_code,
             'business_phone' => $this->business_phone,
             'business_email' => $this->business_email,
-            'category_id' => $this->category_id,
         ]);
     }
 }
