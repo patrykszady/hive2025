@@ -66,7 +66,7 @@
                                         <div class="flex items-center mt-2 gap-2">
                                             <flux:badge 
                                                 size="xs" 
-                                                color="{{ $project->latestStatus->title == 'Service Call' ? 'yellow' : 'zinc' }}"
+                                                color="{{ $project->latestStatus->badge_color }}"
                                                 > 
                                                 {{ $project->latestStatus->title }}
                                             </flux:badge>

@@ -74,7 +74,7 @@
 
             {{-- PROJECT NAME --}}
             <flux:input
-                wire:model.live.debounce.500ms="form.project_name"
+                wire:model="form.project_name"
                 label="Project Name"
                 type="text"
             />

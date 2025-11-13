@@ -189,7 +189,7 @@ class ProjectsIndex extends Component
                         ->values()
                         ->map(function ($status) {
                             return [
-                                'title' => \App\Support\ProjectStatusMap::label((int) $status->status_code),
+                                'title' => ProjectStatus::getLabelForCode((int) $status->status_code),
                                 'start_date' => $status->start_date
                                     ? $status->start_date->copy()
                                     : null,

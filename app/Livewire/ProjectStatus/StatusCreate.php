@@ -38,8 +38,8 @@ class StatusCreate extends Component
     {
         $this->validate();
         
-        // Map label to code
-        $statusCode = \App\Support\ProjectStatusMap::codeFor($this->project_status) ?? 0;
+        // project_status is already a status_code integer from the select dropdown
+        $statusCode = (int) $this->project_status;
         
         $status =
             ProjectStatus::create([
@@ -49,7 +49,8 @@ class StatusCreate extends Component
                 'start_date' => $this->project_status_date,
             ]);
 
-        if ($this->project_status === 'Cancelled') {
+        // Check if cancelled using the code (10)
+        if ($statusCode === 10) {
             $this->project->estimates()->delete();
         }
 

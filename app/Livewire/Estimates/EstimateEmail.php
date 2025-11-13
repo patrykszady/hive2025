@@ -18,6 +18,12 @@ class EstimateEmail extends Component
 
     public array $to = [];
 
+    public string $from = '';
+
+    public array $availableFromEmails = [];
+
+    public $adminUsers = null;
+
     public string $subject = '';
 
     public string $body = '';
@@ -35,6 +41,7 @@ class EstimateEmail extends Component
         return [
             'to' => ['required', 'array', 'min:1'],
             'to.*' => ['required', 'email'],
+            'from' => ['required', 'email'],
             'subject' => 'required|string|max:255',
             'body' => 'required|string',
             'include_estimate_pdf' => 'boolean',
@@ -44,7 +51,7 @@ class EstimateEmail extends Component
 
     public function updated($field)
     {
-        if (in_array($field, ['to', 'subject', 'body'])) {
+        if (in_array($field, ['to', 'from', 'subject', 'body'])) {
             $this->validateOnly($field);
         }
     }
@@ -62,7 +69,27 @@ class EstimateEmail extends Component
             ->values()
             ->all();
 
-        $this->subject = $this->estimate->vendor->name . ' | ' . $this->estimate->client->name . ' | Estimate ' . $this->estimate->project->name;
+        // Get admin users from the vendor
+        $this->adminUsers = $this->estimate->vendor->users()
+            ->wherePivot('role_id', 1)
+            ->wherePivot('is_employed', 1)
+            ->get(['users.id', 'first_name', 'last_name', 'email']);
+
+        $this->availableFromEmails = $this->adminUsers
+            ->pluck('email')
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        // Set default from to current user's email if they're an admin, otherwise first admin
+        $currentUserEmail = auth()->user()->email;
+        $this->from = in_array($currentUserEmail, $this->availableFromEmails) 
+            ? $currentUserEmail 
+            : ($this->availableFromEmails[0] ?? '');
+
+        // Set the default subject and body for the estimate email
+        $this->subject = 'Estimate for ' . $this->estimate->project->project_name . ' | ' . $this->estimate->client->last_names . ' | ' . $this->estimate->vendor->name;
         $this->body = EstimateEmailTemplate::defaultBody($this->estimate);
 
         $reimbursementsTotal = $this->estimate->project->finances['reimbursments'] ?? 0;
@@ -138,7 +165,8 @@ class EstimateEmail extends Component
             estimateId: $this->estimate->id,
             companyEmailId: $companyEmail->id,
             userId: $user->id,
-            recipients: $recipients,
+            recipients: $this->to,
+            fromEmail: $this->from,
             subject: $this->subject,
             body: $this->body,
             includeEstimatePdf: $this->include_estimate_pdf,
@@ -155,10 +183,12 @@ class EstimateEmail extends Component
             text: 'We are sending the estimate to ' . count($this->to) . ' recipient(s)',
         );
 
-        $this->reset(['to', 'subject', 'body', 'include_estimate_pdf', 'include_reimbursements_pdf', 'hasReimbursements', 'estimate']);
+        $this->reset(['to', 'from', 'availableFromEmails', 'adminUsers', 'subject', 'body', 'include_estimate_pdf', 'include_reimbursements_pdf', 'hasReimbursements', 'estimate']);
         $this->include_estimate_pdf = true;
         $this->include_reimbursements_pdf = false;
         $this->to = [];
+        $this->from = '';
+        $this->availableFromEmails = [];
     }
 
     public function getUserDisplayName(string $email): string
@@ -174,6 +204,21 @@ class EstimateEmail extends Component
         }
 
         return $user->first_name . ' (' . $email . ')';
+    }
+
+    public function getFromUserDisplayName(string $email): string
+    {
+        if (!$this->adminUsers) {
+            return $email;
+        }
+
+        $user = $this->adminUsers->firstWhere('email', $email);
+        
+        if (!$user) {
+            return $email;
+        }
+
+        return $user->first_name . ' ' . $user->last_name . ' (' . $email . ')';
     }
 
     public function render()

@@ -123,6 +123,33 @@ class Client extends Model
     }
 
     /**
+     * Get just the last name(s) for display purposes
+     */
+    protected function lastNames(): Attribute
+    {
+        return Attribute::make(
+            get: function ($value, array $attributes) {
+                // If client has a business_name, use that
+                if (!empty($attributes['business_name'])) {
+                    $nameParts = explode(',', $attributes['business_name']);
+                    return trim($nameParts[0]);
+                }
+
+                // Otherwise, get last names from users
+                $users = $this->users;
+
+                if ($users->count() == 0) {
+                    return 'No Name';
+                }
+
+                // Get unique last names and join with &
+                $lastNames = $users->pluck('last_name')->unique()->toArray();
+                return implode(' & ', $lastNames);
+            }
+        );
+    }
+
+    /**
      * Get the source attribute from the pivot table
      */
     protected function source(): Attribute

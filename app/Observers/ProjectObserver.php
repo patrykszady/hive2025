@@ -20,11 +20,12 @@ class ProjectObserver
     {
         $project->vendors()->attach($project->belongs_to_vendor_id, ['client_id' => $project->client_id]);
 
+        // Create initial Estimate status (code 2)
         ProjectStatus::create([
             'project_id' => $project->id,
-            'start_date' => today()->format('Y-m-d'),
             'belongs_to_vendor_id' => $project->belongs_to_vendor_id,
-            'title' => 'Estimate',
+            'status_code' => 2, // Estimate
+            'start_date' => today()->format('Y-m-d'),
         ]);
     }
 

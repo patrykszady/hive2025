@@ -2,7 +2,6 @@
 
 namespace App\Livewire\Estimates;
 
-use App\Jobs\SendInitialEstimateEmail;
 use App\Livewire\Projects\ProjectFinances;
 
 use App\Models\Estimate;
@@ -204,11 +203,6 @@ class EstimateShow extends Component
         }, $document['filename'], [
             'Content-Type' => 'application/pdf',
         ]);
-
-          //     //2024-12-25
-    //     // if($type == 'estimate'){
-    //     //     // SendInitialEstimateEmail::dispatch($this->estimate, $this->sections, $type);
-    //     //}
     }
 
     public function sort_sections($key, $position)

@@ -89,6 +89,23 @@ class ProjectStatus extends Model
     }
 
     /**
+     * Static helper: Get status code from label
+     */
+    public static function getCodeForLabel(string $label): ?int
+    {
+        $reverse = array_flip(self::STATUS_LABELS);
+        return $reverse[$label] ?? null;
+    }
+
+    /**
+     * Static helper: Get label from status code
+     */
+    public static function getLabelForCode(int $code): string
+    {
+        return self::STATUS_LABELS[$code] ?? 'Unknown';
+    }
+
+    /**
      * Get the duration in days from start_date to today
      */
     // protected function duration(): Attribute

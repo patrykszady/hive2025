@@ -3,6 +3,7 @@
 namespace App\Mail;
 
 use App\Models\Estimate;
+use App\Models\User;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Address;
@@ -11,24 +12,21 @@ use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
 
-class InitialEstimate extends Mailable
+class EstimateMail extends Mailable
 {
     use Queueable, SerializesModels;
-
-    public $estimate;
-
-    public $sections;
-
-    public $type;
 
     /**
      * Create a new message instance.
      */
-    public function __construct(Estimate $estimate, $sections, $type)
-    {
-        $this->estimate = $estimate;
-        $this->sections = $sections;
-        $this->type = $type;
+    public function __construct(
+        public Estimate $estimate,
+        public User $user,
+        public string $fromEmail,
+        public string $emailSubject,
+        public string $emailBody,
+        public array $attachmentPaths = []
+    ) {
     }
 
     /**
@@ -36,9 +34,14 @@ class InitialEstimate extends Mailable
      */
     public function envelope(): Envelope
     {
+        $fromName = $this->user->vendor?->name
+            ?? trim($this->user->first_name.' '.$this->user->last_name)
+            ?: config('app.name');
+
         return new Envelope(
-            from: new Address('support@hive.contractors', 'Hive Contractors'),
-            subject: $this->estimate->vendor->name.' | '.$this->estimate->client->name.' | Estimate',
+            from: new Address(config('mail.from.address'), $fromName),
+            replyTo: [new Address($this->fromEmail, $fromName)],
+            subject: $this->emailSubject,
         );
     }
 
@@ -48,7 +51,7 @@ class InitialEstimate extends Mailable
     public function content(): Content
     {
         return new Content(
-            markdown: 'emails.initial_estimate',
+            htmlString: $this->emailBody,
         );
     }
 
@@ -59,16 +62,8 @@ class InitialEstimate extends Mailable
      */
     public function attachments(): array
     {
-        $data = app(\App\Livewire\Estimates\EstimateShow::class)
-            ->create_pdf(
-                $this->estimate,
-                $this->sections,
-                $this->type
-            );
-
-        return [
-            //$data[0] = location
-            Attachment::fromPath($data[0]),
-        ];
+        return collect($this->attachmentPaths)
+            ->map(fn ($path) => Attachment::fromPath($path))
+            ->all();
     }
 }

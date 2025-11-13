@@ -12,6 +12,12 @@
             @endforeach
         </flux:pillbox>
 
+        <flux:select wire:model.live="from" label="From" placeholder="Select sender email...">
+            @foreach($availableFromEmails as $email)
+                <flux:select.option :value="$email">{{ $this->getFromUserDisplayName($email) }}</flux:select.option>
+            @endforeach
+        </flux:select>
+
         <flux:input
             wire:model.live.debounce.500ms="subject"
             label="Subject"
@@ -23,14 +29,16 @@
         <div class="space-y-2">
             <flux:heading size="sm">Attachments</flux:heading>
             <flux:switch wire:model.live="include_estimate_pdf" label="Attach Estimate PDF" />
-            <flux:switch
-                wire:model.live="include_reimbursements_pdf"
-                label="Attach Project Reimbursements"
-                :disabled="! $hasReimbursements"
-            />
-            @unless($hasReimbursements)
-                <flux:description>The project has no reimbursements recorded.</flux:description>
-            @endunless
+            <div>
+                <flux:switch
+                    wire:model.live="include_reimbursements_pdf"
+                    label="Attach Project Reimbursements"
+                    :disabled="! $hasReimbursements"
+                />
+                @unless($hasReimbursements)
+                    <div class="text-sm italic text-zinc-800 dark:text-white mt-1">The project has no reimbursements recorded.</div>
+                @endunless
+            </div>
         </div>
 
         <div class="flex space-x-2">

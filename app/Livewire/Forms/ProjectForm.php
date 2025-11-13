@@ -83,5 +83,6 @@ class ProjectForm extends Form
             'state' => $this->component->state,
             'zip_code' => $this->component->zip_code,
         ]);
+        // ProjectStatus with Estimate (code 2) is created automatically via ProjectObserver
     }
 }

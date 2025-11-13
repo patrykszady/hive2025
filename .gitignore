@@ -28,3 +28,4 @@ auth.json
 # Meilisearch data
 data.ms/
 *.mdb
+mailtrap-mcp/
