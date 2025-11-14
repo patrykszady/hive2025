@@ -21,7 +21,7 @@ class ProjectCreate extends Component
 
     public ProjectForm $form;
 
-    public Project $project;
+    public ?Project $project = null;
 
     public $client_addresses = [];
 
@@ -198,6 +198,20 @@ class ProjectCreate extends Component
         );
 
         $this->dispatch('refreshComponent')->to('projects.project-show');
+    }
+
+    public function delete()
+    {
+        $this->authorize('forceDelete', $this->project);
+
+        $this->form->delete();
+
+        $this->modal('project_form_modal')->close();
+        $this->modal('project_delete_confirm')->close();
+
+        Flux::toast(variant: 'success', text: 'Project Deleted');
+
+        $this->redirect(route('projects.index'), navigate: true);
     }
 
     public function render()

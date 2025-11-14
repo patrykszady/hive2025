@@ -47,7 +47,23 @@ class ProjectPolicy
      */
     public function delete(User $user, Project $project): bool
     {
-        //
+        // Only admins can delete
+        if ($user->vendor_role !== 'Admin') {
+            return false;
+        }
+
+        // Cannot delete if project has payments, timesheets, hours, tasks, expenses, or distributions
+        if ($project->payments()->exists() ||
+            $project->timesheets()->exists() ||
+            $project->hours()->exists() ||
+            $project->tasks()->exists() ||
+            $project->expenses()->exists() ||
+            $project->expenseSplits()->exists() ||
+            $project->distributions()->exists()) {
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -67,7 +83,23 @@ class ProjectPolicy
      */
     public function forceDelete(User $user, Project $project): bool
     {
-        //
+        // Only admins can delete
+        if ($user->vendor_role !== 'Admin') {
+            return false;
+        }
+
+        // Cannot delete if project has payments, timesheets, hours, tasks, expenses, or distributions
+        if ($project->payments()->exists() ||
+            $project->timesheets()->exists() ||
+            $project->hours()->exists() ||
+            $project->tasks()->exists() ||
+            $project->expenses()->exists() ||
+            $project->expenseSplits()->exists() ||
+            $project->distributions()->exists()) {
+            return false;
+        }
+
+        return true;
     }
     
     /**

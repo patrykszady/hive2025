@@ -64,6 +64,12 @@ class ProjectForm extends Form
         return $this->project;
     }
 
+    public function delete()
+    {
+        $this->project->forceDelete();
+        return $this->project;
+    }
+
     public function store()
     {
         if ($this->project_existing_address == 'CLIENT_PROJECT') {

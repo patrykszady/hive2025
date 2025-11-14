@@ -58,6 +58,11 @@ class ProjectObserver
      */
     public function forceDeleted(Project $project): void
     {
-        //
+        // Delete pivot records
+        \DB::table('project_vendor')->where('project_id', $project->id)->delete();
+        
+        // Delete related records
+        $project->statuses()->delete();
+        $project->estimates()->delete();
     }
 }
