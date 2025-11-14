@@ -13,7 +13,7 @@ class SyncNylasContacts extends Command
      *
      * @var string
      */
-    protected $signature = 'nylas:sync-contacts {--user_id=}';
+    protected $signature = 'nylas:sync-contacts {--user_id=} {--recreate : Delete and recreate all contacts}';
 
     /**
      * The console command description.
@@ -36,6 +36,7 @@ class SyncNylasContacts extends Command
     public function handle()
     {
         $userId = $this->option('user_id');
+        $recreate = $this->option('recreate');
 
         if ($userId) {
             // Sync specific user
@@ -46,18 +47,37 @@ class SyncNylasContacts extends Command
             }
 
             $this->info("Syncing contacts for user: {$user->full_name}");
-            $this->contactSyncService->updateContactsForUser($user);
+            
+            if ($recreate) {
+                $this->info("Recreating contacts (deleting and creating fresh)...");
+                $this->contactSyncService->recreateContactsForUser($user);
+            } else {
+                $this->contactSyncService->updateContactsForUser($user);
+            }
+            
             $this->info("Sync complete for user {$user->id}");
         } else {
             // Sync all users with clients
             $this->info('Syncing all client users to Nylas contacts...');
+            
+            if ($recreate) {
+                $this->warn('⚠️  This will DELETE and RECREATE all contacts!');
+                if (!$this->confirm('Are you sure you want to continue?')) {
+                    $this->info('Aborted.');
+                    return 0;
+                }
+            }
             
             $users = User::has('clients')->get();
             $bar = $this->output->createProgressBar($users->count());
             $bar->start();
 
             foreach ($users as $user) {
-                $this->contactSyncService->updateContactsForUser($user);
+                if ($recreate) {
+                    $this->contactSyncService->recreateContactsForUser($user);
+                } else {
+                    $this->contactSyncService->updateContactsForUser($user);
+                }
                 $bar->advance();
             }
 

@@ -50,7 +50,7 @@ class NylasContactSyncService
         $companyEmails = $vendor->company_emails;
         
         foreach ($companyEmails as $companyEmail) {
-            $this->syncUserContactForGrant($user, $client, $companyEmail->grant_id);
+            $this->syncUserContactForGrant($user, $client, $companyEmail);
         }
     }
 
@@ -59,11 +59,13 @@ class NylasContactSyncService
      * 
      * @param User $user
      * @param Client $client
-     * @param string $grantId
+     * @param \App\Models\CompanyEmail $companyEmail
      * @return void
      */
-    public function syncUserContactForGrant(User $user, Client $client, string $grantId): void
+    public function syncUserContactForGrant(User $user, Client $client, $companyEmail): void
     {
+        $grantId = $companyEmail->grant_id;
+        
         try {
             // Get the pivot record to check for existing Nylas contact ID
             $pivot = DB::table('client_user')
@@ -84,7 +86,7 @@ class NylasContactSyncService
             $existingContactId = $existingContactIds[$grantId] ?? null;
 
             // Prepare contact data
-            $contactData = $this->prepareContactData($user, $client);
+            $contactData = $this->prepareContactData($user, $client, $companyEmail);
 
             if ($existingContactId) {
                 // Update existing contact
@@ -148,29 +150,54 @@ class NylasContactSyncService
     }
 
     /**
+     * Recreate contacts for a user (delete and create fresh)
+     * Useful when moving contacts to correct groups
+     * 
+     * @param User $user
+     * @return void
+     */
+    public function recreateContactsForUser(User $user): void
+    {
+        $clients = $user->clients;
+        
+        foreach ($clients as $client) {
+            // First, remove all existing contacts
+            $this->removeUserContactsForClient($user, $client);
+            
+            // Clear the nylas_contact_ids from the pivot table
+            DB::table('client_user')
+                ->where('client_id', $client->id)
+                ->where('user_id', $user->id)
+                ->update([
+                    'nylas_contact_ids' => null,
+                    'updated_at' => now(),
+                ]);
+            
+            // Then create fresh contacts
+            $this->syncUserContactsForClient($user, $client);
+        }
+    }
+
+    /**
      * Prepare contact data for Nylas API
      * 
      * @param User $user
      * @param Client $client
+     * @param \App\Models\CompanyEmail $companyEmail
      * @return array
      */
-    protected function prepareContactData(User $user, Client $client): array
+    protected function prepareContactData(User $user, Client $client, $companyEmail): array
     {
         $data = [
             'given_name' => $user->first_name,
             'surname' => $user->last_name,
-            'groups' => [
-                [
-                    'id' => 'Hive Contractors',
-                ]
-            ],
         ];
 
         // Add email if present
         if ($user->email) {
             $data['emails'] = [
                 [
-                    'type' => 'work',
+                    'type' => 'home',
                     'email' => $user->email,
                 ]
             ];
@@ -195,11 +222,11 @@ class NylasContactSyncService
         if ($client->address) {
             $data['physical_addresses'] = [
                 [
-                    'type' => 'work',
+                    'type' => 'home',
                     'street_address' => $client->address . ($client->address_2 ? "\n" . $client->address_2 : ''),
                     'city' => $client->city,
                     'state' => $client->state,
-                    'postal_code' => $client->zip_code,
+                    'postal_code' => (string) $client->zip_code,
                     'country' => 'US',
                 ]
             ];

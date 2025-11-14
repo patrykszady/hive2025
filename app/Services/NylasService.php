@@ -1233,4 +1233,5 @@ class NylasService
             'error' => $response['error'] ?? null,
         ];
     }
+
 }
