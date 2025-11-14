@@ -110,6 +110,23 @@ class ClientCreate extends Component
         $this->dispatch('refreshComponent')->to('clients.clients-show');
     }
 
+    public function add_user_to_client()
+    {
+        // Attach the user to the client
+        if ($this->form->user && $this->client) {
+            $this->client->users()->syncWithoutDetaching([$this->form->user->id]);
+
+            $this->modal('client_form_modal')->close();
+
+            $this->dispatch('notify',
+                type: 'success',
+                content: 'User added to Client'
+            );
+
+            $this->dispatch('refreshComponent')->to('clients.clients-show');
+        }
+    }
+
     public function save()
     {
         //if existing Client ... redirect to that with Livewire.navigate

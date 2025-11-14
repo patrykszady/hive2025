@@ -80,9 +80,9 @@
             {{-- CREATE/ATTACH 1099 / SUB Vendor / PAYROLL --}}
             <div
                 {{-- model_id: @entangle('model.id') --}}
-                x-data="{ user_form: @entangle('form.user') }"
+                x-data="{ userId: @entangle('form.user_id') }"
                 {{--  && model_id == 'NEW' --}}
-                x-show="$wire.model.type == 'vendor' && $wire.model.id != 'NEW' && user_form"
+                x-show="$wire.model.type == 'vendor' && $wire.model.id != 'NEW' && userId"
                 class="my-4 space-y-4"
                 >
 
@@ -145,23 +145,32 @@
         </div>
 
         {{-- FOOTER --}}
-        <div 
-            class="flex space-x-2 sticky bottom-0 justify-end"             
-            x-show="$wire.user_form && 
-                    ($wire.model.id == 'NEW' || 
-                    ($wire.form.user && 
-                        ($wire.model.type == 'client' || 
-                        ($wire.model.type == 'vendor' && (($wire.form.via_vendor && $wire.form.via_vendor != 'NEW_VIA') || $wire.form.role == 1)))))"
-            x-transition
+        <div
+            x-data="{
+                userForm: @entangle('user_form'),
+                modelId: @entangle('model.id'),
+                modelType: @entangle('model.type'),
+                formUserId: @entangle('form.user_id'),
+                role: @entangle('form.role'),
+                viaVendor: @entangle('form.via_vendor')
+            }"
+            class="space-y-2 sticky bottom-0"             
             >
-
-            <flux:button
-                wire:click="{{$view_text['form_submit']}}"
-                type="submit"
-                variant="primary"
-                >
-                {{$view_text['button_text']}}
-            </flux:button>
+            <div class="flex space-x-2 justify-end">
+                <flux:button
+                    x-show="userForm && (
+                        modelId == 'NEW' || 
+                        (formUserId && modelType == 'client') ||
+                        (formUserId && modelType == 'vendor' && ((viaVendor && viaVendor != 'NEW_VIA') || role == 1)) ||
+                        (modelType == 'user')
+                    )"
+                    wire:click="{{$view_text['form_submit']}}"
+                    type="submit"
+                    variant="primary"
+                    >
+                    {{$view_text['button_text']}}
+                </flux:button>
+            </div>
         </div>
     </form>
 </flux:modal>

@@ -76,7 +76,10 @@
             />
         </div>
 
-        <div x-show="$wire.user_client_id != null"
+        {{-- Button section - always visible when user_client_id is set --}}
+        <div
+            x-data="{ userClientId: @entangle('user_client_id') }"
+            x-show="userClientId !== null"
             x-transition
             class="flex space-x-2 sticky bottom-0">
             <flux:spacer />
@@ -84,7 +87,6 @@
             <flux:button 
                 type="submit" 
                 variant="primary"
-                x-text="!isNaN(parseInt($wire.user_client_id)) && $wire.user_client_id !== 'NEW' ? 'Show Client' : '{{$view_text['button_text']}}'"
             >{{$view_text['button_text']}}</flux:button>
         </div>
     </form>
