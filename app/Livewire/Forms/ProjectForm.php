@@ -41,15 +41,25 @@ class ProjectForm extends Form
     {
         $this->validate();
 
+        $oldClientId = $this->project->client_id;
+        $newClientId = $this->client_id;
+
         $this->project->update([
             'project_name' => $this->project_name,
-            // 'client_id' => $this->client_id,
+            'client_id' => $this->client_id,
             'address' => $this->component->address_1,
             'address_2' => $this->component->address_2,
             'city' => $this->component->city,
             'state' => $this->component->state,
             'zip_code' => $this->component->zip_code,
         ]);
+
+        // If client changed, update the project_vendor pivot table
+        if ($oldClientId != $newClientId) {
+            \DB::table('project_vendor')
+                ->where('project_id', $this->project->id)
+                ->update(['client_id' => $newClientId]);
+        }
 
         return $this->project;
     }

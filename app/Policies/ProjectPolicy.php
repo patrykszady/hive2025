@@ -25,11 +25,6 @@ class ProjectPolicy
         return true;
     }
 
-    /**
-     * Determine whether the user can create models.
-     *
-     * @return \Illuminate\Auth\Access\Response|bool
-     */
     public function create(User $user): bool
     {
         return $user->vendor_role === 'Admin';
@@ -42,18 +37,7 @@ class ProjectPolicy
      */
     public function update(User $user, Project $project): bool
     {
-        // First check if user has admin role
-        if ($user->vendor_role !== 'Admin') {
-            return false;
-        }
-        
-        // Check if there's a client_id mismatch
-        // This prevents updates when the direct client_id doesn't match the related client's id
-        if ($project->client_id && $project->client && $project->client_id != $project->client->id) {
-            return false;
-        }
-        
-        return true;
+        return $user->vendor_role === 'Admin';
     }
 
     /**

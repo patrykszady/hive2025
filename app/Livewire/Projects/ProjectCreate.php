@@ -23,8 +23,6 @@ class ProjectCreate extends Component
 
     public Project $project;
 
-    public $existing_client = null;
-
     public $client_addresses = [];
 
     public $view_text = [
@@ -169,7 +167,6 @@ class ProjectCreate extends Component
         $this->project = $project;
 
         $this->form->setProject($this->project);
-        $this->existing_client = $this->project->client;
 
         $this->view_text = [
             'card_title' => 'Update Project',

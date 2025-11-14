@@ -7,10 +7,8 @@
 
     <form wire:submit="{{$view_text['form_submit']}}" class="grid gap-6">
         {{-- CLIENT ID --}}
-        <div
-            x-data="{ existing_client: @entangle('existing_client') }"
-            >
-            <flux:select label="Client" wire:model.live="form.client_id" x-bind:disabled="existing_client" variant="listbox" searchable placeholder="Choose client...">
+        <div>
+            <flux:select label="Client" wire:model.live="form.client_id" variant="listbox" searchable placeholder="Choose client...">
                 <x-slot name="search">
                     <flux:select.search placeholder="Search..." />
                 </x-slot>
