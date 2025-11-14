@@ -246,6 +246,11 @@ class UserCreate extends Component
                 // Check if this relationship already exists to prevent duplicates
                 if (!$user->clients()->where('client_id', $this->model['id'])->exists()) {
                     $user->clients()->attach($this->model['id']);
+                    
+                    // Sync to Nylas contacts
+                    $client = \App\Models\Client::find($this->model['id']);
+                    app(\App\Services\NylasContactSyncService::class)->syncUserContactsForClient($user, $client);
+                    
                     $this->dispatch('refreshComponent')->to(UsersIndex::class);
                     $this->dispatch('refreshComponent')->to('clients.clients-show');
                     

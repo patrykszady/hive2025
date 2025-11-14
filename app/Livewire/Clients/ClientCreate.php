@@ -115,6 +115,9 @@ class ClientCreate extends Component
         // Attach the user to the client
         if ($this->form->user && $this->client) {
             $this->client->users()->syncWithoutDetaching([$this->form->user->id]);
+            
+            // Sync to Nylas contacts
+            app(\App\Services\NylasContactSyncService::class)->syncUserContactsForClient($this->form->user, $this->client);
 
             $this->modal('client_form_modal')->close();
 

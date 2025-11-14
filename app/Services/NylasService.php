@@ -1153,4 +1153,84 @@ class NylasService
             'error' => $response['error'] ?? null,
         ];
     }
+
+    /**
+     * Create a contact in Nylas
+     * 
+     * @param string $grantId The grant ID for the account
+     * @param array $contactData Contact data (given_name, surname, emails, phone_numbers, etc.)
+     * @return array
+     */
+    public function createContact(string $grantId, array $contactData): array
+    {
+        $response = $this->makeNylasRequest('POST', "/grants/{$grantId}/contacts", $contactData);
+        
+        if (!$response['success']) {
+            Log::channel('nylas')->error('Create Contact Failed', [
+                'grant_id' => $grantId,
+                'contact_data' => $contactData,
+                'error' => $response['error'] ?? $response['body'],
+            ]);
+        }
+        
+        return [
+            'status' => $response['status'] ?? 500,
+            'data' => $response['data'] ?? [],
+            'error' => $response['error'] ?? null,
+        ];
+    }
+
+    /**
+     * Update a contact in Nylas
+     * 
+     * @param string $grantId The grant ID for the account
+     * @param string $contactId The contact ID to update
+     * @param array $contactData Updated contact data
+     * @return array
+     */
+    public function updateContact(string $grantId, string $contactId, array $contactData): array
+    {
+        $response = $this->makeNylasRequest('PUT', "/grants/{$grantId}/contacts/{$contactId}", $contactData);
+        
+        if (!$response['success']) {
+            Log::channel('nylas')->error('Update Contact Failed', [
+                'grant_id' => $grantId,
+                'contact_id' => $contactId,
+                'contact_data' => $contactData,
+                'error' => $response['error'] ?? $response['body'],
+            ]);
+        }
+        
+        return [
+            'status' => $response['status'] ?? 500,
+            'data' => $response['data'] ?? [],
+            'error' => $response['error'] ?? null,
+        ];
+    }
+
+    /**
+     * Delete a contact from Nylas
+     * 
+     * @param string $grantId The grant ID for the account
+     * @param string $contactId The contact ID to delete
+     * @return array
+     */
+    public function deleteContact(string $grantId, string $contactId): array
+    {
+        $response = $this->makeNylasRequest('DELETE', "/grants/{$grantId}/contacts/{$contactId}");
+        
+        if (!$response['success']) {
+            Log::channel('nylas')->error('Delete Contact Failed', [
+                'grant_id' => $grantId,
+                'contact_id' => $contactId,
+                'error' => $response['error'] ?? $response['body'],
+            ]);
+        }
+        
+        return [
+            'status' => $response['status'] ?? 500,
+            'data' => $response['data'] ?? [],
+            'error' => $response['error'] ?? null,
+        ];
+    }
 }

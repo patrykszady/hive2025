@@ -48,6 +48,13 @@ Schedule::call(function () {
     ->withoutOverlapping()
     ->onOneServer();
 
+Schedule::command('nylas:sync-contacts')
+    ->dailyAt('02:00')
+    ->name('sync-nylas-contacts')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer();
+
 //Plaid/Transaction tasks
 Schedule::call(function () {
     app(\App\Http\Controllers\TransactionController::class)->plaid_item_status();

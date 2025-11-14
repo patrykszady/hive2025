@@ -43,6 +43,15 @@ class User extends Authenticatable
         ];
     }
 
+    /**
+     * Boot the model and register events
+     */
+    protected static function booted(): void
+    {
+        // Register observer for update events
+        static::observe(\App\Observers\UserObserver::class);
+    }
+
     //Vendors USER belongs to
     public function vendors(): BelongsToMany
     {

@@ -1,0 +1,251 @@
+<?php
+
+namespace App\Services;
+
+use App\Models\Client;
+use App\Models\CompanyEmail;
+use App\Models\User;
+use App\Models\Vendor;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+
+class NylasContactSyncService
+{
+    protected NylasService $nylasService;
+
+    public function __construct(NylasService $nylasService)
+    {
+        $this->nylasService = $nylasService;
+    }
+
+    /**
+     * Sync a user's contact to all relevant Nylas grants
+     * This happens when a user is attached to a client
+     * 
+     * @param User $user
+     * @param Client $client
+     * @return void
+     */
+    public function syncUserContactsForClient(User $user, Client $client): void
+    {
+        // Get all Hive Contractor vendors that have this client
+        $vendors = $client->vendors()->hiveVendors()->get();
+        
+        foreach ($vendors as $vendor) {
+            $this->syncUserContactForVendor($user, $client, $vendor);
+        }
+    }
+
+    /**
+     * Sync a user's contact for a specific vendor's grant
+     * 
+     * @param User $user
+     * @param Client $client
+     * @param Vendor $vendor
+     * @return void
+     */
+    public function syncUserContactForVendor(User $user, Client $client, Vendor $vendor): void
+    {
+        // Get the vendor's company emails (grants)
+        $companyEmails = $vendor->company_emails;
+        
+        foreach ($companyEmails as $companyEmail) {
+            $this->syncUserContactForGrant($user, $client, $companyEmail->grant_id);
+        }
+    }
+
+    /**
+     * Sync a user contact for a specific grant
+     * 
+     * @param User $user
+     * @param Client $client
+     * @param string $grantId
+     * @return void
+     */
+    public function syncUserContactForGrant(User $user, Client $client, string $grantId): void
+    {
+        try {
+            // Get the pivot record to check for existing Nylas contact ID
+            $pivot = DB::table('client_user')
+                ->where('client_id', $client->id)
+                ->where('user_id', $user->id)
+                ->first();
+
+            if (!$pivot) {
+                Log::channel('nylas')->warning('No client_user pivot found', [
+                    'user_id' => $user->id,
+                    'client_id' => $client->id,
+                ]);
+                return;
+            }
+
+            // Get existing contact IDs (JSON)
+            $existingContactIds = json_decode($pivot->nylas_contact_ids ?? '{}', true) ?? [];
+            $existingContactId = $existingContactIds[$grantId] ?? null;
+
+            // Prepare contact data
+            $contactData = $this->prepareContactData($user, $client);
+
+            if ($existingContactId) {
+                // Update existing contact
+                $result = $this->nylasService->updateContact($grantId, $existingContactId, $contactData);
+                
+                if ($result['status'] === 200) {
+                    Log::channel('nylas')->info('Updated Nylas contact', [
+                        'grant_id' => $grantId,
+                        'contact_id' => $existingContactId,
+                        'user_id' => $user->id,
+                    ]);
+                }
+            } else {
+                // Create new contact
+                $result = $this->nylasService->createContact($grantId, $contactData);
+                
+                if ($result['status'] === 200 && isset($result['data']['data']['id'])) {
+                    $newContactId = $result['data']['data']['id'];
+                    
+                    // Update the pivot table with the new contact ID
+                    $existingContactIds[$grantId] = $newContactId;
+                    
+                    DB::table('client_user')
+                        ->where('client_id', $client->id)
+                        ->where('user_id', $user->id)
+                        ->update([
+                            'nylas_contact_ids' => json_encode($existingContactIds),
+                            'updated_at' => now(),
+                        ]);
+
+                    Log::channel('nylas')->info('Created Nylas contact', [
+                        'grant_id' => $grantId,
+                        'contact_id' => $newContactId,
+                        'user_id' => $user->id,
+                    ]);
+                }
+            }
+        } catch (\Exception $e) {
+            Log::channel('nylas')->error('Failed to sync Nylas contact', [
+                'grant_id' => $grantId,
+                'user_id' => $user->id,
+                'client_id' => $client->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Update contacts for a user across all clients when user data changes
+     * 
+     * @param User $user
+     * @return void
+     */
+    public function updateContactsForUser(User $user): void
+    {
+        $clients = $user->clients;
+        
+        foreach ($clients as $client) {
+            $this->syncUserContactsForClient($user, $client);
+        }
+    }
+
+    /**
+     * Prepare contact data for Nylas API
+     * 
+     * @param User $user
+     * @param Client $client
+     * @return array
+     */
+    protected function prepareContactData(User $user, Client $client): array
+    {
+        $data = [
+            'given_name' => $user->first_name,
+            'surname' => $user->last_name,
+            'groups' => [
+                [
+                    'id' => 'Hive Contractors',
+                ]
+            ],
+        ];
+
+        // Add email if present
+        if ($user->email) {
+            $data['emails'] = [
+                [
+                    'type' => 'work',
+                    'email' => $user->email,
+                ]
+            ];
+        }
+
+        // Add phone if present
+        if ($user->cell_phone) {
+            $data['phone_numbers'] = [
+                [
+                    'type' => 'mobile',
+                    'number' => $user->cell_phone,
+                ]
+            ];
+        }
+
+        // Add company name from client if available
+        if ($client->business_name) {
+            $data['company_name'] = $client->business_name;
+        }
+
+        // Add physical address if client has one
+        if ($client->address) {
+            $data['physical_addresses'] = [
+                [
+                    'type' => 'work',
+                    'street_address' => $client->address . ($client->address_2 ? "\n" . $client->address_2 : ''),
+                    'city' => $client->city,
+                    'state' => $client->state,
+                    'postal_code' => $client->zip_code,
+                    'country' => 'US',
+                ]
+            ];
+        }
+
+        return $data;
+    }
+
+    /**
+     * Remove contact from Nylas when user is detached from client
+     * 
+     * @param User $user
+     * @param Client $client
+     * @return void
+     */
+    public function removeUserContactsForClient(User $user, Client $client): void
+    {
+        try {
+            // Get the pivot record
+            $pivot = DB::table('client_user')
+                ->where('client_id', $client->id)
+                ->where('user_id', $user->id)
+                ->first();
+
+            if (!$pivot || !$pivot->nylas_contact_ids) {
+                return;
+            }
+
+            $contactIds = json_decode($pivot->nylas_contact_ids, true) ?? [];
+
+            // Delete all contacts for this user from all grants
+            foreach ($contactIds as $grantId => $contactId) {
+                $this->nylasService->deleteContact($grantId, $contactId);
+                
+                Log::channel('nylas')->info('Deleted Nylas contact', [
+                    'grant_id' => $grantId,
+                    'contact_id' => $contactId,
+                    'user_id' => $user->id,
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::channel('nylas')->error('Failed to remove Nylas contacts', [
+                'user_id' => $user->id,
+                'client_id' => $client->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+}
