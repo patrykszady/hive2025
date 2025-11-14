@@ -61,10 +61,16 @@ class SendEstimateEmailJob implements ShouldQueue
         $tempFiles = [];
 
         try {
+            // Ensure temp directory exists
+            $tempDir = storage_path('app/temp');
+            if (!is_dir($tempDir)) {
+                mkdir($tempDir, 0755, true);
+            }
+
             if ($this->includeEstimatePdf) {
                 $estimateDocument = EstimateDocumentGenerator::generate($estimate, 'Estimate');
                 if ($estimateDocument && isset($estimateDocument['binary'], $estimateDocument['filename'])) {
-                    $tempPath = storage_path('app/temp/' . $estimateDocument['filename']);
+                    $tempPath = $tempDir . '/' . $estimateDocument['filename'];
                     file_put_contents($tempPath, $estimateDocument['binary']);
                     $attachmentPaths[] = $tempPath;
                     $tempFiles[] = $tempPath;
@@ -75,7 +81,7 @@ class SendEstimateEmailJob implements ShouldQueue
                 if ($estimate->project) {
                     $reimbursementsDocument = ProjectDocumentGenerator::generateReimbursements($estimate->project);
                     if ($reimbursementsDocument && isset($reimbursementsDocument['binary'], $reimbursementsDocument['filename'])) {
-                        $tempPath = storage_path('app/temp/' . $reimbursementsDocument['filename']);
+                        $tempPath = $tempDir . '/' . $reimbursementsDocument['filename'];
                         file_put_contents($tempPath, $reimbursementsDocument['binary']);
                         $attachmentPaths[] = $tempPath;
                         $tempFiles[] = $tempPath;
