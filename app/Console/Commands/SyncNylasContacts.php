@@ -58,7 +58,7 @@ class SyncNylasContacts extends Command
             $this->info("Sync complete for user {$user->id}");
         } else {
             // Sync all users with clients
-            $this->info('Syncing all client users to Nylas contacts...');
+            $this->info('Syncing Nylas contacts for recently updated users...');
             
             if ($recreate) {
                 $this->warn('⚠️  This will DELETE and RECREATE all contacts!');
@@ -66,9 +66,21 @@ class SyncNylasContacts extends Command
                     $this->info('Aborted.');
                     return 0;
                 }
+                
+                // When recreating, process all users
+                $users = User::has('clients')->get();
+            } else {
+                // Only sync users updated in the last 25 hours (to account for schedule timing)
+                $users = User::has('clients')
+                    ->where('updated_at', '>=', now()->subHours(25))
+                    ->get();
             }
             
-            $users = User::has('clients')->get();
+            if ($users->isEmpty()) {
+                $this->info('No users need syncing.');
+                return 0;
+            }
+            
             $bar = $this->output->createProgressBar($users->count());
             $bar->start();
 

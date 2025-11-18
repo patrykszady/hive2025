@@ -5,7 +5,7 @@ namespace App\Livewire\Estimates;
 use App\Jobs\SendEstimateEmailJob;
 use App\Models\CompanyEmail;
 use App\Models\Estimate;
-use App\Support\EstimateEmailTemplate;
+use App\Models\EmailTemplate;
 use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Component;
@@ -27,6 +27,10 @@ class EstimateEmail extends Component
     public string $subject = '';
 
     public string $body = '';
+
+    public ?int $selectedTemplateId = null;
+
+    public $availableTemplates = [];
 
     public bool $include_estimate_pdf = true;
 
@@ -53,6 +57,14 @@ class EstimateEmail extends Component
     {
         if (in_array($field, ['to', 'from', 'subject', 'body'])) {
             $this->validateOnly($field);
+        }
+
+        if ($field === 'selectedTemplateId' && $this->selectedTemplateId && $this->estimate) {
+            $template = EmailTemplate::find($this->selectedTemplateId);
+            if ($template) {
+                $this->subject = $this->replacePlaceholders($template->subject, $this->estimate);
+                $this->body = $this->replacePlaceholders($template->body, $this->estimate);
+            }
         }
     }
 
@@ -88,15 +100,65 @@ class EstimateEmail extends Component
             ? $currentUserEmail 
             : ($this->availableFromEmails[0] ?? '');
 
-        // Set the default subject and body for the estimate email
-        $this->subject = 'Estimate for ' . $this->estimate->project->project_name . ' | ' . $this->estimate->client->last_names . ' | ' . $this->estimate->vendor->name;
-        $this->body = EstimateEmailTemplate::defaultBody($this->estimate);
+        // Load available templates
+        $this->availableTemplates = EmailTemplate::where('type', 'estimate')
+            ->orderBy('name')
+            ->get();
+
+        // Get the default email template for estimates
+        $defaultTemplate = $this->availableTemplates->first();
+
+        if ($defaultTemplate) {
+            $this->selectedTemplateId = $defaultTemplate->id;
+            $this->subject = $this->replacePlaceholders($defaultTemplate->subject, $this->estimate);
+            $this->body = $this->replacePlaceholders($defaultTemplate->body, $this->estimate);
+        } else {
+            // No template exists - leave fields empty for user to fill
+            $this->selectedTemplateId = null;
+            $this->subject = '';
+            $this->body = '';
+        }
 
         $reimbursementsTotal = $this->estimate->project->finances['reimbursments'] ?? 0;
         $this->hasReimbursements = $reimbursementsTotal > 0;
         $this->include_reimbursements_pdf = $this->hasReimbursements;
 
         $this->modal('estimate_email_modal')->show();
+    }
+
+    protected function replacePlaceholders(string $text, Estimate $estimate): string
+    {
+        $clientName = $estimate->client?->business_name 
+            ? $estimate->client->business_name 
+            : ($estimate->client?->first_names ?? 'there');
+        $clientFirstNames = $estimate->client?->first_names ?? '';
+        $clientLastNames = $estimate->client?->last_names ?? '';
+        $projectName = $estimate->project->project_name ?? 'your project';
+        $projectAddress = $estimate->project->address ?? '';
+        $estimateTotal = '$' . number_format($estimate->amount ?? 0, 2);
+        $vendorName = $estimate->vendor->name ?? 'our team';
+
+        return str_replace(
+            [
+                '{{client_name}}', 
+                '{{client_first_names}}', 
+                '{{client_last_names}}', 
+                '{{project_name}}', 
+                '{{project_address_1}}', 
+                '{{estimate_total}}', 
+                '{{vendor_name}}'
+            ],
+            [
+                $clientName, 
+                $clientFirstNames, 
+                $clientLastNames, 
+                $projectName, 
+                $projectAddress, 
+                $estimateTotal, 
+                $vendorName
+            ],
+            $text
+        );
     }
 
     public function send()

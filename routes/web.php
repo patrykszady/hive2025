@@ -24,6 +24,7 @@ use App\Livewire\CompanyEmails\CompanyEmailsIndex;
 use App\Livewire\Dashboard\DashboardShow;
 use App\Livewire\Distributions\DistributionsIndex;
 use App\Livewire\Distributions\DistributionsShow;
+use App\Livewire\EmailTemplates\EmailTemplateIndex;
 use App\Livewire\Entry\Registration;
 use App\Livewire\Entry\VendorRegistration;
 use App\Livewire\Entry\VendorSelection;
@@ -240,5 +241,8 @@ Route::middleware(['auth', 'vendor.access'])->group(function () {
 
     //PLANNER
     Route::get('/planner/gantt', GanttIndex::class)->name('planner.gantt');
-    Route::get('/planner/cards', CardsIndex::class)->name('planner.cards');    
+    Route::get('/planner/cards', CardsIndex::class)->name('planner.cards');
+    
+    //EMAIL TEMPLATES
+    Route::get('/email-templates', EmailTemplateIndex::class)->name('email-templates.index');
 });

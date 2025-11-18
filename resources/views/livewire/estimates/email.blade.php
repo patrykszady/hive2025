@@ -18,6 +18,18 @@
             @endforeach
         </flux:select>
 
+        <flux:input.group label="Email Template">
+            <flux:select wire:model.live="selectedTemplateId" variant="listbox" placeholder="Select a template...">
+                @foreach($availableTemplates as $template)
+                    <flux:select.option :value="$template->id">
+                        {{ $template->name }}
+                    </flux:select.option>
+                @endforeach
+            </flux:select>
+
+            <flux:button href="{{ route('email-templates.index') }}" target="_blank" icon="plus">Add</flux:button>
+        </flux:input.group>
+
         <flux:input
             wire:model.live.debounce.500ms="subject"
             label="Subject"
