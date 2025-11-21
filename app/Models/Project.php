@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Client;
+use App\Models\ProjectStatus;
 use App\Models\ProjectVendor;
 use App\Scopes\ProjectScope;
 use App\Traits\HasAddress;
@@ -148,6 +149,24 @@ class Project extends Model
         return $query->whereHas('latestStatus', function ($q) use ($status) {
             $q->whereIn('status_code', $status); // Check if the latest status code is in the given array
         });
+    }
+
+    public function scopeNotCancelled(Builder $query): Builder
+    {
+        return $query->whereHas('latestStatus', function ($q) {
+            $q->where('status_code', '!=', 10);
+        });
+    }
+
+    public function scopeOrderByLatestStatusDateDesc(Builder $query): Builder
+    {
+        return $query->orderBy(
+            ProjectStatus::select('start_date')
+                ->whereColumn('project_id', 'projects.id')
+                ->latest('start_date')
+                ->take(1),
+            'desc'
+        );
     }
 
     /**

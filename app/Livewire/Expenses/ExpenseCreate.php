@@ -8,6 +8,7 @@ use App\Models\Check;
 use App\Models\Distribution;
 use App\Models\Expense;
 use App\Models\Project;
+use App\Models\ProjectStatus;
 use App\Models\Transaction;
 use App\Models\Vendor;
 use App\Traits\HandlesChecks;
@@ -64,14 +65,9 @@ class ExpenseCreate extends Component
     public function projects()
     {
         return Project::with('latestStatus')
-            ->get()
-            ->filter(function ($project) {
-                return $project->latestStatus->status_code !== 10; // Not Cancelled
-            })
-            ->sortBy([
-                ['latestStatus.status_code', 'asc'],
-                ['latestStatus.start_date', 'desc'],
-            ]);
+            ->notCancelled()
+            ->orderByLatestStatusDateDesc()
+            ->get(['id', 'project_name', 'address']);
     }
 
     #[Computed]

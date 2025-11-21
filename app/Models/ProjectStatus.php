@@ -106,6 +106,24 @@ class ProjectStatus extends Model
     }
 
     /**
+     * Get statuses with labels and colors for selects / badges
+     */
+    public static function selectableStatuses(): array
+    {
+        return collect(self::STATUS_LABELS)
+            ->map(function (string $label, int $code) {
+                return [
+                    'code' => $code,
+                    'label' => $label,
+                    'color' => self::STATUS_COLORS[$code] ?? 'gray',
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+
+    /**
      * Get the duration in days from start_date to today
      */
     // protected function duration(): Attribute

@@ -136,7 +136,8 @@ class HourCreate extends Component
             ->where('date', $dateForQuery)
             ->get();
 
-        $projects = Project::status(['Active'])->get();
+        // Get Active and Service Call projects (using status codes: 6 = Active, 8 = Service Call)
+        $projects = Project::status([6, 8])->get();
 
         // Get projects that have tasks for the selected date (without user filter for now)
         $planner_projects_day = Task::where('start_date', '<=', $dateForQuery)

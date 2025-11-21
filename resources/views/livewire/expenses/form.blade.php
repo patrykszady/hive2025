@@ -36,10 +36,7 @@
 
         {{-- VENDOR --}}
         <flux:field>
-            <flux:select label="Vendor" wire:model.live="form.vendor_id" variant="listbox" searchable placeholder="Choose vendor...">
-                <x-slot name="search">
-                    <flux:select.search placeholder="Search..." />
-                </x-slot>
+            <flux:select label="Vendor" wire:model.live="form.vendor_id" variant="listbox" placeholder="Choose vendor..." searchable>
                 @foreach($this->vendors as $vendor)
                     <flux:select.option value="{{$vendor->id}}">{{$vendor->name}}</flux:select.option>
                 @endforeach
@@ -68,13 +65,31 @@
             x-transition
             >
             <flux:field>
-                <flux:label>Project</flux:label>
-                <flux:input.group>
-                    <flux:select wire:model.live="form.project_id" variant="listbox" searchable x-bind:disabled="split" placeholder="Choose project..." >
-                        {{-- <flux:option value="" readonly x-text="split ? 'Expense is Split' : 'Select Project'"></flux:option> --}}
-
+                <div x-show="!split" x-transition>
+                    <flux:label>Project</flux:label>
+                    <flux:select 
+                        wire:model.live="form.project_id" 
+                        variant="listbox" 
+                        placeholder="Choose project..."
+                        searchable
+                        class="[&_[data-flux-select-trigger]]:min-h-[4rem] [&_[data-flux-select-trigger]]:py-3"
+                    >
                         @foreach($this->projects as $project)
-                            <flux:select.option wire:key="{{$project->id}}" value="{{$project->id}}"><div>{{$project->address}} <br> <i class="font-normal">{{$project->project_name}}</i></div></flux:select.option>
+                            <flux:select.option wire:key="{{$project->id}}" value="{{$project->id}}">
+                                <div class="flex flex-col gap-0 w-full">
+                                    <div class="flex items-center w-full">
+                                        <span class="flex-1 min-w-0">{{$project->address}}</span>
+
+                                        @if($project->latestStatus)
+                                            <flux:badge size="sm" :color="$project->latestStatus->badge_color" inset="top bottom" class="shrink-0 ml-2">
+                                                {{ $project->latestStatus->title }}
+                                            </flux:badge>
+                                        @endif
+                                    </div>
+
+                                    <i class="font-normal block w-full leading-tight">{{$project->project_name}}</i>
+                                </div>
+                            </flux:select.option>
                         @endforeach
 
                         <flux:select.option disabled>--------------</flux:select.option>
@@ -84,18 +99,23 @@
                         @endforeach
                     </flux:select>
 
-                    <flux:button wire:click="$toggle('split')" icon="receipt-percent">Split</flux:button>
-                </flux:input.group>
-                @if($expense)
-                    @if($expense->note)
-                        <flux:description><i class="text-sky-800">{{$expense->note}}</i></flux:description>
-                    @endif
-                    @if($expense->has('receipts'))
-                        @if(isset($expense->receipts()->first()->notes))
-                            <flux:description><i class="text-sky-800">{{$expense->receipts()->first()->notes}}</i></flux:description>
+                    @if($expense)
+                        @if($expense->note)
+                            <flux:description><i class="text-sky-800">{{$expense->note}}</i></flux:description>
+                        @endif
+                        @if($expense->has('receipts'))
+                            @if(isset($expense->receipts()->first()->notes))
+                                <flux:description><i class="text-sky-800">{{$expense->receipts()->first()->notes}}</i></flux:description>
+                            @endif
                         @endif
                     @endif
-                @endif
+                </div>
+
+                <div class="mt-2 flex items-center gap-2">
+                    <flux:switch wire:model.live="split" align="left" />
+
+                    <span class="text-sm text-zinc-600" x-text="split ? 'Project Split' : 'Split'"></span>
+                </div>
             </flux:field>
         </div>
 

@@ -6,6 +6,7 @@ use App\Jobs\SendEstimateEmailJob;
 use App\Models\CompanyEmail;
 use App\Models\Estimate;
 use App\Models\EmailTemplate;
+use App\Models\ProjectStatus;
 use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Component;
@@ -38,6 +39,10 @@ class EstimateEmail extends Component
 
     public bool $hasReimbursements = false;
 
+    public ?string $project_status = null;
+
+    public ?string $project_status_date = null;
+
     protected $listeners = ['compose' => 'openModal'];
 
     protected function rules(): array
@@ -50,6 +55,8 @@ class EstimateEmail extends Component
             'body' => 'required|string',
             'include_estimate_pdf' => 'boolean',
             'include_reimbursements_pdf' => 'boolean',
+            'project_status' => 'nullable|integer',
+            'project_status_date' => 'nullable|date',
         ];
     }
 
@@ -72,7 +79,7 @@ class EstimateEmail extends Component
     {
         $this->authorize('view', $estimate);
 
-        $this->estimate = $estimate->fresh(['project.client.users', 'vendor']);
+        $this->estimate = $estimate->fresh(['project.client.users', 'project.latestStatus', 'vendor']);
 
         $this->to = $this->estimate->client->users
             ->pluck('email')
@@ -122,6 +129,8 @@ class EstimateEmail extends Component
         $reimbursementsTotal = $this->estimate->project->finances['reimbursments'] ?? 0;
         $this->hasReimbursements = $reimbursementsTotal > 0;
         $this->include_reimbursements_pdf = $this->hasReimbursements;
+        $this->project_status = null;
+        $this->project_status_date = today()->format('Y-m-d');
 
         $this->modal('estimate_email_modal')->show();
     }
@@ -171,7 +180,7 @@ class EstimateEmail extends Component
 
         $this->validate();
 
-        $this->estimate->loadMissing(['project.client', 'vendor']);
+        $this->estimate->loadMissing(['project.client', 'project.latestStatus', 'vendor']);
 
         $user = auth()->user();
 
@@ -245,12 +254,79 @@ class EstimateEmail extends Component
             text: 'We are sending the estimate to ' . count($this->to) . ' recipient(s)',
         );
 
-        $this->reset(['to', 'from', 'availableFromEmails', 'adminUsers', 'subject', 'body', 'include_estimate_pdf', 'include_reimbursements_pdf', 'hasReimbursements', 'estimate']);
+        $this->reset([
+            'to',
+            'from',
+            'availableFromEmails',
+            'adminUsers',
+            'subject',
+            'body',
+            'include_estimate_pdf',
+            'include_reimbursements_pdf',
+            'hasReimbursements',
+            'project_status',
+            'project_status_date',
+            'estimate',
+        ]);
         $this->include_estimate_pdf = true;
         $this->include_reimbursements_pdf = false;
         $this->to = [];
         $this->from = '';
         $this->availableFromEmails = [];
+    }
+
+    public function update_project(): void
+    {
+        if (! $this->estimate?->project) {
+            return;
+        }
+
+        $this->validate([
+            'project_status' => ['required', 'integer'],
+            'project_status_date' => ['required', 'date'],
+        ]);
+
+        $userVendorId = auth()->user()?->vendor?->id;
+
+        if (! $userVendorId) {
+            Flux::toast(
+                duration: 7000,
+                position: 'top right',
+                variant: 'danger',
+                heading: 'Status Not Updated',
+                text: 'Your vendor profile is missing. Please contact support.',
+            );
+
+            return;
+        }
+
+        $project = $this->estimate->project;
+        $statusCode = (int) $this->project_status;
+
+        $status = ProjectStatus::create([
+            'project_id' => $project->id,
+            'belongs_to_vendor_id' => $userVendorId,
+            'status_code' => $statusCode,
+            'start_date' => $this->project_status_date,
+        ]);
+
+        if ($statusCode === 10) {
+            $project->estimates()->delete();
+        }
+
+        $this->project_status = null;
+        $this->project_status_date = today()->format('Y-m-d');
+
+        $this->dispatch('refreshComponent')->to('projects.project-show');
+        $this->dispatch('refreshComponent')->to('estimates.estimates-index');
+
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Status Updated',
+            text: $status->title . ' started on ' . $status->start_date->format('m/d/Y'),
+        );
     }
 
     public function getUserDisplayName(string $email): string

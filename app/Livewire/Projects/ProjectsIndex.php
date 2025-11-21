@@ -120,7 +120,7 @@ class ProjectsIndex extends Component
             $client_ids = [];
         }
 
-        return Project::with('latestStatus')
+        return Project::with(['latestStatus', 'client.users'])
             ->when(!empty($this->project_status_title), function ($query) {
                 // Expand "Complete" (7) to also include "Service Call" (8) for backwards compatibility
                 $codes = collect($this->project_status_title)
@@ -141,13 +141,7 @@ class ProjectsIndex extends Component
             ->when($this->client !== null, function ($query) use ($client_ids) {
                 $query->whereIn('client_id', $client_ids);
             })
-            ->orderBy(
-                ProjectStatus::select('start_date')
-                    ->whereColumn('project_id', 'projects.id')
-                    ->latest('start_date')
-                    ->take(1),
-                'desc'
-            )
+            ->orderByLatestStatusDateDesc()
             ->paginate(20);
     }
 

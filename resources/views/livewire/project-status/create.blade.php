@@ -72,30 +72,8 @@
                             <div class="h-1.5 w-1.5 rounded-full bg-gray-100 ring-1 ring-gray-300"></div>
                         </div>
 
-                        {{-- <p class="flex-auto py-0.5 text-sm leading-5 text-gray-500">
-                            <span class="font-medium text-gray-900">Update Project Status</span>
-                        </p> --}}
-
-                        <div class="flex max-w-lg -mt-1 rounded-md shadow-xs">
-                            <flux:input.group>
-                                <flux:input wire:model.live="project_status_date" type="date" max="2999-12-31" placeholder="2023-12-31"/>
-
-                                <flux:select wire:model.live="project_status" id="new_project_id" variant="listbox" class="max-w-fit" placeholder="Choose Status...">
-                                    @include('livewire.projects._status_options')
-                                </flux:select>
-
-                                <flux:button
-                                    wire:click="update_project"
-                                    wire:loading.attr="disabled"
-                                    wire:loading.class="opacity-50"
-                                    icon="arrow-uturn-right"
-                                    >
-                                    Change
-                                </flux:button>
-                            </flux:input.group>
-                        </div>
+                        @include('livewire.project-status._status_controls')
                     </li>
-                    <x-forms.error errorName="project_status"/>
                 </ul>
             </flux:accordion.content>
         </flux:accordion.item>

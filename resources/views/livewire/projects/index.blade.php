@@ -1,4 +1,6 @@
-<div class="max-w-3xl">
+@php($projectStatuses = \App\Models\ProjectStatus::selectableStatuses())
+
+<div class="max-w-3xl space-y-2">
     @if($view === NULL)
         <flux:card class="space-y-2 mb-4">
             <div class="flex justify-between">
@@ -20,7 +22,13 @@
                 </flux:select>
 
                 <flux:select variant="listbox" label="Status" multiple placeholder="Choose status..." wire:model.live="project_status_title">
-                    @include('livewire.projects._status_options')
+                    @foreach($projectStatuses as $status)
+                        <flux:select.option :value="$status['code']">
+                            <flux:badge size="md" inset="top bottom" :color="$status['color']">
+                                {{ $status['label'] }}
+                            </flux:badge>
+                        </flux:select.option>
+                    @endforeach
                 </flux:select>
             </div>
         </flux:card>
@@ -34,22 +42,22 @@
             @endcan
         </div>
 
-        <div class="space-y-2">
-            <flux:table :paginate="$this->projects">
+        <div class="space-y-2 overflow-x-hidden">
+            <flux:table :paginate="$this->projects" class="table-fixed w-full">
                 <flux:table.columns>
                     @if($view == 'clients.index')
                         {{-- Order for client view: Name, Address, Status --}}
-                        <flux:table.column>Name</flux:table.column>
-                        <flux:table.column>Address</flux:table.column>
+                        <flux:table.column class="w-[35%] min-w-0">Name</flux:table.column>
+                        <flux:table.column class="w-[35%] min-w-0">Address</flux:table.column>
                     @else
                         {{-- Original order: Address, Client, Name, Status --}}
-                        <flux:table.column>Address</flux:table.column>
+                        <flux:table.column class="w-[30%] min-w-0">Address</flux:table.column>
                         @if($view != 'clients.index')
-                            <flux:table.column>Client</flux:table.column>
+                            <flux:table.column class="w-[25%] min-w-0">Client</flux:table.column>
                         @endif
-                        <flux:table.column>Name</flux:table.column>
+                        <flux:table.column class="w-[25%] min-w-0">Name</flux:table.column>
                     @endif
-                    <flux:table.column>Status</flux:table.column>
+                    <flux:table.column align="end" class="w-[30%] min-w-[5rem] shrink-0">Status</flux:table.column>
                 </flux:table.columns>
 
                 <flux:table.rows>
@@ -61,11 +69,11 @@
                                     wire:navigate.hover
                                     href="{{route('projects.show', $project->id)}}"
                                     variant="strong" 
-                                    class="cursor-pointer">
-                                    {{ $project->project_name }}
+                                    class="cursor-pointer w-[35%] min-w-0">
+                                    <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->project_name }}">{{ $project->project_name }}</div>
                                 </flux:table.cell>
-                                <flux:table.cell>
-                                    {{ $project->address }}
+                                <flux:table.cell class="w-[35%] min-w-0">
+                                    <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->address }}">{{ $project->address }}</div>
                                 </flux:table.cell>
                             @else
                                 {{-- Original order: Address (bold), Client, Name, Status --}}
@@ -73,22 +81,24 @@
                                     wire:navigate.hover
                                     href="{{route('projects.show', $project->id)}}"
                                     variant="strong"
-                                    class="cursor-pointer"
+                                    class="cursor-pointer w-[30%] min-w-0"
                                     >
-                                    {{ $project->address }}
+                                    <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->address }}">{{ $project->address }}</div>
                                 </flux:table.cell>
                                 @if($view != 'clients.index')
                                     <flux:table.cell
                                         wire:navigate.hover
                                         href="{{route('clients.show', $project->client->id)}}"
-                                        class="cursor-pointer"
+                                        class="cursor-pointer w-[25%] min-w-0"
                                         >
-                                        {{ $project->client->name }}
+                                        <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->client->last_names }}">{{ $project->client->last_names }}</div>
                                     </flux:table.cell>
                                 @endif
-                                <flux:table.cell>{{ $project->project_name }}</flux:table.cell>
+                                  <flux:table.cell class="w-[25%] min-w-0">
+                                      <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->project_name }}">{{ $project->project_name }}</div>
+                                  </flux:table.cell>
                             @endif
-                            <flux:table.cell>
+                            <flux:table.cell align="end" class="w-[30%] min-w-[5rem] shrink-0">
                                 <flux:badge size="sm" :color="$project->latestStatus->badge_color" inset="top bottom">{{ $project->latestStatus->title }}</flux:badge>
                             </flux:table.cell>
                         </flux:table.row>

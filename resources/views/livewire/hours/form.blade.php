@@ -19,7 +19,7 @@
 
                 <flux:calendar
                     wire:model.live="selected_date"
-                    wire:loading.attr="disabled"
+                    wire:loading.class.delay="opacity-50"
                     max="today"
                     start-day="1"
                     with-today
@@ -29,19 +29,20 @@
                 <flux:separator variant="subtle" />
 
                 <div class="space-y-2 mt-2">
-                    <flux:button class="w-full cursor-default" wire:loading.attr="disabled"><b>{{$this->selected_date->format('D M jS, Y')}}</b></flux:button>
-                    <flux:button class="w-full cursor-default" wire:loading.attr="disabled">Hours | <b>{{$this->hours_count}}</b></flux:button>
-                    <flux:button type="submit" variant="primary" class="w-full" wire:loading.attr="disabled">{{$view_text['button_text']}}</flux:button>
+                    <flux:button class="w-full cursor-default"><b>{{$this->selected_date->format('D M jS, Y')}}</b></flux:button>
+                    <flux:button class="w-full cursor-default">Hours | <b>{{$this->hours_count}}</b></flux:button>
+                    <flux:button type="submit" variant="primary" class="w-full">{{$view_text['button_text']}}</flux:button>
                 </div>
 
                 <flux:error name="check_total_min" />
             </flux:card>
 		</div>
 
-		<div class="col-span-4 space-y-2 lg:col-span-2" wire:loading.class="opacity-50">
-            <flux:card class="space-y-2">
-                <flux:heading size="lg">Projects</flux:heading>
-                <flux:separator variant="subtle" />
+		<div class="col-span-4 space-y-2 lg:col-span-2">
+            <div wire:loading.class.delay="opacity-50">
+                <flux:card class="space-y-2">
+                    <flux:heading size="lg">Projects</flux:heading>
+                    <flux:separator variant="subtle" />
 
                 {{-- PROJECT HOUR AMOUNT --}}
                 @foreach ($projects as $index => $project)
@@ -71,6 +72,7 @@
                     @endif
                 @endforeach
             </flux:card>
+            </div>
 
             <flux:card>
                 <flux:heading size="lg">Different Project</flux:heading>

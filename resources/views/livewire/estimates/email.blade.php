@@ -27,7 +27,7 @@
                 @endforeach
             </flux:select>
 
-            <flux:button href="{{ route('email-templates.index') }}" target="_blank" icon="plus">Add</flux:button>
+            <flux:button href="{{ route('email_templates.index') }}" target="_blank" icon="plus">Add</flux:button>
         </flux:input.group>
 
         <flux:input
@@ -41,16 +41,18 @@
         <div class="space-y-2">
             <flux:heading size="sm">Attachments</flux:heading>
             <flux:switch wire:model.live="include_estimate_pdf" label="Attach Estimate PDF" />
-            <div>
-                <flux:switch
-                    wire:model.live="include_reimbursements_pdf"
-                    label="Attach Project Reimbursements"
-                    :disabled="! $hasReimbursements"
-                />
-                @unless($hasReimbursements)
-                    <div class="text-sm italic text-zinc-800 dark:text-white mt-1">The project has no reimbursements recorded.</div>
-                @endunless
-            </div>
+            @if($hasReimbursements)
+                <flux:switch wire:model.live="include_reimbursements_pdf" label="Attach Project Reimbursements" />
+            @endif
+        </div>
+
+        <flux:separator variant="subtle" />
+
+        <div class="space-y-3">
+            <flux:heading size="sm">Project Status</flux:heading>
+            <p class="text-sm text-zinc-600 dark:text-zinc-200">Progress Project to next Status</p>
+
+            @include('livewire.project-status._status_controls')
         </div>
 
         <div class="flex space-x-2">

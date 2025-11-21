@@ -40,7 +40,7 @@
         {{-- Email Body --}}
         <flux:field>
             <flux:label>Email Body</flux:label>
-            <flux:editor wire:model="body" x-ref="bodyEditor" class="[&_.tiptap_p]:!my-0 [&_.tiptap_p]:!leading-normal" />
+            <flux:editor wire:model="body" x-ref="bodyEditor" />
             <flux:error name="body" />
         </flux:field>
     </div>

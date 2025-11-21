@@ -244,5 +244,5 @@ Route::middleware(['auth', 'vendor.access'])->group(function () {
     Route::get('/planner/cards', CardsIndex::class)->name('planner.cards');
     
     //EMAIL TEMPLATES
-    Route::get('/email-templates', EmailTemplateIndex::class)->name('email-templates.index');
+    Route::get('/email_templates', EmailTemplateIndex::class)->name('email_templates.index');
 });

@@ -113,10 +113,15 @@ class ExpenseIndex extends Component
 
             if ($mode === 'exact') {
                 $searchAmount = round((float) $this->amount, 2);
+                
                 // Use Scout for exact amount match on parent expenses
+                // Add amount filter to filterConditions for exact match
                 $filterConditions = $this->buildFilterConditions();
+                $filterConditions[] = "amount = {$searchAmount}";
+                
+                // Pass empty string as search query since we're filtering by amount
                 $baseExpenses = Expense::scopedSearch(
-                    $this->amount,
+                    '',
                     $filterConditions,
                     $this->sortBy,
                     $this->sortDirection
@@ -285,11 +290,20 @@ class ExpenseIndex extends Component
         }
         if (str_contains($value, '.')) {
             [$int, $dec] = array_pad(explode('.', $value), 2, '');
-            if (strlen($dec) < 2) {
+            $decLength = strlen($dec);
+            
+            // If less than 2 decimal places, treat as prefix
+            if ($decLength < 2) {
                 return 'prefix';
             }
+            
+            // If exactly 2 decimal places, always treat as exact match
+            // "112.20" should match only 112.20, "112.25" should match only 112.25
+            if ($decLength === 2) {
+                return 'exact';
+            }
         } elseif (strlen((string) (int) $value) > 0) {
-            // Whole number: treat as prefix (e.g., '311' => 311.00 - 311.99) only if user didn't provide .00
+            // Whole number: treat as prefix (e.g., '311' => 311.00 - 311.99)
             return 'prefix';
         }
         return 'exact';
@@ -299,18 +313,20 @@ class ExpenseIndex extends Component
     {
         $value = $this->normalizedAmountInput();
         $val = (float) $value;
+        
         if (str_contains($value, '.')) {
             $dec = substr(strrchr($value, '.'), 1) ?: '';
             $places = strlen($dec);
         } else {
             $places = 0;
         }
+        
         if ($places === 0) {
             $min = $val;
             $upperExclusive = $val + 1.0; // [val, val+1.0)
         } elseif ($places === 1) {
             $min = $val;
-            // add 0.1 to create exclusive upper bound (covers .00 - .09)
+            // add 0.1 to create exclusive upper bound (covers .X0 - .X9)
             $upperExclusive = round($val + 0.1, 10);
         } else { // shouldn't happen for prefix, fallback
             $min = round($val, 2);

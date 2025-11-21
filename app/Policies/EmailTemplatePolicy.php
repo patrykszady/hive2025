@@ -13,7 +13,7 @@ class EmailTemplatePolicy
      */
     public function viewAny(User $user): bool
     {
-        return true;
+        return $user->vendor_role === 'Admin';
     }
 
     /**
@@ -21,7 +21,7 @@ class EmailTemplatePolicy
      */
     public function view(User $user, EmailTemplate $emailTemplate): bool
     {
-        return $user->primary_vendor_id === $emailTemplate->vendor_id;
+        return $user->vendor_role === 'Admin' && $user->primary_vendor_id === $emailTemplate->vendor_id;
     }
 
     /**
@@ -29,7 +29,7 @@ class EmailTemplatePolicy
      */
     public function create(User $user): bool
     {
-        return true;
+        return $user->vendor_role === 'Admin';
     }
 
     /**
@@ -37,7 +37,7 @@ class EmailTemplatePolicy
      */
     public function update(User $user, EmailTemplate $emailTemplate): bool
     {
-        return $user->primary_vendor_id === $emailTemplate->vendor_id;
+        return $this->view($user, $emailTemplate);
     }
 
     /**
@@ -45,7 +45,7 @@ class EmailTemplatePolicy
      */
     public function delete(User $user, EmailTemplate $emailTemplate): bool
     {
-        return $user->primary_vendor_id === $emailTemplate->vendor_id;
+        return $this->view($user, $emailTemplate);
     }
 
     /**
