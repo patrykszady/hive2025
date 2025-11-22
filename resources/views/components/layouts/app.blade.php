@@ -24,10 +24,11 @@
             </flux:sidebar.header>
 
             @php
-                $accountingGroups = ['banks*', 'distributions*', 'sheets*', 'company_emails*', 'vendor_docs*'];
+                $accountingGroups = ['banks*', 'distributions*', 'sheets*'];
                 $accountingExpanded = request()->is($accountingGroups) || request()->routeIs($accountingGroups);
                 $globalActionsExpanded = request()->is('transactions/match_vendor') || request()->is('transactions/bulk_match');
-                $settingsExpanded = request()->is('email_templates*');
+                $settingsGroups = ['email_templates*', 'company_emails*', 'vendor_docs*'];
+                $settingsExpanded = request()->is($settingsGroups) || request()->routeIs($settingsGroups);
             @endphp
 
             @if(!Route::is(['vendor_selection', 'vendor_registration']))
@@ -98,11 +99,6 @@
                             <flux:sidebar.item wire:navigate.hover href="/banks" icon="building-library">Banks</flux:sidebar.item>
                             <flux:sidebar.item wire:navigate.hover href="/distributions" icon="receipt-percent">Distributions</flux:sidebar.item>
                             <flux:sidebar.item wire:navigate.hover href="/sheets" icon="document-currency-dollar">Sheets</flux:sidebar.item>
-                            <flux:sidebar.item wire:navigate.hover href="/company_emails" icon="inbox-stack">Company Emails</flux:sidebar.item>
-
-                            @can('viewAny', App\Models\VendorDoc::class)
-                                <flux:sidebar.item wire:navigate.hover href="/vendor_docs" icon="eye-slash">Vendor Docs</flux:sidebar.item>
-                            @endcan
                         </flux:sidebar.group>
                     @endcan
                 </flux:sidebar.nav>
@@ -118,11 +114,25 @@
                     </flux:sidebar.group>
                 @endcan
                 
-                @can('viewAny', App\Models\EmailTemplate::class)
+                @if(
+                    auth()->user()->can('viewAny', App\Models\EmailTemplate::class)
+                    || auth()->user()->can('viewAny', App\Models\CompanyEmail::class)
+                    || auth()->user()->can('viewAny', App\Models\VendorDoc::class)
+                )
                     <flux:sidebar.group expandable heading="Settings" class="grid" icon="cog-6-tooth" :expanded="$settingsExpanded">
-                        <flux:sidebar.item wire:navigate.hover href="/email_templates" icon="envelope-open">Email Templates</flux:sidebar.item>
+                        @can('viewAny', App\Models\EmailTemplate::class)
+                            <flux:sidebar.item wire:navigate.hover href="/email_templates" icon="envelope-open">Email Templates</flux:sidebar.item>
+                        @endcan
+
+                        @can('viewAny', App\Models\CompanyEmail::class)
+                            <flux:sidebar.item wire:navigate.hover href="/company_emails" icon="inbox-stack">Company Emails</flux:sidebar.item>
+                        @endcan
+
+                        @can('viewAny', App\Models\VendorDoc::class)
+                            <flux:sidebar.item wire:navigate.hover href="/vendor_docs" icon="eye-slash">Vendor Docs</flux:sidebar.item>
+                        @endcan
                     </flux:sidebar.group>
-                @endcan
+                @endif
             </flux:sidebar.nav>
 
             <flux:dropdown position="top" align="start">

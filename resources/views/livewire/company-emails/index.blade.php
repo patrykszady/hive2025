@@ -4,7 +4,7 @@
         <div class="flex justify-between">
             <flux:heading size="lg">Company Email Accounts</flux:heading>
             <flux:button
-                href="{{route('company-email.login')}}" 
+                x-on:click="window.openNylasPopup('{{route('company-email.login')}}')"
                 size="sm"
                 >
                 Add Email Account
@@ -43,3 +43,27 @@
         <livewire:receipt-accounts.receipt-accounts-index />
     @endif
 </div>
+
+<script>
+window.openNylasPopup = function(url) {
+    const width = 600;
+    const height = 700;
+    const left = (screen.width / 2) - (width / 2);
+    const top = (screen.height / 2) - (height / 2);
+    
+    window.nylasPopup = window.open(
+        url,
+        'nylasAuth',
+        `width=${width},height=${height},top=${top},left=${left},toolbar=no,location=no,status=no,menubar=no,scrollbars=yes,resizable=yes`
+    );
+};
+
+window.addEventListener('message', function(event) {
+    if (event.data.type === 'nylas-auth-success') {
+        if (window.nylasPopup && !window.nylasPopup.closed) {
+            window.nylasPopup.close();
+        }
+        window.location.reload();
+    }
+});
+</script>

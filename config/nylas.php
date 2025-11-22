@@ -13,9 +13,9 @@ return [
     'full_fetch_soft_cap' => env('NYLAS_FULL_FETCH_SOFT_CAP', 0),
 
     // Centralized receipts processing (forward target)
-    'receipts_grant_id' => env('NYLAS_HIVE_RECEIPTS_GRANT_ID'),
-    'receipts_email' => env('NYLAS_HIVE_RECEIPTS_EMAIL'),
-    'receipts_deleted_folder_id' => env('NYLAS_HIVE_RECEIPTS_DELETED_FOLDER_ID'),
+    'receipts_grant_id' => '957bf081-f050-459f-a4cd-7d4423113a22',
+    'receipts_email' => 'receipts@hive.contractors',
+    'receipts_deleted_folder_id' => 'AAMkADM1MTY5NmIzLWY3M2EtNDY5Yi1hYzIzLWE5YzA5NTBkOWE5NgAuAAAAAACCzNgw3NROS5uKY_YOEw_FAQAA-9oxfQJ1SJZ5N89WL8dfAAAAmeNeAAA=',
     'hive_receipts_duplicate_folder_id' => 'AAMkADM1MTY5NmIzLWY3M2EtNDY5Yi1hYzIzLWE5YzA5NTBkOWE5NgAuAAAAAACCzNgw3NROS5uKY_YOEw_FAQAA-9oxfQJ1SJZ5N89WL8dfAAABooYGAAA=',
     'hive_receipts_error_folder_id' => 'AAMkADM1MTY5NmIzLWY3M2EtNDY5Yi1hYzIzLWE5YzA5NTBkOWE5NgAuAAAAAACCzNgw3NROS5uKY_YOEw_FAQAA-9oxfQJ1SJZ5N89WL8dfAAABooYEAAA=',
     'hive_receipts_need_to_add_folder_id' => 'AAMkADM1MTY5NmIzLWY3M2EtNDY5Yi1hYzIzLWE5YzA5NTBkOWE5NgAuAAAAAACCzNgw3NROS5uKY_YOEw_FAQAA-9oxfQJ1SJZ5N89WL8dfAAABooYFAAA=',

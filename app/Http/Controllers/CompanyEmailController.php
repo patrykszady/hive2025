@@ -63,8 +63,24 @@ class CompanyEmailController extends Controller
      */
     public function nylasAuthResponse(Request $request)
     {
+        // Decode state to check if popup mode
+        $isPopup = false;
+        if ($request->has('state')) {
+            $stateJson = base64_decode($request->query('state'));
+            $state = json_decode($stateJson, true);
+            $isPopup = $state['popup'] ?? false;
+        }
+        
         if ($request->has('error')) {
             Log::channel('nylas')->error(["Failed to nylasAuthResponse: ", $request->all()]);
+            
+            // If opened in popup, show error and allow manual close
+            if ($isPopup) {
+                return view('nylas.auth-error', [
+                    'error' => $request->query('error'),
+                ]);
+            }
+            
             return redirect()->back()->withErrors(['error' => $request->query('error')]);
         }
 
@@ -81,14 +97,36 @@ class CompanyEmailController extends Controller
                 // Single HIVE RECEIPTS folder is created during company email setup
                 // Folder ID is stored in api_json['HIVE_RECEIPTS_FOLDER'] for reference
 
+                // If opened in popup, notify parent and auto-close
+                if ($isPopup) {
+                    return view('nylas.auth-success', [
+                        'email' => $nylasAccount['email'],
+                    ]);
+                }
+                
                 return redirect(route('company_emails.index'))->with('success', 'Nylas account connected successfully.');
             } else {
+                // If opened in popup, show error
+                if ($isPopup) {
+                    return view('nylas.auth-error', [
+                        'error' => 'Failed to retrieve account details from Nylas.',
+                    ]);
+                }
+                
                 return redirect()->back()->withErrors(['error' => 'Failed to retrieve account details from Nylas.']);
             }
         } catch (\Exception $e) {
             Log::channel('nylas')->error('Failed to handle Nylas authentication response', ApiErrorFormatter::format($e, [
                 'code' => $code,
             ]));
+            
+            // If opened in popup, show error
+            if ($isPopup) {
+                return view('nylas.auth-error', [
+                    'error' => 'An error occurred during Nylas authentication.',
+                ]);
+            }
+            
             return redirect()->back()->withErrors(['error' => 'An error occurred during Nylas authentication.']);
         }
     }
@@ -127,45 +165,73 @@ class CompanyEmailController extends Controller
     }
 
     /**
-     * Create the "HIVE RECEIPTS" folder for a company email and store the folder ID
+     * Create or find the "HIVE RECEIPTS" folder for a company email and store the folder ID
      */
     private function createHiveReceiptsFolder(CompanyEmail $companyEmail): void
     {
         try {
-            $folderResult = $this->nylasService->createFolder($companyEmail->grant_id, 'HIVE RECEIPTS');
+            // First, try to find existing "HIVE RECEIPTS" folder
+            $foldersResult = $this->nylasService->getFolders($companyEmail->grant_id);
             
-            if ($folderResult['status'] === 200 || $folderResult['status'] === 201) {
-                $folderId = $folderResult['data']['id'] ?? null;
+            $folderId = null;
+            
+            // Only proceed if we successfully got folders (200 status)
+            if ($foldersResult['status'] === 200 && isset($foldersResult['data'])) {
+                // Search for existing "HIVE RECEIPTS" folder
+                foreach ($foldersResult['data'] as $folder) {
+                    if (isset($folder['name']) && $folder['name'] === 'HIVE RECEIPTS') {
+                        $folderId = $folder['id'];
+                        Log::channel('nylas')->info('Found existing HIVE RECEIPTS folder', [
+                            'company_email_id' => $companyEmail->id,
+                            'grant_id' => $companyEmail->grant_id,
+                            'folder_id' => $folderId,
+                        ]);
+                        break;
+                    }
+                }
                 
-                if ($folderId) {
-                    // Update the api_json with the folder information using HIVE_RECEIPTS_FOLDER key
-                    $apiJson = $companyEmail->api_json ?? [];
-                    $apiJson['HIVE_RECEIPTS_FOLDER'] = $folderId;
+                // If folder doesn't exist, create it
+                if (!$folderId) {
+                    $folderResult = $this->nylasService->createFolder($companyEmail->grant_id, 'HIVE RECEIPTS');
                     
-                    $companyEmail->update(['api_json' => $apiJson]);
-                    
-                    Log::channel('nylas')->info('HIVE RECEIPTS folder created successfully', [
-                        'company_email_id' => $companyEmail->id,
-                        'grant_id' => $companyEmail->grant_id,
-                        'folder_id' => $folderId,
-                    ]);
-                } else {
-                    Log::channel('nylas')->warning('Folder created but no ID returned', [
-                        'company_email_id' => $companyEmail->id,
-                        'grant_id' => $companyEmail->grant_id,
-                        'response' => $folderResult,
-                    ]);
+                    if ($folderResult['status'] === 200 || $folderResult['status'] === 201) {
+                        $folderId = $folderResult['data']['id'] ?? null;
+                        
+                        if ($folderId) {
+                            Log::channel('nylas')->info('HIVE RECEIPTS folder created successfully', [
+                                'company_email_id' => $companyEmail->id,
+                                'grant_id' => $companyEmail->grant_id,
+                                'folder_id' => $folderId,
+                            ]);
+                        }
+                    } else {
+                        Log::channel('nylas')->warning('Failed to create HIVE RECEIPTS folder - will retry later', [
+                            'company_email_id' => $companyEmail->id,
+                            'grant_id' => $companyEmail->grant_id,
+                            'status' => $folderResult['status'],
+                            'error' => $folderResult['error'] ?? 'Unknown error',
+                        ]);
+                    }
                 }
             } else {
-                Log::channel('nylas')->error('Failed to create HIVE RECEIPTS folder', [
+                // Log warning but don't fail - folder can be created later
+                Log::channel('nylas')->warning('Unable to fetch folders during setup - HIVE RECEIPTS folder will be created on first use', [
                     'company_email_id' => $companyEmail->id,
                     'grant_id' => $companyEmail->grant_id,
-                    'status' => $folderResult['status'],
-                    'error' => $folderResult['error'] ?? 'Unknown error',
+                    'status' => $foldersResult['status'] ?? 'unknown',
                 ]);
             }
+            
+            // Store folder ID in api_json if we have one
+            if ($folderId) {
+                $apiJson = $companyEmail->api_json ?? [];
+                $apiJson['HIVE_RECEIPTS_FOLDER'] = $folderId;
+                
+                $companyEmail->update(['api_json' => $apiJson]);
+            }
         } catch (\Exception $e) {
-            Log::channel('nylas')->error('Exception creating HIVE RECEIPTS folder', ApiErrorFormatter::format($e, [
+            // Log but don't throw - folder creation can be retried later
+            Log::channel('nylas')->warning('Exception during HIVE RECEIPTS folder setup - will retry later', ApiErrorFormatter::format($e, [
                 'company_email_id' => $companyEmail->id,
                 'grant_id' => $companyEmail->grant_id,
             ]));

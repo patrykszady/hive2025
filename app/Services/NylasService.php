@@ -19,7 +19,6 @@ class NylasService
     private $httpClient;
     private $baseUrl;
     private $apiKey;
-    protected array $folderNameCache = [];
 
 
     public function __construct(Client $client)
@@ -38,13 +37,20 @@ class NylasService
     {
         // Manually build the authentication URL
         $url = $this->baseUrl . '/connect/auth';
+        
+        // Encode popup flag and CSRF token in state parameter
+        $state = json_encode([
+            'csrf' => csrf_token(),
+            'popup' => true,
+        ]);
+        
         $params = [
             'client_id' => config('nylas.client_id'),
             'redirect_uri' => config('nylas.redirect_uri'),
             'response_type' => 'code',
             'access_type' => 'online',
             // 'scope' => config('nylas.scopes'),
-            'state' => csrf_token(),
+            'state' => base64_encode($state),
         ];
 
         // Return the URL as part of the response
@@ -267,7 +273,7 @@ class NylasService
         }
     }
 
-    public function getMessages(string $grantId, array $queryParams = [], bool $withHeaders = false): array
+    public function getMessages(string $grantId, array $queryParams = [], bool $withHeaders = false, ?\App\Models\CompanyEmail $companyEmail = null): array
     {
         $query = array_filter(
             $queryParams,
@@ -279,7 +285,7 @@ class NylasService
 
         if (isset($query['in']) && is_string($query['in']) && $query['in'] !== '') {
             $requestedFolder = $query['in'];
-            $resolvedFolder = $this->resolveFolderIdentifier($grantId, $query['in']);
+            $resolvedFolder = $this->resolveFolderIdentifier($grantId, $query['in'], $companyEmail);
             if ($resolvedFolder) {
                 $query['in'] = $resolvedFolder;
             }
@@ -368,7 +374,7 @@ class NylasService
         });
     }
 
-    protected function resolveFolderIdentifier(string $grantId, string $identifier): ?string
+    protected function resolveFolderIdentifier(string $grantId, string $identifier, ?\App\Models\CompanyEmail $companyEmail = null): ?string
     {
         $trimmed = trim($identifier);
         if ($trimmed === '') {
@@ -388,14 +394,34 @@ class NylasService
             return $configFolderId;
         }
         
-        $cache = $this->folderNameCache[$grantId] ?? null;
-
-        if ($cache === null) {
-            $cache = $this->buildFolderCache($grantId);
-            $this->folderNameCache[$grantId] = $cache;
+        // For company emails, check if they have a cached HIVE_RECEIPTS_FOLDER in api_json
+        if ($companyEmail && $companyEmail->grant_id === $grantId) {
+            $apiJson = $companyEmail->api_json ?? [];
+            
+            // Check if requesting inbox - return null to use default
+            if (in_array($normalized, ['inbox', '\\inbox'])) {
+                return null;
+            }
+            
+            // If they have a cached HIVE_RECEIPTS_FOLDER and requesting something with "hive" and "receipt", use it
+            if (isset($apiJson['HIVE_RECEIPTS_FOLDER']) && is_string($apiJson['HIVE_RECEIPTS_FOLDER'])) {
+                if (str_contains($normalized, 'hive') && str_contains($normalized, 'receipt')) {
+                    return $apiJson['HIVE_RECEIPTS_FOLDER'];
+                }
+            }
         }
-
-        return $cache[$normalized] ?? $trimmed;
+        
+        // If we reach here with a folder name (not ID), something unexpected is happening
+        // Log a warning so we can investigate, but return the original value
+        if (!str_contains($trimmed, '=')) {
+            \Illuminate\Support\Facades\Log::channel('nylas')->warning('Folder name resolution requested for unknown grant/folder combination', [
+                'grant_id' => $grantId,
+                'folder' => $trimmed,
+                'has_company_email' => $companyEmail !== null,
+            ]);
+        }
+        
+        return $trimmed;
     }
 
     protected function getConfigFolderId(string $grantId, string $folderName): ?string
@@ -426,49 +452,6 @@ class NylasService
         }
         
         return null;
-    }
-
-    protected function buildFolderCache(string $grantId): array
-    {
-        $map = [];
-
-        $foldersResponse = $this->getFolders($grantId);
-        $foldersData = [];
-
-        if (isset($foldersResponse['data']['data']) && is_array($foldersResponse['data']['data'])) {
-            $foldersData = $foldersResponse['data']['data'];
-        } elseif (isset($foldersResponse['data']) && is_array($foldersResponse['data'])) {
-            $foldersData = $foldersResponse['data'];
-        }
-
-        foreach ($foldersData as $folder) {
-            $id = $folder['id'] ?? null;
-            $name = strtolower($folder['name'] ?? '');
-
-            if (! $id) {
-                continue;
-            }
-
-            if ($name !== '') {
-                $map[$name] = $id;
-            }
-
-            if (!empty($folder['attributes']) && is_array($folder['attributes'])) {
-                foreach ($folder['attributes'] as $attribute) {
-                    $attrName = strtolower(ltrim($attribute, '\\'));
-                    if ($attrName !== '') {
-                        $map[$attrName] = $id;
-                    }
-                }
-            }
-        }
-
-        // Provide common aliases if not already mapped
-        if (isset($map['inbox'])) {
-            $map['\inbox'] = $map['inbox'];
-        }
-
-        return $map;
     }
 
     /**
@@ -525,7 +508,7 @@ class NylasService
             if ($next) {
                 $current['page_token'] = $next;
             }
-            $resp = $this->getMessages($grantId, $current, $includeHeaders);
+            $resp = $this->getMessages($grantId, $current, $includeHeaders, $companyEmail);
             $data = $resp['data'] ?? [];
 
             if (!is_array($data)) {
