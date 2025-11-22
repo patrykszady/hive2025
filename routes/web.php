@@ -6,7 +6,7 @@ use App\Http\Controllers\ReceiptController;
 use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\PlaidTransactionSyncController;
 use App\Http\Controllers\VendorDocsController;
-use App\Http\Controllers\WebhookController;
+use App\Http\Controllers\Api\NylasWebhookController;
 
 use App\Livewire\Auth\CantLogin;
 use App\Livewire\Auth\Login;
@@ -88,9 +88,6 @@ Route::middleware('auth')->group(function () {
     Route::get('/vendor_selection', VendorSelection::class)->name('vendor_selection');
 });
 
-//Nylas verify webhook
-Route::get('/webhook', [WebhookController::class, 'verify'])->name('webhook.verify');
-
 if(env('APP_ENV') === 'local') {
     Route::get('/fetch-auto-receipts', [CompanyEmailController::class, 'fetchAutoReceipts'])->name('fetch.auto.receipts');
     Route::get('/fetch-consolidated-orders', [CompanyEmailController::class, 'fetchConsolidatedOrders'])->name('fetch.consolidated.orders');
@@ -139,6 +136,10 @@ Route::get('transactions/bulk_match', BulkMatchIndex::class)->name('transactions
 //plaid webhooks
 // Route::post('plaid_webhooks', 'TransactionController@plaid_webhooks');
 // Route::get('fire_webhook', 'TransactionController@fire_webhook');
+
+// Nylas webhook for email tracking (no auth required)
+Route::get('webhooks/nylas', [NylasWebhookController::class, 'verify'])->name('webhooks.nylas.verify');
+Route::post('webhooks/nylas', [NylasWebhookController::class, 'handle'])->name('webhooks.nylas');
 
 Route::middleware(['auth', 'vendor.access'])->group(function () {
     // Registration route

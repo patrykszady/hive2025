@@ -10,6 +10,11 @@ return [
     ],
 
     'mailers' => [
+        'nylas' => [
+            'transport' => 'nylas',
+            'grant_id' => null, // Will be set dynamically per CompanyEmail
+        ],
+
         'mailtrap' => [
             'transport' => 'mailtrap',
         ],

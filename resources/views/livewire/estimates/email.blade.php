@@ -13,8 +13,8 @@
         </flux:pillbox>
 
         <flux:select wire:model.live="from" label="From" placeholder="Select sender email...">
-            @foreach($availableFromEmails as $email)
-                <flux:select.option :value="$email">{{ $this->getFromUserDisplayName($email) }}</flux:select.option>
+            @foreach($availableFromEmails as $companyEmail)
+                <flux:select.option :value="$companyEmail->email">{{ $this->getFromUserDisplayName($companyEmail->email) }}</flux:select.option>
             @endforeach
         </flux:select>
 

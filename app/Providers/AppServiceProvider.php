@@ -18,12 +18,15 @@ use App\Observers\LineItemObserver;
 use App\Observers\ProjectObserver;
 use App\Observers\VendorObserver;
 
+use App\Mail\Transport\NylasTransport;
+use App\Services\NylasService;
 use Carbon\Carbon;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
@@ -91,6 +94,22 @@ class AppServiceProvider extends ServiceProvider
         });
 
         // Blade::component('mails.base', \App\View\Components\Base::class);
+
+        // Register Nylas mail transport
+        Mail::extend('nylas', function (array $config = []) {
+            $nylasService = app(NylasService::class);
+            $grantId = $config['grant_id'] ?? config('nylas.default_grant_id');
+
+            return new NylasTransport($nylasService, $grantId);
+        });
+
+        // Intercept all emails in non-production environments
+        if (! app()->environment('production')) {
+            $devEmail = env('MAIL_DEV_EMAIL');
+            if ($devEmail) {
+                Mail::alwaysTo($devEmail);
+            }
+        }
 
         $this->bootEvent();
         $this->bootRoute();

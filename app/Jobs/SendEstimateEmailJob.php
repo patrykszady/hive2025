@@ -3,7 +3,9 @@
 namespace App\Jobs;
 
 use App\Mail\EstimateMail;
+use App\Models\CompanyEmail;
 use App\Models\Estimate;
+use App\Models\EmailTracking;
 use App\Models\User;
 use App\Support\EstimateDocumentGenerator;
 use App\Support\ProjectDocumentGenerator;
@@ -49,6 +51,15 @@ class SendEstimateEmailJob implements ShouldQueue
         if (! $user || ! $user->vendor) {
             Log::warning('SendEstimateEmailJob missing user or vendor', [
                 'user_id' => $this->userId,
+            ]);
+            return;
+        }
+
+        // Load the CompanyEmail to get the grant_id
+        $companyEmail = CompanyEmail::find($this->companyEmailId);
+        if (!$companyEmail || !$companyEmail->grant_id) {
+            Log::warning('SendEstimateEmailJob missing company email or grant_id', [
+                'company_email_id' => $this->companyEmailId,
             ]);
             return;
         }
@@ -126,7 +137,11 @@ class SendEstimateEmailJob implements ShouldQueue
         }
 
         try {
-            Mail::to($sanitizedRecipients)
+            // Configure the Nylas mailer with this specific grant_id
+            config(['mail.mailers.nylas.grant_id' => $companyEmail->grant_id]);
+            
+            Mail::mailer('nylas')
+                ->to($sanitizedRecipients)
                 ->send(new EstimateMail(
                     estimate: $estimate,
                     user: $user,
@@ -135,6 +150,7 @@ class SendEstimateEmailJob implements ShouldQueue
                     emailBody: $this->body,
                     attachmentPaths: $attachmentPaths
                 ));
+
         } catch (Throwable $exception) {
             Log::error('SendEstimateEmailJob failed to send email', [
                 'estimate_id' => $this->estimateId,

@@ -86,28 +86,43 @@ else
   echo "❌ Vite failed → check logs: $LOG_DIR/vite.log"
 fi
 
-# 6) ngrok tunnel (optional)
-if command -v ngrok >/dev/null 2>&1; then
-  echo "🔄 Starting ngrok tunnel..."
-  nohup ngrok http 8000 >"$LOG_DIR/ngrok.log" 2>&1 &
-  NGROK_PID=$!
+# 6) Hookdeck tunnel (optional)
+HOOKDECK_URL=""
+HOOKDECK_BIN="$(command -v hookdeck 2>/dev/null)"
+if [ -z "$HOOKDECK_BIN" ]; then
+  HOOKDECK_BIN=$(ls "$HOME"/.nvm/versions/node/*/bin/hookdeck 2>/dev/null | tail -n1)
+fi
+
+if [ -n "$HOOKDECK_BIN" ]; then
+  echo "🔄 Starting Hookdeck tunnel..."
+  HOOKDECK_LOG="$LOG_DIR/hookdeck.log"
+
+  "$HOOKDECK_BIN" connection upsert nylas-local \
+    --source-name nylas --source-type WEBHOOK \
+    --destination-name nylas-local-cli --destination-type CLI \
+    --destination-cli-path /webhooks/nylas >>"$HOOKDECK_LOG" 2>&1
+
+  nohup "$HOOKDECK_BIN" listen 8000 nylas nylas-local \
+    --path /webhooks/nylas \
+    --output compact >>"$HOOKDECK_LOG" 2>&1 &
+  HOOKDECK_PID=$!
   sleep 2
-  if ps -p "$NGROK_PID" >/dev/null 2>&1; then
-    # Try to extract the public URL from ngrok API
-    NGROK_URL=$(curl -s http://127.0.0.1:4040/api/tunnels 2>/dev/null | grep -o '"public_url":"https://[^"]*' | cut -d'"' -f4 | head -1)
-    if [ -n "$NGROK_URL" ]; then
-      echo "✅ ngrok tunnel started (pid: $NGROK_PID) → $NGROK_URL"
-      echo "   • Web interface: http://127.0.0.1:4040"
+  if ps -p "$HOOKDECK_PID" >/dev/null 2>&1; then
+    if [ -f "$HOOKDECK_LOG" ]; then
+      HOOKDECK_URL=$(grep -o 'https://[^ ]*' "$HOOKDECK_LOG" | head -1)
+    fi
+    if [ -n "$HOOKDECK_URL" ]; then
+      echo "✅ Hookdeck tunnel started (pid: $HOOKDECK_PID) → $HOOKDECK_URL"
     else
-      echo "✅ ngrok tunnel started (pid: $NGROK_PID) → logs: $LOG_DIR/ngrok.log"
+      echo "✅ Hookdeck tunnel started (pid: $HOOKDECK_PID) → logs: $HOOKDECK_LOG"
     fi
   else
-    echo "❌ ngrok failed → check logs: $LOG_DIR/ngrok.log"
-    NGROK_PID=""
+    echo "❌ Hookdeck tunnel failed → check logs: $HOOKDECK_LOG"
+    HOOKDECK_PID=""
   fi
 else
-  echo "ℹ️  ngrok not found, skipping tunnel setup"
-  NGROK_PID=""
+  echo "ℹ️  Hookdeck CLI not found, skipping tunnel setup"
+  HOOKDECK_PID=""
 fi
 
 echo "🎉 Done! Services running:"
@@ -116,6 +131,7 @@ echo "   • Meilisearch ✅ → $MEILI_HOST"
 echo "   • Horizon pid: ${HORIZON_PID:-n/a}"
 echo "   • PHP server pid: ${SERVE_PID:-n/a} → http://127.0.0.1:8000"
 echo "   • Vite pid: ${VITE_PID:-n/a} → http://127.0.0.1:5173"
-if [ -n "$NGROK_PID" ]; then
-  echo "   • ngrok pid: $NGROK_PID → ${NGROK_URL:-'check http://127.0.0.1:4040'}"
+if [ -n "$HOOKDECK_PID" ]; then
+  HOOKDECK_FALLBACK=${HOOKDECK_URL:-"see ${HOOKDECK_LOG:-$LOG_DIR/hookdeck.log}"}
+  echo "   • Hookdeck pid: $HOOKDECK_PID → $HOOKDECK_FALLBACK"
 fi

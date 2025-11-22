@@ -21,9 +21,9 @@ class EstimateEmail extends Component
 
     public string $from = '';
 
-    public array $availableFromEmails = [];
+    public $availableFromEmails = [];
 
-    public $adminUsers = null;
+    public $adminUsers = [];
 
     public string $subject = '';
 
@@ -88,43 +88,31 @@ class EstimateEmail extends Component
             ->values()
             ->all();
 
-        // Get admin users from the vendor
+        // Get admin users from the vendor for display names
         $this->adminUsers = $this->estimate->vendor->users()
+            ->employed()
             ->wherePivot('role_id', 1)
-            ->wherePivot('is_employed', 1)
             ->get(['users.id', 'first_name', 'last_name', 'email']);
 
-        $this->availableFromEmails = $this->adminUsers
-            ->pluck('email')
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
+        // Get vendor's company emails (Nylas connected emails)
+        $this->availableFromEmails = CompanyEmail::where('vendor_id', $this->estimate->vendor->id)
+            ->whereNotNull('grant_id')
+            ->get();
 
-        // Set default from to current user's email if they're an admin, otherwise first admin
+        // Set default from to current user's email if they have a company email, otherwise first available
         $currentUserEmail = auth()->user()->email;
-        $this->from = in_array($currentUserEmail, $this->availableFromEmails) 
-            ? $currentUserEmail 
-            : ($this->availableFromEmails[0] ?? '');
+        $currentUserCompanyEmail = $this->availableFromEmails->firstWhere('email', $currentUserEmail);
+        $this->from = $currentUserCompanyEmail?->email ?? ($this->availableFromEmails->first()?->email ?? '');
 
         // Load available templates
         $this->availableTemplates = EmailTemplate::where('type', 'estimate')
             ->orderBy('name')
             ->get();
 
-        // Get the default email template for estimates
         $defaultTemplate = $this->availableTemplates->first();
-
-        if ($defaultTemplate) {
-            $this->selectedTemplateId = $defaultTemplate->id;
-            $this->subject = $this->replacePlaceholders($defaultTemplate->subject, $this->estimate);
-            $this->body = $this->replacePlaceholders($defaultTemplate->body, $this->estimate);
-        } else {
-            // No template exists - leave fields empty for user to fill
-            $this->selectedTemplateId = null;
-            $this->subject = '';
-            $this->body = '';
-        }
+        $this->selectedTemplateId = $defaultTemplate?->id;
+        $this->subject = $defaultTemplate ? $this->replacePlaceholders($defaultTemplate->subject, $this->estimate) : '';
+        $this->body = $defaultTemplate ? $this->replacePlaceholders($defaultTemplate->body, $this->estimate) : '';
 
         $reimbursementsTotal = $this->estimate->project->finances['reimbursments'] ?? 0;
         $this->hasReimbursements = $reimbursementsTotal > 0;
@@ -184,31 +172,19 @@ class EstimateEmail extends Component
 
         $user = auth()->user();
 
-        $vendorEmail = $user?->vendor?->business_email;
-
-        if (! $vendorEmail) {
-            Flux::toast(
-                duration: 7000,
-                position: 'top right',
-                variant: 'danger',
-                heading: 'Email Not Sent',
-                text: 'Your vendor profile is missing a business email address.',
-            );
-
-            return;
-        }
-
-        $companyEmail = CompanyEmail::query()
-            ->where('email', $vendorEmail)
+        // Find the CompanyEmail matching the selected "from" address
+        $companyEmail = CompanyEmail::where('email', $this->from)
+            ->where('vendor_id', $this->estimate->vendor->id)
+            ->whereNotNull('grant_id')
             ->first();
 
-        if (! $companyEmail || ! $companyEmail->grant_id) {
+        if (!$companyEmail) {
             Flux::toast(
                 duration: 7000,
                 position: 'top right',
                 variant: 'danger',
                 heading: 'Email Not Sent',
-                text: 'We could not find a connected company email for this vendor.',
+                text: 'The selected sender email is not connected to Nylas.',
             );
 
             return;
