@@ -1169,6 +1169,25 @@ class NylasService
     }
 
     /**
+     * Get a contact from Nylas
+     * 
+     * @param string $grantId The grant ID for the account
+     * @param string $contactId The contact ID to retrieve
+     * @return array
+     */
+    public function getContact(string $grantId, string $contactId): array
+    {
+        $response = $this->makeNylasRequest('GET', "/grants/{$grantId}/contacts/{$contactId}");
+        
+        return [
+            'status' => $response['status'] ?? 500,
+            'data' => $response['data'] ?? [],
+            'error' => $response['error'] ?? null,
+            'exists' => $response['success'] ?? false,
+        ];
+    }
+
+    /**
      * Update a contact in Nylas
      * 
      * @param string $grantId The grant ID for the account

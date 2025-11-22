@@ -169,11 +169,24 @@ class CompanyEmailController extends Controller
      */
     private function createHiveReceiptsFolder(CompanyEmail $companyEmail): void
     {
+        $folderId = null;
+        
         try {
+            Log::channel('nylas')->info('Starting HIVE RECEIPTS folder setup', [
+                'company_email_id' => $companyEmail->id,
+                'grant_id' => $companyEmail->grant_id,
+                'email' => $companyEmail->email,
+            ]);
+            
             // First, try to find existing "HIVE RECEIPTS" folder
             $foldersResult = $this->nylasService->getFolders($companyEmail->grant_id);
             
-            $folderId = null;
+            Log::channel('nylas')->info('getFolders result', [
+                'company_email_id' => $companyEmail->id,
+                'grant_id' => $companyEmail->grant_id,
+                'status' => $foldersResult['status'] ?? 'unknown',
+                'has_data' => isset($foldersResult['data']),
+            ]);
             
             // Only proceed if we successfully got folders (200 status)
             if ($foldersResult['status'] === 200 && isset($foldersResult['data'])) {
@@ -192,7 +205,19 @@ class CompanyEmailController extends Controller
                 
                 // If folder doesn't exist, create it
                 if (!$folderId) {
+                    Log::channel('nylas')->info('Creating new HIVE RECEIPTS folder', [
+                        'company_email_id' => $companyEmail->id,
+                        'grant_id' => $companyEmail->grant_id,
+                    ]);
+                    
                     $folderResult = $this->nylasService->createFolder($companyEmail->grant_id, 'HIVE RECEIPTS');
+                    
+                    Log::channel('nylas')->info('createFolder result', [
+                        'company_email_id' => $companyEmail->id,
+                        'grant_id' => $companyEmail->grant_id,
+                        'status' => $folderResult['status'] ?? 'unknown',
+                        'has_data' => isset($folderResult['data']),
+                    ]);
                     
                     if ($folderResult['status'] === 200 || $folderResult['status'] === 201) {
                         $folderId = $folderResult['data']['id'] ?? null;
@@ -202,6 +227,12 @@ class CompanyEmailController extends Controller
                                 'company_email_id' => $companyEmail->id,
                                 'grant_id' => $companyEmail->grant_id,
                                 'folder_id' => $folderId,
+                            ]);
+                        } else {
+                            Log::channel('nylas')->error('HIVE RECEIPTS folder created but no folder ID returned', [
+                                'company_email_id' => $companyEmail->id,
+                                'grant_id' => $companyEmail->grant_id,
+                                'folder_result' => $folderResult,
                             ]);
                         }
                     } else {
@@ -219,22 +250,43 @@ class CompanyEmailController extends Controller
                     'company_email_id' => $companyEmail->id,
                     'grant_id' => $companyEmail->grant_id,
                     'status' => $foldersResult['status'] ?? 'unknown',
+                    'error' => $foldersResult['error'] ?? null,
                 ]);
-            }
-            
-            // Store folder ID in api_json if we have one
-            if ($folderId) {
-                $apiJson = $companyEmail->api_json ?? [];
-                $apiJson['HIVE_RECEIPTS_FOLDER'] = $folderId;
-                
-                $companyEmail->update(['api_json' => $apiJson]);
             }
         } catch (\Exception $e) {
             // Log but don't throw - folder creation can be retried later
-            Log::channel('nylas')->warning('Exception during HIVE RECEIPTS folder setup - will retry later', ApiErrorFormatter::format($e, [
+            Log::channel('nylas')->error('Exception during HIVE RECEIPTS folder setup', ApiErrorFormatter::format($e, [
                 'company_email_id' => $companyEmail->id,
                 'grant_id' => $companyEmail->grant_id,
+                'folder_id_found' => $folderId,
             ]));
+        }
+        
+        // Store folder ID in api_json if we have one - do this OUTSIDE the try-catch
+        // to ensure it happens even if there was an error earlier
+        if ($folderId) {
+            try {
+                $apiJson = $companyEmail->api_json ?? [];
+                $apiJson['HIVE_RECEIPTS_FOLDER'] = $folderId;
+                
+                $updated = $companyEmail->update(['api_json' => $apiJson]);
+                
+                Log::channel('nylas')->info('Updated api_json with HIVE RECEIPTS folder', [
+                    'company_email_id' => $companyEmail->id,
+                    'folder_id' => $folderId,
+                    'update_success' => $updated,
+                ]);
+            } catch (\Exception $e) {
+                Log::channel('nylas')->error('Failed to update api_json with folder ID', ApiErrorFormatter::format($e, [
+                    'company_email_id' => $companyEmail->id,
+                    'folder_id' => $folderId,
+                ]));
+            }
+        } else {
+            Log::channel('nylas')->warning('No folder ID to save in api_json', [
+                'company_email_id' => $companyEmail->id,
+                'grant_id' => $companyEmail->grant_id,
+            ]);
         }
     }
 

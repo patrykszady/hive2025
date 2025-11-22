@@ -28,8 +28,27 @@ class NylasContactSyncService
      */
     public function syncUserContactsForClient(User $user, Client $client): void
     {
+        Log::channel('nylas')->info('Starting contact sync for client', [
+            'user_id' => $user->id,
+            'client_id' => $client->id,
+        ]);
+        
         // Get all Hive Contractor vendors that have this client
         $vendors = $client->vendors()->hiveVendors()->get();
+        
+        Log::channel('nylas')->info('Found vendors for client', [
+            'user_id' => $user->id,
+            'client_id' => $client->id,
+            'vendor_count' => $vendors->count(),
+        ]);
+        
+        if ($vendors->isEmpty()) {
+            Log::channel('nylas')->warning('No Hive vendors found for client', [
+                'user_id' => $user->id,
+                'client_id' => $client->id,
+            ]);
+            return;
+        }
         
         foreach ($vendors as $vendor) {
             $this->syncUserContactForVendor($user, $client, $vendor);
@@ -46,8 +65,28 @@ class NylasContactSyncService
      */
     public function syncUserContactForVendor(User $user, Client $client, Vendor $vendor): void
     {
+        Log::channel('nylas')->info('Syncing contact for vendor', [
+            'user_id' => $user->id,
+            'client_id' => $client->id,
+            'vendor_id' => $vendor->id,
+        ]);
+        
         // Get the vendor's company emails (grants)
         $companyEmails = $vendor->company_emails;
+        
+        Log::channel('nylas')->info('Found company emails for vendor', [
+            'user_id' => $user->id,
+            'vendor_id' => $vendor->id,
+            'email_count' => $companyEmails->count(),
+        ]);
+        
+        if ($companyEmails->isEmpty()) {
+            Log::channel('nylas')->warning('No company emails found for vendor', [
+                'user_id' => $user->id,
+                'vendor_id' => $vendor->id,
+            ]);
+            return;
+        }
         
         foreach ($companyEmails as $companyEmail) {
             $this->syncUserContactForGrant($user, $client, $companyEmail);
@@ -66,6 +105,12 @@ class NylasContactSyncService
     {
         $grantId = $companyEmail->grant_id;
         
+        Log::channel('nylas')->info('Starting contact sync for grant', [
+            'user_id' => $user->id,
+            'client_id' => $client->id,
+            'grant_id' => $grantId,
+        ]);
+        
         try {
             // Get the pivot record to check for existing Nylas contact ID
             $pivot = DB::table('client_user')
@@ -77,6 +122,7 @@ class NylasContactSyncService
                 Log::channel('nylas')->warning('No client_user pivot found', [
                     'user_id' => $user->id,
                     'client_id' => $client->id,
+                    'grant_id' => $grantId,
                 ]);
                 return;
             }
@@ -85,19 +131,78 @@ class NylasContactSyncService
             $existingContactIds = json_decode($pivot->nylas_contact_ids ?? '{}', true) ?? [];
             $existingContactId = $existingContactIds[$grantId] ?? null;
 
+            Log::channel('nylas')->info('Checked for existing contact', [
+                'user_id' => $user->id,
+                'grant_id' => $grantId,
+                'existing_contact_id' => $existingContactId,
+            ]);
+
             // Prepare contact data
             $contactData = $this->prepareContactData($user, $client, $companyEmail);
 
             if ($existingContactId) {
-                // Update existing contact
-                $result = $this->nylasService->updateContact($grantId, $existingContactId, $contactData);
+                // Verify contact exists in Nylas before updating
+                $contactExists = $this->nylasService->getContact($grantId, $existingContactId);
                 
-                if ($result['status'] === 200) {
-                    Log::channel('nylas')->info('Updated Nylas contact', [
+                if ($contactExists['exists']) {
+                    // Update existing contact
+                    $result = $this->nylasService->updateContact($grantId, $existingContactId, $contactData);
+                    
+                    if ($result['status'] === 200) {
+                        Log::channel('nylas')->info('Updated Nylas contact', [
+                            'grant_id' => $grantId,
+                            'contact_id' => $existingContactId,
+                            'user_id' => $user->id,
+                        ]);
+                    } else {
+                        Log::channel('nylas')->warning('Failed to update Nylas contact', [
+                            'grant_id' => $grantId,
+                            'contact_id' => $existingContactId,
+                            'user_id' => $user->id,
+                            'status' => $result['status'],
+                            'response' => $result['data'] ?? null,
+                        ]);
+                    }
+                } else {
+                    // Contact ID exists in DB but not in Nylas - recreate it
+                    Log::channel('nylas')->warning('Contact ID exists locally but not in Nylas, recreating', [
                         'grant_id' => $grantId,
                         'contact_id' => $existingContactId,
                         'user_id' => $user->id,
                     ]);
+                    
+                    // Create new contact
+                    $result = $this->nylasService->createContact($grantId, $contactData);
+                    
+                    if ($result['status'] === 200 && isset($result['data']['data']['id'])) {
+                        $newContactId = $result['data']['data']['id'];
+                        
+                        // Update the pivot table with the new contact ID
+                        $existingContactIds[$grantId] = $newContactId;
+                        
+                        DB::table('client_user')
+                            ->where('client_id', $client->id)
+                            ->where('user_id', $user->id)
+                            ->update([
+                                'nylas_contact_ids' => json_encode($existingContactIds),
+                                'updated_at' => now(),
+                            ]);
+
+                        Log::channel('nylas')->info('Recreated missing Nylas contact', [
+                            'grant_id' => $grantId,
+                            'old_contact_id' => $existingContactId,
+                            'new_contact_id' => $newContactId,
+                            'user_id' => $user->id,
+                        ]);
+                    } else {
+                        Log::channel('nylas')->error('Failed to recreate missing Nylas contact', [
+                            'grant_id' => $grantId,
+                            'old_contact_id' => $existingContactId,
+                            'user_id' => $user->id,
+                            'status' => $result['status'] ?? null,
+                            'response' => $result['data'] ?? null,
+                        ]);
+                    }
                 }
             } else {
                 // Create new contact
@@ -122,6 +227,13 @@ class NylasContactSyncService
                         'contact_id' => $newContactId,
                         'user_id' => $user->id,
                     ]);
+                } else {
+                    Log::channel('nylas')->warning('Failed to create Nylas contact', [
+                        'grant_id' => $grantId,
+                        'user_id' => $user->id,
+                        'status' => $result['status'] ?? null,
+                        'response' => $result['data'] ?? null,
+                    ]);
                 }
             }
         } catch (\Exception $e) {
@@ -130,6 +242,7 @@ class NylasContactSyncService
                 'user_id' => $user->id,
                 'client_id' => $client->id,
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
         }
     }
