@@ -411,6 +411,11 @@ class NylasService
             }
         }
         
+        // Inbox requests without company email - return null to use default inbox (this is expected)
+        if (in_array($normalized, ['inbox', '\\inbox'])) {
+            return null;
+        }
+        
         // If we reach here with a folder name (not ID), something unexpected is happening
         // Log a warning so we can investigate, but return the original value
         if (!str_contains($trimmed, '=')) {

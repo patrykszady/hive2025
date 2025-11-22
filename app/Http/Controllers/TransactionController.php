@@ -1034,7 +1034,7 @@ class TransactionController extends Controller
                             $ids = $transaction_ids;
 
                             // Skip subset matching if too many items (prevent memory exhaustion)
-                            if ($n > 25) {
+                            if ($n > 20) {
                                 Log::warning('Too many transactions to match - skipping subset sum matching', [
                                     'expense_id' => $expense->id,
                                     'transaction_count' => $n,
@@ -1121,7 +1121,7 @@ class TransactionController extends Controller
                     $ids = $expenses_ids;
 
                     // Skip subset matching if too many items (prevent memory exhaustion)
-                    if ($n > 25) {
+                    if ($n > 20) {
                         Log::warning('Too many expenses to match - skipping subset sum matching', [
                             'transaction_id' => $transaction->id,
                             'expense_count' => $n,
@@ -1248,7 +1248,7 @@ class TransactionController extends Controller
                     $ids = $transaction_ids;
 
                     // Skip subset matching if too many items (prevent memory exhaustion)
-                    if ($n > 25) {
+                    if ($n > 20) {
                         Log::warning('Too many transactions for check matching - skipping subset sum', [
                             'expense_id' => $expense->id,
                             'transaction_count' => $n,
@@ -1325,7 +1325,7 @@ class TransactionController extends Controller
                                 $ids = $transaction_ids;
 
                                 // Skip subset matching if too many items (prevent memory exhaustion)
-                                if ($n > 25) {
+                                if ($n > 20) {
                                     Log::warning('Too many transactions to match - skipping subset sum matching', [
                                         'expense_id' => $expense->id,
                                         'transaction_count' => $n,
@@ -1567,7 +1567,7 @@ class TransactionController extends Controller
                     $ids = $client_payment_ids;
 
                     // Skip subset matching if too many items (prevent memory exhaustion)
-                    if ($n > 25) {
+                    if ($n > 20) {
                         Log::warning('Too many client payments to match - skipping subset sum matching', [
                             'transaction_id' => $transaction->id,
                             'client_payment_count' => $n,
@@ -1688,12 +1688,15 @@ class TransactionController extends Controller
         // dd([$arr, $n, $ids, $model]);
         
         // Safety check: limit to prevent memory exhaustion
-        // 2^25 = 33 million combinations, 2^30 = 1 billion combinations
-        if ($n > 25) {
+        // 2^20 = 1 million combinations (~50MB memory)
+        // 2^22 = 4 million combinations (~200MB memory)
+        // 2^25 = 33 million combinations (too much memory)
+        if ($n > 20) {
             Log::warning('subsetSums called with too many elements - skipping to prevent memory exhaustion', [
                 'n' => $n,
                 'model' => $model,
                 'max_combinations' => 1 << $n,
+                'current_memory_mb' => round(memory_get_usage(true) / 1024 / 1024, 2),
             ]);
             return [];
         }
