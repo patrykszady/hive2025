@@ -189,9 +189,9 @@ class CompanyEmailController extends Controller
             ]);
             
             // Only proceed if we successfully got folders (200 status)
-            if ($foldersResult['status'] === 200 && isset($foldersResult['data'])) {
+            if ($foldersResult['status'] === 200 && isset($foldersResult['data']['data'])) {
                 // Search for existing "HIVE RECEIPTS" folder
-                foreach ($foldersResult['data'] as $folder) {
+                foreach ($foldersResult['data']['data'] as $folder) {
                     if (isset($folder['name']) && $folder['name'] === 'HIVE RECEIPTS') {
                         $folderId = $folder['id'];
                         Log::channel('nylas')->info('Found existing HIVE RECEIPTS folder', [
@@ -233,6 +233,36 @@ class CompanyEmailController extends Controller
                                 'company_email_id' => $companyEmail->id,
                                 'grant_id' => $companyEmail->grant_id,
                                 'folder_result' => $folderResult,
+                            ]);
+                        }
+                    } elseif ($folderResult['status'] === 409) {
+                        // Folder already exists (conflict) - try to find it again
+                        Log::channel('nylas')->warning('Folder already exists (409 Conflict) - searching again', [
+                            'company_email_id' => $companyEmail->id,
+                            'grant_id' => $companyEmail->grant_id,
+                        ]);
+                        
+                        // Refresh folder list and search again
+                        $retryFoldersResult = $this->nylasService->getFolders($companyEmail->grant_id);
+                        
+                        if ($retryFoldersResult['status'] === 200 && isset($retryFoldersResult['data']['data'])) {
+                            foreach ($retryFoldersResult['data']['data'] as $folder) {
+                                if (isset($folder['name']) && $folder['name'] === 'HIVE RECEIPTS') {
+                                    $folderId = $folder['id'];
+                                    Log::channel('nylas')->info('Found HIVE RECEIPTS folder after 409 conflict', [
+                                        'company_email_id' => $companyEmail->id,
+                                        'grant_id' => $companyEmail->grant_id,
+                                        'folder_id' => $folderId,
+                                    ]);
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if (!$folderId) {
+                            Log::channel('nylas')->error('Could not find HIVE RECEIPTS folder even after 409 conflict', [
+                                'company_email_id' => $companyEmail->id,
+                                'grant_id' => $companyEmail->grant_id,
                             ]);
                         }
                     } else {
