@@ -170,6 +170,7 @@ class CompanyEmailController extends Controller
     private function createHiveReceiptsFolder(CompanyEmail $companyEmail): void
     {
         $folderId = null;
+        $inboxFolderId = null;
         
         try {
             Log::channel('nylas')->info('Starting HIVE RECEIPTS folder setup', [
@@ -190,7 +191,7 @@ class CompanyEmailController extends Controller
             
             // Only proceed if we successfully got folders (200 status)
             if ($foldersResult['status'] === 200 && isset($foldersResult['data']['data'])) {
-                // Search for existing "HIVE RECEIPTS" folder
+                // Search for existing "HIVE RECEIPTS" folder and Inbox folder
                 foreach ($foldersResult['data']['data'] as $folder) {
                     if (isset($folder['name']) && $folder['name'] === 'HIVE RECEIPTS') {
                         $folderId = $folder['id'];
@@ -199,6 +200,19 @@ class CompanyEmailController extends Controller
                             'grant_id' => $companyEmail->grant_id,
                             'folder_id' => $folderId,
                         ]);
+                    }
+                    
+                    if (isset($folder['name']) && strtolower($folder['name']) === 'inbox') {
+                        $inboxFolderId = $folder['id'];
+                        Log::channel('nylas')->info('Found Inbox folder', [
+                            'company_email_id' => $companyEmail->id,
+                            'grant_id' => $companyEmail->grant_id,
+                            'inbox_folder_id' => $inboxFolderId,
+                        ]);
+                    }
+                    
+                    // Break early if we found both
+                    if ($folderId && $inboxFolderId) {
                         break;
                     }
                 }
@@ -292,22 +306,30 @@ class CompanyEmailController extends Controller
             ]));
         }
         
-        // Store folder ID in api_json if we have one - do this OUTSIDE the try-catch
+        // Store folder IDs in api_json if we have them - do this OUTSIDE the try-catch
         // to ensure it happens even if there was an error earlier
-        if ($folderId) {
+        if ($folderId || $inboxFolderId) {
             try {
                 $apiJson = $companyEmail->api_json ?? [];
-                $apiJson['HIVE_RECEIPTS_FOLDER'] = $folderId;
+                
+                if ($folderId) {
+                    $apiJson['HIVE_RECEIPTS_FOLDER'] = $folderId;
+                }
+                
+                if ($inboxFolderId) {
+                    $apiJson['INBOX_FOLDER'] = $inboxFolderId;
+                }
                 
                 $updated = $companyEmail->update(['api_json' => $apiJson]);
                 
-                Log::channel('nylas')->info('Updated api_json with HIVE RECEIPTS folder', [
+                Log::channel('nylas')->info('Updated api_json with folder IDs', [
                     'company_email_id' => $companyEmail->id,
-                    'folder_id' => $folderId,
+                    'hive_receipts_folder_id' => $folderId,
+                    'inbox_folder_id' => $inboxFolderId,
                     'update_success' => $updated,
                 ]);
             } catch (\Exception $e) {
-                Log::channel('nylas')->error('Failed to update api_json with folder ID', ApiErrorFormatter::format($e, [
+                Log::channel('nylas')->error('Failed to update api_json with folder IDs', ApiErrorFormatter::format($e, [
                     'company_email_id' => $companyEmail->id,
                     'folder_id' => $folderId,
                 ]));
@@ -1793,9 +1815,6 @@ class CompanyEmailController extends Controller
      */
     public function forwardRecentReceiptEmailsToCentral()
     {
-        // $foldersResult = $this->nylasService->getFolders('023bfe85-9c79-4afa-9569-d53c8cccf25f');
-        // dd($foldersResult);
-
         $companyEmails = CompanyEmail::withoutGlobalScopes()
             ->with(['receipts' => function($query) {
                 // Only load receipts we'll actually use
@@ -1840,7 +1859,8 @@ class CompanyEmailController extends Controller
         $matchingMessages = $this->nylasService->getMessagesMatchingCriteria(
             $grantId, 
             $receiptCriteria, 
-            $receivedAfter
+            $receivedAfter,
+            $companyEmail
         );
 
         // Forward each matching message

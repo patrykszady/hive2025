@@ -996,30 +996,32 @@ class NylasService
     /**
      * Fetch messages matching receipt criteria for forwarding
      */
-    public function getMessagesMatchingCriteria(string $grantId, array $receiptCriteria, Carbon $receivedAfter): array
+    public function getMessagesMatchingCriteria(string $grantId, array $receiptCriteria, Carbon $receivedAfter, ?\App\Models\CompanyEmail $companyEmail = null): array
     {
         if (empty($receiptCriteria)) {
             return [];
         }
         
-        // Decide single folder (priority: explicit test folder in non-prod, otherwise inbox)
-        $folder = env('APP_ENV') === 'production'
-            ? 'inbox'
-            : ('AQMkADZhOTM1NDI2LWUzMTktNDViMy05OQFhLWZlYTE2YmU3MzAyZAAuAAAD_zyyhiR0HUm0oKJuKA6AnQEA23n86TJcJU_kYhT4djVwqgAKpzgFQgAAAA==' ?: 'inbox');
+        // Get inbox folder ID from company email's api_json if available
+        $inboxFolderId = $companyEmail->api_json['INBOX_FOLDER'] ?? null;
         
         // In non-production, look back a year to test with older messages
         $lookbackDate = env('APP_ENV') === 'production'
             ? $receivedAfter
             : Carbon::now()->subYear();
         
-        // Single API call to get all recent messages
+        // Single API call to get all recent messages from inbox
         $query = [
             'limit' => 200,
-            'in' => $folder,
             'received_after' => $lookbackDate->timestamp,
         ];
         
-        $resp = $this->getMessages($grantId, $query, false);
+        // Only add 'in' if we have the inbox folder ID
+        if ($inboxFolderId) {
+            $query['in'] = $inboxFolderId;
+        }
+        
+        $resp = $this->getMessages($grantId, $query, false, $companyEmail);
         $messages = $resp['data'] ?? [];
 
         // Fast filtering using pre-built criteria
