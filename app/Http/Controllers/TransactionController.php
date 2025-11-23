@@ -1296,6 +1296,9 @@ class TransactionController extends Controller
                         // ->whereDoesntHave('check')
                         ->whereNull('check_id')
                         ->where('check_number', $check_number)
+                        // Only get transactions that could plausibly match (not more than check amount)
+                        ->where('amount', '<=', abs($check->amount))
+                        ->where('amount', '!=', 0)
                         //per hive vendor... checks table foreach bank_account_id
                         ->when($bank_account_ids, function ($query, $bank_account_ids) {
                             return $query->whereIn('bank_account_id', $bank_account_ids);
@@ -1329,6 +1332,12 @@ class TransactionController extends Controller
                                 if ($n > 20) {
                                     Log::warning('Too many transactions to match - skipping subset sum matching', [
                                         'expense_id' => $expense->id,
+                                        'check_id' => $check->id,
+                                        'check_type' => $check->check_type,
+                                        'check_number' => $check->check_number,
+                                        'check_amount' => $check->amount,
+                                        'check_date' => $check->date->format('Y-m-d'),
+                                        'user_name' => $check->user ? $check->user->full_name : null,
                                         'transaction_count' => $n,
                                     ]);
                                     continue;
