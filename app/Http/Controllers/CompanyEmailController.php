@@ -1576,6 +1576,12 @@ class CompanyEmailController extends Controller
                 $minTokens = min(count($ocrTokens), count($vendorTokens));
                 $overlapRatio = $minTokens > 0 ? count($overlap) / $minTokens : 0;
                 
+                // Strong boost for exact token matches - each matching token is highly valuable
+                // This helps "Village Of Mount" prefer "Village Of Mount Prospect" (3 matches)
+                // over "Village Of Rosemont" (2 matches, even though "mount" is substring of "rosemont")
+                $tokenMatchBoost = count($overlap) * 8; // Increased from 5 to 8 per match
+                $score += min(50, $tokenMatchBoost); // Cap at 50 instead of 20
+                
                 // If both have significant unique words AND low overlap ratio, it's likely different businesses
                 // This catches "Breckenridge Market" vs "Breckenridge Resort" dynamically
                 // "Chicago Pizza Kitchen" vs "Chicago Pizza Delivery" - both have unique identifiers
@@ -1583,9 +1589,6 @@ class CompanyEmailController extends Controller
                     // Both have distinguishing words that don't match, and overall similarity is low
                     // This indicates different businesses sharing common words
                     $score -= 40;
-                } elseif (!empty($overlap)) {
-                    // Give a small boost per exact token match when there's good overlap
-                    $score += min(20, count($overlap) * 5);
                 }
             }
 

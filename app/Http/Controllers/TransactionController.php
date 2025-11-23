@@ -933,6 +933,9 @@ class TransactionController extends Controller
                     ->whereNull('expense_id')
                     ->whereNull('deleted_at')
                     ->where('amount', '!=', '0.00')
+                    // Only consider transactions that could plausibly match the outstanding amount
+                    // For subset sum, individual transactions must be <= outstanding amount
+                    ->where('amount', '<=', abs($transaction_amount_outstanding))
                     //03-22 -2023 when negative, ignore vendor_id
                     // ->when(substr($expense->amount, 0, 1) == '-', function ($query) {
                     //     dd($vendor_id);
