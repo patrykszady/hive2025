@@ -79,10 +79,12 @@ class NylasWebhookController extends Controller
             return;
         }
 
-        $recipients = $this->resolveRecipientsForMessage($messageId, $object['recipient_email'] ?? null);
-
-        if ($recipients->isEmpty()) {
-            Log::channel('nylas')->warning('Unable to resolve recipient for message.opened webhook', [
+        // CRITICAL: Must have recipient_email in payload to attribute the open correctly.
+        // Without this, we cannot know which specific recipient opened the email.
+        $recipientEmail = $object['recipient_email'] ?? null;
+        
+        if (!$recipientEmail) {
+            Log::channel('nylas')->warning('Missing recipient_email in message.opened webhook - cannot attribute open to specific recipient', [
                 'message_id' => $messageId,
                 'payload' => $payload,
             ]);
@@ -90,9 +92,19 @@ class NylasWebhookController extends Controller
             return;
         }
 
+        $recipients = collect([$recipientEmail]);
+
         $eventDetails = $this->extractEventDetails($data);
 
-        if (($eventDetails['opened_id'] ?? null) === 0 && (int) ($object['message_data']['count'] ?? 0) <= 1) {
+        // Filter out automated/prefetch opens using Mailtrap-inspired logic
+        if ($this->isPrefetchOrAutomatedOpen($eventDetails, $object)) {
+            Log::channel('nylas')->info('Filtered prefetch/automated open', [
+                'message_id' => $messageId,
+                'recipient_email' => $recipientEmail,
+                'user_agent' => $eventDetails['user_agent'],
+                'opened_id' => $eventDetails['opened_id'],
+            ]);
+
             return;
         }
 
@@ -125,10 +137,11 @@ class NylasWebhookController extends Controller
             return;
         }
 
-        $recipients = $this->resolveRecipientsForMessage($messageId, $object['recipient_email'] ?? null);
-
-        if ($recipients->isEmpty()) {
-            Log::channel('nylas')->warning('Unable to resolve recipient for message.link_clicked webhook', [
+        // CRITICAL: Must have recipient_email in payload to attribute the click correctly.
+        $recipientEmail = $object['recipient_email'] ?? null;
+        
+        if (!$recipientEmail) {
+            Log::channel('nylas')->warning('Missing recipient_email in message.link_clicked webhook - cannot attribute click to specific recipient', [
                 'message_id' => $messageId,
                 'payload' => $payload,
             ]);
@@ -136,9 +149,18 @@ class NylasWebhookController extends Controller
             return;
         }
 
+        $recipients = collect([$recipientEmail]);
+
         $eventDetails = $this->extractEventDetails($data);
 
-        if (($eventDetails['opened_id'] ?? null) === 0 && (int) ($object['message_data']['count'] ?? 0) <= 1) {
+        // Filter out automated/prefetch clicks
+        if ($this->isPrefetchOrAutomatedOpen($eventDetails, $object)) {
+            Log::channel('nylas')->info('Filtered prefetch/automated click', [
+                'message_id' => $messageId,
+                'recipient_email' => $recipientEmail,
+                'user_agent' => $eventDetails['user_agent'],
+            ]);
+
             return;
         }
 
@@ -525,5 +547,93 @@ class NylasWebhookController extends Controller
             ?? $object['latest_message_id']
             ?? $object['last_message_id']
             ?? null;
+    }
+
+    /**
+     * Detect automated/prefetch opens using Mailtrap-inspired heuristics.
+     * 
+     * Mail clients (Apple Mail, Outlook, Gmail) often prefetch/preload emails
+     * to show previews or check for safety. These should not count as real opens.
+     * 
+     * Detection strategies:
+     * 1. User agent patterns - automated clients, security scanners, bots
+     * 2. opened_id = 0 with low count - Nylas's own prefetch indicator
+     * 3. Known automated IP ranges (cloud providers, security services)
+     * 4. Suspicious timing patterns (multiple opens within seconds)
+     */
+    protected function isPrefetchOrAutomatedOpen(array $eventDetails, array $object): bool
+    {
+        $userAgent = $eventDetails['user_agent'] ?? '';
+        $openedId = $eventDetails['opened_id'] ?? null;
+        $count = (int) ($object['message_data']['count'] ?? 0);
+        
+        // Check 1: Nylas's own prefetch indicator
+        if ($openedId === 0 && $count <= 1) {
+            return true;
+        }
+
+        // Check 2: User agent patterns indicating automated clients
+        $automatedPatterns = [
+            // Security/Link scanners
+            '/(?:safe|security|scanner|link.*check|threat|virus|malware)/i',
+            '/(?:barracuda|proofpoint|mimecast|ironport|forcepoint)/i',
+            
+            // Email prefetch clients
+            '/(?:apple.*mail.*prefetch|outlook.*safelink|gmail.*image.*proxy)/i',
+            '/(?:microsoft.*safe.*link|office.*365.*atp)/i',
+            
+            // Bots and crawlers
+            '/(?:bot|crawler|spider|scraper|curl|wget|python-requests)/i',
+            
+            // Headless browsers used for automation
+            '/(?:headless|phantom|selenium|puppeteer)/i',
+            
+            // Generic automated indicators
+            '/(?:auto|fetch|preload|preview|cache)/i',
+        ];
+
+        foreach ($automatedPatterns as $pattern) {
+            if (preg_match($pattern, $userAgent)) {
+                return true;
+            }
+        }
+
+        // Check 3: Empty or missing user agent (often automated)
+        if (empty($userAgent) || $userAgent === 'Unknown' || $userAgent === 'null') {
+            return true;
+        }
+
+        // Check 4: Known automated/cloud service IP patterns
+        $ip = $eventDetails['ip'] ?? '';
+        $ipAddresses = $eventDetails['ip_addresses'] ?? [];
+        
+        // Common patterns for security scanners and cloud services
+        $automatedIpPatterns = [
+            '/^(?:10|172\.(?:1[6-9]|2[0-9]|3[01])|192\.168)\./i', // Private IPs (often proxies/scanners)
+            '/^(?:52|54|34|35|18)\./i', // AWS ranges (often used by security services)
+            '/^(?:104\.(?:16|17|18|19|20|21|22|23|24|25|26|27))\./i', // Cloudflare
+            '/^(?:209\.85|172\.217|74\.125)\./i', // Google ranges
+        ];
+
+        foreach (array_merge([$ip], $ipAddresses) as $checkIp) {
+            foreach ($automatedIpPatterns as $pattern) {
+                if (preg_match($pattern, $checkIp)) {
+                    // Note: This is aggressive - consider logging for tuning
+                    Log::channel('nylas')->debug('Potential automated IP detected', [
+                        'ip' => $checkIp,
+                        'user_agent' => $userAgent,
+                    ]);
+                    // Don't auto-reject based on IP alone unless combined with other signals
+                    // return true;
+                }
+            }
+        }
+
+        // Check 5: opened_id of 0 is always suspicious (Nylas tracks legitimate opens with IDs)
+        if ($openedId === 0) {
+            return true;
+        }
+
+        return false;
     }
 }

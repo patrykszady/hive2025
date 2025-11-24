@@ -397,7 +397,8 @@ class CompanyEmailController extends Controller
             }
             $messageId = $message['id'];
 
-            // Prefer X-Hive-Metadata header values if available
+            // ALL messages in receipts inbox must have X-Hive-Metadata header (from forwarding system)
+            // Messages without this header should not be here and will be moved to error folder
             $hiveMeta = null;
             if (isset($message['headers']) && is_array($message['headers'])) {
                 foreach ($message['headers'] as $hdr) {
@@ -443,10 +444,9 @@ class CompanyEmailController extends Controller
 
             $companyEmail = CompanyEmail::withoutGlobalScopes()
                 ->where('email', $toEmail)
-                // ->where('grant_id', $grantId)
                 ->first();
 
-            if (! $companyEmail) {
+            if (!$companyEmail) {
                 Log::channel('nylas')->error('Unable to resolve CompanyEmail for receipt message', [
                     'grant_id' => $grantId,
                     'to_email' => $toEmail,
@@ -555,6 +555,12 @@ class CompanyEmailController extends Controller
                     ])->render();
 
                     $ocr_path = '_temp_ocr/' . $ocr_filename;
+                    
+                    // Ensure the _temp_ocr directory exists
+                    if (!Storage::disk('files')->exists('_temp_ocr')) {
+                        Storage::disk('files')->makeDirectory('_temp_ocr');
+                    }
+                    
                     $location = Storage::disk('files')->path($ocr_path);
 
                     Browsershot::html($view)
@@ -598,6 +604,12 @@ class CompanyEmailController extends Controller
                     $doc_type = 'jpg';
                     $ocr_filename .= '.' . $doc_type;
                     $ocr_path = '_temp_ocr/' . $ocr_filename;
+                    
+                    // Ensure the _temp_ocr directory exists
+                    if (!Storage::disk('files')->exists('_temp_ocr')) {
+                        Storage::disk('files')->makeDirectory('_temp_ocr');
+                    }
+                    
                     $location = Storage::disk('files')->path($ocr_path);
                     
                     // Validate image URL before processing
