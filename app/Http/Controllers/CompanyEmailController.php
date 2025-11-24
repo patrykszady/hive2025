@@ -379,10 +379,10 @@ class CompanyEmailController extends Controller
     {
         $grantId = config('nylas.receipts_grant_id');
 
-        // Decide single folder (priority: explicit test folder in non-prod, otherwise inbox)
+        // Use the configured inbox folder ID (production) or test folder (non-production)
         $folder = env('APP_ENV') === 'production'
-            ? 'inbox'
-            : (config('nylas.hive_receipts_test_folder_id') ?: 'inbox');
+            ? config('nylas.receipts_inbox_folder_id')
+            : (config('nylas.hive_receipts_test_folder_id') ?: config('nylas.receipts_inbox_folder_id'));
 
         $allMessages = $this->nylasService->fetchFolderMessages($grantId, $folder, [
             'full_fetch' => true,
