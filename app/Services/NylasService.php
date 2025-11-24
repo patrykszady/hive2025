@@ -381,8 +381,10 @@ class NylasService
             return null;
         }
 
-        // Heuristic: Nylas folder IDs are long (>= 20 chars) & often start with AAk/AAMk/AQMk and contain '='
-        if (strlen($trimmed) >= 20 && str_contains($trimmed, '=')) {
+        // Heuristic: Nylas folder IDs are long base64-like strings (>= 20 chars) 
+        // They often start with AAk/AAMk/AQMk and may contain '=' for padding
+        // If it's already a long alphanumeric string, assume it's a folder ID
+        if (strlen($trimmed) >= 20 && preg_match('/^[A-Za-z0-9+\/=_-]+$/', $trimmed)) {
             return $trimmed;
         }
 
