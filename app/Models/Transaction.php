@@ -35,6 +35,48 @@ class Transaction extends Model
     protected static function booted()
     {
         static::addGlobalScope(new TransactionScope);
+        
+        // When a transaction is saved or deleted, re-index related expenses
+        // This ensures expense status updates when check transactions change
+        static::saved(function ($transaction) {
+            // Re-index direct expense if linked
+            if ($transaction->expense_id) {
+                $expense = Expense::withoutGlobalScopes()->find($transaction->expense_id);
+                if ($expense) {
+                    $expense->searchable();
+                }
+            }
+            
+            // Re-index expenses linked via check
+            if ($transaction->check_id) {
+                $check = Check::withoutGlobalScopes()->find($transaction->check_id);
+                if ($check) {
+                    foreach ($check->expenses as $expense) {
+                        $expense->searchable();
+                    }
+                }
+            }
+        });
+        
+        static::deleted(function ($transaction) {
+            // Re-index direct expense if linked
+            if ($transaction->expense_id) {
+                $expense = Expense::withoutGlobalScopes()->find($transaction->expense_id);
+                if ($expense) {
+                    $expense->searchable();
+                }
+            }
+            
+            // Re-index expenses linked via check
+            if ($transaction->check_id) {
+                $check = Check::withoutGlobalScopes()->find($transaction->check_id);
+                if ($check) {
+                    foreach ($check->expenses as $expense) {
+                        $expense->searchable();
+                    }
+                }
+            }
+        });
     }
 
     /**

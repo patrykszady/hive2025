@@ -1,7 +1,7 @@
 <div class="max-w-4xl">
     <form wire:submit="{{$view_text['form_submit']}}">
         <div class="grid max-w-xl grid-cols-4 gap-4 xl:relative lg:max-w-5xl sm:px-6">
-            <div class="col-span-4 space-y-4 lg:col-span-2">
+            <div class="col-span-4 space-y-4 lg:col-span-2 lg:sticky lg:top-4 lg:self-start">
                 <flux:card>
                     <flux:heading size="lg">{{$vendor->name}} Payment</flux:heading>
                     <flux:subheading><i>Choose Projects to add for {{$vendor->name}} in this Payment</i></flux:subheading>
@@ -29,15 +29,11 @@
                     <flux:heading size="lg">Choose Payment Projects</flux:heading>
 
                     <flux:input.group>
-                        <flux:select wire:model.live="project_id" variant="listbox" searchable placeholder="Choose project...">
-                            <x-slot name="search">
-                                <flux:select.search placeholder="Search..." />
-                            </x-slot>
-
-                            @foreach(collect($projects)->where('disabled', false) as $project)
-                                <flux:select.option value="{{$project['id']}}"><div>{{$project['address']}} <br> <i class="font-normal">{{$project['project_name']}}</i></div></flux:select.option>
-                            @endforeach
-                        </flux:select>
+                        <x-forms.project-select 
+                            :projects="$this->availableProjects" 
+                            model="project_id"
+                            :in-input-group="true"
+                        />
 
                         <flux:button variant="primary" wire:click="addProject" icon="plus-circle">Add</flux:button>
                     </flux:input.group>

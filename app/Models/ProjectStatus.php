@@ -49,6 +49,23 @@ class ProjectStatus extends Model
         11 => 'gray',     // VIEW ONLY
     ];
 
+    /**
+     * Badge color to RGB mappings for status indicator
+     */
+    protected const COLOR_RGB_MAP = [
+        'zinc' => ['ring' => 'rgb(244, 244, 245)', 'dot' => 'rgb(113, 113, 122)'],
+        'blue' => ['ring' => 'rgb(239, 246, 255)', 'dot' => 'rgb(59, 130, 246)'],
+        'yellow' => ['ring' => 'rgb(254, 252, 232)', 'dot' => 'rgb(234, 179, 8)'],
+        'amber' => ['ring' => 'rgb(255, 251, 235)', 'dot' => 'rgb(245, 158, 11)'],
+        'lime' => ['ring' => 'rgb(247, 254, 231)', 'dot' => 'rgb(132, 204, 22)'],
+        'green' => ['ring' => 'rgb(240, 253, 244)', 'dot' => 'rgb(34, 197, 94)'],
+        'teal' => ['ring' => 'rgb(240, 253, 250)', 'dot' => 'rgb(20, 184, 166)'],
+        'orange' => ['ring' => 'rgb(255, 247, 237)', 'dot' => 'rgb(249, 115, 22)'],
+        'red' => ['ring' => 'rgb(254, 242, 242)', 'dot' => 'rgb(239, 68, 68)'],
+        'gray' => ['ring' => 'rgb(249, 250, 251)', 'dot' => 'rgb(107, 114, 128)'],
+        'sky' => ['ring' => 'rgb(240, 249, 255)', 'dot' => 'rgb(14, 165, 233)'],
+    ];
+
     protected function casts(): array
     {
         return [
@@ -61,6 +78,19 @@ class ProjectStatus extends Model
     protected static function booted()
     {
         static::addGlobalScope(new ProjectStatusScope);
+        
+        // When a project status is saved or deleted, re-index the parent project
+        static::saved(function ($projectStatus) {
+            if ($projectStatus->project) {
+                $projectStatus->project->searchable();
+            }
+        });
+        
+        static::deleted(function ($projectStatus) {
+            if ($projectStatus->project) {
+                $projectStatus->project->searchable();
+            }
+        });
     }
 
     public function project(): BelongsTo
@@ -85,6 +115,32 @@ class ProjectStatus extends Model
     {
         return Attribute::make(
             get: fn ($value, array $attributes) => self::STATUS_COLORS[$attributes['status_code'] ?? 1] ?? 'gray'
+        );
+    }
+
+    /**
+     * Accessor: ring color for status indicator
+     */
+    public function ringColor(): Attribute
+    {
+        return Attribute::make(
+            get: function ($value, array $attributes) {
+                $badgeColor = self::STATUS_COLORS[$attributes['status_code'] ?? 1] ?? 'gray';
+                return self::COLOR_RGB_MAP[$badgeColor]['ring'] ?? self::COLOR_RGB_MAP['gray']['ring'];
+            }
+        );
+    }
+
+    /**
+     * Accessor: dot color for status indicator
+     */
+    public function dotColor(): Attribute
+    {
+        return Attribute::make(
+            get: function ($value, array $attributes) {
+                $badgeColor = self::STATUS_COLORS[$attributes['status_code'] ?? 1] ?? 'gray';
+                return self::COLOR_RGB_MAP[$badgeColor]['dot'] ?? self::COLOR_RGB_MAP['gray']['dot'];
+            }
         );
     }
 

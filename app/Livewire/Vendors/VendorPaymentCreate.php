@@ -87,25 +87,50 @@ class VendorPaymentCreate extends Component
                 ['latestStatus.start_date', 'desc'],
             ]);
 
-        $this->projects = $projectsCollection->mapWithKeys(function ($p) {
+        $order = 0;
+        $this->projects = $projectsCollection->mapWithKeys(function ($p) use (&$order) {
+            $expensesSum = $p->expenses()->where('vendor_id', $this->vendor->id)->sum('amount');
+            $bidsSum = $p->bids()->vendorBids($this->vendor->id)->sum('amount');
+            $balance = $bidsSum - $expensesSum;
+            $hasOutstandingBalance = $balance > 0;
+
+            if ($hasOutstandingBalance) {
+                $order++;
+            }
+
             return [
                 $p->id => [
                     'id' => $p->id,
                     'address' => $p->address,
                     'project_name' => $p->project_name,
-                    'show' => false,
-                    'disabled' => false,
-                    'order' => 0,
-                    'vendor_expenses_sum' => 0.0,
-                    'vendor_bids_sum' => 0.0,
-                    'balance' => 0.0,
+                    'show' => $hasOutstandingBalance,
+                    'disabled' => $hasOutstandingBalance,
+                    'order' => $hasOutstandingBalance ? $order : 0,
+                    'vendor_expenses_sum' => (float) $expensesSum,
+                    'vendor_bids_sum' => (float) $bidsSum,
+                    'balance' => (float) $balance,
                     'amount' => null,
                 ],
             ];
         })->toArray();
 
+        $this->payment_projects_count = $order;
         $this->form->date = today()->format('Y-m-d');
         $this->employees = auth()->user()->vendor->users()->where('is_employed', 1)->get();
+    }
+
+    #[Computed]
+    public function availableProjects()
+    {
+        $projectIds = collect($this->projects)->where('disabled', false)->pluck('id');
+        
+        return Project::whereIn('id', $projectIds)
+            ->with('latestStatus')
+            ->get()
+            ->sortBy([
+                ['latestStatus.status_code', 'asc'],
+                ['latestStatus.start_date', 'desc'],
+            ]);
     }
 
     /**

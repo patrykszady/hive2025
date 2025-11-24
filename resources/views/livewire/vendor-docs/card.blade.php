@@ -1,15 +1,33 @@
-<flux:card class="mt-4 space-y-2">
+<flux:card class="mt-4 space-y-2" x-data="{ expanded: false }">
     <div class="flex justify-between">
-        <flux:heading size="lg">
-            @if($view)
-                Insurance
-            @else
-                <a href="{{route('vendors.show', $vendor->id)}}">{{$vendor->name}}</a>
+        <div class="flex items-center gap-3 flex-1 cursor-pointer" @click="expanded = !expanded">
+            <flux:heading size="lg">
+                @if($view)
+                    Insurance
+                @else
+                    <a href="{{route('vendors.show', $vendor->id)}}">{{$vendor->name}}</a>
+                @endif
+            </flux:heading>
+
+            @if(!$vendor_docs->isEmpty())
+                <div x-show="!expanded" class="flex items-center gap-2">
+                    @php
+                        $currentDocs = $vendor_docs->filter(fn($doc) => $doc->expiration_date > today());
+                    @endphp
+                    
+                    @if($currentDocs->count() > 0)
+                        <flux:badge size="sm" color="green" inset="top bottom">
+                            {{ $currentDocs->count() }} Current
+                        </flux:badge>
+                    @endif
+                </div>
+
+                <flux:icon.chevron-down class="w-5 h-5 transition-transform" ::class="expanded ? 'rotate-180' : ''" />
             @endif
-        </flux:heading>
+        </div>
 
         @can('create', App\Models\VendorDoc::class)
-            <div class="space-x-2">
+            <div class="space-x-2" x-show="expanded">
                 {{-- if any docs are expired.. policy? --}}
                 <flux:button.group>
                     <flux:button size="sm" wire:click="$dispatchTo('vendor-docs.vendor-doc-create', 'addDocument', { vendor: {{$vendor->id}} })">Add</flux:button>
@@ -22,7 +40,8 @@
     </div>
 
     @if(!$vendor_docs->isEmpty())
-        <flux:separator variant="subtle" />
+        <div x-show="expanded" x-collapse>
+            <flux:separator variant="subtle" />
 
         <flux:table>
             <flux:table.columns>
@@ -53,6 +72,7 @@
                 @endforeach
             </flux:table.rows>
         </flux:table>
+        </div>
     @endif
     {{-- <livewire:vendor-docs.vendor-doc-create /> --}}
 </flux:card>

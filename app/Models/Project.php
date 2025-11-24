@@ -16,16 +16,69 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\HasOneThrough;
+use Laravel\Scout\Searchable;
 
 class Project extends Model
 {
-    use HasFactory, HasAddress;
+    use HasFactory, HasAddress, Searchable;
 
     protected $fillable = ['project_name', 'client_id', 'belongs_to_vendor_id', 'created_by_user_id', 'note', 'timesheet_id', 'created_by_user_id', 'note', 'do_not_include', 'address', 'address_2', 'city', 'state', 'zip_code', 'created_at', 'updated_at'];
 
     protected static function booted()
     {
         static::addGlobalScope(new ProjectScope);
+    }
+
+    /**
+     * Get the name of the index associated with the model.
+     */
+    public function searchableAs(): string
+    {
+        return app()->environment('local') ? 'projects_index_dev' : 'projects_index';
+    }
+
+    /**
+     * Get the indexable data array for the model.
+     */
+    public function toSearchableArray(): array
+    {
+        // Get latest status with all needed data
+        $latestStatus = null;
+        $latestStatusCode = null;
+        $latestStatusDate = null;
+        
+        if ($this->relationLoaded('latestStatus')) {
+            $latestStatus = $this->latestStatus;
+        } else {
+            $latestStatus = $this->latestStatus;
+        }
+        
+        if ($latestStatus) {
+            $latestStatusCode = $latestStatus->status_code;
+            $latestStatusDate = $latestStatus->start_date?->timestamp ?? 0;
+        }
+        
+        // Get client_id through the project_vendor relationship
+        $clientId = null;
+        if ($this->relationLoaded('client')) {
+            $clientId = $this->client?->id;
+        } else {
+            $clientId = $this->client()->value('id');
+        }
+
+        return [
+            'id' => (string) $this->id,
+            'project_name' => $this->project_name,
+            'address' => $this->address,
+            'city' => $this->city,
+            'state' => $this->state,
+            'zip_code' => $this->zip_code,
+            'client_id' => $clientId,
+            'belongs_to_vendor_id' => (int) $this->belongs_to_vendor_id,
+            'latest_status_code' => $latestStatusCode,
+            'latest_status_date' => $latestStatusDate,
+            'created_at' => $this->created_at?->timestamp ?? 0,
+        ];
     }
 
     public function distributions(): BelongsToMany

@@ -41,6 +41,9 @@ class StatusCreate extends Component
         // project_status is already a status_code integer from the select dropdown
         $statusCode = (int) $this->project_status;
         
+        // Always use current date/time for new status
+        $this->project_status_date = today()->format('Y-m-d');
+        
         $status =
             ProjectStatus::create([
                 'project_id' => $this->project->id,
@@ -52,6 +55,25 @@ class StatusCreate extends Component
         // Check if cancelled using the code (10)
         if ($statusCode === 10) {
             $this->project->estimates()->delete();
+        }
+        
+        // If changing to Active (6) or any non-cancelled status, restore estimates that were deleted during cancellation
+        // Only restore estimates where deleted_at is after the most recent "Cancelled" status change
+        if ($statusCode !== 10) {
+            // Find the most recent cancelled status before this new status (using created_at timestamps)
+            $lastCancelledStatus = $this->project->statuses()
+                ->where('status_code', 10)
+                ->where('created_at', '<', $status->created_at)
+                ->orderBy('created_at', 'desc')
+                ->first();
+            
+            if ($lastCancelledStatus) {
+                // Only restore estimates that were deleted after the cancellation (meaning they were active before)
+                $this->project->estimates()
+                    ->onlyTrashed()
+                    ->where('deleted_at', '>=', $lastCancelledStatus->created_at)
+                    ->restore();
+            }
         }
 
         $this->project_status = null;
