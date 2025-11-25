@@ -63,7 +63,7 @@ class Project extends Model
         if ($this->relationLoaded('client')) {
             $clientId = $this->client?->id;
         } else {
-            $clientId = $this->client()->value('id');
+            $clientId = $this->client()->value('clients.id');
         }
 
         return [
