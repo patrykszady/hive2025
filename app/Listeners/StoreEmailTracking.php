@@ -66,7 +66,7 @@ class StoreEmailTracking
                 'nylas_message_id' => $nylasMessageId,
                 'nylas_thread_id' => $nylasThreadId,
                 'event_type' => 'sent',
-                'recipient_email' => $recipientEmail,
+                'recipient_emails' => [$recipientEmail],
                 'metadata' => $metadata,
                 'event_at' => now(),
             ]);

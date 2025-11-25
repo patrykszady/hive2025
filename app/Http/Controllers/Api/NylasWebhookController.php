@@ -79,20 +79,16 @@ class NylasWebhookController extends Controller
             return;
         }
 
-        // CRITICAL: Must have recipient_email in payload to attribute the open correctly.
-        // Without this, we cannot know which specific recipient opened the email.
+        // Try to get recipient_email from payload
         $recipientEmail = $object['recipient_email'] ?? null;
         
-        if (!$recipientEmail) {
-            Log::channel('nylas')->warning('Missing recipient_email in message.opened webhook - cannot attribute open to specific recipient', [
-                'message_id' => $messageId,
-                'payload' => $payload,
-            ]);
-
-            return;
+        if ($recipientEmail) {
+            $recipients = collect([$recipientEmail]);
+        } else {
+            // When recipient_email is missing, create a message-level tracking event
+            // This gives aggregate stats without false attribution to specific recipients
+            $recipients = collect(['message:' . $messageId]);
         }
-
-        $recipients = collect([$recipientEmail]);
 
         $eventDetails = $this->extractEventDetails($data);
 
@@ -118,6 +114,7 @@ class NylasWebhookController extends Controller
             eventAt: $eventDetails['timestamp'],
             ip: $eventDetails['ip'],
             userAgent: $eventDetails['user_agent'],
+            isMessageLevel: $isMessageLevel ?? false,
         );
     }
 
@@ -137,19 +134,16 @@ class NylasWebhookController extends Controller
             return;
         }
 
-        // CRITICAL: Must have recipient_email in payload to attribute the click correctly.
+        // Try to get recipient_email from payload
         $recipientEmail = $object['recipient_email'] ?? null;
         
-        if (!$recipientEmail) {
-            Log::channel('nylas')->warning('Missing recipient_email in message.link_clicked webhook - cannot attribute click to specific recipient', [
-                'message_id' => $messageId,
-                'payload' => $payload,
-            ]);
-
-            return;
+        if ($recipientEmail) {
+            $recipients = collect([$recipientEmail]);
+        } else {
+            // When recipient_email is missing, create a message-level tracking event
+            // This gives aggregate stats without false attribution to specific recipients
+            $recipients = collect(['message:' . $messageId]);
         }
-
-        $recipients = collect([$recipientEmail]);
 
         $eventDetails = $this->extractEventDetails($data);
 
@@ -157,7 +151,7 @@ class NylasWebhookController extends Controller
         if ($this->isPrefetchOrAutomatedOpen($eventDetails, $object)) {
             Log::channel('nylas')->info('Filtered prefetch/automated click', [
                 'message_id' => $messageId,
-                'recipient_email' => $recipientEmail,
+                'recipient_email' => $recipients->first(),
                 'user_agent' => $eventDetails['user_agent'],
             ]);
 
@@ -177,6 +171,7 @@ class NylasWebhookController extends Controller
             ip: $eventDetails['ip'],
             userAgent: $eventDetails['user_agent'],
             linkUrl: $linkUrl,
+            isMessageLevel: $isMessageLevel ?? false,
         );
     }
 
@@ -192,6 +187,23 @@ class NylasWebhookController extends Controller
             return;
         }
 
+        // Check if this is a bounce notification from a mailer daemon
+        $fromEmails = collect($object['from'] ?? [])
+            ->map(fn (array $sender) => strtolower($sender['email'] ?? ''))
+            ->filter();
+
+        $isBounceNotification = $fromEmails->contains(function ($email) {
+            return str_contains($email, 'mailer-daemon') || 
+                   str_contains($email, 'postmaster') ||
+                   str_contains($email, 'noreply');
+        });
+
+        if ($isBounceNotification) {
+            // Handle as a bounce instead of a reply
+            $this->handleBouncedAsReply($payload, $data, $object);
+            return;
+        }
+
         $threadId = $this->extractThreadId($object);
         $messageId = $this->resolveMessageId($object) ?? ($threadId ? 'thread:' . $threadId : null);
 
@@ -201,33 +213,17 @@ class NylasWebhookController extends Controller
             return;
         }
 
-        $recipients = collect($object['from'] ?? [])
-            ->map(fn (array $sender) => $sender['email'] ?? null)
-            ->filter()
-            ->values();
+        // For thread.replied, the "from" field contains who replied, not who we sent to.
+        // We should only track the person who actually replied, not all original recipients.
+        $replyFrom = $fromEmails->values();
 
-        if ($recipients->isEmpty()) {
-            $recipients = $this->resolveRecipientsForMessage($messageId);
-        }
-
-        if ($recipients->isEmpty() && $threadId) {
-            $recipients = EmailTracking::query()
-                ->where('nylas_thread_id', $threadId)
-                ->where('event_type', 'sent')
-                ->pluck('recipient_email');
-        }
-
-        if ($recipients->isEmpty()) {
-            Log::channel('nylas')->warning('Unable to resolve reply participants for thread.replied webhook', [
-                'message_id' => $messageId,
-                'thread_id' => $threadId,
-                'payload' => $payload,
-            ]);
-
-            return;
-        }
-
-        $eventDetails = $this->extractEventDetails($data);
+        if ($replyFrom->isEmpty()) {
+            // When we can't determine who replied, get all original recipients for message-level tracking
+            $replyFrom = $this->resolveRecipientsForMessage($messageId, null, $threadId);
+            $isMessageLevel = true;
+        } else {
+            $isMessageLevel = false;
+        }        $eventDetails = $this->extractEventDetails($data);
 
         $metadata = $this->buildMetadata($data, $object, $eventDetails);
         $metadata['reply_summary'] = [
@@ -238,11 +234,12 @@ class NylasWebhookController extends Controller
         $this->storeTrackingEvents(
             messageId: $messageId,
             eventType: 'replied',
-            recipients: $recipients,
+            recipients: $replyFrom,
             metadata: $metadata,
             eventAt: $eventDetails['timestamp'],
             ip: $eventDetails['ip'],
             userAgent: $eventDetails['user_agent'],
+            isMessageLevel: $isMessageLevel ?? false,
         );
     }
 
@@ -311,8 +308,53 @@ class NylasWebhookController extends Controller
             recipients: $recipients,
             metadata: $metadata,
             eventAt: $eventDetails['timestamp'],
-            ip: $eventDetails['ip'],
-            userAgent: $eventDetails['user_agent'],
+        );
+    }
+
+    /**
+     * Handle bounce notifications that come as thread replies (e.g., from Yahoo MAILER-DAEMON).
+     */
+    protected function handleBouncedAsReply(array $payload, array $data, array $object): void
+    {
+        $threadId = $this->extractThreadId($object);
+        
+        // Get the original message ID from the thread
+        $originalSentRecords = EmailTracking::query()
+            ->where('nylas_thread_id', $threadId)
+            ->where('event_type', 'sent')
+            ->get();
+
+        if ($originalSentRecords->isEmpty()) {
+            Log::channel('nylas')->warning('Cannot find original sent email for bounce-as-reply', [
+                'thread_id' => $threadId,
+                'payload' => $payload,
+            ]);
+            return;
+        }
+
+        $messageId = $originalSentRecords->first()->nylas_message_id;
+        $recipients = $originalSentRecords->pluck('recipient_email')->unique();
+
+        $eventDetails = $this->extractEventDetails($data);
+
+        $metadata = $this->buildMetadata($data, $object, $eventDetails);
+        $metadata['bounce_source'] = 'thread_reply';
+        $metadata['bounce_sender'] = $object['from'] ?? [];
+        $metadata['bounce_subject'] = $object['subject'] ?? null;
+
+        Log::channel('nylas')->info('Detected bounce via thread reply', [
+            'message_id' => $messageId,
+            'thread_id' => $threadId,
+            'recipients' => $recipients->toArray(),
+            'from' => $object['from'] ?? [],
+        ]);
+
+        $this->storeTrackingEvents(
+            messageId: $messageId,
+            eventType: 'bounced',
+            recipients: $recipients,
+            metadata: $metadata,
+            eventAt: $eventDetails['timestamp'],
         );
     }
 
@@ -340,16 +382,31 @@ class NylasWebhookController extends Controller
     /**
      * Resolve recipients for the event.
      */
-    protected function resolveRecipientsForMessage(string $messageId, ?string $recipientFromPayload = null): Collection
+    protected function resolveRecipientsForMessage(string $messageId, ?string $recipientFromPayload = null, ?string $threadId = null): Collection
     {
         if ($recipientFromPayload) {
             return collect([$recipientFromPayload]);
         }
 
-        return EmailTracking::query()
+        $recipients = EmailTracking::query()
             ->where('nylas_message_id', $messageId)
             ->where('event_type', 'sent')
-            ->pluck('recipient_email');
+            ->get()
+            ->pluck('recipient_emails')
+            ->flatten()
+            ->unique();
+
+        if ($recipients->isEmpty() && $threadId) {
+            $recipients = EmailTracking::query()
+                ->where('nylas_thread_id', $threadId)
+                ->where('event_type', 'sent')
+                ->get()
+                ->pluck('recipient_emails')
+                ->flatten()
+                ->unique();
+        }
+
+        return $recipients;
     }
 
     /**
@@ -418,6 +475,7 @@ class NylasWebhookController extends Controller
         ?string $ip = null,
         ?string $userAgent = null,
         ?string $linkUrl = null,
+        bool $isMessageLevel = false,
     ): void {
         $threadId = $metadata['nylas_thread_id'] ?? null;
 
@@ -440,45 +498,74 @@ class NylasWebhookController extends Controller
 
         $eventAt = $eventAt ?? now();
 
-        foreach ($recipients as $recipient) {
-            if ($eventType === 'opened' && $eventAt instanceof Carbon) {
-                $windowStart = (clone $eventAt)->subSeconds(60);
+        if ($isMessageLevel) {
+            // Create single tracking record with all recipients in JSON array
+            $recipientsArray = $recipients->values()->all();
 
-                $recentOpenExists = EmailTracking::query()
-                    ->where('nylas_message_id', $messageId)
-                    ->where('event_type', 'opened')
-                    ->where('recipient_email', $recipient)
-                    ->whereBetween('event_at', [$windowStart, $eventAt])
-                    ->exists();
-
-                if ($recentOpenExists) {
-                    continue;
-                }
-            }
-
+            // Check if already stored
             $alreadyStored = EmailTracking::query()
                 ->where('nylas_message_id', $messageId)
                 ->where('event_type', $eventType)
-                ->where('recipient_email', $recipient)
                 ->where('event_at', $eventAt)
+                ->whereJsonLength('recipient_emails', count($recipientsArray))
                 ->exists();
 
-            if ($alreadyStored) {
-                continue;
+            if (!$alreadyStored) {
+                EmailTracking::create([
+                    'project_id' => $projectId,
+                    'nylas_message_id' => $messageId,
+                    'nylas_thread_id' => $threadId,
+                    'event_type' => $eventType,
+                    'recipient_emails' => $recipientsArray,
+                    'link_url' => $linkUrl,
+                    'ip_address' => $ip,
+                    'user_agent' => $userAgent,
+                    'metadata' => $metadata,
+                    'event_at' => $eventAt,
+                ]);
             }
+        } else {
+            // Create individual tracking records per recipient
+            foreach ($recipients as $recipient) {
+                if ($eventType === 'opened' && $eventAt instanceof Carbon) {
+                    $windowStart = (clone $eventAt)->subSeconds(60);
 
-            EmailTracking::create([
-                'project_id' => $projectId,
-                'nylas_message_id' => $messageId,
-                'nylas_thread_id' => $threadId,
-                'event_type' => $eventType,
-                'recipient_email' => $recipient,
-                'link_url' => $linkUrl,
-                'ip_address' => $ip,
-                'user_agent' => $userAgent,
-                'metadata' => $metadata,
-                'event_at' => $eventAt,
-            ]);
+                    $recentOpenExists = EmailTracking::query()
+                        ->where('nylas_message_id', $messageId)
+                        ->where('event_type', 'opened')
+                        ->whereJsonContains('recipient_emails', $recipient)
+                        ->whereBetween('event_at', [$windowStart, $eventAt])
+                        ->exists();
+
+                    if ($recentOpenExists) {
+                        continue;
+                    }
+                }
+
+                $alreadyStored = EmailTracking::query()
+                    ->where('nylas_message_id', $messageId)
+                    ->where('event_type', $eventType)
+                    ->whereJsonContains('recipient_emails', $recipient)
+                    ->where('event_at', $eventAt)
+                    ->exists();
+
+                if ($alreadyStored) {
+                    continue;
+                }
+
+                EmailTracking::create([
+                    'project_id' => $projectId,
+                    'nylas_message_id' => $messageId,
+                    'nylas_thread_id' => $threadId,
+                    'event_type' => $eventType,
+                    'recipient_emails' => [$recipient],
+                    'link_url' => $linkUrl,
+                    'ip_address' => $ip,
+                    'user_agent' => $userAgent,
+                    'metadata' => $metadata,
+                    'event_at' => $eventAt,
+                ]);
+            }
         }
     }
 

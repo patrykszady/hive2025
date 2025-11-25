@@ -14,7 +14,7 @@ class EmailTracking extends Model
         'nylas_message_id',
         'nylas_thread_id',
         'event_type',
-        'recipient_email',
+        'recipient_emails',
         'link_url',
         'ip_address',
         'user_agent',
@@ -23,6 +23,7 @@ class EmailTracking extends Model
     ];
 
     protected $casts = [
+        'recipient_emails' => 'array',
         'metadata' => 'array',
         'event_at' => 'datetime',
     ];
