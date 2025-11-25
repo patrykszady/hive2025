@@ -84,14 +84,14 @@ class ClientForm extends Form
         //ADD USER TO CLIENT
         $this->user->clients()->attach($client->id);
         
-        // Sync to Nylas contacts
-        app(\App\Services\NylasContactSyncService::class)->syncUserContactsForClient($this->user, $client);
-        
         //Add new Client to the logged-in-vendor
         //with pivot Source
         auth()->user()->vendor->clients()->attach($client->id);
 
         $client->vendors()->updateExistingPivot(auth()->user()->vendor->id, ['source' => $this->source]);
+
+        // Sync to Nylas contacts (after vendor is attached)
+        app(\App\Services\NylasContactSyncService::class)->syncUserContactsForClient($this->user, $client);
 
         $this->reset();
 

@@ -28,25 +28,10 @@ class NylasContactSyncService
      */
     public function syncUserContactsForClient(User $user, Client $client): void
     {
-        Log::channel('nylas')->info('Starting contact sync for client', [
-            'user_id' => $user->id,
-            'client_id' => $client->id,
-        ]);
-        
         // Get all Hive Contractor vendors that have this client
         $vendors = $client->vendors()->hiveVendors()->get();
         
-        Log::channel('nylas')->info('Found vendors for client', [
-            'user_id' => $user->id,
-            'client_id' => $client->id,
-            'vendor_count' => $vendors->count(),
-        ]);
-        
         if ($vendors->isEmpty()) {
-            Log::channel('nylas')->warning('No Hive vendors found for client', [
-                'user_id' => $user->id,
-                'client_id' => $client->id,
-            ]);
             return;
         }
         
@@ -65,20 +50,8 @@ class NylasContactSyncService
      */
     public function syncUserContactForVendor(User $user, Client $client, Vendor $vendor): void
     {
-        Log::channel('nylas')->info('Syncing contact for vendor', [
-            'user_id' => $user->id,
-            'client_id' => $client->id,
-            'vendor_id' => $vendor->id,
-        ]);
-        
         // Get the vendor's company emails (grants)
         $companyEmails = $vendor->company_emails;
-        
-        Log::channel('nylas')->info('Found company emails for vendor', [
-            'user_id' => $user->id,
-            'vendor_id' => $vendor->id,
-            'email_count' => $companyEmails->count(),
-        ]);
         
         if ($companyEmails->isEmpty()) {
             Log::channel('nylas')->warning('No company emails found for vendor', [
@@ -105,12 +78,6 @@ class NylasContactSyncService
     {
         $grantId = $companyEmail->grant_id;
         
-        Log::channel('nylas')->info('Starting contact sync for grant', [
-            'user_id' => $user->id,
-            'client_id' => $client->id,
-            'grant_id' => $grantId,
-        ]);
-        
         try {
             // Get the pivot record to check for existing Nylas contact ID
             $pivot = DB::table('client_user')
@@ -130,12 +97,6 @@ class NylasContactSyncService
             // Get existing contact IDs (JSON)
             $existingContactIds = json_decode($pivot->nylas_contact_ids ?? '{}', true) ?? [];
             $existingContactId = $existingContactIds[$grantId] ?? null;
-
-            Log::channel('nylas')->info('Checked for existing contact', [
-                'user_id' => $user->id,
-                'grant_id' => $grantId,
-                'existing_contact_id' => $existingContactId,
-            ]);
 
             // Prepare contact data
             $contactData = $this->prepareContactData($user, $client, $companyEmail);
