@@ -87,32 +87,23 @@ class NylasWebhookController extends Controller
             $recipients = collect([$recipientEmail]);
             $isMessageLevel = false;
         } else {
-            // No specific recipient - get all original recipients for message-level tracking
+            // No specific recipient - could be sender viewing sent email or recipient opening without recipient_email
             $recipients = $this->resolveRecipientsForMessage($messageId);
-            $isMessageLevel = true;
             
-            // Skip if no recipients found (likely sender viewing their own sent email)
-            if ($recipients->isEmpty()) {
-                Log::channel('nylas')->info('Skipping open event - no recipients found, likely sender viewing sent email', [
-                    'message_id' => $messageId,
-                    'grant_id' => $object['grant_id'] ?? null,
-                ]);
-                
+            // If we found recipients, this is a sent message being viewed
+            // When recipient_email is missing but we have sent records, it's the sender viewing their sent email
+            if ($recipients->isNotEmpty()) {
                 return;
             }
+            
+            // No recipients found and no recipient_email - can't track this
+            return;
         }
 
         $eventDetails = $this->extractEventDetails($data);
 
         // Filter out automated/prefetch opens using Mailtrap-inspired logic
         if ($this->isPrefetchOrAutomatedOpen($eventDetails, $object)) {
-            Log::channel('nylas')->info('Filtered prefetch/automated open', [
-                'message_id' => $messageId,
-                'recipient_email' => $recipientEmail,
-                'user_agent' => $eventDetails['user_agent'],
-                'opened_id' => $eventDetails['opened_id'],
-            ]);
-
             return;
         }
 
@@ -154,32 +145,23 @@ class NylasWebhookController extends Controller
             $recipients = collect([$recipientEmail]);
             $isMessageLevel = false;
         } else {
-            // No specific recipient - get all original recipients for message-level tracking
+            // No specific recipient - could be sender clicking link in sent email
             $recipients = $this->resolveRecipientsForMessage($messageId);
-            $isMessageLevel = true;
             
-            // Skip if no recipients found (likely sender clicking their own sent email)
-            if ($recipients->isEmpty()) {
-                Log::channel('nylas')->info('Skipping click event - no recipients found, likely sender clicking own link', [
-                    'message_id' => $messageId,
-                    'grant_id' => $object['grant_id'] ?? null,
-                    'link_url' => $object['link_data']['url'] ?? null,
-                ]);
-                
+            // If we found recipients, this is a sent message being viewed
+            // When recipient_email is missing but we have sent records, it's the sender clicking in their sent email
+            if ($recipients->isNotEmpty()) {
                 return;
             }
+            
+            // No recipients found and no recipient_email - can't track this
+            return;
         }
 
         $eventDetails = $this->extractEventDetails($data);
 
         // Filter out automated/prefetch clicks
         if ($this->isPrefetchOrAutomatedOpen($eventDetails, $object)) {
-            Log::channel('nylas')->info('Filtered prefetch/automated click', [
-                'message_id' => $messageId,
-                'recipient_email' => $recipientEmail,
-                'user_agent' => $eventDetails['user_agent'],
-            ]);
-
             return;
         }
 
@@ -433,6 +415,20 @@ class NylasWebhookController extends Controller
         }
 
         return $recipients;
+    }
+
+    /**
+     * Resolve the sender's email address from the grant_id in the webhook payload.
+     */
+    protected function resolveSenderEmailFromGrant(?string $grantId): ?string
+    {
+        if (!$grantId) {
+            return null;
+        }
+
+        $companyEmail = \App\Models\CompanyEmail::where('grant_id', $grantId)->first();
+
+        return $companyEmail?->email;
     }
 
     /**
