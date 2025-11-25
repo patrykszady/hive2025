@@ -32,7 +32,8 @@ class EstimateMail extends Mailable
         public string $fromEmail,
         public string $emailSubject,
         public string $emailBody,
-        public array $attachmentPaths = []
+        public array $attachmentPaths = [],
+        public ?string $emailTemplateName = null
     ) {
     }
 
@@ -51,6 +52,8 @@ class EstimateMail extends Mailable
             metadata: [
                 'estimate_id' => $this->estimate->id,
                 'project_id' => $this->estimate->project_id,
+                'email_type' => 'estimate',
+                'email_template_name' => $this->emailTemplateName,
             ],
         );
     }
@@ -76,10 +79,15 @@ class EstimateMail extends Mailable
     {
         $metadata = [
             'estimate_id' => $this->estimate->id,
+            'email_type' => 'estimate',
         ];
 
         if ($this->estimate->project_id) {
             $metadata['project_id'] = $this->estimate->project_id;
+        }
+
+        if ($this->emailTemplateName) {
+            $metadata['email_template_name'] = $this->emailTemplateName;
         }
 
         return new Headers(

@@ -546,12 +546,27 @@ class ReceiptController extends Controller
         $result = json_decode($result, true);
 
         //2024-12-25 ..if $result is error...LOG and inform user
+        if (!is_array($result) || !isset($result['status'])) {
+            Log::channel('vendor_docs')->error('Azure API returned invalid response', [
+                'operation_location_id' => $operation_location_id,
+                'raw_result' => $result,
+            ]);
+            throw new \Exception('Azure Document Intelligence API returned invalid response');
+        }
 
         //wait but go as soon as done.
         while ($result['status'] == 'running' || $result['status'] == 'notStarted') {
             sleep(1);
             $result = exec('curl -v -X GET "https://'.$uri);
             $result = json_decode($result, true);
+            
+            if (!is_array($result) || !isset($result['status'])) {
+                Log::channel('vendor_docs')->error('Azure API polling returned invalid response', [
+                    'operation_location_id' => $operation_location_id,
+                    'raw_result' => $result,
+                ]);
+                throw new \Exception('Azure Document Intelligence API polling failed');
+            }
         }
 
         return $result;

@@ -3,6 +3,7 @@
 namespace App\Livewire\Projects;
 
 use App\Models\Client;
+use App\Models\EmailTracking;
 use App\Models\Project;
 use App\Models\ProjectStatus;
 use Carbon\Carbon;
@@ -265,6 +266,66 @@ class ProjectsIndex extends Component
         }
 
         return $monthlyData;
+    }
+
+    #[Computed]
+    public function emailTrackingEvents()
+    {
+        // Get all events grouped by thread
+        $events = EmailTracking::with('project')
+            ->when($this->client !== null, function ($query) {
+                $query->whereHas('project', function ($q) {
+                    $q->where('client_id', $this->client->id);
+                });
+            })
+            ->when($this->client_id, function ($query) {
+                $query->whereHas('project', function ($q) {
+                    $q->where('client_id', $this->client_id);
+                });
+            })
+            ->orderBy('event_at', 'DESC')
+            ->get()
+            ->groupBy('nylas_thread_id')
+            ->map(function ($threadEvents) {
+                // Get the latest event for this thread
+                $latestEvent = $threadEvents->first();
+                
+                // Get all unique recipient emails from all events in this thread
+                $allRecipientEmails = $threadEvents
+                    ->pluck('recipient_emails')
+                    ->flatten()
+                    ->unique()
+                    ->values()
+                    ->all();
+                
+                // Map emails to users
+                $users = collect($allRecipientEmails)
+                    ->map(function ($email) {
+                        return \App\Models\User::where('email', $email)->first();
+                    })
+                    ->filter()
+                    ->values();
+                
+                // Add recipient user data to the event
+                $latestEvent->recipient_users = $users;
+                $latestEvent->all_recipient_emails = $allRecipientEmails;
+                
+                return $latestEvent;
+            })
+            ->values();
+        
+        // Manual pagination
+        $currentPage = \Illuminate\Pagination\Paginator::resolveCurrentPage('page');
+        $perPage = 10;
+        $currentPageItems = $events->slice(($currentPage - 1) * $perPage, $perPage)->values();
+        
+        return new \Illuminate\Pagination\LengthAwarePaginator(
+            $currentPageItems,
+            $events->count(),
+            $perPage,
+            $currentPage,
+            ['path' => request()->url(), 'query' => request()->query()]
+        );
     }
 
     #[Title('Projects')]

@@ -13,6 +13,7 @@ class EmailTracking extends Model
         'project_id',
         'nylas_message_id',
         'nylas_thread_id',
+        'email_template_name',
         'event_type',
         'recipient_emails',
         'link_url',

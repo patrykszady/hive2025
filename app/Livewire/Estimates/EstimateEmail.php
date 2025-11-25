@@ -208,6 +208,12 @@ class EstimateEmail extends Component
             return;
         }
 
+        $templateName = null;
+        if ($this->selectedTemplateId) {
+            $template = EmailTemplate::find($this->selectedTemplateId);
+            $templateName = $template?->name;
+        }
+
         SendEstimateEmailJob::dispatch(
             estimateId: $this->estimate->id,
             companyEmailId: $companyEmail->id,
@@ -218,6 +224,7 @@ class EstimateEmail extends Component
             body: $this->body,
             includeEstimatePdf: $this->include_estimate_pdf,
             includeReimbursementsPdf: $this->include_reimbursements_pdf,
+            emailTemplateName: $templateName,
         );
 
         $this->modal('estimate_email_modal')->close();

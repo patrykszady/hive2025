@@ -518,6 +518,23 @@ class NylasWebhookController extends Controller
             metadata: $metadata,
         );
 
+        // Try to get email_template_name from existing sent record
+        // First try by message_id (for opened/clicked on same message)
+        $existingRecord = EmailTracking::query()
+            ->where('nylas_message_id', $messageId)
+            ->where('event_type', 'sent')
+            ->first();
+        
+        // If not found and we have a thread_id, try by thread_id (for replies)
+        if (!$existingRecord && $threadId) {
+            $existingRecord = EmailTracking::query()
+                ->where('nylas_thread_id', $threadId)
+                ->where('event_type', 'sent')
+                ->first();
+        }
+        
+        $emailTemplateName = $existingRecord?->email_template_name;
+
         $eventAt = $eventAt ?? now();
 
         if ($isMessageLevel) {
@@ -537,6 +554,7 @@ class NylasWebhookController extends Controller
                     'project_id' => $projectId,
                     'nylas_message_id' => $messageId,
                     'nylas_thread_id' => $threadId,
+                    'email_template_name' => $emailTemplateName,
                     'event_type' => $eventType,
                     'recipient_emails' => $recipientsArray,
                     'link_url' => $linkUrl,
@@ -579,6 +597,7 @@ class NylasWebhookController extends Controller
                     'project_id' => $projectId,
                     'nylas_message_id' => $messageId,
                     'nylas_thread_id' => $threadId,
+                    'email_template_name' => $emailTemplateName,
                     'event_type' => $eventType,
                     'recipient_emails' => [$recipient],
                     'link_url' => $linkUrl,
@@ -666,20 +685,16 @@ class NylasWebhookController extends Controller
      * 
      * Detection strategies:
      * 1. User agent patterns - automated clients, security scanners, bots
-     * 2. opened_id = 0 with low count - Nylas's own prefetch indicator
-     * 3. Known automated IP ranges (cloud providers, security services)
-     * 4. Suspicious timing patterns (multiple opens within seconds)
+     * 2. Known automated IP ranges (cloud providers, security services)
+     * 3. Suspicious timing patterns (multiple opens within seconds)
+     * 
+     * Note: We no longer filter on opened_id = 0, as legitimate opens can have this value
      */
     protected function isPrefetchOrAutomatedOpen(array $eventDetails, array $object): bool
     {
         $userAgent = $eventDetails['user_agent'] ?? '';
         $openedId = $eventDetails['opened_id'] ?? null;
         $count = (int) ($object['message_data']['count'] ?? 0);
-        
-        // Check 1: Nylas's own prefetch indicator
-        if ($openedId === 0 && $count <= 1) {
-            return true;
-        }
 
         // Check 2: User agent patterns indicating automated clients
         $automatedPatterns = [

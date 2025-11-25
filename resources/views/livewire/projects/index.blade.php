@@ -110,4 +110,112 @@
         {{-- NEW PROJECT MODAL --}}
         <livewire:projects.project-create />
     </flux:card>
+
+    {{-- EMAIL TRACKING CARD --}}
+    <flux:card class="space-y-2">
+        <div class="flex justify-between items-center">
+            <flux:heading size="lg">Email Tracking</flux:heading>
+            <flux:badge size="sm" color="zinc">{{ $this->emailTrackingEvents->total() }} events</flux:badge>
+        </div>
+
+        <flux:separator variant="subtle" />
+
+        <div class="space-y-2 overflow-x-auto">
+            <flux:table :paginate="$this->emailTrackingEvents">
+                <flux:table.columns>
+                    <flux:table.column>Event</flux:table.column>
+                    <flux:table.column>Template</flux:table.column>
+                    <flux:table.column>Project</flux:table.column>
+                    <flux:table.column>Recipients</flux:table.column>
+                    <flux:table.column>Link</flux:table.column>
+                    <flux:table.column>Date</flux:table.column>
+                </flux:table.columns>
+
+                <flux:table.rows>
+                    @forelse ($this->emailTrackingEvents as $event)
+                        <flux:table.row :key="$event->id">
+                            <flux:table.cell>
+                                <flux:badge 
+                                    size="sm" 
+                                    :color="match($event->event_type) {
+                                        'opened' => 'blue',
+                                        'clicked' => 'green',
+                                        'replied' => 'purple',
+                                        default => 'zinc'
+                                    }"
+                                    inset="top bottom">
+                                    {{ ucfirst($event->event_type) }}
+                                </flux:badge>
+                            </flux:table.cell>
+                            <flux:table.cell>
+                                @if($event->email_template_name)
+                                    <flux:badge size="sm" color="zinc" variant="outline">
+                                        {{ $event->email_template_name }}
+                                    </flux:badge>
+                                @else
+                                    <span class="text-gray-400">-</span>
+                                @endif
+                            </flux:table.cell>
+                            <flux:table.cell>
+                                @if($event->project)
+                                    <a wire:navigate.hover href="{{ route('projects.show', $event->project_id) }}" class="text-blue-600 hover:underline">
+                                        {{ $event->project->project_name }}
+                                    </a>
+                                @else
+                                    <span class="text-gray-400">-</span>
+                                @endif
+                            </flux:table.cell>
+                            <flux:table.cell>
+                                @if($event->recipient_users && $event->recipient_users->isNotEmpty())
+                                    <div class="text-sm">
+                                        @foreach($event->recipient_users->take(2) as $index => $user)
+                                            <span 
+                                                class="cursor-help" 
+                                                title="{{ $user->email }}">
+                                                {{ $user->first_name }} {{ $user->last_name }}{{ $index < min(1, $event->recipient_users->count() - 1) ? ',' : '' }}
+                                            </span>
+                                        @endforeach
+                                        @if($event->recipient_users->count() > 2)
+                                            <span class="text-gray-500 cursor-help" title="{{ implode(', ', $event->all_recipient_emails) }}">
+                                                +{{ $event->recipient_users->count() - 2 }} more
+                                            </span>
+                                        @endif
+                                    </div>
+                                @elseif($event->all_recipient_emails && count($event->all_recipient_emails) > 0)
+                                    <div class="text-sm text-gray-500 cursor-help" title="{{ implode(', ', $event->all_recipient_emails) }}">
+                                        {{ implode(', ', array_slice($event->all_recipient_emails, 0, 2)) }}
+                                        @if(count($event->all_recipient_emails) > 2)
+                                            <span>+{{ count($event->all_recipient_emails) - 2 }} more</span>
+                                        @endif
+                                    </div>
+                                @else
+                                    <span class="text-gray-400">-</span>
+                                @endif
+                            </flux:table.cell>
+                            <flux:table.cell>
+                                @if($event->link_url)
+                                    <a href="{{ $event->link_url }}" target="_blank" class="text-blue-600 hover:underline text-sm truncate block max-w-xs" title="{{ $event->link_url }}">
+                                        {{ Str::limit($event->link_url, 40) }}
+                                    </a>
+                                @else
+                                    <span class="text-gray-400">-</span>
+                                @endif
+                            </flux:table.cell>
+                            <flux:table.cell>
+                                <span class="text-sm text-gray-600" title="{{ $event->event_at->format('M d, Y g:i A') }}">
+                                    {{ $event->event_at->diffForHumans() }}
+                                </span>
+                            </flux:table.cell>
+                        </flux:table.row>
+                    @empty
+                        <flux:table.row>
+                            <flux:table.cell colspan="5" class="text-center text-gray-500 py-8">
+                                No email tracking events found.
+                            </flux:table.cell>
+                        </flux:table.row>
+                    @endforelse
+                </flux:table.rows>
+            </flux:table>
+        </div>
+    </flux:card>
 </div>

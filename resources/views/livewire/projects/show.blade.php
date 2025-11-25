@@ -84,6 +84,116 @@
                 @can('viewAny', App\Models\Estimate::class)
                     <livewire:estimates.estimates-index :project="$project" :view="'projects.show'" lazy />
                 @endcan
+
+                {{-- EMAIL TRACKING --}}
+                @if($this->emailTrackingEvents->total() > 0)
+                    <flux:card class="space-y-2">
+                        <div class="flex justify-between items-center">
+                            <flux:heading size="lg">Email Tracking</flux:heading>
+                        </div>
+
+                        <flux:separator variant="subtle" />
+
+                        <div class="-mx-6 -mb-6 overflow-x-hidden">
+                            <flux:table :paginate="$this->emailTrackingEvents" class="[:where(&)]:p-0 [:where(&)]:space-y-0 [&_th]:!px-4 [&_td]:!px-3 [&_th:first-child]:!ps-6 [&_th:last-child]:!pe-6 [&_td:first-child]:!ps-6 [&_td:last-child]:!pe-6">
+                                <flux:table.columns>
+                                    <flux:table.column>Event</flux:table.column>
+                                    <flux:table.column>Template</flux:table.column>
+                                    <flux:table.column>Recipients</flux:table.column>
+                                    <flux:table.column>Date</flux:table.column>
+                                </flux:table.columns>
+
+                                <flux:table.rows>
+                                    @foreach ($this->emailTrackingEvents as $event)
+                                        <flux:table.row :key="$event->id">
+                                            <flux:table.cell>
+                                                <flux:badge 
+                                                    size="sm" 
+                                                    :color="match($event->event_type) {
+                                                        'opened' => 'blue',
+                                                        'clicked' => 'green',
+                                                        'replied' => 'purple',
+                                                        'sent' => 'zinc',
+                                                        default => 'zinc'
+                                                    }"
+                                                    inset="top bottom">
+                                                    {{ ucfirst($event->event_type) }}
+                                                </flux:badge>
+                                            </flux:table.cell>
+                                            <flux:table.cell>
+                                                @if($event->email_template_name)
+                                                    <flux:badge size="sm" color="zinc" variant="outline">
+                                                        {{ $event->email_template_name }}
+                                                    </flux:badge>
+                                                @else
+                                                    <span class="text-gray-400">-</span>
+                                                @endif
+                                            </flux:table.cell>
+                                            <flux:table.cell>
+                                                @if($event->recipient_users && $event->recipient_users->isNotEmpty())
+                                                    <div class="text-sm">
+                                                        @foreach($event->recipient_users as $index => $user)
+                                                            <span 
+                                                                class="cursor-help" 
+                                                                title="{{ $user->email }}">
+                                                                {{ $user->first_name }}{{ $index < $event->recipient_users->count() - 1 ? ',' : '' }}
+                                                            </span>
+                                                        @endforeach
+                                                    </div>
+                                                @elseif($event->all_recipient_emails && count($event->all_recipient_emails) > 0)
+                                                    <div class="text-sm text-gray-500">
+                                                        {{ implode(', ', $event->all_recipient_emails) }}
+                                                    </div>
+                                                @else
+                                                    <span class="text-gray-400">-</span>
+                                                @endif
+                                            </flux:table.cell>
+                                            <flux:table.cell>
+                                                <span class="cursor-help" title="{{ $event->event_at->format('M j, Y g:i A') }}">
+                                                    {{ $event->event_at->diffForHumans() }}
+                                                </span>
+                                            </flux:table.cell>
+                                        </flux:table.row>
+
+                                        {{-- Show thread event sub-rows --}}
+                                        @if($event->thread_events && $event->thread_events->count() > 0)
+                                            @foreach($event->thread_events as $subEvent)
+                                                <flux:table.row :key="'thread-' . $subEvent->id" class="bg-gray-50 dark:bg-gray-800/50 [&_td]:!py-2">
+                                                    <flux:table.cell class="text-sm text-gray-600 dark:text-gray-400 !pl-10">
+                                                        <flux:badge 
+                                                            size="sm" 
+                                                            variant="outline"
+                                                            :color="match($subEvent->event_type) {
+                                                                'opened' => 'blue',
+                                                                'clicked' => 'green',
+                                                                'replied' => 'purple',
+                                                                'sent' => 'gray',
+                                                                default => 'gray'
+                                                            }">
+                                                            {{ ucfirst($subEvent->event_type) }}
+                                                        </flux:badge>
+                                                    </flux:table.cell>
+                                                    <flux:table.cell class="text-sm text-gray-600 dark:text-gray-400">
+                                                        {{-- Empty template cell for sub-rows --}}
+                                                    </flux:table.cell>
+                                                    <flux:table.cell class="text-sm text-gray-600 dark:text-gray-400">
+                                                        {{-- Empty recipients cell for sub-rows --}}
+                                                    </flux:table.cell>
+                                                    <flux:table.cell class="text-sm text-gray-600 dark:text-gray-400">
+                                                        <span class="cursor-help" title="{{ $subEvent->event_at->format('M j, Y g:i A') }}">
+                                                            {{ $subEvent->event_at->diffForHumans() }}
+                                                        </span>
+                                                    </flux:table.cell>
+                                                </flux:table.row>
+                                            @endforeach
+                                        @endif
+                                    @endforeach
+                                </flux:table.rows>
+                            </flux:table>
+                        </div>
+                    </flux:card>
+                @endif
+
                 {{-- PROEJCT LIFESPAN --}}
                 <livewire:project-status.status-create :project="$project" lazy />
             </div>

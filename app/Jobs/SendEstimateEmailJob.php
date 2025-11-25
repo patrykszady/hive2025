@@ -32,7 +32,8 @@ class SendEstimateEmailJob implements ShouldQueue
         protected string $subject,
         protected string $body,
         protected bool $includeEstimatePdf,
-        protected bool $includeReimbursementsPdf
+        protected bool $includeReimbursementsPdf,
+        protected ?string $emailTemplateName = null
     ) {
     }
 
@@ -148,7 +149,8 @@ class SendEstimateEmailJob implements ShouldQueue
                     fromEmail: $this->fromEmail,
                     emailSubject: $this->subject,
                     emailBody: $this->body,
-                    attachmentPaths: $attachmentPaths
+                    attachmentPaths: $attachmentPaths,
+                    emailTemplateName: $this->emailTemplateName
                 ));
 
         } catch (Throwable $exception) {

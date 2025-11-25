@@ -338,13 +338,24 @@ trait ProcessesVendorDocs
                 continue;
             }
 
+            // Skip Retail vendors - they should never be matched for insurance certificates
+            if ($vendor->business_type === 'Retail') {
+                continue;
+            }
+
             $score = $this->calculateSimilarityScore($businessName, $vendor->business_name);
 
             // Factor in address if available - this helps differentiate similar names
-            if (!empty($businessAddress) && !empty($vendor->business_address)) {
-                $addressScore = $this->calculateSimilarityScore($businessAddress, $vendor->business_address);
-                // Weight name heavily (85%) but use address to break ties (15%)
-                $score = ($score * 0.85) + ($addressScore * 0.15);
+            if (!empty($businessAddress)) {
+                if (!empty($vendor->address)) {
+                    $addressScore = $this->calculateSimilarityScore($businessAddress, $vendor->address);
+                    // Weight name heavily (70%) but address significantly (30%) to differentiate
+                    $score = ($score * 0.7) + ($addressScore * 0.3);
+                } else {
+                    // If we have an address from OCR but vendor has no address, penalize heavily
+                    // This prevents matching to generic vendors like "Costco" that lack location data
+                    $score = $score * 0.5;
+                }
             }
 
             if ($score > $highestScore && $score >= $threshold) {

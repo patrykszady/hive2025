@@ -38,7 +38,7 @@ class VendorDocsController extends Controller
         // Define query parameters for the Nylas API
         $queryParams = [
             'limit' => 10, // Fetch up to 100 messages
-            'in' => 'inbox', // Specify the inbox folder
+            'in' => config('nylas.certificates_inbox_folder_id'), // Specify the inbox folder
         ];
 
         // Fetch messages using the NylasService

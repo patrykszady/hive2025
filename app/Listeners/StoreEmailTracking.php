@@ -58,6 +58,9 @@ class StoreEmailTracking
             }
         }
 
+        // Extract email template name from metadata
+        $emailTemplateName = $metadata['email_template_name'] ?? null;
+
         // Create initial tracking record for each recipient (sent status)
         // This gives us the association before any opens/clicks happen
         foreach ($recipients as $recipientEmail) {
@@ -65,6 +68,7 @@ class StoreEmailTracking
                 'project_id' => $projectId,
                 'nylas_message_id' => $nylasMessageId,
                 'nylas_thread_id' => $nylasThreadId,
+                'email_template_name' => $emailTemplateName,
                 'event_type' => 'sent',
                 'recipient_emails' => [$recipientEmail],
                 'metadata' => $metadata,
