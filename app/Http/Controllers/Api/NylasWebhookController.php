@@ -83,11 +83,23 @@ class NylasWebhookController extends Controller
         $recipientEmail = $object['recipient_email'] ?? null;
         
         if ($recipientEmail) {
+            // Specific recipient provided - track per-recipient
             $recipients = collect([$recipientEmail]);
+            $isMessageLevel = false;
         } else {
-            // When recipient_email is missing, create a message-level tracking event
-            // This gives aggregate stats without false attribution to specific recipients
-            $recipients = collect(['message:' . $messageId]);
+            // No specific recipient - get all original recipients for message-level tracking
+            $recipients = $this->resolveRecipientsForMessage($messageId);
+            $isMessageLevel = true;
+            
+            // Skip if no recipients found (likely sender viewing their own sent email)
+            if ($recipients->isEmpty()) {
+                Log::channel('nylas')->info('Skipping open event - no recipients found, likely sender viewing sent email', [
+                    'message_id' => $messageId,
+                    'grant_id' => $object['grant_id'] ?? null,
+                ]);
+                
+                return;
+            }
         }
 
         $eventDetails = $this->extractEventDetails($data);
@@ -114,7 +126,7 @@ class NylasWebhookController extends Controller
             eventAt: $eventDetails['timestamp'],
             ip: $eventDetails['ip'],
             userAgent: $eventDetails['user_agent'],
-            isMessageLevel: $isMessageLevel ?? false,
+            isMessageLevel: $isMessageLevel,
         );
     }
 
@@ -138,11 +150,24 @@ class NylasWebhookController extends Controller
         $recipientEmail = $object['recipient_email'] ?? null;
         
         if ($recipientEmail) {
+            // Specific recipient provided - track per-recipient
             $recipients = collect([$recipientEmail]);
+            $isMessageLevel = false;
         } else {
-            // When recipient_email is missing, create a message-level tracking event
-            // This gives aggregate stats without false attribution to specific recipients
-            $recipients = collect(['message:' . $messageId]);
+            // No specific recipient - get all original recipients for message-level tracking
+            $recipients = $this->resolveRecipientsForMessage($messageId);
+            $isMessageLevel = true;
+            
+            // Skip if no recipients found (likely sender clicking their own sent email)
+            if ($recipients->isEmpty()) {
+                Log::channel('nylas')->info('Skipping click event - no recipients found, likely sender clicking own link', [
+                    'message_id' => $messageId,
+                    'grant_id' => $object['grant_id'] ?? null,
+                    'link_url' => $object['link_data']['url'] ?? null,
+                ]);
+                
+                return;
+            }
         }
 
         $eventDetails = $this->extractEventDetails($data);
@@ -151,7 +176,7 @@ class NylasWebhookController extends Controller
         if ($this->isPrefetchOrAutomatedOpen($eventDetails, $object)) {
             Log::channel('nylas')->info('Filtered prefetch/automated click', [
                 'message_id' => $messageId,
-                'recipient_email' => $recipients->first(),
+                'recipient_email' => $recipientEmail,
                 'user_agent' => $eventDetails['user_agent'],
             ]);
 
@@ -171,6 +196,7 @@ class NylasWebhookController extends Controller
             ip: $eventDetails['ip'],
             userAgent: $eventDetails['user_agent'],
             linkUrl: $linkUrl,
+            isMessageLevel: $isMessageLevel,
             isMessageLevel: $isMessageLevel ?? false,
         );
     }

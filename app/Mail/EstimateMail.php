@@ -116,13 +116,8 @@ class EstimateMail extends Mailable
         $normalized = $this->normalizeParagraphSpacing($html);
 
         if ($normalized === null) {
-            $plain = $this->plainTextBody();
-
-            if ($plain === '') {
-                return $this->normalizedHtmlBodyCache = '';
-            }
-
-            return $this->normalizedHtmlBodyCache = '<div style="margin:0;padding:0;white-space:pre-line;">' . nl2br(e($plain)) . '</div>';
+            // If HTML parsing failed, treat as plain text and convert newlines to <br> tags
+            return $this->normalizedHtmlBodyCache = '<div style="margin:0;padding:0;white-space:pre-wrap;">' . nl2br(e($html)) . '</div>';
         }
 
         return $this->normalizedHtmlBodyCache = '<div style="margin:0;padding:0;">' . $normalized . '</div>';
