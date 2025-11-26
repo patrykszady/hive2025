@@ -237,6 +237,22 @@ class HourCreate extends Component
         $this->form->setProjects($this->projects->toArray());
     }
 
+    public function incrementHours($index)
+    {
+        $currentHours = $this->form->projects[$index]['hours'] ?? 0;
+        if ($currentHours < 16) {
+            $this->form->projects[$index]['hours'] = $currentHours + 1;
+        }
+    }
+
+    public function decrementHours($index)
+    {
+        $currentHours = $this->form->projects[$index]['hours'] ?? 0;
+        if ($currentHours >= 1) {
+            $this->form->projects[$index]['hours'] = $currentHours - 1;
+        }
+    }
+
     public function add_project()
     {
         //return with error
@@ -250,7 +266,6 @@ class HourCreate extends Component
 
             $this->other_projects->forget($project->keys()->first());
             $this->new_project_id = null;
-            $this->render();
         }
     }
 

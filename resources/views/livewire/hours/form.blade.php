@@ -35,13 +35,19 @@
 
                 <flux:separator variant="subtle" />
 
-                <div x-cloak x-show="!ready"></div>
+                {{-- Show skeleton while loading --}}
+                <div x-show="!ready">
+                    <div class="space-y-4">
+                        <flux:skeleton class="h-64" animate="shimmer" />
+                    </div>
+                </div>
 
+                {{-- Show calendar when ready --}}
                 <div x-show="ready" x-cloak>
                     <flux:calendar
                         wire:model.live="selected_date"
                         wire:loading.class.delay="opacity-50"
-                        :max="$selected_date ? $selected_date->format('Y-m-d') : ''"
+                        ::max="browserDate"
                         start-day="1"
                         unavailable="{{$this->days}}"
                     />
@@ -49,6 +55,14 @@
 
                 <flux:separator variant="subtle" />
 
+                {{-- Show skeleton buttons while loading --}}
+                <div x-show="!ready" class="space-y-2 mt-2">
+                    <flux:skeleton class="h-10 w-full" animate="shimmer" />
+                    <flux:skeleton class="h-10 w-full" animate="shimmer" />
+                    <flux:skeleton class="h-10 w-full" animate="shimmer" />
+                </div>
+
+                {{-- Show real buttons when ready --}}
                 <div class="space-y-2 mt-2" x-show="ready" x-cloak>
                     @if($this->selected_date)
                         <flux:button class="w-full cursor-default"><b>{{$this->selected_date->format('D M jS, Y')}}</b></flux:button>
@@ -61,16 +75,36 @@
             </flux:card>
 		</div>
 
-		<div class="col-span-4 space-y-2 lg:col-span-2" x-show="ready" x-cloak>
+		<div class="col-span-4 space-y-2 lg:col-span-2">
+            {{-- Show skeleton while loading --}}
+            <div x-show="!ready" class="space-y-2">
+                <flux:card class="space-y-2">
+                    <flux:heading size="lg">Projects</flux:heading>
+                    <flux:separator variant="subtle" />
+                    <flux:skeleton class="h-20" animate="shimmer" />
+                    <flux:separator variant="subtle" />
+                    <flux:skeleton class="h-20" animate="shimmer" />
+                    <flux:separator variant="subtle" />
+                    <flux:skeleton class="h-20" animate="shimmer" />
+                </flux:card>
+                
+                <flux:card>
+                    <flux:heading size="lg">Different Project</flux:heading>
+                    <flux:skeleton class="h-12 mt-2" animate="shimmer" />
+                </flux:card>
+            </div>
+
+            {{-- Show real content when ready --}}
+            <div x-show="ready" x-cloak class="space-y-2">
             @if($selected_date)
-                <div wire:loading.class.delay="opacity-50">
-                    <flux:card class="space-y-2">
-                        <flux:heading size="lg">Projects</flux:heading>
-                        <flux:separator variant="subtle" />
+                <flux:card class="space-y-2">
+                    <flux:heading size="lg">Project Hours</flux:heading>
+                    <flux:subheading><i>Add hours worked for each project on {{ $selected_date->format('M jS, Y') }}</i></flux:subheading>
+                    <flux:separator variant="subtle" />
 
                 {{-- PROJECT HOUR AMOUNT --}}
                 @foreach ($projects as $index => $project)
-                    <flux:field>
+                    <flux:field wire:key="project-{{ $project->id }}">
                         {{-- label_text_color_custom="{{ !empty($day_project_tasks[$index]) ? 'text-indigo-600' : NULL}}" --}}
                         <div class="grid gap-2 grid-cols-2">
                             <div>
@@ -78,10 +112,20 @@
                                 <flux:description><i>{{$project->project_name}}</i></flux:description>
                             </div>
                             <div>
-                                <flux:input.group>
-                                    <flux:input.group.prefix>Hours</flux:input.group.prefix>
-                                    <flux:input wire:model.blur="form.projects.{{$index}}.hours" type="number" inputmode="decimal" step="0.25" min="0.25" />
-                                </flux:input.group>
+                                <flux:button.group class="w-full">
+                                    <flux:button wire:click="decrementHours({{$index}})" icon="minus" variant="outline" square />
+                                    <flux:input 
+                                        wire:model.live="form.projects.{{$index}}.hours" 
+                                        type="number" 
+                                        inputmode="decimal" 
+                                        step="0.5" 
+                                        min="0" 
+                                        max="16"
+                                        placeholder="Hours"
+                                        class="flex-1 text-center"
+                                    />
+                                    <flux:button wire:click="incrementHours({{$index}})" icon="plus" variant="outline" square />
+                                </flux:button.group>
                                 @if(!empty($day_project_tasks[$index]))
                                     @foreach($day_project_tasks[$index] as $task)
                                         <flux:description><i class="text-sky-600">{{$task['title']}}</i></flux:description>
@@ -95,8 +139,7 @@
                         <flux:separator variant="subtle" />
                     @endif
                 @endforeach
-            </flux:card>
-            </div>
+                </flux:card>
 
             <flux:card>
                 <flux:heading size="lg">Different Project</flux:heading>
@@ -107,14 +150,16 @@
                         </x-slot>
 
                         @foreach($this->other_projects as $project)
-                            <flux:select.option value="{{$project->id}}"><div>{{$project->address}} <br> <i>{{$project->project_name}}</i></div></flux:select.option>
+                            <flux:select.option value="{{$project->id}}"><div>{{$project->address}} <br> <i class="font-normal">{{$project->project_name}}</i></div></flux:select.option>
                         @endforeach
                     </flux:select>
 
-                    <flux:button variant="primary" wire:click="add_project" icon="plus-circle">Add</flux:button>
+                    <flux:button variant="primary" wire:click="add_project" icon="plus-circle" wire:loading.attr="disabled" wire:target="add_project">Add</flux:button>
                 </flux:input.group>
             </flux:card>
+            </div>
             @endif
+            </div>
 		</div>
 	</div>
 </form>

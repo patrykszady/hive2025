@@ -225,6 +225,16 @@ class NylasService
         }
 
         if (!$response['success']) {
+            // 404 means message doesn't exist - it's already gone, which is fine
+            if ($response['status'] === 404) {
+                Log::channel('nylas')->info("Email {$action} skipped - message not found (already moved/deleted)", [
+                    'message_id' => $messageId,
+                    'folder_id' => $folderId,
+                    'grant_id' => $grantId,
+                ]);
+                return true; // Consider this success since the message is gone
+            }
+            
             Log::channel('nylas')->error("Email {$action} failed", [
                 'message_id' => $messageId,
                 'folder_id' => $folderId,
@@ -927,45 +937,25 @@ class NylasService
             // Move the original message to HIVE_RECEIPTS_FOLDER using unified method
             $this->moveOrDeleteMessage($messageId, $sourceGrantId, $companyEmailId, $hiveReceiptsFolderId);
             
-            // Delete the sent copy from receipts grant ID's sent folder if we have both IDs
+            // Delete the sent copy from receipts grant's sent folder to declutter
             if ($sentMessageId && $receiptsGrantId) {
-                $this->deleteForwardedMessageFromSentItems($receiptsGrantId, $companyEmailId, $sentMessageId);
+                $deletedFolderId = config('nylas.receipts_deleted_folder_id');
+                $success = $this->moveOrDeleteMessage($sentMessageId, $receiptsGrantId, $companyEmailId, $deletedFolderId);
+                
+                // Only log if it actually failed (not 404 which means already gone)
+                if (!$success) {
+                    Log::channel('nylas')->warning('Could not move forwarded sent copy to deleted folder', [
+                        'sent_message_id' => $sentMessageId,
+                        'receipts_grant_id' => $receiptsGrantId,
+                        'deleted_folder_id' => $deletedFolderId,
+                    ]);
+                }
             }
         } catch (\Throwable $e) {
             Log::channel('nylas')->error('Exception moving original message to HIVE folder', ApiErrorFormatter::format($e, [
                 'company_email_id' => $companyEmailId,
                 'source_grant_id' => $sourceGrantId,
                 'message_id' => $messageId,
-            ]));
-        }
-    }
-
-    /**
-     * Move the forwarded message from sent items to configured deleted folder
-     */
-    protected function deleteForwardedMessageFromSentItems(string $grantId, int $companyEmailId, string $sentMessageId): void
-    {
-        try {
-            $deletedFolderId = config('nylas.receipts_deleted_folder_id');
-            
-            // Use unified method - pass null for folderId to delete, or actual folderId to move
-            $success = $this->moveOrDeleteMessage($sentMessageId, $grantId, $companyEmailId, $deletedFolderId);
-            
-            if (!$success) {
-                $action = $deletedFolderId ? 'move to deleted folder' : 'delete';
-                Log::channel('nylas')->error("Failed to {$action} forwarded message", [
-                    'grant_id' => $grantId,
-                    'company_email_id' => $companyEmailId,
-                    'sent_message_id' => $sentMessageId,
-                    'deleted_folder_id' => $deletedFolderId,
-                ]);
-            }
-            
-        } catch (\Throwable $e) {
-            Log::channel('nylas')->error('Exception processing forwarded message deletion', ApiErrorFormatter::format($e, [
-                'grant_id' => $grantId,
-                'company_email_id' => $companyEmailId,
-                'sent_message_id' => $sentMessageId,
             ]));
         }
     }
