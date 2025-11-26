@@ -106,5 +106,12 @@ return [
             'level' => 'info',
             'days' => 30
         ],
+
+        'nylas_webhooks' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/nylas_webhooks.log'),
+            'level' => 'debug',
+            'days' => 30,
+        ],
     ],
 ];

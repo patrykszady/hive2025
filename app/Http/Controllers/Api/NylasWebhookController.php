@@ -36,6 +36,12 @@ class NylasWebhookController extends Controller
     {
         $payload = $request->all();
 
+        // Log all incoming webhooks to dedicated channel
+        Log::channel('nylas_webhooks')->info('Received webhook', [
+            'type' => data_get($payload, 'type'),
+            'payload' => $payload,
+        ]);
+
         $type = data_get($payload, 'type');
         $data = data_get($payload, 'data');
 
