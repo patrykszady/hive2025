@@ -115,7 +115,7 @@ class VendorPaymentCreate extends Component
         })->toArray();
 
         $this->payment_projects_count = $order;
-        $this->form->date = today()->format('Y-m-d');
+        // Date will be set by browser's local date via Alpine.js
         $this->employees = auth()->user()->vendor->users()->where('is_employed', 1)->get();
     }
 

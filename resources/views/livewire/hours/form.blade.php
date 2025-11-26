@@ -1,4 +1,22 @@
-<form wire:submit="{{$view_text['form_submit']}}">
+<form wire:submit="{{$view_text['form_submit']}}" x-data="{ 
+    // Calculate browser's current LOCAL date (not UTC)
+    getBrowserDate() {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    },
+    browserDate: null,
+    ready: false,
+    init() {
+        this.browserDate = this.getBrowserDate();
+        // Send browser's LOCAL date to Livewire immediately on mount
+        this.$wire.setBrowserDate(this.browserDate).then(() => {
+            this.ready = true;
+        });
+    }
+}" x-init="init()">
 	<div class="grid max-w-xl grid-cols-4 gap-4 xl:relative lg:max-w-5xl sm:px-6">
 		{{-- FLOAT CALENDAR --}}
 		<div class="col-span-4 space-y-4 lg:col-span-2 lg:h-32">
@@ -17,19 +35,24 @@
 
                 <flux:separator variant="subtle" />
 
-                <flux:calendar
-                    wire:model.live="selected_date"
-                    wire:loading.class.delay="opacity-50"
-                    max="today"
-                    start-day="1"
-                    with-today
-                    unavailable="{{$this->days}}"
-                />
+                <div x-cloak x-show="!ready"></div>
+
+                <div x-show="ready" x-cloak>
+                    <flux:calendar
+                        wire:model.live="selected_date"
+                        wire:loading.class.delay="opacity-50"
+                        :max="$selected_date ? $selected_date->format('Y-m-d') : ''"
+                        start-day="1"
+                        unavailable="{{$this->days}}"
+                    />
+                </div>
 
                 <flux:separator variant="subtle" />
 
-                <div class="space-y-2 mt-2">
-                    <flux:button class="w-full cursor-default"><b>{{$this->selected_date->format('D M jS, Y')}}</b></flux:button>
+                <div class="space-y-2 mt-2" x-show="ready" x-cloak>
+                    @if($this->selected_date)
+                        <flux:button class="w-full cursor-default"><b>{{$this->selected_date->format('D M jS, Y')}}</b></flux:button>
+                    @endif
                     <flux:button class="w-full cursor-default">Hours | <b>{{$this->hours_count}}</b></flux:button>
                     <flux:button type="submit" variant="primary" class="w-full">{{$view_text['button_text']}}</flux:button>
                 </div>
@@ -38,11 +61,12 @@
             </flux:card>
 		</div>
 
-		<div class="col-span-4 space-y-2 lg:col-span-2">
-            <div wire:loading.class.delay="opacity-50">
-                <flux:card class="space-y-2">
-                    <flux:heading size="lg">Projects</flux:heading>
-                    <flux:separator variant="subtle" />
+		<div class="col-span-4 space-y-2 lg:col-span-2" x-show="ready" x-cloak>
+            @if($selected_date)
+                <div wire:loading.class.delay="opacity-50">
+                    <flux:card class="space-y-2">
+                        <flux:heading size="lg">Projects</flux:heading>
+                        <flux:separator variant="subtle" />
 
                 {{-- PROJECT HOUR AMOUNT --}}
                 @foreach ($projects as $index => $project)
@@ -56,7 +80,7 @@
                             <div>
                                 <flux:input.group>
                                     <flux:input.group.prefix>Hours</flux:input.group.prefix>
-                                    <flux:input wire:model.live="form.projects.{{$index}}.hours" type="number" inputmode="decimal" step="0.25" min="0.25" />
+                                    <flux:input wire:model.blur="form.projects.{{$index}}.hours" type="number" inputmode="decimal" step="0.25" min="0.25" />
                                 </flux:input.group>
                                 @if(!empty($day_project_tasks[$index]))
                                     @foreach($day_project_tasks[$index] as $task)
@@ -90,6 +114,7 @@
                     <flux:button variant="primary" wire:click="add_project" icon="plus-circle">Add</flux:button>
                 </flux:input.group>
             </flux:card>
+            @endif
 		</div>
 	</div>
 </form>

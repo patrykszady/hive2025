@@ -30,8 +30,7 @@ class TimesheetPaymentForm extends Form
     public function setUser($user)
     {
         $this->first_name = $user->first_name;
-
-        $this->date = today()->format('Y-m-d');
+        // Date will be set by browser's local date via Alpine.js
     }
 
     public function store()

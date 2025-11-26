@@ -26,7 +26,7 @@ class HourCreate extends Component
     public HourForm $form;
 
     public $projects = [];
-    public Carbon $selected_date;
+    public ?Carbon $selected_date = null;
     public $days = [];
 
     public $hours_count_store = 0;
@@ -56,7 +56,9 @@ class HourCreate extends Component
     public function mount()
     {
         $this->authorize('create', Hour::class);
-        $this->selectedDate(Carbon::today(config('app.timezone')));
+        
+        // Initialize to null - will be set by setBrowserDate() called from the view
+        $this->selected_date = null;
 
         $confirmed_weeks =
             Timesheet::orderBy('date', 'DESC')
@@ -83,7 +85,21 @@ class HourCreate extends Component
 
         $this->days = implode(',', $confirmed_week_days);
 
-        $this->form->setProjects($this->projects->toArray());
+        // Don't set projects here - wait for setBrowserDate to be called
+        // which will call selectedDate() and populate projects
+    }
+    
+    public function setBrowserDate($browserDate)
+    {
+        // Always initialize with browser's current date (not server's UTC date)
+        $this->selectedDate($browserDate);
+        
+        // Now set projects after selectedDate has been called
+        if (is_array($this->projects)) {
+            $this->form->setProjects($this->projects);
+        } else {
+            $this->form->setProjects($this->projects->toArray());
+        }
     }
 
     public function updatedSelectedDate($value)
@@ -99,7 +115,12 @@ class HourCreate extends Component
     #[Computed]
     public function other_projects()
     {
-        $other_projects = Project::whereNotIn('id', $this->projects->pluck('id'))->whereYear('created_at', '>=', Carbon::now()->subYears(3)->year)->orderBy('created_at', 'DESC')->get();
+        // Handle case where projects is still an empty array before setBrowserDate() runs
+        $projectIds = is_array($this->projects) 
+            ? collect($this->projects)->pluck('id') 
+            : $this->projects->pluck('id');
+            
+        $other_projects = Project::whereNotIn('id', $projectIds)->whereYear('created_at', '>=', Carbon::now()->subYears(3)->year)->orderBy('created_at', 'DESC')->get();
         return $other_projects;
     }
 
@@ -126,8 +147,8 @@ class HourCreate extends Component
             $this->days[$day_index]['has_hours'] = $has_hours;
         }
 
-        // Parse the date in app timezone and keep it as the selected date
-        $this->selected_date = Carbon::parse($date, config('app.timezone'))->startOfDay();
+        // Parse the date as-is (comes from browser in Y-m-d format, represents the user's local date)
+        $this->selected_date = Carbon::parse($date)->startOfDay();
 
         // Use the date in Y-m-d format for database queries (dates are stored without timezone)
         $dateForQuery = $this->selected_date->format('Y-m-d');

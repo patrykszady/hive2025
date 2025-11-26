@@ -65,7 +65,7 @@ class PaymentCreate extends Component
     public function mount()
     {
         $this->authorize('create', Payment::class);
-        $this->form->date = today()->format('Y-m-d');
+        // Date will be set by browser's local date via Alpine.js
     }
 
     public function updated($field)

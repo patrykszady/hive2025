@@ -1,4 +1,15 @@
-<div class="max-w-4xl">
+<div class="max-w-4xl" x-data="{
+    initDate() {
+        // Only set date if it's empty (new payment)
+        if (!$wire.form.date) {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            $wire.form.date = `${year}-${month}-${day}`;
+        }
+    }
+}" x-init="initDate()">
     <form wire:submit="{{$view_text['form_submit']}}">
         <div class="grid max-w-xl grid-cols-4 gap-4 xl:relative lg:max-w-5xl sm:px-6">
             <div class="col-span-4 space-y-4 lg:col-span-2 lg:sticky lg:top-4 lg:self-start">

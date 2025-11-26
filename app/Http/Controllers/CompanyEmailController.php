@@ -161,6 +161,52 @@ class CompanyEmailController extends Controller
 
             // Create the "HIVE RECEIPTS" folder and store its ID in api_json
             $this->createHiveReceiptsFolder($companyEmail);
+            
+            // Sync all existing client contacts to this new grant
+            $this->syncContactsForNewGrant($companyEmail);
+        }
+    }
+    
+    /**
+     * Sync all existing vendor clients to a newly created company email grant
+     */
+    private function syncContactsForNewGrant(CompanyEmail $companyEmail): void
+    {
+        try {
+            $vendor = $companyEmail->vendor;
+            $contactSyncService = app(\App\Services\NylasContactSyncService::class);
+            
+            // Get all clients for this vendor
+            $clients = $vendor->clients;
+            
+            if ($clients->isEmpty()) {
+                Log::channel('nylas')->info('No clients to sync for new grant', [
+                    'grant_id' => $companyEmail->grant_id,
+                    'vendor_id' => $vendor->id,
+                ]);
+                return;
+            }
+            
+            Log::channel('nylas')->info('Syncing existing clients to new grant', [
+                'grant_id' => $companyEmail->grant_id,
+                'vendor_id' => $vendor->id,
+                'client_count' => $clients->count(),
+            ]);
+            
+            // Sync each client's users to the new grant
+            foreach ($clients as $client) {
+                $contactSyncService->syncUserContactsForClient($client);
+            }
+            
+            Log::channel('nylas')->info('Completed syncing clients to new grant', [
+                'grant_id' => $companyEmail->grant_id,
+                'vendor_id' => $vendor->id,
+            ]);
+        } catch (\Exception $e) {
+            Log::channel('nylas')->error('Failed to sync contacts for new grant', [
+                'grant_id' => $companyEmail->grant_id ?? null,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 
@@ -1893,13 +1939,25 @@ class CompanyEmailController extends Controller
     {
         $vendorRegistrationDate = $companyEmail->vendor->registrationDate;
         
+        // Maximum lookback is 7 days to prevent API timeouts
+        $maxLookback = Carbon::now()->subDays(7);
+        
         if ($vendorRegistrationDate) {
-            return $messageLimitDate->greaterThan($vendorRegistrationDate) 
+            // Use the most recent of: message limit, registration date, or max lookback
+            $calculatedDate = $messageLimitDate->greaterThan($vendorRegistrationDate) 
                 ? $messageLimitDate 
                 : $vendorRegistrationDate;
+                
+            // Ensure we don't go back more than 7 days to prevent timeouts
+            return $calculatedDate->greaterThan($maxLookback) 
+                ? $calculatedDate 
+                : $maxLookback;
         }
         
-        return $messageLimitDate;
+        // Ensure message limit date isn't older than max lookback
+        return $messageLimitDate->greaterThan($maxLookback) 
+            ? $messageLimitDate 
+            : $maxLookback;
     }
 
     /**

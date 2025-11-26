@@ -1,4 +1,15 @@
-<flux:modal name="payment_form_modal" class="space-y-2 w-full max-w-lg">
+<flux:modal name="payment_form_modal" class="space-y-2 w-full max-w-lg" x-data="{
+    initDate() {
+        // Only set date if it's empty (new payment)
+        if (!$wire.form.date) {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            $wire.form.date = `${year}-${month}-${day}`;
+        }
+    }
+}" x-init="initDate()">
     <div class="flex justify-between">
         <flux:heading size="lg">{{$view_text['card_title']}}</flux:heading>
     </div>

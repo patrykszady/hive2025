@@ -264,6 +264,9 @@ class PlaidTransactionSyncController extends Controller
                 'pending_transaction_id' => $pendingPlaidTransactionId,
                 'account_id' => $newTransaction['account_id'] ?? null,
                 'candidate_ids' => [$plaidTransactionId, $pendingPlaidTransactionId],
+                'amount' => $amount,
+                'date' => $newTransaction['date'] ?? null,
+                'merchant_name' => $newTransaction['merchant_name'] ?? $newTransaction['name'] ?? null,
             ]);
             $transaction = $this->insertNewTransaction($bank, $newTransaction, $amount, $accountType, $institutionAccountIds, $plaidTransactionId);
             return $this->buildAggregate(
@@ -358,6 +361,9 @@ class PlaidTransactionSyncController extends Controller
                     'plaid_transaction_id' => $plaidTransactionId,
                     'bank_id' => $bank->id,
                     'request_id' => $requestId,
+                    'amount' => $removedTransaction['amount'] ?? null,
+                    'date' => $removedTransaction['date'] ?? null,
+                    'merchant_name' => $removedTransaction['merchant_name'] ?? $removedTransaction['name'] ?? null,
                 ]);
                 return null;
             }
