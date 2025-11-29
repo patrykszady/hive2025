@@ -87,6 +87,12 @@ class AppServiceProvider extends ServiceProvider
         });
 
         LogViewer::auth(function ($request) {
+            // Allow bearer token authentication for remote hosts
+            if ($request->bearerToken() === config('log-viewer.hosts.production.auth.token', env('LOG_VIEWER_PRODUCTION_TOKEN'))) {
+                return true;
+            }
+
+            // Allow specific users via web authentication
             return $request->user()
                 && in_array($request->user()->email, [
                     'patryk@gs.construction',
