@@ -1003,8 +1003,9 @@ class NylasService
             : Carbon::now()->subYear();
         
         // Single API call to get all recent messages from inbox
+        // Use a smaller limit to avoid provider timeouts (504 errors)
         $query = [
-            'limit' => 200,
+            'limit' => 50, // Reduced from 200 to avoid timeouts
             'received_after' => $lookbackDate->timestamp,
         ];
         

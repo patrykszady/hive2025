@@ -1042,8 +1042,6 @@ class CompanyEmailController extends Controller
 
     public function fetchAutoReceipts()
     {
-        //get folders for a grant_id
-
         // Fetch company emails with the specified conditions.
         $company_emails = CompanyEmail::withoutGlobalScopes()
             ->whereNotNull('grant_id')
@@ -1054,14 +1052,26 @@ class CompanyEmailController extends Controller
             $email_vendor = $company_email->vendor;
             $email_vendor_bank_account_ids = $email_vendor->bank_accounts->pluck('id');
 
+            // Get inbox folder ID from company email's api_json
+            $inboxFolderId = $company_email->api_json['INBOX_FOLDER'] ?? null;
+            
+            if (!$inboxFolderId) {
+                Log::channel('nylas')->warning('Skipping fetchAutoReceipts - no INBOX_FOLDER configured', [
+                    'company_email_id' => $company_email->id,
+                    'grant_id' => $grantId,
+                ]);
+                continue;
+            }
+
             // Fetch messages from the inbox using the incremental sync helper
-            $syncResult = $this->nylasService->syncMessages(['inbox'], $company_email);
+            $syncResult = $this->nylasService->syncMessages([$inboxFolderId], $company_email);
             $messages = collect($syncResult['messages'] ?? [])
                 ->filter(fn($m) => isset($m['from'][0]['email'], $m['subject']) &&
                     strcasecmp($m['from'][0]['email'], 'noreply@print.epsonconnect.com') === 0 &&
                     stripos($m['subject'], 'Receipt Scans') !== false)
                 ->values()
                 ->all();
+
             // NylasService::syncMessages already persists cursors into CompanyEmail->api_json when changed.
             // No need to mutate api_json here.
          
