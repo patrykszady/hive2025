@@ -94,7 +94,7 @@
 
                         <flux:separator variant="subtle" />
 
-                        <div class="-mx-6 -mb-6 overflow-x-hidden">
+                        <div class="-mx-6 -mb-6 overflow-x-hidden [&_[data-flux-pagination]]:!px-6 [&_[data-flux-pagination]]:!pb-4">
                             <flux:table :paginate="$this->emailTrackingEvents" class="[:where(&)]:p-0 [:where(&)]:space-y-0 [&_th]:!px-4 [&_td]:!px-3 [&_th:first-child]:!ps-6 [&_th:last-child]:!pe-6 [&_td:first-child]:!ps-6 [&_td:last-child]:!pe-6">
                                 <flux:table.columns>
                                     <flux:table.column>Event</flux:table.column>
@@ -159,8 +159,8 @@
                                         @if($event->thread_events && $event->thread_events->count() > 0)
                                             @foreach($event->thread_events as $subEvent)
                                                 <flux:table.row :key="'thread-' . $subEvent->id" class="bg-gray-50 dark:bg-gray-800/50 [&_td]:!py-2">
-                                                    <flux:table.cell class="text-sm text-gray-600 dark:text-gray-400 !pl-10">
-                                                        <flux:badge 
+                                                    <flux:table.cell class="text-sm text-gray-600 dark:text-gray-400">
+                                                        <flux:badge class="ml-8" 
                                                             size="sm" 
                                                             variant="outline"
                                                             :color="match($subEvent->event_type) {

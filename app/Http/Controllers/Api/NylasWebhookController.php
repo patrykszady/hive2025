@@ -93,17 +93,17 @@ class NylasWebhookController extends Controller
             $recipients = collect([$recipientEmail]);
             $isMessageLevel = false;
         } else {
-            // No specific recipient - could be sender viewing sent email or recipient opening without recipient_email
+            // No specific recipient - track as message-level open
+            // This happens when the email client doesn't send recipient_email in webhook
             $recipients = $this->resolveRecipientsForMessage($messageId);
+            $isMessageLevel = true;
             
-            // If we found recipients, this is a sent message being viewed
-            // When recipient_email is missing but we have sent records, it's the sender viewing their sent email
-            if ($recipients->isNotEmpty()) {
+            if ($recipients->isEmpty()) {
+                Log::channel('nylas')->warning('Cannot find recipients for message.opened', [
+                    'message_id' => $messageId,
+                ]);
                 return;
             }
-            
-            // No recipients found and no recipient_email - can't track this
-            return;
         }
 
         $eventDetails = $this->extractEventDetails($data);
@@ -197,9 +197,10 @@ class NylasWebhookController extends Controller
         $data = $payload['data'] ?? [];
         $object = $data['object'] ?? [];
 
-        if (!empty($object['from_self'])) {
-            return;
-        }
+        $fromSelf = !empty($object['from_self']);
+        
+        // If from_self, track as outgoing reply; otherwise as incoming reply
+        $eventType = $fromSelf ? 'replied_outgoing' : 'replied';
 
         // Check if this is a bounce notification from a mailer daemon
         $fromEmails = collect($object['from'] ?? [])
@@ -247,7 +248,7 @@ class NylasWebhookController extends Controller
 
         $this->storeTrackingEvents(
             messageId: $messageId,
-            eventType: 'replied',
+            eventType: $eventType,
             recipients: $replyFrom,
             metadata: $metadata,
             eventAt: $eventDetails['timestamp'],
@@ -347,7 +348,7 @@ class NylasWebhookController extends Controller
         }
 
         $messageId = $originalSentRecords->first()->nylas_message_id;
-        $recipients = $originalSentRecords->pluck('recipient_email')->unique();
+        $recipients = $originalSentRecords->pluck('recipient_emails')->flatten()->unique();
 
         $eventDetails = $this->extractEventDetails($data);
 

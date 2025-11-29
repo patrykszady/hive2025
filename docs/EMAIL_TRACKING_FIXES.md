@@ -2,7 +2,156 @@
 
 ## Problems Identified
 
-### Problem 1: Opens Registered for ALL Recipients (Not Just Who Opened)
+### Problem 1: Duplicate "Sent" Events for Multi-Recipient Emails
+
+**Root Cause:**
+The `StoreEmailTracking` listener was creating **separate tracking records for each recipient** when an email was sent to multiple people. This caused duplicate "sent" events in the database.
+
+**Example:**
+- Email sent to `john@example.com` and `jane@example.com`
+- Result: 2 separate `email_tracking` records, both with `event_type = 'sent'`
+- Expected: 1 record with `recipient_emails = ["john@example.com", "jane@example.com"]`
+
+**Code Location:** `app/Listeners/StoreEmailTracking.php` (lines 63-76)
+
+```php
+// OLD BEHAVIOR - INCORRECT
+foreach ($recipients as $recipientEmail) {
+    EmailTracking::create([
+        'project_id' => $projectId,
+        'nylas_message_id' => $nylasMessageId,
+        'event_type' => 'sent',
+        'recipient_emails' => [$recipientEmail], // ← Creates one record per recipient
+        // ...
+    ]);
+}
+```
+
+**Fix:**
+Create a **single tracking record with all recipients** in a JSON array, matching the webhook controller's behavior.
+
+```php
+// NEW BEHAVIOR - CORRECT
+if (!empty($recipients)) {
+    EmailTracking::create([
+        'project_id' => $projectId,
+        'nylas_message_id' => $nylasMessageId,
+        'event_type' => 'sent',
+        'recipient_emails' => $recipients, // ← All recipients in one array
+        // ...
+    ]);
+}
+```
+
+**Impact:**
+- **Before:** Email to 3 people → 3 "sent" records in database
+- **After:** Email to 3 people → 1 "sent" record with all 3 recipients
+
+### Problem 2: Opens Without recipient_email Were Skipped
+
+**Root Cause:**
+When Nylas sends a `message.opened` webhook without the `recipient_email` field (which happens with some email clients), the code assumed it was the **sender viewing their own sent email** and skipped tracking it entirely.
+
+**Example Webhooks Being Skipped:**
+```json
+{
+  "type": "message.opened",
+  "object": {
+    "message_id": "AAkAL...",
+    // ← NO recipient_email field
+    "recents": [{
+      "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6_2...)",
+      "opened_id": 25
+    }]
+  }
+}
+```
+
+These are **real opens from recipients** (iPhone, Outlook, etc.), not the sender viewing sent email.
+
+**Code Location:** `NylasWebhookController::handleMessageOpened()` (lines 89-105)
+
+```php
+// OLD BEHAVIOR - INCORRECT
+if ($recipientEmail) {
+    $recipients = collect([$recipientEmail]);
+    $isMessageLevel = false;
+} else {
+    $recipients = $this->resolveRecipientsForMessage($messageId);
+    
+    if ($recipients->isNotEmpty()) {
+        return; // ← Skipped all opens without recipient_email!
+    }
+    
+    return;
+}
+```
+
+**Fix:**
+Track these as **message-level opens** (one event for the entire message) instead of skipping them.
+
+```php
+// NEW BEHAVIOR - CORRECT
+if ($recipientEmail) {
+    $recipients = collect([$recipientEmail]);
+    $isMessageLevel = false;
+} else {
+    // Track as message-level open
+    $recipients = $this->resolveRecipientsForMessage($messageId);
+    $isMessageLevel = true; // ← Track with all recipients
+    
+    if ($recipients->isEmpty()) {
+        Log::warning('Cannot find recipients');
+        return;
+    }
+}
+```
+
+**Impact:**
+- **Before:** Opens without `recipient_email` → Not tracked at all
+- **After:** Opens without `recipient_email` → Tracked as message-level event
+
+### Problem 3: Outgoing Replies (from_self) Were Skipped
+
+**Root Cause:**
+When a `thread.replied` webhook had `from_self: true` (meaning we replied in the thread), it was skipped entirely. But we should track when customer service replies to customer emails.
+
+**Example Webhooks Being Skipped:**
+```json
+{
+  "type": "thread.replied",
+  "object": {
+    "from_self": true, // ← Our reply in the thread
+    "thread_id": "AAQkADZh...",
+    "reply_data": {"count": 2}
+  }
+}
+```
+
+**Code Location:** `NylasWebhookController::handleThreadReplied()` (line 202)
+
+```php
+// OLD BEHAVIOR - INCORRECT
+if (!empty($object['from_self'])) {
+    return; // ← Skipped all our replies!
+}
+```
+
+**Fix:**
+Track outgoing replies with a new event type `replied_outgoing` to distinguish them from incoming replies.
+
+```php
+// NEW BEHAVIOR - CORRECT
+$fromSelf = !empty($object['from_self']);
+$eventType = $fromSelf ? 'replied_outgoing' : 'replied';
+// ... continues to track the event
+```
+
+**Impact:**
+- **Before:** Our replies → Not tracked at all
+- **After:** Our replies → Tracked as `replied_outgoing` events
+
+### Problem 4: Opens Registered for ALL Recipients (Not Just Who Opened)
 
 **Root Cause:**
 When a webhook arrives without `recipient_email` in the payload, the code fell back to fetching ALL recipients from the `email_tracking` table and created an "opened" event for each one.
@@ -37,7 +186,7 @@ if (!$recipientEmail) {
 $recipients = collect([$recipientEmail]);
 ```
 
-### Problem 2: Mail Client Prefetch Triggers False Opens
+### Problem 5: Mail Client Prefetch Triggers False Opens
 
 **Root Cause:**
 Modern mail clients (Apple Mail, Outlook, Gmail) automatically prefetch/preload email content for:
@@ -155,9 +304,14 @@ Schema::create('email_tracking', function (Blueprint $table) {
 
 ## Files Modified
 
-1. `/app/Http/Controllers/Api/NylasWebhookController.php`
+1. `/app/Listeners/StoreEmailTracking.php`
+   - Changed from creating one record per recipient to one record with all recipients
+   - Prevents duplicate "sent" events for multi-recipient emails
+
+2. `/app/Http/Controllers/Api/NylasWebhookController.php`
    - `handleMessageOpened()`: Require recipient_email, add prefetch filtering
    - `handleMessageLinkClicked()`: Require recipient_email, add prefetch filtering  
+   - `handleBouncedAsReply()`: Fixed to use `recipient_emails` (plural) instead of `recipient_email`
    - `isPrefetchOrAutomatedOpen()`: New method for sophisticated detection
 
 ## Next Steps
