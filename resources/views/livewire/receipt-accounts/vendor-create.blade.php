@@ -26,7 +26,7 @@
                                 {{ $distribution_count }}
                             </flux:badge>
                             <span class="ml-4">{{ $distribution_name }}</span>
-                        </flux:table.cell>E
+                        </flux:table.cell>
                     </flux:table.row>
                 @endforeach
             @endforeach
@@ -74,7 +74,7 @@
                     </div>
 
                     {{-- AMOUNT --}}
-                    <flux:input.group label="Amount" >
+                    <flux:input.group label="Amount">
                         <flux:select
                             wire:model.live="transactions_bulk_matches.{{ $index }}.options.amount_type"
                             class="max-w-fit"
@@ -89,11 +89,11 @@
 
                         <flux:input
                             wire:model.live="transactions_bulk_matches.{{ $index }}.amount"
-                            x-bind:disabled="$wire.get('transactions_bulk_matches.{{ $index }}.options.amount_type') === 'ANY'"
+                            x-bind:disabled="{{($match['options']['amount_type'] ?? 'ANY') == 'ANY'}}"
                             inputmode="decimal"
                             step="0.01"
                             icon="currency-dollar"
-                            x-bind:placeholder="$wire.get('transactions_bulk_matches.{{ $index }}.options.amount_type') === 'ANY' ? 'Any Amount' : 'Amount'"
+                            placeholder="{{($match['options']['amount_type'] ?? 'ANY') == 'ANY' ? 'Any Amount' : 'Amount'}}"
                         />
                     </flux:input.group>
 
@@ -104,26 +104,18 @@
                             <flux:select
                                 wire:model.live="transactions_bulk_matches.{{ $index }}.distribution_id"
                                 variant="listbox"
-                                x-bind:disabled="$wire.get('transactions_bulk_matches.{{ $index }}.split')"
-                                {{-- x-bind:disabled="split" --}}
-                                {{-- {{$split == false ? 'Match is Split' : 'Choose distribution...'}} --}}
-                                {{-- x-bind:placeholder="$wire.get('transactions_bulk_matches.{{ $index }}.split') === true ? 'Match is Split' : 'Choose distribution...'" --}}
-                                {{-- x-bind:placeholder="$wire.get('transactions_bulk_matches.{{ $index }}.split')" --}}
+                                x-bind:disabled="$wire.transactions_bulk_matches[{{ $index }}].split"
                                 placeholder="Choose distribution..."
                                 >
-                                {{-- <flux:select.option value="" disabled>{{$match->split === true ? 'Match is Split' : 'Choose distribution...'}}</flux:select.option> --}}
-
                                 @foreach($this->distributions as $distribution)
                                     <flux:select.option value="{{$distribution->id}}">{{$distribution->name}}</flux:select.option>
                                 @endforeach
                             </flux:select>
 
-                            {{-- <flux:switch x-on:click="split = ! split" label="Split" /> --}}
                             <flux:button
-                                wire:click="addSplit({{ $index }})"
-                                {{-- wire:click="$toggle('transactions_bulk_matches.{{ $index }}.split')" --}}
+                                wire:click="toggleSplit({{ $index }})"
                                 >
-                                Split
+                                {{ ($match['split'] ?? false) ? 'Remove Splits' : 'Split' }}
                             </flux:button>
                         </flux:input.group>
                         {{-- <div
@@ -132,9 +124,9 @@
                             x-transition
                             >
                         </div> --}}
-                        @if($match->splits)
+                        @if(isset($match['splits']) && is_array($match['splits']) && !empty($match['splits']))
                             <div class="space-y-2">
-                                @foreach($match->splits as $split_index => $split)
+                                @foreach($match['splits'] as $split_index => $split)
                                     <flux:card wire:key="{{$split_index}}">
                                         {{-- HEADING --}}
                                         <div class="flex justify-between">
@@ -159,7 +151,7 @@
 
                                             <flux:input
                                                 wire:model.live="transactions_bulk_matches.{{ $index }}.splits.{{ $split_index }}.amount"
-                                                x-bind:placeholder="$wire.get('transactions_bulk_matches.{{ $index }}.splits.{{ $split_index }}.amount_type') === '$' ? 'Any Amount' : 'Percentage: .0145'"
+                                                placeholder="{{($split['amount_type'] ?? '$') == '$' ? 'Amount' : 'Percentage: .0145'}}"
                                             />
                                         </flux:input.group>
 
@@ -178,6 +170,10 @@
                                         </div>
                                     </flux:card>
                                 @endforeach
+
+                                <flux:button wire:click="addSplit({{$index}})" size="sm" icon="plus">
+                                    Add Split
+                                </flux:button>
                             </div>
                         @endif
                     </div>

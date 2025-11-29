@@ -39,17 +39,17 @@ class ReceiptAccountsIndex extends Component
     #[Computed]
     public function vendors()
     {
-        $vendors =
-            Vendor::
-            // withoutGlobalScopes()
+        $vendors = Vendor::query()
+            ->with(['receipt_account.distribution'])
+            // ->withoutGlobalScopes()
             //   ->whereIn('id', $this->receipt_accounts)
-                whereHas('receipt_account')
-                // whereHas('receipt_accounts', function ($query) use ($auth_vendor) {
-                //     return $query->where('belongs_to_vendor_id', $auth_vendor->id);
-                //     })
-                    // ->with(['receipts', 'receipt_account'])
-                ->orderBy('business_name')
-                ->get();
+            ->whereHas('receipt_account')
+            // whereHas('receipt_accounts', function ($query) use ($auth_vendor) {
+            //     return $query->where('belongs_to_vendor_id', $auth_vendor->id);
+            //     })
+                // ->with(['receipts', 'receipt_account'])
+            ->orderBy('business_name')
+            ->get();
                 // ->each(function ($vendor, $key) {
                 //     if (! isset($vendor->receipt_account)) {
                 //         $vendor->type = 'Not Connected';
@@ -78,7 +78,7 @@ class ReceiptAccountsIndex extends Component
 
         //$dispatchTo('receipt-accounts.receipt-account-vendor-create', 'editReceiptVendor', { vendor: {{$vendor}} })
         // $this->dispatch('editReceiptVendor')->to(Dashboard::class);
-        $this->dispatch('editReceiptVendor', vendor: $vendor)->to('receipt-accounts.receipt-account-vendor-create');
+        $this->dispatch('editReceiptVendor', vendor: $vendor->id)->to('receipt-accounts.receipt-account-vendor-create');
         $this->vendor_id = NULL;
     }
 

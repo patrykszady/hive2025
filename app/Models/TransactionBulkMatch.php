@@ -6,6 +6,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Collection;
 
 class TransactionBulkMatch extends Model
 {
@@ -13,7 +14,6 @@ class TransactionBulkMatch extends Model
 
     protected $table = 'transactions_bulk_match';
 
-    // protected $hidden = ['split', 'splits'];
     protected $fillable = ['amount', 'vendor_id', 'distribution_id', 'belongs_to_vendor_id', 'created_at', 'updated_at', 'options'];
 
     protected function casts(): array

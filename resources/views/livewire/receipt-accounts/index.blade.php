@@ -34,7 +34,7 @@
             @foreach ($this->vendors as $vendor)
                 <flux:table.row :key="$vendor->id">
                     <flux:table.cell
-                        wire:click="$dispatchTo('receipt-accounts.receipt-account-vendor-create', 'editReceiptVendor', { vendor: {{$vendor}} })"
+                        wire:click="$dispatchTo('receipt-accounts.receipt-account-vendor-create', 'editReceiptVendor', { vendor: {{ $vendor->id }} })"
                         variant="strong"
                         class="cursor-pointer"
                         >

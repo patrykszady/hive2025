@@ -27,7 +27,7 @@ class ReceiptAccountVendorCreate extends Component
     // public BulkMatchForm $form;
     public $distributions = []; //coming from ReceiptAccountsIndex
     public $distribution_id = null;
-    public $transactions_bulk_matches = []; //collection
+    public $transactions_bulk_matches = []; //simple array, not models
     public $vendor_transactions = [];
 
     public Vendor $vendor;
@@ -63,7 +63,9 @@ class ReceiptAccountVendorCreate extends Component
         if (str_contains($field, 'options.amount_type')) {
             // Extract the index of the item being updated
             $index = explode('.', $field)[0];
-            $this->transactions_bulk_matches[$index]->amount = NULL;
+            if(isset($this->transactions_bulk_matches[$index])) {
+                $this->transactions_bulk_matches[$index]['amount'] = null;
+            }
         }
 
         // if (str_contains($field, 'split')) {
@@ -106,14 +108,17 @@ class ReceiptAccountVendorCreate extends Component
     {
         $this->vendor = $vendor->load(['transactions', 'receipts', 'receipt_account', 'transactions_bulk_match']);
 
-        $this->transactions_bulk_matches = $this->vendor->transactions_bulk_match;
-
-        foreach($this->transactions_bulk_matches as $index => $match){
-            if($match->options['splits'] ?? false){
-                $match->splits = collect($match->options['splits']);
-                $match->split = true;
-            }
-        }
+        // Convert models to plain arrays like BulkMatchCreate does
+        $this->transactions_bulk_matches = $this->vendor->transactions_bulk_match->map(function($match) {
+            return [
+                'id' => $match->id,
+                'amount' => $match->amount,
+                'distribution_id' => $match->distribution_id,
+                'options' => $match->options ?? ['amount_type' => 'ANY', 'desc' => null],
+                'split' => isset($match->options['splits']) && !empty($match->options['splits']),
+                'splits' => $match->options['splits'] ?? null,
+            ];
+        })->toArray();
 
         $this->vendor_transactions = $this->vendor->transactions()
             ->with(['expense.distribution']) // Eager load only distribution relationships
@@ -162,35 +167,83 @@ class ReceiptAccountVendorCreate extends Component
 
     public function addMatch()
     {
-        if($this->transactions_bulk_matches->isEmpty()){
-            $this->transactions_bulk_matches = collect();
+        $this->transactions_bulk_matches[] = [
+            'id' => null,
+            'amount' => null,
+            'distribution_id' => null,
+            'options' => ['amount_type' => 'ANY', 'desc' => null],
+            'split' => false,
+            'splits' => null,
+        ];
+    }
+
+    public function toggleSplit($transactions_bulk_matches_index)
+    {
+        if(!isset($this->transactions_bulk_matches[$transactions_bulk_matches_index])) {
+            return;
         }
 
-        $this->transactions_bulk_matches->push(new TransactionBulkMatch(['options' => ['amount_type' => 'ANY', 'desc' => NULL]]));
+        $current = $this->transactions_bulk_matches[$transactions_bulk_matches_index]['split'] ?? false;
+
+        if($current) {
+            // Disable split mode
+            $this->transactions_bulk_matches[$transactions_bulk_matches_index]['split'] = false;
+            $this->transactions_bulk_matches[$transactions_bulk_matches_index]['splits'] = null;
+            $this->transactions_bulk_matches[$transactions_bulk_matches_index]['distribution_id'] = null;
+        } else {
+            // Enable split mode with 2 default splits
+            $this->transactions_bulk_matches[$transactions_bulk_matches_index]['split'] = true;
+            $this->transactions_bulk_matches[$transactions_bulk_matches_index]['distribution_id'] = null;
+            $this->transactions_bulk_matches[$transactions_bulk_matches_index]['splits'] = [
+                ['amount_type' => '$', 'amount' => null, 'distribution_id' => null],
+                ['amount_type' => '$', 'amount' => null, 'distribution_id' => null],
+            ];
+        }
     }
 
     public function addSplit($transactions_bulk_matches_index)
     {
-        $match = $this->transactions_bulk_matches[$transactions_bulk_matches_index];
-
-        if(is_null($match->splits)){
-            $match->split = TRUE;
-            $match->distribution_id = NULL;
-            $match->splits = collect();
-            $match->splits->push(['amount_type' => '$', 'amount' => NULL]);
+        if(!isset($this->transactions_bulk_matches[$transactions_bulk_matches_index])) {
+            return;
         }
 
-        $match->splits->push(['amount_type' => '$', 'amount' => NULL]);
+        if(is_null($this->transactions_bulk_matches[$transactions_bulk_matches_index]['splits'])){
+            $this->transactions_bulk_matches[$transactions_bulk_matches_index]['split'] = true;
+            $this->transactions_bulk_matches[$transactions_bulk_matches_index]['distribution_id'] = null;
+            $this->transactions_bulk_matches[$transactions_bulk_matches_index]['splits'] = [
+                ['amount_type' => '$', 'amount' => null, 'distribution_id' => null],
+            ];
+        }
+
+        $this->transactions_bulk_matches[$transactions_bulk_matches_index]['splits'][] = [
+            'amount_type' => '$',
+            'amount' => null,
+            'distribution_id' => null,
+        ];
     }
 
     public function removeSplit($transactions_bulk_matches_index, $split_index)
     {
-        $this->transactions_bulk_matches[$transactions_bulk_matches_index]->splits->forget($split_index);
+        if(!isset($this->transactions_bulk_matches[$transactions_bulk_matches_index]['splits'][$split_index])) {
+            return;
+        }
+
+        unset($this->transactions_bulk_matches[$transactions_bulk_matches_index]['splits'][$split_index]);
+        $this->transactions_bulk_matches[$transactions_bulk_matches_index]['splits'] = array_values(
+            $this->transactions_bulk_matches[$transactions_bulk_matches_index]['splits']
+        );
+
+        // If no splits left, clear split mode
+        if(empty($this->transactions_bulk_matches[$transactions_bulk_matches_index]['splits'])) {
+            $this->transactions_bulk_matches[$transactions_bulk_matches_index]['split'] = false;
+            $this->transactions_bulk_matches[$transactions_bulk_matches_index]['splits'] = null;
+        }
     }
 
     public function removeMatch($index)
     {
-        $this->transactions_bulk_matches->forget($index);
+        unset($this->transactions_bulk_matches[$index]);
+        $this->transactions_bulk_matches = array_values($this->transactions_bulk_matches);
     }
 
     public function store()
@@ -220,19 +273,26 @@ class ReceiptAccountVendorCreate extends Component
         $receipt_account->vendor_id = $this->vendor->id;
         $receipt_account->save();
 
-        $matches_not_removed = $this->transactions_bulk_matches->pluck('id')->toArray();
+        $matches_not_removed = collect($this->transactions_bulk_matches)->pluck('id')->filter()->toArray();
         $matches_to_remove = $this->vendor->transactions_bulk_match()->whereNotIn('id', $matches_not_removed)->get();
 
         foreach($matches_to_remove as $remove_match){
             $remove_match->delete();
         }
 
-        //create TransactionBulkMatch
-        foreach($this->transactions_bulk_matches as $bulk_match){
+        //create or update TransactionBulkMatch
+        foreach($this->transactions_bulk_matches as $bulk_match_data){
+            $bulk_match = $bulk_match_data['id'] 
+                ? TransactionBulkMatch::find($bulk_match_data['id'])
+                : new TransactionBulkMatch();
+
             $bulk_match->vendor_id = $this->vendor->id;
-            $bulk_match->options = array_merge($bulk_match->options, ['splits' => $bulk_match->splits ? $bulk_match->splits->toArray() : []]);
-            unset($bulk_match->splits);
-            unset($bulk_match->split);
+            $bulk_match->amount = $bulk_match_data['amount'];
+            $bulk_match->distribution_id = $bulk_match_data['distribution_id'];
+            $bulk_match->options = array_merge(
+                $bulk_match_data['options'] ?? [],
+                ['splits' => $bulk_match_data['splits'] ?? []]
+            );
             $bulk_match->belongs_to_vendor_id = auth()->user()->vendor->id;
             $bulk_match->save();
         }
@@ -256,6 +316,8 @@ class ReceiptAccountVendorCreate extends Component
     public function render()
     {
         $this->authorize('create', TransactionBulkMatch::class);
-        return view('livewire.receipt-accounts.vendor-create');
+        return view('livewire.receipt-accounts.vendor-create', [
+            'vendor_transactions' => $this->vendor_transactions ?? [],
+        ]);
     }
 }
