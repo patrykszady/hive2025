@@ -102,13 +102,14 @@ return [
             'name' => ucfirst(env('APP_ENV', 'local')),
         ],
 
-        'production' => [
-            'name' => 'Production',
-            'host' => 'https://dashboard.hive.contractors/log-viewer',
-            'auth' => [
-                'token' => env('LOG_VIEWER_PRODUCTION_TOKEN'),
-            ],
-        ],
+        // Uncomment to view remote production logs (requires connection to production server)
+        // 'production' => [
+        //     'name' => 'Production',
+        //     'host' => 'https://dashboard.hive.contractors/log-viewer',
+        //     'auth' => [
+        //         'token' => env('LOG_VIEWER_PRODUCTION_TOKEN'),
+        //     ],
+        // ],
     ],
 
     /*
