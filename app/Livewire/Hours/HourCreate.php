@@ -129,11 +129,13 @@ class HourCreate extends Component
         $this->validate();
     }
 
-    public function getHoursCountProperty()
+    #[Computed]
+    public function hours_count()
     {
-        $this->hours_count_store = collect($this->form->projects)->where('hours', '!=', null)->sum('hours');
-
-        return $this->hours_count_store;
+        return collect($this->form->projects)
+            ->where('hours', '!=', null)
+            ->where('hours', '>', 0)
+            ->sum('hours');
     }
 
     public function selectedDate($date, $day_index = null)
@@ -271,7 +273,7 @@ class HourCreate extends Component
 
     public function save()
     {
-        if ($this->hours_count_store == 0) {
+        if ($this->hours_count == 0) {
             $this->addError('hours_count', 'Daily Hours need at least one entry.');
         } else {
             $this->form->store();

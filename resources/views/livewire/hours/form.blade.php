@@ -17,6 +17,12 @@
         });
     }
 }" x-init="init()">
+    <style>
+        [wire\:loading][wire\:target^="incrementHours"],
+        [wire\:loading][wire\:target^="decrementHours"] {
+            display: none !important;
+        }
+    </style>
 	<div class="grid max-w-xl grid-cols-4 gap-4 xl:relative lg:max-w-5xl sm:px-6">
 		{{-- FLOAT CALENDAR --}}
 		<div class="col-span-4 space-y-4 lg:col-span-2 lg:h-32">
@@ -113,9 +119,16 @@
                             </div>
                             <div>
                                 <flux:button.group class="w-full">
-                                    <flux:button wire:click="decrementHours({{$index}})" icon="minus" variant="outline" square />
+                                    <flux:button 
+                                        wire:click="decrementHours({{ $index }})" 
+                                        wire:loading.attr="disabled"
+                                        wire:target="decrementHours({{ $index }})"
+                                        icon="minus" 
+                                        variant="outline" 
+                                        square 
+                                    />
                                     <flux:input 
-                                        wire:model.live="form.projects.{{$index}}.hours" 
+                                        wire:model.live.debounce.150ms="form.projects.{{ $index }}.hours"
                                         type="number" 
                                         inputmode="decimal" 
                                         step="0.5" 
@@ -124,7 +137,14 @@
                                         placeholder="Hours"
                                         class="flex-1 text-center"
                                     />
-                                    <flux:button wire:click="incrementHours({{$index}})" icon="plus" variant="outline" square />
+                                    <flux:button 
+                                        wire:click="incrementHours({{ $index }})" 
+                                        wire:loading.attr="disabled"
+                                        wire:target="incrementHours({{ $index }})"
+                                        icon="plus" 
+                                        variant="outline" 
+                                        square 
+                                    />
                                 </flux:button.group>
                                 @if(!empty($day_project_tasks[$index]))
                                     @foreach($day_project_tasks[$index] as $task)

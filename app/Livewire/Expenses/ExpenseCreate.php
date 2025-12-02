@@ -338,6 +338,11 @@ class ExpenseCreate extends Component
         );
 
         $this->resetModal();
+        
+        // If created from transaction, dispatch event to remove it from the UI
+        if ($this->form->transaction) {
+            $this->dispatch('transaction-used', transactionId: $this->form->transaction->id);
+        }
         //queue
 
         $this->dispatch('refreshComponent')->to('expenses.expense-index');

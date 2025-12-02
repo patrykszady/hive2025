@@ -15,7 +15,7 @@ class HourForm extends Form
     public function rules()
     {
         return [
-            'projects.*.hours' => 'nullable|numeric|min:.25|max:16',
+            'projects.*.hours' => 'nullable|numeric|min:0|max:16',
         ];
     }
 
@@ -28,7 +28,9 @@ class HourForm extends Form
     {
         // $this->authorize('create', Expense::class);
         $this->validate();
-        $projects_with_hours = collect($this->projects)->where('hours', '!=', null);
+        $projects_with_hours = collect($this->projects)
+            ->where('hours', '!=', null)
+            ->where('hours', '>', 0);
 
         foreach ($projects_with_hours as $project) {
             $this_hour = Hour::create([
@@ -46,13 +48,13 @@ class HourForm extends Form
     {
         // $this->authorize('create', Expense::class);
         $this->validate();
-        $projects_with_hours = collect($this->projects);
+        $projects_with_hours = collect($this->projects)->where('hours', '!=', null);
 
         foreach ($projects_with_hours as $project) {
             //update existing hour
             if (isset($project['hour_id'])) {
                 $hour = Hour::findOrFail($project['hour_id']);
-                if ($project['hours'] == null) {
+                if ($project['hours'] == null || $project['hours'] == 0) {
                     $hour->delete();
                 } else {
                     $hour->update([
@@ -62,7 +64,7 @@ class HourForm extends Form
                 }
                 //create new hour
             } else {
-                if (isset($project['hours'])) {
+                if (isset($project['hours']) && $project['hours'] > 0) {
                     $hour = Hour::create([
                         'date' => $this->component->selected_date,
                         'hours' => $project['hours'],

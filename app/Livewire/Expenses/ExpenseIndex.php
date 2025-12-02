@@ -37,7 +37,7 @@ class ExpenseIndex extends Component
     public $sortDirection = 'desc';
     public bool $transactionsReady = false;
 
-    protected $listeners = ['refreshComponent' => '$refresh'];
+    protected $listeners = ['refreshComponent' => '$refresh', 'transaction-used' => 'removeTransaction'];
 
     protected $queryString = [
         'amount' => ['except' => ''],
@@ -93,9 +93,17 @@ class ExpenseIndex extends Component
         $this->resetPage('expenses-page');
     }
 
-    public function loadTransactions(): void
+    public function loadTransactions()
     {
         $this->transactionsReady = true;
+    }
+
+    public function removeTransaction($transactionId)
+    {
+        // This will force a refresh of the transactions computed property
+        // which will exclude the transaction since it now has an expense_id
+        unset($this->transactions);
+        $this->js('window.dispatchEvent(new CustomEvent("remove-transaction-row", { detail: { id: ' . $transactionId . ' } }))');
     }
 
     #[Computed]

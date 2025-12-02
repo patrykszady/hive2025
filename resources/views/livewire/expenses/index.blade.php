@@ -187,7 +187,19 @@
     </flux:card>
 
     @if($view === NULL && auth()->user()->can('create', App\Models\Expense::class))
-        <flux:card wire:init="loadTransactions">
+        <flux:card wire:init="loadTransactions" x-data="{
+            init() {
+                window.addEventListener('remove-transaction-row', (event) => {
+                    const transactionId = event.detail.id;
+                    const row = document.querySelector(`[wire\\\\:key='${transactionId}']`);
+                    if (row) {
+                        row.style.transition = 'opacity 0.3s ease-out';
+                        row.style.opacity = '0';
+                        setTimeout(() => row.remove(), 300);
+                    }
+                });
+            }
+        }">
             <div>
                 <flux:heading size="lg">Transactions</flux:heading>
             </div>

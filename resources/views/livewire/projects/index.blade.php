@@ -141,6 +141,7 @@
                                         'opened' => 'blue',
                                         'clicked' => 'green',
                                         'replied' => 'purple',
+                                        'bounced' => 'red',
                                         default => 'zinc'
                                     }"
                                     inset="top bottom">
@@ -202,9 +203,7 @@
                                 @endif
                             </flux:table.cell>
                             <flux:table.cell>
-                                <span class="text-sm text-gray-600" title="{{ $event->event_at->format('M d, Y g:i A') }}">
-                                    {{ $event->event_at->diffForHumans() }}
-                                </span>
+                                <time class="text-sm text-gray-600" x-data x-datetime="'{{ $event->event_at->toIso8601String() }}'" x-datetime-format="relative"></time>
                             </flux:table.cell>
                         </flux:table.row>
                     @empty

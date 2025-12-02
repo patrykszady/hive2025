@@ -113,6 +113,7 @@
                                                         'opened' => 'blue',
                                                         'clicked' => 'green',
                                                         'replied' => 'purple',
+                                                        'bounced' => 'red',
                                                         'sent' => 'zinc',
                                                         default => 'zinc'
                                                     }"
@@ -149,9 +150,7 @@
                                                 @endif
                                             </flux:table.cell>
                                             <flux:table.cell>
-                                                <span class="cursor-help" title="{{ $event->event_at->format('M j, Y g:i A') }}">
-                                                    {{ $event->event_at->diffForHumans() }}
-                                                </span>
+                                                <time x-data x-datetime="'{{ $event->event_at->toIso8601String() }}'" x-datetime-format="relative"></time>
                                             </flux:table.cell>
                                         </flux:table.row>
 
@@ -167,6 +166,7 @@
                                                                 'opened' => 'blue',
                                                                 'clicked' => 'green',
                                                                 'replied' => 'purple',
+                                                                'bounced' => 'red',
                                                                 'sent' => 'gray',
                                                                 default => 'gray'
                                                             }">
@@ -180,9 +180,7 @@
                                                         {{-- Empty recipients cell for sub-rows --}}
                                                     </flux:table.cell>
                                                     <flux:table.cell class="text-sm text-gray-600 dark:text-gray-400">
-                                                        <span class="cursor-help" title="{{ $subEvent->event_at->format('M j, Y g:i A') }}">
-                                                            {{ $subEvent->event_at->diffForHumans() }}
-                                                        </span>
+                                                        <time x-data x-datetime="'{{ $subEvent->event_at->toIso8601String() }}'" x-datetime-format="relative"></time>
                                                     </flux:table.cell>
                                                 </flux:table.row>
                                             @endforeach

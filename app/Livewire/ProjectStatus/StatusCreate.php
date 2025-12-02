@@ -20,10 +20,18 @@ class StatusCreate extends Component
 
     public $project_status_date = null;
 
+    public $editingStatusId = null;
+
+    public $editingStatusCode = null;
+
+    public $editingStatusDate = null;
+
     public function rules()
     {
         return [
             'project_status' => 'required',
+            'editingStatusCode' => 'required',
+            'editingStatusDate' => 'required|date',
         ];
     }
 
@@ -89,6 +97,111 @@ class StatusCreate extends Component
             variant: 'success',
             heading: 'Status Update',
             // route / href / wire:click
+            text: '',
+        );
+    }
+
+    public function editStatus($statusId)
+    {
+        $status = ProjectStatus::findOrFail($statusId);
+        
+        // Authorize - only owner or admin can edit
+        if ($status->belongs_to_vendor_id !== auth()->user()->vendor->id && !auth()->user()->hasRole('Super Admin')) {
+            Flux::toast(
+                duration: 5000,
+                position: 'top right',
+                variant: 'danger',
+                heading: 'Unauthorized',
+                text: 'You cannot edit this status.',
+            );
+            return;
+        }
+        
+        $this->editingStatusId = $statusId;
+        $this->editingStatusCode = $status->status_code;
+        $this->editingStatusDate = $status->start_date->format('Y-m-d');
+        
+        $this->modal('edit_status_modal')->show();
+    }
+
+    public function updateStatus()
+    {
+        $this->validate([
+            'editingStatusCode' => 'required',
+            'editingStatusDate' => 'required|date',
+        ]);
+        
+        $status = ProjectStatus::findOrFail($this->editingStatusId);
+        
+        $status->update([
+            'status_code' => (int) $this->editingStatusCode,
+            'start_date' => $this->editingStatusDate,
+        ]);
+        
+        $this->editingStatusId = null;
+        $this->editingStatusCode = null;
+        $this->editingStatusDate = null;
+        
+        $this->mount($this->project);
+        $this->modal('edit_status_modal')->close();
+        $this->dispatch('refreshComponent')->to('projects.project-show');
+        
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Status Updated',
+            text: '',
+        );
+    }
+
+    public function deleteStatus()
+    {
+        if (!$this->editingStatusId) {
+            return;
+        }
+        
+        $status = ProjectStatus::findOrFail($this->editingStatusId);
+        
+        // Prevent deleting if it's the only status
+        if ($this->statuses->count() <= 1) {
+            Flux::toast(
+                duration: 5000,
+                position: 'top right',
+                variant: 'danger',
+                heading: 'Cannot Delete',
+                text: 'Project must have at least one status.',
+            );
+            return;
+        }
+        
+        // Authorize - only owner or admin can delete
+        if ($status->belongs_to_vendor_id !== auth()->user()->vendor->id && !auth()->user()->hasRole('Super Admin')) {
+            Flux::toast(
+                duration: 5000,
+                position: 'top right',
+                variant: 'danger',
+                heading: 'Unauthorized',
+                text: 'You cannot delete this status.',
+            );
+            return;
+        }
+        
+        $status->delete();
+        
+        $this->editingStatusId = null;
+        $this->editingStatusCode = null;
+        $this->editingStatusDate = null;
+        
+        $this->mount($this->project);
+        $this->modal('edit_status_modal')->close();
+        $this->dispatch('refreshComponent')->to('projects.project-show');
+        
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Status Deleted',
             text: '',
         );
     }

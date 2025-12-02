@@ -9,7 +9,7 @@
             <flux:accordion.content>
                 <ul role="list" class="mt-6">
                     @foreach($statuses as $status)
-                        <li class="relative flex gap-x-4 pb-1">
+                        <li class="relative flex gap-x-4 pb-1 group">
                             @if(!$loop->last)
                                 <div class="absolute top-0 left-0 flex justify-center w-6 -bottom-1">
                                     <div class="w-px bg-gray-200"></div>
@@ -28,6 +28,16 @@
                                 <div class="flex items-center gap-2">
                                     <flux:badge size="sm" :color="$status->badgeColor">{{ $status->title }}</flux:badge>
                                     <span class="text-xs text-gray-500">{{$status->start_date->format('m/d/y')}}</span>
+                                    
+                                    {{-- Edit button - hidden by default, shown on group hover (desktop only) --}}
+                                    <button 
+                                        wire:click="editStatus({{ $status->id }})"
+                                        type="button"
+                                        class="!hidden md:group-hover:!inline-flex text-gray-400 hover:text-blue-600 transition-colors"
+                                        title="Edit status"
+                                    >
+                                        <flux:icon.pencil variant="micro" />
+                                    </button>
                                 </div>
                                 
                                 @if($loop->index < count($statuses) - 1)
@@ -75,18 +85,18 @@
                         $diffInDays = floor($diffInMinutes / 1440);
                         
                         if ($diffInDays > 0) {
-                            $timeText = $diffInDays . ' day' . ($diffInDays === 1 ? '' : 's') . ' later';
+                            $timeText = $diffInDays . ' day' . ($diffInDays === 1 ? '' : 's') . ' since';
                         } elseif ($diffInHours > 0) {
                             $remainingMinutes = $diffInMinutes % 60;
                             $timeText = $diffInHours . ' hour' . ($diffInHours === 1 ? '' : 's');
                             if ($remainingMinutes > 0) {
                                 $timeText .= ', ' . $remainingMinutes . ' minute' . ($remainingMinutes === 1 ? '' : 's');
                             }
-                            $timeText .= ' later';
+                            $timeText .= ' since';
                         } elseif ($diffInMinutes > 0) {
-                            $timeText = $diffInMinutes . ' minute' . ($diffInMinutes === 1 ? '' : 's') . ' later';
+                            $timeText = $diffInMinutes . ' minute' . ($diffInMinutes === 1 ? '' : 's') . ' since';
                         } else {
-                            $timeText = 'less than a minute later';
+                            $timeText = 'less than a minute since';
                         }
                     @endphp
                     
@@ -115,3 +125,51 @@
         </flux:accordion.item>
     </flux:accordion>
 </flux:card>
+
+{{-- Edit Status Modal --}}
+<flux:modal name="edit_status_modal" class="min-w-[22rem]">
+    <form wire:submit="updateStatus">
+        <div class="space-y-6">
+            <div>
+                <flux:heading size="lg">Edit Status</flux:heading>
+            </div>
+
+            <flux:select 
+                wire:model="editingStatusCode" 
+                label="Status" 
+                variant="listbox" 
+                placeholder="Choose Status..."
+            >
+                @php($projectStatuses = \App\Models\ProjectStatus::selectableStatuses())
+                @foreach($projectStatuses as $status)
+                    <flux:select.option :value="$status['code']">
+                        <flux:badge size="sm" inset="top bottom" :color="$status['color']">
+                            {{ $status['label'] }}
+                        </flux:badge>
+                    </flux:select.option>
+                @endforeach
+            </flux:select>
+
+            <flux:input
+                wire:model="editingStatusDate"
+                label="Status Date"
+                type="date"
+            />
+            
+            <div class="flex gap-2">
+                <flux:button 
+                    wire:click="deleteStatus"
+                    type="button"
+                    variant="danger"
+                >
+                    Delete
+                </flux:button>
+                <flux:spacer />
+                <flux:modal.close>
+                    <flux:button variant="ghost">Cancel</flux:button>
+                </flux:modal.close>
+                <flux:button type="submit" variant="primary">Save Changes</flux:button>
+            </div>
+        </div>
+    </form>
+</flux:modal>

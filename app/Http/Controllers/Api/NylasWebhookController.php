@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\EmailTracking;
 use App\Models\Estimate;
+use App\Services\NylasService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -14,6 +15,10 @@ use Illuminate\Support\Facades\Log;
 
 class NylasWebhookController extends Controller
 {
+    public function __construct(
+        protected NylasService $nylasService
+    ) {}
+
     /**
      * Respond to Nylas webhook challenge requests.
      */
@@ -210,8 +215,50 @@ class NylasWebhookController extends Controller
         $isBounceNotification = $fromEmails->contains(function ($email) {
             return str_contains($email, 'mailer-daemon') || 
                    str_contains($email, 'postmaster') ||
-                   str_contains($email, 'noreply');
+                   str_contains($email, 'noreply') ||
+                   str_contains($email, 'microsoftexchange');
         });
+
+        // If webhook doesn't include from field OR it's from_self, fetch the message to check
+        // This catches both incoming bounces and outgoing messages that might actually be error notifications
+        if (!$isBounceNotification && ($fromEmails->isEmpty() || $fromSelf)) {
+            $messageId = $this->resolveMessageId($object);
+            $grantId = $data['grant_id'] ?? null;
+            
+            if ($messageId && $grantId) {
+                try {
+                    $message = $this->nylasService->getMessage($grantId, $messageId);
+                    $messageData = $message['data'] ?? [];
+                    
+                    // Check the actual sender
+                    $actualFrom = collect($messageData['from'] ?? [])
+                        ->map(fn (array $sender) => strtolower($sender['email'] ?? ''))
+                        ->filter();
+                    
+                    $isBounceNotification = $actualFrom->contains(function ($email) {
+                        return str_contains($email, 'mailer-daemon') || 
+                               str_contains($email, 'postmaster') ||
+                               str_contains($email, 'noreply') ||
+                               str_contains($email, 'microsoftexchange');
+                    });
+                    
+                    // Also check subject for bounce indicators
+                    $subject = strtolower($messageData['subject'] ?? '');
+                    if (str_contains($subject, 'undeliverable') || 
+                        str_contains($subject, 'delivery status notification') ||
+                        str_contains($subject, 'delivery failure') ||
+                        str_contains($subject, 'returned mail') ||
+                        str_contains($subject, 'mail delivery failed')) {
+                        $isBounceNotification = true;
+                    }
+                } catch (\Exception $e) {
+                    Log::channel('nylas')->warning('Failed to fetch message for bounce detection', [
+                        'message_id' => $messageId,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            }
+        }
 
         if ($isBounceNotification) {
             // Handle as a bounce instead of a reply
@@ -391,6 +438,17 @@ class NylasWebhookController extends Controller
             'opened_id' => $eventDetails['opened_id'],
         ];
 
+        // Store complete Nylas webhook payload for debugging
+        $metadata['nylas_webhook_payload'] = [
+            'full_data' => $data,
+            'full_object' => $object,
+            'raw_timestamp' => $object['timestamp'] ?? null,
+            'raw_recents' => $object['recents'] ?? null,
+            'processed_at' => now()->toIso8601String(),
+            'server_timezone' => date_default_timezone_get(),
+            'app_timezone' => config('app.timezone'),
+        ];
+
         return $metadata;
     }
 
@@ -484,7 +542,7 @@ class NylasWebhookController extends Controller
         }
 
         return [
-            'timestamp' => $normalizedTimestamp ? Carbon::createFromTimestamp($normalizedTimestamp) : now(),
+            'timestamp' => $normalizedTimestamp ? Carbon::createFromTimestamp($normalizedTimestamp)->setTimezone('UTC') : now()->setTimezone('UTC'),
             'ip' => $ip,
             'ip_addresses' => $ipAddresses,
             'user_agent' => $userAgent,
