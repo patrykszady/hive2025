@@ -20,14 +20,14 @@ class SyncEmailTrackingTimestamps extends Command
      *
      * @var string
      */
-    protected $description = 'Sync created_at and updated_at to match event_at for email tracking records';
+    protected $description = 'Fix updated_at timestamps that were corrupted during timezone conversion';
 
     /**
      * Execute the console command.
      */
     public function handle(): int
     {
-        $this->info('Syncing email_tracking timestamps...');
+        $this->info('Fixing email_tracking updated_at timestamps...');
         $this->newLine();
 
         $dryRun = $this->option('dry-run');
@@ -37,7 +37,8 @@ class SyncEmailTrackingTimestamps extends Command
             $this->newLine();
         }
 
-        // Fix records where updated_at doesn't match created_at (they should be the same)
+        // Find records where updated_at doesn't match created_at
+        // For immutable event logs, these should always be the same
         $count = DB::table('email_tracking')
             ->whereRaw('updated_at != created_at')
             ->count();
