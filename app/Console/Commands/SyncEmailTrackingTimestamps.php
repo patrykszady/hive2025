@@ -37,9 +37,9 @@ class SyncEmailTrackingTimestamps extends Command
             $this->newLine();
         }
 
-        // Find records where created_at is approximately 6 hours behind event_at (MST offset)
+        // Fix records where updated_at doesn't match created_at (they should be the same)
         $count = DB::table('email_tracking')
-            ->whereRaw('TIMESTAMPDIFF(SECOND, event_at, created_at) BETWEEN -21610 AND -21590')
+            ->whereRaw('updated_at != created_at')
             ->count();
 
         if ($count === 0) {
@@ -47,30 +47,28 @@ class SyncEmailTrackingTimestamps extends Command
             return Command::SUCCESS;
         }
 
-        $this->line("Found {$count} records with created_at ~6 hours behind event_at...");
+        $this->line("Found {$count} records where updated_at doesn't match created_at...");
 
         if ($dryRun) {
-            $this->line("  ○ Would sync created_at and updated_at to match event_at for {$count} records");
+            $this->line("  ○ Would set updated_at = created_at for {$count} records");
             
             // Show some examples
             $examples = DB::table('email_tracking')
-                ->whereRaw('TIMESTAMPDIFF(SECOND, event_at, created_at) BETWEEN -21610 AND -21590')
+                ->whereRaw('updated_at != created_at')
                 ->limit(5)
-                ->get(['id', 'event_type', 'event_at', 'created_at']);
+                ->get(['id', 'event_type', 'event_at', 'created_at', 'updated_at']);
             
             $this->newLine();
             $this->line('Examples:');
             foreach ($examples as $record) {
-                $this->line("  ID {$record->id}: event_at={$record->event_at}, created_at={$record->created_at}");
+                $this->line("  ID {$record->id}: event_at={$record->event_at}, created_at={$record->created_at}, updated_at={$record->updated_at}");
             }
         } else {
             DB::statement("
                 UPDATE email_tracking 
-                SET created_at = event_at, 
-                    updated_at = event_at
-                WHERE TIMESTAMPDIFF(SECOND, event_at, created_at) BETWEEN -21610 AND -21590
+                SET updated_at = created_at
             ");
-            $this->info("  ✓ Synced {$count} records");
+            $this->info("  ✓ Synced {$count} records (set updated_at = created_at)");
         }
 
         $this->newLine();
