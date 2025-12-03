@@ -69,16 +69,22 @@
                 @endif
             </x-details.card>
 
-            {{-- CHECK --}}
-            @if($expense->check)
-                <livewire:checks.checks-index :expense_check_id="$expense->check->id" :view="'expenses.show'"/>
+            {{-- CHECKS --}}
+            @if($expense->checks->isNotEmpty())
+                <livewire:checks.checks-index 
+                    :check_ids="$expense->checks->pluck('id')->toArray()" 
+                    :view="'expenses.show'" />
+            @elseif($expense->check)
+                <livewire:checks.checks-index 
+                    :expense_check_id="$expense->check->id" 
+                    :view="'expenses.show'" />
             @endif
 
             {{-- TRANSACTIONS (uses allTransactions() fallback: own -> check) --}}
         @if($expense->allTransactions()->isNotEmpty())
                 <x-transactions.list_card 
             :transactions="$expense->allTransactions()" 
-                    :title="$expense->transactions()->exists() ? 'Transactions' : ($expense->check?->transactions()->exists() ? 'Check Transactions' : 'Transactions')"
+                    :title="$expense->transactions()->exists() ? 'Transactions' : (($expense->checks()->exists() || $expense->check?->transactions()->exists()) ? 'Check Transactions' : 'Transactions')"
                 />
             @endif
         </div>

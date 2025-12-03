@@ -254,6 +254,27 @@ class ExpenseIndex extends Component
             $this->sortDirection
         )->paginateWithSearchData($this->paginate_number, pageName: 'expenses-page');
 
+        // When filtering by check, also include expenses from many-to-many relationship
+        if (is_numeric($this->check)) {
+            $pivotExpenseIds = \Illuminate\Support\Facades\DB::table('check_expense')
+                ->where('check_id', $this->check)
+                ->pluck('expense_id');
+            
+            if ($pivotExpenseIds->isNotEmpty()) {
+                $pivotExpenses = Expense::whereIn('id', $pivotExpenseIds)
+                    ->where('belongs_to_vendor_id', auth()->user()->vendor->id)
+                    ->get();
+                
+                // Merge with existing collection, avoiding duplicates
+                $mergedCollection = $expenses->getCollection()
+                    ->concat($pivotExpenses)
+                    ->unique('id')
+                    ->values();
+                
+                $expenses->setCollection($mergedCollection);
+            }
+        }
+
         if ($expenses->count() > 0) {
             $relations = [];
             if (! in_array($this->view, ['checks.show', 'vendors.show'])) {

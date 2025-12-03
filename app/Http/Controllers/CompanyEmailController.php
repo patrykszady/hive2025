@@ -1005,32 +1005,82 @@ class CompanyEmailController extends Controller
                             ]);
                         }
                     } else {
-                        // No duplicate found - create new expense
-                        $expense = new Expense;
-                        $expense->amount = $amount;
-                        $expense->reimbursment = null;
-                        $expense->project_id = $receipt_account->project_id;
-                        $expense->distribution_id = $receipt_account->distribution_id;
-                        $expense->created_by_user_id = 0; //automated
-                        $expense->date = $date;
-                        $expense->invoice = $invoice;
-                        $expense->vendor_id = $receipt->vendor_id; //Vendor_id of vendor being Queued
-                        $expense->note = null;
-                        $expense->belongs_to_vendor_id = $receipt_account->belongs_to_vendor_id;
-                        $expense->save();
+                        // Check if there are partial expenses that sum to this receipt total
+                        $partialExpenses = $this->findPartialExpensesToConsolidate(
+                            $receipt_account->belongs_to_vendor_id,
+                            $receipt->vendor_id,
+                            $amount,
+                            $date,
+                            $invoice
+                        );
 
-                        //ATTACHMENTS
-                        $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, $message);
-
-                        // Move to Saved folder
-                        if (!empty($folderMap['Saved'])) {
-                            $this->nylasService->moveEmailToFolder($messageId, $folderMap['Saved'], $grantId, $companyEmail->id);
-                        } else {
-                            Log::channel('nylas')->warning('Missing Saved folder configuration after processing receipt', [
-                                'grant_id' => $grantId,
-                                'company_email_id' => $companyEmail->id,
-                                'message_id' => $messageId,
+                        if ($partialExpenses->isNotEmpty()) {
+                            // Found partial expenses that sum to receipt total - consolidate them
+                            Log::channel('nylas')->info('Found partial expenses to consolidate', [
+                                'partial_expense_ids' => $partialExpenses->pluck('id')->toArray(),
+                                'partial_amounts' => $partialExpenses->pluck('amount')->toArray(),
+                                'receipt_total' => $amount,
+                                'vendor_id' => $receipt->vendor_id,
                             ]);
+
+                            // Create new expense with receipt
+                            $expense = new Expense;
+                            $expense->amount = $amount;
+                            $expense->reimbursment = null;
+                            $expense->project_id = $receipt_account->project_id;
+                            $expense->distribution_id = $receipt_account->distribution_id;
+                            $expense->created_by_user_id = 0; //automated
+                            $expense->date = $date;
+                            $expense->invoice = $invoice;
+                            $expense->vendor_id = $receipt->vendor_id;
+                            $expense->note = null;
+                            $expense->belongs_to_vendor_id = $receipt_account->belongs_to_vendor_id;
+                            $expense->save();
+
+                            //ATTACHMENTS
+                            $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, $message);
+
+                            // Transfer transactions and checks from partial expenses using shared method
+                            $this->consolidatePartialExpenses($expense, $partialExpenses);
+
+                            // Move to Saved folder
+                            if (!empty($folderMap['Saved'])) {
+                                $this->nylasService->moveEmailToFolder($messageId, $folderMap['Saved'], $grantId, $companyEmail->id);
+                            } else {
+                                Log::channel('nylas')->warning('Missing Saved folder configuration after consolidating expenses', [
+                                    'grant_id' => $grantId,
+                                    'company_email_id' => $companyEmail->id,
+                                    'message_id' => $messageId,
+                                ]);
+                            }
+                        } else {
+                            // No duplicate and no partial expenses found - create new expense
+                            $expense = new Expense;
+                            $expense->amount = $amount;
+                            $expense->reimbursment = null;
+                            $expense->project_id = $receipt_account->project_id;
+                            $expense->distribution_id = $receipt_account->distribution_id;
+                            $expense->created_by_user_id = 0; //automated
+                            $expense->date = $date;
+                            $expense->invoice = $invoice;
+                            $expense->vendor_id = $receipt->vendor_id; //Vendor_id of vendor being Queued
+                            $expense->note = null;
+                            $expense->belongs_to_vendor_id = $receipt_account->belongs_to_vendor_id;
+                            $expense->save();
+
+                            //ATTACHMENTS
+                            $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, $message);
+
+                            // Move to Saved folder
+                            if (!empty($folderMap['Saved'])) {
+                                $this->nylasService->moveEmailToFolder($messageId, $folderMap['Saved'], $grantId, $companyEmail->id);
+                            } else {
+                                Log::channel('nylas')->warning('Missing Saved folder configuration after processing receipt', [
+                                    'grant_id' => $grantId,
+                                    'company_email_id' => $companyEmail->id,
+                                    'message_id' => $messageId,
+                                ]);
+                            }
                         }
                     }
                 }
@@ -1226,34 +1276,79 @@ class CompanyEmailController extends Controller
                                 }
                             }
                         } elseif ($duplicates->isEmpty()) {
-                            // Use fuzzy matching to determine vendor in the "no duplicate" branch.
-                            $transaction_vendor_id = $transaction ? ($transaction->vendor_id ?? null) : null;
+                            // Check if there are partial expenses that sum to this receipt total
+                            $partialExpenses = $this->findPartialExpensesToConsolidate(
+                                $email_vendor->id,
+                                $expense_vendor_id ?? 0,
+                                $ocr_receipt_data['fields']['total'],
+                                $ocr_receipt_data['fields']['transaction_date'],
+                                $ocr_receipt_data['fields']['invoice_number'] ?? null
+                            );
 
-                            $ocrVendorName = $ocr_receipt_data['fields']['merchant_name'];
-                            $vendors = Vendor::withoutGlobalScopes()->get();
-                            $matchedVendor = $this->fuzzyMatchVendor($ocrVendorName, $vendors, 70.0);
-                            $fuzzyVendorId = $matchedVendor ? $matchedVendor->id : 0;
+                            if ($partialExpenses->isNotEmpty()) {
+                                // Found partial expenses that sum to receipt total - consolidate them
+                                Log::channel('nylas')->info('AutoReceipts: Found partial expenses to consolidate', [
+                                    'partial_expense_ids' => $partialExpenses->pluck('id')->toArray(),
+                                    'partial_amounts' => $partialExpenses->pluck('amount')->toArray(),
+                                    'receipt_total' => $ocr_receipt_data['fields']['total'],
+                                    'vendor_id' => $expense_vendor_id,
+                                ]);
 
-                            // Use the transaction vendor if available, otherwise use the fuzzy match.
-                            $expense_vendor_id = $transaction_vendor_id ?? $fuzzyVendorId;
+                                // Use fuzzy matching to determine vendor if needed
+                                $transaction_vendor_id = $transaction ? ($transaction->vendor_id ?? null) : null;
+                                $ocrVendorName = $ocr_receipt_data['fields']['merchant_name'];
+                                $vendors = Vendor::withoutGlobalScopes()->get();
+                                $matchedVendor = $this->fuzzyMatchVendor($ocrVendorName, $vendors, 70.0);
+                                $fuzzyVendorId = $matchedVendor ? $matchedVendor->id : 0;
+                                $expense_vendor_id = $transaction_vendor_id ?? $fuzzyVendorId;
 
-                            $expense = Expense::create([
-                                'amount'               => $ocr_receipt_data['fields']['total'],
-                                'date'                 => $ocr_receipt_data['fields']['transaction_date'],
-                                'project_id'           => null,
-                                'distribution_id'      => null,
-                                'vendor_id'            => $expense_vendor_id,
-                                'check_id'             => null,
-                                'paid_by'              => null,
-                                'belongs_to_vendor_id' => $email_vendor->id,
-                                'created_by_user_id'   => 0,
-                                'invoice'              => $ocr_receipt_data['fields']['invoice_number'] ?: null,
-                            ]);
+                                // Create new expense with receipt
+                                $expense = Expense::create([
+                                    'amount'               => $ocr_receipt_data['fields']['total'],
+                                    'date'                 => $ocr_receipt_data['fields']['transaction_date'],
+                                    'project_id'           => null,
+                                    'distribution_id'      => null,
+                                    'vendor_id'            => $expense_vendor_id,
+                                    'check_id'             => null,
+                                    'paid_by'              => null,
+                                    'belongs_to_vendor_id' => $email_vendor->id,
+                                    'created_by_user_id'   => 0,
+                                    'invoice'              => $ocr_receipt_data['fields']['invoice_number'] ?: null,
+                                ]);
 
-                            // If exactly one bank transaction matched earlier, link it now
-                            if (isset($transaction) && $transaction && is_null($transaction->expense_id)) {
-                                $transaction->expense_id = $expense->id;
-                                $transaction->save();
+                                // Transfer transactions and checks from partial expenses using shared method
+                                $this->consolidatePartialExpenses($expense, $partialExpenses, 'AutoReceipts:');
+                            } else {
+                                // No duplicate and no partial expenses found - create new expense
+                                // Use fuzzy matching to determine vendor in the "no duplicate" branch.
+                                $transaction_vendor_id = $transaction ? ($transaction->vendor_id ?? null) : null;
+
+                                $ocrVendorName = $ocr_receipt_data['fields']['merchant_name'];
+                                $vendors = Vendor::withoutGlobalScopes()->get();
+                                $matchedVendor = $this->fuzzyMatchVendor($ocrVendorName, $vendors, 70.0);
+                                $fuzzyVendorId = $matchedVendor ? $matchedVendor->id : 0;
+
+                                // Use the transaction vendor if available, otherwise use the fuzzy match.
+                                $expense_vendor_id = $transaction_vendor_id ?? $fuzzyVendorId;
+
+                                $expense = Expense::create([
+                                    'amount'               => $ocr_receipt_data['fields']['total'],
+                                    'date'                 => $ocr_receipt_data['fields']['transaction_date'],
+                                    'project_id'           => null,
+                                    'distribution_id'      => null,
+                                    'vendor_id'            => $expense_vendor_id,
+                                    'check_id'             => null,
+                                    'paid_by'              => null,
+                                    'belongs_to_vendor_id' => $email_vendor->id,
+                                    'created_by_user_id'   => 0,
+                                    'invoice'              => $ocr_receipt_data['fields']['invoice_number'] ?: null,
+                                ]);
+
+                                // If exactly one bank transaction matched earlier, link it now
+                                if (isset($transaction) && $transaction && is_null($transaction->expense_id)) {
+                                    $transaction->expense_id = $expense->id;
+                                    $transaction->save();
+                                }
                             }
                         } else {
                             // Fallback branch for ambiguous situations.
@@ -2117,5 +2212,149 @@ class CompanyEmailController extends Controller
         }
 
         return null;
+    }
+
+    /**
+     * Consolidate partial expenses by transferring their transactions and checks to a new consolidated expense.
+     *
+     * @param Expense $consolidatedExpense The expense to consolidate into
+     * @param \Illuminate\Support\Collection $partialExpenses Collection of partial expenses to consolidate
+     * @param string $logPrefix Prefix for log messages (e.g. 'AutoReceipts:' or '')
+     * @return void
+     */
+    protected function consolidatePartialExpenses(
+        Expense $consolidatedExpense,
+        \Illuminate\Support\Collection $partialExpenses,
+        string $logPrefix = ''
+    ): void {
+        $checkIds = [];
+        
+        foreach ($partialExpenses as $partialExpense) {
+            // Transfer any transactions from partial expense
+            $transactions = Transaction::withoutGlobalScopes()
+                ->where('expense_id', $partialExpense->id)
+                ->get();
+            
+            if ($transactions->isNotEmpty()) {
+                foreach ($transactions as $transaction) {
+                    $transaction->expense_id = $consolidatedExpense->id;
+                    $transaction->save();
+                }
+                
+                Log::channel('nylas')->info(trim($logPrefix . ' Transferred transactions from partial expense'), [
+                    'partial_expense_id' => $partialExpense->id,
+                    'transaction_ids' => $transactions->pluck('id')->toArray(),
+                    'new_expense_id' => $consolidatedExpense->id,
+                ]);
+            }
+            
+            // Track check_id for many-to-many linking
+            if ($partialExpense->check_id) {
+                $checkIds[] = $partialExpense->check_id;
+            }
+            
+            // Soft delete the partial expense
+            Log::channel('nylas')->info(trim($logPrefix . ' Soft deleting consolidated partial expense'), [
+                'partial_expense_id' => $partialExpense->id,
+                'partial_amount' => $partialExpense->amount,
+                'check_id' => $partialExpense->check_id,
+                'new_expense_id' => $consolidatedExpense->id,
+            ]);
+            $partialExpense->delete(); // Soft delete
+        }
+        
+        // Link checks to the new expense via many-to-many relationship
+        if (!empty($checkIds)) {
+            $consolidatedExpense->checks()->attach($checkIds);
+            Log::channel('nylas')->info(trim($logPrefix . ' Linked checks to consolidated expense'), [
+                'expense_id' => $consolidatedExpense->id,
+                'check_ids' => $checkIds,
+            ]);
+        }
+    }
+
+    /**
+     * Find partial expenses that sum to the receipt total for consolidation.
+     * This handles cases where users manually split expenses before receiving the full receipt.
+     *
+     * @param int $belongs_to_vendor_id
+     * @param int $vendor_id
+     * @param string $amount The full receipt total
+     * @param string $date Receipt date
+     * @param string|null $invoice Receipt invoice number if available
+     * @return \Illuminate\Support\Collection Collection of expenses to consolidate, empty if none found
+     */
+    protected function findPartialExpensesToConsolidate(
+        int $belongs_to_vendor_id,
+        int $vendor_id,
+        string $amount,
+        string $date,
+        ?string $invoice = null
+    ): \Illuminate\Support\Collection {
+        // Look for expenses in a ±5 day window
+        $startDate = Carbon::parse($date)->subDays(5)->format('Y-m-d');
+        $endDate = Carbon::parse($date)->addDays(5)->format('Y-m-d');
+
+        // Find all potential partial expenses for this vendor without receipts
+        $candidates = Expense::withoutGlobalScopes()
+            ->where('belongs_to_vendor_id', $belongs_to_vendor_id)
+            ->where('vendor_id', $vendor_id)
+            ->whereNull('deleted_at')
+            ->whereBetween('date', [$startDate, $endDate])
+            ->whereDoesntHave('receipts') // Only expenses without receipts (manually created)
+            ->get();
+
+        if ($candidates->isEmpty()) {
+            return collect();
+        }
+
+        $receiptTotal = (float) $amount;
+        
+        // If invoice number exists, only match expenses with the same invoice OR no invoice
+        if ($invoice !== null && $invoice !== '') {
+            $candidates = $candidates->filter(function ($expense) use ($invoice) {
+                return empty($expense->invoice) || $expense->invoice === $invoice;
+            });
+        }
+
+        // Try to find combinations that sum to the receipt total
+        // Start with checking if 2 expenses sum to total (most common case)
+        $candidateArray = $candidates->toArray();
+        $count = count($candidateArray);
+        
+        // Check pairs (most common: user splits into 2 parts)
+        for ($i = 0; $i < $count - 1; $i++) {
+            for ($j = $i + 1; $j < $count; $j++) {
+                $sum = (float)$candidateArray[$i]['amount'] + (float)$candidateArray[$j]['amount'];
+                if (abs($sum - $receiptTotal) < 0.01) { // Within 1 cent
+                    return collect([
+                        Expense::find($candidateArray[$i]['id']),
+                        Expense::find($candidateArray[$j]['id'])
+                    ]);
+                }
+            }
+        }
+        
+        // Check triplets (less common but possible)
+        if ($count >= 3) {
+            for ($i = 0; $i < $count - 2; $i++) {
+                for ($j = $i + 1; $j < $count - 1; $j++) {
+                    for ($k = $j + 1; $k < $count; $k++) {
+                        $sum = (float)$candidateArray[$i]['amount'] + 
+                               (float)$candidateArray[$j]['amount'] + 
+                               (float)$candidateArray[$k]['amount'];
+                        if (abs($sum - $receiptTotal) < 0.01) {
+                            return collect([
+                                Expense::find($candidateArray[$i]['id']),
+                                Expense::find($candidateArray[$j]['id']),
+                                Expense::find($candidateArray[$k]['id'])
+                            ]);
+                        }
+                    }
+                }
+            }
+        }
+
+        return collect();
     }
 }

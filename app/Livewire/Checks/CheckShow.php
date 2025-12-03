@@ -26,9 +26,14 @@ class CheckShow extends Component
         $this->authorize('view', $this->check);
         //paid_by user_id 60 = Robert, find vendor_id on vendor_user table "team members"(include previous/all
 
+        // Get expense IDs from both check_id and many-to-many relationship
+        $expenseIdsFromCheckId = Expense::where('check_id', $this->check->id)->pluck('id');
+        $expenseIdsFromPivot = $this->check->expensesMany()->pluck('expenses.id');
+        $allExpenseIds = $expenseIdsFromCheckId->merge($expenseIdsFromPivot)->unique();
+
         // EXPENSES
         $vendor_expenses =
-            Expense::where('check_id', $this->check->id)
+            Expense::whereIn('id', $allExpenseIds)
                 ->where(function ($query) {
                     $query->whereNull('reimbursment')
                         ->orWhere('reimbursment', 'Client');
@@ -52,17 +57,17 @@ class CheckShow extends Component
             : collect();
 
         $user_distributions =
-            Expense::whereNotNull('distribution_id')
+            Expense::whereIn('id', $allExpenseIds)
+                ->whereNotNull('distribution_id')
                 ->whereNull('paid_by')
                 ->whereNull('reimbursment')
-                ->where('check_id', $this->check->id)
                 ->get();
 
         // Paid Expenses
         $user_paid_expenses = $this->check->user_id
-            ? Expense::where('paid_by', $this->check->user_id)
+            ? Expense::whereIn('id', $allExpenseIds)
+                ->where('paid_by', $this->check->user_id)
                 ->whereNotNull('paid_by')
-                ->where('check_id', $this->check->id)
                 ->where(function ($query) {
                     $query->whereNull('reimbursment')
                         ->orWhere('reimbursment', 'Client')
@@ -75,7 +80,8 @@ class CheckShow extends Component
             : collect();
 
         $user_paid_by_reimbursements = $this->check->user_id
-            ? Expense::where('paid_by', $this->check->user_id)
+            ? Expense::whereIn('id', $allExpenseIds)
+                ->where('paid_by', $this->check->user_id)
                 ->whereNotNull('paid_by')
                 ->where('check_id', $this->check->id)
                 ->whereNotNull('reimbursment')
@@ -85,9 +91,9 @@ class CheckShow extends Component
             : collect();
 
         $user_reimbursement_expenses = $this->check->user_id
-            ? Expense::where('reimbursment', $this->check->user_id)
+            ? Expense::whereIn('id', $allExpenseIds)
+                ->where('reimbursment', $this->check->user_id)
                 ->whereNull('paid_by')
-                ->where('check_id', $this->check->id)
                 ->orderBy('date', 'DESC')
                 ->get()
                 ->keyBy('id')

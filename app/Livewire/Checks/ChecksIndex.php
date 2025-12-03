@@ -36,6 +36,8 @@ class ChecksIndex extends Component
 
     public $expense_check_id = '';
 
+    public $check_ids = [];
+
     public $sortBy = 'date';
 
     public $sortDirection = 'desc';
@@ -105,13 +107,16 @@ class ChecksIndex extends Component
                 ->when($this->expense_check_id, function ($query) {
                     return $query->where('id', $this->expense_check_id);
                 })
+                ->when(!empty($this->check_ids), function ($query) {
+                    return $query->whereIn('id', $this->check_ids);
+                })
                 ->when($amount, function ($query) {
                     return $query->where('amount', 'like', "{$this->amount}%");
                 })
                 ->when($this->vendor, function ($query) {
                     return $query->where('vendor_id', $this->vendor);
                 })
-                ->simplePaginate($paginate_number);
+                ->paginate($paginate_number);
 
         return $checks;
     }

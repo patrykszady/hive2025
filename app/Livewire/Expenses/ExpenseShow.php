@@ -29,6 +29,8 @@ class ExpenseShow extends Component
             },
             // Load distribution so Expense::project() withDefault can use the real name
             'distribution',
+            // Load checks for many-to-many relationship with their bank accounts
+            'checks.bank_account.bank',
         ]);
 
     }

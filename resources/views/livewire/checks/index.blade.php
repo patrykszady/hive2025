@@ -67,7 +67,11 @@
                 </flux:table.rows>
             </flux:table>
 
-            <flux:pagination :paginator="$this->checks" />
+            @if($this->checks->hasPages())
+                <div class="px-6 pb-6 pt-4">
+                    <flux:pagination :paginator="$this->checks" />
+                </div>
+            @endif
         </div>
     </flux:card>
 </div>
