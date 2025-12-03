@@ -32,7 +32,7 @@ class SplitCheckTransactions extends Command
         // Specific checks that need splitting
         $checksToProcess = [
             ['check_id' => 3604, 'expense_id' => 25829],
-            ['check_id' => 3015, 'expense_id' => 22378],
+            // ['check_id' => 3015, 'expense_id' => 22378], // This check is legitimate - 2 transactions make up 1 check payment
             ['check_id' => 3027, 'expense_id' => 22484],
             ['check_id' => 3009, 'expense_id' => 22381],
         ];

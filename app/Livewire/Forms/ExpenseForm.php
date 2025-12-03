@@ -276,6 +276,9 @@ class ExpenseForm extends Form
 
         $expense_details = $this->expenseDetails();
 
+        // Save the original amount before updating
+        $originalAmount = $this->expense->amount;
+
         $this->expense->update([
             'amount' => $this->amount,
             'date' => $this->date,
@@ -319,14 +322,15 @@ class ExpenseForm extends Form
 
             // If there's an existing check with these details, update it
             if (isset($existing_check)) {
-                // If this expense already had a different check, adjust that check's amount
+                // If this expense already had a different check, recalculate that check's amount
                 if ($check && $check->id !== $existing_check->id) {
-                    $check->amount = $check->amount - $this->amount;
+                    $check->amount = $check->expenses->sum('amount') + $check->timesheets->sum('amount');
                     $check->save();
                 }
                 
                 $check = $existing_check;
-                $check->amount = $check->amount + $this->amount;
+                // Recalculate check amount from all linked expenses and timesheets
+                $check->amount = $check->expenses->sum('amount') + $check->timesheets->sum('amount');
                 $check->save();
             } 
             // Otherwise create a new check only if we have all required values
@@ -358,13 +362,14 @@ class ExpenseForm extends Form
             }
         } else if ($check) {
             // If there's no bank account or check details but there was a check previously,
-            // detach the check from this expense
-            $check->amount = $check->amount - $this->amount;
-            $check->save();
-            
+            // detach the check from this expense and recalculate check amount
             $this->expense->update([
                 'check_id' => null
             ]);
+            
+            // Recalculate check amount from remaining linked expenses and timesheets
+            $check->amount = $check->expenses->sum('amount') + $check->timesheets->sum('amount');
+            $check->save();
         }
 
         $this->save_splits($this->expense);
@@ -439,7 +444,8 @@ class ExpenseForm extends Form
 
             if ($existing_check) {
                 $check = $existing_check;
-                $check->amount = $check->amount + $this->amount;
+                // Recalculate check amount from all linked expenses and timesheets
+                $check->amount = $check->expenses->sum('amount') + $check->timesheets->sum('amount');
                 $check->save();
                 
             } else {
