@@ -207,6 +207,28 @@ class NylasWebhookController extends Controller
 
         $fromSelf = !empty($object['from_self']);
         
+        // If from_self, check if this is a duplicate of a recently sent message
+        // Nylas fires thread.replied webhooks for messages you send, which we already track as "sent"
+        if ($fromSelf) {
+            $messageId = $this->resolveMessageId($object);
+            
+            if ($messageId) {
+                // Check if a "sent" event exists for this message within the last 30 seconds
+                $recentSentEvent = EmailTracking::where('nylas_message_id', $messageId)
+                    ->where('event_type', 'sent')
+                    ->where('event_at', '>=', now()->subSeconds(30))
+                    ->exists();
+                
+                if ($recentSentEvent) {
+                    Log::channel('nylas')->info('Skipping thread.replied webhook for recently sent message', [
+                        'message_id' => $messageId,
+                        'from_self' => true,
+                    ]);
+                    return;
+                }
+            }
+        }
+        
         // If from_self, track as outgoing reply; otherwise as incoming reply
         $eventType = $fromSelf ? 'replied_outgoing' : 'replied';
 
