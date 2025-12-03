@@ -40,10 +40,12 @@ class NylasWebhookController extends Controller
     public function handle(Request $request): JsonResponse
     {
         $payload = $request->all();
+        $nylasRequestId = $request->header('X-Nylas-Request-Id');
 
         // Log all incoming webhooks to dedicated channel
         Log::channel('nylas_webhooks')->info('Received webhook', [
             'type' => data_get($payload, 'type'),
+            'nylas_request_id' => $nylasRequestId,
             'payload' => $payload,
         ]);
 
@@ -66,6 +68,7 @@ class NylasWebhookController extends Controller
 
         if (isset($handlers[$type])) {
             $handler = $handlers[$type];
+            $payload['nylas_request_id'] = $nylasRequestId;
             $this->{$handler}($payload);
         } else {
             Log::channel('nylas')->info('Unhandled webhook type', ['type' => $type]);
@@ -444,6 +447,7 @@ class NylasWebhookController extends Controller
             'full_object' => $object,
             'raw_timestamp' => $object['timestamp'] ?? null,
             'raw_recents' => $object['recents'] ?? null,
+            'nylas_request_id' => $data['nylas_request_id'] ?? null,
             'processed_at' => now()->toIso8601String(),
             'server_timezone' => date_default_timezone_get(),
             'app_timezone' => config('app.timezone'),
