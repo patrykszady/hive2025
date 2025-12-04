@@ -28,6 +28,8 @@ class ExpenseCreate extends Component
     public $split = false;
     public $splits = false;
     public $expense_splits = [];
+    
+    public $existing_check_id = null;
 
     public $view_text = [
         'card_title' => 'Create Expense',
@@ -74,6 +76,33 @@ class ExpenseCreate extends Component
     public function distributions()
     {
         return Distribution::all(['id', 'name']);
+    }
+    
+    #[Computed]
+    public function available_checks()
+    {
+        // Get recent checks from the last 60 days for current vendor
+        return Check::with('vendor', 'bank_account.bank')
+            ->whereNull('deleted_at')
+            ->where('date', '>=', now()->subDays(60))
+            ->orderBy('date', 'DESC')
+            ->limit(50)
+            ->get()
+            ->map(function ($check) {
+                $label = "#{$check->id} - " . $check->check_type;
+                if ($check->check_type === 'Check') {
+                    $label .= " #{$check->check_number}";
+                }
+                $label .= " - $" . number_format($check->amount, 2);
+                $label .= " - " . $check->date->format('m/d/Y');
+                if ($check->vendor) {
+                    $label .= " - " . $check->vendor->business_name;
+                }
+                return [
+                    'id' => $check->id,
+                    'label' => $label,
+                ];
+            });
     }
 
     // Your existing methods don't need to change since they'll now 
@@ -175,6 +204,7 @@ class ExpenseCreate extends Component
         $this->expense = Expense::make();
         $this->form->reset();
         $this->clearCheckFields();
+        $this->existing_check_id = null;
         $this->dispatch('resetSplits')->to('expenses.expense-splits-create');
         $this->split = false;
         $this->splits = false;
@@ -326,6 +356,18 @@ class ExpenseCreate extends Component
         }
 
         $expense = $this->form->store();
+        
+        // If user selected an existing check, manually assign it and recalculate
+        if ($this->existing_check_id) {
+            $expense->check_id = $this->existing_check_id;
+            $expense->save();
+            
+            // Recalculate the check amount
+            $check = Check::find($this->existing_check_id);
+            $check->amount = $check->expenses->sum('amount') + $check->timesheets->sum('amount');
+            $check->save();
+        }
+        
         $this->modal('expenses_form_modal')->close();
 
         Flux::toast(

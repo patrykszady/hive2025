@@ -149,11 +149,31 @@
             </flux:select>
         </div>
 
+        {{-- ATTACH TO EXISTING CHECK (Optional) --}}
+        <div
+            x-data="{ open: @entangle('form.paid_by'), existing_check: @entangle('existing_check_id') }"
+            x-show="!open"
+            x-transition
+            >
+            <flux:select 
+                wire:model.live="existing_check_id" 
+                label="Attach to Existing Check (Optional)"
+                placeholder="Create new check or select existing..."
+                searchable
+            >
+                <flux:select.option value="">Create New Check</flux:select.option>
+                @foreach($this->available_checks as $check)
+                    <flux:select.option value="{{$check['id']}}">{{$check['label']}}</flux:select.option>
+                @endforeach
+            </flux:select>
+            <flux:description>Select an existing check to add this expense to it, or leave blank to create a new check.</flux:description>
+        </div>
+
         {{-- CHECK --}}
         {{-- SHOULD Be a component here --}}
         <div
-            x-data="{ open: @entangle('form.paid_by'), project_id: @entangle('form.project_id'), splits: @entangle('splits') }"
-            x-show="(project_id || splits) && !open"
+            x-data="{ open: @entangle('form.paid_by'), project_id: @entangle('form.project_id'), splits: @entangle('splits'), existing_check: @entangle('existing_check_id') }"
+            x-show="(project_id || splits) && !open && !existing_check"
             x-transition
             >
             @include('livewire.checks._payment_form', ['hideBasicFields' => true])
