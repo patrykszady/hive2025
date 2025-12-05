@@ -122,6 +122,13 @@ Schedule::call(function () {
   ->onOneServer();
 
 Schedule::call(function () {
+    app(\App\Http\Controllers\TransactionController::class)->match_associated_expenses();
+})->everyTenMinutes()
+  ->name('match-associated-expenses')
+  ->withoutOverlapping()
+  ->onOneServer();
+
+Schedule::call(function () {
     app(\App\Http\Controllers\TransactionController::class)->add_category_to_expense();
 })->hourly()
   ->name('add-category-to-expense')

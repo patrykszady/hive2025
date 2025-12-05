@@ -1774,6 +1774,68 @@ class TransactionController extends Controller
             }
         }
     }
+    
+    /**
+     * Match existing expenses that are associated (credit/debit pairs).
+     * Finds negative expenses (refunds/credits) and links them to matching positive expenses (payments).
+     */
+    public function match_associated_expenses()
+    {
+        $hive_vendors = Vendor::hiveVendors()->get();
+        
+        foreach ($hive_vendors as $hive_vendor) {
+            // Find negative expenses (credits/refunds) with transactions
+            $credit_expenses = Expense::withoutGlobalScopes()
+                ->whereNull('deleted_at')
+                ->whereNull('parent_expense_id')
+                ->where('belongs_to_vendor_id', $hive_vendor->id)
+                ->where('amount', '<', 0)
+                ->whereHas('transaction')
+                ->whereDate('date', '>=', now()->subMonths(6))
+                ->get();
+            
+            foreach ($credit_expenses as $credit_expense) {
+                $positive_amount = abs($credit_expense->amount);
+                $start_date = $credit_expense->date->subDays(2)->format('Y-m-d');
+                $end_date = $credit_expense->date->addDays(10)->format('Y-m-d');
+                
+                // Find matching positive expense (debit/payment)
+                $debit_expenses = Expense::withoutGlobalScopes()
+                    ->whereNull('deleted_at')
+                    ->whereNull('parent_expense_id')
+                    ->where('belongs_to_vendor_id', $hive_vendor->id)
+                    ->where('vendor_id', $credit_expense->vendor_id)
+                    ->where('amount', $positive_amount)
+                    ->whereBetween('date', [$start_date, $end_date])
+                    ->get();
+                
+                if ($debit_expenses->isEmpty()) {
+                    continue;
+                }
+                
+                // Calculate date difference for each potential match
+                foreach ($debit_expenses as $debit_expense) {
+                    $debit_expense->date_diff = $credit_expense->date->floatDiffInDays($debit_expense->date);
+                }
+                
+                // Get closest match by date
+                $debit_expense = $debit_expenses->sortBy('date_diff')->first();
+                
+                // Link them as associated expenses
+                $debit_expense->parent_expense_id = $credit_expense->id;
+                $debit_expense->save();
+                
+                Log::info('Matched associated expenses', [
+                    'credit_expense_id' => $credit_expense->id,
+                    'credit_amount' => $credit_expense->amount,
+                    'debit_expense_id' => $debit_expense->id,
+                    'debit_amount' => $debit_expense->amount,
+                    'vendor_id' => $credit_expense->vendor_id,
+                    'date_diff_days' => $debit_expense->date_diff,
+                ]);
+            }
+        }
+    }
 
     public function transaction_vendor_bulk_match_splits($match, $expense, $amount)
     {
