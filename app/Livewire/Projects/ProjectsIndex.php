@@ -287,8 +287,9 @@ class ProjectsIndex extends Component
             ->get()
             ->groupBy('nylas_thread_id')
             ->map(function ($threadEvents) {
-                // Get the latest event for this thread
-                $latestEvent = $threadEvents->first();
+                // Prioritize 'replied' as the main event, even if not the latest chronologically
+                $repliedEvent = $threadEvents->firstWhere('event_type', 'replied');
+                $latestEvent = $repliedEvent ?? $threadEvents->first();
                 
                 // Get all unique recipient emails from all events in this thread
                 $allRecipientEmails = $threadEvents

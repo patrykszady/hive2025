@@ -896,9 +896,23 @@ class TransactionController extends Controller
 
     public function add_expense_to_transactions()
     {
+        // Memory management: limit number of expenses processed per run
+        // This prevents memory exhaustion as data grows over time
+        $maxExpensesPerRun = 50;
+        $processedCount = 0;
+        
         $hive_vendors = Vendor::hiveVendors()->get();
 
         foreach ($hive_vendors as $hive_vendor) {
+            // Early exit if we've hit our processing limit
+            if ($processedCount >= $maxExpensesPerRun) {
+                Log::info('Reached max expenses per run limit', [
+                    'processed' => $processedCount,
+                    'limit' => $maxExpensesPerRun,
+                ]);
+                break;
+            }
+            
             $hive_vendor_bank_account_ids = $hive_vendor->bank_accounts->pluck('id');
 
             $expenses = Expense::with('transactions')
@@ -909,9 +923,27 @@ class TransactionController extends Controller
                 ->whereNull('paid_by') // Exclude employee reimbursements - they match to check, not bank transactions
                 //where transacitons->sum != $expense(item)->sum  \\ whereNull checked_at (transactions add up to expense)
                 ->whereDate('date', '>=', Carbon::now()->subMonths(12))
+                ->orderBy('date', 'DESC') // Process most recent first
+                ->limit($maxExpensesPerRun - $processedCount) // Only get what we can process
                 ->get();
 
             foreach ($expenses as $expense) {
+                $processedCount++;
+                
+                // Check memory usage periodically
+                if ($processedCount % 10 === 0) {
+                    $memoryMB = memory_get_usage(true) / 1024 / 1024;
+                    $limitMB = (int) ini_get('memory_limit');
+                    
+                    if ($limitMB > 0 && $memoryMB > ($limitMB * 0.75)) {
+                        Log::warning('Memory usage high - stopping expense processing', [
+                            'memory_mb' => round($memoryMB, 2),
+                            'limit_mb' => $limitMB,
+                            'processed' => $processedCount,
+                        ]);
+                        break 2; // Break out of both loops
+                    }
+                }
                 $start_date = $expense->date->subDays(7)->format('Y-m-d');
                 $end_date = $expense->date->addDays(21)->format('Y-m-d');
 
@@ -1633,15 +1665,16 @@ class TransactionController extends Controller
     {
         // dd([$arr, $n, $ids, $model]);
         
-        // Safety check: limit to prevent memory exhaustion
+        // Reduced safety limit to prevent memory exhaustion
         // 2^15 = 32k combinations (safe)
-        // 2^18 = 262k combinations (pushing it)
-        // 2^20 = 1M combinations (memory exhaustion risk)
-        if ($n > 18) {
+        // 2^16 = 65k combinations (safer limit for production)
+        // 2^18 = 262k combinations (memory exhaustion risk)
+        if ($n > 16) {
             Log::warning('subsetSums called with too many elements - skipping to prevent memory exhaustion', [
                 'n' => $n,
                 'model' => $model,
                 'max_combinations' => 1 << $n,
+                'memory_limit_mb' => ini_get('memory_limit'),
                 'current_memory_mb' => round(memory_get_usage(true) / 1024 / 1024, 2),
             ]);
             return [];
@@ -1659,6 +1692,27 @@ class TransactionController extends Controller
         // Consider all numbers
         // from 0 to 2^n - 1
         for ($i = 0; $i < $total; $i++) {
+            // Check memory every 1000 iterations to prevent exhaustion
+            if ($i % 1000 === 0) {
+                $memoryUsageMB = memory_get_usage(true) / 1024 / 1024;
+                $memoryLimitMB = ini_get('memory_limit');
+                if ($memoryLimitMB !== '-1') {
+                    $memoryLimitMB = (int) $memoryLimitMB;
+                    // If we've used more than 80% of available memory, stop
+                    if ($memoryUsageMB > ($memoryLimitMB * 0.8)) {
+                        Log::warning('subsetSums approaching memory limit - stopping early', [
+                            'n' => $n,
+                            'model' => $model,
+                            'iteration' => $i,
+                            'total_iterations' => $total,
+                            'memory_used_mb' => round($memoryUsageMB, 2),
+                            'memory_limit_mb' => $memoryLimitMB,
+                        ]);
+                        break;
+                    }
+                }
+            }
+            
             $sum = 0;
             $summy = [];
             // Consider binary reprsentation of
@@ -1821,6 +1875,12 @@ class TransactionController extends Controller
                 // Get closest match by date
                 $debit_expense = $debit_expenses->sortBy('date_diff')->first();
                 
+                // Store date_diff for logging before removing it
+                $dateDiff = $debit_expense->date_diff;
+                
+                // Remove temporary date_diff property before saving
+                unset($debit_expense->date_diff);
+                
                 // Link them as associated expenses
                 $debit_expense->parent_expense_id = $credit_expense->id;
                 $debit_expense->save();
@@ -1831,7 +1891,7 @@ class TransactionController extends Controller
                     'debit_expense_id' => $debit_expense->id,
                     'debit_amount' => $debit_expense->amount,
                     'vendor_id' => $credit_expense->vendor_id,
-                    'date_diff_days' => $debit_expense->date_diff,
+                    'date_diff_days' => $dateDiff,
                 ]);
             }
         }

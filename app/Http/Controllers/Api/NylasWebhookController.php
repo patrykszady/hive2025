@@ -92,6 +92,15 @@ class NylasWebhookController extends Controller
 
             return;
         }
+        
+        // Skip if opened by self (sender viewing their own sent message)
+        $fromSelf = !empty($object['from_self']);
+        if ($fromSelf) {
+            Log::channel('nylas')->info('Skipping message.opened webhook - opened by self', [
+                'message_id' => $messageId,
+            ]);
+            return;
+        }
 
         // Try to get recipient_email from payload
         $recipientEmail = $object['recipient_email'] ?? null;
@@ -118,6 +127,16 @@ class NylasWebhookController extends Controller
 
         // Filter out automated/prefetch opens using Mailtrap-inspired logic
         if ($this->isPrefetchOrAutomatedOpen($eventDetails, $object)) {
+            return;
+        }
+
+        // Filter out sender opens (when sender views their own sent email)
+        if ($this->isLikelySenderOpen($messageId, $eventDetails)) {
+            Log::channel('nylas')->info('Skipping message.opened webhook - likely sender viewing their own email', [
+                'message_id' => $messageId,
+                'ip' => $eventDetails['ip'],
+                'user_agent' => $eventDetails['user_agent'],
+            ]);
             return;
         }
 
@@ -207,30 +226,20 @@ class NylasWebhookController extends Controller
 
         $fromSelf = !empty($object['from_self']);
         
-        // If from_self, check if this is a duplicate of a recently sent message
-        // Nylas fires thread.replied webhooks for messages you send, which we already track as "sent"
+        // Skip all from_self thread.replied webhooks
+        // These are redundant - we already track sent messages with event_type 'sent'
+        // replied_outgoing events provide no additional value and create duplicate tracking
         if ($fromSelf) {
             $messageId = $this->resolveMessageId($object);
-            
-            if ($messageId) {
-                // Check if a "sent" event exists for this message within the last 30 seconds
-                $recentSentEvent = EmailTracking::where('nylas_message_id', $messageId)
-                    ->where('event_type', 'sent')
-                    ->where('event_at', '>=', now()->subSeconds(30))
-                    ->exists();
-                
-                if ($recentSentEvent) {
-                    Log::channel('nylas')->info('Skipping thread.replied webhook for recently sent message', [
-                        'message_id' => $messageId,
-                        'from_self' => true,
-                    ]);
-                    return;
-                }
-            }
+            Log::channel('nylas')->info('Skipping thread.replied webhook - from_self', [
+                'message_id' => $messageId,
+                'thread_id' => $object['thread_id'] ?? null,
+            ]);
+            return;
         }
         
-        // If from_self, track as outgoing reply; otherwise as incoming reply
-        $eventType = $fromSelf ? 'replied_outgoing' : 'replied';
+        // Track as incoming reply
+        $eventType = 'replied';
 
         // Check if this is a bounce notification from a mailer daemon
         $fromEmails = collect($object['from'] ?? [])
@@ -794,7 +803,7 @@ class NylasWebhookController extends Controller
             '/(?:barracuda|proofpoint|mimecast|ironport|forcepoint)/i',
             
             // Email prefetch clients
-            '/(?:apple.*mail.*prefetch|outlook.*safelink|gmail.*image.*proxy)/i',
+            '/(?:apple.*mail.*prefetch|outlook.*safelink|gmail.*image.*proxy|googleimageproxy|ggpht\.com)/i',
             '/(?:microsoft.*safe.*link|office.*365.*atp)/i',
             
             // Bots and crawlers
@@ -849,6 +858,50 @@ class NylasWebhookController extends Controller
             return true;
         }
 
+        return false;
+    }
+
+    /**
+     * Detect if an open is likely from the sender viewing their own sent email.
+     * This helps filter out noise when senders check their sent items.
+     * 
+     * Detection strategy:
+     * 1. Check for OneOutlook user agent (Outlook desktop/web viewing sent items)
+     * 2. Compare IP against known recipient IPs from earlier opens
+     * 3. Look for patterns indicating sender access vs recipient access
+     */
+    protected function isLikelySenderOpen(string $messageId, array $eventDetails): bool
+    {
+        $userAgent = $eventDetails['user_agent'] ?? '';
+        $ip = $eventDetails['ip'] ?? '';
+        
+        // Check 1: OneOutlook user agent is a strong indicator of sender viewing sent items
+        // Format: "Mozilla/5.0 ... Edg/... OneOutlook/1.2025.1121.100"
+        if (stripos($userAgent, 'OneOutlook') !== false) {
+            return true;
+        }
+        
+        // Check 2: Compare IP against known recipient IPs
+        // Get previous opens for this message
+        $previousOpens = EmailTracking::where('nylas_message_id', $messageId)
+            ->where('event_type', 'opened')
+            ->where('ip_address', '!=', $ip)
+            ->whereNotNull('ip_address')
+            ->get();
+        
+        // If there are previous opens from different IPs, and this IP hasn't been seen before
+        // and the user agent is Windows/Edge (typical for Outlook), likely sender
+        if ($previousOpens->count() > 0) {
+            $knownRecipientIps = $previousOpens->pluck('ip_address')->unique();
+            $isNewIp = !$knownRecipientIps->contains($ip);
+            $isWindowsEdge = (stripos($userAgent, 'Windows') !== false && stripos($userAgent, 'Edg/') !== false);
+            
+            if ($isNewIp && $isWindowsEdge) {
+                // Likely sender checking sent items from different device/location
+                return true;
+            }
+        }
+        
         return false;
     }
 }
