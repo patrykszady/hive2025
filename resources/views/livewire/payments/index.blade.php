@@ -69,7 +69,7 @@
                                     href="{{route('clients.show', $payment->project->client->id)}}"
                                     class="cursor-pointer"
                                     >
-                                    {{ $payment->project->client->name }}
+                                    {{ $payment->project->client->last_names }}
                                 </flux:table.cell>
                             @endif
                             <flux:table.cell>{{ $payment->reference }}</flux:table.cell>

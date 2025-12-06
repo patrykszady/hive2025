@@ -86,7 +86,7 @@
                 @endcan
 
                 {{-- EMAIL TRACKING --}}
-                @if($this->emailTrackingEvents->total() > 0)
+                @if($this->emailTrackingEvents->count() > 0)
                     <flux:card class="space-y-2">
                         <div class="flex justify-between items-center">
                             <flux:heading size="lg">Email Tracking</flux:heading>
@@ -94,8 +94,8 @@
 
                         <flux:separator variant="subtle" />
 
-                        <div class="-mx-6 -mb-6 overflow-x-hidden [&_[data-flux-pagination]]:!px-6 [&_[data-flux-pagination]]:!pb-4">
-                            <flux:table :paginate="$this->emailTrackingEvents" class="[:where(&)]:p-0 [:where(&)]:space-y-0 [&_th]:!px-4 [&_td]:!px-3 [&_th:first-child]:!ps-6 [&_th:last-child]:!pe-6 [&_td:first-child]:!ps-6 [&_td:last-child]:!pe-6">
+                        <div class="-mx-6 overflow-hidden pb-6">
+                            <flux:table class="[:where(&)]:p-0 [:where(&)]:space-y-0 [&_th]:!px-6 [&_td]:!px-6 w-full">
                                 <flux:table.columns>
                                     <flux:table.column>Event</flux:table.column>
                                     <flux:table.column>Template</flux:table.column>
@@ -171,6 +171,9 @@
                                                                 default => 'gray'
                                                             }">
                                                             {{ ucfirst($subEvent->event_type) }}
+                                                            @if(isset($subEvent->grouped_count) && $subEvent->grouped_count > 1)
+                                                                <span class="ml-1">x{{ $subEvent->grouped_count }}</span>
+                                                            @endif
                                                         </flux:badge>
                                                     </flux:table.cell>
                                                     <flux:table.cell class="text-sm text-gray-600 dark:text-gray-400">
@@ -193,7 +196,7 @@
                 @endif
 
                 {{-- PROEJCT LIFESPAN --}}
-                <livewire:project-status.status-create :project="$project" lazy />
+                <livewire:project-status.status-create :project="$project" />
             </div>
 
             <div class="col-span-4 space-y-4 lg:col-span-2">

@@ -307,9 +307,20 @@ class ProjectsIndex extends Component
                     ->filter()
                     ->values();
                 
+                // Count consecutive events of the same type as the main event
+                $eventCount = 1;
+                foreach ($threadEvents->slice(1) as $event) {
+                    if ($event->event_type === $latestEvent->event_type) {
+                        $eventCount++;
+                    } else {
+                        break; // Stop at first different event type
+                    }
+                }
+                
                 // Add recipient user data to the event
                 $latestEvent->recipient_users = $users;
                 $latestEvent->all_recipient_emails = $allRecipientEmails;
+                $latestEvent->event_count = $eventCount;
                 
                 return $latestEvent;
             })

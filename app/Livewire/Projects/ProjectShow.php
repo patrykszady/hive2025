@@ -62,25 +62,42 @@ class ProjectShow extends Component
                 $mainEvent->recipient_users = $users;
                 $mainEvent->all_recipient_emails = $allRecipientEmails;
                 
-                // Store all thread events for sub-rows (excluding the first one)
-                $mainEvent->thread_events = $threadEvents->slice(1);
+                // Group consecutive events of the same type (excluding the main event)
+                $groupedEvents = collect();
+                $otherEvents = $threadEvents->slice(1);
+                
+                if ($otherEvents->isNotEmpty()) {
+                    $currentGroup = null;
+                    
+                    foreach ($otherEvents as $event) {
+                        if (!$currentGroup || $currentGroup->event_type !== $event->event_type) {
+                            // Start a new group
+                            if ($currentGroup) {
+                                $groupedEvents->push($currentGroup);
+                            }
+                            $currentGroup = clone $event;
+                            $currentGroup->grouped_count = 1;
+                            $currentGroup->grouped_events = collect([$event]);
+                        } else {
+                            // Add to existing group
+                            $currentGroup->grouped_count++;
+                            $currentGroup->grouped_events->push($event);
+                        }
+                    }
+                    
+                    // Add the last group
+                    if ($currentGroup) {
+                        $groupedEvents->push($currentGroup);
+                    }
+                }
+                
+                $mainEvent->thread_events = $groupedEvents;
                 
                 return $mainEvent;
             })
             ->values();
         
-        // Manual pagination
-        $currentPage = \Illuminate\Pagination\Paginator::resolveCurrentPage('page');
-        $perPage = 10;
-        $currentPageItems = $events->slice(($currentPage - 1) * $perPage, $perPage)->values();
-        
-        return new LengthAwarePaginator(
-            $currentPageItems,
-            $events->count(),
-            $perPage,
-            $currentPage,
-            ['path' => request()->url(), 'query' => request()->query()]
-        );
+        return $events;
     }
 
     #[Title('Project')]

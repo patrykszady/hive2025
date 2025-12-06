@@ -146,6 +146,9 @@
                                     }"
                                     inset="top bottom">
                                     {{ ucfirst($event->event_type) }}
+                                    @if(isset($event->event_count) && $event->event_count > 1)
+                                        <span class="ml-1">x{{ $event->event_count }}</span>
+                                    @endif
                                 </flux:badge>
                             </flux:table.cell>
                             <flux:table.cell>

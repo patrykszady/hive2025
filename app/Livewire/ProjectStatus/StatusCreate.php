@@ -143,7 +143,7 @@ class StatusCreate extends Component
         $this->editingStatusDate = null;
         
         $this->mount($this->project);
-        $this->modal('edit_status_modal')->close();
+        Flux::modal('edit_status_modal')->close();
         $this->dispatch('refreshComponent')->to('projects.project-show');
         
         Flux::toast(
@@ -194,7 +194,7 @@ class StatusCreate extends Component
         $this->editingStatusDate = null;
         
         $this->mount($this->project);
-        $this->modal('edit_status_modal')->close();
+        Flux::modal('edit_status_modal')->close();
         $this->dispatch('refreshComponent')->to('projects.project-show');
         
         Flux::toast(
