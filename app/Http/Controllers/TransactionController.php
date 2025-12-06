@@ -1790,7 +1790,7 @@ class TransactionController extends Controller
                 ->whereNull('parent_expense_id')
                 ->where('belongs_to_vendor_id', $hive_vendor->id)
                 ->where('amount', '<', 0)
-                ->whereHas('transaction')
+                ->whereHas('transactions')
                 ->whereDate('date', '>=', now()->subMonths(6))
                 ->get();
             

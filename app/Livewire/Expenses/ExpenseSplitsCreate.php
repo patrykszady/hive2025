@@ -203,7 +203,14 @@ class ExpenseSplitsCreate extends Component
 
     public function addSplits($expense)
     {
-        $this->expense = Expense::findOrFail($expense['id']);
+        // Handle both integer ID and array with 'id' key
+        $expenseId = is_array($expense) ? ($expense['id'] ?? null) : $expense;
+        
+        if (!$expenseId) {
+            return;
+        }
+        
+        $this->expense = Expense::findOrFail($expenseId);
         $expense = $this->expense;
 
         $receipt = $expense->receipts()->latest()->first();

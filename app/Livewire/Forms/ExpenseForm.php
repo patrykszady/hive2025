@@ -385,7 +385,7 @@ class ExpenseForm extends Form
         return $this->expense;
     }
 
-    public function store()
+    public function store($existing_check_id = null)
     {
         $this->authorize('create', Expense::class);
         $this->validate();
@@ -393,7 +393,8 @@ class ExpenseForm extends Form
         $expense_details = $this->expenseDetails();        
 
         // Determine if we should create/reuse a check
-        $shouldCreateCheck = empty($this->paid_by);
+        // Skip check creation if attaching to an existing check
+        $shouldCreateCheck = empty($this->paid_by) && !$existing_check_id;
         
         // Prefer component-level fields set by the component; fallback to transaction
         $bankAccountId = $this->component->bank_account_id ?? null;
@@ -463,7 +464,12 @@ class ExpenseForm extends Form
                 
             }
         } else {
-            
+            $check = null;
+        }
+        
+        // If attaching to existing check, use that check_id
+        if ($existing_check_id) {
+            $check = Check::find($existing_check_id);
         }
 
         $expense = Expense::create([

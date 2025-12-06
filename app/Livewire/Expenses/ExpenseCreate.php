@@ -355,14 +355,10 @@ class ExpenseCreate extends Component
             return $this->addError('no_splits', 'Splits required if Project is Split');
         }
 
-        $expense = $this->form->store();
+        $expense = $this->form->store($this->existing_check_id);
         
-        // If user selected an existing check, manually assign it and recalculate
+        // If user selected an existing check, recalculate check amount
         if ($this->existing_check_id) {
-            $expense->check_id = $this->existing_check_id;
-            $expense->save();
-            
-            // Recalculate the check amount
             $check = Check::find($this->existing_check_id);
             $check->amount = $check->expenses->sum('amount') + $check->timesheets->sum('amount');
             $check->save();

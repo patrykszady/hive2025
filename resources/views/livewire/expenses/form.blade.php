@@ -126,7 +126,7 @@
             x-transition
             >
             <flux:button
-                wire:click="$dispatchTo('expenses.expense-splits-create', 'addSplits', { expense: {{$expense}} })"
+                wire:click="$dispatchTo('expenses.expense-splits-create', 'addSplits', { expense: {{$expense->id}} })"
                 x-text="splits == true ? 'Edit Splits' : 'Add Splits'"
                 variant="primary"
                 class="w-full"
