@@ -1380,11 +1380,6 @@ class TransactionController extends Controller
      */
     protected function matchChecksToExpenses(): void
     {
-        Log::channel('add_check_id_to_transactions')->info('Starting matchChecksToExpenses', [
-            'memory_used_mb' => round(memory_get_usage(true) / 1024 / 1024, 2),
-            'memory_limit_mb' => ini_get('memory_limit'),
-        ]);
-        
         // Get expenses without any checks linked (via pivot table)
         $expenses = Expense::withoutGlobalScopes()
             ->whereNull('deleted_at')
@@ -1447,13 +1442,6 @@ class TransactionController extends Controller
                 continue; // Skip if too many items or only one check
             }
             
-            Log::channel('add_check_id_to_transactions')->info('Before subsetSums call', [
-                'expense_id' => $expense->id,
-                'n' => $n,
-                'memory_used_mb' => round(memory_get_usage(true) / 1024 / 1024, 2),
-                'memory_limit_mb' => ini_get('memory_limit'),
-            ]);
-            
             $results = collect($this->subsetSums($arr, $n, $check_ids, 'check'))->sortBy('sum');
             
             foreach ($results as $result) {
@@ -1488,10 +1476,6 @@ class TransactionController extends Controller
         
         // Final memory cleanup
         gc_collect_cycles();
-        
-        Log::channel('add_check_id_to_transactions')->info('Completed matchChecksToExpenses', [
-            'memory_used_mb' => round(memory_get_usage(true) / 1024 / 1024, 2),
-        ]);
     }
 
     function getProcessedChecks()
