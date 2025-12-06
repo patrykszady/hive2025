@@ -23,6 +23,13 @@ return [
             'days' => 30,
         ],
 
+        'amazon_orders' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/amazon_orders.log'),
+            'level' => 'debug',
+            'days' => 30,
+        ],
+
         'plaid_adds' => [
             'driver' => 'daily',
             'path' => storage_path('logs/plaid_adds.log'),

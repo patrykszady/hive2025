@@ -198,9 +198,23 @@ class ReceiptController extends Controller
 
             // dd($result);
 
-            //7-17-2023 find last amazon expenses date
-            // '2023-10-14', '2023-10-14'
-            $dates = CarbonPeriod::create(Carbon::today()->subDays(14)->setTimezone('UTC'), Carbon::today()->setTimezone('UTC'));
+            //Incremental sync: fetch from last sync or default to 2 days ago
+            //Nightly full 30-day sync catches order status changes (cancellations, returns)
+            $lastFullSync = isset($receipt_account->options['amazon_orders_full_synced_at'])
+                ? Carbon::parse($receipt_account->options['amazon_orders_full_synced_at'])
+                : null;
+            
+            $needsFullSync = !$lastFullSync || $lastFullSync->lt(Carbon::today());
+            
+            if ($needsFullSync) {
+                $startDate = Carbon::today()->subDays(30)->setTimezone('UTC');
+            } else {
+                $startDate = isset($receipt_account->options['amazon_orders_synced_at'])
+                    ? Carbon::parse($receipt_account->options['amazon_orders_synced_at'])->setTimezone('UTC')
+                    : Carbon::today()->subDays(2)->setTimezone('UTC');
+            }
+            
+            $dates = CarbonPeriod::create($startDate, Carbon::today()->setTimezone('UTC'));
 
             foreach ($dates as $date) {
                 $today = $date;
@@ -223,7 +237,26 @@ class ReceiptController extends Controller
                 $response = $client->send($signedRequest);
                 $orders = collect(json_decode($response->getBody()->getContents(), true)['orders']);
 
+                //Log all orders for this date
+                Log::channel('amazon_orders')->info('Orders fetched', [
+                    'date' => $today->toDateString(),
+                    'receipt_account_id' => $receipt_account->id,
+                    'belongs_to_vendor_id' => $receipt_account->belongs_to_vendor_id,
+                    'order_count' => $orders->count(),
+                    'is_full_sync' => $needsFullSync,
+                ]);
+
                 foreach ($orders as $orders_key => $order) {
+                    //Log full order payload
+                    Log::channel('amazon_orders')->debug('Processing order', [
+                        'receipt_account_id' => $receipt_account->id,
+                        'belongs_to_vendor_id' => $receipt_account->belongs_to_vendor_id,
+                        'order_id' => $order['orderId'],
+                        'order_date' => $order['orderDate'],
+                        'order_status' => $order['orderStatus'],
+                        'order_amount' => $order['orderNetTotal']['amount'],
+                        'full_payload' => $order,
+                    ]);
                     $order_date = Carbon::parse($order['orderDate'])->setTimezone('America/Chicago')->format('Y-m-d');
 
                     //check for expense duplicates
@@ -347,9 +380,24 @@ class ReceiptController extends Controller
                 // sleep(1);
             }
 
+            //Update orders sync timestamp after successful processing
+            $updates = ['options->amazon_orders_synced_at' => Carbon::now()->toIso8601String()];
+            
+            //If this was a full sync, update the full sync timestamp
+            if ($needsFullSync) {
+                $updates['options->amazon_orders_full_synced_at'] = Carbon::now()->toIso8601String();
+            }
+            
+            $receipt_account->update($updates);
+
+            //Incremental sync: fetch transactions from last sync or default to 7 days ago
+            $transactionStartDate = isset($receipt_account->options['amazon_transactions_synced_at'])
+                ? Carbon::parse($receipt_account->options['amazon_transactions_synced_at'])
+                : Carbon::now()->subDays(7);
+
             $path = '/reconciliation/2021-01-08/transactions';
             $params = [
-                'feedStartDate' => Carbon::now()->subDays(60)->toIso8601String(),
+                'feedStartDate' => $transactionStartDate->toIso8601String(),
                 'feedEndDate' => Carbon::now()->toIso8601String(),
             ];
 
@@ -470,6 +518,11 @@ class ReceiptController extends Controller
                     continue;
                 }
             }
+
+            //Update transactions sync timestamp after successful processing
+            $receipt_account->update([
+                'options->amazon_transactions_synced_at' => Carbon::now()->toIso8601String(),
+            ]);
 
             sleep(1);
         }

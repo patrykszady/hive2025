@@ -146,9 +146,18 @@ Schedule::call(function () {
 Schedule::call(function () {
     app(\App\Http\Controllers\ReceiptController::class)->amazon_orders_api();
     })
-    ->hourly()
-    // ->between('7:00', '23:00')
+    ->everyTwoHours()
+    ->between('6:00', '22:00')
     ->name('amazon-orders-api')
+    ->withoutOverlapping()
+    ->onOneServer();
+
+// Nightly full sync for Amazon orders (catches cancellations/returns)
+Schedule::call(function () {
+    app(\App\Http\Controllers\ReceiptController::class)->amazon_orders_api();
+    })
+    ->dailyAt('2:00')
+    ->name('amazon-orders-api-full-sync')
     ->withoutOverlapping()
     ->onOneServer();
 
