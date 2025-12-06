@@ -1070,7 +1070,7 @@ class TransactionController extends Controller
                             $ids = $transaction_ids;
 
                             // Skip subset matching if too many items (prevent memory exhaustion)
-                            if ($n > 18) {
+                            if ($n > 14) {
                                 Log::warning('Too many transactions to match - skipping subset sum matching', [
                                     'expense_id' => $expense->id,
                                     'transaction_count' => $n,
@@ -1157,7 +1157,7 @@ class TransactionController extends Controller
                     $ids = $expenses_ids;
 
                     // Skip subset matching if too many items (prevent memory exhaustion)
-                    if ($n > 18) {
+                    if ($n > 14) {
                         Log::warning('Too many expenses to match - skipping subset sum matching', [
                             'transaction_id' => $transaction->id,
                             'expense_count' => $n,
@@ -1211,6 +1211,7 @@ class TransactionController extends Controller
                 ->whereNull('deleted_at')
                 ->where('date', '>', '2021-01-01')
                 ->orderBy('date', 'DESC')
+                ->limit(500) // Process most recent 500 checks to prevent memory issues
                 ->get();
 
         foreach ($checks as $check) {
@@ -1287,6 +1288,7 @@ class TransactionController extends Controller
             })
             ->whereHas('transactions') // Ensure the Check has related transactions
             ->where('date', '>', '2021-01-01')
+            ->limit(500) // Process most recent 500 checks to prevent memory issues
             ->withSum('transactions', 'amount') // Calculate the sum of the related transactions' amount
             ->get()
             ->filter(function ($check) {
@@ -1358,6 +1360,15 @@ class TransactionController extends Controller
 
         $this->saveProcessedChecks($processedIds, $lastProcessedId);
         
+        // Clear memory before expensive matching operations
+        unset($checks, $transactions, $bank_account_ids);
+        gc_collect_cycles();
+        
+        Log::channel('add_check_id_to_transactions')->info('Memory before matchChecksToExpenses', [
+            'memory_used_mb' => round(memory_get_usage(true) / 1024 / 1024, 2),
+            'memory_limit_mb' => ini_get('memory_limit'),
+        ]);
+        
         // Now match checks to expenses using many-to-many relationship
         // Find expenses that don't have checks (via pivot) and match checks that sum to expense amount
         $this->matchChecksToExpenses();
@@ -1369,6 +1380,11 @@ class TransactionController extends Controller
      */
     protected function matchChecksToExpenses(): void
     {
+        Log::channel('add_check_id_to_transactions')->info('Starting matchChecksToExpenses', [
+            'memory_used_mb' => round(memory_get_usage(true) / 1024 / 1024, 2),
+            'memory_limit_mb' => ini_get('memory_limit'),
+        ]);
+        
         // Get expenses without any checks linked (via pivot table)
         $expenses = Expense::withoutGlobalScopes()
             ->whereNull('deleted_at')
@@ -1376,8 +1392,15 @@ class TransactionController extends Controller
             ->whereNotNull('vendor_id')
             ->whereNull('paid_by') // Exclude employee reimbursements
             ->where('date', '>', '2021-01-01')
-            ->whereDate('date', '>=', Carbon::now()->subMonths(12))
+            ->whereDate('date', '>=', Carbon::now()->subMonths(6)) // Reduced from 12 to 6 months
+            ->orderBy('date', 'DESC')
+            ->limit(200) // Process most recent 200 expenses to prevent memory issues
             ->get();
+        
+        Log::channel('add_check_id_to_transactions')->info('Loaded expenses for matching', [
+            'expense_count' => $expenses->count(),
+            'memory_used_mb' => round(memory_get_usage(true) / 1024 / 1024, 2),
+        ]);
         
         foreach ($expenses as $expense) {
             $start_date = $expense->date->subDays(7)->format('Y-m-d');
@@ -1393,6 +1416,8 @@ class TransactionController extends Controller
                     $query->where('vendor_id', $expense->vendor_id)
                           ->orWhereNull('vendor_id');
                 })
+                ->orderBy('date', 'ASC')
+                ->limit(20) // Limit to 20 checks max to prevent excessive subset combinations
                 ->get();
             
             if ($checks->isEmpty()) {
@@ -1418,9 +1443,16 @@ class TransactionController extends Controller
             $arr = array_values(array_filter($check_amounts));
             $n = count($arr);
             
-            if ($n > 18 || $n < 2) {
+            if ($n > 14 || $n < 2) {
                 continue; // Skip if too many items or only one check
             }
+            
+            Log::channel('add_check_id_to_transactions')->info('Before subsetSums call', [
+                'expense_id' => $expense->id,
+                'n' => $n,
+                'memory_used_mb' => round(memory_get_usage(true) / 1024 / 1024, 2),
+                'memory_limit_mb' => ini_get('memory_limit'),
+            ]);
             
             $results = collect($this->subsetSums($arr, $n, $check_ids, 'check'))->sortBy('sum');
             
@@ -1449,7 +1481,17 @@ class TransactionController extends Controller
                     }
                 }
             }
+            
+            // Free memory after processing each expense
+            unset($checks, $results, $arr, $check_ids, $check_amounts);
         }
+        
+        // Final memory cleanup
+        gc_collect_cycles();
+        
+        Log::channel('add_check_id_to_transactions')->info('Completed matchChecksToExpenses', [
+            'memory_used_mb' => round(memory_get_usage(true) / 1024 / 1024, 2),
+        ]);
     }
 
     function getProcessedChecks()
@@ -1545,7 +1587,7 @@ class TransactionController extends Controller
                     $ids = $client_payment_ids;
 
                     // Skip subset matching if too many items (prevent memory exhaustion)
-                    if ($n > 18) {
+                    if ($n > 14) {
                         Log::warning('Too many client payments to match - skipping subset sum matching', [
                             'transaction_id' => $transaction->id,
                             'client_payment_count' => $n,
@@ -1666,10 +1708,12 @@ class TransactionController extends Controller
         // dd([$arr, $n, $ids, $model]);
         
         // Reduced safety limit to prevent memory exhaustion
-        // 2^15 = 32k combinations (safe)
-        // 2^16 = 65k combinations (safer limit for production)
-        // 2^18 = 262k combinations (memory exhaustion risk)
-        if ($n > 16) {
+        // With proper memory management:
+        // 2^12 = 4k combinations (very safe, processes instantly)
+        // 2^14 = 16k combinations (safe, processes quickly)
+        // 2^16 = 65k combinations (acceptable with memory cleanup)
+        // Beyond 2^16 risks memory exhaustion even with cleanup
+        if ($n > 14) {
             Log::warning('subsetSums called with too many elements - skipping to prevent memory exhaustion', [
                 'n' => $n,
                 'model' => $model,
