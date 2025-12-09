@@ -3,7 +3,7 @@
     <div class="flex-1 flex justify-center items-center">
         <div class="w-96 max-w-96 space-y-6 p-4">
             <div class="flex justify-center opacity-90">
-                <a href="{{ route('welcome') }}" class="group">
+                <a href="{{ route('welcome') }}" wire:navigate class="group">
                     <img class="w-auto h-24 mx-auto" src="{{ asset('favicon.png') }}" alt="{{ config('app.name') }}">
                 </a>
             </div>
@@ -50,10 +50,9 @@
 
             <flux:button 
                 href="{{ route('registration') }}"
+                wire:navigate
                 class="w-full"
-                {{-- Remove disabled attribute --}}
             >
-                {{-- your Hive --}}
                 Register
             </flux:button>
 

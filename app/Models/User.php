@@ -182,7 +182,7 @@ class User extends Authenticatable
     {
         return Attribute::make(
             get: function () {
-                if (!$this->vendor->id) {
+                if (!$this->vendor || !$this->vendor->id) {
                     return 'No Role';
                 }
                 

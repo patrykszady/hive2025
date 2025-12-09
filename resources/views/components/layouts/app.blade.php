@@ -114,24 +114,26 @@
                     </flux:sidebar.group>
                 @endcan
                 
-                @if(
-                    auth()->user()->can('viewAny', App\Models\EmailTemplate::class)
-                    || auth()->user()->can('viewAny', App\Models\CompanyEmail::class)
-                    || auth()->user()->can('viewAny', App\Models\VendorDoc::class)
-                )
-                    <flux:sidebar.group expandable heading="Settings" class="grid" icon="cog-6-tooth" :expanded="$settingsExpanded">
-                        @can('viewAny', App\Models\EmailTemplate::class)
-                            <flux:sidebar.item wire:navigate.hover href="/email_templates" icon="envelope-open">Email Templates</flux:sidebar.item>
-                        @endcan
+                @if(!Route::is(['vendor_selection', 'vendor_registration']))
+                    @if(
+                        auth()->user()->can('viewAny', App\Models\EmailTemplate::class)
+                        || auth()->user()->can('viewAny', App\Models\CompanyEmail::class)
+                        || auth()->user()->can('viewAny', App\Models\VendorDoc::class)
+                    )
+                        <flux:sidebar.group expandable heading="Settings" class="grid" icon="cog-6-tooth" :expanded="$settingsExpanded">
+                            @can('viewAny', App\Models\EmailTemplate::class)
+                                <flux:sidebar.item wire:navigate.hover href="/email_templates" icon="envelope-open">Email Templates</flux:sidebar.item>
+                            @endcan
 
-                        @can('viewAny', App\Models\CompanyEmail::class)
-                            <flux:sidebar.item wire:navigate.hover href="/company_emails" icon="inbox-stack">Company Emails</flux:sidebar.item>
-                        @endcan
+                            @can('viewAny', App\Models\CompanyEmail::class)
+                                <flux:sidebar.item wire:navigate.hover href="/company_emails" icon="inbox-stack">Company Emails</flux:sidebar.item>
+                            @endcan
 
-                        @can('viewAny', App\Models\VendorDoc::class)
-                            <flux:sidebar.item wire:navigate.hover href="/vendor_docs" icon="eye-slash">Vendor Docs</flux:sidebar.item>
-                        @endcan
-                    </flux:sidebar.group>
+                            @can('viewAny', App\Models\VendorDoc::class)
+                                <flux:sidebar.item wire:navigate.hover href="/vendor_docs" icon="eye-slash">Vendor Docs</flux:sidebar.item>
+                            @endcan
+                        </flux:sidebar.group>
+                    @endif
                 @endif
             </flux:sidebar.nav>
 

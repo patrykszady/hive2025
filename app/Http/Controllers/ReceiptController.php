@@ -233,9 +233,25 @@ class ReceiptController extends Controller
                 $s4 = new \Aws\Signature\SignatureV4('execute-api', 'us-east-1');
                 //Build the signed request using the Credentials object. This is required in order to authenticate the call.
                 $signedRequest = $s4->signRequest($request, $credentials);
-                //Send the (signed) API request.
-                $response = $client->send($signedRequest);
-                $orders = collect(json_decode($response->getBody()->getContents(), true)['orders']);
+                
+                //Send the (signed) API request with retry logic for rate limits
+                try {
+                    $response = $client->send($signedRequest);
+                    $orders = collect(json_decode($response->getBody()->getContents(), true)['orders']);
+                } catch (\GuzzleHttp\Exception\ClientException $e) {
+                    // If rate limited (429), skip this date and continue
+                    if ($e->getCode() === 429) {
+                        Log::channel('amazon_orders')->warning('Rate limited, skipping date', [
+                            'date' => $today->toDateString(),
+                            'receipt_account_id' => $receipt_account->id,
+                        ]);
+                        continue;
+                    }
+                    throw $e;
+                }
+                
+                // Add delay between requests to avoid rate limits (2 seconds)
+                sleep(2);
 
                 //Log all orders for this date
                 Log::channel('amazon_orders')->info('Orders fetched', [

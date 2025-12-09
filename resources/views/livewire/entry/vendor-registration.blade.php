@@ -53,6 +53,17 @@
                         :vendor="$vendor" 
                         :view="$view"
                     />
+                    
+                    {{-- BYPASS BUTTON FOR TEAM MEMBERS --}}
+                    @if(!$registration->team_members)
+                        <flux:button 
+                            variant="primary" 
+                            wire:click="confirmProcess('team_members')"
+                            class="w-full"
+                        >
+                            Continue without Additional Members
+                        </flux:button>
+                    @endif
 
                     {{-- EMAILS SECTION --}}
                     <div x-show="$wire.registration.team_members" x-transition>

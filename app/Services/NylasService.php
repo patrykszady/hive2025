@@ -113,7 +113,9 @@ class NylasService
                 
                 // Check if result indicates a retryable error
                 if (is_array($result) && isset($result['status'])) {
-                    $retryableStatuses = [503, 429, 502, 504]; // Service Unavailable, Too Many Requests, Bad Gateway, Gateway Timeout
+                    // 504 Gateway Timeout is not worth retrying - provider can't complete the request
+                    // 503 Service Unavailable, 429 Too Many Requests, 502 Bad Gateway are worth retrying
+                    $retryableStatuses = [503, 429, 502];
                     
                     if (in_array($result['status'], $retryableStatuses) && $attempt < $maxAttempts) {
                         Log::channel('nylas')->warning('Retryable error encountered, retrying...', [

@@ -9,7 +9,7 @@ return [
     
     // Message fetching limits
     'message_limit' => 15,
-    'message_limit_days' => 20,
+    'message_limit_days' => 7, // Reduced from 20 to avoid provider timeouts
     'full_fetch_soft_cap' => env('NYLAS_FULL_FETCH_SOFT_CAP', 0),
 
     // Centralized receipts processing (forward target)

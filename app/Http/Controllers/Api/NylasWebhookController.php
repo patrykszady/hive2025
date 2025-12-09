@@ -130,6 +130,15 @@ class NylasWebhookController extends Controller
             return;
         }
 
+        // Filter out Yahoo bot/proxy opens
+        if ($this->isYahooBot($eventDetails['user_agent'])) {
+            Log::channel('nylas')->info('Skipping message.opened webhook - Yahoo bot/proxy', [
+                'message_id' => $messageId,
+                'user_agent' => $eventDetails['user_agent'],
+            ]);
+            return;
+        }
+
         // Filter out sender opens (when sender views their own sent email)
         if ($this->isLikelySenderOpen($messageId, $eventDetails)) {
             Log::channel('nylas')->info('Skipping message.opened webhook - likely sender viewing their own email', [
@@ -667,6 +676,28 @@ class NylasWebhookController extends Controller
         } else {
             // Create individual tracking records per recipient
             foreach ($recipients as $recipient) {
+                // Deduplicate by opened_id to prevent Nylas duplicate webhook deliveries
+                $openedId = $metadata['resolved_event_details']['opened_id'] ?? null;
+                
+                if ($openedId !== null) {
+                    $duplicateByOpenedId = EmailTracking::query()
+                        ->where('nylas_message_id', $messageId)
+                        ->where('event_type', $eventType)
+                        ->whereJsonContains('recipient_emails', $recipient)
+                        ->whereRaw("JSON_EXTRACT(metadata, '$.resolved_event_details.opened_id') = ?", [$openedId])
+                        ->exists();
+
+                    if ($duplicateByOpenedId) {
+                        Log::channel('nylas')->info('Skipping duplicate webhook by opened_id', [
+                            'message_id' => $messageId,
+                            'event_type' => $eventType,
+                            'recipient' => $recipient,
+                            'opened_id' => $openedId,
+                        ]);
+                        continue;
+                    }
+                }
+
                 if ($eventType === 'opened' && $eventAt instanceof Carbon) {
                     $windowStart = (clone $eventAt)->subSeconds(60);
 
@@ -859,6 +890,20 @@ class NylasWebhookController extends Controller
         }
 
         return false;
+    }
+
+    /**
+     * Detect if the user agent is from Yahoo's email proxy/bot.
+     * Yahoo Mail uses YahooMailProxy to scan emails, which shouldn't count as real opens.
+     */
+    protected function isYahooBot(?string $userAgent): bool
+    {
+        if (!$userAgent) {
+            return false;
+        }
+
+        // Yahoo's proxy scanner user agent
+        return stripos($userAgent, 'YahooMailProxy') !== false;
     }
 
     /**

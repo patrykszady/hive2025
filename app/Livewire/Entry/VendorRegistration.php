@@ -13,6 +13,7 @@ use App\Models\Timesheet;
 use App\Models\Vendor;
 use App\Scopes\VendorScope;
 use Illuminate\Http\Request;
+use Livewire\Attributes\Layout;
 use Livewire\Attributes\PublicProperty;
 use Livewire\Component;
 
@@ -31,6 +32,9 @@ class VendorRegistration extends Component
     {
         $this->view = $request->route()->getName();
         $this->user = auth()->user();
+        
+        // Set the vendor as primary to avoid null errors in sidebar
+        $this->user->update(['primary_vendor_id' => $this->vendor->id]);
         
         // Initialize registration with default values
         $this->registration = $this->vendor->registration ?? new \stdClass();
@@ -443,7 +447,7 @@ class VendorRegistration extends Component
             }
         }
         
-        return redirect(route('dashboard'));
+        return $this->redirect(route('dashboard'), navigate: true);
     }
 
     public function render()

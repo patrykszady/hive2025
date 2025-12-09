@@ -1,257 +1,250 @@
-<div class="flex flex-col justify-center min-h-full min-h-screen py-12 bg-gray-100 sm:px-6 lg:px-8" x-cloak>
-    <div class="sm:mx-auto sm:w-full sm:max-w-md">
-        <a href="{{route('welcome')}}"><img class="w-auto mx-auto h-36" src="{{ asset('favicon.png') }}" alt="{{env('APP_NAME')}}"></a>
-        <h2 class="mt-6 text-3xl font-bold tracking-tight text-center text-gray-900">Register your Hive</h2>
-        <p class="mt-2 text-sm text-center text-gray-600">
-            First,
-            <a href="#" class="font-medium text-indigo-600 hover:text-indigo-500">just some basic personal info.</a>
-        </p>
-    </div>
+<div class="flex min-h-screen">
+    <!-- Left side - Registration form -->
+    <div class="flex-1 flex justify-center items-center">
+        <div class="w-96 max-w-96 space-y-6 p-4">
+            <div class="flex justify-center opacity-90">
+                <a href="{{ route('welcome') }}" wire:navigate class="group">
+                    <img class="w-auto h-24 mx-auto" src="{{ asset('favicon.png') }}" alt="{{ config('app.name') }}">
+                </a>
+            </div>
 
-    <div class="mx-4 mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <div class="px-4 py-8 bg-white shadow-sm sm:rounded-lg sm:px-10">
+            <flux:heading class="text-center" size="xl">Register your Hive</flux:heading>
+
+            <div class="space-y-6">
                 {{-- CELL PHONE --}}
-                <div>
-                    <label for="user_cell" class="block text-sm font-medium text-gray-700">Cell Phone Number</label>
-                    <div class="mt-1">
-                        <input
-                            wire:model.live.debounce.250ms="user_cell"
-                            id="user_cell"
-                            name="user_cell"
-                            type="tel"
-                            {{-- autocomplete="user_cell_required1432" --}}
-                            inputmode="numeric"
-                            placeholder="8470004000"
-                            required
-                            x-bind:disabled="{{isset($user) ? isset($user['id']) || isset($user['cell_phone']) && !$errors->has('user_cell') ? true : false : false}}"
-                            class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-xs appearance-none disabled:opacity-50 focus:border-indigo-500 focus:outline-hidden focus:ring-indigo-500 sm:text-sm"
-                        >
-                    </div>
+                @if($step === 'phone')
+                <div class="space-y-6">
+                    <flux:input 
+                        wire:model.live.debounce.500ms="user_cell"
+                        label="Cell Phone Number"
+                        type="tel"
+                        placeholder="(555) 555-5555"
+                        mask="(999) 999-9999"
+                        required
+                    />
 
-                    <x-forms.error errorName="user_cell" />
-                    {{-- <x-forms.error errorName="invalid_user_cell" /> --}}
-                </div>
-
-                <div
-                    x-data="{ validate_number: @entangle('validate_number'), show_email: @entangle('show_email') }"
-                    x-show="!validate_number && !show_email"
-                    x-transition
-                    class="my-4 space-y-4"
-                    >
-                    <div>
-                        {{-- only enable when user_cell passes validation.. --}}
-                        <button
+                    @if($user_cell_valid)
+                        <flux:button 
                             wire:click="user_cell_confirm"
-                            type="button"
-                            class="flex justify-center w-full px-4 py-2 text-sm text-white bg-indigo-600 border border-transparent rounded-md shadow-xs font-small hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                            >
+                            variant="primary" 
+                            class="w-full"
+                        >
                             Confirm Number
-                        </button>
-                    </div>
+                        </flux:button>
+                    @endif
                 </div>
+                @endif
 
                 {{-- CELL VERIFICATION CODE --}}
-                <div
-                    x-data="{ validate_number: @entangle('validate_number'), show_email: @entangle('show_email') }"
-                    x-show="validate_number && !show_email"
-                    x-transition
-                    class="my-4 space-y-4"
-                    >
-
-                    <div>
-                        <label for="cell_verification_code" class="block text-sm font-medium text-gray-700">Cell Phone Verification Code</label>
-                        <div class="mt-1">
-                            <input
-                                wire:model.live.debounce.1000ms="cell_verification_code"
-                                id="cell_verification_code"
-                                name="cell_verification_code"
-                                type="numeric"
-                                {{-- autocomplete="user_cell_required1432" --}}
-                                inputmode="numeric"
-                                placeholder="123456"
-                                required
-                                class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-xs appearance-none focus:border-indigo-500 focus:outline-hidden focus:ring-indigo-500 sm:text-sm"
-                            >
-                            <span class="text-sm"><i>Enter the 6 digit code we texted you. If you refresh this page you will need to request a new code.</i></span>
+                @if($step === 'verify-phone')
+                <flux:card>
+                    <form wire:submit.prevent="cell_verification_code_confirm" class="space-y-8">
+                        <div class="max-w-64 mx-auto space-y-2">
+                            <flux:heading size="lg" class="text-center">Verify your phone</flux:heading>
+                            <flux:text class="text-center">Please enter the 6-digit code we texted you.</flux:text>
                         </div>
-                        <x-forms.error errorName="cell_verification_code" />
-                    </div>
-                    <div>
-                        {{-- only enable when user_cell passes validation.. --}}
-                        <button
-                            wire:click="cell_verification_code_confirm"
-                            type="button"
-                            class="flex justify-center w-full px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-xs hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+
+                        <flux:otp wire:model.live="cell_verification_code" length="6" label="Verification Code" label:sr-only :error:icon="false" error:class="text-center" class="mx-auto">
+                            <flux:otp.input />
+                            <flux:otp.input />
+                            <flux:otp.input />
+                            <flux:otp.separator />
+                            <flux:otp.input />
+                            <flux:otp.input />
+                            <flux:otp.input />
+                        </flux:otp>
+
+                        <div class="space-y-4">
+                            <flux:button variant="primary" type="submit" class="w-full">Verify</flux:button>
+                            <flux:button 
+                                wire:click="resendPhoneCode" 
+                                class="w-full"
+                                :disabled="!$this->canResendPhone()"
+                                wire:poll.1s
                             >
-                            Verify Cell Phone Number
-                        </button>
-                    </div>
-                </div>
+                                @if($this->canResendPhone())
+                                    Resend code
+                                @else
+                                    Resend code ({{ $this->phoneResendCountdown() }}s)
+                                @endif
+                            </flux:button>
+                        </div>
+                    </form>
+                </flux:card>
+                @endif
 
                 {{-- USER EMAIL --}}
-                <div
-                    x-data="{ validate_email: @entangle('validate_email'), validate_number: @entangle('validate_number'), show_email: @entangle('show_email'), show_name: @entangle('show_name') }"
-                    x-show="!validate_number && show_email"
-                    x-transition
-                    class="my-4 space-y-4"
-                    >
-                    <div>
-                        <label for="user.email" class="block text-sm font-medium text-gray-700">Email Address</label>
-                        <div class="mt-1">
-                            <input
-                                wire:model.live.debounce.1000ms="user.email"
-                                id="user.email"
-                                name="user.email"
+                @if($step === 'email')
+                <div class="space-y-6">
+                    @if($this->hasExistingEmail())
+                        <flux:field>
+                            <flux:label>Email Address</flux:label>
+                            <flux:input 
+                                value="{{ $user->email }}"
                                 type="email"
+                                disabled
+                            />
+                            <flux:description>We found this email associated with your phone number.</flux:description>
+                        </flux:field>
+                    @else
+                        <flux:field>
+                            <flux:label>Email Address</flux:label>
+                            <flux:input 
+                                wire:model.live.debounce.1000ms="user.email"
+                                type="email"
+                                placeholder="email@example.com"
                                 required
-                                x-bind:disabled="{{$show_name == TRUE || $validate_email == TRUE ? true : false}}"
-                                {{-- x-bind:disabled="{{isset($user) ? isset($user['id']) || isset($user['email']) ? true : false : false}}" --}}
-                                class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-xs appearance-none disabled:opacity-50 focus:border-indigo-500 focus:outline-hidden focus:ring-indigo-500 sm:text-sm"
-                            >
-                            <span class="text-sm" x-show="!show_name && !validate_email"><i><b>Personal email</b> NOT your business email.</i></span>
-                        </div>
-                        <x-forms.error errorName="user.email" />
-                    </div>
-                    <div
-                        x-data="{ validate_email: @entangle('validate_email'), show_name: @entangle('show_name') }"
-                        x-show="!validate_email && !show_name"
-                        x-transition
-                        class="my-4 space-y-4"
-                        >
-                        <div>
-                            {{-- only enable when user_cell passes validation.. --}}
-                            <button
-                                wire:click="user_email"
-                                type="button"
-                                class="flex justify-center w-full px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-xs hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                                >
-                                Confirm Email
-                            </button>
-                        </div>
-                    </div>
+                            />
+                            <flux:description><strong>Personal email</strong> NOT your business email.</flux:description>
+                        </flux:field>
+                    @endif
+
+                    <flux:button 
+                        wire:click="user_email"
+                        variant="primary" 
+                        class="w-full"
+                    >
+                        Confirm Email
+                    </flux:button>
                 </div>
+                @endif
 
                 {{-- EMAIL VERIFICATION CODE --}}
-                <div
-                    x-data="{ validate_email: @entangle('validate_email') }"
-                    x-show="validate_email"
-                    x-transition
-                    class="my-4 space-y-4"
-                    >
+                @if($step === 'verify-email')
+                <flux:card>
+                    <form wire:submit.prevent="email_verification_code_confirm" class="space-y-8">
+                        <div class="max-w-64 mx-auto space-y-2">
+                            <flux:heading size="lg" class="text-center">Verify your email</flux:heading>
+                            <flux:text class="text-center">Please enter the 6-digit code we emailed you.</flux:text>
+                        </div>
 
-                    <div>
-                        <label for="email_verification_code" class="block text-sm font-medium text-gray-700">Email Verification Code</label>
-                        <div class="mt-1">
-                            <input
-                                wire:model.live.debounce.1000ms="email_verification_code"
-                                id="email_verification_code"
-                                name="email_verification_code"
-                                type="numeric"
-                                inputmode="numeric"
-                                required
-                                class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-xs appearance-none focus:border-indigo-500 focus:outline-hidden focus:ring-indigo-500 sm:text-sm"
+                        <flux:otp wire:model.live="email_verification_code" length="6" label="Verification Code" label:sr-only :error:icon="false" error:class="text-center" class="mx-auto">
+                            <flux:otp.input />
+                            <flux:otp.input />
+                            <flux:otp.input />
+                            <flux:otp.separator />
+                            <flux:otp.input />
+                            <flux:otp.input />
+                            <flux:otp.input />
+                        </flux:otp>
+
+                        <div class="space-y-4">
+                            <flux:button variant="primary" type="submit" class="w-full">Verify</flux:button>
+                            <flux:button 
+                                wire:click="resendEmailCode" 
+                                class="w-full"
+                                :disabled="!$this->canResendEmail()"
+                                wire:poll.1s
                             >
-                            <span class="text-sm"><i>Enter the 6 digit code we emailed you. If you refresh this page you will need to request a new code.</i></span>
+                                @if($this->canResendEmail())
+                                    Resend code
+                                @else
+                                    Resend code ({{ $this->emailResendCountdown() }}s)
+                                @endif
+                            </flux:button>
                         </div>
-                        <x-forms.error errorName="email_verification_code" />
-                    </div>
+                    </form>
+                </flux:card>
+                @endif
 
-                    <div
-                        x-data="{ validate_email: @entangle('validate_email'), show_name: @entangle('show_name') }"
-                        x-show="validate_email && !show_name"
-                        x-transition
-                        class="my-4 space-y-4"
-                        >
-                        <div>
-                            {{-- only enable when user_cell passes validation.. --}}
-                            <button
-                                wire:click="email_verification_code_confirm"
-                                type="button"
-                                class="flex justify-center w-full px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-xs hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                                >
-                                Verify Email
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                {{-- USER NAMES AND PASSWORD --}}
+                @if($step === 'complete')
+                <form 
+                    wire:submit="register_user"
+                    class="space-y-6"
+                >
+                    @if($this->hasExistingEmail() && $user->first_name)
+                        <flux:input 
+                            value="{{ $user->first_name }}"
+                            label="First Name"
+                            disabled
+                        />
+                    @else
+                        <flux:input 
+                            wire:model.live.debounce.1000ms="user.first_name"
+                            label="First Name"
+                            placeholder="John"
+                            required
+                        />
+                    @endif
 
-            {{-- USER NAMES AND SUBMIT... --}}
-            <form wire:submit="register_user" class="space-y-6">
-                <div
-                    x-data="{ show_name: @entangle('show_name') }"
-                    x-show="show_name"
-                    x-transition
-                    class="my-4 space-y-4"
-                    >
-                    <div>
-                        <label for="user.first_name" class="block text-sm font-medium text-gray-700">First Name</label>
-                        <div class="mt-1">
-                            <input
-                                wire:model.live.debounce.1000ms="user.first_name"
-                                id="user.first_name"
-                                name="user.first_name"
-                                required
-                                x-bind:disabled="{{isset($user) ? isset($user['id']) ? true : false : false}}"
-                                class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-xs appearance-none disabled:opacity-50 focus:border-indigo-500 focus:outline-hidden focus:ring-indigo-500 sm:text-sm"
-                            >
-                        </div>
-                        <x-forms.error errorName="user.first_name" />
-                    </div>
+                    @if($this->hasExistingEmail() && $user->last_name)
+                        <flux:input 
+                            value="{{ $user->last_name }}"
+                            label="Last Name"
+                            disabled
+                        />
+                    @else
+                        <flux:input 
+                            wire:model.live.debounce.1000ms="user.last_name"
+                            label="Last Name"
+                            placeholder="Doe"
+                            required
+                        />
+                    @endif
 
-                    <div>
-                        <label for="user.last_name" class="block text-sm font-medium text-gray-700">Last Name</label>
-                        <div class="mt-1">
-                            <input
-                                wire:model.live.debounce.1000ms="user.last_name"
-                                id="user.last_name"
-                                name="user.last_name"
-                                required
-                                x-bind:disabled="{{isset($user) ? isset($user['id']) ? true : false : false}}"
-                                class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-xs appearance-none disabled:opacity-50 focus:border-indigo-500 focus:outline-hidden focus:ring-indigo-500 sm:text-sm"
-                            >
-                        </div>
-                        <x-forms.error errorName="user.last_name" />
-                    </div>
+                    <flux:input 
+                        wire:model.live.debounce.1000ms="password"
+                        label="New Password"
+                        type="password"
+                        placeholder="Your password"
+                        required
+                    />
 
-                    {{-- password --}}
-                    <div>
-                        <label for="password" class="block text-sm font-medium text-gray-700">New Password</label>
-                        <div class="mt-1">
-                            <input
-                                wire:model.live.debounce.1000ms="password"
-                                id="password"
-                                name="password"
-                                type="password"
-                                required
-                                class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-xs appearance-none focus:border-indigo-500 focus:outline-hidden focus:ring-indigo-500 sm:text-sm"
-                            >
-                        </div>
-                        <x-forms.error errorName="password" />
-                    </div>
+                    <flux:input 
+                        wire:model.live.debounce.1000ms="password_confirmation"
+                        label="Password Confirmation"
+                        type="password"
+                        placeholder="Confirm your password"
+                        required
+                    />
 
-                    <div>
-                        <label for="password_confirmation" class="block text-sm font-medium text-gray-700">Password Confirmation</label>
-                            <div class="mt-1">
-                                <input
-                                    wire:model.live.debounce.1000ms="password_confirmation"
-                                    id="password_confirmation"
-                                    name="password_confirmation"
-                                    type="password"
-                                    required
-                                    class="block w-full px-3 py-2 placeholder-gray-400 border border-gray-300 rounded-md shadow-xs appearance-none focus:border-indigo-500 focus:outline-hidden focus:ring-indigo-500 sm:text-sm"
-                                >
-                            </div>
-                        <x-forms.error errorName="password_confirmation" />
-                    </div>
-
-                    <button
-                        type="submit"
-                        class="flex justify-center w-full px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-xs hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                        >
+                    <flux:button type="submit" variant="primary" class="w-full">
                         Register
-                    </button>
+                    </flux:button>
+                </form>
+                @endif
+            </div>
+
+            @if($step === 'phone')
+            <div>
+                <flux:separator text="or"/>
+
+                <flux:button 
+                    href="{{ route('login') }}"
+                    wire:navigate
+                    class="w-full"
+                >
+                    Sign In
+                </flux:button>
+            </div>
+            @endif
+        </div>
+    </div>
+
+    <!-- Right side - Testimonial -->
+    <div class="flex-1 p-4 max-lg:hidden">
+        <div class="text-white relative rounded-lg h-full w-full bg-blue-900 flex flex-col items-start justify-end p-16">
+            <div class="flex gap-2 mb-4">
+                <flux:icon.star variant="solid" />
+                <flux:icon.star variant="solid" />
+                <flux:icon.star variant="solid" />
+                <flux:icon.star variant="solid" />
+                <flux:icon.star variant="solid" />
+            </div>
+
+            <div class="mb-6 italic font-base text-3xl xl:text-4xl">
+                "Registering my Hive was quick and easy. Now I have complete control over my projects and subcontractors."
+            </div>
+
+            <div class="flex gap-4">
+                <flux:avatar src="{{ asset('favicon.png') }}" size="xl" />
+
+                <div class="flex flex-col justify-center font-medium">
+                    <div class="text-lg">Sarah Johnson</div>
+                    <div class="text-zinc-300">Project Manager</div>
                 </div>
-            </form>
+            </div>
         </div>
     </div>
 </div>

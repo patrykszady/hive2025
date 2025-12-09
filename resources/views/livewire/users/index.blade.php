@@ -56,9 +56,9 @@
                 <flux:button
                     variant="primary"
                     x-show="!isConfirmed"
-                    wire:click="$dispatchTo('entry.vendor-registration', 'confirmProcessStep', { process_step: 'team_members' }); $nextTick(() => { isConfirmed = true })"
+                    wire:click="$dispatchTo('entry.vendor-registration', 'confirmProcess', { process_step: 'team_members' }); $nextTick(() => { isConfirmed = true })"
                     >
-                    No More Employees
+                    Continue without Additional Members
                 </flux:button>
             @endif
 

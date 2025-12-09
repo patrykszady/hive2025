@@ -1364,11 +1364,6 @@ class TransactionController extends Controller
         unset($checks, $transactions, $bank_account_ids);
         gc_collect_cycles();
         
-        Log::channel('add_check_id_to_transactions')->info('Memory before matchChecksToExpenses', [
-            'memory_used_mb' => round(memory_get_usage(true) / 1024 / 1024, 2),
-            'memory_limit_mb' => ini_get('memory_limit'),
-        ]);
-        
         // Now match checks to expenses using many-to-many relationship
         // Find expenses that don't have checks (via pivot) and match checks that sum to expense amount
         $this->matchChecksToExpenses();
@@ -1391,11 +1386,6 @@ class TransactionController extends Controller
             ->orderBy('date', 'DESC')
             ->limit(200) // Process most recent 200 expenses to prevent memory issues
             ->get();
-        
-        Log::channel('add_check_id_to_transactions')->info('Loaded expenses for matching', [
-            'expense_count' => $expenses->count(),
-            'memory_used_mb' => round(memory_get_usage(true) / 1024 / 1024, 2),
-        ]);
         
         foreach ($expenses as $expense) {
             $start_date = $expense->date->subDays(7)->format('Y-m-d');

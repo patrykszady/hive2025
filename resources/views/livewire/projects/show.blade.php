@@ -94,7 +94,7 @@
 
                         <flux:separator variant="subtle" />
 
-                        <div class="-mx-6 overflow-hidden pb-6">
+                        <div class="-mx-6 overflow-hidden">
                             <flux:table class="[:where(&)]:p-0 [:where(&)]:space-y-0 [&_th]:!px-6 [&_td]:!px-6 w-full">
                                 <flux:table.columns>
                                     <flux:table.column>Event</flux:table.column>
