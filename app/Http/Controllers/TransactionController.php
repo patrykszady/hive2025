@@ -1413,11 +1413,6 @@ class TransactionController extends Controller
             $exactMatch = $checks->where('amount', $expense->amount)->first();
             if ($exactMatch) {
                 $expense->checks()->attach($exactMatch->id);
-                Log::channel('add_check_id_to_transactions')->info('Matched single check to expense', [
-                    'expense_id' => $expense->id,
-                    'check_id' => $exactMatch->id,
-                    'amount' => $expense->amount,
-                ]);
                 continue;
             }
             

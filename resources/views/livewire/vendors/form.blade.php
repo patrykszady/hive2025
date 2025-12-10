@@ -21,14 +21,15 @@
                 >
                     Details
                 </button>
+                @if(!$isRegistration)
                 <button
                     @click="activeTab = 'expenses'"
                     :class="activeTab === 'expenses' ? 'border-accent text-accent' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
                     class="py-2 px-1 border-b-2 font-medium text-sm"
-                    x-show="$wire.view_text['form_submit'] === 'edit'"
                 >
                     Categories
                 </button>
+                @endif
             </nav>
         </div>
         
@@ -250,6 +251,7 @@
         </div>
         
         <!-- Expenses Tab Content -->
+        @if(!$isRegistration)
         <div x-show="activeTab === 'expenses'" class="space-y-4">
             <!-- Category Assignment Form -->
             <flux:card class="bg-white border border-gray-200">
@@ -373,5 +375,6 @@
                 @endforelse
             </div>
         </div>
+        @endif
     </div>
 </flux:modal>

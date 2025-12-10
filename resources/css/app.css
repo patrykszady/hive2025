@@ -45,6 +45,9 @@
 /* Hide elements with x-cloak until Alpine initializes */
 [x-cloak] { display: none !important; }
 
+/* Hide Livewire components with wire:cloak until Livewire initializes */
+[wire\:cloak] { display: none !important; }
+
 /* Global Flux editor styling - single-spaced paragraphs and dynamic height */
 [data-flux-editor] .tiptap p {
     margin-top: 0 !important;

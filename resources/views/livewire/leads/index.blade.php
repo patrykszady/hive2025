@@ -34,7 +34,7 @@
         <flux:separator variant="subtle" />
 
         <div class="space-y-2">
-            <flux:table :paginate="$this->leads">
+            <flux:table :paginate="$this->leads->hasPages() ? $this->leads : null">
                 <flux:table.columns>
                     <flux:table.column sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')">Date</flux:table.column>
                     <flux:table.column>User</flux:table.column>

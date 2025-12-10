@@ -17,6 +17,14 @@ class Login extends Component
         'password' => 'required',
     ];
 
+    public function mount(): void
+    {
+        // Clear email if redirected from registration with error
+        if (session('error')) {
+            $this->email = '';
+        }
+    }
+
     public function login(): void
     {
         $this->validate();

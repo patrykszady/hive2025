@@ -27,7 +27,7 @@
             @endforeach
         </flux:radio.group>
 
-        <div x-show="$wire.vendor_id" x-transition>
+        <div x-show="$wire.vendor_id" x-transition x-cloak>
             <div class="flex justify-end">
                 <flux:button variant="primary" wire:click="save">
                     @if($vendor_id && $this->vendors->find($vendor_id))

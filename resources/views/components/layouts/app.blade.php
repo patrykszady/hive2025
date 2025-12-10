@@ -9,10 +9,16 @@
         <flux:sidebar sticky collapsible class="bg-zinc-50 dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-700">
             <flux:sidebar.header>
                 @php
-                    $isVendorRoute = Route::is(['vendor_selection', 'vendor_registration']);
-                    $href = $isVendorRoute ? null : route('dashboard'); // Set href for non-vendor routes
-                    $logo = asset('favicon.png'); // Logo remains the same
-                    $name = \Illuminate\Support\Str::limit($isVendorRoute ? env('APP_NAME') : auth()->user()->vendor->name, 15); // limit to 15 chars
+                    $isVendorRoute = Route::is(['vendor_registration']);
+                    $isVendorSelection = Route::is(['vendor_selection']);
+                    $href = ($isVendorRoute || $isVendorSelection) ? null : route('dashboard');
+                    $logo = asset('favicon.png');
+                    $name = \Illuminate\Support\Str::limit(
+                        $isVendorRoute || $isVendorSelection || !auth()->user()->vendor 
+                            ? env('APP_NAME') 
+                            : auth()->user()->vendor->name, 
+                        15
+                    );
                 @endphp
                 <flux:sidebar.brand
                     href="{{ $href }}"

@@ -10,6 +10,12 @@
 
             <flux:heading class="text-center" size="xl">Sign in to your Hive</flux:heading>
 
+            @if(session('error'))
+                <flux:callout color="sky" icon="information-circle">
+                    {{ session('error') }}
+                </flux:callout>
+            @endif
+
             <div class="space-y-6">
                 <form wire:submit="login" class="space-y-6">
                     <flux:input 

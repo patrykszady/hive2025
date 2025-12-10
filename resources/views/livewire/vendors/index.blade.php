@@ -28,7 +28,7 @@
         </div>
 
         <div class="space-y-2">
-            <flux:table :paginate="$this->vendors">
+            <flux:table :paginate="$this->vendors->hasPages() ? $this->vendors : null">
                 <flux:table.columns>
                     <flux:table.column sortable :sorted="$sortBy === 'business_name'" :direction="$sortDirection" wire:click="sort('business_name')">Vendor</flux:table.column>
                     <flux:table.column>Type</flux:table.column>

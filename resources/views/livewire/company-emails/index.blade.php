@@ -6,6 +6,7 @@
             <flux:button
                 x-on:click="window.openNylasPopup('{{route('company-email.login')}}')"
                 size="sm"
+                icon="plus"
                 >
                 Add Email Account
             </flux:button>

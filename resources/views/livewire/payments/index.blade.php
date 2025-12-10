@@ -17,7 +17,7 @@
         </div>
 
         <div class="space-y-2">
-            <flux:table :paginate="$view !== 'estimate.pdf' ? $this->payments : null">
+            <flux:table :paginate="$view !== 'estimate.pdf' && $this->payments->hasPages() ? $this->payments : null">
                 <flux:table.columns>
                     <flux:table.column>Amount</flux:table.column>
                     @if($view !== 'estimate.pdf')

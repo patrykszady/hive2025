@@ -23,7 +23,7 @@
         </div>
 
         <div class="space-y-2">
-            <flux:table :paginate="$this->estimates">
+            <flux:table :paginate="$this->estimates->hasPages() ? $this->estimates : null">
                 <flux:table.columns>
                     <flux:table.column>Estimate</flux:table.column>
                     <flux:table.column>Amount</flux:table.column>

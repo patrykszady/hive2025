@@ -3,6 +3,7 @@
         <flux:heading size="lg">Distributions</flux:heading>
         <flux:button
             size="sm"
+            icon="plus"
             wire:click="$dispatchTo('distributions.distribution-create', 'newDistribution')"
             >
             Add New
@@ -11,7 +12,7 @@
 
     <livewire:distributions.distribution-create />
 
-    <flux:subheading class="m-0">Split Project profits between shareholders.</flux:subheading>
+    <flux:subheading class="m-0">Assign receipt emails to team members or office accounts.</flux:subheading>
 
     <div class="space-y-2">
         <flux:table>

@@ -4,7 +4,6 @@ namespace App\Livewire\Entry;
 
 use App\Models\User;
 use App\Models\Vendor;
-use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
@@ -57,7 +56,6 @@ class VendorSelection extends Component
     }
 
     #[Title('Account Selection')]
-    #[Layout('components.layouts.guest')]
     public function render()
     {
         return view('livewire.entry.vendor-selection');

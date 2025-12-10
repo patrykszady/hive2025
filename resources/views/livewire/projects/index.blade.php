@@ -43,7 +43,7 @@
         </div>
 
         <div class="space-y-2 overflow-x-hidden">
-            <flux:table :paginate="$this->projects" class="table-fixed w-full">
+            <flux:table :paginate="$this->projects->hasPages() ? $this->projects : null" class="table-fixed w-full">
                 <flux:table.columns>
                     @if($view == 'clients.index')
                         {{-- Order for client view: Name, Address, Status --}}
@@ -121,7 +121,7 @@
         <flux:separator variant="subtle" />
 
         <div class="space-y-2 overflow-x-auto">
-            <flux:table :paginate="$this->emailTrackingEvents">
+            <flux:table :paginate="$this->emailTrackingEvents->hasPages() ? $this->emailTrackingEvents : null">
                 <flux:table.columns>
                     <flux:table.column>Event</flux:table.column>
                     <flux:table.column>Template</flux:table.column>

@@ -207,17 +207,15 @@
             </div>
 
             @if($step === 'phone')
-            <div>
-                <flux:separator text="or"/>
+            <flux:separator text="or"/>
 
-                <flux:button 
-                    href="{{ route('login') }}"
-                    wire:navigate
-                    class="w-full"
-                >
-                    Sign In
-                </flux:button>
-            </div>
+            <flux:button 
+                href="{{ route('login') }}"
+                wire:navigate
+                class="w-full"
+            >
+                Sign In
+            </flux:button>
             @endif
         </div>
     </div>

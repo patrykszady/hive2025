@@ -8,7 +8,7 @@
         <flux:separator variant="subtle" class="my-2" />
 
         <div class="space-y-2">
-            <flux:table :paginate="$this->line_items">
+            <flux:table :paginate="$this->line_items->hasPages() ? $this->line_items : null">
                 <flux:table.columns>
                     <flux:table.column>
                         <flux:input wire:model.live="search" icon="magnifying-glass" placeholder="Search ..." />

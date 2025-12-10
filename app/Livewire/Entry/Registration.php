@@ -159,12 +159,26 @@ class Registration extends Component
         }
 
         if ($field === 'user_cell') {
-            try {
-                $this->validateOnly('user_cell');
-                $this->user_cell_valid = true;
-            } catch (\Illuminate\Validation\ValidationException $e) {
+            // Only validate if user has typed enough characters (at least 10 digits)
+            $rawPhone = preg_replace('/[^0-9]/', '', $this->user_cell);
+            
+            // If they've typed something substantial but incomplete, show error
+            if (!empty($rawPhone) && strlen($rawPhone) < 10) {
                 $this->user_cell_valid = false;
-                throw $e;
+                $this->addError('user_cell', 'Phone number must be 10 digits.');
+            } elseif (strlen($rawPhone) >= 10) {
+                // Full number entered, validate format
+                try {
+                    $this->validateOnly('user_cell');
+                    $this->user_cell_valid = true;
+                } catch (\Illuminate\Validation\ValidationException $e) {
+                    $this->user_cell_valid = false;
+                    throw $e;
+                }
+            } else {
+                // Empty or just started typing, clear errors
+                $this->resetErrorBag('user_cell');
+                $this->user_cell_valid = false;
             }
         } else {
             $this->validateOnly($field);

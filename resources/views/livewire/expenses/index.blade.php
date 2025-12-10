@@ -206,7 +206,7 @@
 
             <div>
                 @if($this->transactionsReady)
-                    <flux:table :paginate="$this->transactions" wire:loading.class="opacity-50 text-opacity-50">
+                    <flux:table :paginate="$this->transactions->hasPages() ? $this->transactions : null" wire:loading.class="opacity-50 text-opacity-50">
                         <flux:table.columns>
                             <flux:table.column>Amount</flux:table.column>
                             <flux:table.column>Date</flux:table.column>

@@ -2,15 +2,13 @@
     <div class="grid max-w-3xl grid-cols-1 gap-6 mx-auto mt-8 sm:px-6 lg:max-w-7xl lg:grid-cols-5">
         {{-- PROGRESS TIMELINE --}}
         <div class="space-y-4 lg:col-start-1 lg:col-span-2">
-            <x-sections.section cols="1" class="sticky top-5">
-                <x-slot name="heading">
-                    <h2 class="text-lg font-medium leading-6 text-gray-900">
-                        Hive Registration for {{$user->vendor->business_name}}
-                    </h2>
-                    <p class="max-w-2xl mt-1 text-sm text-gray-500">
-                        Registration Progress
-                    </p>
-                </x-slot>
+            <flux:card class="sticky top-5 space-y-4">
+                <div>
+                    <flux:heading size="lg">Hive Registration for {{$user->vendor->business_name}}</flux:heading>
+                    <flux:subheading>Registration Progress</flux:subheading>
+                </div>
+
+                <flux:separator variant="subtle" />
 
                 {{-- TIMELINE --}}
                 <div class="flow-root">
@@ -38,7 +36,7 @@
                         @endforeach
                     </ul>
                 </div>
-            </x-sections.section>
+            </flux:card>
         </div>
         
         {{-- REGISTRATION CONTENT --}}
@@ -48,38 +46,29 @@
 
             @if($vendor->business_type !== '1099')
                 {{-- TEAM MEMBERS SECTION (non-1099 only) --}}
-                <div x-show="$wire.registration.vendor_info" x-transition class="space-y-4">
+                <div x-cloak x-show="$wire.registration.vendor_info" x-transition class="space-y-4">
                     <livewire:users.users-index 
                         :vendor="$vendor" 
                         :view="$view"
                     />
-                    
-                    {{-- BYPASS BUTTON FOR TEAM MEMBERS --}}
-                    @if(!$registration->team_members)
-                        <flux:button 
-                            variant="primary" 
-                            wire:click="confirmProcess('team_members')"
-                            class="w-full"
-                        >
-                            Continue without Additional Members
-                        </flux:button>
-                    @endif
 
-                    {{-- EMAILS SECTION --}}
-                    <div x-show="$wire.registration.team_members" x-transition>
-                        <div class="space-y-4">
+                    {{-- DISTRIBUTIONS & COMPANY EMAILS SECTION --}}
+                    <div x-cloak x-show="$wire.registration.team_members" x-transition class="space-y-4">
+                        {{-- DISTRIBUTIONS - Show when company email exists --}}
+                        @if($vendor->company_emails()->exists())
                             <livewire:distributions.distributions-list :view="$view" />
-                            <livewire:company-emails.company-emails-index :view="$view" />
-                        </div>
+                        @endif
+                        
+                        <livewire:company-emails.company-emails-index :view="$view" />
                     </div>
 
-                    {{-- BANKS SECTION --}}
-                    <div x-show="$wire.registration.emails_registered" x-transition>
+                    {{-- BANKS / TRANSACTION ACCOUNTS SECTION --}}
+                    <div x-cloak x-show="$wire.registration.emails_registered" x-transition>
                         <livewire:banks.bank-index :view="$view" />
                     </div>
 
                     {{-- FINAL REGISTRATION (after banks for non-1099) --}}
-                    <div x-show="$wire.registration.banks_registered" x-transition>
+                    <div x-cloak x-show="$wire.registration.banks_registered" x-transition>
                         <form wire:submit="store">
                             <button
                                 type="submit"
@@ -92,7 +81,7 @@
                 </div>
             @else
                 {{-- 1099: Only vendor_info -> registered --}}
-                <div x-show="$wire.registration.vendor_info" x-transition>
+                <div x-cloak x-show="$wire.registration.vendor_info" x-transition>
                     <form wire:submit="store">
                         <button
                             type="submit"

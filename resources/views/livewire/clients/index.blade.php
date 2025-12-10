@@ -18,7 +18,7 @@
         <flux:heading size="lg">Clients</flux:heading>
 
         <div>
-            <flux:table :paginate="$this->clients" wire:loading.class="opacity-50 text-opacity-50">
+            <flux:table :paginate="$this->clients->hasPages() ? $this->clients : null" wire:loading.class="opacity-50 text-opacity-50">
                 <flux:table.columns>
                     <flux:table.column>Name</flux:table.column>
                     <flux:table.column>Address</flux:table.column>

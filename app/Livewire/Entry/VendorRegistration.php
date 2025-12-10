@@ -67,11 +67,11 @@ class VendorRegistration extends Component
                 ]);
             }
 
-            if ($this->vendor->company_emails()->exists() and !isset($this->registration->emails_registered)) {
+            if ($this->vendor->company_emails()->exists() && empty($this->registration->emails_registered)) {
                 $this->confirmProcess('emails_registered');
             }
 
-            if ($this->vendor->banks()->exists() and !isset($this->registration->banks_registered)) {
+            if ($this->vendor->banks()->exists() && empty($this->registration->banks_registered)) {
                 $this->confirmProcess('banks_registered');
             }
         } 

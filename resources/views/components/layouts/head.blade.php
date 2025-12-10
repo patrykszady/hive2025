@@ -37,7 +37,12 @@
     <!-- Styles -->
     @vite(['resources/css/app.css'])
     <style>
+        /* Hide Alpine elements until initialized */
         [x-cloak] {
+            display: none !important;
+        }
+        /* Hide elements with x-show that should start hidden */
+        [x-cloak\:hidden] {
             display: none !important;
         }
     </style>

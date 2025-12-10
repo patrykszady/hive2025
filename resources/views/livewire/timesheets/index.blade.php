@@ -50,7 +50,7 @@
 
         <div class="space-y-2">
 
-            <flux:table :paginate="$timesheets">
+            <flux:table :paginate="$timesheets->hasPages() ? $timesheets : null">
                 <flux:table.columns>
                     <flux:table.column>Date</flux:table.column>
                     <flux:table.column>Name</flux:table.column>

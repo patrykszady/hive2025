@@ -90,7 +90,7 @@
             @endif
 
             @can('update', $vendor)
-                <livewire:vendors.vendor-create />
+                <livewire:vendors.vendor-create :is-registration="$this->view == 'vendor_registration'" />
             @endcan
         </div>
     </x-slot:footer>

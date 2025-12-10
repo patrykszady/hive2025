@@ -42,15 +42,33 @@ class NylasWebhookController extends Controller
         $payload = $request->all();
         $nylasRequestId = $request->header('X-Nylas-Request-Id');
 
-        // Log all incoming webhooks to dedicated channel
-        Log::channel('nylas_webhooks')->info('Received webhook', [
-            'type' => data_get($payload, 'type'),
-            'nylas_request_id' => $nylasRequestId,
-            'payload' => $payload,
-        ]);
-
         $type = data_get($payload, 'type');
         $data = data_get($payload, 'data');
+
+        // For message.created/updated webhooks, only log if thread is tracked
+        // This prevents excessive logging from all incoming messages
+        $shouldLog = true;
+        if (in_array($type, ['message.created', 'message.updated', 'message.created.truncated', 'message.updated.truncated'])) {
+            $threadId = data_get($data, 'object.thread_id');
+            if ($threadId) {
+                $isTrackedThread = EmailTracking::query()
+                    ->where('nylas_thread_id', $threadId)
+                    ->where('event_type', 'sent')
+                    ->exists();
+                $shouldLog = $isTrackedThread;
+            } else {
+                $shouldLog = false;
+            }
+        }
+
+        // Log incoming webhooks to dedicated channel (filtered for message.* types)
+        if ($shouldLog) {
+            Log::channel('nylas_webhooks')->info('Received webhook', [
+                'type' => $type,
+                'nylas_request_id' => $nylasRequestId,
+                'payload' => $payload,
+            ]);
+        }
 
         if (!$type || !is_array($data)) {
             Log::channel('nylas')->warning('Invalid webhook payload', ['payload' => $payload]);
@@ -64,6 +82,10 @@ class NylasWebhookController extends Controller
             'thread.replied' => 'handleThreadReplied',
             'message.bounced' => 'handleMessageBounced',
             'message.rejected' => 'handleMessageRejected',
+            'message.created' => 'handleMessageCreated',
+            'message.updated' => 'handleMessageCreated',
+            'message.created.truncated' => 'handleMessageCreated',
+            'message.updated.truncated' => 'handleMessageCreated',
         ];
 
         if (isset($handlers[$type])) {
@@ -345,6 +367,146 @@ class NylasWebhookController extends Controller
             ip: $eventDetails['ip'],
             userAgent: $eventDetails['user_agent'],
             isMessageLevel: $isMessageLevel ?? false,
+        );
+    }
+
+    /**
+     * Handle message.created/updated webhook as fallback for reply detection.
+     * 
+     * This catches incoming replies to tracked threads when thread.replied webhook
+     * fails to fire (e.g., Nylas tracking pixel not loaded by recipient).
+     */
+    protected function handleMessageCreated(array $payload): void
+    {
+        $webhookType = $payload['type'] ?? 'message.created';
+        $data = $payload['data'] ?? [];
+        $object = $data['object'] ?? [];
+        $grantId = $data['grant_id'] ?? null;
+
+        $threadId = $object['thread_id'] ?? null;
+        $messageId = $object['id'] ?? null;
+        $folders = $object['folders'] ?? [];
+
+        // Only process if we have a thread_id to match against
+        if (!$threadId) {
+            return;
+        }
+
+        // Only process messages in INBOX (incoming messages)
+        if (!in_array('INBOX', $folders) && !in_array('Inbox', $folders)) {
+            return;
+        }
+
+        // Check if this thread is one we're tracking (has a 'sent' event)
+        $trackedThread = EmailTracking::query()
+            ->where('nylas_thread_id', $threadId)
+            ->where('event_type', 'sent')
+            ->first();
+
+        if (!$trackedThread) {
+            // Not a thread we're tracking, ignore
+            return;
+        }
+
+        // Get sender email from the message
+        $fromEmails = collect($object['from'] ?? [])
+            ->map(fn (array $sender) => strtolower($sender['email'] ?? ''))
+            ->filter();
+
+        if ($fromEmails->isEmpty()) {
+            return;
+        }
+
+        // Get the sender email associated with this grant (the account owner)
+        $senderEmail = $this->resolveSenderEmailFromGrant($grantId);
+        
+        // Check if this message is from the grant owner (from_self)
+        // If so, skip - we already track sent messages via 'sent' event
+        if ($senderEmail && $fromEmails->contains(strtolower($senderEmail))) {
+            Log::channel('nylas')->info('Skipping message.created - from self (fallback check)', [
+                'thread_id' => $threadId,
+                'message_id' => $messageId,
+                'sender' => $senderEmail,
+            ]);
+            return;
+        }
+
+        // Check if this is a mailer-daemon/bounce notification
+        $isBounceNotification = $fromEmails->contains(function ($email) {
+            return str_contains($email, 'mailer-daemon') || 
+                   str_contains($email, 'postmaster') ||
+                   str_contains($email, 'noreply') ||
+                   str_contains($email, 'microsoftexchange');
+        });
+
+        if ($isBounceNotification) {
+            // Don't treat bounces as replies via this fallback
+            return;
+        }
+
+        // Check if we already have a 'replied' event for this exact message_id
+        $alreadyTracked = EmailTracking::query()
+            ->where('nylas_message_id', $messageId)
+            ->where('event_type', 'replied')
+            ->exists();
+
+        if ($alreadyTracked) {
+            Log::channel('nylas')->info('Reply already tracked for this message', [
+                'thread_id' => $threadId,
+                'message_id' => $messageId,
+            ]);
+            return;
+        }
+
+        // Also check if we have a recent 'replied' event for this thread (within last 5 minutes)
+        // to avoid duplicates when thread.replied webhook also fires
+        $recentReply = EmailTracking::query()
+            ->where('nylas_thread_id', $threadId)
+            ->where('event_type', 'replied')
+            ->where('created_at', '>=', now()->subMinutes(5))
+            ->exists();
+
+        if ($recentReply) {
+            Log::channel('nylas')->info('Recent reply already tracked for this thread (within 5 min)', [
+                'thread_id' => $threadId,
+                'message_id' => $messageId,
+            ]);
+            return;
+        }
+
+        Log::channel('nylas')->info('Fallback reply detection via ' . $webhookType, [
+            'thread_id' => $threadId,
+            'message_id' => $messageId,
+            'from' => $fromEmails->first(),
+            'tracked_project_id' => $trackedThread->project_id,
+        ]);
+
+        // Parse timestamp from the message
+        $timestamp = isset($object['date']) 
+            ? Carbon::createFromTimestamp($object['date']) 
+            : now();
+
+        $metadata = [
+            'nylas_thread_id' => $threadId,
+            'fallback_detection' => true,
+            'detection_source' => $webhookType,
+            'original_subject' => $object['subject'] ?? null,
+            'reply_summary' => [
+                'subject' => $object['subject'] ?? null,
+                'sender' => $object['from'] ?? null,
+                'snippet' => $object['snippet'] ?? null,
+            ],
+        ];
+
+        $this->storeTrackingEvents(
+            messageId: $messageId,
+            eventType: 'replied',
+            recipients: $fromEmails,
+            metadata: $metadata,
+            eventAt: $timestamp,
+            ip: null,
+            userAgent: null,
+            isMessageLevel: false,
         );
     }
 

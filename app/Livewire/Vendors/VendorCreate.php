@@ -29,6 +29,8 @@ class VendorCreate extends Component
         'form_submit' => 'store',
     ];
 
+    public bool $isRegistration = false;
+
     public Vendor $vendor;
     public User $user;
     public bool $has_user = false;

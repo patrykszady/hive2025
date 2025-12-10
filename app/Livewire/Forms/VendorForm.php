@@ -79,14 +79,13 @@ class VendorForm extends Form
         $this->vendor->update([
             'business_name' => $this->business_name,
             'business_type' => $this->business_type,
-            'address' => $this->address,
-            'address_2' => $this->address_2,
-            'city' => $this->city,
-            'state' => $this->state,
-            'zip_code' => $this->zip_code,
+            'address' => $this->component->address_1,
+            'address_2' => $this->component->address_2,
+            'city' => $this->component->city,
+            'state' => $this->component->state,
+            'zip_code' => $this->component->zip_code,
             'business_phone' => $this->business_phone,
             'business_email' => $this->business_email,
-            'category_id' => $this->category_id, // Make sure this is included
         ]);
         
         return $this->vendor;

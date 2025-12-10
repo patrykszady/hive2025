@@ -6,7 +6,7 @@
     </div>
 
     <div class="space-y-2">
-        <flux:table :paginate="$projects" wire:loading.class="opacity-50 text-opacity-50">
+        <flux:table :paginate="$projects->hasPages() ? $projects : null" wire:loading.class="opacity-50 text-opacity-50">
             <flux:table.columns>
                 <flux:table.column>Projects {{ $type }}</flux:table.column>
                 <flux:table.column>Profit</flux:table.column>
