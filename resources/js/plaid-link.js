@@ -35,7 +35,14 @@ function initializePlaidLink(exchangeToken, eventName, bankId = null) {
 
         onSuccess: function (token, metadata) {
             console.log('Dispatching plaidLinkItem with metadata:', metadata);
-            Livewire.dispatch(eventName, { item_data: metadata, bank_id: bankId });
+
+            // Send the full payload the server expects
+            Livewire.dispatch(eventName, {
+                public_token: token,
+                institution: metadata?.institution,
+                accounts: metadata?.accounts,
+                bank_id: bankId,
+            });
         },
 
         onExit: function (err, metadata) {

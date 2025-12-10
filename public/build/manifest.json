@@ -1,11 +1,11 @@
 {
   "resources/css/app.css": {
-    "file": "assets/app-BMA4t_D0.css",
+    "file": "assets/app-_ND01cID.css",
     "src": "resources/css/app.css",
     "isEntry": true
   },
   "resources/js/app.js": {
-    "file": "assets/app-q4G0MsKQ.js",
+    "file": "assets/app-CHI5vAp6.js",
     "name": "app",
     "src": "resources/js/app.js",
     "isEntry": true,
@@ -14,7 +14,7 @@
     ]
   },
   "resources/js/plaid-link.js": {
-    "file": "assets/plaid-link-BUtVjfh2.js",
+    "file": "assets/plaid-link-tA5t98vW.js",
     "name": "plaid-link",
     "src": "resources/js/plaid-link.js",
     "isEntry": true

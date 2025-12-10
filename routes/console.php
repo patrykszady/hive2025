@@ -64,13 +64,14 @@ Schedule::call(function () {
   ->withoutOverlapping()
   ->onOneServer();
 
-Schedule::call(function () {
-    app(\App\Http\Controllers\PlaidTransactionSyncController::class)->syncAllBanks();
-})->hourly()
-  ->name('plaid-transactions-sync')
-  ->environments(['production'])
-  ->withoutOverlapping()
-  ->onOneServer();
+// Disabled - testing webhook-based transaction sync
+// Schedule::call(function () {
+//     app(\App\Http\Controllers\PlaidTransactionSyncController::class)->syncAllBanks();
+// })->dailyAt('4:00')
+//   ->name('plaid-transactions-sync-fallback')
+//   ->environments(['production'])
+//   ->withoutOverlapping()
+//   ->onOneServer();
 
 Schedule::call(function () {
     app(\App\Http\Controllers\TransactionController::class)->add_check_deposit_to_transactions();

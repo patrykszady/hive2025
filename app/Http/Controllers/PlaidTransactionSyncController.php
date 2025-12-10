@@ -86,11 +86,32 @@ class PlaidTransactionSyncController extends Controller
                 if ($status === 'HISTORICAL_UPDATE_COMPLETE' && $lastBankTransaction?->transaction_date) {
                     $transactionsStartDate = $lastBankTransaction->transaction_date->copy()->subWeeks(3)->toDateString();
                 } else {
-                    $regDate = $bank->vendor->registration_date;
-                    $oneYearAgo = Carbon::now()->subYear();
-                    $transactionsStartDate = $regDate->lt($oneYearAgo)
-                        ? $oneYearAgo->toDateString()
-                        : $regDate->toDateString();
+                    // Check if bank has a specific transactions_start_date set (for newly linked banks)
+                    $configuredStartDate = $bank->plaid_options['transactions_start_date'] ?? null;
+                    
+                    if ($configuredStartDate) {
+                        $transactionsStartDate = $configuredStartDate;
+                        Log::channel('plaid_adds')->info('Using configured transactions_start_date from bank options', [
+                            'bank_id' => $bank->id,
+                            'bank_name' => $bank->name,
+                            'transactions_start_date' => $transactionsStartDate,
+                        ]);
+                    } elseif ($bank->created_at->isToday()) {
+                        // For newly created banks (created today), only fetch transactions from today
+                        $transactionsStartDate = Carbon::today()->toDateString();
+                        Log::channel('plaid_adds')->info('New bank detected - limiting transactions to today', [
+                            'bank_id' => $bank->id,
+                            'bank_name' => $bank->name,
+                            'created_at' => $bank->created_at->toDateTimeString(),
+                            'transactions_start_date' => $transactionsStartDate,
+                        ]);
+                    } else {
+                        $regDate = $bank->vendor->registration_date;
+                        $oneYearAgo = Carbon::now()->subYear();
+                        $transactionsStartDate = $regDate->lt($oneYearAgo)
+                            ? $oneYearAgo->toDateString()
+                            : $regDate->toDateString();
+                    }
                 }
             }
 

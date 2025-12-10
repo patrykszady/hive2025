@@ -54,17 +54,40 @@ class BankIndex extends Component
         $this->dispatch('linkToken', $result['link_token']);
     }
 
-    public function plaid_link_item($itemData)
+    public function plaid_link_item($public_token = null, $institution = null, $accounts = null, $bank_id = null)
     {
-        Log::info('plaid_link_item method triggered.');
-        Log::info('Received itemData:', $itemData);
+        Log::info('plaid_link_item method triggered.', [
+            'public_token' => $public_token,
+            'institution' => $institution,
+            'accounts' => $accounts,
+            'bank_id' => $bank_id,
+        ]);
 
-        if (empty($itemData)) {
-            Log::error('itemData is empty or null.');
+        if (empty($public_token)) {
+            Log::error('Missing public_token in Plaid payload.');
             return;
         }
 
-        Log::info('Processing itemData:', $itemData);
+        $normalizedPayload = [
+            'public_token' => $public_token,
+            'institution' => $institution ?? [],
+            'accounts' => $accounts ?? [],
+        ];
+
+        $plaidService = app(PlaidService::class);
+        $result = $plaidService->processPlaidItem($normalizedPayload);
+
+        if (isset($result['error']) && $result['error'] === true) {
+            Log::error('PlaidService error processing item', $result);
+            return;
+        }
+
+        Log::info('Bank created/updated successfully', [
+            'bank_id' => $result->id ?? null,
+            'bank_name' => $result->name ?? null,
+        ]);
+
+        $this->dispatch('refreshComponent');
     }
 
     #[Title('Banks')]

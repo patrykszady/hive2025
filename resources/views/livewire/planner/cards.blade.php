@@ -1,206 +1,64 @@
-<!-- Single Kanban Card -->
-<div class="h-full">
-    <flux:card
-        class="mx-auto h-full overflow-auto p-0 isolate"
-        x-data="{
-            scrollToToday() {
-                const container = this.$el;
-                const todayElement = container.querySelector('[data-today]');
-                if (!todayElement) { return; }
+<!-- Flux Kanban Planner - 14 Day View with Projects & Tasks -->
+<div class="h-full overflow-hidden">
+    <flux:kanban class="h-full">
+        @foreach($kanbanColumns as $column)
+            @php
+                $day = $column['day'];
+                $isToday = $column['isToday'];
+                $isWeekend = $column['isWeekend'];
+            @endphp
 
-                // We want today's row to appear as roughly the 3rd visible row.
-                // So, if possible, scroll so that the element two rows BEFORE today is at the top.
-                let target = todayElement;
-                if (todayElement.previousElementSibling) {
-                    target = todayElement.previousElementSibling; // one before
-                    if (target.previousElementSibling) {
-                        target = target.previousElementSibling; // two before
-                    }
-                }
+            <flux:kanban.column wire:key="day-{{ $day->format('Y-m-d') }}">
+                {{-- Column Header - Day --}}
+                <flux:kanban.column.header
+                    :heading="$column['title']"
+                    :count="$column['taskCount']"
+                    :class="$isToday ? 'bg-blue-50 dark:bg-blue-900/20' : ($isWeekend ? 'bg-zinc-100 dark:bg-zinc-800' : '')"
+                />
 
-                // Compute desired top position relative to container.
-                let top = target.offsetTop - container.offsetTop;
-                if (top < 0) { top = 0; }
+                {{-- Column Cards - Projects with Tasks --}}
+                <flux:kanban.column.cards>
+                    @forelse($column['projectCards'] as $projectCard)
+                        @php
+                            $project = $projectCard['project'];
+                            $tasks = $projectCard['tasks'];
+                        @endphp
 
-                container.scrollTo({ top, behavior: 'auto' });
-            }
-        }"
-        x-init="$nextTick(() => scrollToToday())"
-    >
-        <!-- Header - Sticky at top -->
-        <div class="sticky top-0 z-50 bg-white dark:bg-zinc-800 shadow-sm">
-            <div class="flex items-start justify-between gap-4 p-4">
-                <flux:heading size="lg">{{ $headerTitle }}</flux:heading>
+                        {{-- Project Card --}}
+                        <flux:kanban.card wire:key="project-{{ $project->id }}-{{ $day->format('Y-m-d') }}">
+                            {{-- Project Header with Badge --}}
+                            <x-slot name="header">
+                                <div class="flex items-center justify-between gap-2 w-full">
+                                    <a
+                                        href="{{ $project->getAddressMapURI() }}"
+                                        target="_blank"
+                                        class="truncate font-semibold text-sm text-zinc-800 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 flex items-center gap-1"
+                                    >
+                                        <flux:icon.map-pin class="w-3 h-3 flex-shrink-0" />
+                                        <span class="truncate">{{ $project->address }}</span>
+                                    </a>
+                                    <flux:badge size="sm" color="lime">{{ $tasks->count() }}</flux:badge>
+                                </div>
+                            </x-slot>
 
-                {{-- Show Add Task button based on type and authorization --}}
-                @if(
-                    ($type === 'project' && auth()->user()->can('update', $project)) ||
-                    ($type === 'vendor' && $vendor) ||
-                    ($type === 'employee' && $employee)
-                )
-                    <div class="flex-shrink-0">
-                        <flux:button
-                            wire:click="addTaskButton"
-                            size="sm"
-                            icon="plus"
-                        >
-                            Add Task
-                        </flux:button>
-                    </div>
-                @endif
-            </div>
-        </div>
-
-        <!-- Days as Rows (including No Date Tasks) -->
-        <div class="divide-y divide-zinc-200">
-            <!-- No Date Tasks Row - Show first if exists -->
-            @if($tasksData['noDateTasks']->count() > 0)
-                <div class="bg-zinc-50 select-none">
-                    <!-- No Date Tasks Header - Sticky under main header -->
-                    <div class="bg-zinc-50 border-b border-zinc-200 px-4 py-2 shadow-sm select-none relative z-40">
-                        <flux:accordion>
-                            <flux:accordion.item>
-                                <flux:accordion.heading class="bg-zinc-50 px-4 py-2">
-                                    <div class="flex items-center justify-between w-full">
-                                        <div class="text-zinc-700">
-                                            <h4 class="font-medium text-sm">Unscheduled Tasks</h4>
-                                            <p class="text-xs text-zinc-500">Tasks with no dates assigned</p>
-                                        </div>
-                                        <flux:badge size="sm" color="zinc" variant="outline">
-                                            {{ $tasksData['noDateTasks']->count() }}
-                                        </flux:badge>
-                                    </div>
-                                </flux:accordion.heading>
-
-                                <flux:accordion.content>
-                                    <div class="space-y-3 p-4 bg-zinc-50 max-h-60 overflow-y-auto">
-                                        @foreach($tasksData['noDateTasks'] as $taskData)
-                                            @php
-                                                $task = $taskData['task'];
-                                                $taskTypeColor = $taskData['taskTypeColor'];
-                                            @endphp
-
-                                            <!-- Task Card -->
-                                            <div class="border border-l-4 rounded transition-all hover:bg-zinc-50 relative select-none {{ $taskTypeColor === 'blue' ? 'border-blue-500 border-l-blue-500' : 'border-indigo-500 border-l-indigo-500' }}">
-                                                <div class="p-3">
-                                                    <!-- Project Address (show for employee/vendor view, hide for project view) -->
-                                                    @if($task->project && $type !== 'project')
-                                                        <a
-                                                            href="{{ $task->project->getAddressMapURI() }}"
-                                                            target="_blank"
-                                                            class="truncate font-medium text-sm text-zinc-800 mb-1 block hover:text-blue-600 cursor-pointer flex items-center gap-1 select-none"
-                                                            >
-                                                            <flux:icon.map-pin class="w-3 h-3" />
-                                                            {{ $task->project->address }}
-                                                        </a>
-                                                    @endif
-
-                                                    <!-- Task Title -->
-                                                    <div
-                                                        class="truncate italic text-sm text-zinc-900 mb-2 cursor-pointer hover:text-blue-600 flex items-center gap-1 select-none"
-                                                        wire:click="editTask({{ $task->id }})"
-                                                        >
-                                                        <flux:icon.pencil-square class="w-3 h-3" />
-                                                        {{ $task->title }}
-                                                    </div>
-
-                                                    <!-- Users and Vendor -->
-                                                    <div class="flex items-center gap-2 min-h-0 h-5 select-none">
-                                                        @if($task->users && $task->users->count() > 0 && $type !== 'employee')
-                                                            <flux:avatar.group size="xs">
-                                                                @foreach($task->users as $user)
-                                                                    <flux:avatar
-                                                                        size="xs"
-                                                                        name="{{ $user->full_name }}"
-                                                                        color="auto"
-                                                                        color:seed="{{ $user->id }}"
-                                                                    />
-                                                                @endforeach
-                                                            </flux:avatar.group>
-                                                        @endif
-
-                                                        @if($task->vendor && $type !== 'vendor')
-                                                            <flux:avatar
-                                                                size="xs"
-                                                                name="{{ $task->vendor->name }}"
-                                                                color="auto"
-                                                                color:seed="{{ $task->vendor->id }}"
-                                                                class="flex-shrink-0"
-                                                            />
-                                                            <span class="text-xs min-w-0 whitespace-nowrap truncate text-zinc-600">
-                                                                {{ $task->vendor->name }}
-                                                            </span>
-                                                        @endif
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        @endforeach
-                                    </div>
-                                </flux:accordion.content>
-                            </flux:accordion.item>
-                        </flux:accordion>
-                    </div>
-                </div>
-            @endif
-
-            <!-- Regular Day Rows -->
-            @foreach($tasksData['dayTasks'] as $dayData)
-                @php
-                    $day = $dayData['day'];
-                    $tasks = $dayData['tasks'];
-                    $isWeekend = $day->isWeekend();
-                @endphp
-
-                <!-- Day Row -->
-                <div class="{{ $day->isToday() ? 'bg-blue-50/50' : '' }} select-none" @if($day->isToday()) data-today @endif>
-                    <!-- Day Header - Sticky under main header -->
-                    <div class="bg-white dark:bg-zinc-800 sticky top-[56px] border-b border-zinc-100 dark:border-zinc-700 px-4 py-2 shadow-sm select-none relative z-30">
-                        <div class="flex items-center justify-between">
-                            <div class="{{ $day->isToday() ? 'text-blue-600 dark:text-blue-400' : ($isWeekend ? 'text-zinc-500 italic dark:text-zinc-500' : 'text-zinc-900 dark:text-zinc-100') }}">
-                                <flux:text class="font-bold {{ $day->isToday() ? 'text-blue-600 dark:text-blue-400' : ($isWeekend ? 'text-zinc-500 italic dark:text-zinc-500' : 'text-zinc-900 dark:text-zinc-100') }}"> {{ $day->format('l') }}</flux:text>
-                                <flux:text class="{{ $day->isToday() ? 'text-blue-500 dark:text-blue-300' : ($isWeekend ? 'text-zinc-400 italic dark:text-zinc-600' : 'text-zinc-700 dark:text-zinc-300') }}">{{ $day->format('M j, Y') }}</flux:text>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Tasks for this day - Only show if there are tasks -->
-                    @if($tasks->count() > 0)
-                        <div class="space-y-3 p-4 select-none">
-                            @foreach($tasks as $taskData)
-                                @php
-                                    $task = $taskData['task'];
-                                    $taskTypeColor = $taskData['taskTypeColor'];
-                                @endphp
-
-                                <!-- Task Card -->
-                                <div class="border border-l-4 rounded transition-all hover:bg-zinc-50 relative select-none {{ $taskTypeColor === 'blue' ? 'border-blue-500 border-l-blue-500' : 'border-indigo-500 border-l-indigo-500' }}">
-                                    <div class="p-3">
-                                        <!-- Project Address (show for employee/vendor view, hide for project view) -->
-                                        @if($task->project && $type !== 'project')
-                                            <a
-                                                href="{{ $task->project->getAddressMapURI() }}"
-                                                target="_blank"
-                                                class="truncate font-medium text-sm text-zinc-800 mb-1 block hover:text-blue-600 cursor-pointer flex items-center gap-1 select-none"
-                                                >
-                                                <flux:icon.map-pin class="w-3 h-3" />
-                                                {{ $task->project->address }}
-                                            </a>
-                                        @endif
-
-                                        <!-- Task Title -->
-                                        <div
-                                            class="truncate italic text-sm text-zinc-900 mb-2 cursor-pointer hover:text-blue-600 flex items-center gap-1 select-none"
-                                            wire:click="editTask({{ $task->id }})"
-                                            >
-                                            <flux:icon.pencil-square class="w-3 h-3" />
-                                            {{ $task->title }}
+                            {{-- Tasks List --}}
+                            <div class="space-y-2 mt-2">
+                                @foreach($tasks as $task)
+                                    <div
+                                        wire:click="editTask({{ $task->id }})"
+                                        class="p-2 rounded border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-700/50 cursor-pointer transition-colors {{ $task->type === 'Milestone' ? 'border-l-4 border-l-indigo-500' : 'border-l-4 border-l-blue-500' }}"
+                                    >
+                                        {{-- Task Title --}}
+                                        <div class="flex items-center gap-1 text-sm text-zinc-900 dark:text-zinc-100">
+                                            <flux:icon.pencil-square class="w-3 h-3 text-zinc-400 flex-shrink-0" />
+                                            <span class="truncate">{{ $task->title }}</span>
                                         </div>
 
-                                        <!-- Users and Vendor -->
-                                        <div class="flex items-center gap-2 min-h-0 h-5 select-none">
-                                            @if($task->users && $task->users->count() > 0 && $type !== 'employee')
+                                        {{-- Task Assignees --}}
+                                        @if($task->users && $task->users->count() > 0)
+                                            <div class="flex items-center gap-1 mt-1.5">
                                                 <flux:avatar.group size="xs">
-                                                    @foreach($task->users as $user)
+                                                    @foreach($task->users->take(3) as $user)
                                                         <flux:avatar
                                                             size="xs"
                                                             name="{{ $user->full_name }}"
@@ -208,37 +66,49 @@
                                                             color:seed="{{ $user->id }}"
                                                         />
                                                     @endforeach
+                                                    @if($task->users->count() > 3)
+                                                        <flux:avatar size="xs">+{{ $task->users->count() - 3 }}</flux:avatar>
+                                                    @endif
                                                 </flux:avatar.group>
-                                            @endif
+                                            </div>
+                                        @endif
 
-                                            @if($task->vendor && $type !== 'vendor')
-                                                <flux:avatar
-                                                    size="xs"
-                                                    name="{{ $task->vendor->name }}"
-                                                    color="auto"
-                                                    color:seed="{{ $task->vendor->id }}"
-                                                    class="flex-shrink-0"
-                                                />
-                                                <span class="text-xs min-w-0 whitespace-nowrap truncate text-zinc-600">
+                                        {{-- Vendor Badge --}}
+                                        @if($task->vendor)
+                                            <div class="mt-1.5">
+                                                <flux:badge size="sm" color="zinc" class="truncate max-w-full">
                                                     {{ $task->vendor->name }}
-                                                </span>
-                                            @endif
-                                        </div>
+                                                </flux:badge>
+                                            </div>
+                                        @endif
                                     </div>
+                                @endforeach
+                            </div>
 
-                                    <!-- Day Indicator -->
-                                    @if($taskData['totalFamilyDays'] > 1 && $taskData['currentFamilyDay'])
-                                        <div class="absolute bottom-1 right-1 text-xs text-zinc-400 select-none">
-                                            {{ $taskData['currentFamilyDay'] }}/{{ $taskData['totalFamilyDays'] }}
-                                        </div>
-                                    @endif
-                                </div>
-                            @endforeach
+                            {{-- Footer: Add Task Button --}}
+                            <x-slot name="footer">
+                                <flux:button
+                                    wire:click="addTask({{ $project->id }})"
+                                    variant="ghost"
+                                    size="sm"
+                                    icon="plus"
+                                    class="w-full justify-center"
+                                >
+                                    Add Task
+                                </flux:button>
+                            </x-slot>
+                        </flux:kanban.card>
+                    @empty
+                        {{-- Empty Column State --}}
+                        <div class="text-center py-8 text-zinc-400 dark:text-zinc-500 text-sm">
+                            No tasks scheduled
                         </div>
-                    @endif
-                </div>
-            @endforeach
-        </div>
-    </flux:card>
+                    @endforelse
+                </flux:kanban.column.cards>
+            </flux:kanban.column>
+        @endforeach
+    </flux:kanban>
+
+    {{-- Task Create Modal --}}
     <livewire:tasks.task-create :projects="$projects" :employees="$employees" :vendors="$vendors"/>
 </div>

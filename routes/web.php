@@ -5,6 +5,7 @@ use App\Http\Controllers\LeadController;
 use App\Http\Controllers\ReceiptController;
 use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\PlaidTransactionSyncController;
+use App\Http\Controllers\Api\PlaidWebhookController;
 use App\Http\Controllers\VendorDocsController;
 use App\Http\Controllers\Api\NylasWebhookController;
 
@@ -133,11 +134,11 @@ Route::get('receipts/amazon_auth_response', [ReceiptController::class, 'amazon_a
 Route::get('receipts/amazon_orders_api', [ReceiptController::class, 'amazon_orders_api']);
 
 Route::get('transactions/bulk_match', BulkMatchIndex::class)->name('transactions.bulk_match');
-//plaid webhooks
-// Route::post('plaid_webhooks', 'TransactionController@plaid_webhooks');
-// Route::get('fire_webhook', 'TransactionController@fire_webhook');
 
-// Nylas webhook for email tracking (no auth required)
+// Plaid webhooks (no auth required - Plaid sends these directly)
+Route::post('webhooks/plaid', [PlaidWebhookController::class, 'handle'])->name('webhooks.plaid');
+
+// Nylas webhooks (no auth required - Nylas sends these directly)
 Route::get('webhooks/nylas', [NylasWebhookController::class, 'verify'])->name('webhooks.nylas.verify');
 Route::post('webhooks/nylas', [NylasWebhookController::class, 'handle'])->name('webhooks.nylas');
 

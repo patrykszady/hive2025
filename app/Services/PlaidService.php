@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Bank;
+use App\Models\BankAccount;
 
 use Illuminate\Support\Facades\Log;
 
@@ -77,6 +78,39 @@ class PlaidService
         }
     }
 
+    public function updateWebhook($accessToken, $webhookUrl)
+    {
+        $url = $this->baseUrl . '/item/webhook/update';
+        $data = [
+            'client_id' => $this->clientId,
+            'secret' => $this->secret,
+            'access_token' => $accessToken,
+            'webhook' => $webhookUrl,
+        ];
+
+        try {
+            $result = $this->makeRequest($url, $data);
+
+            if (isset($result['error']) && $result['error'] === true) {
+                Log::error('Plaid webhook update failed.', $result);
+                return $result;
+            }
+
+            Log::info('Plaid webhook updated successfully.', [
+                'item_id' => $result['item']['item_id'] ?? null,
+                'webhook' => $result['item']['webhook'] ?? null,
+            ]);
+
+            return $result;
+        } catch (\Exception $e) {
+            Log::error('Plaid API error during webhook update.', ApiErrorFormatter::format($e));
+            return [
+                'error' => true,
+                'error_message' => $e->getMessage(),
+            ];
+        }
+    }
+
     public function getTransactions($accessToken, $startDate, $endDate)
     {
         $url = $this->baseUrl . '/transactions/get';
@@ -116,6 +150,29 @@ class PlaidService
             'client_id' => $this->clientId,
             'secret' => $this->secret,
             'access_token' => $accessToken,
+        ];
+
+        return $this->makeRequest($url, $data);
+    }
+
+    /**
+     * Fire a sandbox test webhook for an Item.
+     * Only works in sandbox environment.
+     * 
+     * @param string $accessToken The access token for the Item
+     * @param string $webhookType The webhook type (e.g., 'TRANSACTIONS', 'ITEM')
+     * @param string $webhookCode The webhook code (e.g., 'SYNC_UPDATES_AVAILABLE', 'DEFAULT_UPDATE')
+     * @return array The API response
+     */
+    public function fireWebhook(string $accessToken, string $webhookType = 'TRANSACTIONS', string $webhookCode = 'SYNC_UPDATES_AVAILABLE'): array
+    {
+        $url = $this->baseUrl . '/sandbox/item/fire_webhook';
+        $data = [
+            'client_id' => $this->clientId,
+            'secret' => $this->secret,
+            'access_token' => $accessToken,
+            'webhook_type' => $webhookType,
+            'webhook_code' => $webhookCode,
         ];
 
         return $this->makeRequest($url, $data);
@@ -197,8 +254,20 @@ class PlaidService
             $bank->plaid_item_id = $result['item_id'];
             $bank->vendor_id = auth()->user()->vendor->id;
             $bank->plaid_ins_id = $itemData['institution']['institution_id'];
-            $bank->plaid_options = '{"error": false, "balances": false}';
+            $bank->plaid_options = [
+                'error' => false,
+                'balances' => false,
+                'plaid_linked_at' => now()->toIso8601String(),
+                'transactions_start_date' => now()->toDateString(),
+            ];
             $bank->save();
+            
+            Log::channel('plaid_adds')->info('New bank created via Plaid Link', [
+                'bank_id' => $bank->id,
+                'bank_name' => $bank->name,
+                'vendor_id' => $bank->vendor_id,
+                'transactions_start_date' => now()->toDateString(),
+            ]);
         }
 
         foreach ($itemData['accounts'] as $account) {

@@ -81,15 +81,36 @@ class BankShow extends Component
 
     //plaidLinkItemUpdate
     //sibling: as plaid_link_item on BankIndex
-    public function plaid_link_item_update($itemData, PlaidService $plaidService)
+    public function plaid_link_item_update($public_token = null, $institution = null, $accounts = null, $bank_id = null)
     {
-        $result = $plaidService->processPlaidItem($itemData);
+        if (empty($public_token)) {
+            $this->handlePlaidError([
+                'error' => true,
+                'error_type' => 'invalid_request',
+                'error_code' => 'missing_public_token',
+                'error_message' => 'Missing Plaid public_token from Link payload.',
+                'display_message' => 'We could not update the bank because Plaid did not return a token.',
+                'request_id' => null,
+            ], $bank_id);
+
+            return;
+        }
+
+        $normalizedPayload = [
+            'public_token' => $public_token,
+            'institution' => $institution ?? [],
+            'accounts' => $accounts ?? [],
+        ];
+
+        $plaidService = app(PlaidService::class);
+        $plaidService = app(PlaidService::class);
+        $result = $plaidService->processPlaidItem($normalizedPayload);
 
         if (isset($result['error']) && $result['error'] === true) {
             // Update the Bank model with the error details
             $this->handlePlaidError(
                 $result['error'],
-                $bankId
+                $bank_id
             );
 
             return;
