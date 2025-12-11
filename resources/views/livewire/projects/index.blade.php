@@ -115,18 +115,17 @@
     <flux:card class="space-y-2">
         <div class="flex justify-between items-center">
             <flux:heading size="lg">Email Tracking</flux:heading>
-            <flux:badge size="sm" color="zinc">{{ $this->emailTrackingEvents->total() }} events</flux:badge>
         </div>
 
         <flux:separator variant="subtle" />
 
-        <div class="space-y-2 overflow-x-auto">
+        <div class="space-y-2">
             <flux:table :paginate="$this->emailTrackingEvents->hasPages() ? $this->emailTrackingEvents : null">
                 <flux:table.columns>
                     <flux:table.column>Event</flux:table.column>
                     <flux:table.column>Template</flux:table.column>
                     <flux:table.column>Project</flux:table.column>
-                    <flux:table.column>Recipients</flux:table.column>
+                    <flux:table.column class="w-48">Recipients</flux:table.column>
                     <flux:table.column>Link</flux:table.column>
                     <flux:table.column>Date</flux:table.column>
                 </flux:table.columns>
@@ -171,22 +170,16 @@
                             </flux:table.cell>
                             <flux:table.cell>
                                 @if($event->recipient_users && $event->recipient_users->isNotEmpty())
-                                    <div class="text-sm">
+                                    <div class="text-sm truncate max-w-48" title="{{ $event->recipient_users->map(fn($u) => $u->first_name . ' ' . $u->last_name)->implode(', ') }}">
                                         @foreach($event->recipient_users->take(2) as $index => $user)
-                                            <span 
-                                                class="cursor-help" 
-                                                title="{{ $user->email }}">
-                                                {{ $user->first_name }} {{ $user->last_name }}{{ $index < min(1, $event->recipient_users->count() - 1) ? ',' : '' }}
-                                            </span>
+                                            <span>{{ $user->first_name }} {{ $user->last_name }}{{ $index < min(1, $event->recipient_users->count() - 1) ? ',' : '' }}</span>
                                         @endforeach
                                         @if($event->recipient_users->count() > 2)
-                                            <span class="text-gray-500 cursor-help" title="{{ implode(', ', $event->all_recipient_emails) }}">
-                                                +{{ $event->recipient_users->count() - 2 }} more
-                                            </span>
+                                            <span class="text-gray-500">+{{ $event->recipient_users->count() - 2 }} more</span>
                                         @endif
                                     </div>
                                 @elseif($event->all_recipient_emails && count($event->all_recipient_emails) > 0)
-                                    <div class="text-sm text-gray-500 cursor-help" title="{{ implode(', ', $event->all_recipient_emails) }}">
+                                    <div class="text-sm text-gray-500 truncate max-w-48" title="{{ implode(', ', $event->all_recipient_emails) }}">
                                         {{ implode(', ', array_slice($event->all_recipient_emails, 0, 2)) }}
                                         @if(count($event->all_recipient_emails) > 2)
                                             <span>+{{ count($event->all_recipient_emails) - 2 }} more</span>

@@ -225,6 +225,7 @@ class EstimateEmail extends Component
             includeEstimatePdf: $this->include_estimate_pdf,
             includeReimbursementsPdf: $this->include_reimbursements_pdf,
             emailTemplateName: $templateName,
+            senderIp: request()->ip(),
         );
 
         $this->modal('estimate_email_modal')->close();

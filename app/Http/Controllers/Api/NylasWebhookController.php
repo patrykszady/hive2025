@@ -77,7 +77,8 @@ class NylasWebhookController extends Controller
         }
 
         $handlers = [
-            'message.opened' => 'handleMessageOpened',
+            // Opens are tracked via custom pixel (EmailTrackingController)
+            // 'message.opened' is intentionally not handled here
             'message.link_clicked' => 'handleMessageLinkClicked',
             'thread.replied' => 'handleThreadReplied',
             'message.bounced' => 'handleMessageBounced',
@@ -97,28 +98,6 @@ class NylasWebhookController extends Controller
         }
 
         return response()->json(['status' => 'ok']);
-    }
-
-    /**
-     * Track message opened events.
-     * 
-     * NOTE: We now use our own tracking pixel for opens (see EmailTrackingController).
-     * This handler is kept for backward compatibility but logs and skips processing.
-     * Our custom tracking pixel provides recipient_email which Nylas webhooks do not.
-     */
-    protected function handleMessageOpened(array $payload): void
-    {
-        $data = $payload['data'] ?? [];
-        $object = $data['object'] ?? [];
-        $messageId = $this->resolveMessageId($object);
-
-        // Skip processing - we use our own tracking pixel for opens now
-        // Our pixel provides recipient_email which Nylas doesn't include
-        Log::channel('nylas')->debug('Skipping message.opened webhook - using custom tracking pixel', [
-            'message_id' => $messageId,
-        ]);
-
-        return;
     }
 
     /**
@@ -1129,47 +1108,6 @@ class NylasWebhookController extends Controller
             return true;
         }
 
-        return false;
-    }
-
-    /**
-     * Detect if the user agent is from Yahoo's email proxy/bot.
-     * Yahoo Mail uses YahooMailProxy to scan emails, which shouldn't count as real opens.
-     */
-    protected function isYahooBot(?string $userAgent): bool
-    {
-        if (!$userAgent) {
-            return false;
-        }
-
-        // Yahoo's proxy scanner user agent
-        return stripos($userAgent, 'YahooMailProxy') !== false;
-    }
-
-    /**
-     * Detect if an open is likely from the sender viewing their own sent email.
-     * 
-     * NOTE: Nylas message.opened webhooks do NOT include from_self or recipient_email.
-     * We can only use reliable signals:
-     * 1. OneOutlook user agent (specific to Outlook sent folder viewing)
-     * 2. Fetch the message and compare the 'from' email to the opener context
-     * 
-     * Returns true ONLY if we are CONFIDENT this is a sender-open.
-     * False positives are worse than false negatives here.
-     */
-    protected function isLikelySenderOpen(string $messageId, array $eventDetails, ?string $grantId = null): bool
-    {
-        $userAgent = $eventDetails['user_agent'] ?? '';
-        
-        // Check 1: OneOutlook user agent is a strong indicator of sender viewing sent items
-        // Format: "Mozilla/5.0 ... Edg/... OneOutlook/1.2025.1121.100"
-        if (stripos($userAgent, 'OneOutlook') !== false) {
-            return true;
-        }
-        
-        // That's the only reliable signal we have.
-        // Timing, IP patterns, etc. are NOT reliable and could filter legitimate opens.
-        
         return false;
     }
 }

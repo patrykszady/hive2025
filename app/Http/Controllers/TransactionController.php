@@ -722,20 +722,26 @@ class TransactionController extends Controller
 
         $vendors = Vendor::withoutGlobalScopes()->where('business_type', 'Retail')->get();
 
-        // PART 1: Process transactions WITHOUT vendors (original logic)
-        $transactions = Transaction::TransactionsSinVendor()->whereIn('bank_account_id', $bankAccountIds)->get()->groupBy('plaid_merchant_name');
+        // PART 1: Process transactions WITHOUT vendors
+        // First try matching on plaid_merchant_description (more specific), then fall back to plaid_merchant_name
+        $transactionsWithoutVendor = Transaction::TransactionsSinVendor()->whereIn('bank_account_id', $bankAccountIds)->get();
 
-        foreach ($transactions as $merchant_name => $merchant_transactions) {
-            //find vendor where vendor->business_name is contained in $merchant_name
-            $vendor_match = app(\App\Http\Controllers\CompanyEmailController::class)->fuzzyMatchVendor($merchant_name, $vendors);
+        foreach ($transactionsWithoutVendor as $transaction) {
+            $vendor_match = null;
+
+            // First try matching the more specific plaid_merchant_description
+            if (!empty($transaction->plaid_merchant_description)) {
+                $vendor_match = app(\App\Http\Controllers\CompanyEmailController::class)->fuzzyMatchVendor($transaction->plaid_merchant_description, $vendors);
+            }
+
+            // Fall back to plaid_merchant_name if no match found
+            if (!$vendor_match && !empty($transaction->plaid_merchant_name)) {
+                $vendor_match = app(\App\Http\Controllers\CompanyEmailController::class)->fuzzyMatchVendor($transaction->plaid_merchant_name, $vendors);
+            }
 
             if ($vendor_match) {
-                foreach ($merchant_transactions as $transaction) {
-                    $transaction->vendor_id = $vendor_match->id;
-                    $transaction->save();
-                }
-            } else {
-                continue;
+                $transaction->vendor_id = $vendor_match->id;
+                $transaction->save();
             }
         }
 

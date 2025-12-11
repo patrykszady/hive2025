@@ -33,7 +33,8 @@ class EstimateMail extends Mailable
         public string $emailSubject,
         public string $emailBody,
         public array $attachmentPaths = [],
-        public ?string $emailTemplateName = null
+        public ?string $emailTemplateName = null,
+        public ?string $senderIp = null,
     ) {
     }
 
@@ -88,6 +89,10 @@ class EstimateMail extends Mailable
 
         if ($this->emailTemplateName) {
             $metadata['email_template_name'] = $this->emailTemplateName;
+        }
+
+        if ($this->senderIp) {
+            $metadata['sender_ip'] = $this->senderIp;
         }
 
         return new Headers(
@@ -149,6 +154,7 @@ class EstimateMail extends Mailable
             return null;
         }
 
+        // Reset margins on all paragraphs (email clients handle spacing inconsistently)
         foreach ($document->getElementsByTagName('p') as $paragraph) {
             $style = (string) $paragraph->getAttribute('style');
 
@@ -177,7 +183,13 @@ class EstimateMail extends Mailable
         libxml_clear_errors();
         libxml_use_internal_errors($previousUseInternalErrors);
 
-        return trim($innerHtml);
+        $result = trim($innerHtml);
+
+        // Insert <br> after closing </p> tags to create visual spacing
+        // This is the most reliable method for email clients (Outlook, Gmail, etc.)
+        $result = preg_replace('/<\/p>\s*(?=<p[\s>])/i', '</p><br>', $result);
+
+        return $result;
     }
 
     protected function plainTextBody(): string

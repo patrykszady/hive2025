@@ -42,6 +42,30 @@
   }
 }
 
+/* Ensure sidebar stays fixed while main content scrolls */
+/* Override Flux's default to use fixed positioning */
+[data-flux-sidebar] {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    height: 100dvh;
+    overflow-y: auto;
+    z-index: 40;
+}
+
+/* Add left margin to main content to account for fixed sidebar */
+@media (min-width: 1024px) {
+    [data-flux-main] {
+        margin-left: var(--flux-sidebar-width, 16rem);
+    }
+    
+    /* When sidebar is collapsed */
+    [data-flux-sidebar-collapsed-desktop] ~ [data-flux-main] {
+        margin-left: var(--flux-sidebar-width-collapsed, 4rem);
+    }
+}
+
 /* Hide elements with x-cloak until Alpine initializes */
 [x-cloak] { display: none !important; }
 

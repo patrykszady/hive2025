@@ -324,6 +324,7 @@ class ProjectsIndex extends Component
                 
                 return $latestEvent;
             })
+            ->sortByDesc('event_at')
             ->values();
         
         // Manual pagination

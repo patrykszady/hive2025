@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\CompanyEmail;
 use App\Models\EmailTracking;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -10,6 +11,11 @@ use Illuminate\Support\Facades\Log;
 
 class EmailTrackingController extends Controller
 {
+    /**
+     * Cache of company emails for sender detection.
+     */
+    protected static ?array $companyEmailsCache = null;
+
     /**
      * Handle tracking pixel request (email open).
      * Returns a 1x1 transparent GIF.
@@ -96,7 +102,34 @@ class EmailTrackingController extends Controller
             return;
         }
 
-        // Check for duplicate opens (same message + recipient within short time window)
+        $ipAddress = $request->ip();
+        $userAgent = $request->userAgent() ?? '';
+
+        // === SENDER DETECTION (multi-signal) ===
+        $senderDetection = $this->detectSender($messageId, $ipAddress, $recipientEmail);
+        if ($senderDetection['is_sender']) {
+            Log::debug('Email tracking: Skipping open - detected as sender', [
+                'message_id' => $messageId,
+                'recipient' => $recipientEmail,
+                'ip' => $ipAddress,
+                'detection_reason' => $senderDetection['reason'],
+            ]);
+            return;
+        }
+
+        // === BOT/PREFETCH DETECTION ===
+        $isPrefetch = $this->isPrefetchRequest($userAgent, $request);
+        if ($isPrefetch) {
+            Log::debug('Email tracking: Skipping prefetch/bot open', [
+                'message_id' => $messageId,
+                'recipient' => $recipientEmail,
+                'ip' => $ipAddress,
+                'user_agent' => substr($userAgent, 0, 100),
+            ]);
+            return;
+        }
+
+        // === DUPLICATE DETECTION ===
         $recentOpen = EmailTracking::query()
             ->where('nylas_message_id', $messageId)
             ->where('event_type', 'opened')
@@ -112,10 +145,7 @@ class EmailTrackingController extends Controller
             return;
         }
 
-        // Detect if this might be a prefetch/automated open
-        $userAgent = $request->userAgent() ?? '';
-        $isPrefetch = $this->isPrefetchRequest($userAgent, $request);
-
+        // === RECORD THE OPEN ===
         EmailTracking::create([
             'project_id' => $projectId,
             'nylas_message_id' => $messageId,
@@ -123,11 +153,10 @@ class EmailTrackingController extends Controller
             'email_template_name' => $emailTemplateName,
             'event_type' => 'opened',
             'recipient_emails' => $recipientEmail ? [$recipientEmail] : null,
-            'ip_address' => $request->ip(),
+            'ip_address' => $ipAddress,
             'user_agent' => $userAgent,
             'metadata' => [
                 'source' => 'tracking_pixel',
-                'is_prefetch' => $isPrefetch,
             ],
             'event_at' => now(),
         ]);
@@ -136,8 +165,51 @@ class EmailTrackingController extends Controller
             'message_id' => $messageId,
             'recipient' => $recipientEmail,
             'project_id' => $projectId,
-            'is_prefetch' => $isPrefetch,
         ]);
+    }
+
+    /**
+     * Multi-signal sender detection.
+     * 
+     * Returns ['is_sender' => bool, 'reason' => string|null]
+     */
+    protected function detectSender(string $messageId, string $ipAddress, ?string $recipientEmail): array
+    {
+        // Signal 1: IP matches sender IP from when email was sent
+        $sentRecord = EmailTracking::query()
+            ->where('nylas_message_id', $messageId)
+            ->where('event_type', 'sent')
+            ->first();
+
+        if ($sentRecord) {
+            $senderIp = $sentRecord->metadata['sender_ip'] ?? null;
+            if ($senderIp && $senderIp === $ipAddress) {
+                return ['is_sender' => true, 'reason' => 'ip_matches_sender'];
+            }
+        }
+
+        // Signal 2: Recipient email matches a company email exactly
+        // (Someone viewing an email they sent to themselves/company)
+        if ($recipientEmail && $this->isCompanyEmail($recipientEmail)) {
+            return ['is_sender' => true, 'reason' => 'recipient_is_company_email'];
+        }
+
+        return ['is_sender' => false, 'reason' => null];
+    }
+
+    /**
+     * Check if an email address is a company email.
+     */
+    protected function isCompanyEmail(string $email): bool
+    {
+        if (self::$companyEmailsCache === null) {
+            self::$companyEmailsCache = CompanyEmail::query()
+                ->pluck('email')
+                ->map(fn ($e) => strtolower($e))
+                ->toArray();
+        }
+
+        return in_array(strtolower($email), self::$companyEmailsCache, true);
     }
 
     /**
@@ -157,8 +229,12 @@ class EmailTrackingController extends Controller
             'GoogleImageProxy',
             'YahooMailProxy',
             'Outlook-iOS-Android',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',  // Generic Windows UA often from scanners
         ];
+
+        // Check for generic bot user agent (just "Mozilla/5.0" with nothing else meaningful)
+        if (preg_match('/^Mozilla\/5\.0\s*$/', $userAgent)) {
+            return true;
+        }
 
         foreach ($prefetchPatterns as $pattern) {
             if (stripos($userAgent, $pattern) !== false) {
