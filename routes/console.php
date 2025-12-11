@@ -65,14 +65,13 @@ Schedule::command('nylas:sync-contacts')
 //   ->withoutOverlapping()
 //   ->onOneServer();
 
-// Disabled - testing webhook-based transaction sync
-// Schedule::call(function () {
-//     app(\App\Http\Controllers\PlaidTransactionSyncController::class)->syncAllBanks();
-// })->dailyAt('4:00')
-//   ->name('plaid-transactions-sync-fallback')
-//   ->environments(['production'])
-//   ->withoutOverlapping()
-//   ->onOneServer();
+// Daily fallback for Plaid transaction sync (in case webhooks miss updates)
+Schedule::command('plaid:sync-transactions --all')
+  ->dailyAt('04:00')
+  ->name('plaid-transactions-sync-fallback')
+  ->environments(['production'])
+  ->withoutOverlapping()
+  ->onOneServer();
 
 Schedule::call(function () {
     app(\App\Http\Controllers\TransactionController::class)->add_check_deposit_to_transactions();
