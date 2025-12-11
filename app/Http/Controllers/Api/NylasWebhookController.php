@@ -101,88 +101,24 @@ class NylasWebhookController extends Controller
 
     /**
      * Track message opened events.
+     * 
+     * NOTE: We now use our own tracking pixel for opens (see EmailTrackingController).
+     * This handler is kept for backward compatibility but logs and skips processing.
+     * Our custom tracking pixel provides recipient_email which Nylas webhooks do not.
      */
     protected function handleMessageOpened(array $payload): void
     {
         $data = $payload['data'] ?? [];
         $object = $data['object'] ?? [];
-
         $messageId = $this->resolveMessageId($object);
 
-        if (!$messageId) {
-            Log::channel('nylas')->warning('Missing message_id in message.opened webhook', ['payload' => $payload]);
+        // Skip processing - we use our own tracking pixel for opens now
+        // Our pixel provides recipient_email which Nylas doesn't include
+        Log::channel('nylas')->debug('Skipping message.opened webhook - using custom tracking pixel', [
+            'message_id' => $messageId,
+        ]);
 
-            return;
-        }
-        
-        // Skip if opened by self (sender viewing their own sent message)
-        $fromSelf = !empty($object['from_self']);
-        if ($fromSelf) {
-            Log::channel('nylas')->info('Skipping message.opened webhook - opened by self', [
-                'message_id' => $messageId,
-            ]);
-            return;
-        }
-
-        // Try to get recipient_email from payload
-        $recipientEmail = $object['recipient_email'] ?? null;
-        
-        if ($recipientEmail) {
-            // Specific recipient provided - track per-recipient
-            $recipients = collect([$recipientEmail]);
-            $isMessageLevel = false;
-        } else {
-            // No specific recipient - track as message-level open
-            // This happens when the email client doesn't send recipient_email in webhook
-            $recipients = $this->resolveRecipientsForMessage($messageId);
-            $isMessageLevel = true;
-            
-            if ($recipients->isEmpty()) {
-                Log::channel('nylas')->warning('Cannot find recipients for message.opened', [
-                    'message_id' => $messageId,
-                ]);
-                return;
-            }
-        }
-
-        $eventDetails = $this->extractEventDetails($data);
-
-        // Filter out automated/prefetch opens using Mailtrap-inspired logic
-        if ($this->isPrefetchOrAutomatedOpen($eventDetails, $object)) {
-            return;
-        }
-
-        // Filter out Yahoo bot/proxy opens
-        if ($this->isYahooBot($eventDetails['user_agent'])) {
-            Log::channel('nylas')->info('Skipping message.opened webhook - Yahoo bot/proxy', [
-                'message_id' => $messageId,
-                'user_agent' => $eventDetails['user_agent'],
-            ]);
-            return;
-        }
-
-        // Filter out sender opens (when sender views their own sent email)
-        if ($this->isLikelySenderOpen($messageId, $eventDetails)) {
-            Log::channel('nylas')->info('Skipping message.opened webhook - likely sender viewing their own email', [
-                'message_id' => $messageId,
-                'ip' => $eventDetails['ip'],
-                'user_agent' => $eventDetails['user_agent'],
-            ]);
-            return;
-        }
-
-        $metadata = $this->buildMetadata($data, $object, $eventDetails);
-
-        $this->storeTrackingEvents(
-            messageId: $messageId,
-            eventType: 'opened',
-            recipients: $recipients,
-            metadata: $metadata,
-            eventAt: $eventDetails['timestamp'],
-            ip: $eventDetails['ip'],
-            userAgent: $eventDetails['user_agent'],
-            isMessageLevel: $isMessageLevel,
-        );
+        return;
     }
 
     /**
@@ -249,132 +185,52 @@ class NylasWebhookController extends Controller
 
     /**
      * Track thread reply events.
+     * 
+     * NOTE: This webhook is unreliable as it only fires when recipient loads
+     * the Nylas tracking pixel. The message.created handler is the primary
+     * mechanism for reply detection. This handler now defers to that logic
+     * to ensure consistent behavior and avoid duplicate events.
      */
     protected function handleThreadReplied(array $payload): void
     {
         $data = $payload['data'] ?? [];
         $object = $data['object'] ?? [];
 
-        $fromSelf = !empty($object['from_self']);
-        
-        // Skip all from_self thread.replied webhooks
-        // These are redundant - we already track sent messages with event_type 'sent'
-        // replied_outgoing events provide no additional value and create duplicate tracking
-        if ($fromSelf) {
-            $messageId = $this->resolveMessageId($object);
-            Log::channel('nylas')->info('Skipping thread.replied webhook - from_self', [
-                'message_id' => $messageId,
+        // Skip from_self - these are our own replies in the thread
+        if (!empty($object['from_self'])) {
+            Log::channel('nylas')->debug('Skipping thread.replied - from_self', [
                 'thread_id' => $object['thread_id'] ?? null,
             ]);
             return;
         }
-        
-        // Track as incoming reply
-        $eventType = 'replied';
 
-        // Check if this is a bounce notification from a mailer daemon
-        $fromEmails = collect($object['from'] ?? [])
-            ->map(fn (array $sender) => strtolower($sender['email'] ?? ''))
-            ->filter();
-
-        $isBounceNotification = $fromEmails->contains(function ($email) {
-            return str_contains($email, 'mailer-daemon') || 
-                   str_contains($email, 'postmaster') ||
-                   str_contains($email, 'noreply') ||
-                   str_contains($email, 'microsoftexchange');
-        });
-
-        // If webhook doesn't include from field OR it's from_self, fetch the message to check
-        // This catches both incoming bounces and outgoing messages that might actually be error notifications
-        if (!$isBounceNotification && ($fromEmails->isEmpty() || $fromSelf)) {
-            $messageId = $this->resolveMessageId($object);
-            $grantId = $data['grant_id'] ?? null;
-            
-            if ($messageId && $grantId) {
-                try {
-                    $message = $this->nylasService->getMessage($grantId, $messageId);
-                    $messageData = $message['data'] ?? [];
-                    
-                    // Check the actual sender
-                    $actualFrom = collect($messageData['from'] ?? [])
-                        ->map(fn (array $sender) => strtolower($sender['email'] ?? ''))
-                        ->filter();
-                    
-                    $isBounceNotification = $actualFrom->contains(function ($email) {
-                        return str_contains($email, 'mailer-daemon') || 
-                               str_contains($email, 'postmaster') ||
-                               str_contains($email, 'noreply') ||
-                               str_contains($email, 'microsoftexchange');
-                    });
-                    
-                    // Also check subject for bounce indicators
-                    $subject = strtolower($messageData['subject'] ?? '');
-                    if (str_contains($subject, 'undeliverable') || 
-                        str_contains($subject, 'delivery status notification') ||
-                        str_contains($subject, 'delivery failure') ||
-                        str_contains($subject, 'returned mail') ||
-                        str_contains($subject, 'mail delivery failed')) {
-                        $isBounceNotification = true;
-                    }
-                } catch (\Exception $e) {
-                    Log::channel('nylas')->warning('Failed to fetch message for bounce detection', [
-                        'message_id' => $messageId,
-                        'error' => $e->getMessage()
-                    ]);
-                }
-            }
-        }
-
-        if ($isBounceNotification) {
-            // Handle as a bounce instead of a reply
-            $this->handleBouncedAsReply($payload, $data, $object);
-            return;
-        }
-
-        $threadId = $this->extractThreadId($object);
-        $messageId = $this->resolveMessageId($object) ?? ($threadId ? 'thread:' . $threadId : null);
-
-        if (!$messageId) {
-            Log::channel('nylas')->warning('Unable to resolve identifiers for thread.replied webhook', ['payload' => $payload]);
-
-            return;
-        }
-
-        // For thread.replied, the "from" field contains who replied, not who we sent to.
-        // We should only track the person who actually replied, not all original recipients.
-        $replyFrom = $fromEmails->values();
-
-        if ($replyFrom->isEmpty()) {
-            // When we can't determine who replied, get all original recipients for message-level tracking
-            $replyFrom = $this->resolveRecipientsForMessage($messageId, null, $threadId);
-            $isMessageLevel = true;
-        } else {
-            $isMessageLevel = false;
-        }        $eventDetails = $this->extractEventDetails($data);
-
-        $metadata = $this->buildMetadata($data, $object, $eventDetails);
-        $metadata['reply_summary'] = [
-            'subject' => $object['subject'] ?? null,
-            'sender' => $object['from'] ?? null,
+        // Transform payload to look like message.created and delegate
+        // This ensures consistent handling between both webhook types
+        $messagePayload = [
+            'type' => 'thread.replied',
+            'data' => $data,
         ];
 
-        $this->storeTrackingEvents(
-            messageId: $messageId,
-            eventType: $eventType,
-            recipients: $replyFrom,
-            metadata: $metadata,
-            eventAt: $eventDetails['timestamp'],
-            ip: $eventDetails['ip'],
-            userAgent: $eventDetails['user_agent'],
-            isMessageLevel: $isMessageLevel ?? false,
-        );
+        Log::channel('nylas')->info('thread.replied webhook received, delegating to message handler', [
+            'thread_id' => $object['thread_id'] ?? null,
+            'message_id' => $object['id'] ?? $this->resolveMessageId($object),
+        ]);
+
+        $this->handleMessageCreated($messagePayload);
     }
 
     /**
-     * Handle message.created/updated webhook as fallback for reply detection.
+     * Handle message.created/updated webhook for reliable reply detection.
      * 
-     * This catches incoming replies to tracked threads when thread.replied webhook
-     * fails to fire (e.g., Nylas tracking pixel not loaded by recipient).
+     * This is the PRIMARY mechanism for detecting thread replies since thread.replied
+     * webhook is unreliable (depends on recipient loading tracking pixel).
+     * 
+     * Handles:
+     * - Reply chain tracking with sequence order
+     * - OOO/auto-reply detection and filtering
+     * - Bounce notification detection
+     * - Shared mailbox sender detection
+     * - Deduplication of events
      */
     protected function handleMessageCreated(array $payload): void
     {
@@ -385,15 +241,11 @@ class NylasWebhookController extends Controller
 
         $threadId = $object['thread_id'] ?? null;
         $messageId = $object['id'] ?? null;
-        $folders = $object['folders'] ?? [];
+        $subject = $object['subject'] ?? '';
+        $snippet = $object['snippet'] ?? '';
 
         // Only process if we have a thread_id to match against
         if (!$threadId) {
-            return;
-        }
-
-        // Only process messages in INBOX (incoming messages)
-        if (!in_array('INBOX', $folders) && !in_array('Inbox', $folders)) {
             return;
         }
 
@@ -417,33 +269,45 @@ class NylasWebhookController extends Controller
             return;
         }
 
-        // Get the sender email associated with this grant (the account owner)
-        $senderEmail = $this->resolveSenderEmailFromGrant($grantId);
-        
-        // Check if this message is from the grant owner (from_self)
-        // If so, skip - we already track sent messages via 'sent' event
-        if ($senderEmail && $fromEmails->contains(strtolower($senderEmail))) {
-            Log::channel('nylas')->info('Skipping message.created - from self (fallback check)', [
+        $fromEmail = $fromEmails->first();
+        $fromName = strtolower($object['from'][0]['name'] ?? '');
+
+        // === SENDER DETECTION (including shared mailboxes) ===
+        if ($this->isFromSelfOrSharedMailbox($grantId, $fromEmails, $trackedThread)) {
+            Log::channel('nylas')->debug('Skipping message.created - from self/shared mailbox', [
                 'thread_id' => $threadId,
                 'message_id' => $messageId,
-                'sender' => $senderEmail,
+                'from' => $fromEmail,
             ]);
             return;
         }
 
-        // Check if this is a mailer-daemon/bounce notification
-        $isBounceNotification = $fromEmails->contains(function ($email) {
-            return str_contains($email, 'mailer-daemon') || 
-                   str_contains($email, 'postmaster') ||
-                   str_contains($email, 'noreply') ||
-                   str_contains($email, 'microsoftexchange');
-        });
-
-        if ($isBounceNotification) {
-            // Don't treat bounces as replies via this fallback
+        // === BOUNCE NOTIFICATION DETECTION ===
+        if ($this->isBounceNotification($fromEmail, $fromName, $subject)) {
+            Log::channel('nylas')->info('Skipping reply - detected as bounce notification', [
+                'thread_id' => $threadId,
+                'message_id' => $messageId,
+                'from' => $fromEmail,
+            ]);
             return;
         }
 
+        // === OOO / AUTO-REPLY DETECTION ===
+        $autoReplyType = $this->detectAutoReplyType($subject, $snippet, $object);
+        if ($autoReplyType) {
+            // Log auto-replies but don't store in database
+            Log::channel('nylas')->info('Skipping auto-reply message (not stored)', [
+                'thread_id' => $threadId,
+                'message_id' => $messageId,
+                'from' => $fromEmail,
+                'auto_reply_type' => $autoReplyType,
+                'subject' => $subject,
+                'project_id' => $trackedThread->project_id,
+            ]);
+            return;
+        }
+
+        // === DEDUPLICATION ===
         // Check if we already have a 'replied' event for this exact message_id
         $alreadyTracked = EmailTracking::query()
             ->where('nylas_message_id', $messageId)
@@ -451,34 +315,28 @@ class NylasWebhookController extends Controller
             ->exists();
 
         if ($alreadyTracked) {
-            Log::channel('nylas')->info('Reply already tracked for this message', [
+            Log::channel('nylas')->debug('Reply already tracked for this message', [
                 'thread_id' => $threadId,
                 'message_id' => $messageId,
             ]);
             return;
         }
 
-        // Also check if we have a recent 'replied' event for this thread (within last 5 minutes)
-        // to avoid duplicates when thread.replied webhook also fires
-        $recentReply = EmailTracking::query()
+        // === REPLY CHAIN TRACKING ===
+        // Count existing replies in this thread to track sequence
+        $existingRepliesCount = EmailTracking::query()
             ->where('nylas_thread_id', $threadId)
             ->where('event_type', 'replied')
-            ->where('created_at', '>=', now()->subMinutes(5))
-            ->exists();
+            ->count();
+        
+        $replyIndex = $existingRepliesCount + 1;
 
-        if ($recentReply) {
-            Log::channel('nylas')->info('Recent reply already tracked for this thread (within 5 min)', [
-                'thread_id' => $threadId,
-                'message_id' => $messageId,
-            ]);
-            return;
-        }
-
-        Log::channel('nylas')->info('Fallback reply detection via ' . $webhookType, [
+        Log::channel('nylas')->info('Reply detected via ' . $webhookType, [
             'thread_id' => $threadId,
             'message_id' => $messageId,
-            'from' => $fromEmails->first(),
-            'tracked_project_id' => $trackedThread->project_id,
+            'from' => $fromEmail,
+            'reply_index' => $replyIndex,
+            'project_id' => $trackedThread->project_id,
         ]);
 
         // Parse timestamp from the message
@@ -488,13 +346,14 @@ class NylasWebhookController extends Controller
 
         $metadata = [
             'nylas_thread_id' => $threadId,
-            'fallback_detection' => true,
             'detection_source' => $webhookType,
-            'original_subject' => $object['subject'] ?? null,
+            'reply_index' => $replyIndex,
+            'original_subject' => $trackedThread->metadata['original_subject'] ?? $subject,
             'reply_summary' => [
-                'subject' => $object['subject'] ?? null,
+                'subject' => $subject,
                 'sender' => $object['from'] ?? null,
-                'snippet' => $object['snippet'] ?? null,
+                'snippet' => $snippet,
+                'in_reply_to' => $object['in_reply_to'] ?? null,
             ],
         ];
 
@@ -508,6 +367,206 @@ class NylasWebhookController extends Controller
             userAgent: null,
             isMessageLevel: false,
         );
+    }
+
+    /**
+     * Check if the message is from the sender's own account or a shared mailbox.
+     */
+    protected function isFromSelfOrSharedMailbox(
+        ?string $grantId, 
+        Collection $fromEmails, 
+        EmailTracking $trackedThread
+    ): bool {
+        // Method 1: Check against grant's associated email
+        $senderEmail = $this->resolveSenderEmailFromGrant($grantId);
+        if ($senderEmail && $fromEmails->contains(strtolower($senderEmail))) {
+            return true;
+        }
+
+        // Method 2: Check against all company emails (shared mailboxes)
+        $companyEmails = \App\Models\CompanyEmail::query()
+            ->pluck('email')
+            ->map(fn ($email) => strtolower($email));
+        
+        if ($fromEmails->intersect($companyEmails)->isNotEmpty()) {
+            return true;
+        }
+
+        // Method 3: Check if sender matches the original 'sent' event's from address
+        $originalSenderEmails = $trackedThread->metadata['from_emails'] ?? [];
+        if (!empty($originalSenderEmails)) {
+            $originalSenders = collect($originalSenderEmails)->map(fn ($e) => strtolower($e));
+            if ($fromEmails->intersect($originalSenders)->isNotEmpty()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if the message is a bounce/delivery failure notification.
+     */
+    protected function isBounceNotification(string $fromEmail, string $fromName, string $subject): bool
+    {
+        $subjectLower = strtolower($subject);
+
+        // Check from email patterns
+        $bounceEmailPatterns = [
+            'mailer-daemon',
+            'postmaster',
+            'noreply@',
+            'no-reply@',
+            'microsoftexchange',
+            'maildelivery',
+            'mail-daemon',
+        ];
+
+        foreach ($bounceEmailPatterns as $pattern) {
+            if (str_contains($fromEmail, $pattern)) {
+                return true;
+            }
+        }
+
+        // Check from name patterns  
+        $bounceNamePatterns = [
+            'mail delivery',
+            'postmaster',
+            'mailer daemon',
+            'microsoft outlook',
+            'mail system',
+        ];
+
+        foreach ($bounceNamePatterns as $pattern) {
+            if (str_contains($fromName, $pattern)) {
+                return true;
+            }
+        }
+
+        // Check subject patterns
+        $bounceSubjectPatterns = [
+            'undeliverable',
+            'delivery status notification',
+            'delivery failure',
+            'returned mail',
+            'mail delivery failed',
+            'delivery has failed',
+            'undelivered mail',
+            'message not delivered',
+            'could not be delivered',
+            'delivery problem',
+            'failure notice',
+        ];
+
+        foreach ($bounceSubjectPatterns as $pattern) {
+            if (str_contains($subjectLower, $pattern)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Detect if the message is an auto-reply (OOO, vacation, etc).
+     * Returns the type of auto-reply or null if not an auto-reply.
+     */
+    protected function detectAutoReplyType(string $subject, string $snippet, array $object): ?string
+    {
+        $subjectLower = strtolower($subject);
+        $snippetLower = strtolower($snippet);
+
+        // Check X-Auto-Reply or similar headers if available
+        $headers = $object['headers'] ?? [];
+        foreach ($headers as $header) {
+            $headerName = strtolower($header['name'] ?? '');
+            $headerValue = strtolower($header['value'] ?? '');
+            
+            if ($headerName === 'x-auto-reply' || $headerName === 'auto-submitted') {
+                if ($headerValue !== 'no') {
+                    return 'auto_reply_header';
+                }
+            }
+            
+            if ($headerName === 'x-autoreply' || $headerName === 'x-autorespond') {
+                return 'auto_reply_header';
+            }
+            
+            // Check precedence header
+            if ($headerName === 'precedence' && in_array($headerValue, ['auto_reply', 'bulk', 'junk'])) {
+                return 'auto_reply_precedence';
+            }
+        }
+
+        // Out of Office patterns
+        $oooPatterns = [
+            'out of office',
+            'out of the office',
+            'away from office',
+            'away from the office',
+            'automatic reply',
+            'automatyczna odpowiedź',  // Polish
+            'réponse automatique',     // French
+            'respuesta automática',    // Spanish
+            'automatische antwort',    // German
+            'risposta automatica',     // Italian
+        ];
+
+        foreach ($oooPatterns as $pattern) {
+            if (str_contains($subjectLower, $pattern) || str_contains($snippetLower, $pattern)) {
+                return 'out_of_office';
+            }
+        }
+
+        // Vacation patterns
+        $vacationPatterns = [
+            'on vacation',
+            'on holiday',
+            'on leave',
+            'i am currently away',
+            'i\'m currently away',
+            'currently out',
+            'will be back on',
+            'will return on',
+            'limited access to email',
+            'i will respond when i return',
+        ];
+
+        foreach ($vacationPatterns as $pattern) {
+            if (str_contains($subjectLower, $pattern) || str_contains($snippetLower, $pattern)) {
+                return 'vacation';
+            }
+        }
+
+        // Auto-response subject prefixes
+        $autoSubjectPrefixes = [
+            'auto:',
+            'auto-reply:',
+            'autoreply:',
+            '[auto]',
+            '[automatic reply]',
+        ];
+
+        foreach ($autoSubjectPrefixes as $prefix) {
+            if (str_starts_with($subjectLower, $prefix)) {
+                return 'auto_reply_subject';
+            }
+        }
+
+        // Read receipt patterns
+        $readReceiptPatterns = [
+            'read:',
+            'read receipt',
+            'message read notification',
+        ];
+
+        foreach ($readReceiptPatterns as $pattern) {
+            if (str_contains($subjectLower, $pattern)) {
+                return 'read_receipt';
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -861,8 +920,27 @@ class NylasWebhookController extends Controller
                 }
 
                 if ($eventType === 'opened' && $eventAt instanceof Carbon) {
-                    $windowStart = (clone $eventAt)->subSeconds(60);
+                    // Check for very recent opens (within 5 seconds) - likely duplicates from same action
+                    $shortWindowStart = (clone $eventAt)->subSeconds(5);
+                    $veryRecentOpenExists = EmailTracking::query()
+                        ->where('nylas_message_id', $messageId)
+                        ->where('event_type', 'opened')
+                        ->whereJsonContains('recipient_emails', $recipient)
+                        ->whereBetween('event_at', [$shortWindowStart, $eventAt])
+                        ->lockForUpdate() // Prevent race conditions
+                        ->exists();
 
+                    if ($veryRecentOpenExists) {
+                        Log::channel('nylas')->info('Skipping duplicate open within 5 seconds', [
+                            'message_id' => $messageId,
+                            'recipient' => $recipient,
+                            'event_at' => $eventAt->toDateTimeString(),
+                        ]);
+                        continue;
+                    }
+
+                    // Check for opens within 60 seconds - still track but note it
+                    $windowStart = (clone $eventAt)->subSeconds(60);
                     $recentOpenExists = EmailTracking::query()
                         ->where('nylas_message_id', $messageId)
                         ->where('event_type', 'opened')
@@ -1070,17 +1148,18 @@ class NylasWebhookController extends Controller
 
     /**
      * Detect if an open is likely from the sender viewing their own sent email.
-     * This helps filter out noise when senders check their sent items.
      * 
-     * Detection strategy:
-     * 1. Check for OneOutlook user agent (Outlook desktop/web viewing sent items)
-     * 2. Compare IP against known recipient IPs from earlier opens
-     * 3. Look for patterns indicating sender access vs recipient access
+     * NOTE: Nylas message.opened webhooks do NOT include from_self or recipient_email.
+     * We can only use reliable signals:
+     * 1. OneOutlook user agent (specific to Outlook sent folder viewing)
+     * 2. Fetch the message and compare the 'from' email to the opener context
+     * 
+     * Returns true ONLY if we are CONFIDENT this is a sender-open.
+     * False positives are worse than false negatives here.
      */
-    protected function isLikelySenderOpen(string $messageId, array $eventDetails): bool
+    protected function isLikelySenderOpen(string $messageId, array $eventDetails, ?string $grantId = null): bool
     {
         $userAgent = $eventDetails['user_agent'] ?? '';
-        $ip = $eventDetails['ip'] ?? '';
         
         // Check 1: OneOutlook user agent is a strong indicator of sender viewing sent items
         // Format: "Mozilla/5.0 ... Edg/... OneOutlook/1.2025.1121.100"
@@ -1088,26 +1167,8 @@ class NylasWebhookController extends Controller
             return true;
         }
         
-        // Check 2: Compare IP against known recipient IPs
-        // Get previous opens for this message
-        $previousOpens = EmailTracking::where('nylas_message_id', $messageId)
-            ->where('event_type', 'opened')
-            ->where('ip_address', '!=', $ip)
-            ->whereNotNull('ip_address')
-            ->get();
-        
-        // If there are previous opens from different IPs, and this IP hasn't been seen before
-        // and the user agent is Windows/Edge (typical for Outlook), likely sender
-        if ($previousOpens->count() > 0) {
-            $knownRecipientIps = $previousOpens->pluck('ip_address')->unique();
-            $isNewIp = !$knownRecipientIps->contains($ip);
-            $isWindowsEdge = (stripos($userAgent, 'Windows') !== false && stripos($userAgent, 'Edg/') !== false);
-            
-            if ($isNewIp && $isWindowsEdge) {
-                // Likely sender checking sent items from different device/location
-                return true;
-            }
-        }
+        // That's the only reliable signal we have.
+        // Timing, IP patterns, etc. are NOT reliable and could filter legitimate opens.
         
         return false;
     }

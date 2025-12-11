@@ -74,7 +74,7 @@
 
             {{-- PROJECT TIMELINE --}}
             {{-- <div class="h-180">
-                <livewire:planner.cards-index type="project" :project-id="$project->id" />
+                <livewire:planner.cards-index type="project" :project-id="$project->id" lazy />
             </div> --}}
 		</div>
 
@@ -86,8 +86,19 @@
                 @endcan
 
                 {{-- EMAIL TRACKING --}}
-                @if($this->emailTrackingEvents->count() > 0)
-                    <flux:card class="space-y-2">
+                <div x-data="{ loaded: false }" x-intersect.once="$wire.loadEmailTracking(); loaded = true">
+                    @if(!$showEmailTracking)
+                        <flux:card class="space-y-4 animate-pulse">
+                            <div class="h-6 bg-zinc-300 dark:bg-zinc-700 rounded w-1/3"></div>
+                            <div class="h-px bg-zinc-200 dark:bg-zinc-700"></div>
+                            <div class="space-y-3">
+                                @for ($i = 0; $i < 3; $i++)
+                                    <div class="h-12 bg-zinc-200 dark:bg-zinc-800 rounded"></div>
+                                @endfor
+                            </div>
+                        </flux:card>
+                    @elseif($this->emailTrackingEvents->count() > 0)
+                        <flux:card class="space-y-2">
                         <div class="flex justify-between items-center">
                             <flux:heading size="lg">Email Tracking</flux:heading>
                         </div>
@@ -193,29 +204,39 @@
                             </flux:table>
                         </div>
                     </flux:card>
-                @endif
+                    @endif
+                </div>
 
                 {{-- PROEJCT LIFESPAN --}}
-                <livewire:project-status.status-create :project="$project" />
+                <livewire:project-status.status-create :project="$project" lazy />
             </div>
 
             <div class="col-span-4 space-y-4 lg:col-span-2">
-                @if(!$project->expenses->isEmpty())
-                    <livewire:expenses.expense-index :project_id="$project->id" :view="'projects.show'"/>
-                @endif
+                <livewire:expenses.expense-index :project_id="$project->id" :view="'projects.show'" lazy />
             </div>
 
             <div class="col-span-4 space-y-4 lg:col-span-2 lg:col-start-3">
                 @if(in_array($this->project->latestStatus->title, ['Active', 'Complete',  'Service Call', 'Service Call Complete', 'VIEW ONLY']))
                     {{-- PROJECT PAYMENTS --}}
-                    <livewire:payments.payments-index :project="$project" :view="'projects.show'" />
+                    <livewire:payments.payments-index :project="$project" :view="'projects.show'" lazy />
 
                     {{-- PROJECT FINANCIALS --}}
                     <livewire:projects.project-finances :project="$project" lazy />
 
                     {{-- PROJECT DISTRIBUTIONS --}}
-                    @if($this->project->distributions->isNotEmpty())
-                        <flux:card class="space-y-2">
+                    <div x-data="{ loaded: false }" x-intersect.once="$wire.loadDistributions(); loaded = true">
+                        @if(!$showDistributions)
+                            <flux:card class="space-y-4 animate-pulse">
+                                <div class="h-6 bg-zinc-300 dark:bg-zinc-700 rounded w-1/2"></div>
+                                <div class="h-px bg-zinc-200 dark:bg-zinc-700"></div>
+                                <div class="space-y-2">
+                                    @for ($i = 0; $i < 2; $i++)
+                                        <div class="h-8 bg-zinc-200 dark:bg-zinc-800 rounded"></div>
+                                    @endfor
+                                </div>
+                            </flux:card>
+                        @elseif($this->project->distributions->isNotEmpty())
+                            <flux:card class="space-y-2">
                             {{-- HEADING --}}
                             <div class="flex justify-between">
                                 <flux:heading size="lg" class="mb-0">Project Distributions</flux:heading>
@@ -230,7 +251,8 @@
                                 @endforeach
                             </x-lists.details_list>
                         </flux:card>
-                    @endif
+                        @endif
+                    </div>
 
 
                 @endif

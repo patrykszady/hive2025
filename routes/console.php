@@ -56,13 +56,14 @@ Schedule::command('nylas:sync-contacts')
     ->onOneServer();
 
 //Plaid/Transaction tasks
-Schedule::call(function () {
-    app(\App\Http\Controllers\TransactionController::class)->plaid_item_status();
-})->hourly()
-  ->name('plaid-item-status')
-  ->environments(['production'])
-  ->withoutOverlapping()
-  ->onOneServer();
+// Disabled - using ITEM webhooks (ERROR, PENDING_EXPIRATION, USER_PERMISSION_REVOKED) instead
+// Schedule::call(function () {
+//     app(\App\Http\Controllers\TransactionController::class)->plaid_item_status();
+// })->hourly()
+//   ->name('plaid-item-status')
+//   ->environments(['production'])
+//   ->withoutOverlapping()
+//   ->onOneServer();
 
 // Disabled - testing webhook-based transaction sync
 // Schedule::call(function () {

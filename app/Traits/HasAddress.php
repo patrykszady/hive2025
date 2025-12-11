@@ -136,17 +136,28 @@ trait HasAddress
 
     /**
      * Get a URL to view this address on a map
+     * Automatically detects iOS devices and uses Apple Maps, otherwise Google Maps
      *
-     * @param string $provider Map provider (google or apple)
+     * @param string|null $provider Map provider (google or apple) - auto-detects if null
      * @return string|null
      */
-    public function getAddressMapURI($provider = 'google')
+    public function getAddressMapURI($provider = null)
     {
         if (!$this->address || !$this->city || !$this->state || !$this->zip_code) {
             return null;
         }
         
         $query = urlencode("{$this->address}, {$this->city}, {$this->state} {$this->zip_code}");
+        
+        // Auto-detect device if provider not explicitly specified
+        if ($provider === null) {
+            $userAgent = request()->header('User-Agent', '');
+            $isIOS = (stripos($userAgent, 'iPhone') !== false || 
+                     stripos($userAgent, 'iPad') !== false || 
+                     stripos($userAgent, 'iPod') !== false);
+            
+            $provider = $isIOS ? 'apple' : 'google';
+        }
         
         return $provider === 'apple'
             ? "https://maps.apple.com/?q={$query}"

@@ -8,6 +8,7 @@ use App\Http\Controllers\PlaidTransactionSyncController;
 use App\Http\Controllers\Api\PlaidWebhookController;
 use App\Http\Controllers\VendorDocsController;
 use App\Http\Controllers\Api\NylasWebhookController;
+use App\Http\Controllers\Api\EmailTrackingController;
 
 use App\Livewire\Auth\CantLogin;
 use App\Livewire\Auth\Login;
@@ -141,6 +142,9 @@ Route::post('webhooks/plaid', [PlaidWebhookController::class, 'handle'])->name('
 // Nylas webhooks (no auth required - Nylas sends these directly)
 Route::get('webhooks/nylas', [NylasWebhookController::class, 'verify'])->name('webhooks.nylas.verify');
 Route::post('webhooks/nylas', [NylasWebhookController::class, 'handle'])->name('webhooks.nylas');
+
+// Email tracking pixel (no auth required - loaded by email clients)
+Route::get('t/o', [EmailTrackingController::class, 'trackOpen'])->name('email.track.open');
 
 Route::middleware(['auth', 'vendor.access'])->group(function () {
     // Registration route

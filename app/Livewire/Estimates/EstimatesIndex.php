@@ -40,34 +40,34 @@ class EstimatesIndex extends Component
     {
         $estimate->delete();
 
-        if ($this->view === 'estimates.show') {
-            $this->dispatch('navigate', route('projects.show', ['project' => $estimate->project->id]));
-        }
-
         Flux::toast(
             duration: 5000,
             position: 'top right',
             variant: 'success',
             heading: 'Estimate Disabled',
-            // route / href / wire:click
             text: '',
         );
     }
 
     public function removeEstimate($estimate_id)
     {
-        $estimate = Estimate::withTrashed()->with(['estimate_sections', 'estimate_line_items'])->findOrFail($estimate_id);
-
-        $estimate->estimate_line_items()->forceDelete();
-        $estimate->estimate_sections()->forceDelete();
-
-        $estimate->forceDelete();
+        $estimate = Estimate::withTrashed()->findOrFail($estimate_id);
+        
+        // If already soft deleted (disabled), force delete permanently
+        if ($estimate->trashed()) {
+            $estimate->forceDelete();
+            $message = 'Estimate permanently deleted';
+        } else {
+            // Otherwise, soft delete (disable)
+            $estimate->delete();
+            $message = 'Estimate disabled';
+        }
 
         Flux::toast(
             duration: 5000,
             position: 'top right',
             variant: 'success',
-            heading: 'Estimate Deleted',
+            heading: $message,
             text: '',
         );
     }

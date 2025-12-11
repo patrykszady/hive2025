@@ -117,8 +117,9 @@ class BankShow extends Component
         }
 
         // Process the bank item if no error occurred
-        app(\App\Http\Controllers\TransactionController::class)->plaid_item_status();
-        sleep(5);
+        // Note: Item status updates are now handled by ITEM webhooks
+        // app(\App\Controllers\TransactionController::class)->plaid_item_status();
+        sleep(2);
         $this->render();
 
         $this->dispatch('confirmProcessStep', 'banks_registered')->to('entry.vendor-registration');

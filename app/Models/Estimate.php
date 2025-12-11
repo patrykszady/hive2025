@@ -60,7 +60,15 @@ class Estimate extends Model
     protected function status(): Attribute
     {
         return Attribute::make(
-            get: fn () => is_null($this->deleted_at) ? 'Active' : 'Disabled'
+            get: function () {
+                if (is_null($this->deleted_at)) {
+                    return 'Active';
+                }
+                
+                // Check if it's force deleted (will be checked in queries with onlyTrashed())
+                // For soft deleted items, we consider them "Disabled"
+                return 'Disabled';
+            }
         );
     }
 

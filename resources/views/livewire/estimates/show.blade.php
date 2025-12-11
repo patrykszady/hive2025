@@ -27,6 +27,15 @@
                             <flux:menu.item icon="wrench-screwdriver" wire:click="create_pdf('work order')" wire:loading.attr="disabled" wire:loading.class="opacity-50" wire:target="create_pdf">Export Work Order</flux:menu.item>
                             <flux:menu.item icon="table-cells" wire:click="export_csv">Export Excel Estimate</flux:menu.item>
                         </flux:menu.submenu>
+
+                        @if($estimate->status === 'Active')
+                            <flux:menu.separator />
+                            <flux:menu.item icon="x-circle" wire:click="disableEstimate" variant="danger">Disable Estimate</flux:menu.item>
+                        @else
+                            <flux:menu.separator />
+                            <flux:menu.item icon="arrow-path" wire:click="activateEstimate">Restore Estimate</flux:menu.item>
+                            <flux:menu.item icon="trash" wire:click="removeEstimate" variant="danger">Delete Estimate</flux:menu.item>
+                        @endif
                     </flux:menu>
                 </flux:dropdown>
             </x-slot:header_buttons>

@@ -23,21 +23,46 @@ class ProjectShow extends Component
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 
+    public $showEmailTracking = false;
+    public $showDistributions = false;
+
     public function mount()
     {
-        //include deleted
-        $this->estimates = $this->project->estimates()->orderBy('created_at', 'DESC')->get();
+        // Only load critical relationships for initial render
+        $this->project->load(['latestStatus']);
+        
+        $this->estimates = [];
+    }
+
+    public function loadEmailTracking()
+    {
+        $this->showEmailTracking = true;
+    }
+
+    public function loadDistributions()
+    {
+        $this->project->load('distributions');
+        $this->showDistributions = true;
     }
 
     #[Computed]
     public function emailTrackingEvents()
     {
+        if (!$this->showEmailTracking) {
+            return collect();
+        }
+
         $events = EmailTracking::with('project')
             ->where('project_id', $this->project->id)
             ->orderBy('event_at', 'DESC')
-            ->get()
-            ->groupBy('nylas_thread_id')
-            ->map(function ($threadEvents) {
+            ->get();
+        
+        // Get all unique emails and fetch users in one query
+        $allEmails = $events->pluck('recipient_emails')->flatten()->unique();
+        $usersByEmail = User::whereIn('email', $allEmails)->get()->keyBy('email');
+        
+        $events = $events->groupBy('nylas_thread_id')
+            ->map(function ($threadEvents) use ($usersByEmail) {
                 // Prioritize 'replied' as the main event, even if not the latest chronologically
                 $repliedEvent = $threadEvents->firstWhere('event_type', 'replied');
                 $mainEvent = $repliedEvent ?? $threadEvents->first();
@@ -50,11 +75,9 @@ class ProjectShow extends Component
                     ->values()
                     ->all();
                 
-                // Map emails to users
+                // Map emails to users using pre-fetched collection
                 $users = collect($allRecipientEmails)
-                    ->map(function ($email) {
-                        return User::where('email', $email)->first();
-                    })
+                    ->map(fn($email) => $usersByEmail->get($email))
                     ->filter()
                     ->values();
                 

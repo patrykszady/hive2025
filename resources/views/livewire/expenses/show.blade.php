@@ -110,7 +110,7 @@
                                 @foreach ($expense->associated_expenses as $associated_expense)
                                     <flux:table.row :key="$associated_expense->id">
                                         <flux:table.cell variant="strong">
-                                            <a href="{{route('expenses.show', $associated_expense->id)}}">
+                                            <a href="{{route('expenses.show', $associated_expense->id)}}" wire:navigate>
                                                 {{ money($associated_expense->amount) }}
                                             </a>
                                         </flux:table.cell>

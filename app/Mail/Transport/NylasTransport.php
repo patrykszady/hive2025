@@ -2,6 +2,8 @@
 
 namespace App\Mail\Transport;
 
+use App\Models\EmailTracking;
+use App\Services\EmailTrackingService;
 use App\Services\NylasService;
 use Illuminate\Support\Facades\Log;
 use JsonException;
@@ -27,11 +29,16 @@ class NylasTransport extends AbstractTransport
     {
         $email = MessageConverter::toEmail($message->getOriginalMessage());
 
-        $payload = $this->buildPayload($email);
-
         // Extract metadata from the original message if available
         $originalMessage = $message->getOriginalMessage();
         $metadata = $this->extractMetadata($email, $originalMessage);
+
+        // Generate a pre-send tracking ID for tracking pixels
+        $preSendTrackingId = $this->generatePreSendTrackingId();
+        $metadata['pre_send_tracking_id'] = $preSendTrackingId;
+
+        // Build payload with tracking pixels injected
+        $payload = $this->buildPayload($email, $metadata, $preSendTrackingId);
 
         try {
             $response = $this->nylasService->sendEmail($this->grantId, $payload);
@@ -50,6 +57,16 @@ class NylasTransport extends AbstractTransport
 
             if ($threadId) {
                 $metadata['nylas_thread_id'] = $threadId;
+            }
+
+            // Update any tracking records that used the pre-send ID with the real message ID
+            if ($messageId && $preSendTrackingId) {
+                EmailTracking::query()
+                    ->where('nylas_message_id', $preSendTrackingId)
+                    ->update([
+                        'nylas_message_id' => $messageId,
+                        'nylas_thread_id' => $threadId,
+                    ]);
             }
 
             // Store message ID and metadata in the sent message for later retrieval
@@ -129,13 +146,15 @@ class NylasTransport extends AbstractTransport
     /**
      * Build the Nylas API payload from the Symfony email message.
      */
-    protected function buildPayload(Email $email): array
+    protected function buildPayload(Email $email, array $metadata = [], ?string $preSendTrackingId = null): array
     {
+        $recipients = $email->getTo();
+
         $payload = [
             'subject' => $email->getSubject(),
-            'to' => $this->formatAddresses($email->getTo()),
+            'to' => $this->formatAddresses($recipients),
             'tracking_options' => [
-                'opens' => true,
+                'opens' => false,  // Disable Nylas tracking - we use our own
                 'links' => true,
                 'thread_replies' => true,
             ],
@@ -162,10 +181,23 @@ class NylasTransport extends AbstractTransport
         }
 
         // Body (HTML preferred, fallback to text)
-        if ($htmlBody = $email->getHtmlBody()) {
+        $htmlBody = $email->getHtmlBody();
+        if (!$htmlBody && ($textBody = $email->getTextBody())) {
+            $htmlBody = nl2br(e($textBody));
+        }
+
+        // Inject tracking pixels for each recipient
+        if ($htmlBody && $preSendTrackingId) {
+            $htmlBody = $this->injectTrackingPixels(
+                $htmlBody,
+                $preSendTrackingId,
+                $recipients,
+                $metadata
+            );
+        }
+
+        if ($htmlBody) {
             $payload['body'] = $htmlBody;
-        } elseif ($textBody = $email->getTextBody()) {
-            $payload['body'] = nl2br(e($textBody));
         }
 
         // Attachments
@@ -184,6 +216,52 @@ class NylasTransport extends AbstractTransport
         }
 
         return $payload;
+    }
+
+    /**
+     * Inject tracking pixels into the HTML body for each recipient.
+     */
+    protected function injectTrackingPixels(string $htmlBody, string $messageId, array $recipients, array $metadata): string
+    {
+        $trackingService = app(EmailTrackingService::class);
+
+        $projectId = $metadata['project_id'] ?? null;
+        $threadId = $metadata['nylas_thread_id'] ?? null;
+        $emailTemplateName = $metadata['email_template_name'] ?? null;
+
+        // Collect all tracking pixels
+        $pixels = '';
+        foreach ($recipients as $address) {
+            $recipientEmail = $address->getAddress();
+            $pixels .= $trackingService->generateTrackingPixelHtml(
+                $messageId,
+                $recipientEmail,
+                $projectId ? (int) $projectId : null,
+                $threadId,
+                $emailTemplateName
+            );
+        }
+
+        // Inject before </body> tag if it exists
+        if (stripos($htmlBody, '</body>') !== false) {
+            return preg_replace(
+                '/<\/body>/i',
+                $pixels . '</body>',
+                $htmlBody,
+                1
+            );
+        }
+
+        // Otherwise append to end
+        return $htmlBody . $pixels;
+    }
+
+    /**
+     * Generate a unique pre-send tracking ID.
+     */
+    protected function generatePreSendTrackingId(): string
+    {
+        return 'pre_' . bin2hex(random_bytes(16));
     }
 
     /**

@@ -26,13 +26,10 @@
             <flux:table :paginate="$this->estimates->hasPages() ? $this->estimates : null">
                 <flux:table.columns>
                     <flux:table.column>Estimate</flux:table.column>
-                    <flux:table.column>Amount</flux:table.column>
                     <flux:table.column>Date</flux:table.column>
                     @if($view === 'estimates.index')
                         <flux:table.column>Client</flux:table.column>
                     @endif
-                    {{-- <flux:table.column>Status</flux:table.column> --}}
-                    <flux:table.column></flux:table.column>
                 </flux:table.columns>
 
                 <flux:table.rows>
@@ -45,10 +42,10 @@
                                     variant="strong"
                                     class="cursor-pointer"
                                     >
-                                    # {{ $estimate->id }}
+                                    {{ money($estimate->estimate_sections->sum('total')) }}
                                     <flux:badge
                                         size="sm"
-                                        :color="$estimate->status === 'Active' ? 'green' : 'red'"
+                                        :color="$estimate->status === 'Active' ? 'green' : 'orange'"
                                         inset="top bottom"
                                         >
                                         {{$estimate->status}}
@@ -56,20 +53,28 @@
                                 </flux:table.cell>
                             @else
                                 <flux:table.cell>
-                                    # {{ $estimate->id }}
-                                    <flux:badge
-                                        size="sm"
-                                        :color="$estimate->status === 'Active' ? 'green' : 'red'"
-                                        inset="top bottom"
-                                        >
-                                        {{$estimate->status}}
-                                    </flux:badge>
+                                    <flux:dropdown position="bottom" align="start">
+                                        <flux:button variant="ghost" size="sm" class="!justify-start !p-0">
+                                            {{ money($estimate->estimate_sections->sum('total')) }}
+                                            <flux:badge
+                                                size="sm"
+                                                color="orange"
+                                                inset="top bottom"
+                                                class="ml-2"
+                                                >
+                                                {{$estimate->status}}
+                                            </flux:badge>
+                                        </flux:button>
+
+                                        <flux:menu>
+                                            <flux:menu.item icon="arrow-path" wire:click="activateEstimate({{ $estimate->id }})">Restore</flux:menu.item>
+                                            <flux:menu.item icon="trash" wire:click="removeEstimate({{ $estimate->id }})" variant="danger">Delete</flux:menu.item>
+                                        </flux:menu>
+                                    </flux:dropdown>
                                 </flux:table.cell>
                             @endif
-
-                            <flux:table.cell>{{ money($estimate->estimate_sections->sum('total')) }}</flux:table.cell>
                             
-                            <flux:table.cell>{{ $estimate->created_at->format('m/d/Y') }}</flux:table.cell>
+                            <flux:table.cell>{{ $estimate->created_at->format('m/d/y') }}</flux:table.cell>
                             
                             @if($view === 'estimates.index')
                                 <flux:table.cell
@@ -80,22 +85,6 @@
                                     {{ $estimate->project->client->name }}
                                 </flux:table.cell>
                             @endif
-
-                            <flux:table.cell>
-                                <flux:dropdown position="bottom" align="end">
-                                    <flux:button inset="top bottom" size="sm" icon="ellipsis-horizontal"></flux:button>
-
-                                    <flux:menu>
-                                        @if($estimate->status === 'Active')
-                                            <flux:menu.item href="{{route('estimates.show', $estimate->id)}}">Open</flux:menu.item>
-                                            <flux:menu.item wire:click="disableEstimate({{ $estimate->id }})" variant="danger">Disable</flux:menu.item>
-                                        @else
-                                            <flux:menu.item wire:click="activateEstimate({{ $estimate->id }})">Restore</flux:menu.item>
-                                            <flux:menu.item wire:click="removeEstimate({{ $estimate->id }})" variant="danger">Delete</flux:menu.item>
-                                        @endif
-                                    </flux:menu>
-                                </flux:dropdown>
-                            </flux:table.cell>
                         </flux:table.row>
                     @endforeach
                 </flux:table.rows>

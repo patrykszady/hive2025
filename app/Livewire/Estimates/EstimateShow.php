@@ -140,11 +140,50 @@ class EstimateShow extends Component
         );
     }
 
-    // public function disableEstimate()
-    // {
-    //     $this->dispatch('disableEstimate', ['estimate' => $this->estimate->id])->to(EstimatesIndex::class);
-    //     // $this->dispatch('estimates.estimates-index', 'disableEstimate', ['estimate' => $this->estimate->id]);
-    // }
+    public function disableEstimate()
+    {
+        $projectId = $this->estimate->project->id;
+        $this->estimate->delete();
+
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Estimate Disabled',
+            text: '',
+        );
+
+        return $this->redirect(route('projects.show', ['project' => $projectId]), navigate: true);
+    }
+
+    public function removeEstimate()
+    {
+        $projectId = $this->estimate->project->id;
+        $this->estimate->delete();
+
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Estimate Deleted',
+            text: '',
+        );
+
+        return $this->redirect(route('projects.show', ['project' => $projectId]), navigate: true);
+    }
+
+    public function activateEstimate()
+    {
+        $this->estimate->restore();
+
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Estimate Restored',
+            text: '',
+        );
+    }
 
     public function sectionDuplicate($section_index)
     {
