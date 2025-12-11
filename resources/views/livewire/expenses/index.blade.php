@@ -56,6 +56,8 @@
         </flux:card>
     @endif
 
+    {{-- Hide expenses card on project page when there are no expenses --}}
+    @if($view !== 'projects.show' || $this->expenses->isNotEmpty())
     <flux:card class="overflow-hidden">
         <div class="space-y-4">
             <div>
@@ -185,6 +187,7 @@
             </div>
         </div>
     </flux:card>
+    @endif
 
     @if($view === NULL && auth()->user()->can('create', App\Models\Expense::class))
         <flux:card wire:init="loadTransactions" x-data="{

@@ -26,15 +26,6 @@ class StatusCreate extends Component
 
     public $editingStatusDate = null;
 
-    public function rules()
-    {
-        return [
-            'project_status' => 'required',
-            'editingStatusCode' => 'required',
-            'editingStatusDate' => 'required|date',
-        ];
-    }
-
     public function mount(Project $project)
     {
         $this->project = $project;
@@ -44,7 +35,9 @@ class StatusCreate extends Component
 
     public function update_project()
     {
-        $this->validate();
+        $this->validate([
+            'project_status' => 'required',
+        ]);
         
         // project_status is already a status_code integer from the select dropdown
         $statusCode = (int) $this->project_status;
