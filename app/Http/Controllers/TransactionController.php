@@ -726,8 +726,36 @@ class TransactionController extends Controller
         // First try matching on plaid_merchant_description (more specific), then fall back to plaid_merchant_name
         $transactionsWithoutVendor = Transaction::TransactionsSinVendor()->whereIn('bank_account_id', $bankAccountIds)->get();
 
+        // Transaction types that should NOT be matched to retail vendors
+        // These are typically bank transfers, not purchases
+        $skipPatterns = [
+            '/\bZELLE\b/i',
+            '/\bTRANSFER\b/i',
+            '/\bWIRE\b/i',
+            '/\bACH\b/i',
+            '/\bDIRECT DEPOSIT\b/i',
+            '/\bPAYROLL\b/i',
+            '/\bOTHER DECREASE\b/i',
+            '/\bOTHER INCREASE\b/i',
+        ];
+
         foreach ($transactionsWithoutVendor as $transaction) {
             $vendor_match = null;
+            
+            // Skip if description indicates this is a transfer/non-purchase transaction
+            $description = $transaction->plaid_merchant_description ?? '';
+            $isTransfer = false;
+            foreach ($skipPatterns as $pattern) {
+                if (preg_match($pattern, $description)) {
+                    $isTransfer = true;
+                    break;
+                }
+            }
+            
+            // Don't assign retail vendors to transfer transactions
+            if ($isTransfer) {
+                continue;
+            }
 
             // First try matching the more specific plaid_merchant_description
             if (!empty($transaction->plaid_merchant_description)) {
@@ -761,6 +789,20 @@ class TransactionController extends Controller
         foreach ($transactionsWithVendor as $transaction) {
             // Skip if plaid_merchant_name is empty
             if (empty($transaction->plaid_merchant_name)) {
+                continue;
+            }
+            
+            // Skip transfer/non-purchase transactions - don't reassign their vendors
+            $description = $transaction->plaid_merchant_description ?? '';
+            $merchantName = $transaction->plaid_merchant_name ?? '';
+            $isTransfer = false;
+            foreach ($skipPatterns as $pattern) {
+                if (preg_match($pattern, $description) || preg_match($pattern, $merchantName)) {
+                    $isTransfer = true;
+                    break;
+                }
+            }
+            if ($isTransfer) {
                 continue;
             }
 
@@ -974,6 +1016,17 @@ class TransactionController extends Controller
                     // Only consider transactions that could plausibly match the outstanding amount
                     // For subset sum, individual transactions must be <= outstanding amount
                     ->where('amount', '<=', abs($transaction_amount_outstanding))
+                    // Exclude bank transfers from expense matching - these are not retail purchases
+                    ->where(function ($query) {
+                        $query->whereNull('plaid_merchant_description')
+                            ->orWhere(function ($subQuery) {
+                                $subQuery->where('plaid_merchant_description', 'NOT LIKE', '%ZELLE%')
+                                    ->where('plaid_merchant_description', 'NOT LIKE', '%WIRE%')
+                                    ->where('plaid_merchant_description', 'NOT LIKE', '%ACH%')
+                                    ->where('plaid_merchant_description', 'NOT LIKE', '%TRANSFER%')
+                                    ->where('plaid_merchant_description', 'NOT LIKE', '%PAYROLL%');
+                            });
+                    })
                     //03-22 -2023 when negative, ignore vendor_id
                     // ->when(substr($expense->amount, 0, 1) == '-', function ($query) {
                     //     dd($vendor_id);

@@ -564,7 +564,20 @@ class PlaidTransactionSyncController extends Controller
         $matchedTransaction->details = $payload;
         $matchedTransaction->owner = $payload['account_owner'] ?? $matchedTransaction->owner;
         $matchedTransaction->check_number = $payload['check_number'] ?? $matchedTransaction->check_number;
-        $matchedTransaction->plaid_merchant_name = $payload['merchant_name'] ?? $matchedTransaction->plaid_merchant_name;
+        
+        // Handle merchant_name carefully - if incoming description indicates a transfer (ZELLE, ACH, WIRE),
+        // don't keep previous merchant name as it could be from an incorrectly matched pending transaction
+        $incomingDescription = $payload['name'] ?? $payload['original_description'] ?? '';
+        $isTransfer = preg_match('/\b(ZELLE|WIRE|ACH|TRANSFER|PAYROLL)\b/i', $incomingDescription);
+        
+        if (isset($payload['merchant_name']) && $payload['merchant_name'] !== null) {
+            $matchedTransaction->plaid_merchant_name = $payload['merchant_name'];
+        } elseif ($isTransfer) {
+            // Clear merchant name for transfers - don't inherit from previous pending transaction
+            $matchedTransaction->plaid_merchant_name = null;
+        }
+        // Otherwise keep existing merchant name (for non-transfer upgrades where Plaid doesn't send merchant_name)
+        
         $matchedTransaction->plaid_merchant_description = $payload['name'] ?? $payload['original_description'] ?? $matchedTransaction->plaid_merchant_description;
         $matchedTransaction->save();
     }
