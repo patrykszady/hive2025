@@ -944,42 +944,31 @@ class TransactionController extends Controller
 
     public function add_expense_to_transactions()
     {
-        // Memory management: limit number of expenses processed per run
-        // This prevents memory exhaustion as data grows over time
-        $maxExpensesPerRun = 50;
         $processedCount = 0;
         
         $hive_vendors = Vendor::hiveVendors()->get();
 
         foreach ($hive_vendors as $hive_vendor) {
-            // Early exit if we've hit our processing limit
-            if ($processedCount >= $maxExpensesPerRun) {
-                Log::info('Reached max expenses per run limit', [
-                    'processed' => $processedCount,
-                    'limit' => $maxExpensesPerRun,
-                ]);
-                break;
-            }
-            
             $hive_vendor_bank_account_ids = $hive_vendor->bank_accounts->pluck('id');
 
-            $expenses = Expense::with('transactions')
-                ->with('receipts')
+            // Use cursor() for memory-efficient iteration through all matching expenses
+            // Filter at DB level: only get expenses where transaction sum < expense amount
+            $expensesCursor = Expense::with('receipts')
                 ->whereNull('deleted_at')
                 ->where('belongs_to_vendor_id', $hive_vendor->id)
                 ->whereNotNull('vendor_id')
                 ->whereNull('paid_by') // Exclude employee reimbursements - they match to check, not bank transactions
-                //where transacitons->sum != $expense(item)->sum  \\ whereNull checked_at (transactions add up to expense)
                 ->whereDate('date', '>=', Carbon::now()->subMonths(12))
-                ->orderBy('date', 'DESC') // Process most recent first
-                ->limit($maxExpensesPerRun - $processedCount) // Only get what we can process
-                ->get();
+                // Only fetch expenses that are not fully matched (transaction sum < expense amount)
+                ->whereRaw('(SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE transactions.expense_id = expenses.id AND transactions.deleted_at IS NULL) < expenses.amount')
+                ->orderBy('date', 'DESC')
+                ->cursor();
 
-            foreach ($expenses as $expense) {
+            foreach ($expensesCursor as $expense) {
                 $processedCount++;
                 
                 // Check memory usage periodically
-                if ($processedCount % 10 === 0) {
+                if ($processedCount % 50 === 0) {
                     $memoryMB = memory_get_usage(true) / 1024 / 1024;
                     $limitMB = (int) ini_get('memory_limit');
                     
@@ -992,14 +981,18 @@ class TransactionController extends Controller
                         break 2; // Break out of both loops
                     }
                 }
-                $start_date = $expense->date->subDays(7)->format('Y-m-d');
-                $end_date = $expense->date->addDays(21)->format('Y-m-d');
+                
+                // Load transactions only when needed (not eager loaded to save memory)
+                $expenseTransactions = Transaction::where('expense_id', $expense->id)
+                    ->whereNull('deleted_at')
+                    ->get();
+                
+                $start_date = $expense->date->copy()->subDays(7)->format('Y-m-d');
+                $end_date = $expense->date->copy()->addDays(21)->format('Y-m-d');
 
-                if (! $expense->transactions->isEmpty()) {
-                    //transaction->amount cannot be more than expense->amount
-                    $transaction_amount_outstanding = $expense->amount - $expense->transactions->sum('amount');
+                if (! $expenseTransactions->isEmpty()) {
+                    $transaction_amount_outstanding = $expense->amount - $expenseTransactions->sum('amount');
 
-                    //if amount = full expense amount...
                     if ($transaction_amount_outstanding == 0) {
                         continue;
                     }
