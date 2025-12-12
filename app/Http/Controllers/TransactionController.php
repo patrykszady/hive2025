@@ -1322,20 +1322,9 @@ class TransactionController extends Controller
                 $closest?->check()->associate($check)->save();
                 continue; // done with this check
             } else {
-                // No exact match found - check should remain unmatched
-                // If a check has multiple transactions, they should be split into separate checks
-                // (handled by checks:split-transactions command)
-            
-            // Continue with existing fallback logic for specific check types
-                if ($check->check_type === 'Transfer') {
-                    // Transfer checks should match 1:1 with transactions
-                    // If multiple transactions exist, they should be split into separate checks
-                    // (handled by checks:split-transactions command)
-                } elseif ($check->check_type === 'Check') {
-                    // Check type checks should match 1:1 with transactions by check_number
-                    // If multiple transactions exist with same check_number, they should be split
-                    // (handled by checks:split-transactions command)
-                }
+                // No exact match found - try subset sum matching
+                // Find multiple transactions that sum to the check amount
+                $this->matchTransactionsToCheckBySubsetSum($check, $check_number, $bank_account_ids, $add_days);
             }
         }
 
@@ -1437,10 +1426,11 @@ class TransactionController extends Controller
      */
     protected function matchChecksToExpenses(): void
     {
-        // Get expenses without any checks linked (via pivot table)
+        // Get expenses without any checks linked (via pivot table OR direct check_id)
         $expenses = Expense::withoutGlobalScopes()
             ->whereNull('deleted_at')
             ->whereDoesntHave('checks') // No checks via many-to-many
+            ->whereNull('check_id') // No direct check_id set (legacy relationship)
             ->whereNotNull('vendor_id')
             ->whereNull('paid_by') // Exclude employee reimbursements
             ->where('date', '>', '2021-01-01')
@@ -1454,9 +1444,11 @@ class TransactionController extends Controller
             $end_date = $expense->date->addDays(21)->format('Y-m-d');
             
             // Find checks without expense links that could match
+            // Exclude checks that have expenses via many-to-many OR via legacy check_id
             $checks = Check::withoutGlobalScopes()
                 ->whereNull('deleted_at')
                 ->whereDoesntHave('expensesMany') // No expenses via many-to-many
+                ->whereDoesntHave('expenses') // No expenses via legacy check_id
                 ->whereBetween('date', [$start_date, $end_date])
                 ->where(function($query) use ($expense) {
                     // Match vendor if check has one
@@ -1523,6 +1515,153 @@ class TransactionController extends Controller
         
         // Final memory cleanup
         gc_collect_cycles();
+    }
+
+    /**
+     * Match multiple transactions to a single check using subset sum matching.
+     * Finds groups of transactions that sum to the check amount.
+     */
+    protected function matchTransactionsToCheckBySubsetSum(Check $check, string $check_number, $bank_account_ids, int $add_days): void
+    {
+        // Get all unmatched transactions within the date range that could potentially match
+        $transactions = Transaction::withoutGlobalScopes()
+            ->whereNull('deleted_at')
+            ->whereNull('check_id')
+            ->whereNull('expense_id')
+            ->where('check_number', $check_number)
+            ->when($bank_account_ids, function ($query, $bank_account_ids) {
+                return $query->whereIn('bank_account_id', $bank_account_ids);
+            })
+            ->whereBetween('transaction_date', [
+                $check->date->copy()->subDays(7)->format('Y-m-d'),
+                $check->date->copy()->addDays($add_days)->format('Y-m-d'),
+            ])
+            ->where('amount', '<=', $check->amount) // Only transactions <= check amount
+            ->orderBy('transaction_date', 'ASC')
+            ->limit(50) // Get more initially, we'll group by payee name
+            ->get();
+
+        if ($transactions->count() < 2) {
+            return; // Need at least 2 transactions for subset matching
+        }
+
+        // For Zelle/Transfer transactions, group by payee name extracted from description
+        // This ensures we only match transactions to the same person
+        if ($check->check_type === 'Transfer') {
+            $transactionsByPayee = $transactions->groupBy(function ($t) {
+                return $this->extractPayeeNameFromDescription($t->plaid_merchant_description);
+            });
+
+            // Try each payee group separately
+            foreach ($transactionsByPayee as $payeeName => $payeeTransactions) {
+                if ($payeeTransactions->count() < 2) {
+                    continue; // Need at least 2 transactions for subset matching
+                }
+
+                // Limit to 14 for subset sum algorithm
+                $payeeTransactions = $payeeTransactions->take(14);
+
+                $matched = $this->trySubsetSumMatch($check, $payeeTransactions);
+                if ($matched) {
+                    return; // Found a match, done
+                }
+            }
+        } else {
+            // For non-Transfer types (Check, Cash), just ensure all transactions have the same check_number
+            // which is already filtered in the query above
+            $transactions = $transactions->take(14);
+            $this->trySubsetSumMatch($check, $transactions);
+        }
+    }
+
+    /**
+     * Extract payee name from Plaid transaction description.
+     * Handles formats like "ZELLE DEBIT PAY ID xxx ORG ID CTI NAME JOHN DOE"
+     */
+    protected function extractPayeeNameFromDescription(?string $description): string
+    {
+        if (empty($description)) {
+            return 'unknown';
+        }
+
+        // Try to extract name after "NAME " pattern (common in Zelle transactions)
+        if (preg_match('/\bNAME\s+([A-Z][A-Z\s]+?)(?:\s*$|\s+(?:ID|ORG|REF|CONF))/i', $description, $matches)) {
+            return strtoupper(trim($matches[1]));
+        }
+
+        // Try to extract name from Venmo format
+        if (preg_match('/VENMO\s+(?:CASHOUT|PAYMENT)?\s*([A-Z][A-Z\s]+?)(?:\s*$|\s+ID)/i', $description, $matches)) {
+            return strtoupper(trim($matches[1]));
+        }
+
+        // For other transfers, use the full description as identifier
+        // This ensures different transactions don't get mixed
+        return strtoupper(trim($description));
+    }
+
+    /**
+     * Attempt to match transactions to a check using subset sum algorithm.
+     * Returns true if a match was found and linked.
+     */
+    protected function trySubsetSumMatch(Check $check, $transactions): bool
+    {
+        // Verify transactions are within reasonable date range of each other (7 days max spread)
+        $minDate = $transactions->min('transaction_date');
+        $maxDate = $transactions->max('transaction_date');
+        if ($minDate->diffInDays($maxDate) > 7) {
+            // Transactions are too spread out - filter to only those within 7 days of check date
+            $transactions = $transactions->filter(function ($t) use ($check) {
+                return abs($t->transaction_date->diffInDays($check->date)) <= 7;
+            });
+            
+            if ($transactions->count() < 2) {
+                return false;
+            }
+        }
+
+        $transaction_ids = $transactions->pluck('id')->toArray();
+        $transaction_amounts = $transactions->pluck('amount')->map(fn ($a) => (float) $a)->toArray();
+
+        $arr = array_values(array_filter($transaction_amounts));
+        $n = count($arr);
+
+        if ($n > 14 || $n < 2) {
+            return false; // Skip if too many items or only one transaction
+        }
+
+        $results = collect($this->subsetSums($arr, $n, $transaction_ids, 'transaction'))->sortBy('sum');
+
+        foreach ($results as $result) {
+            $sum = number_format($result['sum'], 2, '.', '');
+
+            if ($sum == $check->amount && isset($result['transactions'])) {
+                $matchingTransactionIds = collect($result['transactions'])->pluck('transaction_id')->toArray();
+
+                // Verify transactions haven't been linked to other checks since we queried
+                $stillAvailable = Transaction::withoutGlobalScopes()
+                    ->whereIn('id', $matchingTransactionIds)
+                    ->whereNull('check_id')
+                    ->pluck('id')
+                    ->toArray();
+
+                if (count($stillAvailable) === count($matchingTransactionIds)) {
+                    // Link all matching transactions to this check
+                    Transaction::withoutGlobalScopes()
+                        ->whereIn('id', $matchingTransactionIds)
+                        ->update(['check_id' => $check->id]);
+
+                    Log::channel('add_check_id_to_transactions')->info('Matched multiple transactions to check via subset sum', [
+                        'check_id' => $check->id,
+                        'check_amount' => $check->amount,
+                        'transaction_ids' => $matchingTransactionIds,
+                        'transaction_count' => count($matchingTransactionIds),
+                    ]);
+                    return true; // Found a match
+                }
+            }
+        }
+
+        return false;
     }
 
     function getProcessedChecks()
