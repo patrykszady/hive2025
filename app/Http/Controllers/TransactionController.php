@@ -1041,7 +1041,17 @@ class TransactionController extends Controller
                 if ($expense->vendor_id == $expense->belongs_to_vendor_id) {
                     $transactions = $transactions->whereNull('vendor_id')->where('deposit', 1);
                 } else {
-                    $transactions = $transactions->where('vendor_id', $expense->vendor_id);
+                    // Include transactions matching the vendor OR service fee transactions
+                    // Service fees are small amounts that may have a different vendor or no vendor
+                    $expenseVendorId = $expense->vendor_id;
+                    $transactions = $transactions->where(function ($query) use ($expenseVendorId) {
+                        $query->where('vendor_id', $expenseVendorId)
+                            // Also include potential service fee transactions (any vendor, small amount)
+                            ->orWhere(function ($subQuery) {
+                                $subQuery->where('amount', '<=', 10.00) // Service fees are typically small
+                                    ->where('plaid_merchant_description', 'LIKE', '%SERVICEFEE%');
+                            });
+                    });
                 }
 
                 // if($expense->amount == 0){

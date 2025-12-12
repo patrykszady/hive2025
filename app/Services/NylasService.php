@@ -1004,24 +1004,49 @@ class NylasService
             ? $receivedAfter
             : Carbon::now()->subYear();
         
-        // Single API call to get all recent messages from inbox
-        // Use a smaller limit to avoid provider timeouts (504 errors)
-        $query = [
-            'limit' => 50, // Reduced from 200 to avoid timeouts
+        // Build base query params - will paginate through all results
+        $baseQuery = [
+            'limit' => 50, // Per-page limit to avoid timeouts
             'received_after' => $lookbackDate->timestamp,
         ];
         
         // Only add 'in' if we have the inbox folder ID
         if ($inboxFolderId) {
-            $query['in'] = $inboxFolderId;
+            $baseQuery['in'] = $inboxFolderId;
         }
         
-        $resp = $this->getMessages($grantId, $query, false, $companyEmail);
-        $messages = $resp['data'] ?? [];
+        // Paginate through all messages in date range
+        $allMessages = [];
+        $nextCursor = null;
+        $maxPages = 10; // Safety limit: 10 pages * 50 = 500 messages max
+        $page = 0;
+        
+        do {
+            $query = $baseQuery;
+            if ($nextCursor) {
+                $query['page_token'] = $nextCursor;
+            }
+            
+            $resp = $this->getMessages($grantId, $query, false, $companyEmail);
+            $messages = $resp['data'] ?? [];
+            
+            if (!is_array($messages)) {
+                break;
+            }
+            
+            foreach ($messages as $m) {
+                if (isset($m['id'])) {
+                    $allMessages[$m['id']] = $m; // De-dupe by ID
+                }
+            }
+            
+            $nextCursor = $resp['next_cursor'] ?? null;
+            $page++;
+        } while ($nextCursor && $page < $maxPages);
 
         // Fast filtering using pre-built criteria
         $aggregated = [];
-        foreach ($messages as $m) {
+        foreach ($allMessages as $m) {
             if (empty($m['id'])) {
                 continue;
             }
