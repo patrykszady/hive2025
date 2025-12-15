@@ -45,6 +45,35 @@
         [x-cloak\:hidden] {
             display: none !important;
         }
+        /* Fullscreen planner pages: remove any grid/flex gaps */
+        body.h-screen {
+            gap: 0 !important;
+            grid-gap: 0 !important;
+            column-gap: 0 !important;
+            row-gap: 0 !important;
+        }
+
+        /* Fullscreen planner pages: Flux applies padding on the real main element */
+        body.h-screen [data-flux-main] {
+            padding: 0 !important;
+        }
+
+        /* Mobile: keep hamburger overlay (don't reserve header height) */
+        @media (max-width: 1023.98px) {
+            [data-flux-header] {
+                position: fixed !important;
+                top: 0 !important;
+                left: 0 !important;
+                right: 0 !important;
+                z-index: 60 !important;
+                background: transparent !important;
+            }
+
+            /* When the sidebar is open on mobile, hide the header toggle overlay */
+            body:has([data-flux-sidebar-on-mobile]:not([data-flux-sidebar-collapsed-mobile])) [data-flux-header] {
+                display: none !important;
+            }
+        }
     </style>
     @stack('styles')
 

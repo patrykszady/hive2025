@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use App\Models\Task;
 use App\Models\User;
 use App\Traits\Sortable;
 use App\Observers\TaskObserver;
@@ -40,6 +39,45 @@ class Task extends Model
             'start_date' => 'date',
             'end_date' => 'date',
         ];
+    }
+
+    public const TYPE_UI = [
+        'Task' => [
+            'flux' => 'sky',
+            'text' => 'text-sky-600 dark:text-sky-400',
+            'border' => 'border-sky-500',
+            'bg' => 'bg-sky-500',
+            'bg_strong' => 'bg-sky-600',
+            'hover_bg_strong' => 'hover:bg-sky-600',
+        ],
+        'Milestone' => [
+            'flux' => 'indigo',
+            'text' => 'text-indigo-600 dark:text-indigo-400',
+            'border' => 'border-indigo-500',
+            'bg' => 'bg-indigo-500',
+            'bg_strong' => 'bg-indigo-600',
+            'hover_bg_strong' => 'hover:bg-indigo-600',
+        ],
+        'Meet' => [
+            'flux' => 'orange',
+            'text' => 'text-orange-600 dark:text-orange-400',
+            'border' => 'border-orange-500',
+            'bg' => 'bg-orange-500',
+            'bg_strong' => 'bg-orange-600',
+            'hover_bg_strong' => 'hover:bg-orange-600',
+        ],
+    ];
+
+    /**
+     * Accessor: full UI mapping for the current task type.
+     *
+     * @return Attribute<array{flux:string,text:string,border:string,bg:string,bg_strong:string,hover_bg_strong:string}, never>
+     */
+    public function typeUi(): Attribute
+    {
+        return Attribute::make(
+            get: fn () => self::TYPE_UI[$this->type ?? 'Task'] ?? self::TYPE_UI['Task'],
+        );
     }
 
     protected function scopeSortable($query, $task)

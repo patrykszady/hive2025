@@ -4,7 +4,7 @@
         x-data="ganttChart()"
         x-init="init()"
         x-bind:class="loaded ? 'opacity-100 blur-none' : 'opacity-0 blur-sm'"
-        style="scroll-left: {{ max(0, $this->days->search(fn($d) => $d->isToday()) * 100) }}px;"
+        style="scroll-left: {{ max(0, $this->days->search(fn($d) => $d->isSameDay($this->today)) * 100) }}px;"
         >
         
     <div class="min-w-max relative">
@@ -17,8 +17,8 @@
                     <div
                         class="p-2 text-left text-xs border-r border-zinc-300
                             {{ $day->isWeekend() ? 'bg-zinc-200' : 'bg-zinc-100' }}
-                            {{ $day->isToday() ? 'font-bold text-accent relative before:content-[\'\'] before:absolute before:inset-0 before:bg-accent/20 before:pointer-events-none' : '' }}"
-                        @if($day->isToday()) data-today @endif
+                            {{ $day->isSameDay($this->today) ? 'font-bold text-accent relative before:content-[\'\'] before:absolute before:inset-0 before:bg-accent/20 before:pointer-events-none' : '' }}"
+                        @if($day->isSameDay($this->today)) data-today @endif
                     >
                         <div>{{ $day->format('D') }}</div>
                         <div>{{ $day->format('M j') }}</div>
@@ -44,8 +44,8 @@
                             <div
                                 class="border-r border-zinc-50 h-full
                                     {{ $day->isWeekend() ? 'bg-zinc-200' : 'bg-zinc-100' }}
-                                    {{ $day->isToday() ? 'relative before:content-[\'\'] before:absolute before:inset-0 before:bg-accent/20 before:pointer-events-none' : '' }}"
-                                @if($day->isToday()) data-today @endif
+                                    {{ $day->isSameDay($this->today) ? 'relative before:content-[\'\'] before:absolute before:inset-0 before:bg-accent/20 before:pointer-events-none' : '' }}"
+                                @if($day->isSameDay($this->today)) data-today @endif
                             ></div>
                         @endforeach
                     </div>
@@ -99,7 +99,7 @@
                                                     <flux:badge
                                                         as="button"
                                                         size="xs"
-                                                        color="{{ $unscheduledTask->type === 'Task' ? 'blue' : 'indigo' }}"                                       
+                                                        :color="data_get($unscheduledTask->type_ui, 'flux')"
                                                         wire:click="editTask({{ $unscheduledTask->id }})"
                                                         wire:loading.class="opacity-50 pointer-events-none"
                                                         wire:loading.attr="disabled"
@@ -135,8 +135,8 @@
                             <div
                                 class="border-r border-zinc-200 h-full
                                     {{ $day->isWeekend() ? 'bg-zinc-100' : 'bg-zinc-50' }}
-                                    {{ $day->isToday() ? 'relative before:content-[\'\'] before:absolute before:inset-0 before:bg-accent/20 before:pointer-events-none' : '' }}"
-                                @if($day->isToday()) data-today @endif
+                                    {{ $day->isSameDay($this->today) ? 'relative before:content-[\'\'] before:absolute before:inset-0 before:bg-accent/20 before:pointer-events-none' : '' }}"
+                                @if($day->isSameDay($this->today)) data-today @endif
                             ></div>
                         @endforeach
                     </div>
@@ -167,7 +167,7 @@
                                 <div
                                     wire:key="task-{{ $task->id }}"
                                     class="task-bar group absolute inset-y-0.5 bg-white/50 border-opacity-30 cursor-default
-                                        {{ $task->type === 'Task' ? 'border-accent' : 'border-indigo-500' }}
+                                        {{ data_get($task->type_ui, 'border') }}
                                         text-md flex items-center shadow select-none overflow-visible transition-all duration-200
                                         {{ $isTruncatedLeft ? 'border-r border-t border-b rounded-r' : '' }}
                                         {{ !$isTruncatedLeft && $taskEndDate->isAfter($this->days->last()) ? 'border-l border-t border-b rounded-l' : '' }}
@@ -208,14 +208,14 @@
                                     @if(!$taskStartDate->isBefore($this->days->first()))
                                         <div
                                             class="resize-handle w-2 touch:w-4 h-full absolute top-0 left-0
-                                                {{ $task->type === 'Task' ? 'bg-accent' : 'bg-indigo-500' }}
+                                                {{ data_get($task->type_ui, 'bg') }}
                                                 opacity-30 rounded-l z-30 transition-all duration-200
                                                 before:content-[''] before:absolute before:inset-y-0 before:-left-2 before:w-6 before:touch:w-8 before:bg-transparent"
                                             x-bind:class="{
-                                                '{{ $task->type === 'Task' ? 'opacity-100 bg-accent-content' : 'opacity-100 bg-indigo-600' }}': resizing,
+                                                '{{ 'opacity-100 ' . data_get($task->type_ui, 'bg_strong') }}': resizing,
                                                 'cursor-ew-resize': true,
                                                 'cursor-not-allowed opacity-20 pointer-events-none': updating,
-                                                    'group-hover:opacity-50 hover:!opacity-100 {{ $task->type === 'Task' ? 'hover:bg-accent-content' : 'hover:bg-indigo-600' }}': !updating
+                                                    'group-hover:opacity-50 hover:!opacity-100 {{ data_get($task->type_ui, 'hover_bg_strong') }}': !updating
                                             }"
                                             @mousedown="startResize('left', $event, '{{ $taskStartDate->format('Y-m-d') }}', '{{ $taskEndDate->format('Y-m-d') }}', '{{ $this->days->first()->format('Y-m-d') }}', '{{ $this->days->last()->format('Y-m-d') }}')"
                                             @touchstart="startResize('left', $event, '{{ $taskStartDate->format('Y-m-d') }}', '{{ $taskEndDate->format('Y-m-d') }}', '{{ $this->days->first()->format('Y-m-d') }}', '{{ $this->days->last()->format('Y-m-d') }}')"
@@ -464,14 +464,14 @@
                                     @if(!$taskEndDate->isAfter($this->days->last()))
                                         <div
                                             class="resize-handle w-2 touch:w-4 h-full absolute top-0 right-0
-                                                {{ $task->type === 'Task' ? 'bg-accent' : 'bg-indigo-500' }}
+                                                {{ data_get($task->type_ui, 'bg') }}
                                                 opacity-30 rounded-r z-30 transition-all duration-200
                                                 before:content-[''] before:absolute before:inset-y-0 before:-right-2 before:w-6 before:touch:w-8 before:bg-transparent"
                                             x-bind:class="{
-                                                '{{ $task->type === 'Task' ? 'opacity-100 bg-accent-content' : 'opacity-100 bg-indigo-600' }}': resizing,
+                                                '{{ 'opacity-100 ' . data_get($task->type_ui, 'bg_strong') }}': resizing,
                                                 'cursor-ew-resize': true,
                                                 'cursor-not-allowed opacity-20 pointer-events-none': updating,
-                                                    'group-hover:opacity-50 hover:!opacity-100 {{ $task->type === 'Task' ? 'hover:bg-accent-content' : 'hover:bg-indigo-600' }}': !updating
+                                                    'group-hover:opacity-50 hover:!opacity-100 {{ data_get($task->type_ui, 'hover_bg_strong') }}': !updating
                                             }"
                                             @mousedown="startResize('right', $event, '{{ $taskStartDate->format('Y-m-d') }}', '{{ $taskEndDate->format('Y-m-d') }}', '{{ $this->days->first()->format('Y-m-d') }}', '{{ $this->days->last()->format('Y-m-d') }}')"
                                             @touchstart="startResize('right', $event, '{{ $taskStartDate->format('Y-m-d') }}', '{{ $taskEndDate->format('Y-m-d') }}', '{{ $this->days->first()->format('Y-m-d') }}', '{{ $this->days->last()->format('Y-m-d') }}')"

@@ -51,6 +51,7 @@
     height: 100vh;
     height: 100dvh;
     overflow-y: auto;
+  scrollbar-gutter: stable;
     z-index: 40;
 }
 
@@ -62,7 +63,7 @@
     
     /* When sidebar is collapsed */
     [data-flux-sidebar-collapsed-desktop] ~ [data-flux-main] {
-        margin-left: var(--flux-sidebar-width-collapsed, 4rem);
+      margin-left: var(--flux-sidebar-width-collapsed, 3.5rem);
     }
 }
 

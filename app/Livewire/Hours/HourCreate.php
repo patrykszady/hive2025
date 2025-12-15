@@ -43,7 +43,7 @@ class HourCreate extends Component
         'form_submit' => 'save',
     ];
 
-    protected $listeners = ['refreshComponent' => '$refresh'];
+    protected $listeners = ['refreshComponent' => 'refreshFromBrowserSession'];
 
     public function rules()
     {
@@ -56,8 +56,7 @@ class HourCreate extends Component
     public function mount()
     {
         $this->authorize('create', Hour::class);
-        
-        // Initialize to null - will be set by setBrowserDate() called from the view
+
         $this->selected_date = null;
 
         $confirmed_weeks =
@@ -85,21 +84,25 @@ class HourCreate extends Component
 
         $this->days = implode(',', $confirmed_week_days);
 
-        // Don't set projects here - wait for setBrowserDate to be called
-        // which will call selectedDate() and populate projects
-    }
-    
-    public function setBrowserDate($browserDate)
-    {
-        // Always initialize with browser's current date (not server's UTC date)
-        $this->selectedDate($browserDate);
-        
-        // Now set projects after selectedDate has been called
-        if (is_array($this->projects)) {
-            $this->form->setProjects($this->projects);
-        } else {
-            $this->form->setProjects($this->projects->toArray());
+        $browserDate = browser_date();
+        if ($browserDate) {
+            $this->selectedDate($browserDate);
         }
+    }
+
+    public function refreshFromBrowserSession(): void
+    {
+        $browserDate = browser_date();
+        if (! $browserDate) {
+            return;
+        }
+
+        $currentBrowserDate = $this->selected_date?->format('Y-m-d');
+        if ($currentBrowserDate === $browserDate) {
+            return;
+        }
+
+        $this->selectedDate($browserDate);
     }
 
     public function updatedSelectedDate($value)
@@ -115,7 +118,7 @@ class HourCreate extends Component
     #[Computed]
     public function other_projects()
     {
-        // Handle case where projects is still an empty array before setBrowserDate() runs
+        // Handle case where projects is still an empty array before browser date sync runs
         $projectIds = is_array($this->projects) 
             ? collect($this->projects)->pluck('id') 
             : $this->projects->pluck('id');

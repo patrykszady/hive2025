@@ -7,6 +7,104 @@
  * <time x-datetime="{{ $date->toIso8601String() }}" x-datetime-format="relative"></time>
  */
 
+function getBrowserLocalDateString() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function getCachedBrowserTimezone() {
+    try {
+        const cached = window.localStorage?.getItem('hive.browser.timezone');
+        if (cached) {
+            return cached;
+        }
+    } catch {
+        // ignore
+    }
+
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+    try {
+        window.localStorage?.setItem('hive.browser.timezone', timezone);
+    } catch {
+        // ignore
+    }
+
+    return timezone;
+}
+
+function getLastBrowserSyncPayload() {
+    try {
+        const raw = window.sessionStorage?.getItem('hive.browser.timezoneSync');
+        if (!raw) {
+            return null;
+        }
+
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+}
+
+function setLastBrowserSyncPayload(payload) {
+    try {
+        window.sessionStorage?.setItem('hive.browser.timezoneSync', JSON.stringify(payload));
+    } catch {
+        // ignore
+    }
+}
+
+function shouldThrottleBrowserSync(lastPayload) {
+    if (!lastPayload || typeof lastPayload !== 'object') {
+        return false;
+    }
+
+    const lastSyncAt = Number(lastPayload.syncedAt ?? 0);
+    if (!Number.isFinite(lastSyncAt) || lastSyncAt <= 0) {
+        return false;
+    }
+
+    // "Once every few hours" – 4h default.
+    const THROTTLE_MS = 4 * 60 * 60 * 1000;
+    return (Date.now() - lastSyncAt) < THROTTLE_MS;
+}
+
+function syncBrowserTimezoneToServer() {
+    if (!window.Livewire || typeof window.Livewire.dispatchTo !== 'function') {
+        return;
+    }
+
+    const timezone = getCachedBrowserTimezone();
+    const date = getBrowserLocalDateString();
+
+    if (window.Alpine?.store) {
+        const store = window.Alpine.store('timezone');
+        if (store) {
+            store.today = date;
+            store.name = timezone;
+            store.offset = new Date().getTimezoneOffset();
+        }
+    }
+
+    const last = window.__hiveBrowserTimezoneSync;
+    if (last && last.timezone === timezone && last.date === date) {
+        return;
+    }
+
+    const lastSession = getLastBrowserSyncPayload();
+    if (lastSession && lastSession.timezone === timezone && lastSession.date === date && shouldThrottleBrowserSync(lastSession)) {
+        window.__hiveBrowserTimezoneSync = { timezone, date };
+        return;
+    }
+
+    window.__hiveBrowserTimezoneSync = { timezone, date };
+    setLastBrowserSyncPayload({ timezone, date, syncedAt: Date.now() });
+    window.Livewire.dispatchTo('browser-timezone', 'browser-timezone-sync', { timezone, date });
+}
+
 document.addEventListener('alpine:init', () => {
     // Alpine.js directive for automatic timezone conversion
     Alpine.directive('datetime', (el, { expression, modifiers }, { evaluate }) => {
@@ -107,9 +205,16 @@ document.addEventListener('alpine:init', () => {
     
     // Store browser timezone in Alpine store for easy access
     Alpine.store('timezone', {
-        name: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        offset: new Date().getTimezoneOffset()
+        name: getCachedBrowserTimezone(),
+        offset: new Date().getTimezoneOffset(),
+        today: getBrowserLocalDateString(),
     });
+});
+
+// Keep server-side session in sync with browser timezone/date.
+// livewire:navigated fires on initial page load and after wire:navigate.
+document.addEventListener('livewire:navigated', () => {
+    syncBrowserTimezoneToServer();
 });
 
 function getRelativeTime(date) {

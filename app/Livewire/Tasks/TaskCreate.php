@@ -37,6 +37,30 @@ class TaskCreate extends Component
     protected $listeners = ['editTask', 'addTask'];
 
     #[Computed]
+    public function taskTypeTextClasses(): array
+    {
+        return collect(Task::TYPE_UI)
+            ->mapWithKeys(fn (array $ui, string $type) => [$type => $ui['text']])
+            ->all();
+    }
+
+    #[Computed]
+    public function taskTypeUi(): array
+    {
+        return Task::TYPE_UI[$this->form->type ?? 'Task'] ?? Task::TYPE_UI['Task'];
+    }
+
+    #[Computed]
+    public function taskTypeTabClasses(): array
+    {
+        return collect(Task::TYPE_UI)
+            ->mapWithKeys(fn (array $ui, string $type) => [
+                $type => trim(($ui['border'] ?? '').' '.($ui['text'] ?? '')),
+            ])
+            ->all();
+    }
+
+    #[Computed]
     public function vendors()
     {
         // Use Scout search to sort by ytd_expense_sum
@@ -230,6 +254,11 @@ class TaskCreate extends Component
     public function removeTask()
     {
         $task = $this->form->task;
+
+        if (!$task) {
+            return;
+        }
+
         $task->delete();
         
         $this->handleTaskOperation('complete');
@@ -403,6 +432,9 @@ class TaskCreate extends Component
             'text' => $text,
             'completed' => false,
         ];
+
+        // Auto-save the checklist
+        $this->saveChecklistOnly();
     }
 
     /**
@@ -444,15 +476,67 @@ class TaskCreate extends Component
     }
 
     /**
+     * Sort checklist items via drag-and-drop
+     */
+    public function sortChecklistItems($key, $position)
+    {
+        $items = $this->form->checklist;
+        
+        // Find the item by its original index
+        $fromIndex = (int) $key;
+        
+        if (!isset($items[$fromIndex])) {
+            return;
+        }
+        
+        // Remove item from original position
+        $item = $items[$fromIndex];
+        array_splice($items, $fromIndex, 1);
+        
+        // Insert at new position
+        array_splice($items, $position, 0, [$item]);
+        
+        // Re-index and update
+        $this->form->checklist = array_values($items);
+        
+        // Auto-save
+        $this->saveChecklistOnly();
+    }
+
+    /**
      * Save only the checklist without closing the modal
      */
     private function saveChecklistOnly()
     {
-        if ($this->form->task) {
-            $this->form->task->update([
-                'checklist' => $this->form->checklist,
-            ]);
+        $task = $this->form->task;
+
+        if (!$task) {
+            return;
         }
+
+        // Checklist is stored in options JSON column
+        $options = (array) ($task->options ?? []);
+        $options['checklist'] = $this->form->checklist;
+
+        $task->update([
+            'options' => $options,
+        ]);
+    }
+
+    /**
+     * Save only the notes without closing the modal
+     */
+    public function saveNotes()
+    {
+        $task = $this->form->task;
+
+        if (!$task) {
+            return;
+        }
+
+        $task->update([
+            'notes' => $this->form->notes,
+        ]);
     }
 
     public function render()

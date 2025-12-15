@@ -1,35 +1,46 @@
-<flux:modal name="task_create_form_modal" class="!mt-8 w-full max-w-sm" x-on:modal-show.window="$dispatch('reset-tabs'); window.dispatchEvent(new CustomEvent('task-modal-opened'))">
-    <flux:heading size="lg" class="!mb-0">{{$view_text['card_title']}}</flux:heading>
+<flux:modal 
+    name="task_create_form_modal" 
+    class="!mt-8 w-full max-w-sm" 
+    x-on:modal-show.window="$dispatch('reset-tabs'); window.dispatchEvent(new CustomEvent('task-modal-opened'))"
+>
+    <flux:heading size="lg" class="!mb-0">{{ str_replace('Task', $form->type ?? 'Task', $view_text['card_title']) }}</flux:heading>
     @if(isset($form->task))
         <flux:subheading>{{$form->task->title}}</flux:subheading>
     @endif
 
     <!-- Tab Navigation -->
     <div 
-        x-data="{ activeTab: 'details' }" 
+        x-data="{ 
+            activeTab: 'details',
+            taskType: @entangle('form.type').live,
+            tabClasses: @js($this->taskTypeTabClasses),
+            get activeClasses() { return this.tabClasses[this.taskType] || this.tabClasses.Task }
+        }" 
         @reset-tabs.window="activeTab = 'details'"
     >
         <div class="border-b border-gray-200 mb-4">
             <nav class="-mb-px flex space-x-8">
                 <button
                     @click="activeTab = 'details'"
-                    :class="activeTab === 'details' ? 'border-accent text-accent' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                    :class="activeTab === 'details' ? activeClasses : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
                     class="py-2 px-1 border-b-2 font-medium text-sm"
                 >
                     Details
                 </button>
-                <button
-                    @click="activeTab = 'notes'"
-                    :class="activeTab === 'notes' ? 'border-accent text-accent' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
-                    class="py-2 px-1 border-b-2 font-medium text-sm"
-                >
-                    Notes
-                </button>
                 @if($view_text['form_submit'] === 'edit' && $form->task)
+                    <button
+                        @click="activeTab = 'notes'"
+                        :class="activeTab === 'notes' ? activeClasses : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                        class="py-2 px-1 border-b-2 font-medium text-sm"
+                    >
+                        Notes
+                    </button>
+                @endif
+                {{-- @if($view_text['form_submit'] === 'edit' && $form->task)
                     <!-- Replace the "Dependencies" tab button with "Related Tasks" -->
                     <button
                         @click="activeTab = 'dependencies'"
-                        :class="activeTab === 'dependencies' ? 'border-accent text-accent' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                        :class="activeTab === 'dependencies' ? activeClasses : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
                         class="py-2 px-1 border-b-2 font-medium text-sm flex items-center gap-2"
                     >
                         Related Tasks
@@ -39,7 +50,7 @@
                             {{ $form->task->total_dependencies_count }}
                         </flux:badge>
                     </button>
-                @endif
+                @endif --}}
             </nav>
         </div>
 
@@ -48,9 +59,10 @@
             <div class="relative">
                 <form wire:submit="{{$view_text['form_submit']}}" class="grid space-y-4">
                     {{-- TYPE --}}
-                    <flux:radio.group wire:model="form.type" label="Task Type" variant="segmented">
-                        <flux:radio value="Task" label="Task" class="!text-accent"/>
-                        <flux:radio value="Milestone" label="Milestone" class="!text-indigo-800" />
+                    <flux:radio.group wire:model.live="form.type" label="Task Type" variant="segmented">
+                        <flux:radio value="Task"><span class="{{ data_get($this->taskTypeTextClasses, 'Task') }}">Task</span></flux:radio>
+                        <flux:radio value="Milestone"><span class="{{ data_get($this->taskTypeTextClasses, 'Milestone') }}">Milestone</span></flux:radio>
+                        <flux:radio value="Meet"><span class="{{ data_get($this->taskTypeTextClasses, 'Meet') }}">Meet</span></flux:radio>
                     </flux:radio.group>
 
                     {{-- TITLE --}}
@@ -72,6 +84,8 @@
                             <flux:popover class="p-4">
                                 <flux:calendar
                                     multiple
+                                    with-today
+                                    size="sm"
                                     wire:model.live="form.dates"
                                     :error="$errors->has('form.dates')"
                                 />
@@ -81,13 +95,11 @@
                     </flux:field>
 
                     {{-- PROJECT --}}
-                    <flux:select wire:model.live="form.project_id" label="Project" variant="listbox" searchable placeholder="Assign project...">
-                        @foreach($projects as $project)
-                            <flux:select.option wire:key="{{$project->id}}" value="{{$project->id}}">
-                                <div>{{$project->address}} <br> <i>{{$project->project_name}}</i></div>
-                            </flux:select.option>
-                        @endforeach
-                    </flux:select>
+                    <x-forms.project-select
+                        :projects="$projects"
+                        model="form.project_id"
+                        placeholder="Assign project..."
+                    />
 
                     {{-- VENDOR --}}
                     <flux:select
@@ -127,7 +139,9 @@
                             <flux:button wire:click="duplicateTask">Duplicate</flux:button>
                         @endif
 
-                        <flux:button wire:click="removeTask" variant="danger">Remove</flux:button>
+                        @if($view_text['form_submit'] === 'edit' && $form->task)
+                            <flux:button wire:click="removeTask" variant="danger">Remove</flux:button>
+                        @endif
 
                         <flux:button type="submit" variant="primary">{{$view_text['button_text']}}</flux:button>
                     </div>
@@ -136,89 +150,145 @@
         </div>
 
         <!-- Notes Panel -->
-        <div x-show="activeTab === 'notes'">
-            <div class="relative">
-                <div class="space-y-4">
-                    {{-- NOTES --}}
-                    <flux:textarea
-                        wire:model.blur="form.notes"
-                        label="Task Notes"
-                        rows="auto"
-                        placeholder="Notes about this task."
-                    />
-                    
-                    {{-- UPDATE NOTES BUTTON --}}
-                    <div class="flex justify-end">
-                        <flux:button wire:click="{{ $view_text['form_submit'] }}" variant="primary">Update</flux:button>
-                    </div>
+        @if($view_text['form_submit'] === 'edit' && $form->task)
+            <div x-show="activeTab === 'notes'" x-effect="if (activeTab === 'notes') $nextTick(() => { $el.querySelector('textarea')?.dispatchEvent(new Event('input', { bubbles: true })) })">
+                <div class="relative">
+                    <div class="space-y-4">
+                        {{-- NOTES --}}
+                        <flux:composer
+                            wire:model="form.notes"
+                            label="Notes"
+                            variant="input"
+                            max-rows="20"
+                            placeholder="Notes about this task..."
+                        >
+                            <x-slot name="actionsLeading">
+                                {{-- Empty to push trailing to the right --}}
+                            </x-slot>
 
-                    {{-- CHECKLIST --}}
-                    <div class="w-full">
-                        <div class="flex items-center justify-between mb-3">
-                            <div class="flex items-center gap-2">
-                                <flux:heading>Checklist</flux:heading>
-                                <span class="text-sm text-zinc-500">{{ count(array_filter($form->checklist ?? [], fn($item) => !(is_array($item) ? ($item['completed'] ?? false) : ($item->completed ?? false)))) }}</span>
-                            </div>
-                            <flux:button 
-                                variant="subtle" 
-                                icon="{{ $showCompletedChecklist ? 'eye-slash' : 'eye' }}" 
-                                size="sm" 
-                                wire:click.stop="toggleCompletedChecklist"
-                            />
-                        </div>
+                            <x-slot name="actionsTrailing">
+                                <flux:button 
+                                    wire:click="saveNotes" 
+                                    wire:loading.class="opacity-50"
+                                    wire:target="saveNotes"
+                                    type="button" 
+                                    size="sm" 
+                                    variant="filled"
+                                    loading
+                                >
+                                    Save
+                                </flux:button>
+                            </x-slot>
+                        </flux:composer>
 
-                        <div class="space-y-1">
-                            @if(!empty($form->checklist))
-                                @foreach($form->checklist as $index => $item)
-                                    @php
-                                        $isCompleted = is_array($item) ? ($item['completed'] ?? false) : ($item->completed ?? false);
-                                    @endphp
-                                    @if(!$isCompleted || $showCompletedChecklist)
-                                        <div class="flex items-center gap-3 px-3 py-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg">
-                                            <flux:checkbox 
-                                                wire:change="toggleChecklistItem({{ $index }})"
-                                                :checked="$isCompleted"
-                                                class="shrink-0"
-                                            />
-                                            <input 
-                                                type="text" 
-                                                wire:model.blur="form.checklist.{{ $index }}.text"
-                                                class="flex-1 bg-transparent border-none focus:outline-none min-w-0 text-sm {{ $isCompleted ? 'line-through text-zinc-400 dark:text-zinc-500' : '' }}"
-                                                placeholder="Checklist item..."
-                                            />
-                                            <button 
-                                                wire:click.stop="removeChecklistItem({{ $index }})"
-                                                type="button"
-                                                class="shrink-0 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
-                                            >
-                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                                                </svg>
-                                            </button>
+                        {{-- CHECKLIST --}}
+                        <div class="w-full">
+                            <flux:kanban class="rounded-lg min-w-0 w-full !block">
+                                <flux:kanban.column class="!w-full !max-w-none [&>div]:!w-full [&>div]:!max-w-none">
+                                    <flux:kanban.column.header class="min-w-0">
+                                        <flux:heading class="min-w-0 flex items-center gap-2">
+                                            <span>Checklist</span>
+                                            <span class="text-sm text-zinc-500">
+                                                {{ count(array_filter($form->checklist ?? [], fn($item) => !(is_array($item) ? ($item['completed'] ?? false) : ($item->completed ?? false)))) }}
+                                            </span>
+                                        </flux:heading>
+
+                                        <x-slot name="actions">
+                                            <div class="flex justify-end">
+                                                <flux:button
+                                                    variant="subtle"
+                                                    icon="{{ $showCompletedChecklist ? 'eye-slash' : 'eye' }}"
+                                                    size="sm"
+                                                    wire:click.stop="toggleCompletedChecklist"
+                                                />
+                                            </div>
+                                        </x-slot>
+                                    </flux:kanban.column.header>
+
+                                    <flux:kanban.column.cards class="w-full">
+                                        @php
+                                            $checklistItems = $form->checklist ?? [];
+                                        @endphp
+
+                                        {{-- Sortable incomplete items --}}
+                                        <div x-sort="$wire.sortChecklistItems($key, $position)" class="flex flex-col gap-2">
+                                            @foreach($checklistItems as $index => $item)
+                                                @php
+                                                    $isCompleted = is_array($item) ? ($item['completed'] ?? false) : ($item->completed ?? false);
+                                                @endphp
+
+                                                @if(!$isCompleted)
+                                                    <flux:kanban.card class="min-w-0 w-full !px-3 !py-2" wire:key="checklist-item-{{ $index }}" x-sort:item="{{ $index }}">
+                                                        <div class="flex items-center gap-2 min-w-0">
+                                                            <flux:checkbox
+                                                                wire:change="toggleChecklistItem({{ $index }})"
+                                                                :checked="$isCompleted"
+                                                                class="shrink-0"
+                                                            />
+
+                                                            <input
+                                                                type="text"
+                                                                wire:model.blur="form.checklist.{{ $index }}.text"
+                                                                class="flex-1 min-w-0 bg-transparent border-none focus:outline-none text-sm leading-tight"
+                                                                placeholder="Checklist item..."
+                                                            />
+
+                                                            <flux:icon.chevron-up-down x-sort:handle class="shrink-0 size-4 text-zinc-400 cursor-grab active:cursor-grabbing" />
+                                                        </div>
+                                                    </flux:kanban.card>
+                                                @endif
+                                            @endforeach
                                         </div>
-                                    @endif
-                                @endforeach
-                            @endif
-                        </div>
 
-                        <div class="mt-2 px-3 py-2">
-                            <form x-data="{ newItem: '' }" @submit.prevent="$wire.addChecklistItem(newItem).then(() => newItem = '')">
-                                <div class="flex items-center gap-2">
-                                    <input 
-                                        x-model="newItem" 
-                                        class="flex-1 bg-transparent border-none focus:outline-none text-sm placeholder:text-zinc-400" 
-                                        placeholder="New item..."
-                                    />
-                                    <flux:button type="submit" variant="filled" size="sm">Add</flux:button>
-                                </div>
-                            </form>
+                                        {{-- Completed items (not sortable) --}}
+                                        @if($showCompletedChecklist)
+                                            @foreach($checklistItems as $index => $item)
+                                                @php
+                                                    $isCompleted = is_array($item) ? ($item['completed'] ?? false) : ($item->completed ?? false);
+                                                @endphp
+
+                                                @if($isCompleted)
+                                                    <flux:kanban.card class="min-w-0 w-full !px-3 !py-2" wire:key="checklist-item-{{ $index }}">
+                                                        <div class="flex items-center gap-2 min-w-0">
+                                                            <flux:checkbox
+                                                                wire:change="toggleChecklistItem({{ $index }})"
+                                                                :checked="$isCompleted"
+                                                                class="shrink-0"
+                                                            />
+
+                                                            <input
+                                                                type="text"
+                                                                wire:model.blur="form.checklist.{{ $index }}.text"
+                                                                class="flex-1 min-w-0 bg-transparent border-none focus:outline-none text-sm leading-tight line-through text-zinc-400 dark:text-zinc-500"
+                                                                placeholder="Checklist item..."
+                                                            />
+                                                        </div>
+                                                    </flux:kanban.card>
+                                                @endif
+                                            @endforeach
+                                        @endif
+
+                                        {{-- Add new item form --}}
+                                        <flux:kanban.card class="min-w-0 w-full !px-3 !py-2">
+                                            <form x-data="{ newItem: '' }" @submit.prevent="$wire.addChecklistItem(newItem).then(() => newItem = '')" class="flex items-center gap-2">
+                                                <input
+                                                    x-model="newItem"
+                                                    class="flex-1 min-w-0 bg-transparent border-none focus:outline-none text-sm placeholder:text-zinc-400"
+                                                    placeholder="New task..."
+                                                />
+                                                <flux:button type="submit" variant="filled" size="sm">Add</flux:button>
+                                            </form>
+                                        </flux:kanban.card>
+                                    </flux:kanban.column.cards>
+                                </flux:kanban.column>
+                            </flux:kanban>
                         </div>
-                    </div>
+                        </div>
                     </div>
                 </div>
-            </div>
+        @endif
 
-        <!-- Updated Dependencies Panel (now called Related Tasks) -->
+        {{-- <!-- Updated Dependencies Panel (now called Related Tasks) -->
         @if($view_text['form_submit'] === 'edit' && $form->task)
             <div x-show="activeTab === 'dependencies'">
                 <div class="relative">
@@ -325,6 +395,6 @@
                     </div>
                 </div>
             </div>
-        @endif
+        @endif --}}
     </div>
 </flux:modal>

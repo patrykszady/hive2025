@@ -9,7 +9,7 @@ use Livewire\Form;
 
 class TaskForm extends Form
 {
-    public ?Task $task;
+    public ?Task $task = null;
 
     #[Validate('required')]
     public $title = null;
@@ -29,7 +29,7 @@ class TaskForm extends Form
     #[Validate('nullable|array')]
     public $user_ids = null;
 
-    #[Validate('required')]
+    #[Validate('required|in:Task,Milestone,Meet')]
     public $type = 'Task';
 
     #[Validate('nullable')]

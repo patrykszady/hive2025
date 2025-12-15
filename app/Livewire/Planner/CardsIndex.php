@@ -19,13 +19,27 @@ class CardsIndex extends Component
     public $employees = [];
     public $projects = [];
 
+    private const PLANNER_PROJECT_STATUS_CODES = [4, 5, 6, 8]; // Prep, Scheduled, Active, Service Call
+    private const PLANNER_STATUS_PRIORITY = [8 => 1, 6 => 2, 4 => 3, 5 => 4]; // Service Call, Active, Prep, Scheduled
+
     protected $listeners = ['refreshComponent' => '$refresh'];
 
     public function mount()
     {
         $this->employees = auth()->user()->vendor->users()->employed()->get();
         $this->vendors = Vendor::all();
-        $this->projects = Project::status([5, 6, 8])->get(); // 5=Scheduled, 6=Active, 8=Service Call
+        $this->projects = Project::status(self::PLANNER_PROJECT_STATUS_CODES)
+            ->with('latestStatus')
+            ->get()
+            ->sortBy(function (Project $project): string {
+                $priority = self::PLANNER_STATUS_PRIORITY[$project->latestStatus->status_code ?? 0] ?? 999;
+                $startDate = ($project->latestStatus?->start_date?->format('Y-m-d')) ?: '9999-12-31';
+
+                return str_pad((string) $priority, 3, '0', STR_PAD_LEFT)
+                    .'-'.$startDate
+                    .'-'.mb_strtolower((string) ($project->address ?? ''));
+            })
+            ->values();
     }
 
     /**
@@ -34,7 +48,7 @@ class CardsIndex extends Component
     #[Computed]
     public function days()
     {
-        $startDate = now('America/Chicago')->startOfDay();
+        $startDate = browser_today();
         $endDate = $startDate->copy()->addDays(13); // 14 days total (today + 13)
 
         return collect(CarbonPeriod::create($startDate, '1 day', $endDate));
@@ -46,7 +60,7 @@ class CardsIndex extends Component
     #[Computed]
     public function activeProjects()
     {
-        return Project::status([6]) // 6=Active
+        return Project::status(self::PLANNER_PROJECT_STATUS_CODES)
             ->with(['tasks' => function ($query) {
                 $query->whereNotNull('start_date')
                     ->whereNotNull('end_date')
@@ -54,7 +68,16 @@ class CardsIndex extends Component
                     ->orderBy('start_date');
             }, 'client.users', 'latestStatus'])
             ->orderBy('address')
-            ->get();
+            ->get()
+            ->sortBy(function (Project $project): string {
+                $priority = self::PLANNER_STATUS_PRIORITY[$project->latestStatus->status_code ?? 0] ?? 999;
+                $startDate = ($project->latestStatus?->start_date?->format('Y-m-d')) ?: '9999-12-31';
+
+                return str_pad((string) $priority, 3, '0', STR_PAD_LEFT)
+                    .'-'.$startDate
+                    .'-'.mb_strtolower((string) ($project->address ?? ''));
+            })
+            ->values();
     }
 
     /**
@@ -63,7 +86,11 @@ class CardsIndex extends Component
     #[Computed]
     public function kanbanColumns()
     {
-        return $this->days->map(function ($day) {
+        $today = browser_today();
+
+        $tomorrow = $today->copy()->addDay();
+
+        return $this->days->map(function ($day) use ($today, $tomorrow) {
             $dayFormat = $day->format('Y-m-d');
 
             // Show ALL active projects in each day column
@@ -121,19 +148,20 @@ class CardsIndex extends Component
             return (object) [
                 'day' => $day,
                 'title' => $day->format('D, M j'),
-                'isToday' => $day->isToday(),
+                'isToday' => $day->isSameDay($today),
+                'isTomorrow' => $day->isSameDay($tomorrow),
                 'isWeekend' => $day->isWeekend(),
                 'columns' => $projectColumns,
             ];
-        });
+        })->values();
     }
 
-    public function addTask($projectId = null)
+    public function addTask($projectId = null, $date = null)
     {
-        $this->dispatch('addTask', $projectId)->to('tasks.task-create');
+        $this->dispatch('addTask', $projectId, $date)->to('tasks.task-create');
     }
 
-    public function editTask($taskId)
+    public function editTask(int $taskId, ?string $day = null, ?int $projectId = null): void
     {
         $this->dispatch('editTask', task: $taskId)->to('tasks.task-create');
     }
@@ -143,7 +171,7 @@ class CardsIndex extends Component
         return view('livewire.planner.cards', [
             'kanbanColumns' => $this->kanbanColumns,
         ])->layout('components.layouts.app', [
-            'fullscreenClasses' => '!p-0',
+            'fullscreenClasses' => '!p-0 h-full overflow-hidden',
         ]);
     }
 }

@@ -1,22 +1,4 @@
-<form wire:submit="{{$view_text['form_submit']}}" x-data="{ 
-    // Calculate browser's current LOCAL date (not UTC)
-    getBrowserDate() {
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = String(now.getMonth() + 1).padStart(2, '0');
-        const day = String(now.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-    },
-    browserDate: null,
-    ready: false,
-    init() {
-        this.browserDate = this.getBrowserDate();
-        // Send browser's LOCAL date to Livewire immediately on mount
-        this.$wire.setBrowserDate(this.browserDate).then(() => {
-            this.ready = true;
-        });
-    }
-}" x-init="init()">
+<form wire:submit="{{$view_text['form_submit']}}">
     <style>
         [wire\:loading][wire\:target^="incrementHours"],
         [wire\:loading][wire\:target^="decrementHours"] {
@@ -41,49 +23,52 @@
 
                 <flux:separator variant="subtle" />
 
-                {{-- Show skeleton while loading --}}
-                <div x-show="!ready">
+                {{-- Show skeleton while waiting for browser date sync --}}
+                @if(! $selected_date)
                     <div class="space-y-4">
                         <flux:skeleton class="h-64" animate="shimmer" />
                     </div>
-                </div>
+                @else
 
                 {{-- Show calendar when ready --}}
-                <div x-show="ready" x-cloak>
+                <div>
                     <flux:calendar
                         wire:model.live="selected_date"
                         wire:loading.class.delay="opacity-50"
-                        ::max="browserDate"
+                        ::max="$store.timezone.today"
                         start-day="1"
                         unavailable="{{$this->days}}"
                     />
                 </div>
+                @endif
 
                 <flux:separator variant="subtle" />
 
-                {{-- Show skeleton buttons while loading --}}
-                <div x-show="!ready" class="space-y-2 mt-2">
+                {{-- Show skeleton buttons while waiting for browser date sync --}}
+                @if(! $selected_date)
                     <flux:skeleton class="h-10 w-full" animate="shimmer" />
                     <flux:skeleton class="h-10 w-full" animate="shimmer" />
                     <flux:skeleton class="h-10 w-full" animate="shimmer" />
-                </div>
+                @else
 
                 {{-- Show real buttons when ready --}}
-                <div class="space-y-2 mt-2" x-show="ready" x-cloak>
+                <div class="space-y-2 mt-2">
                     @if($this->selected_date)
                         <flux:button class="w-full cursor-default"><b>{{$this->selected_date->format('D M jS, Y')}}</b></flux:button>
                     @endif
                     <flux:button class="w-full cursor-default">Hours | <b>{{$this->hours_count}}</b></flux:button>
                     <flux:button type="submit" variant="primary" class="w-full">{{$view_text['button_text']}}</flux:button>
                 </div>
+                @endif
 
                 <flux:error name="check_total_min" />
             </flux:card>
 		</div>
 
-		<div class="col-span-4 space-y-2 lg:col-span-2">
-            {{-- Show skeleton while loading --}}
-            <div x-show="!ready" class="space-y-2">
+        <div class="col-span-4 space-y-2 lg:col-span-2">
+            {{-- Show skeleton while waiting for browser date sync --}}
+            @if(! $selected_date)
+            <div class="space-y-2">
                 <flux:card class="space-y-2">
                     <flux:heading size="lg">Projects</flux:heading>
                     <flux:separator variant="subtle" />
@@ -99,9 +84,10 @@
                     <flux:skeleton class="h-12 mt-2" animate="shimmer" />
                 </flux:card>
             </div>
+            @else
 
             {{-- Show real content when ready --}}
-            <div x-show="ready" x-cloak class="space-y-2">
+            <div class="space-y-2">
             @if($selected_date)
                 <flux:card class="space-y-2">
                     <flux:heading size="lg">Project Hours</flux:heading>
@@ -180,6 +166,7 @@
             </div>
             @endif
             </div>
+            @endif
 		</div>
 	</div>
 </form>

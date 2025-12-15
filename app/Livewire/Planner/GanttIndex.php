@@ -28,12 +28,18 @@ class GanttIndex extends Component
     protected $listeners = ['refreshComponent' => '$refresh'];
 
     #[Computed]
+    public function today(): Carbon
+    {
+        return browser_today();
+    }
+
+    #[Computed]
     public function days()
     {
         // Determine the center date for the window
         $centerDate = $this->startDate
             ? Carbon::parse($this->startDate)
-            : ($this->week ? Carbon::parse($this->week)->startOfWeek() : Carbon::today());
+            : ($this->week ? Carbon::parse($this->week)->startOfWeek() : $this->today);
 
         // Start 2 weeks before the center date
         $startDate = $centerDate->copy()->subDays($this->daysBeforeToday);
@@ -126,7 +132,7 @@ class GanttIndex extends Component
                 
                 if ($lastTask) {
                     $lastTaskEndDate = Carbon::parse($lastTask->end_date);
-                    $today = Carbon::today();
+                    $today = $this->today;
                     $daysAgo = abs($today->diffInDays($lastTaskEndDate));
                     
                     $lastTaskInfo = [

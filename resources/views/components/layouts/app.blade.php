@@ -5,8 +5,10 @@
 
     {{-- BODY --}}
     {{-- $fullscreenClasses prop in render of Planner/Board --}}
-    <body class="{{isset($fullscreenClasses) ? 'h-screen ' : 'min-h-screen '}} bg-zinc-100 dark:bg-zinc-800">
-        <flux:sidebar sticky collapsible class="bg-zinc-50 dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-700">
+    <body class="{{isset($fullscreenClasses) ? 'h-screen overflow-hidden ' : 'min-h-screen '}} bg-zinc-100 dark:bg-zinc-800">
+        <livewire:browser-timezone />
+
+        <flux:sidebar sticky collapsible class="bg-zinc-50 dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-700 overflow-x-hidden flux-no-scrollbar">
             <flux:sidebar.header>
                 @php
                     $isVendorRoute = Route::is(['vendor_registration']);
@@ -57,7 +59,7 @@
                     @endcan
 
                     <flux:sidebar.item wire:navigate.hover icon="folder" href="/projects">Projects</flux:sidebar.item>
-                    <flux:sidebar.item wire:navigate.hover icon="calendar" href="{{ route('planner.gantt') }}">Planner</flux:sidebar.item>
+                    <flux:sidebar.item wire:navigate.hover icon="calendar" href="{{ route('planner.cards') }}">Planner</flux:sidebar.item>
 
                     @canany(['viewAny', 'create'], App\Models\Expense::class)
                         <flux:sidebar.group expandable heading="Finances" icon="credit-card" class="grid" :expanded="true">
@@ -159,21 +161,27 @@
             </flux:dropdown>
         </flux:sidebar>
 
-        {{-- <div class="fixed top-4 left-6 lg:hidden print:hidden">
-            <flux:sidebar.toggle
-                icon="bars-2"
-                class="backdrop-blur-lg shadow-lg shadow-gray-500/50 bg-black/5 ring-1 ring-black/15 hover:bg-black/10 hover:shadow-xl transition-all duration-200"
-            />
-        </div> --}}
-        <flux:header class="fixed top-4 lg:hidden print:hidden">
-            <flux:sidebar.toggle class="lg:hidden backdrop-blur-lg shadow-lg shadow-gray-500/50 bg-black/5 ring-1 ring-black/15 hover:bg-black/10 hover:shadow-xl transition-all duration-200" icon="bars-2" inset="left" />
+        <flux:header class="lg:hidden print:hidden">
+            <flux:button
+                class="lg:hidden bg-white/60 dark:bg-zinc-900/50 backdrop-blur-[2px] border border-zinc-200/60 dark:border-zinc-700/60 shadow-sm rounded-lg"
+                variant="subtle"
+                square
+                inset="left"
+                x-data
+                x-on:click="$dispatch('flux-sidebar-toggle')"
+                aria-label="Toggle sidebar"
+                data-flux-sidebar-toggle
+            >
+                <svg class="text-zinc-500 dark:text-zinc-400" width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M7.5 3.75V16.25M3.4375 16.25H16.5625C17.08 16.25 17.5 15.83 17.5 15.3125V4.6875C17.5 4.17 17.08 3.75 16.5625 3.75H3.4375C2.92 3.75 2.5 4.17 2.5 4.6875V15.3125C2.5 15.83 2.92 16.25 3.4375 16.25Z" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"></path>
+                </svg>
+            </flux:button>
         </flux:header>
 
-        <flux:main 
+        <flux:main
+            class="min-h-0"
             :class="$fullscreenClasses ?? null"
-            {{-- x-data
-            x-cloak --}}
-            >
+        >
             {{-- <flux:heading size="xl" level="1">Good afternoon, Olivia</flux:heading>
             <flux:text class="mt-2 mb-6 text-base">Here's what's new today</flux:text>
             <flux:separator variant="subtle" /> --}}

@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 LOG_DIR="storage/logs/dev"
 mkdir -p "$LOG_DIR"
 
-echo "🚀 Starting Laravel dev environment..."
+echo "🚀 Starting Hive2025 dev environment..."
 
 # Helper to show status
 status() {
@@ -65,25 +65,35 @@ else
 fi
 
 # 4) Laravel dev server
-echo "🔄 Starting Laravel dev server (http://127.0.0.1:8000)..."
-nohup php artisan serve --host=127.0.0.1 --port=8000 --no-interaction >"$LOG_DIR/serve.log" 2>&1 &
-SERVE_PID=$!
-sleep 0.7
-if ps -p "$SERVE_PID" >/dev/null 2>&1; then
-  echo "✅ Laravel server started (pid: $SERVE_PID) → logs: $LOG_DIR/serve.log"
+if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1; then
+  SERVE_PID=$(lsof -Pi :8000 -sTCP:LISTEN -t)
+  echo "✅ Laravel server already running (pid: $SERVE_PID)"
 else
-  echo "❌ Laravel server failed → check logs: $LOG_DIR/serve.log"
+  echo "🔄 Starting Laravel dev server (http://127.0.0.1:8000)..."
+  nohup php artisan serve --host=127.0.0.1 --port=8000 --no-interaction >"$LOG_DIR/serve.log" 2>&1 &
+  SERVE_PID=$!
+  sleep 0.7
+  if ps -p "$SERVE_PID" >/dev/null 2>&1; then
+    echo "✅ Laravel server started (pid: $SERVE_PID) → logs: $LOG_DIR/serve.log"
+  else
+    echo "❌ Laravel server failed → check logs: $LOG_DIR/serve.log"
+  fi
 fi
 
 # 5) Vite dev server (npm run dev)
-echo "🔄 Starting Vite (npm run dev)..."
-nohup npm run dev >"$LOG_DIR/vite.log" 2>&1 &
-VITE_PID=$!
-sleep 0.7
-if ps -p "$VITE_PID" >/dev/null 2>&1; then
-  echo "✅ Vite dev server started (pid: $VITE_PID, default http://127.0.0.1:5173) → logs: $LOG_DIR/vite.log"
+if lsof -Pi :5173 -sTCP:LISTEN -t >/dev/null 2>&1; then
+  VITE_PID=$(lsof -Pi :5173 -sTCP:LISTEN -t)
+  echo "✅ Vite already running (pid: $VITE_PID)"
 else
-  echo "❌ Vite failed → check logs: $LOG_DIR/vite.log"
+  echo "🔄 Starting Vite (npm run dev)..."
+  nohup npm run dev >"$LOG_DIR/vite.log" 2>&1 &
+  VITE_PID=$!
+  sleep 0.7
+  if ps -p "$VITE_PID" >/dev/null 2>&1; then
+    echo "✅ Vite dev server started (pid: $VITE_PID, default http://127.0.0.1:5173) → logs: $LOG_DIR/vite.log"
+  else
+    echo "❌ Vite failed → check logs: $LOG_DIR/vite.log"
+  fi
 fi
 
 # 6) Hookdeck tunnel (optional)
@@ -125,13 +135,14 @@ else
   HOOKDECK_PID=""
 fi
 
+echo ""
 echo "🎉 Done! Services running:"
 echo "   • Redis ✅"
 echo "   • Meilisearch ✅ → $MEILI_HOST"
-echo "   • Horizon pid: ${HORIZON_PID:-n/a}"
-echo "   • PHP server pid: ${SERVE_PID:-n/a} → http://127.0.0.1:8000"
-echo "   • Vite pid: ${VITE_PID:-n/a} → http://127.0.0.1:5173"
+echo "   • Horizon (pid: ${HORIZON_PID:-n/a})"
+echo "   • PHP server (pid: ${SERVE_PID:-n/a}) → http://127.0.0.1:8000"
+echo "   • Vite (pid: ${VITE_PID:-n/a}) → http://127.0.0.1:5173"
 if [ -n "$HOOKDECK_PID" ]; then
   HOOKDECK_FALLBACK=${HOOKDECK_URL:-"see ${HOOKDECK_LOG:-$LOG_DIR/hookdeck.log}"}
-  echo "   • Hookdeck pid: $HOOKDECK_PID → $HOOKDECK_FALLBACK"
+  echo "   • Hookdeck (pid: $HOOKDECK_PID) → $HOOKDECK_FALLBACK"
 fi
