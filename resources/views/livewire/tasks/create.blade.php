@@ -18,6 +18,13 @@
                 >
                     Details
                 </button>
+                <button
+                    @click="activeTab = 'notes'"
+                    :class="activeTab === 'notes' ? 'border-accent text-accent' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                    class="py-2 px-1 border-b-2 font-medium text-sm"
+                >
+                    Notes
+                </button>
                 @if($view_text['form_submit'] === 'edit' && $form->task)
                     <!-- Replace the "Dependencies" tab button with "Related Tasks" -->
                     <button
@@ -50,23 +57,28 @@
                     <flux:input wire:model.blur="form.title" label="Title" placeholder="Task Title" autofocus/>
 
                     {{-- DATES --}}
-                    <flux:input.group label="Dates" class="w-full">
-                        <flux:date-picker
-                            with-today
-                            mode="range"
-                            wire:model.live="form.dates"
-                            :error="$errors->has('form.dates')"
-                            class="flex-1"
-                        />
-                        <flux:input.group.suffix>{{ $this->duration }} {{ Str::plural('Day', $this->duration) }}</flux:input.group.suffix>
-                    </flux:input.group>
-                    <flux:error name="form.dates" />
-
-                    {{-- WEEKEND DAYS --}}
-                    <flux:checkbox.group label="Weekend" variant="buttons">
-                        <flux:checkbox wire:model.live="form.saturday" value="saturday" label="Saturday" />
-                        <flux:checkbox wire:model.live="form.sunday" value="sunday" label="Sunday" />
-                    </flux:checkbox.group>
+                    <flux:field>
+                        <flux:label>Select Days</flux:label>
+                        <flux:dropdown class="w-full" width="trigger">
+                            <flux:button class="w-full justify-between" variant="filled">
+                                @if(empty($form->dates))
+                                    Select dates...
+                                @else
+                                    {{ count($form->dates) }} {{ Str::plural('day', count($form->dates)) }} selected
+                                @endif
+                                <flux:icon.chevron-down variant="micro" />
+                            </flux:button>
+                            
+                            <flux:popover class="p-4">
+                                <flux:calendar
+                                    multiple
+                                    wire:model.live="form.dates"
+                                    :error="$errors->has('form.dates')"
+                                />
+                            </flux:popover>
+                        </flux:dropdown>
+                        <flux:error name="form.dates" />
+                    </flux:field>
 
                     {{-- PROJECT --}}
                     <flux:select wire:model.live="form.project_id" label="Project" variant="listbox" searchable placeholder="Assign project...">
@@ -108,14 +120,6 @@
                         @endforeach
                     </flux:select>
 
-                    {{-- NOTES --}}
-                    <flux:textarea
-                        wire:model.blur="form.notes"
-                        label="Task Notes"
-                        rows="auto"
-                        placeholder="Notes about this task."
-                    />
-
                     {{-- STICKY FOOTER - NOW INSIDE FORM --}}
                     <div class="sticky bottom-0 flex justify-end space-x-2">
                         {{-- Only show duplicate button when editing (not creating) --}}
@@ -130,6 +134,89 @@
                 </form>
             </div>
         </div>
+
+        <!-- Notes Panel -->
+        <div x-show="activeTab === 'notes'">
+            <div class="relative">
+                <div class="space-y-4">
+                    {{-- NOTES --}}
+                    <flux:textarea
+                        wire:model.blur="form.notes"
+                        label="Task Notes"
+                        rows="auto"
+                        placeholder="Notes about this task."
+                    />
+                    
+                    {{-- UPDATE NOTES BUTTON --}}
+                    <div class="flex justify-end">
+                        <flux:button wire:click="{{ $view_text['form_submit'] }}" variant="primary">Update</flux:button>
+                    </div>
+
+                    {{-- CHECKLIST --}}
+                    <div class="w-full">
+                        <div class="flex items-center justify-between mb-3">
+                            <div class="flex items-center gap-2">
+                                <flux:heading>Checklist</flux:heading>
+                                <span class="text-sm text-zinc-500">{{ count(array_filter($form->checklist ?? [], fn($item) => !(is_array($item) ? ($item['completed'] ?? false) : ($item->completed ?? false)))) }}</span>
+                            </div>
+                            <flux:button 
+                                variant="subtle" 
+                                icon="{{ $showCompletedChecklist ? 'eye-slash' : 'eye' }}" 
+                                size="sm" 
+                                wire:click.stop="toggleCompletedChecklist"
+                            />
+                        </div>
+
+                        <div class="space-y-1">
+                            @if(!empty($form->checklist))
+                                @foreach($form->checklist as $index => $item)
+                                    @php
+                                        $isCompleted = is_array($item) ? ($item['completed'] ?? false) : ($item->completed ?? false);
+                                    @endphp
+                                    @if(!$isCompleted || $showCompletedChecklist)
+                                        <div class="flex items-center gap-3 px-3 py-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg">
+                                            <flux:checkbox 
+                                                wire:change="toggleChecklistItem({{ $index }})"
+                                                :checked="$isCompleted"
+                                                class="shrink-0"
+                                            />
+                                            <input 
+                                                type="text" 
+                                                wire:model.blur="form.checklist.{{ $index }}.text"
+                                                class="flex-1 bg-transparent border-none focus:outline-none min-w-0 text-sm {{ $isCompleted ? 'line-through text-zinc-400 dark:text-zinc-500' : '' }}"
+                                                placeholder="Checklist item..."
+                                            />
+                                            <button 
+                                                wire:click.stop="removeChecklistItem({{ $index }})"
+                                                type="button"
+                                                class="shrink-0 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+                                            >
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    @endif
+                                @endforeach
+                            @endif
+                        </div>
+
+                        <div class="mt-2 px-3 py-2">
+                            <form x-data="{ newItem: '' }" @submit.prevent="$wire.addChecklistItem(newItem).then(() => newItem = '')">
+                                <div class="flex items-center gap-2">
+                                    <input 
+                                        x-model="newItem" 
+                                        class="flex-1 bg-transparent border-none focus:outline-none text-sm placeholder:text-zinc-400" 
+                                        placeholder="New item..."
+                                    />
+                                    <flux:button type="submit" variant="filled" size="sm">Add</flux:button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    </div>
+                </div>
+            </div>
 
         <!-- Updated Dependencies Panel (now called Related Tasks) -->
         @if($view_text['form_submit'] === 'edit' && $form->task)

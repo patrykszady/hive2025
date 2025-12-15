@@ -26,6 +26,7 @@ class TaskCreate extends Component
     public $selectedPredecessorId = null;
     public $dependencyType = 'finish_to_start';
     public $lagDays = 0;
+    public $showCompletedChecklist = false;
 
     public $view_text = [
         'card_title' => 'Create Task',
@@ -53,32 +54,11 @@ class TaskCreate extends Component
     #[Computed]
     public function duration()
     {
-        $startDate = $this->form->dates['start'] ?? null;
-        $endDate = $this->form->dates['end'] ?? null;
-
-        if (is_null($startDate) || is_null($endDate)) {
+        if (empty($this->form->dates) || !is_array($this->form->dates)) {
             return 0;
         }
 
-        $period = CarbonPeriod::create($startDate, $endDate);
-        $totalDays = 0;
-
-        foreach ($period as $date) {
-            $isSaturday = $date->isSaturday();
-            $isSunday = $date->isSunday();
-
-            // Include the day if:
-            // - It's a weekday (not Saturday or Sunday)
-            // - It's Saturday and Saturday is enabled
-            // - It's Sunday and Sunday is enabled
-            if ((!$isSaturday && !$isSunday) ||
-                ($isSaturday && $this->form->saturday) ||
-                ($isSunday && $this->form->sunday)) {
-                $totalDays++;
-            }
-        }
-
-        return $totalDays;
+        return count($this->form->dates);
     }
 
     /**
@@ -412,6 +392,67 @@ class TaskCreate extends Component
         }
         
         return false;
+    }
+
+    /**
+     * Add a new checklist item
+     */
+    public function addChecklistItem($text = '')
+    {
+        $this->form->checklist[] = [
+            'text' => $text,
+            'completed' => false,
+        ];
+    }
+
+    /**
+     * Remove a checklist item
+     */
+    public function removeChecklistItem($index)
+    {
+        unset($this->form->checklist[$index]);
+        $this->form->checklist = array_values($this->form->checklist); // Re-index array
+    }
+
+    /**
+     * Toggle visibility of completed checklist items
+     */
+    public function toggleCompletedChecklist()
+    {
+        $this->showCompletedChecklist = !$this->showCompletedChecklist;
+    }
+
+    /**
+     * Toggle checklist item completion status
+     */
+    public function toggleChecklistItem($index)
+    {
+        if (isset($this->form->checklist[$index])) {
+            $item = $this->form->checklist[$index];
+            $isCompleted = is_array($item) ? ($item['completed'] ?? false) : ($item->completed ?? false);
+            
+            if (is_object($item)) {
+                $item = (array) $item;
+            }
+            
+            $item['completed'] = !$isCompleted;
+            $this->form->checklist[$index] = $item;
+            
+            // Auto-save the checklist without closing modal
+            $this->saveChecklistOnly();
+        }
+    }
+
+    /**
+     * Save only the checklist without closing the modal
+     */
+    private function saveChecklistOnly()
+    {
+        if ($this->form->task) {
+            $this->form->task->update([
+                'checklist' => $this->form->checklist,
+            ]);
+        }
     }
 
     public function render()

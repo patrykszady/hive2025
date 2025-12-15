@@ -178,10 +178,11 @@ Schedule::command('tasks:process-notifications')
     ->withoutOverlapping()
     ->onOneServer();
     
-// Search index maintenance
-Schedule::command('vendors:update-search-index')
+// Search index maintenance - sync settings and reimport vendor index
+Schedule::command('scout:sync-index-settings')
     ->dailyAt('02:00')
-    ->name('update-vendor-search-index')
+    ->name('sync-scout-index-settings')
+    ->environments(['production'])
     ->withoutOverlapping()
     ->onOneServer();
 

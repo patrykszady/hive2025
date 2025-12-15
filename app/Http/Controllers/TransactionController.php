@@ -1650,6 +1650,11 @@ class TransactionController extends Controller
                         ->whereIn('id', $matchingTransactionIds)
                         ->update(['check_id' => $check->id]);
 
+                    // Re-index transactions in Meilisearch after bulk update (bulk updates bypass Scout)
+                    Transaction::withoutGlobalScopes()
+                        ->whereIn('id', $matchingTransactionIds)
+                        ->searchable();
+
                     Log::channel('add_check_id_to_transactions')->info('Matched multiple transactions to check via subset sum', [
                         'check_id' => $check->id,
                         'check_amount' => $check->amount,

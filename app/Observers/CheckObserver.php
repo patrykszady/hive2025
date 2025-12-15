@@ -27,10 +27,20 @@ class CheckObserver
      */
     public function deleted(Check $check): void
     {
+        // Get transaction IDs before bulk update (bulk update bypasses Scout indexing)
+        $transactionIds = $check->transactions()->pluck('id')->toArray();
+
         // $check->expenses()->delete();
         $check->expenses()->update(['check_id' => null]);
         $check->timesheets()->update(['check_id' => null]);
         $check->transactions()->update(['check_id' => null]);
+
+        // Re-index transactions in Meilisearch after bulk update
+        if (! empty($transactionIds)) {
+            \App\Models\Transaction::withoutGlobalScopes()
+                ->whereIn('id', $transactionIds)
+                ->searchable();
+        }
     }
 
     /**

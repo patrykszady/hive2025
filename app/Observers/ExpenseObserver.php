@@ -38,7 +38,17 @@ class ExpenseObserver
         if (! empty($expense->paid_by)) {
             // Only detach transactions linked via expense_id; check-attached txns are unaffected
             if ($expense->transactions()->exists()) {
+                // Get transaction IDs before bulk update (bulk update bypasses Scout indexing)
+                $transactionIds = $expense->transactions()->pluck('id')->toArray();
+
                 $expense->transactions()->update(['expense_id' => null]);
+
+                // Re-index transactions in Meilisearch after bulk update
+                if (! empty($transactionIds)) {
+                    \App\Models\Transaction::withoutGlobalScopes()
+                        ->whereIn('id', $transactionIds)
+                        ->searchable();
+                }
             }
         }
     }

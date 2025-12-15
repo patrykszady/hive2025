@@ -35,11 +35,11 @@ class TaskForm extends Form
     #[Validate('nullable')]
     public $notes = null;
 
+    #[Validate('nullable|array')]
+    public $checklist = [];
+
     #[Validate('nullable|exists:tasks,id')]
     public $parent_task_id = null;
-
-    public $saturday = false;
-    public $sunday = false;
 
     public function setTask(Task $task)
     {
@@ -52,21 +52,43 @@ class TaskForm extends Form
         $this->vendor_id = $task->vendor_id;
         $this->user_ids = $task->user_ids ?? [];
         $this->notes = $task->notes;
+        
+        // Convert checklist from stdClass to array if needed
+        $checklist = $task->options->checklist ?? [];
+        if (!empty($checklist) && is_object($checklist)) {
+            $checklist = json_decode(json_encode($checklist), true);
+        } elseif (is_object($checklist) && $checklist instanceof \stdClass) {
+            $checklist = (array) $checklist;
+        } elseif (!empty($checklist) && !is_array($checklist)) {
+            // Handle case where it's an array of objects
+            $checklist = array_map(function($item) {
+                return is_object($item) ? (array) $item : $item;
+            }, (array) $checklist);
+        }
+        $this->checklist = is_array($checklist) ? $checklist : [];
+        
         $this->parent_task_id = $task->parent_task_id;
         $this->order = $task->order;
 
-        // Set dates
-        if ($task->start_date && $task->end_date) {
-            $this->dates = [
-                'start' => $task->start_date->format('Y-m-d'),
-                'end' => $task->end_date->format('Y-m-d')
-            ];
-        }
-
-        // Set weekend options
-        if ($task->options) {
-            $this->saturday = $task->options->saturday ?? false;
-            $this->sunday = $task->options->sunday ?? false;
+        // Set dates - extract from options if stored there, otherwise try to recreate from start/end
+        if (isset($task->options->dates) && is_array($task->options->dates)) {
+            $this->dates = $task->options->dates;
+        } elseif ($task->start_date && $task->end_date) {
+            // Legacy: try to recreate dates array from start/end and weekend flags
+            $dates = [];
+            $current = $task->start_date->copy();
+            $saturday = $task->options->saturday ?? false;
+            $sunday = $task->options->sunday ?? false;
+            
+            while ($current->lte($task->end_date)) {
+                if ((!$current->isSaturday() && !$current->isSunday()) ||
+                    ($current->isSaturday() && $saturday) ||
+                    ($current->isSunday() && $sunday)) {
+                    $dates[] = $current->format('Y-m-d');
+                }
+                $current->addDay();
+            }
+            $this->dates = $dates;
         }
 
         // Load dependencies without eager loading users
@@ -77,30 +99,25 @@ class TaskForm extends Form
     {
         $this->validate();
 
-        // Custom validation for sibling overlaps
-        $startDate = $this->dates['start'] ?? null;
-        $endDate = $this->dates['end'] ?? null;
+        // Calculate start and end dates from selected dates array
+        $startDate = null;
+        $endDate = null;
+        
+        if (!empty($this->dates)) {
+            sort($this->dates); // Ensure dates are in order
+            $startDate = $this->dates[0];
+            $endDate = end($this->dates);
+        }
 
         if ($startDate && $endDate && $this->task->wouldOverlapWithSiblings($startDate, $endDate)) {
             $this->addError('dates', 'This task would overlap with a sibling task.');
             return false;
         }
 
-        // Prepare options array
+        // Prepare options array - preserve existing options and update dates
         $options = (array) ($this->task->options ?? []);
-
-        // Update weekend options - only store true values
-        if ($this->saturday) {
-            $options['saturday'] = true;
-        } else {
-            unset($options['saturday']);
-        }
-
-        if ($this->sunday) {
-            $options['sunday'] = true;
-        } else {
-            unset($options['sunday']);
-        }
+        $options['dates'] = $this->dates;
+        $options['checklist'] = $this->checklist;
 
         $this->task->update([
             'start_date' => $startDate,
@@ -123,9 +140,15 @@ class TaskForm extends Form
     {
         $this->validate();
 
-        // Custom validation for sibling overlaps
-        $startDate = $this->dates['start'] ?? null;
-        $endDate = $this->dates['end'] ?? null;
+        // Calculate start and end dates from selected dates array
+        $startDate = null;
+        $endDate = null;
+        
+        if (!empty($this->dates)) {
+            sort($this->dates); // Ensure dates are in order
+            $startDate = $this->dates[0];
+            $endDate = end($this->dates);
+        }
 
         if ($startDate && $endDate && $this->parent_task_id) {
             $tempTask = new Task([
@@ -135,23 +158,16 @@ class TaskForm extends Form
             ]);
 
             if ($tempTask->wouldOverlapWithSiblings($startDate, $endDate)) {
-                // Use 'dates' instead of 'form.dates'
                 $this->addError('dates', 'This task would overlap with a sibling task.');
                 return false;
             }
         }
 
-        // Prepare options array
-        $options = [];
-
-        // Only store true values for weekend options
-        if ($this->saturday) {
-            $options['saturday'] = true;
-        }
-
-        if ($this->sunday) {
-            $options['sunday'] = true;
-        }
+        // Store dates array in options
+        $options = [
+            'dates' => $this->dates,
+            'checklist' => $this->checklist,
+        ];
 
         $task = Task::create([
             'start_date' => $startDate,

@@ -77,8 +77,6 @@ class NylasWebhookController extends Controller
         }
 
         $handlers = [
-            // Opens are tracked via custom pixel (EmailTrackingController)
-            // 'message.opened' is intentionally not handled here
             'message.link_clicked' => 'handleMessageLinkClicked',
             'thread.replied' => 'handleThreadReplied',
             'message.bounced' => 'handleMessageBounced',
@@ -89,10 +87,17 @@ class NylasWebhookController extends Controller
             'message.updated.truncated' => 'handleMessageCreated',
         ];
 
+        // Webhook types we intentionally ignore (no logging needed)
+        $ignoredTypes = [
+            'message.opened', // Opens tracked via custom pixel (EmailTrackingController)
+        ];
+
         if (isset($handlers[$type])) {
             $handler = $handlers[$type];
             $payload['nylas_request_id'] = $nylasRequestId;
             $this->{$handler}($payload);
+        } elseif (in_array($type, $ignoredTypes)) {
+            // Silently ignore these webhook types
         } else {
             Log::channel('nylas')->info('Unhandled webhook type', ['type' => $type]);
         }
