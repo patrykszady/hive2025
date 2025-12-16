@@ -1,0 +1,1161 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Distribution;
+use App\Models\Expense;
+use App\Models\Project;
+use App\Models\ProjectStatus;
+use App\Models\Vendor;
+use Illuminate\Support\Facades\Log;
+
+class ExpenseAutoMatchController extends Controller
+{
+    /**
+     * Auto-match "No Project" expenses to a distribution or project based on purchase order.
+     */
+    public function runNoProjectExpenseAutoMatch(
+        ?array $onlyBelongsToVendorIds = null,
+        ?callable $onDecision = null,
+        bool $summaryAll = false,
+        bool $includeNullStatus = false,
+        bool $includeNullSplits = false,
+    ): void
+    {
+        $hiveVendorsQuery = Vendor::hiveVendors();
+
+        if (is_array($onlyBelongsToVendorIds) && $onlyBelongsToVendorIds !== []) {
+            $vendorIds = array_values(array_unique(array_filter(array_map(
+                fn ($id) => (int) $id,
+                $onlyBelongsToVendorIds
+            ), fn (int $id) => $id > 0)));
+
+            if ($vendorIds !== []) {
+                $hiveVendorsQuery->whereIn('id', $vendorIds);
+            }
+        }
+
+        $hiveVendors = $hiveVendorsQuery->get();
+
+        foreach ($hiveVendors as $hiveVendor) {
+            $distributionIndex = null;
+            $distributionNameById = [];
+
+            $projects = Project::withoutGlobalScopes()
+                ->where('belongs_to_vendor_id', $hiveVendor->id)
+                ->select(['id', 'project_name', 'address', 'created_at'])
+                ->get();
+
+            $projectDisplayById = $projects
+                ->mapWithKeys(function (Project $project): array {
+                    $raw = trim(((string) ($project->address ?? '')).' '.((string) ($project->project_name ?? '')));
+                    $display = $raw !== '' ? $raw : (string) ($project->project_name ?? '');
+
+                    return [(int) $project->id => trim($display)];
+                })
+                ->all();
+
+            $projectStatuses = ProjectStatus::withoutGlobalScopes()
+                ->where('belongs_to_vendor_id', $hiveVendor->id)
+                ->whereIn('project_id', $projects->pluck('id')->all())
+                ->get(['project_id', 'status_code', 'start_date']);
+
+            $statusesByProjectId = [];
+            foreach ($projectStatuses as $status) {
+                $projectId = (int) ($status->project_id ?? 0);
+                if ($projectId <= 0) {
+                    continue;
+                }
+
+                $startDateValue = $status->start_date;
+                $startDate = null;
+
+                if ($startDateValue instanceof \DateTimeInterface) {
+                    $startDate = $startDateValue->format('Y-m-d');
+                } elseif (is_string($startDateValue) && $startDateValue !== '') {
+                    $startDate = substr($startDateValue, 0, 10);
+                }
+
+                if (! $startDate) {
+                    continue;
+                }
+
+                $statusesByProjectId[$projectId] ??= [];
+                $statusesByProjectId[$projectId][] = [
+                    'code' => (int) ($status->status_code ?? 0),
+                    'start_date' => $startDate,
+                ];
+            }
+
+            foreach ($statusesByProjectId as $projectId => $statuses) {
+                usort($statuses, fn (array $a, array $b) => strcmp($a['start_date'], $b['start_date']));
+                $statusesByProjectId[$projectId] = $statuses;
+            }
+
+            $projectCandidates = $projects
+                ->map(function (Project $project) use ($statusesByProjectId): ?array {
+                    $variants = [];
+
+                    $normalizedAddress = $this->normalizeText((string) ($project->address ?? ''));
+                    if ($normalizedAddress !== '') {
+                        $variants[] = $normalizedAddress;
+                    }
+
+                    $normalizedFull = $this->normalizeText(trim(((string) ($project->address ?? '')).' '.((string) ($project->project_name ?? ''))));
+                    if ($normalizedFull !== '' && ! in_array($normalizedFull, $variants, true)) {
+                        $variants[] = $normalizedFull;
+                    }
+
+                    $normalizedName = $this->normalizeText((string) ($project->project_name ?? ''));
+                    if ($normalizedName !== '' && ! in_array($normalizedName, $variants, true)) {
+                        $variants[] = $normalizedName;
+                    }
+
+                    if ($variants === []) {
+                        return null;
+                    }
+
+                    $projectId = (int) $project->id;
+                    $createdAt = $project->created_at?->timestamp ?? 0;
+
+                    return [
+                        'id' => $projectId,
+                        'created_at' => (int) $createdAt,
+                        'statuses' => $statusesByProjectId[$projectId] ?? [],
+                        'variants' => $variants,
+                    ];
+                })
+                ->filter()
+                ->values()
+                ->all();
+
+            $projectStatusAtDate = static function (array $statuses, string $date): ?array {
+                $best = null;
+
+                foreach ($statuses as $status) {
+                    if (($status['start_date'] ?? '') === '' || ($status['code'] ?? null) === null) {
+                        continue;
+                    }
+
+                    if ($status['start_date'] > $date) {
+                        continue;
+                    }
+
+                    if ($best === null || $status['start_date'] >= $best['start_date']) {
+                        $best = $status;
+                    }
+                }
+
+                return $best;
+            };
+
+            $projectStatusPriority = static function (int $statusCode): int {
+                return match ($statusCode) {
+                    6 => 60,
+                    8 => 55,
+                    5 => 50,
+                    4 => 40,
+                    3 => 30,
+                    2 => 20,
+                    1 => 10,
+                    7 => 5,
+                    default => 0,
+                };
+            };
+
+            $isBetterProjectCandidate = static function (float $score, int $priority, ?string $statusStartDate, int $createdAt, int $projectId, array $currentBest): bool {
+                if ($score !== ($currentBest['score'] ?? null)) {
+                    return $score > (float) ($currentBest['score'] ?? 0);
+                }
+
+                if ($priority !== ($currentBest['priority'] ?? null)) {
+                    return $priority > (int) ($currentBest['priority'] ?? 0);
+                }
+
+                $bestStatusStart = $currentBest['status_start_date'] ?? null;
+                if (($statusStartDate ?? '') !== ($bestStatusStart ?? '')) {
+                    return ($statusStartDate ?? '') > ($bestStatusStart ?? '');
+                }
+
+                if ($createdAt !== (int) ($currentBest['created_at'] ?? 0)) {
+                    return $createdAt > (int) ($currentBest['created_at'] ?? 0);
+                }
+
+                return $projectId > (int) ($currentBest['project_id'] ?? 0);
+            };
+
+            $matchPurchaseOrderToProjectAtDate = function (string $purchaseOrder, $expenseDate) use ($projectCandidates, $projectStatusAtDate, $projectStatusPriority, $isBetterProjectCandidate): ?array {
+                $po = $this->normalizeText($purchaseOrder);
+                if ($po === '' || $projectCandidates === []) {
+                    return null;
+                }
+
+                $poStreetToken = $this->hasHouseNumberPrefix($po) ? $this->extractStreetToken($po) : '';
+
+                $expenseDateString = null;
+                if (is_string($expenseDate) && $expenseDate !== '') {
+                    $expenseDateString = substr($expenseDate, 0, 10);
+                } elseif ($expenseDate && method_exists($expenseDate, 'format')) {
+                    $expenseDateString = $expenseDate->format('Y-m-d');
+                }
+
+                if (! $expenseDateString) {
+                    return null;
+                }
+
+                $expenseDateObj = \DateTimeImmutable::createFromFormat('Y-m-d', $expenseDateString);
+                if (! $expenseDateObj) {
+                    return null;
+                }
+
+                $windowStart = $expenseDateObj->modify('-2 months')->format('Y-m-d');
+                $windowEnd = $expenseDateObj->modify('+2 months')->format('Y-m-d');
+
+                $isActiveWithinWindow = static function (array $statuses, string $startDate, string $endDate): bool {
+                    if ($statuses === []) {
+                        return false;
+                    }
+
+                    $count = count($statuses);
+                    for ($i = 0; $i < $count; $i++) {
+                        $status = $statuses[$i];
+                        $code = (int) ($status['code'] ?? 0);
+                        $segmentStart = (string) ($status['start_date'] ?? '');
+
+                        if ($segmentStart === '') {
+                            continue;
+                        }
+
+                        $segmentEnd = '9999-12-31';
+                        if ($i + 1 < $count) {
+                            $nextStart = (string) ($statuses[$i + 1]['start_date'] ?? '');
+                            if ($nextStart !== '') {
+                                $nextStartObj = \DateTimeImmutable::createFromFormat('Y-m-d', $nextStart);
+                                if ($nextStartObj) {
+                                    $segmentEnd = $nextStartObj->modify('-1 day')->format('Y-m-d');
+                                }
+                            }
+                        }
+
+                        // Active status code.
+                        if ($code !== 6) {
+                            continue;
+                        }
+
+                        // Overlap check: [segmentStart, segmentEnd] overlaps [startDate, endDate].
+                        if ($segmentStart <= $endDate && $segmentEnd >= $startDate) {
+                            return true;
+                        }
+                    }
+
+                    return false;
+                };
+
+                $bestActive = null;
+                $secondActive = null;
+                $bestAny = null;
+                $secondAny = null;
+
+                $updateBestSecond = function (&$best, &$second, float $score, int $priority, ?string $statusStart, int $createdAt, int $projectId) use ($isBetterProjectCandidate): void {
+                    if ($best === null || $isBetterProjectCandidate($score, $priority, $statusStart, $createdAt, $projectId, $best)) {
+                        $second = $best;
+                        $best = [
+                            'project_id' => $projectId,
+                            'score' => $score,
+                            'priority' => $priority,
+                            'status_start_date' => $statusStart,
+                            'created_at' => $createdAt,
+                        ];
+                        return;
+                    }
+
+                    if ($second === null || $isBetterProjectCandidate($score, $priority, $statusStart, $createdAt, $projectId, $second)) {
+                        $second = [
+                            'project_id' => $projectId,
+                            'score' => $score,
+                            'priority' => $priority,
+                            'status_start_date' => $statusStart,
+                            'created_at' => $createdAt,
+                        ];
+                    }
+                };
+
+                foreach ($projectCandidates as $candidate) {
+                    // Hard requirement: project must be active near the expense date.
+                    if (! $isActiveWithinWindow($candidate['statuses'] ?? [], $windowStart, $windowEnd)) {
+                        continue;
+                    }
+
+                    $statusAtDate = $projectStatusAtDate($candidate['statuses'] ?? [], $expenseDateString);
+                    $statusCode = $statusAtDate['code'] ?? null;
+
+                    // Exclude Cancelled / View-only (per existing business rules).
+                    if (in_array($statusCode, [10, 11], true)) {
+                        continue;
+                    }
+
+                    $priority = $projectStatusPriority((int) ($statusCode ?? 0));
+                    $statusStart = $statusAtDate['start_date'] ?? null;
+                    $isActiveAtDate = ((int) ($statusCode ?? 0)) === 6;
+
+                    $score = 0.0;
+                    foreach (($candidate['variants'] ?? []) as $variant) {
+                        $variant = (string) $variant;
+
+                        $score = max($score, $this->similarityScore($po, $variant));
+
+                        if ($poStreetToken !== '') {
+                            $variantStreetToken = $this->extractStreetToken($variant);
+                            if ($variantStreetToken !== '') {
+                                $score = max($score, $this->similarityScore($poStreetToken, $variantStreetToken));
+                            }
+                        }
+                    }
+
+                    $candidateProjectId = (int) ($candidate['id'] ?? 0);
+                    $candidateCreatedAt = (int) ($candidate['created_at'] ?? 0);
+
+                    if ($candidateProjectId <= 0) {
+                        continue;
+                    }
+
+                    if ($isActiveAtDate) {
+                        $updateBestSecond($bestActive, $secondActive, $score, $priority, $statusStart, $candidateCreatedAt, $candidateProjectId);
+                    }
+
+                    $updateBestSecond($bestAny, $secondAny, $score, $priority, $statusStart, $candidateCreatedAt, $candidateProjectId);
+                }
+
+                $minScore = 0.70;
+
+                $choose = static function (?array $best, ?array $second) use ($minScore): ?array {
+                    if (! $best || ((float) ($best['score'] ?? 0)) < $minScore) {
+                        return null;
+                    }
+
+                    $ambiguous = false;
+                    if ($second && (((float) ($best['score'] ?? 0)) - ((float) ($second['score'] ?? 0))) < 0.06) {
+                        if (($best['priority'] ?? null) === ($second['priority'] ?? null) && ($best['status_start_date'] ?? null) === ($second['status_start_date'] ?? null)) {
+                            $ambiguous = true;
+                        }
+                    }
+
+                    return [
+                        'project_id' => (int) ($best['project_id'] ?? 0),
+                        'score' => (float) ($best['score'] ?? 0),
+                        'ambiguous' => $ambiguous,
+                    ];
+                };
+
+                return $choose($bestActive, $secondActive) ?? $choose($bestAny, $secondAny);
+            };
+
+            $statsByExpenseVendorId = [];
+
+            $ensureStats = static function (int $expenseVendorId) use (&$statsByExpenseVendorId): void {
+                if ($expenseVendorId <= 0) {
+                    return;
+                }
+
+                if (isset($statsByExpenseVendorId[$expenseVendorId])) {
+                    return;
+                }
+
+                $statsByExpenseVendorId[$expenseVendorId] = [
+                    'candidates_seen' => 0,
+                    'candidates_considered' => 0,
+                    'valid_po_seen' => 0,
+                    'matched_distribution' => 0,
+                    'matched_project' => 0,
+                    'skipped_no_po' => 0,
+                    'skipped_no_match' => 0,
+                    'skipped_ambiguous' => 0,
+                ];
+            };
+
+            $emitDecision = static function (?callable $onDecision, array $payload): void {
+                if (! $onDecision) {
+                    return;
+                }
+
+                $onDecision($payload);
+            };
+
+            $filterConditions = [
+                '(project_id = 0 OR project_id IS NULL)',
+                'distribution_id IS NULL',
+                $includeNullSplits ? '(has_splits = false OR has_splits IS NULL)' : 'has_splits = false',
+                $includeNullStatus ? "(expense_status = 'No Project' OR expense_status IS NULL)" : "expense_status = 'No Project'",
+            ];
+
+            $updatedExpenseIds = [];
+
+            $perPage = 1000;
+            $page = 1;
+
+            while (true) {
+                $paginator = Expense::scopedSearchForVendor(
+                    $hiveVendor->id,
+                    '',
+                    $filterConditions,
+                    'date',
+                    'desc'
+                )->paginate($perPage, 'page', $page);
+
+                $pageItems = $paginator->items();
+                if ($pageItems === []) {
+                    break;
+                }
+
+                $candidateIds = [];
+
+                foreach ($pageItems as $item) {
+                    $expenseId = (int) (is_array($item) ? ($item['id'] ?? 0) : ($item->id ?? 0));
+                    if ($expenseId <= 0) {
+                        continue;
+                    }
+
+                    $expenseVendorId = (int) (is_array($item) ? ($item['vendor_id'] ?? 0) : ($item->vendor_id ?? 0));
+                    $ensureStats($expenseVendorId);
+
+                    if ($expenseVendorId > 0) {
+                        $statsByExpenseVendorId[$expenseVendorId]['candidates_seen']++;
+                    }
+
+                    $candidateIds[] = $expenseId;
+                }
+
+                $candidateIds = array_values(array_unique($candidateIds));
+
+                if ($candidateIds === []) {
+                    $page++;
+                    continue;
+                }
+
+                $expenses = Expense::withoutGlobalScopes()
+                    ->where('belongs_to_vendor_id', $hiveVendor->id)
+                    ->whereIn('id', $candidateIds)
+                    ->with(['receipts:id,expense_id,receipt_items,created_at'])
+                    ->get(['id', 'belongs_to_vendor_id', 'vendor_id', 'date', 'distribution_id', 'project_id']);
+
+                foreach ($expenses as $expense) {
+                    $expenseVendorId = (int) ($expense->vendor_id ?? 0);
+                    $ensureStats($expenseVendorId);
+
+                    if ($expenseVendorId > 0) {
+                        $statsByExpenseVendorId[$expenseVendorId]['candidates_considered']++;
+                    }
+
+                    if (! is_null($expense->distribution_id)) {
+                        continue;
+                    }
+
+                    $purchaseOrder = $this->extractPurchaseOrder($expense);
+
+                    if (! $purchaseOrder) {
+                        $emitDecision($onDecision, [
+                            'belongs_to_vendor_id' => (int) $hiveVendor->id,
+                            'expense_vendor_id' => (int) $expenseVendorId,
+                            'expense_id' => (int) $expense->id,
+                            'purchase_order' => '',
+                            'result' => 'skipped',
+                            'reason' => 'no_po',
+                        ]);
+
+                        if ($expenseVendorId > 0) {
+                            $statsByExpenseVendorId[$expenseVendorId]['skipped_no_po']++;
+                        }
+                        continue;
+                    }
+
+                    if ($expenseVendorId > 0) {
+                        $statsByExpenseVendorId[$expenseVendorId]['valid_po_seen']++;
+                    }
+
+                    if ($distributionIndex === null) {
+                        $distributions = Distribution::withoutGlobalScopes()
+                            ->where('vendor_id', $hiveVendor->id)
+                            ->select(['id', 'name'])
+                            ->get();
+
+                        $distributionNameById = $distributions
+                            ->mapWithKeys(fn (Distribution $d) => [(int) $d->id => (string) ($d->name ?? '')])
+                            ->all();
+
+                        $distributionIndex = $distributions
+                            ->map(function (Distribution $distribution): ?array {
+                                $normalized = $this->normalizeText((string) ($distribution->name ?? ''));
+                                if ($normalized === '') {
+                                    return null;
+                                }
+
+                                return [
+                                    'id' => (int) $distribution->id,
+                                    'normalized' => $normalized,
+                                    'name' => (string) ($distribution->name ?? ''),
+                                ];
+                            })
+                            ->filter()
+                            ->values()
+                            ->all();
+                    }
+
+                    $distributionMatch = $distributionIndex !== []
+                        ? $this->matchPurchaseOrderToDistribution($purchaseOrder, $distributionIndex)
+                        : null;
+                    $projectMatch = $matchPurchaseOrderToProjectAtDate($purchaseOrder, $expense->date);
+
+                    $best = $this->pickBestMatch($distributionMatch, $projectMatch);
+
+                    if (! $best) {
+                        $emitDecision($onDecision, [
+                            'belongs_to_vendor_id' => (int) $hiveVendor->id,
+                            'expense_vendor_id' => (int) $expenseVendorId,
+                            'expense_id' => (int) $expense->id,
+                            'purchase_order' => (string) $purchaseOrder,
+                            'result' => 'skipped',
+                            'reason' => 'no_match',
+                        ]);
+
+                        if ($expenseVendorId > 0) {
+                            $statsByExpenseVendorId[$expenseVendorId]['skipped_no_match']++;
+                        }
+                        continue;
+                    }
+
+                    if ($best['ambiguous']) {
+                        $matchedName = '';
+                        if ($best['type'] === 'distribution') {
+                            $matchedName = (string) ($distributionNameById[(int) $best['id']] ?? '');
+                        } elseif ($best['type'] === 'project') {
+                            $matchedName = (string) ($projectDisplayById[(int) $best['id']] ?? '');
+                        }
+
+                        $emitDecision($onDecision, [
+                            'belongs_to_vendor_id' => (int) $hiveVendor->id,
+                            'expense_vendor_id' => (int) $expenseVendorId,
+                            'expense_id' => (int) $expense->id,
+                            'purchase_order' => (string) $purchaseOrder,
+                            'result' => 'skipped',
+                            'reason' => 'ambiguous',
+                            'matched_type' => (string) ($best['type'] ?? ''),
+                            'matched_id' => (int) ($best['id'] ?? 0),
+                            'matched_name' => $matchedName,
+                            'score' => (float) ($best['score'] ?? 0),
+                        ]);
+
+                        if ($expenseVendorId > 0) {
+                            $statsByExpenseVendorId[$expenseVendorId]['skipped_ambiguous']++;
+                        }
+                        continue;
+                    }
+
+                    if ($best['type'] === 'distribution') {
+                        $matchedName = (string) ($distributionNameById[(int) $best['id']] ?? '');
+                        $emitDecision($onDecision, [
+                            'belongs_to_vendor_id' => (int) $hiveVendor->id,
+                            'expense_vendor_id' => (int) $expenseVendorId,
+                            'expense_id' => (int) $expense->id,
+                            'purchase_order' => (string) $purchaseOrder,
+                            'result' => 'matched',
+                            'reason' => null,
+                            'matched_type' => 'distribution',
+                            'matched_id' => (int) $best['id'],
+                            'matched_name' => $matchedName,
+                            'score' => (float) ($best['score'] ?? 0),
+                        ]);
+
+                        $affected = Expense::withoutGlobalScopes()
+                            ->where('belongs_to_vendor_id', $hiveVendor->id)
+                            ->where('id', $expense->id)
+                            ->where(function ($query) {
+                                $query->whereNull('distribution_id')->orWhere('distribution_id', 0);
+                            })
+                            ->update(['distribution_id' => $best['id']]);
+
+                        if ($affected > 0) {
+                            $updatedExpenseIds[] = (int) $expense->id;
+                        }
+
+                        if ($expenseVendorId > 0) {
+                            $statsByExpenseVendorId[$expenseVendorId]['matched_distribution']++;
+                        }
+
+                        continue;
+                    }
+
+                    if ($best['type'] === 'project') {
+                        $matchedName = (string) ($projectDisplayById[(int) $best['id']] ?? '');
+                        $emitDecision($onDecision, [
+                            'belongs_to_vendor_id' => (int) $hiveVendor->id,
+                            'expense_vendor_id' => (int) $expenseVendorId,
+                            'expense_id' => (int) $expense->id,
+                            'purchase_order' => (string) $purchaseOrder,
+                            'result' => 'matched',
+                            'reason' => null,
+                            'matched_type' => 'project',
+                            'matched_id' => (int) $best['id'],
+                            'matched_name' => $matchedName,
+                            'score' => (float) ($best['score'] ?? 0),
+                        ]);
+
+                        $affected = Expense::withoutGlobalScopes()
+                            ->where('belongs_to_vendor_id', $hiveVendor->id)
+                            ->where('id', $expense->id)
+                            ->where(function ($query) {
+                                $query->whereNull('project_id')->orWhere('project_id', 0);
+                            })
+                            ->update(['project_id' => $best['id']]);
+
+                        if ($affected > 0) {
+                            $updatedExpenseIds[] = (int) $expense->id;
+                        }
+
+                        if ($expenseVendorId > 0) {
+                            $statsByExpenseVendorId[$expenseVendorId]['matched_project']++;
+                        }
+                    }
+                }
+
+                $page++;
+            }
+
+            foreach ($statsByExpenseVendorId as $expenseVendorId => $stats) {
+                // Default: only report vendors that actually had at least one valid PO candidate.
+                // When $summaryAll=true: include all vendors that had any candidate expenses.
+                if (! $summaryAll && (($stats['valid_po_seen'] ?? 0) <= 0)) {
+                    continue;
+                }
+
+                if ($summaryAll && (($stats['candidates_seen'] ?? 0) <= 0)) {
+                    continue;
+                }
+
+                Log::info('PO → Distribution/Project auto-match summary', [
+                    'belongs_to_vendor_id' => $hiveVendor->id,
+                    'expense_vendor_id' => (int) $expenseVendorId,
+                    'candidates_seen' => (int) ($stats['candidates_seen'] ?? 0),
+                    'candidates_considered' => (int) ($stats['candidates_considered'] ?? 0),
+                    'valid_po_seen' => (int) ($stats['valid_po_seen'] ?? 0),
+                    'matched_distribution' => (int) ($stats['matched_distribution'] ?? 0),
+                    'matched_project' => (int) ($stats['matched_project'] ?? 0),
+                    'skipped_no_po' => (int) ($stats['skipped_no_po'] ?? 0),
+                    'skipped_no_match' => (int) ($stats['skipped_no_match'] ?? 0),
+                    'skipped_ambiguous' => (int) ($stats['skipped_ambiguous'] ?? 0),
+                ]);
+            }
+
+            if ($updatedExpenseIds !== []) {
+                try {
+                    Expense::withoutGlobalScopes()
+                        ->where('belongs_to_vendor_id', $hiveVendor->id)
+                        ->whereIn('id', array_values(array_unique($updatedExpenseIds)))
+                        ->get(['id', 'belongs_to_vendor_id'])
+                        ->searchable();
+                } catch (\Throwable $e) {
+                    Log::warning('PO auto-match: failed to sync Scout index for updated expenses', [
+                        'belongs_to_vendor_id' => $hiveVendor->id,
+                        'updated_count' => count(array_unique($updatedExpenseIds)),
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+        }
+    }
+
+    /**
+     * @param array{distribution_id:int,score:float,ambiguous:bool}|null $distributionMatch
+     * @param array{project_id:int,score:float,ambiguous:bool}|null $projectMatch
+     * @return array{type:'distribution'|'project',id:int,score:float,ambiguous:bool}|null
+     */
+    protected function pickBestMatch(?array $distributionMatch, ?array $projectMatch): ?array
+    {
+        if (! $distributionMatch && ! $projectMatch) {
+            return null;
+        }
+
+        if ($distributionMatch && ! $projectMatch) {
+            return [
+                'type' => 'distribution',
+                'id' => (int) $distributionMatch['distribution_id'],
+                'score' => (float) $distributionMatch['score'],
+                'ambiguous' => (bool) ($distributionMatch['ambiguous'] ?? false),
+            ];
+        }
+
+        if ($projectMatch && ! $distributionMatch) {
+            return [
+                'type' => 'project',
+                'id' => (int) $projectMatch['project_id'],
+                'score' => (float) $projectMatch['score'],
+                'ambiguous' => (bool) ($projectMatch['ambiguous'] ?? false),
+            ];
+        }
+
+        $distScore = (float) $distributionMatch['score'];
+        $projScore = (float) $projectMatch['score'];
+
+        $distAmbiguous = (bool) ($distributionMatch['ambiguous'] ?? false);
+        $projAmbiguous = (bool) ($projectMatch['ambiguous'] ?? false);
+
+        // Treat distribution/project equally:
+        // - Don't discard an ambiguous match just because the other type exists.
+        // - Only allow a non-ambiguous candidate to win over an ambiguous one if it's clearly better.
+        if ($distAmbiguous || $projAmbiguous) {
+            // If both are ambiguous, we can't safely auto-match.
+            if ($distAmbiguous && $projAmbiguous) {
+                return [
+                    'type' => $distScore >= $projScore ? 'distribution' : 'project',
+                    'id' => $distScore >= $projScore ? (int) $distributionMatch['distribution_id'] : (int) $projectMatch['project_id'],
+                    'score' => max($distScore, $projScore),
+                    'ambiguous' => true,
+                ];
+            }
+
+            // If only one side is ambiguous, require a meaningful score lead to trust the other.
+            $clearWinDelta = 0.06;
+
+            if ($distAmbiguous && ! $projAmbiguous) {
+                if (($projScore - $distScore) >= $clearWinDelta) {
+                    return [
+                        'type' => 'project',
+                        'id' => (int) $projectMatch['project_id'],
+                        'score' => $projScore,
+                        'ambiguous' => false,
+                    ];
+                }
+
+                return [
+                    'type' => 'distribution',
+                    'id' => (int) $distributionMatch['distribution_id'],
+                    'score' => $distScore,
+                    'ambiguous' => true,
+                ];
+            }
+
+            if ($projAmbiguous && ! $distAmbiguous) {
+                if (($distScore - $projScore) >= $clearWinDelta) {
+                    return [
+                        'type' => 'distribution',
+                        'id' => (int) $distributionMatch['distribution_id'],
+                        'score' => $distScore,
+                        'ambiguous' => false,
+                    ];
+                }
+
+                return [
+                    'type' => 'project',
+                    'id' => (int) $projectMatch['project_id'],
+                    'score' => $projScore,
+                    'ambiguous' => true,
+                ];
+            }
+        }
+
+        if (abs($distScore - $projScore) < 0.02) {
+            return [
+                'type' => $distScore >= $projScore ? 'distribution' : 'project',
+                'id' => $distScore >= $projScore ? (int) $distributionMatch['distribution_id'] : (int) $projectMatch['project_id'],
+                'score' => max($distScore, $projScore),
+                'ambiguous' => true,
+            ];
+        }
+
+        if ($distScore > $projScore) {
+            return [
+                'type' => 'distribution',
+                'id' => (int) $distributionMatch['distribution_id'],
+                'score' => $distScore,
+                'ambiguous' => false,
+            ];
+        }
+
+        return [
+            'type' => 'project',
+            'id' => (int) $projectMatch['project_id'],
+            'score' => $projScore,
+            'ambiguous' => false,
+        ];
+    }
+
+    protected function extractPurchaseOrder(Expense $expense): ?string
+    {
+        if (! $expense->relationLoaded('receipts')) {
+            $expense->load('receipts');
+        }
+
+        $receipts = $expense->receipts
+            ->sortByDesc(fn ($r) => $r->created_at ?? $r->id)
+            ->values();
+
+        foreach ($receipts as $receipt) {
+            $items = $receipt->receipt_items ?? null;
+            if (! is_array($items)) {
+                continue;
+            }
+
+            if (! array_key_exists('purchase_order', $items)) {
+                $rawPurchaseOrder = null;
+            } else {
+                $rawPurchaseOrder = $items['purchase_order'];
+            }
+
+            $values = $rawPurchaseOrder === null
+                ? []
+                : (is_array($rawPurchaseOrder) ? $rawPurchaseOrder : [$rawPurchaseOrder]);
+
+            foreach ($values as $value) {
+                $candidate = $this->normalizePurchaseOrderCandidate($value);
+                if ($candidate !== null) {
+                    return $candidate;
+                }
+            }
+
+            // Some OCR pipelines store the PO in handwritten notes instead of the structured purchase_order field.
+            // If purchase_order yields nothing usable, fall back to handwritten_notes.
+            $rawHandwritten = $items['handwritten_notes'] ?? null;
+            $handwrittenValues = is_array($rawHandwritten) ? $rawHandwritten : ($rawHandwritten === null ? [] : [$rawHandwritten]);
+
+            foreach ($handwrittenValues as $note) {
+                $candidate = $this->normalizePurchaseOrderCandidate($note);
+                if ($candidate !== null) {
+                    return $candidate;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    protected function normalizePurchaseOrderCandidate(mixed $value): ?string
+    {
+        if (is_null($value)) {
+            return null;
+        }
+
+        $text = trim((string) $value);
+        if ($text === '') {
+            return null;
+        }
+
+        $text = str_replace('|', ',', $text);
+        $first = trim(explode(',', $text)[0] ?? '');
+
+        if ($first === '') {
+            return null;
+        }
+
+        $firstWithoutSpaces = preg_replace('/\s+/', '', $first);
+        $moneyCandidate = $firstWithoutSpaces === null ? '' : $firstWithoutSpaces;
+        $moneyCandidate = str_replace(',', '', $moneyCandidate);
+
+        // Reject obvious currency/amount values like "$44.60" or "44.60".
+        if (preg_match('/^\$?\d{1,6}(?:\.\d{2})$/', $moneyCandidate)) {
+            return null;
+        }
+
+        $normalizedFirst = $this->normalizeText($first);
+
+        $length = mb_strlen($normalizedFirst);
+
+        // Too-short POs (e.g. "A", "PP") are almost always noise.
+        // Keep 3-digit numeric POs (e.g. "901"), which are common in this dataset.
+        if ($length <= 2) {
+            return null;
+        }
+
+        if ($length === 3 && ! preg_match('/^\d{3}$/', $normalizedFirst)) {
+            return null;
+        }
+
+        if (in_array($normalizedFirst, ['missing po', 'missing purchase order'], true)) {
+            return null;
+        }
+
+        return $first;
+    }
+
+    /**
+     * @param array<int, array{id:int,normalized:string}> $distributionIndex
+     * @return array{distribution_id:int,score:float,ambiguous:bool}|null
+     */
+    protected function matchPurchaseOrderToDistribution(string $purchaseOrder, array $distributionIndex): ?array
+    {
+        $po = $this->normalizeText($purchaseOrder);
+
+        if ($po === '') {
+            return null;
+        }
+
+        $poVariants = [$po];
+        if (str_starts_with($po, 'not ')) {
+            $stripped = trim(substr($po, 4));
+            if ($stripped !== '') {
+                $poVariants[] = $stripped;
+            }
+        }
+
+        $best = null;
+        $second = null;
+
+        foreach ($distributionIndex as $distribution) {
+            $score = 0.0;
+            foreach ($poVariants as $candidatePo) {
+                $score = max($score, $this->similarityScore($candidatePo, $distribution['normalized']));
+            }
+
+            if ($best === null || $score > $best['score']) {
+                $second = $best;
+                $best = [
+                    'distribution_id' => $distribution['id'],
+                    'score' => $score,
+                ];
+                continue;
+            }
+
+            if ($second === null || $score > $second['score']) {
+                $second = [
+                    'distribution_id' => $distribution['id'],
+                    'score' => $score,
+                ];
+            }
+        }
+
+        if (! $best) {
+            return null;
+        }
+
+        $minScore = 0.70;
+        if ($best['score'] < $minScore) {
+            return null;
+        }
+
+        $ambiguous = false;
+        if ($second && ($best['score'] - $second['score']) < 0.06) {
+            $ambiguous = true;
+        }
+
+        return [
+            'distribution_id' => (int) $best['distribution_id'],
+            'score' => (float) $best['score'],
+            'ambiguous' => $ambiguous,
+        ];
+    }
+
+    /**
+     * @param array<int, array{id:int,variants:array<int, string>}> $projectIndex
+     * @return array{project_id:int,score:float,ambiguous:bool}|null
+     */
+    protected function matchPurchaseOrderToProject(string $purchaseOrder, array $projectIndex): ?array
+    {
+        $po = $this->normalizeText($purchaseOrder);
+
+        if ($po === '' || $projectIndex === []) {
+            return null;
+        }
+
+        $best = null;
+        $second = null;
+
+        foreach ($projectIndex as $project) {
+            $score = 0.0;
+            foreach (($project['variants'] ?? []) as $variant) {
+                $score = max($score, $this->similarityScore($po, (string) $variant));
+            }
+
+            if ($best === null || $score > $best['score']) {
+                $second = $best;
+                $best = [
+                    'project_id' => (int) $project['id'],
+                    'score' => $score,
+                ];
+                continue;
+            }
+
+            if ($second === null || $score > $second['score']) {
+                $second = [
+                    'project_id' => (int) $project['id'],
+                    'score' => $score,
+                ];
+            }
+        }
+
+        if (! $best) {
+            return null;
+        }
+
+        $minScore = 0.70;
+        if (($best['score'] ?? 0) < $minScore) {
+            return null;
+        }
+
+        $ambiguous = false;
+        if ($second && (($best['score'] - $second['score']) < 0.06)) {
+            $ambiguous = true;
+        }
+
+        return [
+            'project_id' => (int) $best['project_id'],
+            'score' => (float) $best['score'],
+            'ambiguous' => $ambiguous,
+        ];
+    }
+
+    protected function similarityScore(string $a, string $b): float
+    {
+        if ($a === '' || $b === '') {
+            return 0.0;
+        }
+
+        return max(0.0, min(1.0, $this->rawSimilarityScore($a, $b)));
+    }
+
+    protected function rawSimilarityScore(string $a, string $b): float
+    {
+        if ($a === '' || $b === '') {
+            return 0.0;
+        }
+
+        $aNumber = null;
+        $bNumber = null;
+
+        if (preg_match('/^\d+/', $a, $mA)) {
+            $aNumber = $mA[0];
+        }
+
+        if (preg_match('/^\d+/', $b, $mB)) {
+            $bNumber = $mB[0];
+        }
+
+        if ($aNumber !== null && $bNumber !== null) {
+            if ($aNumber === $bNumber) {
+                return 0.92;
+            }
+
+            if (str_starts_with($aNumber, $bNumber) || str_starts_with($bNumber, $aNumber)) {
+                return 0.30;
+            }
+        }
+
+        if ($a === $b) {
+            return 1.0;
+        }
+
+        if (str_contains($a, $b) || str_contains($b, $a)) {
+            $lenA = strlen($a);
+            $lenB = strlen($b);
+            $max = max($lenA, $lenB);
+            $min = min($lenA, $lenB);
+
+            if ($max === 0) {
+                return 0.0;
+            }
+
+            $ratio = $min / $max;
+            $score = 0.86 + (0.14 * $ratio);
+
+            return max(0.0, min(1.0, $score));
+        }
+
+        $distance = levenshtein($a, $b);
+        $maxLen = max(strlen($a), strlen($b));
+
+        if ($maxLen === 0) {
+            return 0.0;
+        }
+
+        $score = 1.0 - ($distance / $maxLen);
+
+        return max(0.0, min(1.0, $score));
+    }
+
+    protected function normalizeText(string $value): string
+    {
+        $value = strtolower(trim($value));
+
+        if ($value === '') {
+            return '';
+        }
+
+        $value = str_replace('&', ' and ', $value);
+        $value = preg_replace('/[^a-z0-9\s]/', ' ', $value) ?? '';
+        $value = preg_replace('/\s+/', ' ', $value) ?? '';
+
+        return trim($value);
+    }
+
+    protected function hasHouseNumberPrefix(string $normalizedText): bool
+    {
+        $value = trim($normalizedText);
+        if ($value === '') {
+            return false;
+        }
+
+        $parts = array_values(array_filter(explode(' ', $value), fn (string $p) => trim($p) !== ''));
+        if (count($parts) < 2) {
+            return false;
+        }
+
+        $first = (string) ($parts[0] ?? '');
+        if ($first === '') {
+            return false;
+        }
+
+        if (ctype_digit($first)) {
+            return true;
+        }
+
+        // OCR sometimes turns numbers into letters (e.g. "17" -> "iz" / "l7" / "o7").
+        // Treat short, digit-like tokens as a house-number prefix.
+        if (strlen($first) <= 4 && preg_match('/^[0-9ilozt]+$/', $first)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    protected function extractStreetToken(string $normalizedText): string
+    {
+        $value = trim($normalizedText);
+        if ($value === '') {
+            return '';
+        }
+
+        $ignore = [
+            'n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw',
+            'rd', 'road', 'st', 'street', 'ave', 'avenue', 'dr', 'drive',
+            'ln', 'lane', 'blvd', 'boulevard', 'ct', 'court', 'cir', 'circle',
+            'pl', 'place', 'way',
+        ];
+
+        $tokens = array_values(array_filter(explode(' ', $value), fn (string $p) => trim($p) !== ''));
+
+        foreach ($tokens as $i => $token) {
+            $token = trim($token);
+
+            if ($token === '') {
+                continue;
+            }
+
+            // Skip leading house number tokens (including OCR'd variants like "iz").
+            if ($i === 0) {
+                if (ctype_digit($token)) {
+                    continue;
+                }
+
+                if (strlen($token) <= 4 && preg_match('/^[0-9ilozt]+$/', $token)) {
+                    continue;
+                }
+            }
+
+            if (ctype_digit($token) || in_array($token, $ignore, true)) {
+                continue;
+            }
+
+            return $token;
+        }
+
+        return '';
+    }
+}

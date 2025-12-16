@@ -1,0 +1,69 @@
+expense_id;amount;receipt_po;best_dist_id;best_dist_name;score;delta;status
+25141;40,65;Ofice;1;OFFICE;0,833;0,722;matched
+25142;39,59;Office;1;OFFICE;1,000;0,889;matched
+25150;34,32;Greg;2;Greg - Home;0,922;0,831;matched
+25153;40,65;Ofice;1;OFFICE;0,833;0,722;matched
+25188;-40,65;Ofice;1;OFFICE;0,833;0,722;matched
+25194;3,79;;;;;;missing_po
+25202;57,26;Patryk home;3;Patryk - Home;1,000;0,455;matched
+25236;179,63;patryk;3;Patryk - Home;0,936;0,936;matched
+25317;9,56;Greg;2;Greg - Home;0,922;0,831;matched
+25319;3,89;;;;;;missing_po
+25368;32,84;Greg;2;Greg - Home;0,922;0,831;matched
+25463;21,11;Greg;2;Greg - Home;0,922;0,831;matched
+25523;9,04;Greg;2;Greg - Home;0,922;0,831;matched
+25551;17,46;901;1;OFFICE;0,000;0,000;below_threshold
+25569;53,89;Office;1;OFFICE;1,000;0,889;matched
+25572;59,94;Greg;2;Greg - Home;0,922;0,831;matched
+25573;-49,75;177r;3;Patryk - Home;0,091;0,091;below_threshold
+25574;-24,19;patryk;3;Patryk - Home;0,936;0,936;matched
+25580;45,09;Greg;2;Greg - Home;0,922;0,831;matched
+25581;47,29;400 wheeling;1;OFFICE;0,083;0,000;below_threshold
+25586;27,50;Ofice;1;OFFICE;0,833;0,722;matched
+25625;24,54;Greg home;2;Greg - Home;1,000;0,455;matched
+25626;89,09;Ofice;1;OFFICE;0,833;0,722;matched
+25629;45,46;Greg;2;Greg - Home;0,922;0,831;matched
+25633;31,37;Ofice;1;OFFICE;0,833;0,722;matched
+25647;32,77;Greg;2;Greg - Home;0,922;0,831;matched
+25648;49,49;Greg;2;Greg - Home;0,922;0,831;matched
+25691;39,04;Greg;2;Greg - Home;0,922;0,831;matched
+25696;74,78;Greg;2;Greg - Home;0,922;0,831;matched
+25706;16,49;Greg;2;Greg - Home;0,922;0,831;matched
+25713;34,64;Greg;2;Greg - Home;0,922;0,831;matched
+25716;32,43;Ofice;1;OFFICE;0,833;0,722;matched
+25717;26,86;Greg;2;Greg - Home;0,922;0,831;matched
+25724;40,14;Greg;2;Greg - Home;0,922;0,831;matched
+25725;38,49;Greg;2;Greg - Home;0,922;0,831;matched
+25726;131,37;Greg;2;Greg - Home;0,922;0,831;matched
+25749;29,27;Greg;2;Greg - Home;0,922;0,831;matched
+25761;35,93;Not Greg home;2;Greg - Home;0,820;0,373;matched
+25762;16,49;Greg home;2;Greg - Home;1,000;0,455;matched
+25788;17,59;Greg;2;Greg - Home;0,922;0,831;matched
+25791;-131,37;Greg;2;Greg - Home;0,922;0,831;matched
+25792;-26,86;Greg;2;Greg - Home;0,922;0,831;matched
+25795;54,88;Greg;2;Greg - Home;0,922;0,831;matched
+25796;76,97;Greg;2;Greg - Home;0,922;0,831;matched
+25828;36,45;Greg home;2;Greg - Home;1,000;0,455;matched
+25837;76,41;Office;1;OFFICE;1,000;0,889;matched
+25843;24,18;Greg;2;Greg - Home;0,922;0,831;matched
+25857;22,24;Greg;2;Greg - Home;0,922;0,831;matched
+25858;121,05;Greg;2;Greg - Home;0,922;0,831;matched
+25864;9,35;Ofice;1;OFFICE;0,833;0,722;matched
+25865;31,47;Ofice;1;OFFICE;0,833;0,722;matched
+25868;3,79;;;;;;missing_po
+25878;38,49;Greg;2;Greg - Home;0,922;0,831;matched
+25879;52,70;Greg;2;Greg - Home;0,922;0,831;matched
+25880;49,93;Greg;2;Greg - Home;0,922;0,831;matched
+25895;15,35;Not Greg home;2;Greg - Home;0,820;0,373;matched
+25896;16,50;Not Greg home;2;Greg - Home;0,820;0,373;matched
+25904;35,52;Greg;2;Greg - Home;0,922;0,831;matched
+25908;17,59;Not Greg hom;2;Greg - Home;0,807;0,435;matched
+25909;-9,35;Ofice;1;OFFICE;0,833;0,722;matched
+25929;27,48;Greg;2;Greg - Home;0,922;0,831;matched
+25954;3,99;;;;;;missing_po
+26004;7,69;Greg;2;Greg - Home;0,922;0,831;matched
+26009;10,59;Greg;2;Greg - Home;0,922;0,831;matched
+26010;505,99;Greg;2;Greg - Home;0,922;0,831;matched
+26011;19,79;Greg;2;Greg - Home;0,922;0,831;matched
+26027;505,99;Greg;2;Greg - Home;0,922;0,831;matched
+26040;-17,59;Greg;2;Greg - Home;0,922;0,831;matched

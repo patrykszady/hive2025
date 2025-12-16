@@ -12,6 +12,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\Auth;
+use Laravel\Scout\Builder as ScoutBuilder;
 use Laravel\Scout\Searchable;
 
 class Expense extends Model
@@ -118,30 +120,51 @@ class Expense extends Model
     /**
      * Create a search builder that respects user access permissions
      */
-    public static function scopedSearch($query = '', $filterConditions = [], $sortBy = 'date', $sortDirection = 'desc')
+    public static function scopedSearch($query = '', $filterConditions = [], $sortBy = 'date', $sortDirection = 'desc', ?User $user = null): ScoutBuilder
     {
-        return self::search($query, function ($meilisearch, $searchQuery, $options) use ($filterConditions, $sortBy, $sortDirection) {
-            // Apply base security filters
-            $user = auth()->user();
-            $baseFilter = "__soft_deleted = 0 AND belongs_to_vendor_id = {$user->vendor->id}";
-            
-            // Add role-specific filter
-            if ($user->vendor_role === 'Member') {
-                $baseFilter .= " AND paid_by = {$user->id}";
-            }
-            
+        $user ??= Auth::user();
+
+        if (! $user) {
+            throw new \RuntimeException('Expense::scopedSearch() requires an authenticated user. For scheduler/tenant usage, call Expense::scopedSearchForVendor($belongsToVendorId, ...) instead.');
+        }
+
+        $belongsToVendorId = (int) $user->vendor->id;
+        $baseFilter = "__soft_deleted = 0 AND belongs_to_vendor_id = {$belongsToVendorId}";
+
+        if ($user->vendor_role === 'Member') {
+            $paidByUserId = (int) $user->id;
+            $baseFilter .= " AND paid_by = {$paidByUserId}";
+        }
+
+        return self::scopedSearchWithBaseFilter($query, $filterConditions, $sortBy, $sortDirection, $baseFilter);
+    }
+
+    /**
+     * Scheduler-safe Meilisearch query builder scoped to a specific hive vendor/tenant.
+     */
+    public static function scopedSearchForVendor(int $belongsToVendorId, $query = '', $filterConditions = [], $sortBy = 'date', $sortDirection = 'desc'): ScoutBuilder
+    {
+        $belongsToVendorId = (int) $belongsToVendorId;
+        $baseFilter = "__soft_deleted = 0 AND belongs_to_vendor_id = {$belongsToVendorId}";
+
+        return self::scopedSearchWithBaseFilter($query, $filterConditions, $sortBy, $sortDirection, $baseFilter);
+    }
+
+    protected static function scopedSearchWithBaseFilter($query, array $filterConditions, string $sortBy, string $sortDirection, string $baseFilter): ScoutBuilder
+    {
+        return self::search($query, function ($meilisearch, $searchQuery, $options) use ($filterConditions, $sortBy, $sortDirection, $baseFilter) {
             // Process numeric search queries using shared trait logic
             [$actualQuery, $augmentedFilters] = self::processNumericSearch($searchQuery, $filterConditions);
-            
+
             // Apply search options using shared trait logic
             $options = self::applySearchOptions($options, $baseFilter, $augmentedFilters, $actualQuery, $sortBy, $sortDirection);
-            
+
             return $meilisearch->search($actualQuery, $options);
         })
-        // Narrow the columns fetched from the database when hydrating models
-        ->query(function ($eloquent) {
-            $eloquent->select(['id', 'amount', 'date', 'vendor_id', 'project_id', 'distribution_id', 'check_id', 'paid_by']);
-        });
+            // Narrow the columns fetched from the database when hydrating models
+            ->query(function ($eloquent) {
+                $eloquent->select(['id', 'amount', 'date', 'vendor_id', 'project_id', 'distribution_id', 'check_id', 'paid_by']);
+            });
     }
 
     public function project(): BelongsTo

@@ -143,6 +143,13 @@ Schedule::call(function () {
   ->withoutOverlapping()
   ->onOneServer();
 
+Schedule::call(function () {
+  app(\App\Http\Controllers\ExpenseAutoMatchController::class)->runNoProjectExpenseAutoMatch();
+})->everyTenMinutes()
+  ->name('match-expense-po-to-project')
+  ->withoutOverlapping()
+  ->onOneServer();
+
 // External API tasks
 Schedule::call(function () {
     app(\App\Http\Controllers\ReceiptController::class)->amazon_orders_api();
