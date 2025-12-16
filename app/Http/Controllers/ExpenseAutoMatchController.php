@@ -17,6 +17,7 @@ class ExpenseAutoMatchController extends Controller
     public function runNoProjectExpenseAutoMatch(
         ?array $onlyBelongsToVendorIds = null,
         ?callable $onDecision = null,
+        ?callable $onSummary = null,
         bool $summaryAll = false,
         bool $includeNullStatus = false,
         bool $includeNullSplits = false,
@@ -631,18 +632,20 @@ class ExpenseAutoMatchController extends Controller
                     continue;
                 }
 
-                Log::info('PO → Distribution/Project auto-match summary', [
-                    'belongs_to_vendor_id' => $hiveVendor->id,
-                    'expense_vendor_id' => (int) $expenseVendorId,
-                    'candidates_seen' => (int) ($stats['candidates_seen'] ?? 0),
-                    'candidates_considered' => (int) ($stats['candidates_considered'] ?? 0),
-                    'valid_po_seen' => (int) ($stats['valid_po_seen'] ?? 0),
-                    'matched_distribution' => (int) ($stats['matched_distribution'] ?? 0),
-                    'matched_project' => (int) ($stats['matched_project'] ?? 0),
-                    'skipped_no_po' => (int) ($stats['skipped_no_po'] ?? 0),
-                    'skipped_no_match' => (int) ($stats['skipped_no_match'] ?? 0),
-                    'skipped_ambiguous' => (int) ($stats['skipped_ambiguous'] ?? 0),
-                ]);
+                if (is_callable($onSummary)) {
+                    $onSummary([
+                        'belongs_to_vendor_id' => (int) $hiveVendor->id,
+                        'expense_vendor_id' => (int) $expenseVendorId,
+                        'candidates_seen' => (int) ($stats['candidates_seen'] ?? 0),
+                        'candidates_considered' => (int) ($stats['candidates_considered'] ?? 0),
+                        'valid_po_seen' => (int) ($stats['valid_po_seen'] ?? 0),
+                        'matched_distribution' => (int) ($stats['matched_distribution'] ?? 0),
+                        'matched_project' => (int) ($stats['matched_project'] ?? 0),
+                        'skipped_no_po' => (int) ($stats['skipped_no_po'] ?? 0),
+                        'skipped_no_match' => (int) ($stats['skipped_no_match'] ?? 0),
+                        'skipped_ambiguous' => (int) ($stats['skipped_ambiguous'] ?? 0),
+                    ]);
+                }
             }
 
             if ($updatedExpenseIds !== []) {

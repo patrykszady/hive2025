@@ -6,7 +6,6 @@ use App\Http\Controllers\ExpenseAutoMatchController;
 use App\Models\Expense;
 use App\Models\Vendor;
 use Illuminate\Console\Command;
-use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\DB;
 
 class ExpensesAutoMatchPo extends Command
@@ -54,13 +53,7 @@ class ExpensesAutoMatchPo extends Command
 
         $summaryRows = [];
         $matchRows = [];
-        app('log')->listen(function (MessageLogged $event) use (&$summaryRows): void {
-            if ($event->message !== 'PO → Distribution/Project auto-match summary') {
-                return;
-            }
-
-            $context = is_array($event->context) ? $event->context : [];
-
+        $onSummary = function (array $context) use (&$summaryRows): void {
             $summaryRows[] = [
                 'belongs_to_vendor_id' => (int) ($context['belongs_to_vendor_id'] ?? 0),
                 'expense_vendor_id' => (int) ($context['expense_vendor_id'] ?? 0),
@@ -73,7 +66,7 @@ class ExpensesAutoMatchPo extends Command
                 'skipped_no_match' => (int) ($context['skipped_no_match'] ?? 0),
                 'skipped_ambiguous' => (int) ($context['skipped_ambiguous'] ?? 0),
             ];
-        });
+        };
 
         $runner = function () use ($onlyBelongsToVendorIds, $summaryAll, $includeNullStatus, $includeNullSplits, $preview, $previewAll, $previewLimit, &$matchRows): void {
             $onDecision = null;
@@ -99,6 +92,7 @@ class ExpensesAutoMatchPo extends Command
             app(ExpenseAutoMatchController::class)->runNoProjectExpenseAutoMatch(
                 $onlyBelongsToVendorIds === [] ? null : $onlyBelongsToVendorIds,
                 $onDecision,
+                $onSummary,
                 $summaryAll,
                 $includeNullStatus,
                 $includeNullSplits

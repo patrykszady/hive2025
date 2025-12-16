@@ -578,6 +578,8 @@ class TransactionController extends Controller
 
     public function add_category_to_expense()
     {
+        $cutoff = Carbon::now()->subMonth();
+
         $hive_vendors = Vendor::hiveVendors()->get();
         $categories = Category::all();
         foreach ($hive_vendors as $hive_vendor) {
@@ -588,8 +590,9 @@ class TransactionController extends Controller
                 Transaction::withoutGlobalScopes()
                     ->whereNull('deleted_at')
                     ->whereIn('bank_account_id', $hive_vendor_bank_account_ids)
-                    ->whereHas('expense', function ($query) {
-                        return $query->whereDoesntHave('category');
+                    ->whereHas('expense', function ($query) use ($cutoff) {
+                        return $query->whereDoesntHave('category')
+                            ->where('created_at', '>=', $cutoff);
                     })
                     ->with(['expense.vendor.category'])
                     ->get();
@@ -600,9 +603,10 @@ class TransactionController extends Controller
                 // Prefer the vendor's category if present; otherwise leave for next pass
                 $vendorCategory = optional(optional($transaction->expense)->vendor)->category;
                 if ($vendorCategory) {
-                    $transaction->expense->category()->associate($vendorCategory);
-                    $transaction->expense->timestamps = false;
-                    $transaction->expense->save();
+                    if ((int) $transaction->expense->category_id !== (int) $vendorCategory->id) {
+                        $transaction->expense->category()->associate($vendorCategory);
+                        $transaction->expense->save();
+                    }
                 }
             }
 
@@ -611,8 +615,9 @@ class TransactionController extends Controller
                     ->whereNull('deleted_at')
                     ->whereIn('bank_account_id', $hive_vendor_bank_account_ids)
                     ->whereNotNull('details')
-                    ->whereHas('expense', function ($query) {
-                        return $query->whereDoesntHave('category');
+                    ->whereHas('expense', function ($query) use ($cutoff) {
+                        return $query->whereDoesntHave('category')
+                            ->where('created_at', '>=', $cutoff);
                     })
                     ->with(['expense.vendor.category'])
                     ->get();
@@ -622,9 +627,10 @@ class TransactionController extends Controller
                     // 1) Use vendor's category if available
                     $vendorCategory = optional(optional($transaction->expense)->vendor)->category;
                     if ($vendorCategory) {
-                        $transaction->expense->category()->associate($vendorCategory);
-                        $transaction->expense->timestamps = false;
-                        $transaction->expense->save();
+                        if ((int) $transaction->expense->category_id !== (int) $vendorCategory->id) {
+                            $transaction->expense->category()->associate($vendorCategory);
+                            $transaction->expense->save();
+                        }
                         continue;
                     }
 
@@ -633,9 +639,10 @@ class TransactionController extends Controller
                     if ($transaction_category) {
                         $category = $categories->where('detailed', $transaction_category)->first();
                         if ($category) {
-                            $transaction->expense->category()->associate($category);
-                            $transaction->expense->timestamps = false;
-                            $transaction->expense->save();
+                            if ((int) $transaction->expense->category_id !== (int) $category->id) {
+                                $transaction->expense->category()->associate($category);
+                                $transaction->expense->save();
+                            }
                         }
                     }
                 }
@@ -644,19 +651,25 @@ class TransactionController extends Controller
                     foreach ($transaction->check->expenses as $expense) {
                         if ($expense->category) { continue; }
 
+                        if ($expense->created_at?->lt($cutoff)) {
+                            continue;
+                        }
+
                         // Prefer the expense vendor category; else fallback to the transaction's expense category; else Plaid mapping
                         $expenseVendorCategory = optional($expense->vendor)->category;
                         if ($expenseVendorCategory) {
-                            $expense->category()->associate($expenseVendorCategory);
-                            $expense->timestamps = false;
-                            $expense->save();
+                            if ((int) $expense->category_id !== (int) $expenseVendorCategory->id) {
+                                $expense->category()->associate($expenseVendorCategory);
+                                $expense->save();
+                            }
                             continue;
                         }
 
                         if ($transaction->expense && $transaction->expense->category) {
-                            $expense->category()->associate($transaction->expense->category);
-                            $expense->timestamps = false;
-                            $expense->save();
+                            if ((int) $expense->category_id !== (int) $transaction->expense->category_id) {
+                                $expense->category()->associate($transaction->expense->category);
+                                $expense->save();
+                            }
                             continue;
                         }
 
@@ -664,9 +677,10 @@ class TransactionController extends Controller
                         if ($transaction_category) {
                             $category = $categories->where('detailed', $transaction_category)->first();
                             if ($category) {
-                                $expense->category()->associate($category);
-                                $expense->timestamps = false;
-                                $expense->save();
+                                if ((int) $expense->category_id !== (int) $category->id) {
+                                    $expense->category()->associate($category);
+                                    $expense->save();
+                                }
                             }
                         }
                     }
@@ -677,6 +691,7 @@ class TransactionController extends Controller
                 Expense::withoutGlobalScopes()
                     ->whereNull('deleted_at')
                     ->where('belongs_to_vendor_id', $hive_vendor->id)
+                    ->where('created_at', '>=', $cutoff)
                     ->whereBetween('date', ['2021-01-01', Carbon::now()->subDays(6)->format('Y-m-d')])
                     ->whereDoesntHave('category')
                     ->get()
@@ -686,6 +701,7 @@ class TransactionController extends Controller
                 $expenses =
                     Expense::withoutGlobalScopes()
                         ->where('belongs_to_vendor_id', $hive_vendor->id)
+                        ->where('created_at', '>=', $cutoff)
                         ->whereBetween('date', ['2021-01-01', Carbon::now()->subDays(6)->format('Y-m-d')])
                         ->whereDoesntHave('category')
                         ->where('vendor_id', $vendor_id);
@@ -701,8 +717,17 @@ class TransactionController extends Controller
                             return $category->count();
                         })
                         ->sort()->keys()->last();
-                $expenses->timestamps = false;
-                $expenses->update(['category_id' => $category]);
+
+                if (empty($category)) {
+                    continue;
+                }
+
+                $expenses
+                    ->where(function ($query) use ($category) {
+                        $query->whereNull('category_id')
+                            ->orWhere('category_id', '!=', $category);
+                    })
+                    ->update(['category_id' => $category]);
             }
         }
     }
