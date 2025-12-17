@@ -61,7 +61,9 @@ class ProjectShow extends Component
         $allEmails = $events->pluck('recipient_emails')->flatten()->unique();
         $usersByEmail = User::whereIn('email', $allEmails)->get()->keyBy('email');
         
-        $events = $events->groupBy('nylas_thread_id')
+        $events = $events->groupBy(function ($event) {
+            return $event->nylas_thread_id ?: $event->nylas_message_id;
+        })
             ->map(function ($threadEvents) use ($usersByEmail) {
                 // Prioritize 'replied' as the main event, even if not the latest chronologically
                 $repliedEvent = $threadEvents->firstWhere('event_type', 'replied');

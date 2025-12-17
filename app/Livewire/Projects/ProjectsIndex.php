@@ -285,7 +285,9 @@ class ProjectsIndex extends Component
             })
             ->orderBy('event_at', 'DESC')
             ->get()
-            ->groupBy('nylas_thread_id')
+            ->groupBy(function ($event) {
+                return $event->nylas_thread_id ?: $event->nylas_message_id;
+            })
             ->map(function ($threadEvents) {
                 // Prioritize 'replied' as the main event, even if not the latest chronologically
                 $repliedEvent = $threadEvents->firstWhere('event_type', 'replied');

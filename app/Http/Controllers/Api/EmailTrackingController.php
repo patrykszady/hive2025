@@ -7,7 +7,9 @@ use App\Models\CompanyEmail;
 use App\Models\EmailTracking;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class EmailTrackingController extends Controller
 {
@@ -22,6 +24,17 @@ class EmailTrackingController extends Controller
      */
     public function trackOpen(Request $request): Response
     {
+        // If Nylas opens tracking is enabled, prefer the webhook-based opens.
+        // In compare mode, we still record pixel opens as a separate event_type=opened_pixel.
+        $nylasConfig = config('nylas');
+        $nylasOpensEnabled = (bool) Arr::get($nylasConfig, 'tracking.opens', false);
+        $compareOpens = (bool) Arr::get($nylasConfig, 'tracking.compare_opens', false);
+        $pixelEventType = ($nylasOpensEnabled && $compareOpens) ? 'opened_pixel' : 'opened';
+
+        if ($nylasOpensEnabled && ! $compareOpens) {
+            return $this->transparentPixel();
+        }
+
         $token = $request->query('t');
 
         if (!$token) {
@@ -35,7 +48,7 @@ class EmailTrackingController extends Controller
             return $this->transparentPixel();
         }
 
-        $this->recordOpenEvent($data, $request);
+        $this->recordOpenEvent($data, $request, $pixelEventType);
 
         return $this->transparentPixel();
     }
@@ -90,7 +103,7 @@ class EmailTrackingController extends Controller
     /**
      * Record an open event in the database.
      */
-    protected function recordOpenEvent(array $data, Request $request): void
+    protected function recordOpenEvent(array $data, Request $request, string $eventType = 'opened'): void
     {
         $messageId = $data['mid'] ?? null;
         $recipientEmail = $data['r'] ?? null;
@@ -105,11 +118,23 @@ class EmailTrackingController extends Controller
         $ipAddress = $request->ip();
         $userAgent = $request->userAgent() ?? '';
 
+        $sentContext = $this->resolveSentContext((string) $messageId, $recipientEmail);
+        $canonicalMessageId = $sentContext['nylas_message_id'] ?? (string) $messageId;
+        $canonicalThreadId = $sentContext['nylas_thread_id'] ?? $threadId;
+
+        if (! $projectId && isset($sentContext['project_id'])) {
+            $projectId = $sentContext['project_id'];
+        }
+
+        if (! $emailTemplateName && isset($sentContext['email_template_name'])) {
+            $emailTemplateName = $sentContext['email_template_name'];
+        }
+
         // === SENDER DETECTION (multi-signal) ===
-        $senderDetection = $this->detectSender($messageId, $ipAddress, $recipientEmail);
+        $senderDetection = $this->detectSender($canonicalMessageId, $ipAddress, $recipientEmail);
         if ($senderDetection['is_sender']) {
             Log::debug('Email tracking: Skipping open - detected as sender', [
-                'message_id' => $messageId,
+                'message_id' => $canonicalMessageId,
                 'recipient' => $recipientEmail,
                 'ip' => $ipAddress,
                 'detection_reason' => $senderDetection['reason'],
@@ -120,22 +145,21 @@ class EmailTrackingController extends Controller
         // === BOT/PREFETCH DETECTION ===
         $isPrefetch = $this->isPrefetchRequest($userAgent, $request);
         if ($isPrefetch) {
-            Log::debug('Email tracking: Skipping prefetch/bot open', [
-                'message_id' => $messageId,
-                'recipient' => $recipientEmail,
-                'ip' => $ipAddress,
-                'user_agent' => substr($userAgent, 0, 100),
-            ]);
             return;
         }
 
         // === DUPLICATE DETECTION ===
-        $recentOpen = EmailTracking::query()
-            ->where('nylas_message_id', $messageId)
-            ->where('event_type', 'opened')
-            ->where('recipient_emails', json_encode([$recipientEmail]))
+        $recentOpenQuery = EmailTracking::query()
+            ->where('nylas_message_id', $canonicalMessageId)
+            ->where('event_type', $eventType)
             ->where('event_at', '>=', now()->subMinutes(5))
-            ->exists();
+            ;
+
+        if ($recipientEmail) {
+            $recentOpenQuery->whereJsonContains('recipient_emails', $recipientEmail);
+        }
+
+        $recentOpen = $recentOpenQuery->exists();
 
         if ($recentOpen) {
             Log::debug('Email tracking: Duplicate open suppressed', [
@@ -146,26 +170,71 @@ class EmailTrackingController extends Controller
         }
 
         // === RECORD THE OPEN ===
+        $proxy = $this->detectImageProxy($userAgent);
+
         EmailTracking::create([
             'project_id' => $projectId,
-            'nylas_message_id' => $messageId,
-            'nylas_thread_id' => $threadId,
+            'nylas_message_id' => $canonicalMessageId,
+            'nylas_thread_id' => $canonicalThreadId,
             'email_template_name' => $emailTemplateName,
-            'event_type' => 'opened',
+            'event_type' => $eventType,
             'recipient_emails' => $recipientEmail ? [$recipientEmail] : null,
             'ip_address' => $ipAddress,
             'user_agent' => $userAgent,
             'metadata' => [
                 'source' => 'tracking_pixel',
+                'pre_send_tracking_id' => str_starts_with((string) $messageId, 'pre_') ? (string) $messageId : null,
+                'image_proxy' => $proxy,
             ],
             'event_at' => now(),
         ]);
 
-        Log::info('Email tracking: Open recorded', [
-            'message_id' => $messageId,
+        Log::channel('nylas')->info('Email tracking: Open recorded', [
+            'message_id' => $canonicalMessageId,
+            'thread_id' => $canonicalThreadId,
             'recipient' => $recipientEmail,
             'project_id' => $projectId,
         ]);
+    }
+
+    /**
+     * Resolve a pre-send tracking id (pre_...) into the real Nylas message/thread id.
+     *
+     * @return array{nylas_message_id?:string,nylas_thread_id?:string,project_id?:int,email_template_name?:string}
+     */
+    protected function resolveSentContext(string $tokenMessageId, ?string $recipientEmail): array
+    {
+        $sent = EmailTracking::query()
+            ->where('event_type', 'sent')
+            ->where(function ($query) use ($tokenMessageId): void {
+                $query
+                    ->where('nylas_message_id', $tokenMessageId)
+                    ->orWhere('metadata->pre_send_tracking_id', $tokenMessageId);
+            })
+            ->orderByDesc('event_at')
+            ->first();
+
+        if (! $sent) {
+            return [];
+        }
+
+        if ($recipientEmail) {
+            $recipientHit = is_array($sent->recipient_emails)
+                && in_array($recipientEmail, $sent->recipient_emails, true);
+
+            if (! $recipientHit) {
+                return [];
+            }
+        }
+
+        $context = [
+            'nylas_message_id' => (string) ($sent->nylas_message_id ?? ''),
+            'nylas_thread_id' => $sent->nylas_thread_id ? (string) $sent->nylas_thread_id : null,
+            'project_id' => $sent->project_id ? (int) $sent->project_id : null,
+            'email_template_name' => $sent->email_template_name ? (string) $sent->email_template_name : null,
+        ];
+
+        return array_filter($context, static fn ($value) => $value !== null && $value !== '');
     }
 
     /**
@@ -224,25 +293,55 @@ class EmailTrackingController extends Controller
             return true;
         }
 
-        // Known prefetch/bot user agents
-        $prefetchPatterns = [
-            'GoogleImageProxy',
-            'YahooMailProxy',
-            'Outlook-iOS-Android',
-        ];
+        // We do NOT treat email image proxies as prefetch.
+        // Gmail/Yahoo/Outlook often proxy images for real human opens.
+
+        $ua = trim($userAgent);
 
         // Check for generic bot user agent (just "Mozilla/5.0" with nothing else meaningful)
-        if (preg_match('/^Mozilla\/5\.0\s*$/', $userAgent)) {
+        if ($ua !== '' && preg_match('/^Mozilla\/5\.0\s*$/', $ua)) {
             return true;
         }
 
-        foreach ($prefetchPatterns as $pattern) {
-            if (stripos($userAgent, $pattern) !== false) {
+        // Link preview bots and crawlers (not email clients).
+        $previewBots = [
+            'Slackbot',
+            'Discordbot',
+            'Twitterbot',
+            'facebookexternalhit',
+            'WhatsApp',
+            'TelegramBot',
+            'SkypeUriPreview',
+            'LinkedInBot',
+            'Google-InspectionTool',
+        ];
+
+        foreach ($previewBots as $pattern) {
+            if (stripos($ua, $pattern) !== false) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    protected function detectImageProxy(string $userAgent): ?string
+    {
+        $ua = $userAgent;
+
+        if (Str::contains($ua, 'GoogleImageProxy')) {
+            return 'google_image_proxy';
+        }
+
+        if (Str::contains($ua, 'YahooMailProxy')) {
+            return 'yahoo_mail_proxy';
+        }
+
+        if (Str::contains($ua, 'Outlook-iOS-Android')) {
+            return 'outlook_mobile_proxy';
+        }
+
+        return null;
     }
 
     /**

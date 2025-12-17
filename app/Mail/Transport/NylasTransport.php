@@ -150,11 +150,14 @@ class NylasTransport extends AbstractTransport
     {
         $recipients = $email->getTo();
 
+        $nylasOpensTrackingEnabled = (bool) config('nylas.tracking.opens', false);
+        $customPixelOpensEnabled = (bool) config('nylas.tracking.custom_pixel_opens', true);
+
         $payload = [
             'subject' => $email->getSubject(),
             'to' => $this->formatAddresses($recipients),
             'tracking_options' => [
-                'opens' => false,  // Disable Nylas tracking - we use our own
+                'opens' => $nylasOpensTrackingEnabled,
                 'links' => true,
                 'thread_replies' => true,
             ],
@@ -186,8 +189,10 @@ class NylasTransport extends AbstractTransport
             $htmlBody = nl2br(e($textBody));
         }
 
-        // Inject tracking pixels for each recipient
-        if ($htmlBody && $preSendTrackingId) {
+        // Inject tracking pixels for each recipient.
+        // If Nylas opens tracking is enabled, we disable custom open pixels to avoid double-counting
+        // and to allow Nylas to provide per-recipient attribution.
+        if ($htmlBody && $preSendTrackingId && $customPixelOpensEnabled && ! $nylasOpensTrackingEnabled) {
             $htmlBody = $this->injectTrackingPixels(
                 $htmlBody,
                 $preSendTrackingId,

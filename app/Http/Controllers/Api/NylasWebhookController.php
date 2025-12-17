@@ -77,6 +77,7 @@ class NylasWebhookController extends Controller
         }
 
         $handlers = [
+            'message.opened' => 'handleMessageOpened',
             'message.link_clicked' => 'handleMessageLinkClicked',
             'thread.replied' => 'handleThreadReplied',
             'message.bounced' => 'handleMessageBounced',
@@ -89,7 +90,7 @@ class NylasWebhookController extends Controller
 
         // Webhook types we intentionally ignore (no logging needed)
         $ignoredTypes = [
-            'message.opened', // Opens tracked via custom pixel (EmailTrackingController)
+            // (none)
         ];
 
         if (isset($handlers[$type])) {
@@ -163,7 +164,54 @@ class NylasWebhookController extends Controller
             userAgent: $eventDetails['user_agent'],
             linkUrl: $linkUrl,
             isMessageLevel: $isMessageLevel,
-            isMessageLevel: $isMessageLevel ?? false,
+        );
+    }
+
+    /**
+     * Track open events emitted by Nylas.
+     *
+     * Important: We only persist opens when Nylas provides recipient_email.
+     * When recipient_email is missing, it's typically the sender viewing the message in Sent.
+     */
+    protected function handleMessageOpened(array $payload): void
+    {
+        if (! (bool) config('nylas.tracking.opens', false)) {
+            return;
+        }
+
+        $data = $payload['data'] ?? [];
+        $object = $data['object'] ?? [];
+
+        $messageId = $this->resolveMessageId($object);
+
+        if (! $messageId) {
+            Log::channel('nylas')->warning('Missing message_id in message.opened webhook', ['payload' => $payload]);
+            return;
+        }
+
+        $recipientEmail = $object['recipient_email'] ?? null;
+        if (! is_string($recipientEmail) || $recipientEmail === '') {
+            // Sender view (or unknown) - ignore.
+            return;
+        }
+
+        $eventDetails = $this->extractEventDetails($data);
+
+        if ($this->isPrefetchOrAutomatedOpen($eventDetails, $object)) {
+            return;
+        }
+
+        $metadata = $this->buildMetadata($data, $object, $eventDetails);
+        $metadata['source'] = 'nylas_webhook';
+
+        $this->storeTrackingEvents(
+            messageId: $messageId,
+            eventType: 'opened',
+            recipients: collect([$recipientEmail]),
+            metadata: $metadata,
+            eventAt: $eventDetails['timestamp'],
+            ip: $eventDetails['ip'],
+            userAgent: $eventDetails['user_agent'],
         );
     }
 

@@ -34,4 +34,15 @@ return [
     // OAuth scopes required (space separated). Ensure the Nylas Connect flow requests email.send for forwarding.
     // Add NYLAS_SCOPES to .env to override if needed.
     'scopes' => env('NYLAS_SCOPES') ?: 'email.read_only email.send',
+
+    // Tracking configuration
+    // Note: "opens" tracking is still pixel-based under the hood, but Nylas may provide per-recipient
+    // attribution via webhook payloads (e.g. recipient_email). When enabled, we can ignore sender opens.
+    'tracking' => [
+        'opens' => (bool) env('NYLAS_TRACK_OPENS', env('APP_ENV') === 'production'),
+        'custom_pixel_opens' => (bool) env('NYLAS_CUSTOM_PIXEL_OPENS', true),
+        // When true and opens=true, we will also record custom pixel opens as event_type=opened_pixel
+        // so you can compare them against Nylas webhook opens.
+        'compare_opens' => (bool) env('NYLAS_COMPARE_OPENS', env('APP_ENV') === 'production'),
+    ],
 ];
