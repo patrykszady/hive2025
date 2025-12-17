@@ -8,16 +8,16 @@
     "packages": [
         {
             "name": "2captcha/2captcha",
-            "version": "v1.2.1",
+            "version": "v1.2.2",
             "source": {
                 "type": "git",
                 "url": "https://github.com/2captcha/2captcha-php.git",
-                "reference": "fa04f580fb32867204be0d5cae8891cc29f4e92e"
+                "reference": "75dbb12449c0247fa396f7056453bc42002580c5"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/2captcha/2captcha-php/zipball/fa04f580fb32867204be0d5cae8891cc29f4e92e",
-                "reference": "fa04f580fb32867204be0d5cae8891cc29f4e92e",
+                "url": "https://api.github.com/repos/2captcha/2captcha-php/zipball/75dbb12449c0247fa396f7056453bc42002580c5",
+                "reference": "75dbb12449c0247fa396f7056453bc42002580c5",
                 "shasum": ""
             },
             "require": {
@@ -75,9 +75,9 @@
             ],
             "support": {
                 "issues": "https://github.com/2captcha/2captcha-php/issues",
-                "source": "https://github.com/2captcha/2captcha-php/tree/v1.2.1"
+                "source": "https://github.com/2captcha/2captcha-php/tree/v1.2.2"
             },
-            "time": "2024-12-04T10:25:37+00:00"
+            "time": "2025-12-17T15:26:14+00:00"
         },
         {
             "name": "aws/aws-crt-php",
@@ -135,16 +135,16 @@
         },
         {
             "name": "aws/aws-sdk-php",
-            "version": "3.367.2",
+            "version": "3.368.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/aws/aws-sdk-php.git",
-                "reference": "3dc26d6f26a4d6380d82b2be4d8ae80fefb23d71"
+                "reference": "f7916ea27b5214fa1b4b6ecfa0c3f549b388a70c"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/aws/aws-sdk-php/zipball/3dc26d6f26a4d6380d82b2be4d8ae80fefb23d71",
-                "reference": "3dc26d6f26a4d6380d82b2be4d8ae80fefb23d71",
+                "url": "https://api.github.com/repos/aws/aws-sdk-php/zipball/f7916ea27b5214fa1b4b6ecfa0c3f549b388a70c",
+                "reference": "f7916ea27b5214fa1b4b6ecfa0c3f549b388a70c",
                 "shasum": ""
             },
             "require": {
@@ -226,9 +226,9 @@
             "support": {
                 "forum": "https://github.com/aws/aws-sdk-php/discussions",
                 "issues": "https://github.com/aws/aws-sdk-php/issues",
-                "source": "https://github.com/aws/aws-sdk-php/tree/3.367.2"
+                "source": "https://github.com/aws/aws-sdk-php/tree/3.368.1"
             },
-            "time": "2025-12-12T19:14:10+00:00"
+            "time": "2025-12-17T19:06:44+00:00"
         },
         {
             "name": "barryvdh/laravel-snappy",
@@ -2350,16 +2350,16 @@
         },
         {
             "name": "http-interop/http-factory-guzzle",
-            "version": "1.2.0",
+            "version": "1.2.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/http-interop/http-factory-guzzle.git",
-                "reference": "8f06e92b95405216b237521cc64c804dd44c4a81"
+                "reference": "c2c859ceb05c3f42e710b60555f4c35b6a4a3995"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/http-interop/http-factory-guzzle/zipball/8f06e92b95405216b237521cc64c804dd44c4a81",
-                "reference": "8f06e92b95405216b237521cc64c804dd44c4a81",
+                "url": "https://api.github.com/repos/http-interop/http-factory-guzzle/zipball/c2c859ceb05c3f42e710b60555f4c35b6a4a3995",
+                "reference": "c2c859ceb05c3f42e710b60555f4c35b6a4a3995",
                 "shasum": ""
             },
             "require": {
@@ -2402,9 +2402,9 @@
             ],
             "support": {
                 "issues": "https://github.com/http-interop/http-factory-guzzle/issues",
-                "source": "https://github.com/http-interop/http-factory-guzzle/tree/1.2.0"
+                "source": "https://github.com/http-interop/http-factory-guzzle/tree/1.2.1"
             },
-            "time": "2021-07-21T13:50:14+00:00"
+            "time": "2025-12-15T11:28:16+00:00"
         },
         {
             "name": "ilovepdf/ilovepdf-php",
@@ -2743,16 +2743,16 @@
         },
         {
             "name": "laravel/framework",
-            "version": "v12.42.0",
+            "version": "v12.43.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/laravel/framework.git",
-                "reference": "509b33095564c5165366d81bbaa0afaac28abe75"
+                "reference": "195b893593a9298edee177c0844132ebaa02102f"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/laravel/framework/zipball/509b33095564c5165366d81bbaa0afaac28abe75",
-                "reference": "509b33095564c5165366d81bbaa0afaac28abe75",
+                "url": "https://api.github.com/repos/laravel/framework/zipball/195b893593a9298edee177c0844132ebaa02102f",
+                "reference": "195b893593a9298edee177c0844132ebaa02102f",
                 "shasum": ""
             },
             "require": {
@@ -2961,20 +2961,20 @@
                 "issues": "https://github.com/laravel/framework/issues",
                 "source": "https://github.com/laravel/framework"
             },
-            "time": "2025-12-09T15:51:23+00:00"
+            "time": "2025-12-16T18:53:08+00:00"
         },
         {
             "name": "laravel/horizon",
-            "version": "v5.40.2",
+            "version": "v5.41.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/laravel/horizon.git",
-                "reference": "005e5638478db9e25f7ae5cfb30c56846fbad793"
+                "reference": "eb6738246ab9d3450b705126b9794dfb0ea371b3"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/laravel/horizon/zipball/005e5638478db9e25f7ae5cfb30c56846fbad793",
-                "reference": "005e5638478db9e25f7ae5cfb30c56846fbad793",
+                "url": "https://api.github.com/repos/laravel/horizon/zipball/eb6738246ab9d3450b705126b9794dfb0ea371b3",
+                "reference": "eb6738246ab9d3450b705126b9794dfb0ea371b3",
                 "shasum": ""
             },
             "require": {
@@ -3038,22 +3038,22 @@
             ],
             "support": {
                 "issues": "https://github.com/laravel/horizon/issues",
-                "source": "https://github.com/laravel/horizon/tree/v5.40.2"
+                "source": "https://github.com/laravel/horizon/tree/v5.41.0"
             },
-            "time": "2025-11-28T20:12:12+00:00"
+            "time": "2025-12-14T15:55:28+00:00"
         },
         {
             "name": "laravel/nightwatch",
-            "version": "v1.19.0",
+            "version": "v1.21.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/laravel/nightwatch.git",
-                "reference": "5d3e86a84514a470d1827ab5771ae38e46b24773"
+                "reference": "48a0108537929c894cae9239c940aeac99d1dc7a"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/laravel/nightwatch/zipball/5d3e86a84514a470d1827ab5771ae38e46b24773",
-                "reference": "5d3e86a84514a470d1827ab5771ae38e46b24773",
+                "url": "https://api.github.com/repos/laravel/nightwatch/zipball/48a0108537929c894cae9239c940aeac99d1dc7a",
+                "reference": "48a0108537929c894cae9239c940aeac99d1dc7a",
                 "shasum": ""
             },
             "require": {
@@ -3086,7 +3086,7 @@
                 "orchestra/testbench-core": "^8.0|^9.0|^10.0",
                 "orchestra/workbench": "^8.0|^9.0|^10.0",
                 "phpstan/phpstan": "^1.0",
-                "phpunit/phpunit": "^10.0|^11.0",
+                "phpunit/phpunit": "^10.0|^11.0|^12.0",
                 "singlestoredb/singlestoredb-laravel": "^1.0|^2.0",
                 "spatie/laravel-ignition": "^2.0",
                 "symfony/mailer": "^6.0|^7.0",
@@ -3131,7 +3131,7 @@
                 "issues": "https://github.com/laravel/nightwatch/issues",
                 "source": "https://github.com/laravel/nightwatch"
             },
-            "time": "2025-11-25T07:22:08+00:00"
+            "time": "2025-12-16T07:34:09+00:00"
         },
         {
             "name": "laravel/prompts",
@@ -3257,16 +3257,16 @@
         },
         {
             "name": "laravel/scout",
-            "version": "v10.22.1",
+            "version": "v10.23.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/laravel/scout.git",
-                "reference": "13ed8e0eeaddd894bf360b85cb873980de19dbaf"
+                "reference": "fb6d94cfc5708e4202dc00d46e61af0b9f35b03c"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/laravel/scout/zipball/13ed8e0eeaddd894bf360b85cb873980de19dbaf",
-                "reference": "13ed8e0eeaddd894bf360b85cb873980de19dbaf",
+                "url": "https://api.github.com/repos/laravel/scout/zipball/fb6d94cfc5708e4202dc00d46e61af0b9f35b03c",
+                "reference": "fb6d94cfc5708e4202dc00d46e61af0b9f35b03c",
                 "shasum": ""
             },
             "require": {
@@ -3333,7 +3333,7 @@
                 "issues": "https://github.com/laravel/scout/issues",
                 "source": "https://github.com/laravel/scout"
             },
-            "time": "2025-11-25T15:19:35+00:00"
+            "time": "2025-12-16T15:43:03+00:00"
         },
         {
             "name": "laravel/serializable-closure",
@@ -4023,16 +4023,16 @@
         },
         {
             "name": "livewire/flux",
-            "version": "v2.9.2",
+            "version": "v2.10.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/livewire/flux.git",
-                "reference": "6572847f70a18e7cf136bb31201d4064f5c8ade1"
+                "reference": "52a639e889c9616b60f3619e9e282a162efdd0cc"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/livewire/flux/zipball/6572847f70a18e7cf136bb31201d4064f5c8ade1",
-                "reference": "6572847f70a18e7cf136bb31201d4064f5c8ade1",
+                "url": "https://api.github.com/repos/livewire/flux/zipball/52a639e889c9616b60f3619e9e282a162efdd0cc",
+                "reference": "52a639e889c9616b60f3619e9e282a162efdd0cc",
                 "shasum": ""
             },
             "require": {
@@ -4045,7 +4045,7 @@
                 "symfony/console": "^6.0|^7.0"
             },
             "conflict": {
-                "livewire/blaze": "<0.1.0"
+                "livewire/blaze": "<1.0.0"
             },
             "type": "library",
             "extra": {
@@ -4083,25 +4083,25 @@
             ],
             "support": {
                 "issues": "https://github.com/livewire/flux/issues",
-                "source": "https://github.com/livewire/flux/tree/v2.9.2"
+                "source": "https://github.com/livewire/flux/tree/v2.10.0"
             },
-            "time": "2025-12-04T17:09:39+00:00"
+            "time": "2025-12-17T02:28:28+00:00"
         },
         {
             "name": "livewire/flux-pro",
-            "version": "2.9.2",
+            "version": "2.10.0",
             "dist": {
                 "type": "zip",
-                "url": "https://composer.fluxui.dev/download/a0843966-980f-472e-ac02-3fff5b0dd424/flux-pro-2.9.2.zip",
-                "reference": "9a53a80c3922fc44df95b0653164efc1180019f2",
-                "shasum": "e45cbb87c256d537ec5d0bb9c62e7da59dd4893a"
+                "url": "https://composer.fluxui.dev/download/a09c79fb-0bec-4d1c-abe5-3b477dadcc04/flux-pro-2.10.0.zip",
+                "reference": "80595513ff5c6223be89f7a701b4c5dcfe760823",
+                "shasum": "72b9936fe575244df10b5427794f573a5c21ea88"
             },
             "require": {
                 "illuminate/console": "^10.0|^11.0|^12.0",
                 "illuminate/support": "^10.0|^11.0|^12.0",
                 "illuminate/view": "^10.0|^11.0|^12.0",
                 "laravel/prompts": "^0.1.24|^0.2|^0.3",
-                "livewire/flux": "2.9.2|dev-main",
+                "livewire/flux": "2.10.0|dev-main",
                 "livewire/livewire": "^3.7.0|^4.0",
                 "php": "^8.1",
                 "symfony/console": "^6.0|^7.0"
@@ -4158,20 +4158,20 @@
                 "livewire",
                 "ui"
             ],
-            "time": "2025-12-05T01:19:53+00:00"
+            "time": "2025-12-17T02:40:19+00:00"
         },
         {
             "name": "livewire/livewire",
-            "version": "v3.7.1",
+            "version": "v3.7.2",
             "source": {
                 "type": "git",
                 "url": "https://github.com/livewire/livewire.git",
-                "reference": "214da8f3a1199a88b56ab2fe901d4a607f784805"
+                "reference": "b13a1e50aad156d382815c64e6c7da4a4fd08407"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/livewire/livewire/zipball/214da8f3a1199a88b56ab2fe901d4a607f784805",
-                "reference": "214da8f3a1199a88b56ab2fe901d4a607f784805",
+                "url": "https://api.github.com/repos/livewire/livewire/zipball/b13a1e50aad156d382815c64e6c7da4a4fd08407",
+                "reference": "b13a1e50aad156d382815c64e6c7da4a4fd08407",
                 "shasum": ""
             },
             "require": {
@@ -4226,7 +4226,7 @@
             "description": "A front-end framework for Laravel.",
             "support": {
                 "issues": "https://github.com/livewire/livewire/issues",
-                "source": "https://github.com/livewire/livewire/tree/v3.7.1"
+                "source": "https://github.com/livewire/livewire/tree/v3.7.2"
             },
             "funding": [
                 {
@@ -4234,7 +4234,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2025-12-03T22:41:13+00:00"
+            "time": "2025-12-17T01:53:59+00:00"
         },
         {
             "name": "log1x/laravel-webfonts",
@@ -7963,16 +7963,16 @@
         },
         {
             "name": "psy/psysh",
-            "version": "v0.12.16",
+            "version": "v0.12.18",
             "source": {
                 "type": "git",
                 "url": "https://github.com/bobthecow/psysh.git",
-                "reference": "ee6d5028be4774f56c6c2c85ec4e6bc9acfe6b67"
+                "reference": "ddff0ac01beddc251786fe70367cd8bbdb258196"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/bobthecow/psysh/zipball/ee6d5028be4774f56c6c2c85ec4e6bc9acfe6b67",
-                "reference": "ee6d5028be4774f56c6c2c85ec4e6bc9acfe6b67",
+                "url": "https://api.github.com/repos/bobthecow/psysh/zipball/ddff0ac01beddc251786fe70367cd8bbdb258196",
+                "reference": "ddff0ac01beddc251786fe70367cd8bbdb258196",
                 "shasum": ""
             },
             "require": {
@@ -8036,9 +8036,9 @@
             ],
             "support": {
                 "issues": "https://github.com/bobthecow/psysh/issues",
-                "source": "https://github.com/bobthecow/psysh/tree/v0.12.16"
+                "source": "https://github.com/bobthecow/psysh/tree/v0.12.18"
             },
-            "time": "2025-12-07T03:39:01+00:00"
+            "time": "2025-12-17T14:35:46+00:00"
         },
         {
             "name": "railsware/mailtrap-php",
