@@ -656,7 +656,7 @@ class ReceiptController extends Controller
         return $result['analyzeResult'];
     }
 
-    public function ocr_extract($ocr_receipt_extracted, $expense_amount = null, $email = null)
+    public function ocr_extract($ocr_receipt_extracted, $expense_amount = null, $email = null, ?Receipt $receipt = null)
     {
         if (isset($ocr_receipt_extracted['document'])) {
             $ocr_receipt_extract_prefix = $ocr_receipt_extracted['document'];
@@ -740,6 +740,32 @@ class ReceiptController extends Controller
 
         $purchase_order_number = count($values) > 1 ? implode(', ', $values) : implode('', $values);
 
+        // Fallback: attempt PO extraction from receipt text when Azure doesn't map it.
+        // Prefer receipt template options->po_regex when present, otherwise use a generic PO/Job pattern.
+        if ($purchase_order_number === '' && isset($ocr_receipt_extracted['content']) && is_string($ocr_receipt_extracted['content'])) {
+            $content = $ocr_receipt_extracted['content'];
+
+            $poRegex = null;
+            if ($receipt instanceof Receipt) {
+                $poRegex = Arr::get($receipt->options ?? [], 'po_regex');
+            }
+
+            if (! is_string($poRegex) || $poRegex === '') {
+                $poRegex = '/(?:PO\s*\/\s*JOB\s*NAME|PO\s*NUMBER|PO\s*#|P\.?O\.?\s*#?|JOB\s*NAME)\s*:\s*([^\r\n]{1,80})/i';
+            }
+
+            if (preg_match($poRegex, $content, $matches)) {
+                $candidate = trim($matches[1] ?? $matches[0] ?? '');
+
+                // Clean common trailing fragments
+                $candidate = preg_replace('/\s{2,}.*/', '', $candidate) ?? $candidate;
+
+                if ($candidate !== '') {
+                    $purchase_order_number = $candidate;
+                }
+            }
+        }
+        
         //TOTAL TAX
         if (isset($ocr_receipt_extract_prefix['TotalTax'])) {
             if (isset($ocr_receipt_extract_prefix['TotalTax']['valueCurrency'])) {

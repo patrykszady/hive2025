@@ -705,7 +705,7 @@ class CompanyEmailController extends Controller
                 $ocr_receipt_extracted = app(\App\Http\Controllers\ReceiptController::class)->azure_receipts($ocr_path, $doc_type, $document_model);
 
                 //pass receipt info to ocr_extract method
-                $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->ocr_extract($ocr_receipt_extracted, null, 'email');
+                $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->ocr_extract($ocr_receipt_extracted, null, 'email', $receipt);
              
                 $receipt_account = ReceiptAccount::withoutGlobalScopes()
                     ->where('belongs_to_vendor_id', $companyEmail->vendor_id)
@@ -1218,6 +1218,8 @@ class CompanyEmailController extends Controller
                             ->whereBetween('date', [$duplicate_start_date, $duplicate_end_date])
                             ->get();
 
+                        $didAttachReceipt = false;
+
                         if ($duplicates->count() >= 1) {
                             foreach ($duplicates as $duplicate) {
                                 $duplicate->date_diff = Carbon::parse($ocr_receipt_data['fields']['transaction_date'])
@@ -1274,6 +1276,13 @@ class CompanyEmailController extends Controller
                                     $transaction->expense_id = $expense->id;
                                     $transaction->save();
                                 }
+                            }
+
+                            // Attach the currently processed receipt to the chosen expense.
+                            // (saveExpenseReceipt moves the temp file into receipts/ and persists the receipt record)
+                            if (isset($expense) && $expense instanceof Expense) {
+                                $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, null, true);
+                                $didAttachReceipt = true;
                             }
                         } elseif ($duplicates->isEmpty()) {
                             // Check if there are partial expenses that sum to this receipt total
@@ -1382,7 +1391,9 @@ class CompanyEmailController extends Controller
                         }
 
                         // Finally, save the expense receipt (this method moves the file from _temp_ocr to receipts).
-                        $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename);
+                        if (! $didAttachReceipt) {
+                            $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename);
+                        }
                     } // end foreach attachment
 
                     // After processing all attachments for the message, move the email to the HIVE folder.
@@ -1397,7 +1408,7 @@ class CompanyEmailController extends Controller
         }
     }
 
-    public function saveExpenseReceipt($expense_id, $ocr_receipt_data, $ocr_filename, $message = NULL)
+    public function saveExpenseReceipt($expense_id, $ocr_receipt_data, $ocr_filename, $message = NULL, bool $skipDuplicateCheck = false)
     {
         if ($message) {
             if (!empty($message['attachments'])) {
@@ -1468,7 +1479,7 @@ class CompanyEmailController extends Controller
                             : $current_ocr_data['fields'];
                         
                         // Check for duplicate receipts based on content and invoice number
-                        $isDuplicate = $this->isDuplicateReceipt($expense_id, $receipt_html, $receipt_items);
+                        $isDuplicate = $skipDuplicateCheck ? false : $this->isDuplicateReceipt($expense_id, $receipt_html, $receipt_items);
                         
                         if ($isDuplicate) {
                             // Skip saving this duplicate receipt and clean up temp file
@@ -1510,7 +1521,7 @@ class CompanyEmailController extends Controller
         $destinationPath = 'receipts/' . $filename;
 
         // Check for duplicate receipts based on content and invoice number
-        $isDuplicate = $this->isDuplicateReceipt($expense_id, $ocr_receipt_data['content'], $ocr_receipt_data['fields']);
+        $isDuplicate = $skipDuplicateCheck ? false : $this->isDuplicateReceipt($expense_id, $ocr_receipt_data['content'], $ocr_receipt_data['fields']);
         
         if ($isDuplicate) {
             // Skip saving this duplicate receipt and clean up temp file

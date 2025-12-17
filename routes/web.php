@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\CompanyEmailController;
+use App\Http\Controllers\ExpenseAutoMatchController;
 use App\Http\Controllers\LeadController;
 use App\Http\Controllers\ReceiptController;
 use App\Http\Controllers\TransactionController;
@@ -96,6 +97,9 @@ if(env('APP_ENV') === 'local') {
     Route::get('/fetch-receipt-messages', [CompanyEmailController::class, 'fetchReceiptMessages'])->name('fetch.receipt.messages');
     Route::get('transaction_vendor_bulk_match', [TransactionController::class, 'transaction_vendor_bulk_match'])->name('transaction_vendor_bulk_match');
     Route::get('/insurance-mailbox/messages', [VendorDocsController::class, 'fetchMessagesFromInsuranceMailbox']);
+
+    Route::get('/match-expense-po-to-project', [ExpenseAutoMatchController::class, 'runNoProjectExpenseAutoMatchRoute'])
+        ->name('match_expense_po_to_project');
 }
 
 Route::get('/company-email/login', [CompanyEmailController::class, 'nylasLogin'])->name('company-email.login');

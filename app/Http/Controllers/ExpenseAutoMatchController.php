@@ -7,10 +7,18 @@ use App\Models\Expense;
 use App\Models\Project;
 use App\Models\ProjectStatus;
 use App\Models\Vendor;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
 
 class ExpenseAutoMatchController extends Controller
 {
+    public function runNoProjectExpenseAutoMatchRoute(): JsonResponse
+    {
+        $this->runNoProjectExpenseAutoMatch();
+
+        return response()->json(['ok' => true]);
+    }
+
     /**
      * Auto-match "No Project" expenses to a distribution or project based on purchase order.
      */
@@ -451,9 +459,9 @@ class ExpenseAutoMatchController extends Controller
                         continue;
                     }
 
-                    $purchaseOrder = $this->extractPurchaseOrder($expense);
+                    $purchaseOrderCandidates = $this->extractPurchaseOrderCandidates($expense);
 
-                    if (! $purchaseOrder) {
+                    if ($purchaseOrderCandidates === []) {
                         $emitDecision($onDecision, [
                             'belongs_to_vendor_id' => (int) $hiveVendor->id,
                             'expense_vendor_id' => (int) $expenseVendorId,
@@ -501,19 +509,47 @@ class ExpenseAutoMatchController extends Controller
                             ->all();
                     }
 
-                    $distributionMatch = $distributionIndex !== []
-                        ? $this->matchPurchaseOrderToDistribution($purchaseOrder, $distributionIndex)
-                        : null;
-                    $projectMatch = $matchPurchaseOrderToProjectAtDate($purchaseOrder, $expense->date);
+                    $best = null;
+                    $bestPurchaseOrder = null;
+                    $ambiguousBest = null;
+                    $ambiguousPurchaseOrder = null;
 
-                    $best = $this->pickBestMatch($distributionMatch, $projectMatch);
+                    foreach ($purchaseOrderCandidates as $purchaseOrder) {
+                        $distributionMatch = $distributionIndex !== []
+                            ? $this->matchPurchaseOrderToDistribution($purchaseOrder, $distributionIndex)
+                            : null;
+                        $projectMatch = $matchPurchaseOrderToProjectAtDate($purchaseOrder, $expense->date);
+
+                        $candidateBest = $this->pickBestMatch($distributionMatch, $projectMatch);
+
+                        if (! $candidateBest) {
+                            continue;
+                        }
+
+                        if (($candidateBest['ambiguous'] ?? false) === true) {
+                            if ($ambiguousBest === null) {
+                                $ambiguousBest = $candidateBest;
+                                $ambiguousPurchaseOrder = $purchaseOrder;
+                            }
+                            continue;
+                        }
+
+                        $best = $candidateBest;
+                        $bestPurchaseOrder = $purchaseOrder;
+                        break;
+                    }
+
+                    if (! $best && $ambiguousBest) {
+                        $best = $ambiguousBest;
+                        $bestPurchaseOrder = $ambiguousPurchaseOrder;
+                    }
 
                     if (! $best) {
                         $emitDecision($onDecision, [
                             'belongs_to_vendor_id' => (int) $hiveVendor->id,
                             'expense_vendor_id' => (int) $expenseVendorId,
                             'expense_id' => (int) $expense->id,
-                            'purchase_order' => (string) $purchaseOrder,
+                            'purchase_order' => implode(' | ', $purchaseOrderCandidates),
                             'result' => 'skipped',
                             'reason' => 'no_match',
                         ]);
@@ -536,7 +572,7 @@ class ExpenseAutoMatchController extends Controller
                             'belongs_to_vendor_id' => (int) $hiveVendor->id,
                             'expense_vendor_id' => (int) $expenseVendorId,
                             'expense_id' => (int) $expense->id,
-                            'purchase_order' => (string) $purchaseOrder,
+                            'purchase_order' => (string) ($bestPurchaseOrder ?? ''),
                             'result' => 'skipped',
                             'reason' => 'ambiguous',
                             'matched_type' => (string) ($best['type'] ?? ''),
@@ -557,7 +593,7 @@ class ExpenseAutoMatchController extends Controller
                             'belongs_to_vendor_id' => (int) $hiveVendor->id,
                             'expense_vendor_id' => (int) $expenseVendorId,
                             'expense_id' => (int) $expense->id,
-                            'purchase_order' => (string) $purchaseOrder,
+                            'purchase_order' => (string) ($bestPurchaseOrder ?? ''),
                             'result' => 'matched',
                             'reason' => null,
                             'matched_type' => 'distribution',
@@ -591,7 +627,7 @@ class ExpenseAutoMatchController extends Controller
                             'belongs_to_vendor_id' => (int) $hiveVendor->id,
                             'expense_vendor_id' => (int) $expenseVendorId,
                             'expense_id' => (int) $expense->id,
-                            'purchase_order' => (string) $purchaseOrder,
+                            'purchase_order' => (string) ($bestPurchaseOrder ?? ''),
                             'result' => 'matched',
                             'reason' => null,
                             'matched_type' => 'project',
@@ -784,6 +820,20 @@ class ExpenseAutoMatchController extends Controller
 
     protected function extractPurchaseOrder(Expense $expense): ?string
     {
+        return $this->extractPurchaseOrderCandidates($expense)[0] ?? null;
+    }
+
+    /**
+     * Return ordered PO candidates for matching.
+     *
+     * Priority:
+     * 1) Structured receipt_items.purchase_order
+     * 2) receipt_items.handwritten_notes
+     *
+     * @return array<int, string>
+     */
+    protected function extractPurchaseOrderCandidates(Expense $expense): array
+    {
         if (! $expense->relationLoaded('receipts')) {
             $expense->load('receipts');
         }
@@ -792,43 +842,52 @@ class ExpenseAutoMatchController extends Controller
             ->sortByDesc(fn ($r) => $r->created_at ?? $r->id)
             ->values();
 
-        foreach ($receipts as $receipt) {
-            $items = $receipt->receipt_items ?? null;
-            if (! is_array($items)) {
-                continue;
+        $candidates = [];
+        $seen = [];
+
+        $pushCandidate = function (string $value) use (&$candidates, &$seen): void {
+            $key = mb_strtolower(trim($value));
+            if ($key === '' || isset($seen[$key])) {
+                return;
             }
 
-            if (! array_key_exists('purchase_order', $items)) {
-                $rawPurchaseOrder = null;
-            } else {
-                $rawPurchaseOrder = $items['purchase_order'];
+            $seen[$key] = true;
+            $candidates[] = $value;
+        };
+
+        $extractValues = function (mixed $raw): array {
+            if ($raw === null) {
+                return [];
             }
 
-            $values = $rawPurchaseOrder === null
-                ? []
-                : (is_array($rawPurchaseOrder) ? $rawPurchaseOrder : [$rawPurchaseOrder]);
+            return is_array($raw) ? $raw : [$raw];
+        };
 
-            foreach ($values as $value) {
-                $candidate = $this->normalizePurchaseOrderCandidate($value);
-                if ($candidate !== null) {
-                    return $candidate;
+        $collect = function (string $field) use ($receipts, $extractValues, $pushCandidate): void {
+            foreach ($receipts as $receipt) {
+                $items = $receipt->receipt_items ?? null;
+                if (! is_array($items)) {
+                    continue;
+                }
+
+                $raw = array_key_exists($field, $items)
+                    ? $items[$field]
+                    : null;
+
+                foreach ($extractValues($raw) as $value) {
+                    $candidate = $this->normalizePurchaseOrderCandidate($value);
+                    if ($candidate !== null) {
+                        $pushCandidate($candidate);
+                    }
                 }
             }
+        };
 
-            // Some OCR pipelines store the PO in handwritten notes instead of the structured purchase_order field.
-            // If purchase_order yields nothing usable, fall back to handwritten_notes.
-            $rawHandwritten = $items['handwritten_notes'] ?? null;
-            $handwrittenValues = is_array($rawHandwritten) ? $rawHandwritten : ($rawHandwritten === null ? [] : [$rawHandwritten]);
+        // Global priority across all receipts: purchase_order first, then handwritten_notes.
+        $collect('purchase_order');
+        $collect('handwritten_notes');
 
-            foreach ($handwrittenValues as $note) {
-                $candidate = $this->normalizePurchaseOrderCandidate($note);
-                if ($candidate !== null) {
-                    return $candidate;
-                }
-            }
-        }
-
-        return null;
+        return $candidates;
     }
 
     protected function normalizePurchaseOrderCandidate(mixed $value): ?string
