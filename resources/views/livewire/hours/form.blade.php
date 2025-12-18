@@ -22,15 +22,6 @@
                 <flux:subheading><i>Pick Date to add or edit Daily Hours for {{auth()->user()->first_name}}</i></flux:subheading>
 
                 <flux:separator variant="subtle" />
-
-                {{-- Show skeleton while waiting for browser date sync --}}
-                @if(! $selected_date)
-                    <div class="space-y-4">
-                        <flux:skeleton class="h-64" animate="shimmer" />
-                    </div>
-                @else
-
-                {{-- Show calendar when ready --}}
                 <div>
                     <flux:calendar
                         wire:model.live="selected_date"
@@ -40,18 +31,8 @@
                         unavailable="{{$this->days}}"
                     />
                 </div>
-                @endif
 
                 <flux:separator variant="subtle" />
-
-                {{-- Show skeleton buttons while waiting for browser date sync --}}
-                @if(! $selected_date)
-                    <flux:skeleton class="h-10 w-full" animate="shimmer" />
-                    <flux:skeleton class="h-10 w-full" animate="shimmer" />
-                    <flux:skeleton class="h-10 w-full" animate="shimmer" />
-                @else
-
-                {{-- Show real buttons when ready --}}
                 <div class="space-y-2 mt-2">
                     @if($this->selected_date)
                         <flux:button class="w-full cursor-default"><b>{{$this->selected_date->format('D M jS, Y')}}</b></flux:button>
@@ -59,34 +40,12 @@
                     <flux:button class="w-full cursor-default">Hours | <b>{{$this->hours_count}}</b></flux:button>
                     <flux:button type="submit" variant="primary" class="w-full">{{$view_text['button_text']}}</flux:button>
                 </div>
-                @endif
 
                 <flux:error name="check_total_min" />
             </flux:card>
 		</div>
 
         <div class="col-span-4 space-y-2 lg:col-span-2">
-            {{-- Show skeleton while waiting for browser date sync --}}
-            @if(! $selected_date)
-            <div class="space-y-2">
-                <flux:card class="space-y-2">
-                    <flux:heading size="lg">Projects</flux:heading>
-                    <flux:separator variant="subtle" />
-                    <flux:skeleton class="h-20" animate="shimmer" />
-                    <flux:separator variant="subtle" />
-                    <flux:skeleton class="h-20" animate="shimmer" />
-                    <flux:separator variant="subtle" />
-                    <flux:skeleton class="h-20" animate="shimmer" />
-                </flux:card>
-                
-                <flux:card>
-                    <flux:heading size="lg">Different Project</flux:heading>
-                    <flux:skeleton class="h-12 mt-2" animate="shimmer" />
-                </flux:card>
-            </div>
-            @else
-
-            {{-- Show real content when ready --}}
             <div class="space-y-2">
             @if($selected_date)
                 <flux:card class="space-y-2">
@@ -166,7 +125,6 @@
             </div>
             @endif
             </div>
-            @endif
 		</div>
 	</div>
 </form>

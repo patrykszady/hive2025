@@ -25,7 +25,12 @@ function getCachedBrowserTimezone() {
         // ignore
     }
 
-    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    let timezone = 'UTC';
+    try {
+        timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    } catch {
+        timezone = 'UTC';
+    }
 
     try {
         window.localStorage?.setItem('hive.browser.timezone', timezone);
@@ -103,6 +108,26 @@ function syncBrowserTimezoneToServer() {
     window.__hiveBrowserTimezoneSync = { timezone, date };
     setLastBrowserSyncPayload({ timezone, date, syncedAt: Date.now() });
     window.Livewire.dispatchTo('browser-timezone', 'browser-timezone-sync', { timezone, date });
+}
+
+function scheduleBrowserTimezoneSync({ maxAttempts = 25, delayMs = 100 } = {}) {
+    let attempts = 0;
+
+    const attempt = () => {
+        attempts += 1;
+
+        try {
+            syncBrowserTimezoneToServer();
+        } catch (error) {
+            console.error('Error syncing browser timezone:', error);
+        }
+
+        if ((!window.Livewire || typeof window.Livewire.dispatchTo !== 'function') && attempts < maxAttempts) {
+            window.setTimeout(attempt, delayMs);
+        }
+    };
+
+    attempt();
 }
 
 document.addEventListener('alpine:init', () => {
@@ -214,7 +239,17 @@ document.addEventListener('alpine:init', () => {
 // Keep server-side session in sync with browser timezone/date.
 // livewire:navigated fires on initial page load and after wire:navigate.
 document.addEventListener('livewire:navigated', () => {
-    syncBrowserTimezoneToServer();
+    scheduleBrowserTimezoneSync();
+});
+
+// Some browsers (notably Safari) can be finicky about when Livewire navigation events
+// fire on the first page load. Make sure we also attempt a sync during init/load.
+document.addEventListener('livewire:init', () => {
+    scheduleBrowserTimezoneSync();
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+    scheduleBrowserTimezoneSync();
 });
 
 function getRelativeTime(date) {

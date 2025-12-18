@@ -57,7 +57,7 @@ class HourCreate extends Component
     {
         $this->authorize('create', Hour::class);
 
-        $this->selected_date = null;
+        $this->selectedDate(Carbon::today(config('app.timezone'))->format('Y-m-d'));
 
         $confirmed_weeks =
             Timesheet::orderBy('date', 'DESC')
