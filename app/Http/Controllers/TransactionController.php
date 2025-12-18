@@ -985,7 +985,11 @@ class TransactionController extends Controller
                 ->whereNull('paid_by') // Exclude employee reimbursements - they match to check, not bank transactions
                 ->whereDate('date', '>=', Carbon::now()->subMonths(12))
                 // Only fetch expenses that are not fully matched (transaction sum < expense amount)
-                ->whereRaw('(SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE transactions.expense_id = expenses.id AND transactions.deleted_at IS NULL) < expenses.amount')
+                ->whereRaw("(
+                    (expenses.amount >= 0 AND (SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE transactions.expense_id = expenses.id AND transactions.deleted_at IS NULL) < expenses.amount)
+                    OR
+                    (expenses.amount < 0 AND (SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE transactions.expense_id = expenses.id AND transactions.deleted_at IS NULL) > expenses.amount)
+                )")
                 ->orderBy('date', 'DESC')
                 ->cursor();
 
@@ -1031,9 +1035,15 @@ class TransactionController extends Controller
                     ->whereNull('expense_id')
                     ->whereNull('deleted_at')
                     ->where('amount', '!=', '0.00')
-                    // Only consider transactions that could plausibly match the outstanding amount
-                    // For subset sum, individual transactions must be <= outstanding amount
-                    ->where('amount', '<=', abs($transaction_amount_outstanding))
+                    // Only consider transactions that could plausibly match the outstanding amount.
+                    // Keep the sign consistent (refunds/returns match to negative, purchases to positive).
+                    ->when($transaction_amount_outstanding < 0, function ($query) use ($transaction_amount_outstanding) {
+                        return $query->where('amount', '<', 0)
+                            ->where('amount', '>=', $transaction_amount_outstanding);
+                    }, function ($query) use ($transaction_amount_outstanding) {
+                        return $query->where('amount', '>', 0)
+                            ->where('amount', '<=', $transaction_amount_outstanding);
+                    })
                     // Exclude bank transfers from expense matching - these are not retail purchases
                     ->where(function ($query) {
                         $query->whereNull('plaid_merchant_description')
