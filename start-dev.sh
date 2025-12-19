@@ -98,6 +98,7 @@ fi
 
 # 6) Hookdeck tunnel (optional)
 HOOKDECK_URL=""
+HOOKDECK_MAILTRAP_URL=""
 HOOKDECK_BIN="$(command -v hookdeck 2>/dev/null)"
 if [ -z "$HOOKDECK_BIN" ]; then
   HOOKDECK_BIN=$(ls "$HOME"/.nvm/versions/node/*/bin/hookdeck 2>/dev/null | tail -n1)
@@ -116,6 +117,27 @@ if [ -n "$HOOKDECK_BIN" ]; then
     --path /webhooks/nylas \
     --output compact >>"$HOOKDECK_LOG" 2>&1 &
   HOOKDECK_PID=$!
+
+  # Mailtrap webhook tunnel (for local webhook testing)
+  "$HOOKDECK_BIN" connection upsert mailtrap-local \
+    --source-name mailtrap --source-type WEBHOOK \
+    --destination-name mailtrap-local-cli --destination-type CLI \
+    --destination-cli-path / >>"$HOOKDECK_LOG" 2>&1
+
+  MAILTRAP_TOKEN=$(grep -E '^MAILTRAP_WEBHOOK_TOKEN=' .env 2>/dev/null | cut -d '=' -f2- | tr -d '\r' | xargs)
+  if [ -z "$MAILTRAP_TOKEN" ]; then
+    MAILTRAP_TOKEN="dev-mailtrap-webhook-token"
+  fi
+
+  # Important: Mailtrap is configured with a full path like:
+  #   https://hkdk.events/<id>/webhooks/mailtrap/<token>
+  # Hookdeck forwards the incoming request path to localhost, so we must listen on "/"
+  # to avoid ending up with duplicated paths like:
+  #   /webhooks/mailtrap/<token>/webhooks/mailtrap/<token>
+  nohup "$HOOKDECK_BIN" listen 8000 mailtrap mailtrap-local \
+    --path "/" \
+    --output compact >>"$HOOKDECK_LOG" 2>&1 &
+  HOOKDECK_MAILTRAP_PID=$!
   sleep 2
   if ps -p "$HOOKDECK_PID" >/dev/null 2>&1; then
     if [ -f "$HOOKDECK_LOG" ]; then
@@ -129,6 +151,19 @@ if [ -n "$HOOKDECK_BIN" ]; then
   else
     echo "❌ Hookdeck tunnel failed → check logs: $HOOKDECK_LOG"
     HOOKDECK_PID=""
+  fi
+
+  if ps -p "${HOOKDECK_MAILTRAP_PID:-0}" >/dev/null 2>&1; then
+    if [ -f "$HOOKDECK_LOG" ]; then
+      HOOKDECK_MAILTRAP_URL=$(grep -o 'https://hkdk\.events/[^ ]*' "$HOOKDECK_LOG" | tail -1)
+    fi
+    if [ -n "$HOOKDECK_MAILTRAP_URL" ]; then
+      echo "✅ Mailtrap webhook URL (paste into Mailtrap): ${HOOKDECK_MAILTRAP_URL}/webhooks/mailtrap/${MAILTRAP_TOKEN}"
+    else
+      echo "✅ Mailtrap Hookdeck listener started (pid: ${HOOKDECK_MAILTRAP_PID:-n/a}) → see $HOOKDECK_LOG"
+    fi
+  else
+    echo "❌ Mailtrap Hookdeck listener failed → check logs: $HOOKDECK_LOG"
   fi
 else
   echo "ℹ️  Hookdeck CLI not found, skipping tunnel setup"
@@ -145,4 +180,8 @@ echo "   • Vite (pid: ${VITE_PID:-n/a}) → http://127.0.0.1:5173"
 if [ -n "$HOOKDECK_PID" ]; then
   HOOKDECK_FALLBACK=${HOOKDECK_URL:-"see ${HOOKDECK_LOG:-$LOG_DIR/hookdeck.log}"}
   echo "   • Hookdeck (pid: $HOOKDECK_PID) → $HOOKDECK_FALLBACK"
+fi
+
+if [ -n "${HOOKDECK_MAILTRAP_PID:-}" ]; then
+  echo "   • Hookdeck Mailtrap (pid: $HOOKDECK_MAILTRAP_PID)"
 fi

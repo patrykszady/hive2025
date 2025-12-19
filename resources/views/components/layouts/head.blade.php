@@ -51,10 +51,18 @@
             grid-gap: 0 !important;
             column-gap: 0 !important;
             row-gap: 0 !important;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            min-height: 100dvh;
         }
 
-        /* Fullscreen planner pages: Flux applies padding on the real main element */
+        /* Fullscreen planner pages: make main flex + zero padding so children can stretch */
         body.h-screen [data-flux-main] {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            flex: 1 1 auto;
             padding: 0 !important;
         }
 

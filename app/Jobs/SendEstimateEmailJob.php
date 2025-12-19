@@ -17,6 +17,7 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Throwable;
 
 class SendEstimateEmailJob implements ShouldQueue
@@ -40,6 +41,8 @@ class SendEstimateEmailJob implements ShouldQueue
 
     public function handle(): void
     {
+        $trackingProvider = (string) config('email_tracking.provider', 'nylas');
+
         $estimate = Estimate::withoutGlobalScopes()->find($this->estimateId);
         if (! $estimate) {
             Log::warning('SendEstimateEmailJob skipped missing estimate', [
@@ -57,10 +60,16 @@ class SendEstimateEmailJob implements ShouldQueue
             return;
         }
 
-        // Load the CompanyEmail to get the grant_id
         $companyEmail = CompanyEmail::find($this->companyEmailId);
-        if (!$companyEmail || !$companyEmail->grant_id) {
-            Log::warning('SendEstimateEmailJob missing company email or grant_id', [
+        if (! $companyEmail) {
+            Log::warning('SendEstimateEmailJob missing company email', [
+                'company_email_id' => $this->companyEmailId,
+            ]);
+            return;
+        }
+
+        if ($trackingProvider !== 'mailtrap' && ! $companyEmail->grant_id) {
+            Log::warning('SendEstimateEmailJob missing grant_id for Nylas', [
                 'company_email_id' => $this->companyEmailId,
             ]);
             return;
@@ -121,7 +130,8 @@ class SendEstimateEmailJob implements ShouldQueue
             ->all();
 
         if (app()->environment('local', 'development')) {
-            $sanitizedRecipients = ['patryk.szady@live.com'];
+            $devEmail = (string) config('mail.dev_email');
+            $sanitizedRecipients = $devEmail !== '' ? [$devEmail] : ['patryk.szady@live.com'];
         }
 
         if (empty($sanitizedRecipients)) {
@@ -139,21 +149,60 @@ class SendEstimateEmailJob implements ShouldQueue
         }
 
         try {
-            // Configure the Nylas mailer with this specific grant_id
-            config(['mail.mailers.nylas.grant_id' => $companyEmail->grant_id]);
-            
-            Mail::mailer('nylas')
+            $trackingId = (string) Str::uuid();
+
+            $replyToEmail = $this->fromEmail;
+
+            $fromEmail = $this->fromEmail;
+            if ($trackingProvider === 'mailtrap' && app()->environment('local', 'development')) {
+                $safeFromEmail = (string) config('mail.from.address');
+                if ($safeFromEmail !== '') {
+                    $fromEmail = $safeFromEmail;
+                }
+            }
+
+            if ($trackingProvider === 'mailtrap') {
+                $mailer = (string) config('email_tracking.mailtrap_mailer', 'mailtrap-sdk');
+            } else {
+                $mailer = 'nylas';
+                // Configure the Nylas mailer with this specific grant_id
+                config(['mail.mailers.nylas.grant_id' => $companyEmail->grant_id]);
+            }
+
+            $mailable = new EstimateMail(
+                estimate: $estimate,
+                user: $user,
+                fromEmail: $fromEmail,
+                replyToEmail: $replyToEmail,
+                emailSubject: $this->subject,
+                emailBody: $this->body,
+                attachmentPaths: $attachmentPaths,
+                emailTemplateName: $this->emailTemplateName,
+                senderIp: $this->senderIp,
+                trackingId: $trackingId,
+            );
+
+            if ($trackingProvider === 'mailtrap') {
+                $mailable->withSymfonyMessage(function (\Symfony\Component\Mime\Email $message) use ($trackingId, $estimate): void {
+                    $headers = $message->getHeaders();
+
+                    $headers->add(new \Mailtrap\EmailHeader\CustomVariableHeader('tracking_id', $trackingId));
+
+                    if ($estimate->project_id) {
+                        $headers->add(new \Mailtrap\EmailHeader\CustomVariableHeader('project_id', (string) $estimate->project_id));
+                    }
+
+                    $headers->add(new \Mailtrap\EmailHeader\CustomVariableHeader('estimate_id', (string) $estimate->id));
+
+                    if (is_string($this->emailTemplateName) && $this->emailTemplateName !== '') {
+                        $headers->add(new \Mailtrap\EmailHeader\CustomVariableHeader('email_template_name', $this->emailTemplateName));
+                    }
+                });
+            }
+
+            Mail::mailer($mailer)
                 ->to($sanitizedRecipients)
-                ->send(new EstimateMail(
-                    estimate: $estimate,
-                    user: $user,
-                    fromEmail: $this->fromEmail,
-                    emailSubject: $this->subject,
-                    emailBody: $this->body,
-                    attachmentPaths: $attachmentPaths,
-                    emailTemplateName: $this->emailTemplateName,
-                    senderIp: $this->senderIp,
-                ));
+                ->send($mailable);
 
         } catch (Throwable $exception) {
             Log::error('SendEstimateEmailJob failed to send email', [

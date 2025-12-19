@@ -12,9 +12,7 @@ class VerifyCsrfToken extends Middleware
      * @var array
      */
     protected $except = [
-        'webhooks/nylas',
         'webhooks/plaid',
-        // '/webbooks/*',
-        // 'webbooks/*',
+        'webhooks/mailtrap/*',
     ];
 }

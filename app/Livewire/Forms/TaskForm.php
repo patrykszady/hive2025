@@ -17,6 +17,9 @@ class TaskForm extends Form
     #[Validate('array')]
     public $dates = [];
 
+    #[Validate('nullable|array')]
+    public $time_settings = [];
+
     #[Validate('required')]
     public $project_id = null;
 
@@ -91,6 +94,9 @@ class TaskForm extends Form
             $this->dates = $dates;
         }
 
+        // Load time settings from options
+        $this->time_settings = $task->options->time_settings ?? [];
+
         // Load dependencies without eager loading users
         $this->refreshTaskWithDependencies($task->id);
     }
@@ -118,6 +124,7 @@ class TaskForm extends Form
         $options = (array) ($this->task->options ?? []);
         $options['dates'] = $this->dates;
         $options['checklist'] = $this->checklist;
+        $options['time_settings'] = $this->time_settings;
 
         $this->task->update([
             'start_date' => $startDate,
@@ -167,6 +174,7 @@ class TaskForm extends Form
         $options = [
             'dates' => $this->dates,
             'checklist' => $this->checklist,
+            'time_settings' => $this->time_settings,
         ];
 
         $task = Task::create([

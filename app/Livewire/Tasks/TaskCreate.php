@@ -98,6 +98,64 @@ class TaskCreate extends Component
     }
 
     /**
+     * Clear all time settings for all selected dates
+     */
+    public function clearAllTimes()
+    {
+        $this->form->time_settings = [];
+    }
+
+    /**
+     * Update end time to 2 hours after start time
+     */
+    public function updateEndTime($date)
+    {
+        if (!isset($this->form->time_settings[$date]['start_time'])) {
+            return;
+        }
+
+        $startTime = $this->form->time_settings[$date]['start_time'];
+        
+        try {
+            $endTime = Carbon::createFromFormat('H:i', $startTime)
+                ->addHours(2)
+                ->format('H:i');
+            
+            $this->form->time_settings[$date]['end_time'] = $endTime;
+            
+            // Apply same times to all other dates
+            $this->applyTimeToAllDates($date);
+        } catch (\Exception $e) {
+            // If parsing fails, do nothing
+        }
+    }
+
+    /**
+     * Apply time settings from one date to all other dates
+     */
+    public function applyTimeToAllDates($sourceDate)
+    {
+        if (!isset($this->form->time_settings[$sourceDate])) {
+            return;
+        }
+
+        $sourceSettings = $this->form->time_settings[$sourceDate];
+
+        foreach ($this->form->dates as $date) {
+            if ($date !== $sourceDate) {
+                $this->form->time_settings[$date] = array_merge(
+                    $this->form->time_settings[$date] ?? [],
+                    [
+                        'use_time' => $sourceSettings['use_time'] ?? false,
+                        'start_time' => $sourceSettings['start_time'] ?? null,
+                        'end_time' => $sourceSettings['end_time'] ?? null,
+                    ]
+                );
+            }
+        }
+    }
+
+    /**
      * Set the view text configuration based on mode
      */
     private function setupViewText(string $mode)

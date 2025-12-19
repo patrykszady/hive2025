@@ -8,8 +8,8 @@ use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\PlaidTransactionSyncController;
 use App\Http\Controllers\Api\PlaidWebhookController;
 use App\Http\Controllers\VendorDocsController;
-use App\Http\Controllers\Api\NylasWebhookController;
 use App\Http\Controllers\Api\EmailTrackingController;
+use App\Http\Controllers\Api\MailtrapWebhookController;
 
 use App\Livewire\Auth\CantLogin;
 use App\Livewire\Auth\Login;
@@ -143,9 +143,8 @@ Route::get('transactions/bulk_match', BulkMatchIndex::class)->name('transactions
 // Plaid webhooks (no auth required - Plaid sends these directly)
 Route::post('webhooks/plaid', [PlaidWebhookController::class, 'handle'])->name('webhooks.plaid');
 
-// Nylas webhooks (no auth required - Nylas sends these directly)
-Route::get('webhooks/nylas', [NylasWebhookController::class, 'verify'])->name('webhooks.nylas.verify');
-Route::post('webhooks/nylas', [NylasWebhookController::class, 'handle'])->name('webhooks.nylas');
+// Mailtrap webhooks (no auth required - token is validated in the URL)
+Route::post('webhooks/mailtrap/{token}', [MailtrapWebhookController::class, 'handle'])->name('webhooks.mailtrap');
 
 // Email tracking pixel (no auth required - loaded by email clients)
 Route::get('t/o', [EmailTrackingController::class, 'trackOpen'])->name('email.track.open');

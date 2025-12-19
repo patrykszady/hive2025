@@ -172,11 +172,18 @@ class EstimateEmail extends Component
 
         $user = auth()->user();
 
+        $trackingProvider = (string) config('email_tracking.provider', 'nylas');
+
         // Find the CompanyEmail matching the selected "from" address
-        $companyEmail = CompanyEmail::where('email', $this->from)
-            ->where('vendor_id', $this->estimate->vendor->id)
-            ->whereNotNull('grant_id')
-            ->first();
+        $companyEmailQuery = CompanyEmail::query()
+            ->where('email', $this->from)
+            ->where('vendor_id', $this->estimate->vendor->id);
+
+        if ($trackingProvider !== 'mailtrap') {
+            $companyEmailQuery->whereNotNull('grant_id');
+        }
+
+        $companyEmail = $companyEmailQuery->first();
 
         if (!$companyEmail) {
             Flux::toast(
@@ -184,7 +191,9 @@ class EstimateEmail extends Component
                 position: 'top right',
                 variant: 'danger',
                 heading: 'Email Not Sent',
-                text: 'The selected sender email is not connected to Nylas.',
+                text: $trackingProvider === 'mailtrap'
+                    ? 'The selected sender email is not available.'
+                    : 'The selected sender email is not connected to Nylas.',
             );
 
             return;

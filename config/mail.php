@@ -2,12 +2,15 @@
 
 return [
 
-    'default' => env('MAIL_MAILER', 'smtp'),
+    'default' => env('MAIL_MAILER', 'mailtrap-sdk'),
 
     'from' => [
         'address' => env('MAIL_FROM_ADDRESS'),
         'name' => env('MAIL_FROM_NAME'),
     ],
+
+    // Where to redirect all outgoing mail in local/development.
+    'dev_email' => env('MAIL_DEV_EMAIL'),
 
     'mailers' => [
         'nylas' => [
@@ -15,8 +18,13 @@ return [
             'grant_id' => null, // Will be set dynamically per CompanyEmail
         ],
 
+        'mailtrap-sdk' => [
+            'transport' => 'mailtrap-sdk',
+        ],
+
         'mailtrap' => [
-            'transport' => 'mailtrap',
+            // Alias to the Mailtrap API transport to avoid accidentally using SMTP.
+            'transport' => 'mailtrap-sdk',
         ],
 
         'smtp' => [

@@ -307,83 +307,124 @@ class NylasService
             $query['fields'] = 'include_headers';
         }
 
-        return $this->retryWithBackoff(function () use ($grantId, $query, $withHeaders, $requestedFolder, $resolvedFolder) {
-            try {
-                $response = $this->httpClient->get($this->baseUrl . "/grants/{$grantId}/messages", [
-                    'headers' => [
-                        'Authorization' => 'Bearer ' . $this->apiKey,
-                        'Accept' => 'application/json',
-                        'Content-Type' => 'application/json',
-                    ],
-                    'query' => $query,
-                ]);
+        $configuredLimit = (int) config('nylas.message_limit', 15);
+        if (isset($query['limit']) && is_numeric($query['limit']) && $configuredLimit > 0) {
+            $query['limit'] = min((int) $query['limit'], $configuredLimit);
+        }
 
-                $decoded = json_decode($response->getBody(), true) ?? [];
+        $limitCandidates = [];
+        if (isset($query['limit']) && is_numeric($query['limit'])) {
+            $limitCandidates[] = (int) $query['limit'];
+        }
 
-                if (!is_array($decoded)) {
-                    Log::channel('nylas')->warning('Unexpected getMessages response payload', [
-                        'grant_id' => $grantId,
-                        'with_headers' => $withHeaders,
-                        'query_params' => $query,
-                        'requested_folder' => $requestedFolder,
-                        'resolved_folder' => $resolvedFolder,
+        foreach ([15, 10, 5] as $fallbackLimit) {
+            if ($configuredLimit > 0) {
+                $fallbackLimit = min($fallbackLimit, $configuredLimit);
+            }
+            $limitCandidates[] = $fallbackLimit;
+        }
+
+        $limitCandidates = array_values(array_unique(array_filter($limitCandidates, static fn ($v) => is_int($v) && $v > 0)));
+
+        $attemptedLimits = [];
+        $lastResult = null;
+        foreach ($limitCandidates as $limit) {
+            $attemptedLimits[] = $limit;
+            $queryAttempt = $query;
+            $queryAttempt['limit'] = $limit;
+
+            $result = $this->retryWithBackoff(function () use ($grantId, $queryAttempt, $withHeaders) {
+                try {
+                    $response = $this->httpClient->get($this->baseUrl . "/grants/{$grantId}/messages", [
+                        'headers' => [
+                            'Authorization' => 'Bearer ' . $this->apiKey,
+                            'Accept' => 'application/json',
+                            'Content-Type' => 'application/json',
+                        ],
+                        'query' => $queryAttempt,
                     ]);
+
+                    $decoded = json_decode($response->getBody(), true) ?? [];
 
                     return [
                         'status' => $response->getStatusCode(),
+                        'data' => is_array($decoded) ? ($decoded['data'] ?? []) : [],
+                        'next_cursor' => is_array($decoded) ? ($decoded['next_cursor'] ?? null) : null,
+                        'request_id' => is_array($decoded)
+                            ? ($decoded['request_id'] ?? ($response->hasHeader('x-request-id') ? $response->getHeader('x-request-id')[0] : null))
+                            : ($response->hasHeader('x-request-id') ? $response->getHeader('x-request-id')[0] : null),
+                    ];
+                } catch (RequestException $e) {
+                    $statusCode = $e->hasResponse() ? $e->getResponse()->getStatusCode() : 500;
+                    $response = $e->getResponse();
+
+                    return [
+                        'status' => $statusCode,
                         'data' => [],
-                        'next_cursor' => null,
-                        'request_id' => $response->hasHeader('x-request-id')
+                        'error' => ApiErrorFormatter::format($e, []),
+                        'request_id' => $response && $response->hasHeader('x-request-id')
                             ? $response->getHeader('x-request-id')[0]
                             : null,
                     ];
                 }
+            });
 
-                $data = $decoded['data'] ?? [];
+            $lastResult = $result;
 
-                return [
-                    'status' => $response->getStatusCode(),
-                    'data' => $data,
-                    'next_cursor' => $decoded['next_cursor'] ?? null,
-                    'request_id' => $decoded['request_id'] ?? ($response->hasHeader('x-request-id')
-                        ? $response->getHeader('x-request-id')[0]
-                        : null),
+            if (!is_array($result) || !isset($result['status'])) {
+                return $result;
+            }
+
+            $status = (int) $result['status'];
+            if ($status === 504) {
+                continue;
+            }
+
+            if ($status >= 400) {
+                $isRetriable = in_array($status, [503, 429, 502], true);
+                $context = [
+                    'grant_id' => $grantId,
+                    'with_headers' => $withHeaders,
+                    'query_params' => $queryAttempt,
+                    'requested_folder' => $requestedFolder,
+                    'resolved_folder' => $resolvedFolder,
                 ];
-            } catch (RequestException $e) {
-                $statusCode = $e->hasResponse() ? $e->getResponse()->getStatusCode() : 500;
-                $isRetriableError = in_array($statusCode, [503, 429, 502, 504]);
-                
-                // Only log as error if not retriable, otherwise warning since retries were exhausted
-                if ($isRetriableError) {
-                    Log::channel('nylas')->warning('Get Messages API Error (Retries Exhausted)', ApiErrorFormatter::format($e, [
-                        'grant_id' => $grantId,
-                        'with_headers' => $withHeaders,
-                        'query_params' => $query,
-                        'requested_folder' => $requestedFolder,
-                        'resolved_folder' => $resolvedFolder,
+
+                if ($isRetriable) {
+                    Log::channel('nylas')->warning('Get Messages API Error (Retries Exhausted)', array_merge($context, [
+                        'request_id' => $result['request_id'] ?? null,
+                        'error' => $result['error'] ?? null,
                     ]));
                 } else {
-                    Log::channel('nylas')->error('Get Messages API Error', ApiErrorFormatter::format($e, [
-                        'grant_id' => $grantId,
-                        'with_headers' => $withHeaders,
-                        'query_params' => $query,
-                        'requested_folder' => $requestedFolder,
-                        'resolved_folder' => $resolvedFolder,
+                    Log::channel('nylas')->error('Get Messages API Error', array_merge($context, [
+                        'request_id' => $result['request_id'] ?? null,
+                        'error' => $result['error'] ?? null,
                     ]));
                 }
-                
-                $response = $e->getResponse();
-
-                return [
-                    'status' => $statusCode,
-                    'data' => [],
-                    'error' => $e->getMessage(),
-                    'request_id' => $response && $response->hasHeader('x-request-id')
-                        ? $response->getHeader('x-request-id')[0]
-                        : null,
-                ];
             }
-        });
+
+            return $result;
+        }
+
+        if (is_array($lastResult) && isset($lastResult['status']) && (int) $lastResult['status'] === 504) {
+            Log::channel('nylas')->warning('Get Messages API Timeout (Provider 504)', [
+                'grant_id' => $grantId,
+                'with_headers' => $withHeaders,
+                'query_params' => $query,
+                'attempted_limits' => $attemptedLimits,
+                'requested_folder' => $requestedFolder,
+                'resolved_folder' => $resolvedFolder,
+                'request_id' => $lastResult['request_id'] ?? null,
+                'error' => $lastResult['error'] ?? null,
+            ]);
+        }
+
+        return $lastResult ?? [
+            'status' => 500,
+            'data' => [],
+            'next_cursor' => null,
+            'request_id' => null,
+        ];
     }
 
     protected function resolveFolderIdentifier(string $grantId, string $identifier, ?\App\Models\CompanyEmail $companyEmail = null): ?string
@@ -1004,45 +1045,95 @@ class NylasService
             ? $receivedAfter
             : Carbon::now()->subYear();
         
-        // Build base query params - will paginate through all results
+        // Build base query params.
+        // Use field selection to reduce response size and avoid provider timeouts.
+        // We'll only fetch full message bodies later if/when needed.
+        $perPageLimit = (int) config('nylas.message_limit', 15);
         $baseQuery = [
-            'limit' => 50, // Per-page limit to avoid timeouts
-            'received_after' => $lookbackDate->timestamp,
+            'limit' => $perPageLimit,
+            'select' => 'id,subject,from,to,date,has_attachment,thread_id',
         ];
-        
-        // Only add 'in' if we have the inbox folder ID
+
         if ($inboxFolderId) {
             $baseQuery['in'] = $inboxFolderId;
         }
-        
-        // Paginate through all messages in date range
+
+        // Chunk the lookback window to reduce chance of provider 504 timeouts.
+        // Nylas supports both received_after and received_before on the messages list endpoint.
+        $windowStart = $lookbackDate->copy()->startOfDay();
+        $windowEnd = Carbon::now();
+        if ($windowStart->greaterThanOrEqualTo($windowEnd)) {
+            return [];
+        }
+
+        $chunkSeconds = 60 * 60 * 24; // 24h
+        $minChunkSeconds = 60 * 60;   // 1h
+        $maxPagesPerChunk = 10;
+
         $allMessages = [];
-        $nextCursor = null;
-        $maxPages = 10; // Safety limit: 10 pages * 50 = 500 messages max
-        $page = 0;
-        
-        do {
-            $query = $baseQuery;
-            if ($nextCursor) {
-                $query['page_token'] = $nextCursor;
-            }
-            
-            $resp = $this->getMessages($grantId, $query, false, $companyEmail);
-            $messages = $resp['data'] ?? [];
-            
-            if (!is_array($messages)) {
-                break;
-            }
-            
-            foreach ($messages as $m) {
-                if (isset($m['id'])) {
-                    $allMessages[$m['id']] = $m; // De-dupe by ID
+
+        $fetchChunk = function (Carbon $chunkStart, Carbon $chunkEnd) use (
+            $grantId,
+            $companyEmail,
+            $baseQuery,
+            $maxPagesPerChunk,
+            $minChunkSeconds,
+            &$fetchChunk,
+            &$allMessages
+        ): void {
+            $query = $baseQuery + [
+                'received_after' => $chunkStart->timestamp,
+                'received_before' => $chunkEnd->timestamp,
+            ];
+
+            $nextCursor = null;
+            $page = 0;
+
+            do {
+                $pageQuery = $query;
+                if ($nextCursor) {
+                    $pageQuery['page_token'] = $nextCursor;
                 }
+
+                $resp = $this->getMessages($grantId, $pageQuery, false, $companyEmail);
+                $status = (int) ($resp['status'] ?? 200);
+
+                if ($status === 504) {
+                    $seconds = max(0, $chunkEnd->timestamp - $chunkStart->timestamp);
+                    if ($seconds > $minChunkSeconds) {
+                        $midpoint = $chunkStart->copy()->addSeconds((int) floor($seconds / 2));
+                        $fetchChunk($chunkStart, $midpoint);
+                        $fetchChunk($midpoint, $chunkEnd);
+                    }
+                    return;
+                }
+
+                $messages = $resp['data'] ?? [];
+                if (!is_array($messages)) {
+                    return;
+                }
+
+                foreach ($messages as $m) {
+                    if (isset($m['id'])) {
+                        $allMessages[$m['id']] = $m;
+                    }
+                }
+
+                $nextCursor = $resp['next_cursor'] ?? null;
+                $page++;
+            } while ($nextCursor && $page < $maxPagesPerChunk);
+        };
+
+        $chunkEnd = $windowEnd->copy();
+        while ($chunkEnd->greaterThan($windowStart)) {
+            $chunkStart = $chunkEnd->copy()->subSeconds($chunkSeconds);
+            if ($chunkStart->lessThan($windowStart)) {
+                $chunkStart = $windowStart->copy();
             }
-            
-            $nextCursor = $resp['next_cursor'] ?? null;
-            $page++;
-        } while ($nextCursor && $page < $maxPages);
+
+            $fetchChunk($chunkStart, $chunkEnd);
+            $chunkEnd = $chunkStart;
+        }
 
         // Fast filtering using pre-built criteria
         $aggregated = [];
@@ -1053,16 +1144,11 @@ class NylasService
             
             $fromEmail = strtolower($m['from'][0]['email'] ?? '');
             $messageSubject = strtolower($m['subject'] ?? '');
-            $messageBody = $m['body'] ?? '';
             
-            // Check if this is a forwarded email and extract original sender
-            // Look for email address immediately after "From:" in the body
-            if (preg_match('/From:.*?([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i', $messageBody, $matches)) {
-                $originalFromEmail = strtolower(trim($matches[1]));
-                if (!empty($originalFromEmail) && filter_var($originalFromEmail, FILTER_VALIDATE_EMAIL)) {
-                    $fromEmail = $originalFromEmail;
-                }
-            }
+            // NOTE: We intentionally do not use message bodies here (we use field selection
+            // to keep list requests small and reduce provider timeouts). If a message
+            // matches criteria, sendForwardCopy() will fetch the full message.
+            // (Forwarded email parsing happens later when forwarding, using full message fetch.)
 
             // Clean subject - remove Fw:, Fwd:, Re: prefixes for matching
             $cleanSubject = preg_replace('/^(fw:|fwd:|re:)\s*/i', '', $messageSubject);

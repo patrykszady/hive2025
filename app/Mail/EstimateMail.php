@@ -30,11 +30,13 @@ class EstimateMail extends Mailable
         public Estimate $estimate,
         public User $user,
         public string $fromEmail,
+        public ?string $replyToEmail,
         public string $emailSubject,
         public string $emailBody,
         public array $attachmentPaths = [],
         public ?string $emailTemplateName = null,
         public ?string $senderIp = null,
+        public ?string $trackingId = null,
     ) {
     }
 
@@ -47,8 +49,11 @@ class EstimateMail extends Mailable
             ?? trim($this->user->first_name.' '.$this->user->last_name)
             ?: config('app.name');
 
+        $replyToEmail = (string) ($this->replyToEmail ?? '');
+
         return new Envelope(
             from: new Address($this->fromEmail, $fromName),
+            replyTo: $replyToEmail !== '' ? [new Address($replyToEmail, $fromName)] : [],
             subject: $this->emailSubject,
             metadata: [
                 'estimate_id' => $this->estimate->id,
@@ -95,11 +100,13 @@ class EstimateMail extends Mailable
             $metadata['sender_ip'] = $this->senderIp;
         }
 
-        return new Headers(
-            text: [
-                'X-Email-Metadata' => json_encode($metadata),
-            ],
-        );
+        if ($this->trackingId) {
+            $metadata['tracking_id'] = $this->trackingId;
+        }
+
+        return new Headers(text: [
+            'X-Email-Metadata' => json_encode($metadata),
+        ]);
     }
 
     /**
@@ -130,10 +137,43 @@ class EstimateMail extends Mailable
 
         if ($normalized === null) {
             // If HTML parsing failed, treat as plain text and convert newlines to <br> tags
-            return $this->normalizedHtmlBodyCache = '<div style="margin:0;padding:0;white-space:pre-wrap;">' . nl2br(e($html)) . '</div>';
+            $body = '<div style="margin:0;padding:0;white-space:pre-wrap;">' . nl2br(e($html)) . '</div>';
+
+            return $this->normalizedHtmlBodyCache = $this->wrapHtmlDocumentWithUtf8($body);
         }
 
-        return $this->normalizedHtmlBodyCache = '<div style="margin:0;padding:0;">' . $normalized . '</div>';
+        $body = '<div style="margin:0;padding:0;">' . $normalized . '</div>';
+
+        return $this->normalizedHtmlBodyCache = $this->wrapHtmlDocumentWithUtf8($body);
+    }
+
+
+    protected function wrapHtmlDocumentWithUtf8(string $bodyHtml): string
+    {
+        // If the editor/body already provides a full HTML document, don't double-wrap it.
+        // We still ensure a UTF-8 declaration is present.
+        if (preg_match('/<\s*html\b/i', $bodyHtml) === 1) {
+            if (preg_match('/<\s*meta\s+charset\s*=\s*["\']?utf-?8["\']?/i', $bodyHtml) === 1) {
+                return $bodyHtml;
+            }
+
+            // Try to inject <meta charset="utf-8"> into an existing <head>.
+            if (preg_match('/<\s*head\b[^>]*>/i', $bodyHtml) === 1) {
+                return preg_replace(
+                    '/(<\s*head\b[^>]*>)/i',
+                    '$1<meta charset="utf-8">',
+                    $bodyHtml,
+                    1
+                ) ?? $bodyHtml;
+            }
+
+            // No <head> tag; prepend a charset meta.
+            return '<meta charset="utf-8">' . $bodyHtml;
+        }
+
+        return '<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"></head><body style="margin:0;padding:0;">'
+            . $bodyHtml
+            . '</body></html>';
     }
 
     protected function normalizeParagraphSpacing(string $html): ?string
@@ -154,14 +194,64 @@ class EstimateMail extends Mailable
             return null;
         }
 
-        // Reset margins on all paragraphs (email clients handle spacing inconsistently)
-        foreach ($document->getElementsByTagName('p') as $paragraph) {
-            $style = (string) $paragraph->getAttribute('style');
+        // If the body is comprised of <p> blocks (as produced by the rich editor), render it
+        // using <br> separators instead of relying on <p> default spacing (which varies wildly
+        // across email clients, especially Outlook).
+        $body = $document->getElementsByTagName('body')->item(0);
+        if ($body) {
+            $elementChildren = [];
+            foreach ($body->childNodes as $node) {
+                if ($node->nodeType === XML_ELEMENT_NODE) {
+                    $elementChildren[] = $node;
+                }
+                if ($node->nodeType === XML_TEXT_NODE && trim((string) $node->nodeValue) !== '') {
+                    $elementChildren[] = $node;
+                }
+            }
 
-            if (! str_contains(strtolower($style), 'margin')) {
-                $style = trim($style);
-                $style = $style !== '' ? rtrim($style, ';') . '; margin:0;' : 'margin:0;';
-                $paragraph->setAttribute('style', $style);
+            $onlyParagraphElements = collect($elementChildren)
+                ->every(function ($node): bool {
+                    if ($node instanceof \DOMText) {
+                        return false;
+                    }
+
+                    return $node instanceof \DOMElement && strtolower($node->tagName) === 'p';
+                });
+
+            if ($onlyParagraphElements) {
+                $out = '';
+                $pendingBlankLine = false;
+
+                foreach ($elementChildren as $node) {
+                    if (! ($node instanceof \DOMElement) || strtolower($node->tagName) !== 'p') {
+                        continue;
+                    }
+
+                    $paragraphHtml = '';
+                    foreach ($node->childNodes as $child) {
+                        $paragraphHtml .= $document->saveHTML($child);
+                    }
+
+                    $textContent = str_replace("\xc2\xa0", ' ', (string) $node->textContent);
+                    $isEmpty = trim($textContent) === '' && preg_match('/<\s*br\b/i', $paragraphHtml) !== 1;
+
+                    if ($isEmpty || trim($paragraphHtml) === '') {
+                        $pendingBlankLine = true;
+                        continue;
+                    }
+
+                    if ($out !== '') {
+                        $out .= $pendingBlankLine ? '<br><br>' : '<br>';
+                    }
+
+                    $out .= trim($paragraphHtml);
+                    $pendingBlankLine = false;
+                }
+
+                libxml_clear_errors();
+                libxml_use_internal_errors($previousUseInternalErrors);
+
+                return trim($out);
             }
         }
 
@@ -184,10 +274,6 @@ class EstimateMail extends Mailable
         libxml_use_internal_errors($previousUseInternalErrors);
 
         $result = trim($innerHtml);
-
-        // Insert <br> after closing </p> tags to create visual spacing
-        // This is the most reliable method for email clients (Outlook, Gmail, etc.)
-        $result = preg_replace('/<\/p>\s*(?=<p[\s>])/i', '</p><br>', $result);
 
         return $result;
     }

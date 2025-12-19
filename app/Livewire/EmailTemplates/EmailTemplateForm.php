@@ -30,6 +30,9 @@ class EmailTemplateForm extends Component
 
     public function save()
     {
+        $this->subject = $this->fixMojibake((string) $this->subject);
+        $this->body = $this->fixMojibake((string) $this->body);
+
         $validated = $this->validate([
             'name' => 'required|string|max:255',
             'subject' => 'required|string|max:255',
@@ -49,6 +52,28 @@ class EmailTemplateForm extends Component
 
         $this->dispatch('template-saved');
         $this->dispatch('close-form');
+    }
+
+    protected function fixMojibake(string $text): string
+    {
+        // Common mojibake sequences caused by UTF-8 bytes being interpreted as Windows-1252.
+        // We keep this narrow and explicit so we don't accidentally mutate valid content.
+        if (! str_contains($text, 'â') && ! str_contains($text, 'Ã') && ! str_contains($text, 'Â')) {
+            return $text;
+        }
+
+        return strtr($text, [
+            'â€™' => '’',
+            'â€œ' => '“',
+            'â€�' => '”',
+            'â€˜' => '‘',
+            'â€”' => '—',
+            'â€“' => '–',
+            'â€¦' => '…',
+            'â€¢' => '•',
+            'Â ' => ' ',
+            'Â ' => ' ',
+        ]);
     }
 
     public function cancel()

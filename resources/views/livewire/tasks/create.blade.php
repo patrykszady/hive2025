@@ -68,6 +68,44 @@
                     {{-- TITLE --}}
                     <flux:input wire:model.blur="form.title" label="Title" placeholder="Task Title" autofocus/>
 
+                    {{-- PROJECT --}}
+                    <x-forms.project-select
+                        :projects="$projects"
+                        model="form.project_id"
+                        placeholder="Assign project..."
+                    />
+
+                    {{-- USERS --}}
+                    <flux:select wire:model.blur="form.user_ids" multiple label="Team Members" variant="listbox" placeholder="Assign team members...">
+                        @foreach($this->employees as $employee)
+                            <flux:select.option wire:key="{{$employee->id}}" value="{{$employee->id}}">
+                                <div class="flex items-center gap-2 whitespace-nowrap">
+                                    <flux:avatar size="xs" name="{{ $employee->full_name }}" color="auto" color:seed="{{ $employee->id }}"  />
+                                    {{$employee->first_name}}
+                                </div>
+                            </flux:select.option>
+                        @endforeach
+                    </flux:select>
+
+                    {{-- VENDOR --}}
+                    <flux:select
+                        wire:model.live="form.vendor_id"
+                        label="Vendor"
+                        variant="listbox"
+                        searchable
+                        clearable
+                        placeholder="Assign vendor..."
+                    >
+                        @foreach($this->vendors as $vendor)
+                            <flux:select.option wire:key="{{$vendor->id}}" value="{{$vendor->id}}">
+                                <div class="flex items-center gap-2 whitespace-nowrap">
+                                    <flux:avatar size="xs" name="{{ $vendor->name }}" color="auto" color:seed="{{ $vendor->id }}" />
+                                    {{$vendor->name}}
+                                </div>
+                            </flux:select.option>
+                        @endforeach
+                    </flux:select>
+
                     {{-- DATES --}}
                     <flux:field>
                         <flux:label>Select Days</flux:label>
@@ -94,43 +132,51 @@
                         <flux:error name="form.dates" />
                     </flux:field>
 
-                    {{-- PROJECT --}}
-                    <x-forms.project-select
-                        :projects="$projects"
-                        model="form.project_id"
-                        placeholder="Assign project..."
-                    />
+                    {{-- TIME SETTINGS --}}
+                    @if(!empty($form->dates))
+                        <flux:field>
+                            <flux:label>Arrival Time</flux:label>
+                            
+                            <div class="space-y-3 border border-zinc-200 dark:border-zinc-700 rounded-lg p-3">
+                                @foreach($form->dates as $date)
+                                    <div class="border border-zinc-200 dark:border-zinc-700 rounded-lg p-3 space-y-2">
+                                        <div class="flex items-center justify-between">
+                                            <flux:subheading class="text-sm">
+                                                {{ \Carbon\Carbon::parse($date)->format('D, M j') }}
+                                            </flux:subheading>
+                                            <flux:switch 
+                                                wire:model.live="form.time_settings.{{ $date }}.use_time"
+                                                size="sm"
+                                            />
+                                        </div>
 
-                    {{-- VENDOR --}}
-                    <flux:select
-                        wire:model.live="form.vendor_id"
-                        label="Vendor"
-                        variant="listbox"
-                        searchable
-                        clearable
-                        placeholder="Assign vendor..."
-                    >
-                        @foreach($this->vendors as $vendor)
-                            <flux:select.option wire:key="{{$vendor->id}}" value="{{$vendor->id}}">
-                                <div class="flex items-center gap-2 whitespace-nowrap">
-                                    <flux:avatar size="xs" name="{{ $vendor->name }}" color="auto" color:seed="{{ $vendor->id }}" />
-                                    {{$vendor->name}}
-                                </div>
-                            </flux:select.option>
-                        @endforeach
-                    </flux:select>
-
-                    {{-- USERS --}}
-                    <flux:select wire:model.blur="form.user_ids" multiple label="Team Members" variant="listbox" placeholder="Assign team members...">
-                        @foreach($this->employees as $employee)
-                            <flux:select.option wire:key="{{$employee->id}}" value="{{$employee->id}}">
-                                <div class="flex items-center gap-2 whitespace-nowrap">
-                                    <flux:avatar size="xs" name="{{ $employee->full_name }}" color="auto" color:seed="{{ $employee->id }}"  />
-                                    {{$employee->first_name}}
-                                </div>
-                            </flux:select.option>
-                        @endforeach
-                    </flux:select>
+                                        @if($form->time_settings[$date]['use_time'] ?? false)
+                                            <div class="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-100 dark:border-zinc-800 [&_[data-flux-time-picker-button]:not(:has([data-flux-time-picker-placeholder]))>[data-flux-icon]:first-child]:hidden">
+                                                <flux:time-picker
+                                                    wire:model.live="form.time_settings.{{ $date }}.start_time"
+                                                    wire:change="updateEndTime('{{ $date }}')"
+                                                    interval="60"
+                                                    min="06:00"
+                                                    max="23:00"
+                                                    open-to="08:00"
+                                                    placeholder="Start"
+                                                />
+                                                <flux:time-picker
+                                                    wire:model.live="form.time_settings.{{ $date }}.end_time"
+                                                    wire:change="applyTimeToAllDates('{{ $date }}')"
+                                                    interval="60"
+                                                    min="06:00"
+                                                    max="23:00"
+                                                    open-to="10:00"
+                                                    placeholder="End"
+                                                />
+                                            </div>
+                                        @endif
+                                    </div>
+                                @endforeach
+                            </div>
+                        </flux:field>
+                    @endif
 
                     {{-- STICKY FOOTER - NOW INSIDE FORM --}}
                     <div class="sticky bottom-0 flex justify-end space-x-2">

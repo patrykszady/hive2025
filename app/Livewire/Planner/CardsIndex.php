@@ -171,7 +171,7 @@ class CardsIndex extends Component
         return view('livewire.planner.cards', [
             'kanbanColumns' => $this->kanbanColumns,
         ])->layout('components.layouts.app', [
-            'fullscreenClasses' => '!p-0 h-full overflow-hidden',
+            'fullscreenClasses' => '!p-0 h-full overflow-hidden flex flex-col',
         ]);
     }
 }

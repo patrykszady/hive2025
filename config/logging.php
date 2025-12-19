@@ -114,10 +114,10 @@ return [
             'days' => 30
         ],
 
-        'nylas_webhooks' => [
+        'mailtrap' => [
             'driver' => 'daily',
-            'path' => storage_path('logs/nylas_webhooks.log'),
-            'level' => 'debug',
+            'path' => storage_path('logs/mailtrap.log'),
+            'level' => 'info',
             'days' => 30,
         ],
     ],
