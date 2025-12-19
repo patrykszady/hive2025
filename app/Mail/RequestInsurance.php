@@ -34,6 +34,10 @@ class RequestInsurance extends Mailable
         // $this->agent = $agent;
         $this->vendor = $vendor;
         $this->requesting_vendor = $requesting_vendor;
+
+        $this->withSymfonyMessage(function (\Symfony\Component\Mime\Email $message): void {
+            $message->getHeaders()->add(new \Mailtrap\EmailHeader\CategoryHeader('insurance_request'));
+        });
     }
 
     /**

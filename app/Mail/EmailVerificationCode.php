@@ -23,6 +23,10 @@ class EmailVerificationCode extends Mailable
     public function __construct($verification_code)
     {
         $this->verification_code = $verification_code;
+
+        $this->withSymfonyMessage(function (\Symfony\Component\Mime\Email $message): void {
+            $message->getHeaders()->add(new \Mailtrap\EmailHeader\CategoryHeader('email_verification'));
+        });
     }
 
     /**

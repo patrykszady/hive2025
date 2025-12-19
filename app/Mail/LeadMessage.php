@@ -25,6 +25,10 @@ class LeadMessage extends Mailable
     {
         $this->lead = $lead;
         $this->reply = $reply;
+
+        $this->withSymfonyMessage(function (\Symfony\Component\Mime\Email $message): void {
+            $message->getHeaders()->add(new \Mailtrap\EmailHeader\CategoryHeader('lead_message'));
+        });
     }
 
     /**

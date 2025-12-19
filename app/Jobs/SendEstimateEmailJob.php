@@ -186,6 +186,8 @@ class SendEstimateEmailJob implements ShouldQueue
                 $mailable->withSymfonyMessage(function (\Symfony\Component\Mime\Email $message) use ($trackingId, $estimate): void {
                     $headers = $message->getHeaders();
 
+                    $headers->add(new \Mailtrap\EmailHeader\CategoryHeader('estimate'));
+
                     $headers->add(new \Mailtrap\EmailHeader\CustomVariableHeader('tracking_id', $trackingId));
 
                     if ($estimate->project_id) {

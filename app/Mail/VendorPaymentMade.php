@@ -39,6 +39,10 @@ class VendorPaymentMade extends Mailable
 
         $this->vendor = $vendor;
         $this->paying_vendor = $paying_vendor;
+
+        $this->withSymfonyMessage(function (\Symfony\Component\Mime\Email $message): void {
+            $message->getHeaders()->add(new \Mailtrap\EmailHeader\CategoryHeader('vendor_payment'));
+        });
     }
 
     /**
