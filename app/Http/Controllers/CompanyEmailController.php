@@ -758,17 +758,24 @@ class CompanyEmailController extends Controller
                 }
 
                 //01-26-2023 pass rest of receipt info to ocr_extract method
-                if (!is_null($ocr_receipt_data['fields']['transaction_date'])) {
-                    $date = $ocr_receipt_data['fields']['transaction_date'];
-                } else {
-                    $date = $dateEmail;
-                }
+                $transactionDate = $ocr_receipt_data['fields']['transaction_date'] ?? null;
+                $date = ! empty($transactionDate) ? $transactionDate : $dateEmail;
 
                 //8-18-23 we can remove this?!
+                $total = $ocr_receipt_data['fields']['total'] ?? null;
+                if ($total === null || $total === '') {
+                    Log::channel('nylas')->warning('OCR extract missing total field', [
+                        'receipt_id' => $receipt->id,
+                        'company_email_id' => $companyEmail->id,
+                        'message_id' => $messageId,
+                    ]);
+                    $total = '0';
+                }
+
                 if (isset($receipt->options['refund'])) {
-                    $amount = '-'.$ocr_receipt_data['fields']['total'];
+                    $amount = '-'.$total;
                 } else {
-                    $amount = $ocr_receipt_data['fields']['total'];
+                    $amount = $total;
                 }
 
                 // receipt number / invoice
