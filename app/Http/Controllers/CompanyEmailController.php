@@ -759,6 +759,17 @@ class CompanyEmailController extends Controller
 
                 //01-26-2023 pass rest of receipt info to ocr_extract method
                 $transactionDate = $ocr_receipt_data['fields']['transaction_date'] ?? null;
+                if (empty($transactionDate)) {
+                    Log::channel('nylas')->warning('OCR extract missing transaction_date field', [
+                        'receipt_id' => $receipt->id,
+                        'company_email_id' => $companyEmail->id,
+                        'message_id' => $messageId,
+                        'from_email' => $fromEmail,
+                        'to_email' => $toEmail,
+                        'subject' => $subject,
+                    ]);
+                }
+
                 $date = ! empty($transactionDate) ? $transactionDate : $dateEmail;
 
                 //8-18-23 we can remove this?!
@@ -768,6 +779,9 @@ class CompanyEmailController extends Controller
                         'receipt_id' => $receipt->id,
                         'company_email_id' => $companyEmail->id,
                         'message_id' => $messageId,
+                        'from_email' => $fromEmail,
+                        'to_email' => $toEmail,
+                        'subject' => $subject,
                     ]);
                     $total = '0';
                 }
