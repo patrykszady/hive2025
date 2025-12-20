@@ -706,6 +706,25 @@ class CompanyEmailController extends Controller
 
                 //pass receipt info to ocr_extract method
                 $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->ocr_extract($ocr_receipt_extracted, null, 'email', $receipt);
+
+                // Some OCR providers / failure modes can return a partial payload without a "fields" key.
+                // This method is executed by the scheduler; avoid crashing the whole run.
+                if (! is_array($ocr_receipt_data)) {
+                    Log::channel('nylas')->warning('OCR extract returned non-array payload', [
+                        'receipt_id' => $receipt->id,
+                        'company_email_id' => $companyEmail->id,
+                        'message_id' => $messageId,
+                    ]);
+                    continue;
+                }
+
+                if (! isset($ocr_receipt_data['fields']) || ! is_array($ocr_receipt_data['fields'])) {
+                    $ocr_receipt_data['fields'] = [];
+                }
+
+                if (! isset($ocr_receipt_data['content']) || ! is_string($ocr_receipt_data['content'])) {
+                    $ocr_receipt_data['content'] = '';
+                }
              
                 $receipt_account = ReceiptAccount::withoutGlobalScopes()
                     ->where('belongs_to_vendor_id', $companyEmail->vendor_id)

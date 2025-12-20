@@ -202,12 +202,6 @@ class SendEstimateEmailJob implements ShouldQueue
                 });
             }
 
-            Log::info('SendEstimateEmailJob mailer debug', [
-                'mailer' => $mailer,
-                'config_host' => config("mail.mailers.$mailer.host"),
-                'config_key_len' => strlen(config("mail.mailers.$mailer.apiKey") ?? ''),
-            ]);
-
             Mail::mailer($mailer)
                 ->to($sanitizedRecipients)
                 ->send($mailable);
