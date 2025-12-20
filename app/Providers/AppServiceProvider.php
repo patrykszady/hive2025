@@ -109,8 +109,10 @@ class AppServiceProvider extends ServiceProvider
             return new NylasTransport($nylasService, $grantId);
         });
 
-        // Intercept all emails in non-production environments
-        if (! app()->environment('production')) {
+        // Intercept all emails in local/dev/test environments only.
+        // Using "non-production" here is too broad and can accidentally redirect real mail
+        // if APP_ENV is misconfigured on a server.
+        if (app()->environment('local', 'development', 'testing')) {
             $devEmail = env('MAIL_DEV_EMAIL');
             if ($devEmail) {
                 Mail::alwaysTo($devEmail);
