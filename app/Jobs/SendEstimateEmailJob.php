@@ -154,7 +154,7 @@ class SendEstimateEmailJob implements ShouldQueue
             $replyToEmail = $this->fromEmail;
 
             $fromEmail = $this->fromEmail;
-            if ($trackingProvider === 'mailtrap' && app()->environment('local', 'development')) {
+            if ($trackingProvider === 'mailtrap') {
                 $safeFromEmail = (string) config('mail.from.address');
                 if ($safeFromEmail !== '') {
                     $fromEmail = $safeFromEmail;
@@ -207,10 +207,21 @@ class SendEstimateEmailJob implements ShouldQueue
                 ->send($mailable);
 
         } catch (Throwable $exception) {
+            $mailerForLog = $mailer ?? null;
+            $mailtrapKey = (string) (config('services.mailtrap-sdk.apiKey') ?? '');
+            $mailtrapKeyLen = strlen($mailtrapKey);
+            $mailtrapKeyFingerprint = $mailtrapKeyLen >= 12
+                ? (substr($mailtrapKey, 0, 8).'...'.substr($mailtrapKey, -4))
+                : null;
+
             Log::error('SendEstimateEmailJob failed to send email', [
                 'estimate_id' => $this->estimateId,
                 'recipients' => $this->recipients,
                 'error' => $exception->getMessage(),
+                'mailer' => $mailerForLog,
+                'mailtrap_host' => config('services.mailtrap-sdk.host'),
+                'mailtrap_api_key_len' => $mailtrapKeyLen,
+                'mailtrap_api_key_fingerprint' => $mailtrapKeyFingerprint,
             ]);
         } finally {
             // Clean up temp files
