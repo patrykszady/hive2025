@@ -70,22 +70,30 @@ class ProjectShow extends Component
                 $mainEvent = $repliedEvent ?? $threadEvents->first();
                 
                 // Get all unique recipient emails from all events in this thread
-                $allRecipientEmails = $threadEvents
+                $threadRecipientEmails = $threadEvents
                     ->pluck('recipient_emails')
                     ->flatten()
                     ->unique()
                     ->values()
                     ->all();
+
+                // Prefer showing the recipients for the specific event row (e.g. opened should be 1 recipient)
+                $eventRecipientEmails = collect($mainEvent->recipient_emails ?? [])
+                    ->flatten()
+                    ->filter()
+                    ->unique()
+                    ->values()
+                    ->all();
                 
                 // Map emails to users using pre-fetched collection
-                $users = collect($allRecipientEmails)
+                $users = collect($eventRecipientEmails)
                     ->map(fn($email) => $usersByEmail->get($email))
                     ->filter()
                     ->values();
                 
                 // Add recipient user data to the main event
                 $mainEvent->recipient_users = $users;
-                $mainEvent->all_recipient_emails = $allRecipientEmails;
+                $mainEvent->all_recipient_emails = ! empty($eventRecipientEmails) ? $eventRecipientEmails : $threadRecipientEmails;
                 
                 // Group consecutive events of the same type (excluding the main event)
                 $groupedEvents = collect();

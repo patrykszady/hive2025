@@ -2,6 +2,8 @@
 
 use Illuminate\Support\Facades\Schedule;
 
+Schedule::timezone('America/Chicago');
+
 // Schedule::call(function () {
 //     app(\App\Http\Controllers\LeadController::class)->leads_in_email();
 // })->everyTenMinutes()
@@ -50,6 +52,7 @@ Schedule::call(function () {
 
 Schedule::command('nylas:sync-contacts')
     ->dailyAt('02:00')
+    ->timezone('America/Chicago')
     ->name('sync-nylas-contacts')
     ->environments(['production'])
     ->withoutOverlapping()
@@ -165,6 +168,7 @@ Schedule::call(function () {
     app(\App\Http\Controllers\ReceiptController::class)->amazon_orders_api();
     })
     ->dailyAt('2:00')
+    ->timezone('America/Chicago')
     ->name('amazon-orders-api-full-sync')
     ->withoutOverlapping()
     ->onOneServer();
@@ -172,6 +176,7 @@ Schedule::call(function () {
 // Daily user/team member task reminders for next day
 Schedule::command('tasks:send-tomorrow-reminders')
     ->dailyAt('19:00')
+    ->timezone('America/Chicago')
     ->name('send-tomorrow-reminders')
     ->environments(['production'])
     ->withoutOverlapping()
@@ -188,6 +193,7 @@ Schedule::command('tasks:process-notifications')
 // Search index maintenance - sync settings and reimport vendor index
 Schedule::command('scout:sync-index-settings')
     ->dailyAt('02:00')
+    ->timezone('America/Chicago')
     ->name('sync-scout-index-settings')
     ->environments(['production'])
     ->withoutOverlapping()

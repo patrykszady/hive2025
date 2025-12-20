@@ -6,6 +6,7 @@ use App\Models\Client;
 use App\Models\EmailTracking;
 use App\Models\Project;
 use App\Models\ProjectStatus;
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Collection;
@@ -271,8 +272,9 @@ class ProjectsIndex extends Component
     #[Computed]
     public function emailTrackingEvents()
     {
-        // Get all events grouped by thread
-        $events = EmailTracking::with('project')
+        // Get all events grouped by message/thread.
+        // For Mailtrap, group by mailtrap_message_id so multi-recipient opens collapse into one row.
+        $allEvents = EmailTracking::with('project')
             ->when($this->client !== null, function ($query) {
                 $query->whereHas('project', function ($q) {
                     $q->where('client_id', $this->client->id);
@@ -284,47 +286,59 @@ class ProjectsIndex extends Component
                 });
             })
             ->orderBy('event_at', 'DESC')
-            ->get()
+            ->get();
+
+        $allEmails = $allEvents->pluck('recipient_emails')->flatten()->unique()->values()->all();
+        $usersByEmail = User::query()->whereIn('email', $allEmails)->get()->keyBy('email');
+
+        $events = $allEvents
             ->groupBy(function ($event) {
-                return $event->nylas_thread_id ?: $event->nylas_message_id;
+                $mailtrapMessageId = is_array($event->metadata)
+                    ? ($event->metadata['mailtrap_message_id'] ?? null)
+                    : null;
+
+                if (is_string($mailtrapMessageId) && $mailtrapMessageId !== '') {
+                    return 'mailtrap:' . $mailtrapMessageId;
+                }
+
+                return $event->nylas_thread_id ?: $event->nylas_message_id ?: ('email_tracking:' . $event->id);
             })
-            ->map(function ($threadEvents) {
+            ->map(function ($threadEvents) use ($usersByEmail) {
                 // Prioritize 'replied' as the main event, even if not the latest chronologically
                 $repliedEvent = $threadEvents->firstWhere('event_type', 'replied');
-                $latestEvent = $repliedEvent ?? $threadEvents->first();
-                
-                // Get all unique recipient emails from all events in this thread
-                $allRecipientEmails = $threadEvents
+                $mainEvent = $repliedEvent ?? $threadEvents->first();
+
+                $threadRecipientEmails = $threadEvents
                     ->pluck('recipient_emails')
                     ->flatten()
+                    ->filter()
                     ->unique()
                     ->values()
                     ->all();
-                
-                // Map emails to users
-                $users = collect($allRecipientEmails)
-                    ->map(function ($email) {
-                        return \App\Models\User::where('email', $email)->first();
-                    })
+
+                // Aggregate recipients across the same event type (e.g. opened) for this message.
+                $mainEventType = (string) ($mainEvent->event_type ?? '');
+                $eventRecipientEmails = $threadEvents
+                    ->where('event_type', $mainEventType)
+                    ->pluck('recipient_emails')
+                    ->flatten()
+                    ->filter()
+                    ->unique()
+                    ->values()
+                    ->all();
+
+                $users = collect($eventRecipientEmails)
+                    ->map(fn ($email) => $usersByEmail->get($email))
                     ->filter()
                     ->values();
-                
-                // Count consecutive events of the same type as the main event
-                $eventCount = 1;
-                foreach ($threadEvents->slice(1) as $event) {
-                    if ($event->event_type === $latestEvent->event_type) {
-                        $eventCount++;
-                    } else {
-                        break; // Stop at first different event type
-                    }
-                }
-                
-                // Add recipient user data to the event
-                $latestEvent->recipient_users = $users;
-                $latestEvent->all_recipient_emails = $allRecipientEmails;
-                $latestEvent->event_count = $eventCount;
-                
-                return $latestEvent;
+
+                $eventCount = $threadEvents->where('event_type', $mainEventType)->count();
+
+                $mainEvent->recipient_users = $users;
+                $mainEvent->all_recipient_emails = ! empty($eventRecipientEmails) ? $eventRecipientEmails : $threadRecipientEmails;
+                $mainEvent->event_count = $eventCount;
+
+                return $mainEvent;
             })
             ->sortByDesc('event_at')
             ->values();
