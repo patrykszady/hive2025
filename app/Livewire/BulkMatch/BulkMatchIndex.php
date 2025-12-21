@@ -35,6 +35,8 @@ class BulkMatchIndex extends Component
 
     public function mount()
     {
+        $this->authorize('viewAny', TransactionBulkMatch::class);
+
         $this->distributions = Distribution::all();
         //exclude Vendors that dont/have receipt accounts
         // $exclude_vendors = Vendor::whereDoesntHave('receipt_accounts')->pluck('id')->toArray();
@@ -145,7 +147,7 @@ class BulkMatchIndex extends Component
     #[Title('Bulk Transactions')]
     public function render()
     {
-        // $this->authorize('viewAny', TransactionBulkMatch::class);
+        $this->authorize('viewAny', TransactionBulkMatch::class);
 
         if ($this->vendor) {
             //transactions groupBy amount

@@ -101,8 +101,19 @@
                         </flux:card>
                     </div>
                     <div class="col-span-3">
+                        @php
+                            $hasReceiptLineItems = $expense->receipt
+                                && $expense->receipt->receipt_items
+                                && ! empty($expense->receipt->receipt_items['items'] ?? []);
+
+                            $receiptSubheading = $hasReceiptLineItems
+                                ? null
+                                : 'No Receipt line items. See Original Receipt for a receipt copy.';
+                        @endphp
+
                         <x-details.card 
                             title="Receipt"
+                            :subheading="$receiptSubheading"
                             :accordion="false"
                         >
                             @if($expense->receipt && $expense->receipt->receipt_filename)
@@ -118,8 +129,12 @@
                             @endif
 
                             <x-slot:details>
-                                @if(!$expense->receipt || !$expense->receipt->receipt_items || empty($expense->receipt->receipt_items['items'] ?? []))
-                                    <p class="text-sm text-zinc-600 dark:text-zinc-300">No Receipt line items. See <i>Original Receipt</i> for a receipt copy.</p>
+                                @if(!$hasReceiptLineItems)
+                                    @if(!empty($expense->receipt_html))
+                                        <div class="flow-root">
+                                            <pre class="text-xs leading-tight font-mono" style="background-color:transparent; overflow: auto;">{!! $expense->receipt_html !!}</pre>
+                                        </div>
+                                    @endif
                                 @else
                                     <x-expenses.receipt 
                                         :receipt="$expense->receipt" 

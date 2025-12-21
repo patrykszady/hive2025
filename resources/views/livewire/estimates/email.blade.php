@@ -1,11 +1,5 @@
-<flux:modal name="estimate_email_modal" class="space-y-4 min-w-96">
-    <div class="flex justify-between">
-        <flux:heading size="lg">Email Estimate</flux:heading>
-    </div>
-
-    <flux:separator variant="subtle" />
-
-    <form wire:submit="send" class="space-y-4">
+<x-form-modal name="estimate_email_modal" title="Email Estimate">
+    <form id="estimate_email_modal_form" wire:submit="send" class="space-y-4">
         <flux:pillbox wire:model="to" label="To" placeholder="Add email address..." multiple>
             @foreach($to as $email)
                 <flux:pillbox.option :value="$email">{{ $this->getUserDisplayName($email) }}</flux:pillbox.option>
@@ -54,12 +48,12 @@
 
             @include('livewire.project-status._status_controls')
         </div>
-
-        <div class="flex space-x-2">
-            <flux:spacer />
-            <flux:button type="submit" variant="primary" wire:loading.attr="disabled" wire:target="send">
-                Send Email
-            </flux:button>
-        </div>
     </form>
-</flux:modal>
+
+    <x-slot name="footer">
+        <flux:spacer />
+        <flux:button type="submit" form="estimate_email_modal_form" variant="primary" wire:loading.attr="disabled" wire:target="send">
+            Send Email
+        </flux:button>
+    </x-slot>
+</x-form-modal>

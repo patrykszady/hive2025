@@ -137,6 +137,8 @@ class PlaidService
             'options' => [
                 // Request Plaid to return original_description field in each transaction
                 'include_original_description' => $includeOriginalDescription,
+                // Explicitly request Personal Finance Categories v2
+                'personal_finance_category_version' => 'v2',
             ],
         ];
 

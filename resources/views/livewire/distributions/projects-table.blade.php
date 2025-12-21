@@ -17,15 +17,19 @@
                 @foreach ($projects as $project)
                     <flux:table.row :key="$project->id">
                         <flux:table.cell>
-                            <a href="{{ route('projects.show', $project) }}">
+                            <button
+                                type="button"
+                                class="w-full text-left"
+                                wire:click="$dispatchTo('distributions.distribution-projects-form', 'addDis', [{{ $project->id }}])"
+                            >
                                 <div>
-                                    <b>{{ $project->address }}</b>
+                                    <b>{{ $project->short_address }}</b>
                                     <br>
                                     <i class="font-normal">{{$project->project_name}}</i>
                                     <br>
                                     {{ $project->client->name }}
                                 </div>
-                            </a>
+                            </button>
                         </flux:table.cell>
                         <flux:table.cell>{{ money($project->finances['profit']) }}</flux:table.cell>
                         <flux:table.cell>{{ $project->statuses->first()->start_date->format('F Y') }}</flux:table.cell>

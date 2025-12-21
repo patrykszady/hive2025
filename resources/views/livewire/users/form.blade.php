@@ -1,11 +1,5 @@
-<flux:modal name="user_form_modal" class="space-y-2">
-    <div class="flex justify-between">
-        <flux:heading size="lg">{{$view_text['card_title']}}</flux:heading>
-    </div>
-
-    <flux:separator variant="subtle" />
-
-    <form wire:submit="{{$view_text['form_submit']}}" class="grid gap-6">
+<x-form-modal name="user_form_modal" :title="$view_text['card_title']">
+    <form id="user_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="space-y-4">
         {{-- PHONE --}}
         <flux:input
             wire:model.live.debounce.1000ms="user_cell"
@@ -39,7 +33,7 @@
         <div
             x-data="{ open: @entangle('user_form'), user: @entangle('form.user') }"
             x-show="open"
-            class="space-y-1"
+            class="space-y-4"
             >
             <flux:input
                 wire:model.live="form.first_name"
@@ -143,34 +137,30 @@
                 </div>
             </div>
         </div>
-
-        {{-- FOOTER --}}
-        <div
-            x-data="{
-                userForm: @entangle('user_form'),
-                modelId: @entangle('model.id'),
-                modelType: @entangle('model.type'),
-                formUserId: @entangle('form.user_id'),
-                role: @entangle('form.role'),
-                viaVendor: @entangle('form.via_vendor')
-            }"
-            class="space-y-2 sticky bottom-0"             
-            >
-            <div class="flex space-x-2 justify-end">
-                <flux:button
-                    x-show="userForm && (
-                        modelId == 'NEW' || 
-                        (formUserId && modelType == 'client') ||
-                        (formUserId && modelType == 'vendor' && ((viaVendor && viaVendor != 'NEW_VIA') || role == 1)) ||
-                        (modelType == 'user')
-                    )"
-                    wire:click="{{$view_text['form_submit']}}"
-                    type="submit"
-                    variant="primary"
-                    >
-                    {{$view_text['button_text']}}
-                </flux:button>
-            </div>
-        </div>
     </form>
-</flux:modal>
+
+    <x-slot name="footer">
+        <flux:spacer />
+        <flux:button
+            x-data="{
+                userForm: $wire.user_form,
+                modelId: $wire.model.id,
+                modelType: $wire.model.type,
+                formUserId: $wire.form.user_id,
+                role: $wire.form.role,
+                viaVendor: $wire.form.via_vendor
+            }"
+            x-show="userForm && (
+                modelId == 'NEW' || 
+                (formUserId && modelType == 'client') ||
+                (formUserId && modelType == 'vendor' && ((viaVendor && viaVendor != 'NEW_VIA') || role == 1)) ||
+                (modelType == 'user')
+            )"
+            type="submit"
+            form="user_form_modal_form"
+            variant="primary"
+            >
+            {{$view_text['button_text']}}
+        </flux:button>
+    </x-slot>
+</x-form-modal>

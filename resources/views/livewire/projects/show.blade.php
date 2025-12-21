@@ -3,7 +3,7 @@
 		<div class="col-span-4 lg:col-span-2 space-y-4">
             {{-- PROJECT DETAILS --}}
             <x-details.card
-                :title="$project->address . ' | ' . $project->project_name"
+                :title="$project->short_address . ' | ' . $project->project_name"
                 :subheading="$project->client->name"
                 :canEdit="auth()->user()->can('update', $project)"
                 >
@@ -130,38 +130,56 @@
                                                     }"
                                                     inset="top bottom">
                                                     {{ ucfirst($event->event_type) }}
+                                                    @if(isset($event->event_count) && $event->event_count > 1)
+                                                        <span class="ml-1">x{{ $event->event_count }}</span>
+                                                    @endif
                                                 </flux:badge>
                                             </flux:table.cell>
-                                            <flux:table.cell>
+                                            <flux:table.cell class="min-w-0">
                                                 @if($event->email_template_name)
-                                                    <flux:badge size="sm" color="zinc" variant="outline">
-                                                        {{ $event->email_template_name }}
+                                                    <flux:badge size="sm" color="zinc" variant="outline" class="max-w-sm">
+                                                        <span class="block truncate" title="{{ $event->email_template_name }}">{{ $event->email_template_name }}</span>
                                                     </flux:badge>
                                                 @else
                                                     <span class="text-gray-400">-</span>
                                                 @endif
                                             </flux:table.cell>
-                                            <flux:table.cell>
+                                            <flux:table.cell class="min-w-0">
                                                 @if($event->recipient_users && $event->recipient_users->isNotEmpty())
-                                                    <div class="text-sm">
-                                                        @foreach($event->recipient_users as $index => $user)
-                                                            <span 
-                                                                class="cursor-help" 
-                                                                title="{{ $user->email }}">
-                                                                {{ $user->first_name }}{{ $index < $event->recipient_users->count() - 1 ? ',' : '' }}
-                                                            </span>
-                                                        @endforeach
+                                                    <div class="text-sm flex items-center min-w-0 gap-1 whitespace-nowrap" title="{{ $event->recipient_users->map(fn($u) => $u->first_name . ' ' . $u->last_name)->implode(', ') }}">
+                                                        @php
+                                                            $firstRecipient = $event->recipient_users->first();
+                                                            $remainingRecipientCount = max(0, $event->recipient_users->count() - 1);
+                                                        @endphp
+
+                                                        <span class="inline-block max-w-12 truncate cursor-help" title="{{ $firstRecipient->email }}">
+                                                            {{ $firstRecipient->first_name }}
+                                                        </span>
+                                                        @if($remainingRecipientCount > 0)
+                                                            <span class="text-gray-500 shrink-0">+{{ $remainingRecipientCount }}</span>
+                                                        @endif
                                                     </div>
                                                 @elseif($event->all_recipient_emails && count($event->all_recipient_emails) > 0)
-                                                    <div class="text-sm text-gray-500">
-                                                        {{ implode(', ', $event->all_recipient_emails) }}
+                                                    <div class="text-sm text-gray-500 flex items-center min-w-0 gap-1 whitespace-nowrap" title="{{ implode(', ', $event->all_recipient_emails) }}">
+                                                        @php
+                                                            $firstRecipientEmail = $event->all_recipient_emails[0] ?? null;
+                                                            $remainingRecipientCount = max(0, count($event->all_recipient_emails) - 1);
+                                                        @endphp
+
+                                                        @if($firstRecipientEmail)
+                                                            <span class="inline-block max-w-20 truncate" title="{{ $firstRecipientEmail }}">{{ $firstRecipientEmail }}</span>
+                                                        @endif
+
+                                                        @if($remainingRecipientCount > 0)
+                                                            <span class="shrink-0">+{{ $remainingRecipientCount }}</span>
+                                                        @endif
                                                     </div>
                                                 @else
                                                     <span class="text-gray-400">-</span>
                                                 @endif
                                             </flux:table.cell>
                                             <flux:table.cell>
-                                                <time x-data x-datetime="'{{ $event->event_at->toIso8601String() }}'" x-datetime-format="relative"></time>
+                                                <time class="whitespace-nowrap" x-data x-datetime="'{{ $event->event_at->toIso8601String() }}'" x-datetime-format="relative"></time>
                                             </flux:table.cell>
                                         </flux:table.row>
 
@@ -187,14 +205,45 @@
                                                             @endif
                                                         </flux:badge>
                                                     </flux:table.cell>
-                                                    <flux:table.cell class="text-sm text-gray-600 dark:text-gray-400">
+                                                    <flux:table.cell class="text-sm text-gray-600 dark:text-gray-400 min-w-0">
                                                         {{-- Empty template cell for sub-rows --}}
                                                     </flux:table.cell>
-                                                    <flux:table.cell class="text-sm text-gray-600 dark:text-gray-400">
-                                                        {{-- Empty recipients cell for sub-rows --}}
+                                                    <flux:table.cell class="text-sm text-gray-600 dark:text-gray-400 min-w-0">
+                                                        @if($subEvent->recipient_users && $subEvent->recipient_users->isNotEmpty())
+                                                            <div class="text-sm flex items-center min-w-0 gap-1 whitespace-nowrap" title="{{ $subEvent->recipient_users->map(fn($u) => $u->first_name . ' ' . $u->last_name)->implode(', ') }}">
+                                                                @php
+                                                                    $firstRecipient = $subEvent->recipient_users->first();
+                                                                    $remainingRecipientCount = max(0, $subEvent->recipient_users->count() - 1);
+                                                                @endphp
+
+                                                                <span class="inline-block max-w-12 truncate cursor-help" title="{{ $firstRecipient->email }}">
+                                                                    {{ $firstRecipient->first_name }}
+                                                                </span>
+                                                                @if($remainingRecipientCount > 0)
+                                                                    <span class="text-gray-500 shrink-0">+{{ $remainingRecipientCount }}</span>
+                                                                @endif
+                                                            </div>
+                                                        @elseif($subEvent->all_recipient_emails && count($subEvent->all_recipient_emails) > 0)
+                                                            <div class="text-sm text-gray-500 flex items-center min-w-0 gap-1 whitespace-nowrap" title="{{ implode(', ', $subEvent->all_recipient_emails) }}">
+                                                                @php
+                                                                    $firstRecipientEmail = $subEvent->all_recipient_emails[0] ?? null;
+                                                                    $remainingRecipientCount = max(0, count($subEvent->all_recipient_emails) - 1);
+                                                                @endphp
+
+                                                                @if($firstRecipientEmail)
+                                                                    <span class="inline-block max-w-20 truncate" title="{{ $firstRecipientEmail }}">{{ $firstRecipientEmail }}</span>
+                                                                @endif
+
+                                                                @if($remainingRecipientCount > 0)
+                                                                    <span class="shrink-0">+{{ $remainingRecipientCount }}</span>
+                                                                @endif
+                                                            </div>
+                                                        @else
+                                                            <span class="text-gray-400">-</span>
+                                                        @endif
                                                     </flux:table.cell>
                                                     <flux:table.cell class="text-sm text-gray-600 dark:text-gray-400">
-                                                        <time x-data x-datetime="'{{ $subEvent->event_at->toIso8601String() }}'" x-datetime-format="relative"></time>
+                                                        <time class="whitespace-nowrap" x-data x-datetime="'{{ $subEvent->event_at->toIso8601String() }}'" x-datetime-format="relative"></time>
                                                     </flux:table.cell>
                                                 </flux:table.row>
                                             @endforeach

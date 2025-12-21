@@ -51,12 +51,7 @@
                                             if ($diffInDays > 0) {
                                                 $timeText = $diffInDays . ' day' . ($diffInDays === 1 ? '' : 's') . ' later';
                                             } elseif ($diffInHours > 0) {
-                                                $remainingMinutes = $diffInMinutes % 60;
-                                                $timeText = $diffInHours . ' hour' . ($diffInHours === 1 ? '' : 's');
-                                                if ($remainingMinutes > 0) {
-                                                    $timeText .= ', ' . $remainingMinutes . ' minute' . ($remainingMinutes === 1 ? '' : 's');
-                                                }
-                                                $timeText .= ' later';
+                                                $timeText = $diffInHours . ' hour' . ($diffInHours === 1 ? '' : 's') . ' later';
                                             } elseif ($diffInMinutes > 0) {
                                                 $timeText = $diffInMinutes . ' minute' . ($diffInMinutes === 1 ? '' : 's') . ' later';
                                             } else {
@@ -88,12 +83,7 @@
                             if ($diffInDays > 0) {
                                 $timeText = $diffInDays . ' day' . ($diffInDays === 1 ? '' : 's') . ' since';
                             } elseif ($diffInHours > 0) {
-                                $remainingMinutes = $diffInMinutes % 60;
-                                $timeText = $diffInHours . ' hour' . ($diffInHours === 1 ? '' : 's');
-                                if ($remainingMinutes > 0) {
-                                    $timeText .= ', ' . $remainingMinutes . ' minute' . ($remainingMinutes === 1 ? '' : 's');
-                                }
-                                $timeText .= ' since';
+                                $timeText = $diffInHours . ' hour' . ($diffInHours === 1 ? '' : 's') . ' since';
                             } elseif ($diffInMinutes > 0) {
                                 $timeText = $diffInMinutes . ' minute' . ($diffInMinutes === 1 ? '' : 's') . ' since';
                             } else {
@@ -128,50 +118,41 @@
     </flux:card>
 
     {{-- Edit Status Modal --}}
-    <flux:modal name="edit_status_modal" class="min-w-[22rem]">
-        <form wire:submit="updateStatus">
-            <div class="space-y-6">
-                <div>
-                    <flux:heading size="lg">Edit Status</flux:heading>
-                </div>
+    <x-form-modal name="edit_status_modal" title="Edit Status">
+        <form id="edit_status_modal_form" wire:submit="updateStatus" class="space-y-4">
+            <flux:select 
+                wire:model="editingStatusCode" 
+                label="Status" 
+                variant="listbox" 
+                placeholder="Choose Status..."
+            >
+                @php($projectStatuses = \App\Models\ProjectStatus::selectableStatuses())
+                @foreach($projectStatuses as $status)
+                    <flux:select.option :value="$status['code']">
+                        <flux:badge size="sm" inset="top bottom" :color="$status['color']">
+                            {{ $status['label'] }}
+                        </flux:badge>
+                    </flux:select.option>
+                @endforeach
+            </flux:select>
 
-                <flux:select 
-                    wire:model="editingStatusCode" 
-                    label="Status" 
-                    variant="listbox" 
-                    placeholder="Choose Status..."
-                >
-                    @php($projectStatuses = \App\Models\ProjectStatus::selectableStatuses())
-                    @foreach($projectStatuses as $status)
-                        <flux:select.option :value="$status['code']">
-                            <flux:badge size="sm" inset="top bottom" :color="$status['color']">
-                                {{ $status['label'] }}
-                            </flux:badge>
-                        </flux:select.option>
-                    @endforeach
-                </flux:select>
-
-                <flux:input
-                    wire:model="editingStatusDate"
-                    label="Status Date"
-                    type="date"
-                />
-                
-                <div class="flex gap-2">
-                    <flux:button 
-                        wire:click="deleteStatus"
-                        type="button"
-                        variant="danger"
-                    >
-                        Delete
-                    </flux:button>
-                    <flux:spacer />
-                    <flux:modal.close>
-                        <flux:button variant="ghost">Cancel</flux:button>
-                    </flux:modal.close>
-                    <flux:button type="submit" variant="primary">Save Changes</flux:button>
-                </div>
-            </div>
+            <flux:input
+                wire:model="editingStatusDate"
+                label="Status Date"
+                type="date"
+            />
         </form>
-    </flux:modal>
+
+        <x-slot name="footer">
+            <flux:button 
+                wire:click="deleteStatus"
+                type="button"
+                variant="danger"
+            >
+                Delete
+            </flux:button>
+            <flux:spacer />
+            <flux:button type="submit" form="edit_status_modal_form" variant="primary">Save Changes</flux:button>
+        </x-slot>
+    </x-form-modal>
 </div>

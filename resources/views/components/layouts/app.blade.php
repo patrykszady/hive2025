@@ -34,7 +34,7 @@
             @php
                 $accountingGroups = ['banks*', 'distributions*', 'sheets*'];
                 $accountingExpanded = request()->is($accountingGroups) || request()->routeIs($accountingGroups);
-                $globalActionsExpanded = request()->is('transactions/match_vendor') || request()->is('transactions/bulk_match');
+                $globalActionsExpanded = request()->is('transactions/match_vendor');
                 $settingsGroups = ['email_templates*', 'company_emails*', 'vendor_docs*'];
                 $settingsExpanded = request()->is($settingsGroups) || request()->routeIs($settingsGroups);
             @endphp
@@ -118,7 +118,6 @@
                 @can('admin_login_as_user', App\Models\User::class)
                     <flux:sidebar.group expandable heading="Global Actions" class="grid" icon="eye-slash" :expanded="$globalActionsExpanded">
                         <flux:sidebar.item wire:navigate.hover href="/transactions/match_vendor">Match Vendor</flux:sidebar.item>
-                        <flux:sidebar.item wire:navigate.hover href="/transactions/bulk_match">Match Transactions</flux:sidebar.item>
                     </flux:sidebar.group>
                 @endcan
                 
@@ -134,7 +133,8 @@
                             @endcan
 
                             @can('viewAny', App\Models\CompanyEmail::class)
-                                <flux:sidebar.item wire:navigate.hover href="/company_emails" icon="inbox-stack">Company Emails</flux:sidebar.item>
+                                <flux:sidebar.item wire:navigate.hover href="/company_emails" icon="inbox-stack">Email Accounts</flux:sidebar.item>
+                                <flux:sidebar.item wire:navigate.hover href="/company_emails" icon="receipt-percent">Expense Bulk Match</flux:sidebar.item>
                             @endcan
 
                             @can('viewAny', App\Models\VendorDoc::class)

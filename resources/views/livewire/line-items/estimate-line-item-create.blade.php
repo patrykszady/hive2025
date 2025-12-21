@@ -1,14 +1,6 @@
-<flux:modal name="estimate_line_item_form_modal" class="space-y-2 min-w-96">
-    <div class="flex justify-between">
-        <flux:heading size="lg">{{$view_text['card_title']}}</flux:heading>
-    </div>
-
-    <flux:separator variant="subtle" />
-
-    <form wire:submit="{{$view_text['form_submit']}}" class="grid gap-6">
-        <div
-            x-data="{ edit_line_item: @entangle('edit_line_item') }"
-            >
+<x-form-modal name="estimate_line_item_form_modal" :title="$view_text['card_title']">
+    <form id="estimate_line_item_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="space-y-4">
+        <div x-data="{ edit_line_item: @entangle('edit_line_item') }">
             <flux:select variant="listbox" wire:model.live="line_item_id" label="Line Item" searchable placeholder="Choose Line Item..." x-bind:disabled="edit_line_item">
                 @foreach($this->line_items as $line_item)
                     <flux:select.option value="{{$line_item->id}}"><div>{{$line_item->name}} <br> <i class="font-normal">{{$line_item->category . ' / ' . $line_item->sub_category}}</i></div></flux:select.option>
@@ -20,7 +12,7 @@
             x-data="{ open: @entangle('line_item_id') }"
             x-show="open"
             x-transition
-            class="my-4 space-y-4"
+            class="space-y-4"
             >
             {{-- DESCRIPTION --}}
             <flux:textarea
@@ -88,16 +80,26 @@
                 />
             </div>
         </div>
-
-        <div class="flex space-x-2 sticky bottom-0">
-            <flux:spacer />
-            <div
-                x-data="{ edit_line_item: @entangle('edit_line_item') }"
-                x-show="edit_line_item"
-                >
-                <flux:button wire:click="removeFromEstimate" variant="danger">Remove</flux:button>
-            </div>
-            <flux:button type="submit" variant="primary">{{$view_text['button_text']}}</flux:button>
-        </div>
     </form>
-</flux:modal>
+
+    <x-slot name="footer">
+        <div x-data="{ edit_line_item: @entangle('edit_line_item') }" x-show="edit_line_item">
+            @can('create', App\Models\LineItem::class)
+                <flux:button
+                    type="button"
+                    wire:click="updateGlobalLineItem"
+                    icon="pencil-square"
+                    variant="filled"
+                    tooltip="Update main"
+                />
+            @endcan
+        </div>
+
+        <flux:spacer />
+
+        <div x-data="{ edit_line_item: @entangle('edit_line_item') }" x-show="edit_line_item">
+            <flux:button wire:click="removeFromEstimate" variant="danger">Remove</flux:button>
+        </div>
+        <flux:button type="submit" form="estimate_line_item_form_modal_form" variant="primary">{{$view_text['button_text']}}</flux:button>
+    </x-slot>
+</x-form-modal>

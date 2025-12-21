@@ -1,13 +1,9 @@
-<flux:modal name="receipt_account_vendor_form_modal" class="space-y-2">
-    <div>
-        <flux:heading size="lg">{{$vendor->name ?? 'NO VENDOR'}}</flux:heading>
-        <flux:subheading>Choose which Distribution all receipts or transactions from {{ $vendor->name ?? 'this vendor' }} should be automatically attached to. Select NO DISTRIBUTION if you do not want to assign automatically but still save the expense(will be asked to match project manually) </flux:subheading>
-    </div>
+<x-form-modal name="receipt_account_vendor_form_modal" :title="$vendor->name ?? 'NO VENDOR'">
+    <flux:subheading class="mb-4">Choose which Distribution all receipts or transactions from {{ $vendor->name ?? 'this vendor' }} should be automatically attached to. Select NO DISTRIBUTION if you do not want to assign automatically but still save the expense(will be asked to match project manually) </flux:subheading>
 
-    <flux:separator variant="subtle" />
     <flux:separator text="Recurring Expenses/Transactions" variant="subtle" />
 
-    <flux:table>
+    <flux:table class="mb-4">
         <flux:table.rows>
             @foreach ($vendor_transactions as $amount => $vendor_transactions_amount)
                 <flux:table.row class="border-b-2">
@@ -35,7 +31,7 @@
 
     <flux:separator text="Distribution for all receipts and transactions" variant="subtle" />
 
-    <form wire:submit="store" class="grid gap-6">
+    <form id="receipt_account_vendor_form_modal_form" wire:submit="store" class="space-y-4">
         <flux:select label="Distribution" wire:model.live="distribution_id" variant="listbox" placeholder="Select Distribution...">
             <flux:select.option value="NO_PROJECT">NO DISTRIBUTION</flux:select.option>
             @foreach($distributions as $distribution)
@@ -45,7 +41,7 @@
 
         <flux:separator text="Unless receipt/transaction Amount is Matched below:" variant="subtle" />
 
-        <flux:card class="space-y-2">
+        <flux:card class="space-y-4">
             {{-- HEADING --}}
             <div class="flex justify-between">
                 <flux:heading size="lg">Amount Match</flux:heading>
@@ -197,17 +193,10 @@
                 </div>
             </div>
         @endif --}}
-
-        <div
-            {{-- , connect_logged_in: @entangle('vendor.logged_in') --}}
-            x-show="$wire.distribution_id"
-            x-transition
-            >
-            <div class="flex space-x-2 sticky bottom-0">
-                <flux:spacer />
-
-                <flux:button type="submit" variant="primary">Add</flux:button>
-            </div>
-        </div>
     </form>
-</flux:modal>
+
+    <x-slot name="footer">
+        <flux:spacer />
+        <flux:button type="submit" form="receipt_account_vendor_form_modal_form" variant="primary">Add</flux:button>
+    </x-slot>
+</x-form-modal>

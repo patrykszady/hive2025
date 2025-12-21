@@ -77,8 +77,21 @@ class ProjectShow extends Component
                     ->values()
                     ->all();
 
-                // Prefer showing the recipients for the specific event row (e.g. opened should be 1 recipient)
-                $eventRecipientEmails = collect($mainEvent->recipient_emails ?? [])
+                $mainEventType = (string) ($mainEvent->event_type ?? '');
+
+                $sameTypeEvents = $threadEvents
+                    ->where('event_type', $mainEventType)
+                    ->values();
+
+                // If the main row is an event type that can happen per-recipient (opened/delivered/clicked),
+                // collapse all same-type events into the main row.
+                $shouldCollapseSameType = in_array($mainEventType, ['opened', 'delivered', 'clicked', 'link_clicked'], true);
+
+                $eventRecipientEmails = ($shouldCollapseSameType && $sameTypeEvents->count() > 1)
+                    ? $sameTypeEvents->pluck('recipient_emails')->flatten()
+                    : collect($mainEvent->recipient_emails ?? []);
+
+                $eventRecipientEmails = $eventRecipientEmails
                     ->flatten()
                     ->filter()
                     ->unique()
@@ -94,10 +107,16 @@ class ProjectShow extends Component
                 // Add recipient user data to the main event
                 $mainEvent->recipient_users = $users;
                 $mainEvent->all_recipient_emails = ! empty($eventRecipientEmails) ? $eventRecipientEmails : $threadRecipientEmails;
+
+                if ($shouldCollapseSameType && $sameTypeEvents->count() > 1) {
+                    $mainEvent->event_count = $sameTypeEvents->count();
+                }
                 
                 // Group consecutive events of the same type (excluding the main event)
                 $groupedEvents = collect();
-                $otherEvents = $threadEvents->slice(1);
+                $otherEvents = $threadEvents
+                    ->reject(fn ($event) => $event->event_type === $mainEventType)
+                    ->values();
                 
                 if ($otherEvents->isNotEmpty()) {
                     $currentGroup = null;
@@ -106,6 +125,20 @@ class ProjectShow extends Component
                         if (!$currentGroup || $currentGroup->event_type !== $event->event_type) {
                             // Start a new group
                             if ($currentGroup) {
+                                $groupRecipientEmails = $currentGroup->grouped_events
+                                    ->pluck('recipient_emails')
+                                    ->flatten()
+                                    ->filter()
+                                    ->unique()
+                                    ->values()
+                                    ->all();
+
+                                $currentGroup->recipient_users = collect($groupRecipientEmails)
+                                    ->map(fn ($email) => $usersByEmail->get($email))
+                                    ->filter()
+                                    ->values();
+                                $currentGroup->all_recipient_emails = $groupRecipientEmails;
+
                                 $groupedEvents->push($currentGroup);
                             }
                             $currentGroup = clone $event;
@@ -120,6 +153,20 @@ class ProjectShow extends Component
                     
                     // Add the last group
                     if ($currentGroup) {
+                        $groupRecipientEmails = $currentGroup->grouped_events
+                            ->pluck('recipient_emails')
+                            ->flatten()
+                            ->filter()
+                            ->unique()
+                            ->values()
+                            ->all();
+
+                        $currentGroup->recipient_users = collect($groupRecipientEmails)
+                            ->map(fn ($email) => $usersByEmail->get($email))
+                            ->filter()
+                            ->values();
+                        $currentGroup->all_recipient_emails = $groupRecipientEmails;
+
                         $groupedEvents->push($currentGroup);
                     }
                 }
@@ -128,7 +175,148 @@ class ProjectShow extends Component
                 
                 return $mainEvent;
             })
+            ->values()
+            ->sortByDesc('event_at')
             ->values();
+
+        // Final pass: collapse consecutive opened rows (same template) into a single row.
+        $collapsed = collect();
+        $current = null;
+
+        foreach ($events as $event) {
+            if (! $current) {
+                $current = $event;
+                continue;
+            }
+
+            $canCollapseOpened = ($current->event_type === 'opened')
+                && ($event->event_type === 'opened')
+                && ((int) $current->project_id === (int) $event->project_id)
+                && ((string) $current->email_template_name === (string) $event->email_template_name);
+
+            if (! $canCollapseOpened) {
+                $collapsed->push($current);
+                $current = $event;
+                continue;
+            }
+
+            $currentCount = (int) ($current->event_count ?? 1);
+            $eventCount = (int) ($event->event_count ?? 1);
+            $current->event_count = $currentCount + $eventCount;
+
+            $mergedEmails = collect(array_merge(
+                is_array($current->all_recipient_emails ?? null) ? $current->all_recipient_emails : [],
+                is_array($event->all_recipient_emails ?? null) ? $event->all_recipient_emails : [],
+            ))
+                ->filter(fn ($email) => is_string($email) && $email !== '')
+                ->unique()
+                ->values()
+                ->all();
+
+            $current->all_recipient_emails = $mergedEmails;
+
+            $mergedUsers = collect();
+            foreach ([$current->recipient_users ?? null, $event->recipient_users ?? null] as $users) {
+                if (! $users || ! $users instanceof \Illuminate\Support\Collection) {
+                    continue;
+                }
+
+                foreach ($users as $user) {
+                    if (! $user || ! isset($user->email) || ! is_string($user->email)) {
+                        continue;
+                    }
+
+                    $mergedUsers->put($user->email, $user);
+                }
+            }
+
+            $current->recipient_users = $mergedUsers->values();
+
+            // Preserve and merge sub-rows (Delivered/Sent/etc) from both groups.
+            $currentThreadEvents = $current->thread_events ?? collect();
+            $eventThreadEvents = $event->thread_events ?? collect();
+
+            $mergedThreadEvents = collect();
+            foreach ([$currentThreadEvents, $eventThreadEvents] as $threadEvents) {
+                if (! $threadEvents || ! $threadEvents instanceof \Illuminate\Support\Collection) {
+                    continue;
+                }
+
+                foreach ($threadEvents as $subEvent) {
+                    if ($subEvent) {
+                        $mergedThreadEvents->push($subEvent);
+                    }
+                }
+            }
+
+            if ($mergedThreadEvents->isNotEmpty()) {
+                $mergedThreadEvents = $mergedThreadEvents
+                    ->sortByDesc('event_at')
+                    ->values();
+
+                $regrouped = collect();
+                $group = null;
+
+                foreach ($mergedThreadEvents as $subEvent) {
+                    $subCount = (int) ($subEvent->grouped_count ?? 1);
+
+                    if (! $group || $group->event_type !== $subEvent->event_type) {
+                        if ($group) {
+                            $regrouped->push($group);
+                        }
+
+                        $group = clone $subEvent;
+                        $group->grouped_count = $subCount;
+
+                        $groupEmails = collect(is_array($subEvent->all_recipient_emails ?? null) ? $subEvent->all_recipient_emails : [])
+                            ->filter(fn ($email) => is_string($email) && $email !== '')
+                            ->unique()
+                            ->values()
+                            ->all();
+                        $group->all_recipient_emails = $groupEmails;
+                    } else {
+                        $group->grouped_count = (int) ($group->grouped_count ?? 1) + $subCount;
+
+                        $group->all_recipient_emails = collect(array_merge(
+                            is_array($group->all_recipient_emails ?? null) ? $group->all_recipient_emails : [],
+                            is_array($subEvent->all_recipient_emails ?? null) ? $subEvent->all_recipient_emails : [],
+                        ))
+                            ->filter(fn ($email) => is_string($email) && $email !== '')
+                            ->unique()
+                            ->values()
+                            ->all();
+
+                        $mergedSubUsers = collect();
+                        foreach ([$group->recipient_users ?? null, $subEvent->recipient_users ?? null] as $users) {
+                            if (! $users || ! $users instanceof \Illuminate\Support\Collection) {
+                                continue;
+                            }
+
+                            foreach ($users as $user) {
+                                if (! $user || ! isset($user->email) || ! is_string($user->email)) {
+                                    continue;
+                                }
+
+                                $mergedSubUsers->put($user->email, $user);
+                            }
+                        }
+                        $group->recipient_users = $mergedSubUsers->values();
+                    }
+                }
+
+                if ($group) {
+                    $regrouped->push($group);
+                }
+
+                $current->thread_events = $regrouped;
+            }
+        }
+
+        if ($current) {
+            $collapsed->push($current);
+        }
+
+        $events = $collapsed;
         
         return $events;
     }

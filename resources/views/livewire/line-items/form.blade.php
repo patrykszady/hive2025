@@ -1,14 +1,9 @@
-<flux:modal name="line_item_form_modal" class="space-y-2 min-w-96">
-    <div class="flex justify-between">
-        <flux:heading size="lg">{{$view_text['card_title']}}</flux:heading>
-    </div>
-
-    <flux:separator variant="subtle" />
-
+<x-form-modal name="line_item_form_modal" :title="$view_text['card_title']">
     <form
+        id="line_item_form_modal_form"
         x-data="{ line_title: @entangle('form.name'), existing_line_item_id: @entangle('existing_line_item_id') }"
         wire:submit="{{$view_text['form_submit']}}"
-        class="grid gap-6"
+        class="space-y-4"
         >
         <flux:input wire:model.live.debounce.500ms="form.name" label="Item Title" placeholder="Item Title" x-bind:disabled="existing_line_item_id"/>
 
@@ -30,7 +25,7 @@
         <div
             x-show="existing_line_item_id === 'NEW'"
             x-transition
-            class="space-y-2"
+            class="space-y-4"
             >
 
             {{-- DESCRIPTION --}}
@@ -77,12 +72,11 @@
                     placeholder="00.00"
                 />
             </div>
-
-            <div class="flex space-x-2 sticky bottom-0">
-                <flux:spacer />
-
-                <flux:button type="submit" variant="primary">{{$view_text['button_text']}}</flux:button>
-            </div>
         </div>
     </form>
-</flux:modal>
+
+    <x-slot name="footer">
+        <flux:spacer />
+        <flux:button type="submit" form="line_item_form_modal_form" variant="primary">{{$view_text['button_text']}}</flux:button>
+    </x-slot>
+</x-form-modal>

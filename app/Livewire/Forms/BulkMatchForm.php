@@ -36,12 +36,17 @@ class BulkMatchForm extends Form
         $this->vendor_id = $match->vendor_id;
         $this->amount = $match->amount;
         $this->distribution_id = $match->distribution_id;
-        $this->amount_type = $match->options->amount_type;
-        $this->desc = $match->options->desc;
+        $this->amount_type = $match->options['amount_type'] ?? 'ANY';
+        $this->desc = $match->options['desc'] ?? null;
     }
 
     public function options()
     {
+        $options = [
+            'amount_type' => $this->amount_type,
+            'desc' => $this->desc,
+        ];
+
         if (! empty($this->component->bulk_splits)) {
             $options['splits'] = [];
 

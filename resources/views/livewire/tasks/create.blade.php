@@ -1,12 +1,17 @@
-<flux:modal 
+<div>
+<x-form-modal 
     name="task_create_form_modal" 
     class="!mt-8 w-full max-w-sm" 
     x-on:modal-show.window="$dispatch('reset-tabs'); window.dispatchEvent(new CustomEvent('task-modal-opened'))"
 >
-    <flux:heading size="lg" class="!mb-0">{{ str_replace('Task', $form->type ?? 'Task', $view_text['card_title']) }}</flux:heading>
-    @if(isset($form->task))
-        <flux:subheading>{{$form->task->title}}</flux:subheading>
-    @endif
+    <x-slot name="header">
+        <div class="min-w-0">
+            <flux:heading size="lg" class="!mb-0">{{ str_replace('Task', $form->type ?? 'Task', $view_text['card_title']) }}</flux:heading>
+            @if(isset($form->task))
+                <flux:subheading>{{$form->task->title}}</flux:subheading>
+            @endif
+        </div>
+    </x-slot>
 
     <!-- Tab Navigation -->
     <div 
@@ -21,6 +26,7 @@
         <div class="border-b border-gray-200 mb-4">
             <nav class="-mb-px flex space-x-8">
                 <button
+                    type="button"
                     @click="activeTab = 'details'"
                     :class="activeTab === 'details' ? activeClasses : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
                     class="py-2 px-1 border-b-2 font-medium text-sm"
@@ -29,6 +35,7 @@
                 </button>
                 @if($view_text['form_submit'] === 'edit' && $form->task)
                     <button
+                        type="button"
                         @click="activeTab = 'notes'"
                         :class="activeTab === 'notes' ? activeClasses : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
                         class="py-2 px-1 border-b-2 font-medium text-sm"
@@ -57,7 +64,7 @@
         <!-- Task Details Panel -->
         <div x-show="activeTab === 'details'">
             <div class="relative">
-                <form wire:submit="{{$view_text['form_submit']}}" class="grid space-y-4">
+                <form id="task_create_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="grid space-y-4">
                     {{-- TYPE --}}
                     <flux:radio.group wire:model.live="form.type" label="Task Type" variant="segmented">
                         <flux:radio value="Task"><span class="{{ data_get($this->taskTypeTextClasses, 'Task') }}">Task</span></flux:radio>
@@ -75,18 +82,6 @@
                         placeholder="Assign project..."
                     />
 
-                    {{-- USERS --}}
-                    <flux:select wire:model.blur="form.user_ids" multiple label="Team Members" variant="listbox" placeholder="Assign team members...">
-                        @foreach($this->employees as $employee)
-                            <flux:select.option wire:key="{{$employee->id}}" value="{{$employee->id}}">
-                                <div class="flex items-center gap-2 whitespace-nowrap">
-                                    <flux:avatar size="xs" name="{{ $employee->full_name }}" color="auto" color:seed="{{ $employee->id }}"  />
-                                    {{$employee->first_name}}
-                                </div>
-                            </flux:select.option>
-                        @endforeach
-                    </flux:select>
-
                     {{-- VENDOR --}}
                     <flux:select
                         wire:model.live="form.vendor_id"
@@ -101,6 +96,18 @@
                                 <div class="flex items-center gap-2 whitespace-nowrap">
                                     <flux:avatar size="xs" name="{{ $vendor->name }}" color="auto" color:seed="{{ $vendor->id }}" />
                                     {{$vendor->name}}
+                                </div>
+                            </flux:select.option>
+                        @endforeach
+                    </flux:select>
+
+                    {{-- USERS --}}
+                    <flux:select wire:model.blur="form.user_ids" multiple label="Team Members" variant="listbox" placeholder="Assign team members...">
+                        @foreach($this->employees as $employee)
+                            <flux:select.option wire:key="{{$employee->id}}" value="{{$employee->id}}">
+                                <div class="flex items-center gap-2 whitespace-nowrap">
+                                    <flux:avatar size="xs" name="{{ $employee->full_name }}" color="auto" color:seed="{{ $employee->id }}"  />
+                                    {{$employee->first_name}}
                                 </div>
                             </flux:select.option>
                         @endforeach
@@ -178,19 +185,6 @@
                         </flux:field>
                     @endif
 
-                    {{-- STICKY FOOTER - NOW INSIDE FORM --}}
-                    <div class="sticky bottom-0 flex justify-end space-x-2">
-                        {{-- Only show duplicate button when editing (not creating) --}}
-                        @if($view_text['form_submit'] === 'edit')
-                            <flux:button wire:click="duplicateTask">Duplicate</flux:button>
-                        @endif
-
-                        @if($view_text['form_submit'] === 'edit' && $form->task)
-                            <flux:button wire:click="removeTask" variant="danger">Remove</flux:button>
-                        @endif
-
-                        <flux:button type="submit" variant="primary">{{$view_text['button_text']}}</flux:button>
-                    </div>
                 </form>
             </div>
         </div>
@@ -443,4 +437,18 @@
             </div>
         @endif --}}
     </div>
-</flux:modal>
+
+    <x-slot name="footer">
+        <div class="flex-1"></div>
+        @if($view_text['form_submit'] === 'edit')
+            <flux:button type="button" wire:click="duplicateTask">Duplicate</flux:button>
+        @endif
+
+        @if($view_text['form_submit'] === 'edit' && $form->task)
+            <flux:button type="button" wire:click="removeTask" variant="danger">Remove</flux:button>
+        @endif
+
+        <flux:button type="submit" form="task_create_form_modal_form" variant="primary">{{$view_text['button_text']}}</flux:button>
+    </x-slot>
+</x-form-modal>
+</div>

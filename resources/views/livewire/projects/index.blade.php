@@ -1,4 +1,6 @@
-@php($projectStatuses = \App\Models\ProjectStatus::selectableStatuses())
+@php
+    $projectStatuses = \App\Models\ProjectStatus::selectableStatuses();
+@endphp
 
 <div class="max-w-3xl space-y-2">
     @if($view === NULL)
@@ -73,7 +75,7 @@
                                     <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->project_name }}">{{ $project->project_name }}</div>
                                 </flux:table.cell>
                                 <flux:table.cell class="w-[35%] min-w-0">
-                                    <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->address }}">{{ $project->address }}</div>
+                                    <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->address }}">{{ $project->short_address }}</div>
                                 </flux:table.cell>
                             @else
                                 {{-- Original order: Address (bold), Client, Name, Status --}}
@@ -83,7 +85,7 @@
                                     variant="strong"
                                     class="cursor-pointer w-[30%] min-w-0"
                                     >
-                                    <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->address }}">{{ $project->address }}</div>
+                                    <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->address }}">{{ $project->short_address }}</div>
                                 </flux:table.cell>
                                 @if($view != 'clients.index')
                                     <flux:table.cell
@@ -126,7 +128,6 @@
                     <flux:table.column>Template</flux:table.column>
                     <flux:table.column>Project</flux:table.column>
                     <flux:table.column class="w-48">Recipients</flux:table.column>
-                    <flux:table.column>Link</flux:table.column>
                     <flux:table.column>Date</flux:table.column>
                 </flux:table.columns>
 
@@ -170,30 +171,34 @@
                             </flux:table.cell>
                             <flux:table.cell>
                                 @if($event->recipient_users && $event->recipient_users->isNotEmpty())
-                                    <div class="text-sm truncate max-w-48" title="{{ $event->recipient_users->map(fn($u) => $u->first_name . ' ' . $u->last_name)->implode(', ') }}">
-                                        @foreach($event->recipient_users->take(2) as $index => $user)
-                                            <span>{{ $user->first_name }} {{ $user->last_name }}{{ $index < min(1, $event->recipient_users->count() - 1) ? ',' : '' }}</span>
-                                        @endforeach
-                                        @if($event->recipient_users->count() > 2)
-                                            <span class="text-gray-500">+{{ $event->recipient_users->count() - 2 }} more</span>
+                                    <div class="text-sm flex items-center min-w-0 gap-1 whitespace-nowrap" title="{{ $event->recipient_users->map(fn($u) => $u->first_name . ' ' . $u->last_name)->implode(', ') }}">
+                                        @php
+                                            $firstRecipient = $event->recipient_users->first();
+                                            $remainingRecipientCount = max(0, $event->recipient_users->count() - 1);
+                                        @endphp
+
+                                        <span class="inline-block max-w-12 truncate cursor-help" title="{{ $firstRecipient->email }}">
+                                            {{ $firstRecipient->first_name }}
+                                        </span>
+                                        @if($remainingRecipientCount > 0)
+                                            <span class="text-gray-500 shrink-0">+{{ $remainingRecipientCount }}</span>
                                         @endif
                                     </div>
                                 @elseif($event->all_recipient_emails && count($event->all_recipient_emails) > 0)
-                                    <div class="text-sm text-gray-500 truncate max-w-48" title="{{ implode(', ', $event->all_recipient_emails) }}">
-                                        {{ implode(', ', array_slice($event->all_recipient_emails, 0, 2)) }}
-                                        @if(count($event->all_recipient_emails) > 2)
-                                            <span>+{{ count($event->all_recipient_emails) - 2 }} more</span>
+                                    <div class="text-sm text-gray-500 flex items-center min-w-0 gap-1 whitespace-nowrap" title="{{ implode(', ', $event->all_recipient_emails) }}">
+                                        @php
+                                            $firstRecipientEmail = $event->all_recipient_emails[0] ?? null;
+                                            $remainingRecipientCount = max(0, count($event->all_recipient_emails) - 1);
+                                        @endphp
+
+                                        @if($firstRecipientEmail)
+                                            <span class="inline-block max-w-20 truncate" title="{{ $firstRecipientEmail }}">{{ $firstRecipientEmail }}</span>
+                                        @endif
+
+                                        @if($remainingRecipientCount > 0)
+                                            <span class="shrink-0">+{{ $remainingRecipientCount }}</span>
                                         @endif
                                     </div>
-                                @else
-                                    <span class="text-gray-400">-</span>
-                                @endif
-                            </flux:table.cell>
-                            <flux:table.cell>
-                                @if($event->link_url)
-                                    <a href="{{ $event->link_url }}" target="_blank" class="text-blue-600 hover:underline text-sm truncate block max-w-xs" title="{{ $event->link_url }}">
-                                        {{ Str::limit($event->link_url, 40) }}
-                                    </a>
                                 @else
                                     <span class="text-gray-400">-</span>
                                 @endif

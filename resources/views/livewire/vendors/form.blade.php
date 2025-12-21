@@ -1,10 +1,4 @@
-<flux:modal name="vendors_form_modal" class="space-y-2">
-    <div class="flex justify-between">
-        <flux:heading size="lg">{{$view_text['card_title']}}</flux:heading>
-    </div>
-
-    <flux:separator variant="subtle" />
-
+<x-form-modal name="vendors_form_modal" :title="$view_text['card_title']">
     <div x-data="{ 
         activeTab: 'details',
         business_type: @entangle('form.business_type'), 
@@ -35,7 +29,7 @@
         
         <!-- Details Tab Content -->
         <div x-show="activeTab === 'details'">
-            <form wire:submit="{{$view_text['form_submit']}}" class="grid gap-6">
+            <form id="vendors_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="space-y-4">
                 {{-- BUSINESS NAME TEXT/SEARCH--}}
                 <div x-show="$wire.view_text.form_submit != 'edit' && !$wire.via_vendor">
                     <flux:input
@@ -51,7 +45,7 @@
                 <div
                     x-show="$wire.business_name_text && $wire.business_name_text.length >= 3"
                     x-transition
-                    class="space-y-2"
+                    class="space-y-4"
                     >
 
                     {{-- Existing Vendors that belong to the logged in Hive Vendor --}}
@@ -231,22 +225,6 @@
                         </div>
                     </div>
                 </div>
-
-                {{-- FOOTER --}}
-                <div 
-                    class="flex space-x-2 sticky bottom-0 justify-end"             
-                    x-show="$wire.form.business_type === 'Retail' || ($wire.form.business_type !== 'Retail' && $wire.zip_code)"
-                    x-transition
-                    >
-
-                    <flux:button
-                        wire:click="{{$view_text['form_submit']}}"
-                        type="submit"
-                        variant="primary"
-                        >
-                        {{$view_text['button_text']}}
-                    </flux:button>
-                </div>
             </form>
         </div>
         
@@ -377,4 +355,20 @@
         </div>
         @endif
     </div>
-</flux:modal>
+
+    <x-slot name="footer">
+        <flux:spacer />
+        <flux:button
+            x-data="{ 
+                businessType: @entangle('form.business_type'),
+                zipCode: @entangle('zip_code')
+            }"
+            x-show="businessType === 'Retail' || (businessType !== 'Retail' && zipCode)"
+            type="submit"
+            form="vendors_form_modal_form"
+            variant="primary"
+            >
+            {{$view_text['button_text']}}
+        </flux:button>
+    </x-slot>
+</x-form-modal>

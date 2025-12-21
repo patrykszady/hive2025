@@ -1,11 +1,5 @@
-<flux:modal name="accept_estimate_modal">
-    <div class="flex justify-between space-y-2">
-        <flux:heading size="lg">Finalize Estimate</flux:heading>
-    </div>
-
-    <flux:separator variant="subtle" class="mb-2" />
-
-    <form wire:submit="save" class="grid gap-6">
+<x-form-modal name="accept_estimate_modal" title="Finalize Estimate">
+    <form id="accept_estimate_modal_form" wire:submit="save" class="space-y-4">
         <flux:card>
             {{-- HEADING --}}
             <div class="flex justify-between">
@@ -132,12 +126,10 @@
                 <flux:input wire:model.live="end_date" label="End Date" type="date" />
             </div>
         </flux:card>
-
-        {{-- FOOTER --}}
-        <div class="flex space-x-2 sticky bottom-0">
-            <flux:spacer />
-
-            <flux:button type="submit" variant="primary">Finalize</flux:button>
-        </div>
     </form>
-</flux:modal>
+
+    <x-slot name="footer">
+        <flux:spacer />
+        <flux:button type="submit" form="accept_estimate_modal_form" variant="primary">Finalize</flux:button>
+    </x-slot>
+</x-form-modal>

@@ -115,7 +115,7 @@
         @endif
     </div>
 
-    <div class="col-span-5 space-y-2 lg:col-span-3 lg:col-start-3 overflow-y-auto">
+    <div class="col-span-5 space-y-2 lg:col-span-3 lg:col-start-3">
         {{-- SECTIONS --}}
         <div x-sort="$wire.sort_sections($key, $position)" class="space-y-2">
             @foreach($sections as $index => $section)

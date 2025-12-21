@@ -1,93 +1,99 @@
-<x-modals.modal>
-    @if(isset($project))
-        <form wire:submit="{{$view_text['form_submit']}}"> 
-            <x-cards.heading>
-                <x-slot name="left">
-                    <h1><b>Distributions</b> | {!! $project->name !!}</h1>
-                </x-slot>
+<x-form-modal
+    name="project_distributions_modal"
+    :title="$project && $project->short_address ? $project->short_address.' Distributions' : 'Project distributions'"
+    class="max-w-lg"
+>
+    @if ($project)
+        @php
+            $projectProfit = (float) data_get($project->finances, 'profit', 0);
+            $projectTotal = (float) data_get($project->finances, 'total_project', 0);
+            $projectProfitPercent = $projectTotal > 0
+                ? (int) round(($projectProfit / $projectTotal) * 100)
+                : 0;
+        @endphp
 
-                <x-slot name="right">
-                    <x-cards.button 
-                        href="{{route('projects.show', $project->id)}}"
-                        hrefTarget='_blank'
-                        >
-                        View Project
-                    </x-cards.button>
-                </x-slot>
-            </x-cards.heading>
-
-            <x-cards.body>
-                <x-cards.heading>
-                    <x-slot name="left">
-                        <h1>Project Balance: {{money($project->finances['balance'])}}</h1>
-                        <h1>Project Profit: <b>{{money($project->finances['profit'])}}</b></h1>
-                    </x-slot>       
-                </x-cards.heading>
-                <br>
-                <x-cards.body>
-                    @foreach ($distributions as $index => $distribution)
-                        {{-- ROWS --}}
-                        <div class="space-y-2 mt-2">
-                            <x-forms.row 
-                                wire:model.live.debounce.500ms="distributions.{{ $index }}.percent" 
-                                errorName="distributions.{{ $index }}.percent"
-                                name="distributions.{{ $index }}.percent"
-                                text="{{$distribution->name}}" 
-                                type="number" 
-                                hint="%" 
-                                textSize="xl"
-                                placeholder="25" 
-                                inputmode="numeric" 
-                                step="5"
-                                {{-- radioHint="{{$loop->first ? '' : 'Remove'}}" --}}
-                                >
-                            </x-forms.row>
-                            <x-forms.row 
-                                wire:model.live.debounce.500ms="distributions.{{ $index }}.percent_amount" 
-                                errorName="distributions.{{ $index }}.percent_amount"
-                                name="distributions.{{ $index }}.percent_amount"
-                                text=""
-                                hint="$"                 
-                                disabled
-                                >
-                            </x-forms.row>
-                        </div>
-                    @endforeach
-                    <br>
-                </x-cards.body>
-            </x-cards.body>
-
-            <x-cards.footer>
-                <button 
-                    wire:click="$dispatch('resetModal')"
-                    type="button"
-                    x-on:click="open = false"
-                    class="bg-white py-2 px-4 border border-gray-300 rounded-md shadow-xs text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                    > 
-                    Cancel
-                </button>
-
+        <x-slot name="subtitle">
+            <flux:subheading class="truncate">
+                {{ $project->client?->last_names ?? $project->client?->name ?? 'No Client' }}
+                <span class="text-zinc-500 dark:text-zinc-400">—</span>
                 <a
-                    type="button"
-                    class="text-center focus:outline-hidden rounded-md border-2 border-indigo-600 py-2 px-4 text-lg font-medium text-gray-900 shadow-xs">
-                    <b>{{$this->percent_sum}}</b>%
-                </a>    
+                    wire:navigate.hover
+                    href="{{ route('projects.show', $project) }}"
+                    class="hover:underline underline-offset-2"
+                >
+                    {{ $project->project_name ?: 'View project' }}
+                </a>
+            </flux:subheading>
+        </x-slot>
 
-                <button 
-                    type="submit"
-                    {{-- x-on:click="open = false" --}}
-                    {{-- x-bind:disabled="expense.project_id" --}}
-                    class="ml-3 inline-flex justify-center disabled:opacity-50 py-2 px-4 border border-transparent shadow-xs text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                    >
-                    {{$view_text['button_text']}}
-                </button>
+        <div class="grid grid-cols-2 gap-2 mb-3">
+            <flux:card class="space-y-0.5 p-3">
+                <flux:text class="text-xs text-zinc-600 dark:text-zinc-400">Profit</flux:text>
+                <div class="flex items-baseline gap-2">
+                    <flux:heading size="md">{{ money(data_get($project->finances, 'profit')) }}</flux:heading>
+                    @if ($projectProfitPercent > 0)
+                        <span class="text-xs text-zinc-600 dark:text-zinc-400">{{ $projectProfitPercent }}%</span>
+                    @endif
+                </div>
+            </flux:card>
+            <flux:card class="space-y-0.5 p-3">
+                <flux:text class="text-xs text-zinc-600 dark:text-zinc-400">Balance</flux:text>
+                <flux:heading size="md">{{ money(data_get($project->finances, 'balance')) }}</flux:heading>
+            </flux:card>
+        </div>
 
-                @if($errors->has('percent_distributions_sum')) 
-                    <x-slot name="bottom">
-                        <x-forms.error errorName="percent_distributions_sum" />              
-                    </x-slot>
-                @endif     
-            </x-cards.footer> 
+        <form id="project_distributions_form" wire:submit="store" class="space-y-2">
+            <div class="grid grid-cols-1 gap-2">
+                @foreach ($distributions as $index => $distribution)
+                    <flux:card class="p-3">
+                        <div class="flex items-center justify-between gap-3">
+                            <div class="min-w-0">
+                                <flux:heading size="sm" class="truncate">{{ $distribution['name'] }}</flux:heading>
+                                <flux:text class="text-xs text-zinc-600 dark:text-zinc-400">
+                                    Amount: {{ $distribution['amount'] !== null ? money($distribution['amount']) : '—' }}
+                                </flux:text>
+                            </div>
+
+                            <div class="w-28 shrink-0">
+                                <flux:input.group>
+                                    <flux:input
+                                        type="number"
+                                        inputmode="numeric"
+                                        min="0"
+                                        max="100"
+                                        step="5"
+                                        placeholder="0"
+                                        wire:model.blur="distributions.{{ $index }}.percent"
+                                    />
+                                    <flux:input.group.suffix>%</flux:input.group.suffix>
+                                </flux:input.group>
+                                <flux:error name="distributions.{{ $index }}.percent" />
+                            </div>
+                        </div>
+                    </flux:card>
+                @endforeach
+            </div>
+
+            <flux:error name="percent_distributions_sum" />
         </form>
+
+        <x-slot name="footer">
+            <flux:modal.close>
+                <flux:button type="button" variant="subtle">Cancel</flux:button>
+            </flux:modal.close>
+
+            <div class="flex-1 flex justify-center">
+                <flux:button
+                    type="button"
+                    variant="filled"
+                    color="{{ $this->percent_sum === 100 ? 'green' : 'orange' }}"
+                    disabled
+                >
+                    {{ $this->percent_sum > 0 ? $this->percent_sum.'%' : '—%' }}
+                </flux:button>
+            </div>
+
+            <flux:button type="submit" form="project_distributions_form" variant="primary">Save</flux:button>
+        </x-slot>
     @endif
-</x-modals.modal>
+</x-form-modal>

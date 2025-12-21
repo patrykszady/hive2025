@@ -191,7 +191,7 @@
                 <x-details.card 
                     title="Receipts"
                     subheading="Receipt details and information"
-                    details_text="Receipt Items"
+                    :details_text="$this->hasReceiptLineItems ? 'Receipt Items' : false"
                 >
                     @if($expense->receipts->count() === 1 && !empty($expense->receipts->first()->receipt_filename))
                         <x-slot:header_buttons>

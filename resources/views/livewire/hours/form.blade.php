@@ -59,7 +59,7 @@
                         {{-- label_text_color_custom="{{ !empty($day_project_tasks[$index]) ? 'text-indigo-600' : NULL}}" --}}
                         <div class="grid gap-2 grid-cols-2">
                             <div>
-                                <flux:label><a href="{{route('projects.show', $project->id)}}" target="_blank">{{$project->address}}</a></flux:label>
+                                <flux:label><a href="{{route('projects.show', $project->id)}}" target="_blank">{{ $project->short_address }}</a></flux:label>
                                 <flux:description><i>{{$project->project_name}}</i></flux:description>
                             </div>
                             <div>
@@ -115,7 +115,7 @@
                         </x-slot>
 
                         @foreach($this->other_projects as $project)
-                            <flux:select.option value="{{$project->id}}"><div>{{$project->address}} <br> <i class="font-normal">{{$project->project_name}}</i></div></flux:select.option>
+                            <flux:select.option value="{{$project->id}}"><div>{{ $project->short_address }} <br> <i class="font-normal">{{$project->project_name}}</i></div></flux:select.option>
                         @endforeach
                     </flux:select>
 

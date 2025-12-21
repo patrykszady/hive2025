@@ -16,6 +16,7 @@ return [
         'sid' => env('TWILIO_SID'),
         'token' => env('TWILIO_TOKEN'),
         'from' => env('TWILIO_FROM'), // Your Twilio phone number
+        'dev_to' => env('TWILIO_DEV_TO', '+12249993880'),
     ],
 
     'two_captcha' => [

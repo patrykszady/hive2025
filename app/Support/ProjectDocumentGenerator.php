@@ -56,11 +56,11 @@ class ProjectDocumentGenerator
         $binary = Browsershot::html($view)
             ->newHeadless()
             ->addChromiumArguments([
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--single-process',
+                'no-sandbox',
+                'disable-setuid-sandbox',
+                'disable-dev-shm-usage',
+                'disable-gpu',
+                'single-process',
             ])
             ->showBrowserHeaderAndFooter()
             ->showBackground()

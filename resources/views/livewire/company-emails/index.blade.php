@@ -2,7 +2,7 @@
     {{-- COMPANY EMAILS --}}
     <flux:card>
         <div class="flex justify-between">
-            <flux:heading size="lg">Company Email Accounts</flux:heading>
+            <flux:heading size="lg">Email Accounts</flux:heading>
             <flux:button
                 x-on:click="window.openNylasPopup('{{route('company-email.login')}}')"
                 size="sm"

@@ -1,14 +1,12 @@
-<flux:modal name="expenses_form_modal" class="space-y-2">
-    <div class="flex justify-between">
-        <flux:heading size="lg">{{$view_text['card_title']}}</flux:heading>
+<div>
+<x-form-modal name="expenses_form_modal" :title="$view_text['card_title']">
+    <x-slot name="headerActions">
         @if(isset($expense->id))
             <flux:button wire:navigate.hover href="{{route('expenses.show', $expense->id)}}">Show Expense</flux:button>
         @endif
-    </div>
+    </x-slot>
 
-    <flux:separator variant="subtle" />
-
-    <form wire:submit="{{$view_text['form_submit']}}" class="grid gap-6">
+    <form id="expenses_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="space-y-4">
         {{-- AMOUNT --}}
         <div
             x-data="{ amount: @entangle('form.amount'), save_form: @entangle('view_text.form_submit'), expense_transactions: @entangle('form.expense_transactions_sum') }"
@@ -78,7 +76,7 @@
                             <flux:select.option wire:key="{{$project->id}}" value="{{$project->id}}">
                                 <div class="flex flex-col gap-0 w-full">
                                     <div class="flex items-center w-full">
-                                        <span class="flex-1 min-w-0">{{$project->address}}</span>
+                                        <span class="flex-1 min-w-0">{{ $project->short_address }}</span>
 
                                         @if($project->latestStatus)
                                             <flux:badge size="sm" :color="$project->latestStatus->badge_color" inset="top bottom" class="shrink-0 ml-2">
@@ -255,19 +253,20 @@
                 placeholder="Notes"
             />
         </div>
-
-        {{-- FOOTER --}}
-        <div class="flex space-x-2 sticky bottom-0">
-            <flux:spacer />
-
-            {{-- @if($form->amount == '0.00' || $form->transaction != NULL || ($form->expense_transactions_sum == FALSE && $form->transaction == NULL && $form->bank_account_id == NULL))
-                <flux:button wire:click="remove" variant="danger">Remove</flux:button>
-            @endif --}}
-            <flux:button wire:click="remove" variant="danger">Remove</flux:button>
-            <flux:button type="submit" variant="primary">{{$view_text['button_text']}}</flux:button>
-        </div>
     </form>
 
-    {{-- SPLITS MODAL --}}
-    <livewire:expenses.expense-splits-create :projects="$this->projects" :distributions="$this->distributions" />
-</flux:modal>
+    <x-slot name="footer">
+        {{-- @if($form->amount == '0.00' || $form->transaction != NULL || ($form->expense_transactions_sum == FALSE && $form->transaction == NULL && $form->bank_account_id == NULL))
+            <flux:button wire:click="remove" variant="danger">Remove</flux:button>
+        @endif --}}
+        <flux:button wire:click="remove" variant="danger">Remove</flux:button>
+
+        <flux:spacer />
+
+        <flux:button type="submit" form="expenses_form_modal_form" variant="primary">{{$view_text['button_text']}}</flux:button>
+    </x-slot>
+</x-form-modal>
+
+{{-- SPLITS MODAL --}}
+<livewire:expenses.expense-splits-create :projects="$this->projects" :distributions="$this->distributions" />
+</div>

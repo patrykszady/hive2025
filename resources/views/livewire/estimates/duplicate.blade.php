@@ -1,11 +1,5 @@
-<flux:modal name="estimate_duplicate_modal">
-    <div class="flex justify-between space-y-2">
-        <flux:heading size="lg">{{ $this->view_text['card_title'] }}</flux:heading>
-    </div>
-
-    <flux:separator variant="subtle" class="mb-2" />
-
-    <form wire:submit="{{ $this->view_text['form_submit'] }}" class="space-y-2">
+<x-form-modal name="estimate_duplicate_modal" :title="$this->view_text['card_title']">
+    <form id="estimate_duplicate_modal_form" wire:submit="{{ $this->view_text['form_submit'] }}" class="space-y-4">
         <flux:select label="Client" wire:model.live="client_id" variant="listbox" searchable placeholder="Choose client...">
             @foreach($this->clients as $client)
                 <flux:select.option value="{{$client->id}}" wire:key="{{$client->id}}">{{$client->name}}</flux:select.option>
@@ -37,16 +31,10 @@
                 @endforeach
             </flux:select>
         </div>
-
-        {{-- FOOTER --}}
-        <div
-            x-show="$wire.project_id"
-            x-transition
-            class="flex space-x-2 sticky bottom-0"
-            >
-            <flux:spacer />
-
-            <flux:button type="submit" variant="primary">{{ $this->view_text['button_text'] }}</flux:button>
-        </div>
     </form>
-</flux:modal>
+
+    <x-slot name="footer">
+        <flux:spacer />
+        <flux:button type="submit" form="estimate_duplicate_modal_form" variant="primary">{{ $this->view_text['button_text'] }}</flux:button>
+    </x-slot>
+</x-form-modal>

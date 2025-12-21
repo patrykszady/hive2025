@@ -6,11 +6,15 @@ use App\Livewire\Forms\EstimateLineItemForm;
 use App\Livewire\Projects\ProjectFinances;
 use App\Models\Estimate;
 use App\Models\LineItem;
+use Flux;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 
 class EstimateLineItemCreate extends Component
 {
+    use AuthorizesRequests;
+
     public Estimate $estimate;
 
     public EstimateLineItemForm $form;
@@ -146,6 +150,36 @@ class EstimateLineItemCreate extends Component
         $this->modal('estimate_line_item_form_modal')->close();
         $this->dispatch('refreshComponent')->to('estimates.estimate-show');
         $this->dispatch('refresh')->to(ProjectFinances::class);
+    }
+
+    public function updateGlobalLineItem(): void
+    {
+        $this->authorize('create', LineItem::class);
+
+        if (! $this->edit_line_item || ! $this->line_item_id) {
+            return;
+        }
+
+        $this->form->validate();
+
+        $lineItem = LineItem::query()->findOrFail($this->line_item_id);
+
+        $lineItem->update([
+            'desc' => $this->form->desc,
+            'notes' => $this->form->notes,
+            'category' => $this->form->category,
+            'sub_category' => $this->form->sub_category,
+            'unit_type' => $this->form->unit_type,
+            'cost' => $this->form->cost,
+        ]);
+
+        Flux::toast(
+            duration: 4000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Global line item updated',
+            text: '',
+        );
     }
 
     public function save()

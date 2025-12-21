@@ -1,11 +1,5 @@
-<flux:modal name="client_form_modal" class="space-y-2">
-    <div class="flex justify-between">
-        <flux:heading size="lg">{{$view_text['card_title']}}</flux:heading>
-    </div>
-
-    <flux:separator variant="subtle" />
-
-    <form wire:submit="{{$view_text['form_submit']}}" class="grid gap-6">
+<x-form-modal name="client_form_modal" :title="$view_text['card_title']">
+    <form id="client_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="space-y-4">
         <flux:input
             wire:model.live.debounce.500ms="form.client_name"
             disabled
@@ -75,19 +69,10 @@
                 placeholder="Referral / Lead / Source"
             />
         </div>
-
-        {{-- Button section - always visible when user_client_id is set --}}
-        <div
-            x-data="{ userClientId: @entangle('user_client_id') }"
-            x-show="userClientId !== null"
-            x-transition
-            class="flex space-x-2 sticky bottom-0">
-            <flux:spacer />
-
-            <flux:button 
-                type="submit" 
-                variant="primary"
-            >{{$view_text['button_text']}}</flux:button>
-        </div>
     </form>
-</flux:modal>
+
+    <x-slot name="footer">
+        <flux:spacer />
+        <flux:button type="submit" form="client_form_modal_form" variant="primary">{{$view_text['button_text']}}</flux:button>
+    </x-slot>
+</x-form-modal>

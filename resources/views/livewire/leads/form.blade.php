@@ -1,11 +1,5 @@
 {{--  x-on:close="console.log({close: $event})" x-on:cancel="console.log({cancel: $event})" --}}
-<flux:modal name="lead_form_modal" class="space-y-2" :dismissible="false">
-    <div class="flex justify-between">
-        <flux:heading size="lg">Lead</flux:heading>
-    </div>
-
-    <flux:separator variant="subtle" />
-
+<x-form-modal name="lead_form_modal" title="Lead" :dismissible="false">
     <flux:tab.group>
         <flux:tabs>
             <flux:tab name="details">Details</flux:tab>
@@ -13,7 +7,7 @@
         </flux:tabs>
 
         <flux:tab.panel name="details">
-            <form wire:submit="{{$view_text['form_submit']}}" class="grid gap-6">
+            <form id="lead_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="space-y-4">
                 <flux:textarea
                     wire:model.live="lead.message"
                     disabled
@@ -86,16 +80,10 @@
                     rows="auto"
                     resize="none"
                 />
-
-                <div class="flex space-x-2 sticky bottom-0">
-                    <flux:spacer />
-                    <flux:button wire:click="remove" variant="danger">Remove</flux:button>
-                    <flux:button type="submit" variant="primary">{{$view_text['button_text']}}</flux:button>
-                </div>
             </form>
         </flux:tab.panel>
         <flux:tab.panel name="messages">
-            <form wire:submit="message_reply" class="grid gap-6">
+            <form wire:submit="message_reply" class="space-y-4">
                 <flux:textarea
                     wire:model.live="lead.message"
                     disabled
@@ -123,5 +111,11 @@
         </flux:tab.panel>
     </flux:tab.group>
 
+    <x-slot name="footer">
+        <flux:spacer />
+        <flux:button wire:click="remove" variant="danger">Remove</flux:button>
+        <flux:button type="submit" form="lead_form_modal_form" variant="primary">{{$view_text['button_text']}}</flux:button>
+    </x-slot>
+
     {{-- <livewire:users.user-create /> --}}
-</flux:modal>
+</x-form-modal>

@@ -1,4 +1,4 @@
-<flux:modal name="payment_form_modal" class="space-y-2 w-full max-w-lg" x-data="{
+<x-form-modal name="payment_form_modal" :title="$view_text['card_title']" x-data="{
     initDate() {
         // Only set date if it's empty (new payment)
         if (!$wire.form.date) {
@@ -10,13 +10,7 @@
         }
     }
 }" x-init="initDate()">
-    <div class="flex justify-between">
-        <flux:heading size="lg">{{$view_text['card_title']}}</flux:heading>
-    </div>
-
-    <flux:separator variant="subtle" />
-
-    <form wire:submit="{{$view_text['form_submit']}}" class="grid gap-6">
+    <form id="payment_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="space-y-4">
         {{-- CLIENT --}}
         <flux:select
             label="Client"
@@ -35,7 +29,7 @@
             x-data="{ open: @entangle('client_id') }"
             x-show="open"
             x-transition
-            class="space-y-2"
+            class="space-y-4"
             >
 
             @if($this->hasValidProjects)
@@ -87,21 +81,6 @@
                     @endif
                 @endforeach
 
-                <flux:separator variant="subtle" />
-                
-                <div class="flex justify-between mt-4">
-                    <flux:button disabled variant="primary" icon="currency-dollar">
-                        {{money($this->client_payment_sum)}}
-                    </flux:button>
-
-                    <div class="space-x-2">
-                        @if($view_text['form_submit'] === 'update')
-                            <flux:button wire:click.prevent="remove" variant="danger" icon="trash">Delete</flux:button>
-                        @endif
-                        <flux:button type="submit" variant="primary">{{$view_text['button_text']}}</flux:button>
-                    </div>
-                </div>
-
                 <flux:error name="payment_total_min" />
             @else
                 {{-- Show callout when no valid projects --}}
@@ -113,4 +92,17 @@
             @endif
         </div>
     </form>
-</flux:modal>
+
+    <x-slot name="footer">
+        <flux:button disabled variant="primary" icon="currency-dollar">
+            {{money($this->client_payment_sum)}}
+        </flux:button>
+
+        <flux:spacer />
+
+        @if($view_text['form_submit'] === 'update')
+            <flux:button wire:click.prevent="remove" variant="danger" icon="trash">Delete</flux:button>
+        @endif
+        <flux:button type="submit" form="payment_form_modal_form" variant="primary">{{$view_text['button_text']}}</flux:button>
+    </x-slot>
+</x-form-modal>

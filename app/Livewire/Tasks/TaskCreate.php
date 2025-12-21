@@ -132,10 +132,25 @@ class TaskCreate extends Component
 
     /**
      * Apply time settings from one date to all other dates
+     * Only copies start/end times if this is the only date with use_time enabled
+     * Does not toggle use_time on for other dates
      */
     public function applyTimeToAllDates($sourceDate)
     {
         if (!isset($this->form->time_settings[$sourceDate])) {
+            return;
+        }
+
+        // Count how many dates have use_time enabled
+        $enabledCount = 0;
+        foreach ($this->form->dates as $date) {
+            if ($this->form->time_settings[$date]['use_time'] ?? false) {
+                $enabledCount++;
+            }
+        }
+
+        // Only propagate if this is the only date with use_time enabled
+        if ($enabledCount > 1) {
             return;
         }
 
@@ -146,7 +161,8 @@ class TaskCreate extends Component
                 $this->form->time_settings[$date] = array_merge(
                     $this->form->time_settings[$date] ?? [],
                     [
-                        'use_time' => $sourceSettings['use_time'] ?? false,
+                        // Preserve existing use_time state, default to false
+                        'use_time' => $this->form->time_settings[$date]['use_time'] ?? false,
                         'start_time' => $sourceSettings['start_time'] ?? null,
                         'end_time' => $sourceSettings['end_time'] ?? null,
                     ]

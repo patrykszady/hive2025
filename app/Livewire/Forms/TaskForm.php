@@ -95,7 +95,15 @@ class TaskForm extends Form
         }
 
         // Load time settings from options
-        $this->time_settings = $task->options->time_settings ?? [];
+        $timeSettings = $task->options->time_settings ?? [];
+
+        if (!empty($timeSettings) && is_object($timeSettings)) {
+            $timeSettings = json_decode(json_encode($timeSettings), true);
+        } elseif (!empty($timeSettings) && is_array($timeSettings)) {
+            $timeSettings = json_decode(json_encode($timeSettings), true);
+        }
+
+        $this->time_settings = is_array($timeSettings) ? $timeSettings : [];
 
         // Load dependencies without eager loading users
         $this->refreshTaskWithDependencies($task->id);

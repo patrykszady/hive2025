@@ -4,17 +4,22 @@ namespace App\Livewire\Distributions;
 
 use App\Models\Distribution;
 use App\Models\Project;
+use Flux;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Component;
 
 class DistributionProjectsForm extends Component
 {
-    public Project $project;
+    use AuthorizesRequests;
 
-    public $modal_show = false;
+    public ?Project $project = null;
 
-    public $distributions = [];
+    /**
+     * @var array<int, array{id:int,name:string,percent:int|null,amount:float|null}>
+     */
+    public array $distributions = [];
 
-    public $percent_distributions_sum = 0;
+    public int $percent_distributions_sum = 0;
 
     public $view_text = [
         'card_title' => 'New Distributions',
@@ -27,9 +32,8 @@ class DistributionProjectsForm extends Component
     protected function rules()
     {
         return [
-            'distributions.*.percent' => 'nullable|numeric|min:10',
-            'distributions.*.percent_amount' => 'nullable|numeric',
-            'percent_distributions_sum' => 'required|numeric|min:100|max:100',
+            'distributions.*.percent' => 'nullable|integer|min:0|max:100',
+            'percent_distributions_sum' => 'required|integer|min:100|max:100',
         ];
     }
 
@@ -42,79 +46,139 @@ class DistributionProjectsForm extends Component
 
     public function updated($field, $value)
     {
-        $this->validateOnly($field);
-        //distributions.0.percent
-        $index = substr($field, 14, -8);
-        if ($field == 'distributions.'.$index.'.percent') {
-            if ($value == '' || $value == 0 || $value == 0.0 || $value == 0.00) {
-                $this->distributions[$index]['percent'] = '';
-                // $this->distributions[$index]['percent_amount'] = NULL;
+        if (preg_match('/^distributions\.(\d+)\.percent$/', (string) $field, $matches) === 1) {
+            if ($value === '') {
+                $this->distributions[(int) $matches[1]]['percent'] = null;
             }
         }
+
+        if (str_starts_with((string) $field, 'distributions.')) {
+            $this->recalculateTotals();
+        }
+
+        $this->validateOnly($field);
     }
 
-    public function mount()
+    public function mount(): void
     {
-        $this->distributions = Distribution::all();
         $this->resetModal();
     }
 
-    public function resetModal()
+    public function resetModal(): void
     {
-        // Public functions should be reset here
-        $this->distributions->each(function ($item, $key) {
-            $item->percent = null;
-            $item->percent_amount = null;
-        });
-
+        $this->resetErrorBag();
         $this->percent_distributions_sum = 0;
+
+        $this->distributions = Distribution::query()
+            ->orderBy('id')
+            ->get(['id', 'name'])
+            ->map(fn (Distribution $distribution): array => [
+                'id' => (int) $distribution->id,
+                'name' => (string) $distribution->name,
+                'percent' => null,
+                'amount' => null,
+            ])
+            ->all();
     }
 
-    public function getPercentSumProperty()
+    public function getPercentSumProperty(): int
     {
-        $this->percent_distributions_sum =
-            collect($this->distributions)
-                ->reject(function ($distribution) {
-                    return ! $distribution->percent;
-                })->sum('percent');
-
-        foreach ($this->distributions as $distribution) {
-            if ($distribution->percent != '' && $distribution->percent != 0 && $distribution->percent != null) {
-                $percent = '.'.$distribution->percent;
-                $distribution->percent_amount = round($this->project->finances['profit'] * $percent, 2);
-            } else {
-                $distribution->percent_amount = null;
-            }
-        }
+        $this->recalculateTotals();
 
         return $this->percent_distributions_sum;
     }
 
-    public function addDis(Project $project)
+    private function recalculateTotals(): void
     {
-        $this->project = $project;
-        $this->resetModal();
-        $this->modal_show = true;
+        $this->percent_distributions_sum = (int) collect($this->distributions)
+            ->pluck('percent')
+            ->filter(fn ($percent) => is_numeric($percent) && (int) $percent > 0)
+            ->sum();
+
+        $profit = (float) data_get($this->project?->finances ?? [], 'profit', 0);
+
+        foreach ($this->distributions as $index => $row) {
+            $percent = (int) ($row['percent'] ?? 0);
+
+            if ($percent > 0) {
+                $this->distributions[$index]['amount'] = round($profit * ($percent / 100), 2);
+            } else {
+                $this->distributions[$index]['amount'] = null;
+            }
+        }
     }
 
-    public function store()
+    public function addDis(Project $project): void
     {
-        $this->validate();
+        $this->authorize('viewAny', Distribution::class);
 
-        foreach ($this->distributions->whereNotNull('percent') as $distribution) {
-            $distribution->projects()->attach($this->project->id, [
-                'percent' => $distribution->percent,
-                'amount' => $distribution->percent_amount,
+        $this->project = $project;
+        $this->project->loadMissing(['distributions', 'client.users']);
+
+        $this->resetModal();
+
+        $existing = $this->project->distributions
+            ->mapWithKeys(fn (Distribution $distribution): array => [
+                (int) $distribution->id => [
+                    'percent' => (int) $distribution->pivot->percent,
+                    'amount' => (float) $distribution->pivot->amount,
+                ],
             ]);
+
+        foreach ($this->distributions as $index => $row) {
+            $existingRow = $existing->get((int) $row['id']);
+
+            if ($existingRow) {
+                $this->distributions[$index]['percent'] = $existingRow['percent'];
+                $this->distributions[$index]['amount'] = $existingRow['amount'];
+            }
         }
 
-        $this->modal_show = false;
-        //emit and refresh so distributions.index removes/refreshes projects_doesnt_dis
-        $this->dispatch('refreshComponent')->to('distributions.distributions-index');
-        //reset modal data
-        // $this->dispatch('resetModal')->self();
+        $this->recalculateTotals();
+        $this->modal('project_distributions_modal')->show();
+    }
 
-        //NOTIFICATIONS!
+    public function store(): void
+    {
+        $this->authorize('viewAny', Distribution::class);
+
+        if (!$this->project) {
+            return;
+        }
+
+        $this->recalculateTotals();
+        $this->validate();
+
+        $profit = (float) data_get($this->project->finances ?? [], 'profit', 0);
+
+        $syncData = [];
+
+        foreach ($this->distributions as $row) {
+            $percent = (int) ($row['percent'] ?? 0);
+
+            if ($percent <= 0) {
+                continue;
+            }
+
+            $syncData[(int) $row['id']] = [
+                'percent' => $percent,
+                'amount' => round($profit * ($percent / 100), 2),
+            ];
+        }
+
+        $this->project->distributions()->sync($syncData);
+
+        $this->modal('project_distributions_modal')->close();
+
+        $this->dispatch('refreshComponent')->to('distributions.distributions-index');
+
+        Flux::toast(
+            duration: 4000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Project distributions updated.',
+            text: 'Saved distribution splits for '.$this->project->short_address.'.',
+        );
     }
 
     public function render()

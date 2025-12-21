@@ -42,7 +42,7 @@
                     @endforeach
                     <flux:select.option disabled>---------</flux:select.option>
                     @foreach ($projects as $project)
-                        <flux:select.option value="{{$project->id}}"><div>{{$project->address}} <br> <i class="font-normal">{{$project->project_name}}</i></div></flux:select.option>
+                        <flux:select.option value="{{$project->id}}"><div>{{ $project->short_address }} <br> <i class="font-normal">{{$project->project_name}}</i></div></flux:select.option>
                     @endforeach
                 </flux:select>
 

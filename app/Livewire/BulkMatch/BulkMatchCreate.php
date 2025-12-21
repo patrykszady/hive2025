@@ -135,13 +135,15 @@ class BulkMatchCreate extends Component
 
     public function addSplit()
     {
-        $this->splits_count = $this->splits_count ++;
+        $this->splits_count++;
         $this->bulk_splits->push(['amount' => null, 'amount_type' => '$', 'distribution_id' => null]);
     }
 
     public function removeSplit($index)
     {
-        $this->splits_count = $this->splits_count --;
+        if ($this->splits_count > 0) {
+            $this->splits_count--;
+        }
         unset($this->bulk_splits[$index]);
     }
 
@@ -206,9 +208,8 @@ class BulkMatchCreate extends Component
 
     public function edit()
     {
-        dd('in edit');
         $this->form->update();
-        //refresh main component of transactions/bulk_match
+        // Refresh the main list.
         $this->dispatch('refreshComponent')->to('bulk-match.bulk-match-index');
         $this->modal('bulk_match_form_modal')->close();
 

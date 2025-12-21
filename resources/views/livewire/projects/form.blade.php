@@ -1,11 +1,5 @@
-<flux:modal name="project_form_modal" class="space-y-2">
-    <div class="flex justify-between">
-        <flux:heading size="lg">{{$view_text['card_title']}}</flux:heading>
-    </div>
-
-    <flux:separator variant="subtle" />
-
-    <form wire:submit="{{$view_text['form_submit']}}" class="grid gap-6">
+<x-form-modal name="project_form_modal" :title="$view_text['card_title']">
+    <form id="project_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="space-y-4">
         {{-- CLIENT ID --}}
         <div>
             <flux:select label="Client" wire:model.live="form.client_id" variant="listbox" searchable placeholder="Choose client...">
@@ -77,48 +71,48 @@
                 type="text"
             />
         </div>
-
-        <div class="flex space-x-2 sticky bottom-0">
-            @if($view_text['form_submit'] === 'edit')
-                @can('forceDelete', $project)
-                    <flux:button
-                        x-on:click="$flux.modal('project_delete_confirm').show()"
-                        variant="danger"
-                        type="button"
-                    >
-                        Delete
-                    </flux:button>
-                @endcan
-            @endif
-
-            <flux:spacer />
-
-            <flux:button type="submit" variant="primary">{{$view_text['button_text']}}</flux:button>
-        </div>
     </form>
 
-    @if($view_text['form_submit'] === 'edit')
-        @can('forceDelete', $project)
-            <flux:modal name="project_delete_confirm" class="min-w-[22rem]">
-                <div class="space-y-6">
-                    <div>
-                        <flux:heading size="lg">Delete Project?</flux:heading>
-                        <flux:text class="mt-2">
-                            <p>You're about to permanently delete this project.</p>
-                            <p>This action cannot be reversed.</p>
-                            <p class="mt-2">Projects can only be deleted if they have no payments, timesheets, hours, tasks, expenses, bids, or distributions.</p>
-                        </flux:text>
-                    </div>
-                    
-                    <div class="flex gap-2">
-                        <flux:spacer />
-                        <flux:modal.close>
-                            <flux:button variant="ghost">Cancel</flux:button>
-                        </flux:modal.close>
-                        <flux:button wire:click="delete" variant="danger">Delete Project</flux:button>
-                    </div>
+    <x-slot name="footer">
+        @if($view_text['form_submit'] === 'edit')
+            @can('forceDelete', $project)
+                <flux:button
+                    x-on:click="$flux.modal('project_delete_confirm').show()"
+                    variant="danger"
+                    type="button"
+                >
+                    Delete
+                </flux:button>
+            @endcan
+        @endif
+
+        <flux:spacer />
+
+        <flux:button type="submit" form="project_form_modal_form" variant="primary">{{$view_text['button_text']}}</flux:button>
+    </x-slot>
+</x-form-modal>
+
+@if($view_text['form_submit'] === 'edit')
+    @can('forceDelete', $project)
+        <flux:modal name="project_delete_confirm" class="min-w-[22rem]">
+            <div class="space-y-6">
+                <div>
+                    <flux:heading size="lg">Delete Project?</flux:heading>
+                    <flux:text class="mt-2">
+                        <p>You're about to permanently delete this project.</p>
+                        <p>This action cannot be reversed.</p>
+                        <p class="mt-2">Projects can only be deleted if they have no payments, timesheets, hours, tasks, expenses, bids, or distributions.</p>
+                    </flux:text>
                 </div>
-            </flux:modal>
-        @endcan
-    @endif
-</flux:modal>
+                
+                <div class="flex gap-2">
+                    <flux:spacer />
+                    <flux:modal.close>
+                        <flux:button variant="ghost">Cancel</flux:button>
+                    </flux:modal.close>
+                    <flux:button wire:click="delete" variant="danger">Delete Project</flux:button>
+                </div>
+            </div>
+        </flux:modal>
+    @endcan
+@endif

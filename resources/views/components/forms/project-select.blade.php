@@ -26,7 +26,7 @@
             <flux:select.option wire:key="{{$project->id}}" value="{{$project->id}}">
                 <div class="flex flex-col gap-0 w-full">
                     <div class="flex items-center w-full">
-                        <span class="flex-1 min-w-0">{{$project->address}}</span>
+                        <span class="flex-1 min-w-0">{{ $project->short_address }}</span>
 
                         @if($showStatusBadge && $project->latestStatus)
                             <flux:badge size="sm" :color="$project->latestStatus->badgeColor" inset="top bottom" class="shrink-0 ml-2">
@@ -70,7 +70,7 @@
                 <flux:select.option wire:key="{{$project->id}}" value="{{$project->id}}">
                     <div class="flex flex-col gap-0 w-full">
                         <div class="flex items-center w-full">
-                            <span class="flex-1 min-w-0">{{$project->address}}</span>
+                            <span class="flex-1 min-w-0">{{ $project->short_address }}</span>
 
                             @if($showStatusBadge && $project->latestStatus)
                                 <flux:badge size="sm" :color="$project->latestStatus->badgeColor" inset="top bottom" class="shrink-0 ml-2">

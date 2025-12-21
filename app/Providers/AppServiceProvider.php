@@ -58,6 +58,19 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Guard against Blade compiler state leaking across view compilations.
+        // If the internal @forelse counter becomes negative, Blade will generate invalid
+        // variables like "$__empty_-1" which causes a syntax error when rendering views.
+        Blade::precompiler(function (string $value): string {
+            $compiler = app('blade.compiler');
+
+            (function (): void {
+                $this->forElseCounter = 0;
+            })->call($compiler);
+
+            return $value;
+        });
+
         // if (isset($_SERVER['HTTPS']) && ($_SERVER['HTTPS'] == 'on' || $_SERVER['HTTPS'] == 1) || isset($_SERVER['HTTP_X_FORWARDED_PROTO']) &&  $_SERVER['HTTP_X_FORWARDED_PROTO'] == 'https') {
         //     \URL::forceScheme('https');
         // }

@@ -291,8 +291,90 @@ class ProjectsIndex extends Component
         $allEmails = $allEvents->pluck('recipient_emails')->flatten()->unique()->values()->all();
         $usersByEmail = User::query()->whereIn('email', $allEmails)->get()->keyBy('email');
 
+        $sentCandidatesByProjectAndTemplate = $allEvents
+            ->where('event_type', 'sent')
+            ->groupBy(fn ($event) => (string) $event->project_id . '|' . (string) $event->email_template_name);
+
+        /** @var array<int, int> $inferredSentIdByEventId */
+        $inferredSentIdByEventId = [];
+        $inferenceWindowSeconds = 6 * 60 * 60;
+
+        foreach ($allEvents as $event) {
+            if ($event->event_type === 'sent') {
+                continue;
+            }
+
+            $linkedSentId = is_array($event->metadata) ? ($event->metadata['linked_sent_id'] ?? null) : null;
+            if (is_numeric($linkedSentId) && (int) $linkedSentId > 0) {
+                continue;
+            }
+
+            if (! $event->project_id || ! is_string($event->email_template_name) || $event->email_template_name === '') {
+                continue;
+            }
+
+            if (! $event->event_at) {
+                continue;
+            }
+
+            $recipientEmails = is_array($event->recipient_emails) ? $event->recipient_emails : [];
+            $recipientEmails = collect($recipientEmails)->filter(fn ($email) => is_string($email) && $email !== '')->values()->all();
+            if (empty($recipientEmails)) {
+                continue;
+            }
+
+            $candidates = $sentCandidatesByProjectAndTemplate->get((string) $event->project_id . '|' . (string) $event->email_template_name, collect());
+            if ($candidates->isEmpty()) {
+                continue;
+            }
+
+            $best = $candidates
+                ->filter(function ($sent) use ($recipientEmails, $event) {
+                    if (! $sent->event_at) {
+                        return false;
+                    }
+
+                    $sentRecipients = is_array($sent->recipient_emails) ? $sent->recipient_emails : [];
+                    $hasRecipient = (bool) collect($recipientEmails)->first(fn ($email) => in_array($email, $sentRecipients, true));
+                    if (! $hasRecipient) {
+                        return false;
+                    }
+
+                    // Sent must be before (or equal) to the event.
+                    return $sent->event_at->lte($event->event_at);
+                })
+                ->sortByDesc('event_at')
+                ->first();
+
+            if (! $best || ! $best->event_at) {
+                continue;
+            }
+
+            if ($event->event_at->diffInSeconds($best->event_at) > $inferenceWindowSeconds) {
+                continue;
+            }
+
+            $inferredSentIdByEventId[$event->id] = (int) $best->id;
+        }
+
         $events = $allEvents
-            ->groupBy(function ($event) {
+            ->groupBy(function ($event) use ($inferredSentIdByEventId) {
+                // Group all per-recipient events (opened/delivered/etc) by their originating sent event.
+                if ($event->event_type === 'sent') {
+                    return 'sent:' . $event->id;
+                }
+
+                $linkedSentId = is_array($event->metadata) ? ($event->metadata['linked_sent_id'] ?? null) : null;
+                if (is_numeric($linkedSentId) && (int) $linkedSentId > 0) {
+                    return 'sent:' . (int) $linkedSentId;
+                }
+
+                $inferredSentId = $inferredSentIdByEventId[$event->id] ?? null;
+                if (is_int($inferredSentId) && $inferredSentId > 0) {
+                    return 'sent:' . $inferredSentId;
+                }
+
+                // Fallback grouping.
                 $mailtrapMessageId = is_array($event->metadata)
                     ? ($event->metadata['mailtrap_message_id'] ?? null)
                     : null;
@@ -342,6 +424,67 @@ class ProjectsIndex extends Component
             })
             ->sortByDesc('event_at')
             ->values();
+
+        // Final pass: if multiple opened rows are consecutive for the same project+template,
+        // collapse them into a single row (Opened xN) with combined recipients.
+        $collapsed = collect();
+        $current = null;
+
+        foreach ($events as $event) {
+            if (! $current) {
+                $current = $event;
+                continue;
+            }
+
+            $canCollapseOpened = ($current->event_type === 'opened')
+                && ($event->event_type === 'opened')
+                && ((int) $current->project_id === (int) $event->project_id)
+                && ((string) $current->email_template_name === (string) $event->email_template_name);
+
+            if (! $canCollapseOpened) {
+                $collapsed->push($current);
+                $current = $event;
+                continue;
+            }
+
+            $currentCount = (int) ($current->event_count ?? 1);
+            $eventCount = (int) ($event->event_count ?? 1);
+            $current->event_count = $currentCount + $eventCount;
+
+            $mergedEmails = collect(array_merge(
+                is_array($current->all_recipient_emails ?? null) ? $current->all_recipient_emails : [],
+                is_array($event->all_recipient_emails ?? null) ? $event->all_recipient_emails : [],
+            ))
+                ->filter(fn ($email) => is_string($email) && $email !== '')
+                ->unique()
+                ->values()
+                ->all();
+
+            $current->all_recipient_emails = $mergedEmails;
+
+            $mergedUsers = collect();
+            foreach ([$current->recipient_users ?? null, $event->recipient_users ?? null] as $users) {
+                if (! $users || ! $users instanceof \Illuminate\Support\Collection) {
+                    continue;
+                }
+
+                foreach ($users as $user) {
+                    if (! $user || ! isset($user->email) || ! is_string($user->email)) {
+                        continue;
+                    }
+
+                    $mergedUsers->put($user->email, $user);
+                }
+            }
+
+            $current->recipient_users = $mergedUsers->values();
+        }
+
+        if ($current) {
+            $collapsed->push($current);
+        }
+
+        $events = $collapsed;
         
         // Manual pagination
         $currentPage = \Illuminate\Pagination\Paginator::resolveCurrentPage('page');

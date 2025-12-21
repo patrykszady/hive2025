@@ -612,11 +612,11 @@ class CompanyEmailController extends Controller
                     Browsershot::html($view)
                         ->newHeadless()
                         ->addChromiumArguments([
-                            '--no-sandbox',
-                            '--disable-setuid-sandbox',
-                            '--disable-dev-shm-usage',
-                            '--disable-gpu',
-                            '--single-process',
+                            'no-sandbox',
+                            'disable-setuid-sandbox',
+                            'disable-dev-shm-usage',
+                            'disable-gpu',
+                            'single-process',
                         ])
                         ->format('A4')
                         ->margins(20, 0, 20, 20)

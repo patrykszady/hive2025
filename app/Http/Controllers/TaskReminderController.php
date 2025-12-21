@@ -285,8 +285,8 @@ class TaskReminderController extends Controller
                 ->with(['project.client'])
                 ->get();
             
-            // Send notification
-            if (app()->environment('production')) {
+            // Send notification (dev/local are forced to the Twilio dev number)
+            if (app()->environment(['production', 'local', 'development'])) {
                 $user->notify(new TaskUpdateNotification($currentTasks, $removedTasks, $today));
             }
             
@@ -365,7 +365,8 @@ class TaskReminderController extends Controller
             $userTaskList = $userData['tasks'];
 
             try {
-                if (app()->environment('production')) {
+                // Dev/local are forced to the Twilio dev number
+                if (app()->environment(['production', 'local', 'development'])) {
                     $user->notify(new TaskReminderNotification($userTaskList, $tomorrow));
                 }
                 $successCount++;

@@ -1,17 +1,15 @@
-<flux:modal name="bids_form_modal" class="space-y-2">
-    <div class="flex justify-between">
-        <flux:heading size="lg">Project Bids</flux:heading>
-        @php
-            $hasEditableBids = collect($bids)->contains('has_estimate_sections', false);
-        @endphp
+@php
+    $hasEditableBids = collect($bids)->contains('has_estimate_sections', false);
+@endphp
+
+<x-form-modal name="bids_form_modal" title="Project Bids">
+    <x-slot name="headerActions">
         @if($hasEditableBids)
             <flux:button wire:navigate.hover wire:click="addChangeOrder" icon="plus" size="sm">Change Order</flux:button>
         @endif
-    </div>
+    </x-slot>
 
-    <flux:separator variant="subtle" />
-
-    <form wire:submit="{{$view_text['form_submit']}}" class="grid gap-6">
+    <form id="bids_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="space-y-4">
         @foreach($bids as $bid_index => $bid)
             <flux:card class="space-y-6">
                 <div class="flex justify-between">
@@ -53,11 +51,10 @@
                 </flux:field>
             </flux:card>
         @endforeach
-
-        <div class="flex space-x-2">
-            <flux:spacer />
-
-            <flux:button type="submit" variant="primary">{{$view_text['button_text']}}</flux:button>
-        </div>
     </form>
-</flux:modal>
+
+    <x-slot name="footer">
+        <flux:spacer />
+        <flux:button type="submit" form="bids_form_modal_form" variant="primary">{{$view_text['button_text']}}</flux:button>
+    </x-slot>
+</x-form-modal>

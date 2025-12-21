@@ -22,6 +22,77 @@ class Project extends Model
 {
     use HasFactory, HasAddress, Searchable;
 
+    /**
+     * A compact, UI-friendly street address.
+     *
+     * Examples:
+     * - "917 E Marion St" => "917 Marion"
+     * - "4100 N Kennicott Ave" => "4100 Kennicott"
+     */
+    protected function shortAddress(): Attribute
+    {
+        return Attribute::make(
+            get: function ($value, array $attributes) {
+                return self::simplifyStreetAddress($attributes['address'] ?? null);
+            }
+        );
+    }
+
+    private static function simplifyStreetAddress(?string $address): ?string
+    {
+        if (!$address) {
+            return null;
+        }
+
+        $address = trim((string) $address);
+        $address = preg_replace('/\s+/', ' ', $address) ?? $address;
+
+        // If anything includes a comma, keep only the street portion.
+        $streetOnly = trim(explode(',', $address, 2)[0]);
+
+        $tokens = preg_split('/\s+/', $streetOnly) ?: [];
+        if (count($tokens) < 2) {
+            return $streetOnly;
+        }
+
+        $first = array_shift($tokens);
+
+        // Drop a directional token directly after the street number.
+        if (!empty($tokens) && preg_match('/^(N|S|E|W|NE|NW|SE|SW)\.?$/i', (string) $tokens[0])) {
+            array_shift($tokens);
+        }
+
+        $suffixes = [
+            'ST', 'STREET',
+            'AVE', 'AVENUE',
+            'RD', 'ROAD',
+            'DR', 'DRIVE',
+            'CT', 'COURT',
+            'LN', 'LANE',
+            'BLVD', 'BOULEVARD',
+            'PL', 'PLACE',
+            'TER', 'TERRACE',
+            'CIR', 'CIRCLE',
+            'PKWY', 'PARKWAY',
+            'WAY',
+        ];
+
+        while (!empty($tokens)) {
+            $last = (string) end($tokens);
+            $normalized = strtoupper(rtrim($last, '.'));
+
+            if (!in_array($normalized, $suffixes, true)) {
+                break;
+            }
+
+            array_pop($tokens);
+        }
+
+        $rest = trim(implode(' ', $tokens));
+
+        return trim($first.' '.$rest);
+    }
+
     protected $fillable = ['project_name', 'client_id', 'belongs_to_vendor_id', 'created_by_user_id', 'note', 'timesheet_id', 'created_by_user_id', 'note', 'do_not_include', 'address', 'address_2', 'city', 'state', 'zip_code', 'created_at', 'updated_at'];
 
     protected static function booted()
@@ -268,7 +339,9 @@ class Project extends Model
 
                 // Standard project: include address prefix if present
                 if (! empty($attributes['address'])) {
-                    return $attributes['address'] . ' | ' . $attributes['project_name'];
+                    $shortAddress = self::simplifyStreetAddress($attributes['address']);
+
+                    return $shortAddress . ' | ' . $attributes['project_name'];
                 }
 
                 return $attributes['project_name'];

@@ -1,5 +1,5 @@
-<flux:modal name="check_form_modal" class="space-y-2">
-    <form wire:submit="{{$view_text['form_submit']}}" class="grid gap-6">
+<x-form-modal name="check_form_modal" title="Check Details">
+    <form id="check_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="space-y-4">
         <div x-data="{ transaction: @entangle('form.transaction') }">
             <flux:select x-bind:disabled="transaction" label="Bank" wire:model.live="form.bank_account_id" placeholder="Choose Bank...">
                 @foreach($bank_accounts as $bank_account)
@@ -10,7 +10,7 @@
                 x-data="{ bank_account: @entangle('form.bank_account_id') }"
                 x-show="bank_account"
                 x-transition
-                class="mt-2 space-y-2"
+                class="mt-4 space-y-4"
                 >
                 <flux:select x-bind:disabled="transaction" label="Type" wire:model.live="form.check_type" placeholder="Choose Payment Type...">
                     <flux:select.option value="" readonly>Select Type...</flux:select.option>
@@ -37,13 +37,14 @@
                     />
                 </div>
             </div>
-            
-            @can('delete', $check)
-                <div class="flex space-x-2 mt-2">
-                    <flux:spacer />
-                    <flux:button wire:click="remove" variant="danger">Remove</flux:button>
-                </div>
-            @endcan
         </div>
     </form>
-</flux:modal>
+
+    <x-slot name="footer">
+        @can('delete', $check)
+            <flux:button wire:click="remove" variant="danger">Remove</flux:button>
+        @endcan
+        <flux:spacer />
+        <flux:button type="submit" form="check_form_modal_form" variant="primary">Save</flux:button>
+    </x-slot>
+</x-form-modal>

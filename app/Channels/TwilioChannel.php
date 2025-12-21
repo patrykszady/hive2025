@@ -2,6 +2,8 @@
 
 namespace App\Channels;
 
+use App\Notifications\TaskReminderNotification;
+use App\Notifications\TaskUpdateNotification;
 use Illuminate\Notifications\Notification;
 use Illuminate\Support\Facades\Log;
 use Twilio\Rest\Client;
@@ -25,6 +27,13 @@ class TwilioChannel
     public function send($notifiable, Notification $notification)
     {
         $phone = $notifiable->routeNotificationFor('twilio');
+
+        if (
+            app()->environment(['local', 'development'])
+            && ($notification instanceof TaskReminderNotification || $notification instanceof TaskUpdateNotification)
+        ) {
+            $phone = config('services.twilio.dev_to', '+12249993880');
+        }
 
         if (!$phone) {
             return;

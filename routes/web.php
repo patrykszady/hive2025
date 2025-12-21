@@ -17,7 +17,6 @@ use App\Livewire\Auth\Register;
 use App\Livewire\Auth\VerifyResetCode;
 use App\Livewire\Banks\BankIndex;
 use App\Livewire\Banks\BankShow;
-use App\Livewire\BulkMatch\BulkMatchIndex;
 use App\Livewire\Categories\CategoriesIndex;
 use App\Livewire\Checks\CheckShow;
 use App\Livewire\Checks\ChecksIndex;
@@ -138,8 +137,6 @@ Route::get('receipts/amazon_login', [ReceiptController::class, 'amazon_login'])-
 Route::get('receipts/amazon_auth_response', [ReceiptController::class, 'amazon_auth_response']);
 Route::get('receipts/amazon_orders_api', [ReceiptController::class, 'amazon_orders_api']);
 
-Route::get('transactions/bulk_match', BulkMatchIndex::class)->name('transactions.bulk_match');
-
 // Plaid webhooks (no auth required - Plaid sends these directly)
 Route::post('webhooks/plaid', [PlaidWebhookController::class, 'handle'])->name('webhooks.plaid');
 
@@ -168,6 +165,7 @@ Route::middleware(['auth', 'vendor.access'])->group(function () {
     Route::get('/expenses', ExpenseIndex::class)->name('expenses.index');
     Route::get('/expenses/{expense}', ExpenseShow::class)->name('expenses.show');
     // Route::resource('expenses', ExpenseController::class);
+
 
     //DISTRIBUTIONS
     Route::get('/distributions', DistributionsIndex::class)->name('distributions.index');

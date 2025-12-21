@@ -38,16 +38,17 @@
             </flux:table.row>
             <flux:table.row>
                 <flux:table.cell>
-                    Reimbursements
-                    <flux:button
-                        icon="arrow-down-on-square"
-                        size="sm"
-                        variant="primary"
-                        color="accent"
-                        wire:click="print_reimbursements"
-                    >
-                        Download
-                    </flux:button>
+                    <div class="flex items-center justify-between gap-2">
+                        <span>Reimbursements</span>
+                        <flux:button
+                            icon="arrow-down-on-square"
+                            size="xs"
+                            variant="ghost"
+                            class="shrink-0 !p-0"
+                            wire:click="print_reimbursements"
+                            tooltip="Download"
+                        />
+                    </div>
                 </flux:table.cell>
                 <flux:table.cell>{{money($finances['reimbursments'])}}</flux:table.cell>
             </flux:table.row>

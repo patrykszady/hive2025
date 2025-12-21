@@ -1,8 +1,5 @@
-<flux:modal name="expense_splits_form_modal" class="space-y-2">
-    <flux:heading size="lg">Expense Splits</flux:heading>
-    <flux:separator variant="subtle" />
-
-    <form wire:submit="{{$view_text['form_submit']}}" class="grid gap-6">
+<x-form-modal name="expense_splits_form_modal" title="Expense Splits">
+    <form id="expense_splits_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="space-y-4">
         @foreach ($expense_splits as $index => $split)
             <flux:card class="space-y-6">
                 <div class="flex justify-between">
@@ -80,7 +77,7 @@
                     <flux:label>Project</flux:label>
                     <flux:select wire:model.live="expense_splits.{{ $index }}.project_id" variant="listbox" searchable placeholder="Choose project...">
                         @foreach($projects as $project)
-                            <flux:select.option value="{{$project->id}}"><div>{{$project->address}} <br> <i class="font-normal">{{$project->project_name}}</i></div></flux:select.option>
+                            <flux:select.option value="{{$project->id}}"><div>{{ $project->short_address }} <br> <i class="font-normal">{{$project->project_name}}</i></div></flux:select.option>
                         @endforeach
 
                         <flux:select.option disabled>--------------</flux:select.option>
@@ -113,14 +110,16 @@
             </flux:card>
         @endforeach
 
-        {{-- FOOTER --}}
-        <div class="flex justify-between sticky bottom-0">
-            <flux:button disabled variant="primary" icon="currency-dollar">
-                {{money($this->splits_sum)}}
-            </flux:button>
-
-            <flux:button type="submit" variant="primary">{{$view_text['button_text']}}</flux:button>
-        </div>
         <flux:error name="expense_splits_total_match" />
     </form>
-</flux:modal>
+
+    <x-slot name="footer">
+        <flux:button disabled variant="primary" icon="currency-dollar">
+            {{money($this->splits_sum)}}
+        </flux:button>
+
+        <flux:spacer />
+
+        <flux:button type="submit" form="expense_splits_form_modal_form" variant="primary">{{$view_text['button_text']}}</flux:button>
+    </x-slot>
+</x-form-modal>

@@ -1,14 +1,5 @@
-<flux:modal name="distribution_form_modal" class="space-y-2">
-    <div class="flex justify-between">
-        <flux:heading size="lg">{{$view_text['card_title']}}</flux:heading>
-        @if(isset($expense->id))
-            <flux:button wire:navigate.hover href="{{route('expenses.show', $expense->id)}}">Show Expense</flux:button>
-        @endif
-    </div>
-
-    <flux:separator variant="subtle" />
-
-    <form wire:submit="{{$view_text['form_submit']}}" class="grid gap-6">
+<x-form-modal name="distribution_form_modal" :title="$view_text['card_title']">
+    <form id="distribution_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="space-y-4">
         {{-- TEAM MEMBER --}}
         <flux:select label="Team Member" wire:model.live="form.user_id" variant="listbox" placeholder="Select User...">
             @foreach ($form->users as $user)
@@ -23,12 +14,10 @@
             type="text"
             placeholder="Office"
         />
-
-        {{-- FOOTER --}}
-        <div class="flex space-x-2 sticky bottom-0">
-            <flux:spacer />
-
-            <flux:button type="submit" variant="primary">{{$view_text['button_text']}}</flux:button>
-        </div>
     </form>
-</flux:modal>
+
+    <x-slot name="footer">
+        <flux:spacer />
+        <flux:button type="submit" form="distribution_form_modal_form" variant="primary">{{$view_text['button_text']}}</flux:button>
+    </x-slot>
+</x-form-modal>

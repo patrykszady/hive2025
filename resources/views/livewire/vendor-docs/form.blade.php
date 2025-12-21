@@ -1,22 +1,15 @@
 <div>
-    <flux:modal name="vendor_doc_form_modal" class="space-y-2">
-        <div class="flex justify-between">
-            <flux:heading size="lg">Add Vendor Document</flux:heading>
-        </div>
-
-        <flux:separator variant="subtle" />
-
-        <form wire:submit="store" class="grid gap-6">
+    <x-form-modal name="vendor_doc_form_modal" title="Add Vendor Document">
+        <form id="vendor_doc_form_modal_form" wire:submit="store" class="space-y-4">
             <flux:input
                 wire:model.live="doc_file"
                 type="file"
             />
-
-            <div class="flex space-x-2">
-                <flux:spacer />
-
-                <flux:button type="submit" variant="primary">Add Document</flux:button>
-            </div>
         </form>
-    </flux:modal>
+
+        <x-slot name="footer">
+            <flux:spacer />
+            <flux:button type="submit" form="vendor_doc_form_modal_form" variant="primary">Add Document</flux:button>
+        </x-slot>
+    </x-form-modal>
 </div>
