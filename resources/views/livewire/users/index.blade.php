@@ -52,7 +52,7 @@
     
     <div class="flex justify-end">
         <div x-data="{ isConfirmed: false }">
-            @if($this->view == 'vendor_registration' && !isset($vendor->registration?->team_members))
+            @if($this->view == 'vendor_registration' && ! data_get($vendor->registration, 'team_members', false))
                 <flux:button
                     variant="primary"
                     x-show="!isConfirmed"

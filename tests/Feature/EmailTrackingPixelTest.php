@@ -32,7 +32,7 @@ it('records an open event with recipient email', function () {
 
     $this->get($url);
 
-    $tracking = EmailTracking::where('nylas_message_id', $messageId)
+    $tracking = EmailTracking::where('message_id', $messageId)
         ->where('event_type', 'opened')
         ->first();
 
@@ -56,7 +56,7 @@ it('records open event with project_id when provided', function () {
 
     $this->get($url);
 
-    $tracking = EmailTracking::where('nylas_message_id', $messageId)
+    $tracking = EmailTracking::where('message_id', $messageId)
         ->where('event_type', 'opened')
         ->first();
 
@@ -81,7 +81,7 @@ it('records open event with email template name', function () {
 
     $this->get($url);
 
-    $tracking = EmailTracking::where('nylas_message_id', $messageId)->first();
+    $tracking = EmailTracking::where('message_id', $messageId)->first();
 
     expect($tracking->email_template_name)->toBe($templateName);
 });
@@ -103,7 +103,7 @@ it('suppresses duplicate opens within 5 minutes', function () {
     // Second request should be suppressed
     $this->get($url);
 
-    $count = EmailTracking::where('nylas_message_id', $messageId)
+    $count = EmailTracking::where('message_id', $messageId)
         ->where('event_type', 'opened')
         ->count();
 
@@ -137,7 +137,7 @@ it('rejects tokens with invalid signatures', function () {
     $this->get('/t/o?t=' . $token);
 
     // Should not create any tracking record due to invalid signature
-    $count = EmailTracking::where('nylas_message_id', $data['mid'])->count();
+    $count = EmailTracking::where('message_id', $data['mid'])->count();
 
     expect($count)->toBe(0);
 });

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\CompanyEmail;
 use App\Models\EmailTracking;
+use App\Models\Project;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Arr;
@@ -119,8 +120,9 @@ class EmailTrackingController extends Controller
         $userAgent = $request->userAgent() ?? '';
 
         $sentContext = $this->resolveSentContext((string) $messageId, $recipientEmail);
-        $canonicalMessageId = $sentContext['nylas_message_id'] ?? (string) $messageId;
-        $canonicalThreadId = $sentContext['nylas_thread_id'] ?? $threadId;
+        $canonicalMessageId = $sentContext['message_id'] ?? (string) $messageId;
+        $canonicalThreadId = $sentContext['thread_id'] ?? $threadId;
+        $belongsToVendorId = $sentContext['belongs_to_vendor_id'] ?? null;
 
         if (! $projectId && isset($sentContext['project_id'])) {
             $projectId = $sentContext['project_id'];
@@ -128,6 +130,12 @@ class EmailTrackingController extends Controller
 
         if (! $emailTemplateName && isset($sentContext['email_template_name'])) {
             $emailTemplateName = $sentContext['email_template_name'];
+        }
+
+        if (! $belongsToVendorId && $projectId) {
+            $belongsToVendorId = Project::query()
+                ->whereKey($projectId)
+                ->value('belongs_to_vendor_id');
         }
 
         // === SENDER DETECTION (multi-signal) ===
@@ -150,7 +158,7 @@ class EmailTrackingController extends Controller
 
         // === DUPLICATE DETECTION ===
         $recentOpenQuery = EmailTracking::query()
-            ->where('nylas_message_id', $canonicalMessageId)
+            ->where('message_id', $canonicalMessageId)
             ->where('event_type', $eventType)
             ->where('event_at', '>=', now()->subMinutes(5))
             ;
@@ -173,9 +181,10 @@ class EmailTrackingController extends Controller
         $proxy = $this->detectImageProxy($userAgent);
 
         EmailTracking::create([
+            'belongs_to_vendor_id' => $belongsToVendorId,
             'project_id' => $projectId,
-            'nylas_message_id' => $canonicalMessageId,
-            'nylas_thread_id' => $canonicalThreadId,
+            'message_id' => $canonicalMessageId,
+            'thread_id' => $canonicalThreadId,
             'email_template_name' => $emailTemplateName,
             'event_type' => $eventType,
             'recipient_emails' => $recipientEmail ? [$recipientEmail] : null,
@@ -200,7 +209,7 @@ class EmailTrackingController extends Controller
     /**
      * Resolve a pre-send tracking id (pre_...) into the real Nylas message/thread id.
      *
-     * @return array{nylas_message_id?:string,nylas_thread_id?:string,project_id?:int,email_template_name?:string}
+     * @return array{message_id?:string,thread_id?:string,project_id?:int,email_template_name?:string,belongs_to_vendor_id?:int}
      */
     protected function resolveSentContext(string $tokenMessageId, ?string $recipientEmail): array
     {
@@ -208,7 +217,7 @@ class EmailTrackingController extends Controller
             ->where('event_type', 'sent')
             ->where(function ($query) use ($tokenMessageId): void {
                 $query
-                    ->where('nylas_message_id', $tokenMessageId)
+                    ->where('message_id', $tokenMessageId)
                     ->orWhere('metadata->pre_send_tracking_id', $tokenMessageId);
             })
             ->orderByDesc('event_at')
@@ -228,10 +237,11 @@ class EmailTrackingController extends Controller
         }
 
         $context = [
-            'nylas_message_id' => (string) ($sent->nylas_message_id ?? ''),
-            'nylas_thread_id' => $sent->nylas_thread_id ? (string) $sent->nylas_thread_id : null,
+            'message_id' => (string) ($sent->message_id ?? ''),
+            'thread_id' => $sent->thread_id ? (string) $sent->thread_id : null,
             'project_id' => $sent->project_id ? (int) $sent->project_id : null,
             'email_template_name' => $sent->email_template_name ? (string) $sent->email_template_name : null,
+            'belongs_to_vendor_id' => $sent->belongs_to_vendor_id ? (int) $sent->belongs_to_vendor_id : null,
         ];
 
         return array_filter($context, static fn ($value) => $value !== null && $value !== '');
@@ -246,7 +256,7 @@ class EmailTrackingController extends Controller
     {
         // Signal 1: IP matches sender IP from when email was sent
         $sentRecord = EmailTracking::query()
-            ->where('nylas_message_id', $messageId)
+            ->where('message_id', $messageId)
             ->where('event_type', 'sent')
             ->first();
 

@@ -33,7 +33,7 @@
                     @if($vendor_id && $this->vendors->find($vendor_id))
                         @php
                             $selectedVendor = $this->vendors->find($vendor_id);
-                            $buttonText = isset($selectedVendor->registration->registered) && $selectedVendor->registration->registered == true
+                            $buttonText = isset($selectedVendor->registration['registered']) && $selectedVendor->registration['registered'] == true
                                 ? 'Login to '
                                 : 'Register ';
                         @endphp

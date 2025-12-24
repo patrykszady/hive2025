@@ -19,6 +19,12 @@ class VendorSelection extends Component
     {
         $this->user = auth()->user();
         $this->user->update(['primary_vendor_id' => null]);
+
+        $firstVendor = $this->vendors->first();
+        if ($firstVendor) {
+            $this->vendor_id = $firstVendor->id;
+            $this->vendor = $firstVendor;
+        }
     }
 
     #[Computed]
@@ -31,6 +37,14 @@ class VendorSelection extends Component
             ->withoutGlobalScopes()
             ->orderBy('vendors.business_type')
             ->get();
+    }
+
+    #[Computed]
+    public function hasUnregisteredVendors(): bool
+    {
+        return $this->vendors->contains(function (Vendor $vendor): bool {
+            return data_get($vendor, 'registration.registered') !== true;
+        });
     }
 
     // #[Computed]
@@ -47,8 +61,7 @@ class VendorSelection extends Component
     public function save()
     {
         $this->user->update(['primary_vendor_id' => $this->vendor->id]);
-
-        if (isset($this->vendor->registration->registered)) {
+        if (isset($this->vendor->registration['registered'])) {
             return $this->redirect(route('dashboard'), navigate: true);
         } else {
             return $this->redirect(route('vendor_registration', $this->vendor->id), navigate: true);

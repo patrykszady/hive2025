@@ -78,7 +78,8 @@ class BidCreate extends Component
                         $item->has_estimate_sections = $belongsToAuthVendor && $hasEstimateSections;
                     }
                     
-                    $item->name = $item->name;
+                    // Display names consistently even if legacy records have off-by-one types.
+                    $item->name = $key === 0 ? 'Original Bid' : 'Change Order '.$key;
                 })
                 ->toArray();
 
@@ -100,14 +101,14 @@ class BidCreate extends Component
 
     public function addChangeOrder()
     {
-        $bid_index = count($this->bids) + 1;
+        $nextType = (int) (collect($this->bids)->max('type') ?? 0) + 1;
 
         $bid = [
             'amount' => null,
-            'type' => $bid_index,
+            'type' => $nextType,
             'project_id' => $this->project->id,
             'vendor_id' => $this->vendor->id,
-            'name' => 'Change Order '.$bid_index,
+            'name' => 'Change Order '.max(1, $nextType - 1),
             // In payment context, always allow editing of new change orders
             'has_estimate_sections' => $this->context === 'payment' ? false : false,
         ];

@@ -383,7 +383,7 @@ class ProjectsIndex extends Component
                     return 'mailtrap:' . $mailtrapMessageId;
                 }
 
-                return $event->nylas_thread_id ?: $event->nylas_message_id ?: ('email_tracking:' . $event->id);
+                return $event->thread_id ?: $event->message_id ?: ('email_tracking:' . $event->id);
             })
             ->map(function ($threadEvents) use ($usersByEmail) {
                 // Prioritize 'replied' as the main event, even if not the latest chronologically

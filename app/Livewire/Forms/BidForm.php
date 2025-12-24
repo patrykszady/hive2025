@@ -29,11 +29,12 @@ class BidForm extends Form
                     'project_id' => $this->component->project->id,
                 ]);
             } else {
-                $bid_index = count($this->component->bids);
+                $type = $bid['type'] ?? null;
+                $type = is_numeric($type) ? (int) $type : ($index + 1);
 
                 Bid::create([
                     'amount' => $bid['amount'],
-                    'type' => $bid_index + 1,
+                    'type' => $type,
                     'project_id' => $this->component->project->id,
                     'vendor_id' => $this->component->vendor->id,
                 ]);

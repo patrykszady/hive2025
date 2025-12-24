@@ -62,10 +62,10 @@ class NylasTransport extends AbstractTransport
             // Update any tracking records that used the pre-send ID with the real message ID
             if ($messageId && $preSendTrackingId) {
                 EmailTracking::query()
-                    ->where('nylas_message_id', $preSendTrackingId)
+                    ->where('message_id', $preSendTrackingId)
                     ->update([
-                        'nylas_message_id' => $messageId,
-                        'nylas_thread_id' => $threadId,
+                        'message_id' => $messageId,
+                        'thread_id' => $threadId,
                     ]);
             }
 
@@ -231,7 +231,7 @@ class NylasTransport extends AbstractTransport
         $trackingService = app(EmailTrackingService::class);
 
         $projectId = $metadata['project_id'] ?? null;
-        $threadId = $metadata['nylas_thread_id'] ?? null;
+        $threadId = $metadata['thread_id'] ?? ($metadata['nylas_thread_id'] ?? null);
         $emailTemplateName = $metadata['email_template_name'] ?? null;
 
         // Collect all tracking pixels

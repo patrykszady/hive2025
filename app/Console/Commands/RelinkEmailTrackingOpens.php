@@ -37,7 +37,7 @@ class RelinkEmailTrackingOpens extends Command
 
         $query = EmailTracking::query()
             ->where('event_type', 'opened')
-            ->where('nylas_message_id', 'like', 'pre\_%')
+            ->where('message_id', 'like', 'pre\_%')
             ->orderBy('id');
 
         if ($limit > 0) {
@@ -84,7 +84,7 @@ class RelinkEmailTrackingOpens extends Command
                 $processed++;
                 $bar->advance();
 
-                $preId = (string) $open->nylas_message_id;
+                $preId = (string) $open->message_id;
                 if (! Str::startsWith($preId, 'pre_')) {
                     continue;
                 }
@@ -97,7 +97,7 @@ class RelinkEmailTrackingOpens extends Command
                 $sent = EmailTracking::query()
                     ->where('event_type', 'sent')
                     ->where(function ($q) use ($preId): void {
-                        $q->where('nylas_message_id', $preId)
+                        $q->where('message_id', $preId)
                             ->orWhere('metadata->pre_send_tracking_id', $preId);
                     })
                     ->orderByDesc('event_at')
@@ -116,18 +116,18 @@ class RelinkEmailTrackingOpens extends Command
                     }
                 }
 
-                $canonicalMessageId = (string) ($sent->nylas_message_id ?? '');
+                $canonicalMessageId = (string) ($sent->message_id ?? '');
                 if ($canonicalMessageId === '') {
                     $skippedNoSent++;
                     continue;
                 }
 
-                $canonicalThreadId = $sent->nylas_thread_id ? (string) $sent->nylas_thread_id : null;
+                $canonicalThreadId = $sent->thread_id ? (string) $sent->thread_id : null;
 
                 // If an equivalent canonical open already exists, we can delete this pre_* row.
                 $existingCanonicalOpenQuery = EmailTracking::query()
                     ->where('event_type', 'opened')
-                    ->where('nylas_message_id', $canonicalMessageId);
+                    ->where('message_id', $canonicalMessageId);
 
                 if ($recipientEmail !== null) {
                     $existingCanonicalOpenQuery->whereJsonContains('recipient_emails', $recipientEmail);
@@ -151,8 +151,8 @@ class RelinkEmailTrackingOpens extends Command
                 }
 
                 $updates = [
-                    'nylas_message_id' => $canonicalMessageId,
-                    'nylas_thread_id' => $canonicalThreadId,
+                    'message_id' => $canonicalMessageId,
+                    'thread_id' => $canonicalThreadId,
                 ];
 
                 if (! $open->project_id && $sent->project_id) {

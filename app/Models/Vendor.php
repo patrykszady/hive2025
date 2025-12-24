@@ -29,7 +29,7 @@ class Vendor extends Model
     protected function casts(): array
     {
         return [
-            'registration' => 'object',
+            'registration' => 'array',
             'options'=> 'object',
         ];
     }
@@ -332,11 +332,11 @@ class Vendor extends Model
     {
         return Attribute::make(
             get: function ($value, array $attributes) {
-                // When cast as object, $this->registration may be stdClass or null
-                if (!isset($this->registration) || !isset($this->registration->registration_date)) {
+                // When cast as array, $this->registration may be array or null
+                if (!isset($this->registration) || !isset($this->registration['registration_date'])) {
                     return null;
                 }
-                $raw = $this->registration->registration_date;
+                $raw = $this->registration['registration_date'];
                 if (empty($raw)) {
                     return null;
                 }

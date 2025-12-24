@@ -36,13 +36,13 @@ class Bid extends Model
 
     public function getNameAttribute()
     {
-        if ($this->type == 1) {
-            $name = 'Original Bid';
-        } else {
-            $name = 'Change Order '.$this->type - 1;
+        $type = (int) $this->type;
+
+        if ($type === 1) {
+            return 'Original Bid';
         }
 
-        return $name;
+        return 'Change Order '.max(1, $type - 1);
     }
 
     public function scopeVendorBids($query, $vendor_id)

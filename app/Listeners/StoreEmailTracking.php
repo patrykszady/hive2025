@@ -4,6 +4,7 @@ namespace App\Listeners;
 
 use App\Models\EmailTracking;
 use App\Models\Estimate;
+use App\Models\Project;
 use Illuminate\Mail\Events\MessageSent;
 
 class StoreEmailTracking
@@ -18,7 +19,7 @@ class StoreEmailTracking
         // Extract correlation IDs from headers
         $headers = $message->getHeaders();
         $nylasMessageId = $headers->get('X-Nylas-Message-Id')?->getBodyAsString();
-        $nylasThreadId = $headers->get('X-Nylas-Thread-Id')?->getBodyAsString();
+        $threadId = $headers->get('X-Nylas-Thread-Id')?->getBodyAsString();
         $metadataJson = $headers->get('X-Email-Metadata')?->getBodyAsString();
 
         $rfcMessageId = $headers->get('Message-ID')?->getBodyAsString() ?? $headers->get('Message-Id')?->getBodyAsString();
@@ -74,12 +75,17 @@ class StoreEmailTracking
             return;
         }
 
-        if (!$nylasThreadId && isset($metadata['nylas_thread_id'])) {
-            $nylasThreadId = $metadata['nylas_thread_id'];
+        if (! $threadId && isset($metadata['thread_id']) && is_string($metadata['thread_id'])) {
+            $threadId = $metadata['thread_id'];
         }
 
-        if ($nylasThreadId) {
-            $metadata['nylas_thread_id'] = $nylasThreadId;
+        if (! $threadId && isset($metadata['nylas_thread_id']) && is_string($metadata['nylas_thread_id'])) {
+            $threadId = $metadata['nylas_thread_id'];
+        }
+
+        if ($threadId) {
+            $metadata['thread_id'] = $threadId;
+            $metadata['nylas_thread_id'] = $threadId;
         }
 
         $projectId = $metadata['project_id'] ?? null;
@@ -105,13 +111,23 @@ class StoreEmailTracking
         // Extract email template name from metadata
         $emailTemplateName = $metadata['email_template_name'] ?? null;
 
+        $belongsToVendorId = $metadata['belongs_to_vendor_id'] ?? null;
+        $belongsToVendorId = is_numeric($belongsToVendorId) ? (int) $belongsToVendorId : null;
+
+        if (! $belongsToVendorId && $projectId) {
+            $belongsToVendorId = Project::query()
+                ->whereKey($projectId)
+                ->value('belongs_to_vendor_id');
+        }
+
         // Create single tracking record with all recipients
         // This matches the webhook controller behavior and prevents duplicate "sent" events
         if (!empty($recipients)) {
             EmailTracking::create([
+                'belongs_to_vendor_id' => $belongsToVendorId,
                 'project_id' => $projectId,
-                'nylas_message_id' => $correlationId,
-                'nylas_thread_id' => $nylasThreadId,
+                'message_id' => $correlationId,
+                'thread_id' => $threadId,
                 'email_template_name' => $emailTemplateName,
                 'event_type' => 'sent',
                 'recipient_emails' => $recipients,
@@ -122,7 +138,7 @@ class StoreEmailTracking
 
         if ($projectId) {
             EmailTracking::query()
-            ->where('nylas_message_id', $correlationId)
+            ->where('message_id', $correlationId)
                 ->whereNull('project_id')
                 ->update(['project_id' => $projectId]);
         }

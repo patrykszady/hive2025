@@ -4,6 +4,7 @@ namespace App\Livewire\Projects;
 
 use App\Models\Client;
 use App\Models\Project;
+use App\Models\ProjectStatus;
 use App\Models\Vendor;
 use Livewire\Component;
 
@@ -43,12 +44,14 @@ class ProjectVendors extends Component
 
         if (! $vendor->projects->contains($this->project->id)) {
             $vendor->projects()->attach($this->project->id, ['client_id' => $client->id]);
-            app(\App\Http\Controllers\VendorRegisteredController::class)
-                ->add_project_status(
-                    $this->project->id,
-                    $vendor->id,
-                    'Invited'
-                );
+
+            $statusCode = ProjectStatus::getCodeForLabel('Invited') ?? 1;
+            ProjectStatus::create([
+                'project_id' => $this->project->id,
+                'belongs_to_vendor_id' => $vendor->id,
+                'status_code' => $statusCode,
+                'start_date' => today()->format('Y-m-d'),
+            ]);
 
             $this->dispatch('notify',
                 type: 'success',

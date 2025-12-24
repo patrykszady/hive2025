@@ -58,12 +58,12 @@ class VendorAccessControl
         }
         
         // If registered is explicitly set to false, registration is not complete
-        if (isset($vendor->registration->registered) && $vendor->registration->registered === false) {
+        if (isset($vendor->registration['registered']) && $vendor->registration['registered'] === false) {
             return false;
         }
         
         // If the registered flag is explicitly true, consider registration complete
-        if (isset($vendor->registration->registered) && $vendor->registration->registered === true) {
+        if (isset($vendor->registration['registered']) && $vendor->registration['registered'] === true) {
             return true;
         }
         
@@ -77,7 +77,7 @@ class VendorAccessControl
         
         // Check all required steps
         foreach ($requiredSteps as $step) {
-            if (!isset($vendor->registration->{$step}) || !$vendor->registration->{$step}) {
+            if (!isset($vendor->registration[$step]) || !$vendor->registration[$step]) {
                 return false;
             }
         }

@@ -36,6 +36,11 @@
 
     <!-- Styles -->
     @vite(['resources/css/app.css'])
+    <noscript>
+        <style>
+            [data-page-fade] { opacity: 1 !important; }
+        </style>
+    </noscript>
     <style>
         /* Hide Alpine elements until initialized */
         [x-cloak] {

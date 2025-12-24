@@ -105,18 +105,6 @@ class TimesheetPaymentForm extends Form
             $expense->save();
         }
 
-        // Observer logic for via vendor
-        // if ($via_vendor) {
-        //     if ($via_vendor->registration && ($via_vendor->registration['registered'] ?? false)) {
-        //         app(\App\Http\Controllers\VendorRegisteredController::class)
-        //             ->create_payment_from_check(
-        //                 $check,
-        //                 $check->timesheets,
-        //                 $via_vendor
-        //             );
-        //     }
-        // }
-
         if (isset($check)) {
             $expenses = $check->expenses; // reload attached expenses (after loops)
             foreach ($expenses as $expense) {

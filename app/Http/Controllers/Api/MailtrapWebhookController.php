@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\EmailTracking;
+use App\Models\Project;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -49,6 +50,9 @@ class MailtrapWebhookController extends Controller
         /** @var array<int, array<string, mixed>> $eventSummaries */
         $eventSummaries = [];
 
+        /** @var array<int, int|null> $projectVendorCache */
+        $projectVendorCache = [];
+
         foreach ($events as $event) {
             if (! is_array($event)) {
                 continue;
@@ -90,7 +94,7 @@ class MailtrapWebhookController extends Controller
 
             if ($baselineAt === null && $eventAt !== null && (int) config('email_tracking.mailtrap_bot_open_within_seconds', 0) > 0) {
                 $fallbackBaseline = EmailTracking::query()
-                    ->where('nylas_message_id', $correlationId)
+                    ->where('message_id', $correlationId)
                     ->whereIn('event_type', ['sent', 'delivered'])
                     ->orderByDesc('event_at')
                     ->first();
@@ -103,7 +107,7 @@ class MailtrapWebhookController extends Controller
                 continue;
             }
 
-            $canonicalMessageId = $sent?->nylas_message_id ?: $correlationId;
+            $canonicalMessageId = $sent?->message_id ?: $correlationId;
 
             $projectId = Arr::get($metadata, 'project_id');
             if ($projectId !== null) {
@@ -113,9 +117,20 @@ class MailtrapWebhookController extends Controller
                 $projectId = (int) $sent->project_id;
             }
 
+            $belongsToVendorId = Arr::get($metadata, 'belongs_to_vendor_id') ?: ($sent?->belongs_to_vendor_id ?? null);
+            if (! $belongsToVendorId && $projectId) {
+                if (! array_key_exists($projectId, $projectVendorCache)) {
+                    $projectVendorCache[$projectId] = Project::query()
+                        ->whereKey($projectId)
+                        ->value('belongs_to_vendor_id');
+                }
+
+                $belongsToVendorId = $projectVendorCache[$projectId];
+            }
+
             $threadId = Arr::get($metadata, 'thread_id');
-            if (! $threadId && $sent?->nylas_thread_id) {
-                $threadId = (string) $sent->nylas_thread_id;
+            if (! $threadId && $sent?->thread_id) {
+                $threadId = (string) $sent->thread_id;
             }
 
             $emailTemplateName = Arr::get($metadata, 'email_template_name');
@@ -127,11 +142,11 @@ class MailtrapWebhookController extends Controller
             // update existing rows so the project UI can group by our canonical tracking id.
             if ($sent && $canonicalMessageId !== $correlationId) {
                 EmailTracking::query()
-                    ->where('nylas_message_id', $correlationId)
+                    ->where('message_id', $correlationId)
                     ->update([
                         'project_id' => $projectId,
-                        'nylas_message_id' => $canonicalMessageId,
-                        'nylas_thread_id' => $threadId,
+                        'message_id' => $canonicalMessageId,
+                        'thread_id' => $threadId,
                         'email_template_name' => $emailTemplateName,
                     ]);
 
@@ -154,7 +169,7 @@ class MailtrapWebhookController extends Controller
                 $windowEnd = $eventAt?->addMinute() ?? now();
 
                 $recentQuery = EmailTracking::query()
-                    ->where('nylas_message_id', $correlationId)
+                    ->where('message_id', $correlationId)
                     ->where('event_type', $eventType)
                     ->whereBetween('event_at', [$windowStart, $windowEnd]);
 
@@ -170,9 +185,10 @@ class MailtrapWebhookController extends Controller
 
             try {
                 $record = EmailTracking::create([
+                    'belongs_to_vendor_id' => $belongsToVendorId,
                     'project_id' => $projectId,
-                    'nylas_message_id' => $correlationId,
-                    'nylas_thread_id' => $threadId,
+                    'message_id' => $correlationId,
+                    'thread_id' => $threadId,
                     'email_template_name' => $emailTemplateName,
                     'event_type' => $eventType,
                     'recipient_emails' => $recipientEmail ? [$recipientEmail] : null,
@@ -195,7 +211,7 @@ class MailtrapWebhookController extends Controller
             } catch (Throwable $exception) {
                 $stats['events_failed']++;
                 Log::channel('mailtrap')->error('Mailtrap webhook failed to persist', [
-                    'nylas_message_id' => $correlationId,
+                    'message_id' => $correlationId,
                     'event_type' => $eventType,
                     'recipient_email' => $recipientEmail,
                     'error' => $exception->getMessage(),
@@ -261,7 +277,7 @@ class MailtrapWebhookController extends Controller
         if (is_string($trackingId) && $trackingId !== '') {
             return EmailTracking::query()
                 ->where('event_type', 'sent')
-                ->where('nylas_message_id', $trackingId)
+                ->where('message_id', $trackingId)
                 ->orderByDesc('event_at')
                 ->first();
         }

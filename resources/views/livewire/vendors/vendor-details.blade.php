@@ -79,7 +79,7 @@
     
     <x-slot:footer>
         <div x-data="{ isConfirmed: false }">
-            @if($this->view == 'vendor_registration' && !isset($vendor->registration?->vendor_info))
+            @if($this->view == 'vendor_registration' && ! data_get($vendor->registration, 'vendor_info', false))
                 <flux:button
                     variant="primary"
                     x-show="!isConfirmed"

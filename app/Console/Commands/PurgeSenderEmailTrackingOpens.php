@@ -17,7 +17,7 @@ class PurgeSenderEmailTrackingOpens extends Command
         {--execute : Actually delete records (default is dry-run)}
         {--limit=5000 : Max opened records to scan}
         {--delete-limit=5000 : Max records to delete}
-        {--only-message-id= : Only consider a specific nylas_message_id}
+        {--only-message-id= : Only consider a specific message_id}
         {--delete-id= : Delete a specific email_tracking id (or comma-separated list of ids)}
         {--force : Allow deleting --delete-id rows even if they do not match sender_ip heuristics}
     ';
@@ -59,32 +59,32 @@ class PurgeSenderEmailTrackingOpens extends Command
 
         $openedQuery = EmailTracking::query()
             ->where('event_type', 'opened')
-            ->whereNotNull('nylas_message_id')
+            ->whereNotNull('message_id')
             ->whereNotNull('ip_address')
             ->when(is_string($onlyMessageId) && $onlyMessageId !== '', function ($query) use ($onlyMessageId) {
-                $query->where('nylas_message_id', $onlyMessageId);
+                $query->where('message_id', $onlyMessageId);
             })
             ->orderByDesc('id')
             ->limit($scanLimit);
 
-        $opened = $openedQuery->get(['id', 'nylas_message_id', 'ip_address', 'user_agent', 'event_at']);
+        $opened = $openedQuery->get(['id', 'message_id', 'ip_address', 'user_agent', 'event_at']);
 
         if ($opened->isEmpty()) {
             $this->info('No opened rows found to scan.');
             return self::SUCCESS;
         }
 
-        $messageIds = $opened->pluck('nylas_message_id')->unique()->values()->all();
+        $messageIds = $opened->pluck('message_id')->unique()->values()->all();
 
         $sentByMessageId = EmailTracking::query()
             ->where('event_type', 'sent')
-            ->whereIn('nylas_message_id', $messageIds)
-            ->get(['id', 'nylas_message_id', 'metadata'])
-            ->keyBy('nylas_message_id');
+            ->whereIn('message_id', $messageIds)
+            ->get(['id', 'message_id', 'metadata'])
+            ->keyBy('message_id');
 
         $toDeleteIds = [];
         foreach ($opened as $open) {
-            $sent = $sentByMessageId->get($open->nylas_message_id);
+            $sent = $sentByMessageId->get($open->message_id);
             if (! $sent) {
                 continue;
             }
@@ -142,7 +142,7 @@ class PurgeSenderEmailTrackingOpens extends Command
 
         $rows = EmailTracking::query()
             ->whereIn('id', $ids->all())
-            ->get(['id', 'event_type', 'nylas_message_id', 'ip_address', 'metadata', 'event_at']);
+            ->get(['id', 'event_type', 'message_id', 'ip_address', 'metadata', 'event_at']);
 
         $foundIds = $rows->pluck('id')->map(static fn ($id) => (int) $id)->all();
         $missing = $ids->diff($foundIds);
@@ -157,7 +157,7 @@ class PurgeSenderEmailTrackingOpens extends Command
         }
 
         $messageIds = $rows
-            ->pluck('nylas_message_id')
+            ->pluck('message_id')
             ->filter(static fn ($value) => is_string($value) && $value !== '')
             ->unique()
             ->values()
@@ -165,14 +165,14 @@ class PurgeSenderEmailTrackingOpens extends Command
 
         $sentByMessageId = EmailTracking::query()
             ->where('event_type', 'sent')
-            ->whereIn('nylas_message_id', $messageIds)
-            ->get(['nylas_message_id', 'metadata'])
-            ->keyBy('nylas_message_id');
+            ->whereIn('message_id', $messageIds)
+            ->get(['message_id', 'metadata'])
+            ->keyBy('message_id');
 
         $toDeleteIds = [];
 
         foreach ($rows as $row) {
-            $messageId = is_string($row->nylas_message_id) ? $row->nylas_message_id : null;
+            $messageId = is_string($row->message_id) ? $row->message_id : null;
             $ip = is_string($row->ip_address) ? $row->ip_address : null;
 
             $matchesSenderIp = false;
