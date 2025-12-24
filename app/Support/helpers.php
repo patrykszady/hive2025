@@ -18,8 +18,14 @@ if (! function_exists('browser_timezone')) {
     {
         $timezone = session('browser.timezone');
 
-        return is_string($timezone) && $timezone !== ''
-            ? $timezone
+        if (is_string($timezone) && $timezone !== '') {
+            return $timezone;
+        }
+
+        $vendorTimezone = auth()->user()?->vendor?->timezone;
+
+        return is_string($vendorTimezone) && $vendorTimezone !== ''
+            ? $vendorTimezone
             : (string) config('app.timezone');
     }
 }
@@ -43,10 +49,10 @@ if (! function_exists('browser_today')) {
         $date = browser_date();
 
         if ($date) {
-            return \Illuminate\Support\Carbon::createFromFormat('Y-m-d', $date, config('app.timezone'))
+            return \Illuminate\Support\Carbon::createFromFormat('Y-m-d', $date, browser_timezone())
                 ->startOfDay();
         }
 
-        return \Illuminate\Support\Carbon::today(config('app.timezone'));
+        return \Illuminate\Support\Carbon::today(browser_timezone());
     }
 }
