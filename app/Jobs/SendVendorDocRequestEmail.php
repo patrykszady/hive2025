@@ -38,13 +38,8 @@ class SendVendorDocRequestEmail implements ShouldQueue
      */
     public function handle(): void
     {
-        if (env('APP_ENV') === 'production') {
-            Mail::to($this->agent_email)
-                ->cc([$this->vendor->business_email, $this->requesting_vendor->business_email])
-                ->send(new RequestInsurance($this->agent_expired_docs, $this->vendor, $this->requesting_vendor));
-        }elseif (env('APP_ENV') === 'local') {
-            Mail::to('patryk.szady@live.com')
-                ->send(new RequestInsurance($this->agent_expired_docs, $this->vendor, $this->requesting_vendor));
-        }
+        Mail::to($this->agent_email)
+            ->cc([$this->vendor->business_email, $this->requesting_vendor->business_email])
+            ->send(new RequestInsurance($this->agent_expired_docs, $this->vendor, $this->requesting_vendor));
     }
 }

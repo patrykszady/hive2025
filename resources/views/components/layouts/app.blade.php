@@ -186,7 +186,7 @@
             <flux:text class="mt-2 mb-6 text-base">Here's what's new today</flux:text>
             <flux:separator variant="subtle" /> --}}
 
-            <div data-page-fade class="opacity-0 transition-opacity duration-[250ms]">
+            <div data-page-fade class="opacity-0 transition-opacity duration-[250ms] {{ isset($fullscreenClasses) ? 'h-full min-h-0 flex flex-col' : '' }}">
                 {{ $slot }}
             </div>
         </flux:main>

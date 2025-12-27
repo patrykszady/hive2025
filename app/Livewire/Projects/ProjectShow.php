@@ -68,11 +68,38 @@ class ProjectShow extends Component
                 // Prioritize 'replied' as the main event, even if not the latest chronologically
                 $repliedEvent = $threadEvents->firstWhere('event_type', 'replied');
                 $mainEvent = $repliedEvent ?? $threadEvents->first();
+
+                $sentEvent = $threadEvents->firstWhere('event_type', 'sent');
+                $sentMetadata = is_array($sentEvent?->metadata) ? $sentEvent->metadata : [];
+                $ignoreEmails = collect(array_filter([
+                    is_string($sentMetadata['from_email'] ?? null) ? (string) $sentMetadata['from_email'] : null,
+                    is_string($sentMetadata['sender_email'] ?? null) ? (string) $sentMetadata['sender_email'] : null,
+                ]))
+                    ->filter(fn ($email) => is_string($email) && trim($email) !== '')
+                    ->map(fn ($email) => strtolower(trim($email)))
+                    ->unique()
+                    ->values()
+                    ->all();
+
+                $shouldIgnoreRecipient = function ($email) use ($ignoreEmails): bool {
+                    if (! is_string($email) || trim($email) === '') {
+                        return true;
+                    }
+
+                    $email = strtolower(trim($email));
+
+                    if (in_array($email, $ignoreEmails, true)) {
+                        return true;
+                    }
+
+                    return false;
+                };
                 
                 // Get all unique recipient emails from all events in this thread
                 $threadRecipientEmails = $threadEvents
                     ->pluck('recipient_emails')
                     ->flatten()
+                    ->reject($shouldIgnoreRecipient)
                     ->unique()
                     ->values()
                     ->all();
@@ -94,6 +121,7 @@ class ProjectShow extends Component
                 $eventRecipientEmails = $eventRecipientEmails
                     ->flatten()
                     ->filter()
+                    ->reject($shouldIgnoreRecipient)
                     ->unique()
                     ->values()
                     ->all();
@@ -129,6 +157,7 @@ class ProjectShow extends Component
                                     ->pluck('recipient_emails')
                                     ->flatten()
                                     ->filter()
+                                    ->reject($shouldIgnoreRecipient)
                                     ->unique()
                                     ->values()
                                     ->all();
@@ -157,6 +186,7 @@ class ProjectShow extends Component
                             ->pluck('recipient_emails')
                             ->flatten()
                             ->filter()
+                            ->reject($shouldIgnoreRecipient)
                             ->unique()
                             ->values()
                             ->all();

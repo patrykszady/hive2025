@@ -2,7 +2,14 @@
 
 namespace Tests;
 
-abstract class TestCase
+use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
+
+abstract class TestCase extends BaseTestCase
 {
-    // Intentionally empty base; we are not bootstrapping Laravel for these pure logic tests.
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->withoutVite();
+    }
 }

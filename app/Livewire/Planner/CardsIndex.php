@@ -26,9 +26,20 @@ class CardsIndex extends Component
     public array $filterStatusCodes = [];
     public bool $showMobileFilters = false;
 
+    public int $previousDaysLoaded = 0;
+
+    private const PREVIOUS_DAYS_PER_LOAD = 3;
+
     public function toggleMobileFilters(): void
     {
         $this->showMobileFilters = ! $this->showMobileFilters;
+    }
+
+    public function loadPreviousDays(): void
+    {
+        $this->previousDaysLoaded += self::PREVIOUS_DAYS_PER_LOAD;
+
+        $this->dispatch('planner-days-updated');
     }
 
     public array $undatedTasksModalTasks = [];
@@ -69,8 +80,9 @@ class CardsIndex extends Component
     #[Computed]
     public function days()
     {
-        $startDate = browser_today();
-        $endDate = $startDate->copy()->addDays(13); // 14 days total (today + 13)
+        $today = browser_today();
+        $startDate = $today->copy()->subDays($this->previousDaysLoaded);
+        $endDate = $today->copy()->addDays(13); // 14 days forward (today + 13)
 
         return collect(CarbonPeriod::create($startDate, '1 day', $endDate));
     }
@@ -198,6 +210,11 @@ class CardsIndex extends Component
                         // New way: check if day is in selected dates
                         return in_array($dayFormat, $selectedDates);
                     } else {
+                        // If task has no dates at all, don't show in any day column
+                        if (!$task->start_date && !$task->end_date) {
+                            return false;
+                        }
+
                         // If only one legacy date is present, treat it as a single-day task.
                         if ($task->start_date && !$task->end_date) {
                             return Carbon::parse($task->start_date)->format('Y-m-d') === $dayFormat;

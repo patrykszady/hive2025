@@ -43,7 +43,11 @@ class MailtrapWebhookController extends Controller
             'events_processed' => 0,
             'events_persisted' => 0,
             'events_deduped' => 0,
+            'events_ignored_untracked' => 0,
+            'events_ignored_unknown' => 0,
             'events_ignored_bot' => 0,
+            'events_ignored_non_recipient' => 0,
+            'events_ignored_sender' => 0,
             'events_failed' => 0,
         ];
 
@@ -68,9 +72,30 @@ class MailtrapWebhookController extends Controller
 
             [$correlationId, $eventType, $recipientEmail, $linkUrl, $eventAt, $providerMessageId, $metadata] = $normalized;
 
+            // Ignore events we don't understand; they don't map to UX.
+            if ($eventType === 'mailtrap_webhook_received') {
+                $stats['events_ignored_unknown']++;
+                continue;
+            }
+
             $trackingId = Arr::get($metadata, 'tracking_id');
             $providerUserAgent = $this->getString($event, ['user_agent', 'userAgent']);
             $providerEventId = $this->getString($event, ['event_id', 'eventId']);
+
+            // Match to our tracked 'sent' event first; Mailtrap webhooks do not always include custom_variables.
+            $sent = $this->findBestSentMatch(
+                trackingId: is_string($trackingId) ? $trackingId : null,
+                providerMessageId: $providerMessageId,
+                recipientEmail: $recipientEmail,
+                eventAt: $eventAt,
+            );
+
+            // If this webhook event can't be linked to a tracked `sent` row created by our app/UI,
+            // we ignore it entirely (no persistence, no logging).
+            if (! $sent) {
+                $stats['events_ignored_untracked']++;
+                continue;
+            }
 
             $eventSummaries[] = array_filter([
                 'event_type' => $eventType,
@@ -81,14 +106,6 @@ class MailtrapWebhookController extends Controller
                 'timestamp' => $eventAt?->toIso8601String(),
                 'user_agent' => $providerUserAgent,
             ], static fn ($v) => $v !== null);
-
-            // Match to our tracked 'sent' event first; Mailtrap webhooks do not always include custom_variables.
-            $sent = $this->findBestSentMatch(
-                trackingId: is_string($trackingId) ? $trackingId : null,
-                providerMessageId: $providerMessageId,
-                recipientEmail: $recipientEmail,
-                eventAt: $eventAt,
-            );
 
             $baselineAt = $sent?->event_at?->toImmutable();
 
@@ -104,6 +121,16 @@ class MailtrapWebhookController extends Controller
 
             if ($this->shouldIgnoreAsBot($eventType, $eventAt, $baselineAt, $providerUserAgent)) {
                 $stats['events_ignored_bot']++;
+                continue;
+            }
+
+            if ($this->shouldIgnoreAsNonRecipient($eventType, $recipientEmail, $sent)) {
+                $stats['events_ignored_non_recipient']++;
+                continue;
+            }
+
+            if ($this->shouldIgnoreAsSenderOpen($eventType, $recipientEmail, $sent)) {
+                $stats['events_ignored_sender']++;
                 continue;
             }
 
@@ -184,6 +211,8 @@ class MailtrapWebhookController extends Controller
             }
 
             try {
+                $eventIp = $this->getString($event, ['ip', 'client_ip', 'clientIp']);
+
                 $record = EmailTracking::create([
                     'belongs_to_vendor_id' => $belongsToVendorId,
                     'project_id' => $projectId,
@@ -193,7 +222,7 @@ class MailtrapWebhookController extends Controller
                     'event_type' => $eventType,
                     'recipient_emails' => $recipientEmail ? [$recipientEmail] : null,
                     'link_url' => $linkUrl,
-                    'ip_address' => $request->ip(),
+                    'ip_address' => $eventIp ?: $request->ip(),
                     'user_agent' => $providerUserAgent ?: $request->userAgent(),
                     'metadata' => array_merge($metadata, [
                         'source' => 'mailtrap_webhook',
@@ -201,6 +230,7 @@ class MailtrapWebhookController extends Controller
                         'mailtrap_message_id' => $providerMessageId,
                         'mailtrap_event_id' => $providerEventId,
                         'linked_sent_id' => $sent?->id,
+                        'event_ip' => $eventIp,
                         'webhook_ip' => $request->ip(),
                         'webhook_user_agent' => $request->userAgent(),
                     ]),
@@ -219,16 +249,20 @@ class MailtrapWebhookController extends Controller
             }
         }
 
-        Log::channel('mailtrap')->info('Mailtrap webhook received', [
-            'ip' => $request->ip(),
-            'hookdeck_original_ip' => $request->header('x-hookdeck-original-ip'),
-            'user_agent' => $request->userAgent(),
-            'content_type' => $request->header('content-type'),
-            'content_length' => $request->header('content-length'),
-            'payload_keys' => array_keys($payload),
-            'stats' => $stats,
-            'events' => $eventSummaries,
-        ]);
+        // Only log webhooks that resulted in persisted records or failures.
+        // Untracked/ignored events should not pollute logs.
+        if ($stats['events_persisted'] > 0 || $stats['events_failed'] > 0) {
+            Log::channel('mailtrap')->info('Mailtrap webhook received', [
+                'ip' => $request->ip(),
+                'hookdeck_original_ip' => $request->header('x-hookdeck-original-ip'),
+                'user_agent' => $request->userAgent(),
+                'content_type' => $request->header('content-type'),
+                'content_length' => $request->header('content-length'),
+                'payload_keys' => array_keys($payload),
+                'stats' => $stats,
+                'events' => $eventSummaries,
+            ]);
+        }
 
         return response('', 200);
     }
@@ -266,6 +300,64 @@ class MailtrapWebhookController extends Controller
         $diffSeconds = $baselineAt->diffInSeconds($eventAt);
 
         return $diffSeconds <= $seconds;
+    }
+
+    protected function shouldIgnoreAsSenderOpen(string $eventType, ?string $recipientEmail, ?EmailTracking $sent): bool
+    {
+        if (! (bool) config('email_tracking.mailtrap_filter_sender_opens', true)) {
+            return false;
+        }
+
+        if (! in_array($eventType, ['opened', 'link_clicked'], true)) {
+            return false;
+        }
+
+        if (! is_string($recipientEmail) || trim($recipientEmail) === '') {
+            // We can't attribute this to a recipient; safest is to ignore.
+            return true;
+        }
+
+        $recipientEmail = strtolower(trim($recipientEmail));
+
+        $senderEmail = Arr::get($sent?->metadata ?? [], 'sender_email');
+        if (is_string($senderEmail) && $senderEmail !== '' && $recipientEmail === strtolower(trim($senderEmail))) {
+            return true;
+        }
+
+        $fromEmail = Arr::get($sent?->metadata ?? [], 'from_email');
+        if (is_string($fromEmail) && $fromEmail !== '' && $recipientEmail === strtolower(trim($fromEmail))) {
+            return true;
+        }
+
+        return false;
+    }
+
+    protected function shouldIgnoreAsNonRecipient(string $eventType, ?string $recipientEmail, ?EmailTracking $sent): bool
+    {
+        if (! in_array($eventType, ['opened', 'link_clicked'], true)) {
+            return false;
+        }
+
+        if (! $sent) {
+            // If we couldn't match a 'sent' row, we can't reliably assert who the intended recipients were.
+            return false;
+        }
+
+        if (! is_string($recipientEmail) || trim($recipientEmail) === '') {
+            return true;
+        }
+
+        $recipientEmail = strtolower(trim($recipientEmail));
+
+        $sentRecipients = is_array($sent->recipient_emails) ? $sent->recipient_emails : [];
+        $sentRecipients = collect($sentRecipients)
+            ->filter(fn ($email) => is_string($email) && trim($email) !== '')
+            ->map(fn ($email) => strtolower(trim($email)))
+            ->unique()
+            ->values()
+            ->all();
+
+        return ! in_array($recipientEmail, $sentRecipients, true);
     }
 
     protected function findBestSentMatch(
@@ -337,7 +429,7 @@ class MailtrapWebhookController extends Controller
      */
     protected function normalizeEvent(array $event): ?array
     {
-        $eventName = $this->getString($event, ['event', 'type', 'name']);
+        $eventName = $this->getString($event, ['event_type', 'event', 'type', 'name']);
 
         $eventType = 'mailtrap_webhook_received';
         if ($eventName !== null) {
@@ -371,6 +463,10 @@ class MailtrapWebhookController extends Controller
             'custom_variables_prefix_tracking_id',
             'customVariablesPrefixTrackingId',
         ]);
+
+        if (! $trackingId) {
+            $trackingId = $this->getString($event, ['tracking_id', 'trackingId']);
+        }
 
         $correlationId = $trackingId
             ?? ($providerMessageId ? 'mailtrap:' . $providerMessageId : (string) Str::uuid());

@@ -38,6 +38,21 @@ class StoreEmailTracking
             $metadata = json_decode($metadataJson, true) ?? [];
         }
 
+        $from = $message->getFrom();
+        if (is_array($from) && isset($from[0])) {
+            $fromEmail = $from[0]->getAddress();
+
+            if (! isset($metadata['from_email'])) {
+                $metadata['from_email'] = $fromEmail;
+            }
+
+            // Backward compatibility / fallback: if sender_email isn't explicitly set by the mailable,
+            // default it to the actual From address.
+            if (! isset($metadata['sender_email'])) {
+                $metadata['sender_email'] = $fromEmail;
+            }
+        }
+
         if ($rfcMessageId) {
             $metadata['rfc_message_id'] = $rfcMessageId;
         }
@@ -108,6 +123,20 @@ class StoreEmailTracking
             }
         }
 
+        if ($cc = $message->getCc()) {
+            foreach ($cc as $address) {
+                $recipients[] = $address->getAddress();
+            }
+        }
+
+        if ($bcc = $message->getBcc()) {
+            foreach ($bcc as $address) {
+                $recipients[] = $address->getAddress();
+            }
+        }
+
+        $recipients = array_values(array_unique(array_filter(array_map('strtolower', array_map('trim', $recipients)))));
+
         // Extract email template name from metadata
         $emailTemplateName = $metadata['email_template_name'] ?? null;
 
@@ -122,7 +151,7 @@ class StoreEmailTracking
 
         // Create single tracking record with all recipients
         // This matches the webhook controller behavior and prevents duplicate "sent" events
-        if (!empty($recipients)) {
+        if (! empty($recipients)) {
             EmailTracking::create([
                 'belongs_to_vendor_id' => $belongsToVendorId,
                 'project_id' => $projectId,

@@ -33,6 +33,14 @@
                 >
                     Details
                 </button>
+                <button
+                    type="button"
+                    @click="activeTab = 'schedule'"
+                    :class="activeTab === 'schedule' ? activeClasses : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                    class="py-2 px-1 border-b-2 font-medium text-sm"
+                >
+                    Dates
+                </button>
                 @if($view_text['form_submit'] === 'edit' && $form->task)
                     <button
                         type="button"
@@ -61,10 +69,10 @@
             </nav>
         </div>
 
-        <!-- Task Details Panel -->
-        <div x-show="activeTab === 'details'">
-            <div class="relative">
-                <form id="task_create_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="grid space-y-4">
+        <form id="task_create_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="grid space-y-4">
+            <!-- Task Details Panel -->
+            <div x-show="activeTab === 'details'">
+                <div class="relative">
                     {{-- TYPE --}}
                     <flux:radio.group wire:model.live="form.type" label="Task Type" variant="segmented">
                         <flux:radio value="Task"><span class="{{ data_get($this->taskTypeTextClasses, 'Task') }}">Task</span></flux:radio>
@@ -112,7 +120,12 @@
                             </flux:select.option>
                         @endforeach
                     </flux:select>
+                </div>
+            </div>
 
+            <!-- Select Days and Arrival Time Panel -->
+            <div x-show="activeTab === 'schedule'">
+                <div class="relative">
                     {{-- DATES --}}
                     <flux:field>
                         <flux:label>Select Days</flux:label>
@@ -184,10 +197,9 @@
                             </div>
                         </flux:field>
                     @endif
-
-                </form>
+                </div>
             </div>
-        </div>
+        </form>
 
         <!-- Notes Panel -->
         @if($view_text['form_submit'] === 'edit' && $form->task)

@@ -221,12 +221,30 @@
     </flux:modal>
 
     <!-- Planner Cards - 14 Day Kanban View -->
-    <div class="flex-1 min-h-0 overflow-x-scroll overflow-y-hidden bg-zinc-100 dark:bg-zinc-800">
+    <div
+        x-data="{ atLeft: true }"
+        x-init="$nextTick(() => { atLeft = $el.scrollLeft <= 10; })"
+        x-on:scroll.passive="atLeft = $el.scrollLeft <= 10"
+        class="relative flex-1 min-h-0 overflow-x-scroll overflow-y-hidden bg-zinc-100 dark:bg-zinc-800"
+    >
         <div class="flex h-full min-h-0 min-w-max">
+            {{-- Spacer for previous days button --}}
             <div
                 aria-hidden="true"
-                class="self-stretch shrink-0 w-4 {{ $firstDayIsWeekend ? 'bg-zinc-200 dark:bg-zinc-700' : 'bg-zinc-100 dark:bg-zinc-800' }}"
-            ></div>
+                class="self-stretch shrink-0 flex items-center justify-center bg-zinc-100 dark:bg-zinc-800"
+                :class="atLeft ? 'w-12' : 'w-4'"
+            >
+                <div x-show="atLeft" x-cloak>
+                    <flux:button
+                        wire:click="loadPreviousDays"
+                        variant="subtle"
+                        square
+                        icon="chevron-left"
+                        class="bg-white/90 dark:bg-zinc-800/90 shadow-sm"
+                        aria-label="Load previous days"
+                    />
+                </div>
+            </div>
 
             <div class="flex h-full min-h-0 min-w-max pr-4">
             @foreach ($kanbanColumns as $dayData)

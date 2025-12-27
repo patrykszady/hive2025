@@ -14,6 +14,11 @@ return [
     // Filter out likely bot activity from Mailtrap webhooks (e.g. security scanners).
     'mailtrap_filter_bots' => env('MAILTRAP_FILTER_BOTS', true),
 
+    // Filter out opens/clicks that are likely the sender (or internal staff) viewing their own copy.
+    // This uses (a) per-message sender_email stored on the matching 'sent' row metadata when available,
+    // and (b) the actual From address stored on the 'sent' row (from_email).
+    'mailtrap_filter_sender_opens' => env('MAILTRAP_FILTER_SENDER_OPENS', true),
+
     // If an opened/clicked event happens "too soon" after our tracked 'sent' event (same tracking_id),
     // treat it as automated prefetch/scanning.
     'mailtrap_bot_open_within_seconds' => (int) env('MAILTRAP_BOT_OPEN_WITHIN_SECONDS', 15),

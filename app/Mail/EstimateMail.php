@@ -86,6 +86,7 @@ class EstimateMail extends Mailable
         $metadata = [
             'estimate_id' => $this->estimate->id,
             'email_type' => 'estimate',
+            'sender_email' => $this->user->email,
         ];
 
         if ($this->estimate->project_id) {

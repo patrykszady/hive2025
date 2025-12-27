@@ -129,11 +129,6 @@ class SendEstimateEmailJob implements ShouldQueue
             ->values()
             ->all();
 
-        if (app()->environment('local', 'development')) {
-            $devEmail = (string) config('mail.dev_email');
-            $sanitizedRecipients = $devEmail !== '' ? [$devEmail] : ['patryk.szady@live.com'];
-        }
-
         if (empty($sanitizedRecipients)) {
             Log::warning('SendEstimateEmailJob missing recipients after sanitization', [
                 'estimate_id' => $this->estimateId,

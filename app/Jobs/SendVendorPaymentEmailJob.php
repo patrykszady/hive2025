@@ -9,6 +9,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Str;
 
 class SendVendorPaymentEmailJob implements ShouldQueue
 {
@@ -51,15 +52,25 @@ class SendVendorPaymentEmailJob implements ShouldQueue
             $this->auth_user->vendor->business_email,
         ]));
 
-        if (app()->environment('local', 'development')) {
-            $devEmail = (string) config('mail.dev_email');
-            $to = $devEmail !== '' ? $devEmail : 'patryk.szady@live.com';
-            $cc = [];
-        }
+        $trackingProvider = (string) config('email_tracking.provider', 'mailtrap');
+        $trackingId = (string) Str::uuid();
 
-        Mail::mailer('mailtrap-sdk')
+        $mailable = new VendorPaymentMade(
+            vendor: $this->vendor,
+            paying_vendor: $this->auth_user->vendor,
+            check: $this->check,
+            trackingId: $trackingId,
+            senderEmail: $this->auth_user->email,
+            belongsToVendorId: (int) $this->auth_user->vendor->id,
+        );
+
+        $mailer = $trackingProvider === 'mailtrap'
+            ? (string) config('email_tracking.mailtrap_mailer', 'mailtrap-sdk')
+            : 'mailtrap-sdk';
+
+        Mail::mailer($mailer)
             ->to($to)
             ->cc($cc)
-            ->send(new VendorPaymentMade($this->vendor, $this->auth_user->vendor, $this->check));
+            ->send($mailable);
     }
 }

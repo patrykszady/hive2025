@@ -1,7 +1,15 @@
+@props([
+	'hideFooter' => false,
+	'showHeaderBrand' => false,
+])
+
 <x-mail::layout>
 <x-slot:header>
 <x-mail::header :url="'https://dashboard.hive.contractors'">
 <img src="https://dashboard.hive.contractors/favicon.png" class="logo" alt="Hive Contractors" height="72px">
+@if (! empty($showHeaderBrand))
+<span style="display: block; margin-top: 10px; font-weight: 700; letter-spacing: 0.02em; text-decoration: none; color: inherit;">Hive Contractors</span>
+@endif
 </x-mail::header>
 </x-slot:header>
 {{ $slot }}
@@ -12,9 +20,11 @@
 </x-mail::subcopy>
 </x-slot:subcopy>
 @endisset
+@if (empty($hideFooter))
 <x-slot:footer>
 <x-mail::footer>
 © {{ date('Y') }}
 </x-mail::footer>
 </x-slot:footer>
+@endif
 </x-mail::layout>

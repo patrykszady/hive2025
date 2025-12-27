@@ -126,8 +126,8 @@ class AppServiceProvider extends ServiceProvider
         // Using "non-production" here is too broad and can accidentally redirect real mail
         // if APP_ENV is misconfigured on a server.
         if (app()->environment('local', 'development', 'testing')) {
-            $devEmail = env('MAIL_DEV_EMAIL');
-            if ($devEmail) {
+            $devEmail = (string) config('mail.dev_email');
+            if ($devEmail !== '') {
                 Mail::alwaysTo($devEmail);
             }
         }

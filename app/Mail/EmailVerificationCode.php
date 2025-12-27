@@ -15,6 +15,10 @@ class EmailVerificationCode extends Mailable
 
     public $verification_code;
 
+    public bool $showHeaderBrand = true;
+
+    public bool $hideFooter = true;
+
     /**
      * Create a new message instance.
      *
@@ -23,6 +27,8 @@ class EmailVerificationCode extends Mailable
     public function __construct($verification_code)
     {
         $this->verification_code = $verification_code;
+
+        $this->theme = 'transparent';
 
         $this->withSymfonyMessage(function (\Symfony\Component\Mime\Email $message): void {
             $message->getHeaders()->add(new \Mailtrap\EmailHeader\CategoryHeader('email_verification'));
@@ -38,7 +44,7 @@ class EmailVerificationCode extends Mailable
     {
         return new Envelope(
             from: new Address(config('mail.from.address'), config('mail.from.name')),
-            subject: 'Email Verification Code',
+            subject: 'Verify your email',
         );
     }
 
@@ -50,7 +56,11 @@ class EmailVerificationCode extends Mailable
     public function content()
     {
         return new Content(
-            markdown: 'emails.email_verification_code'
+            markdown: 'emails.email_verification_code',
+            with: [
+                'showHeaderBrand' => true,
+                'hideFooter' => true,
+            ],
             // text: 'emails.email_verification_code-text'
         );
     }
