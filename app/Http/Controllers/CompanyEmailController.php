@@ -1215,6 +1215,31 @@ class CompanyEmailController extends Controller
                             continue;
                         }
 
+                        $resolvedTransactionDate = $this->resolveAutoReceiptTransactionDate(
+                            $ocr_receipt_data['fields']['transaction_date'] ?? null,
+                            (string) ($ocr_receipt_data['content'] ?? '')
+                        );
+
+                        if (! $resolvedTransactionDate) {
+                            Log::channel('receipt_processing')->warning('AutoReceipts: invalid transaction_date; skipping receipt', [
+                                'company_email_id' => $company_email->id,
+                                'attachment_filename' => $attachment['filename'] ?? 'unknown',
+                                'raw_transaction_date' => $ocr_receipt_data['fields']['transaction_date'] ?? null,
+                                'timestamp' => now()->toISOString(),
+                            ]);
+
+                            Storage::disk('files')->delete($ocr_path);
+
+                            if ($attachment_key === array_key_last($message['attachments'])) {
+                                $this->nylasService->moveOriginalMessageToHiveFolder($grantId, $messageId, $company_email->id);
+                            }
+
+                            continue;
+                        }
+
+                        // Normalize stored value so downstream logic uses the corrected date.
+                        $ocr_receipt_data['fields']['transaction_date'] = $resolvedTransactionDate->toDateString();
+
                         // Set up the transaction date range.
                         $start_date = Carbon::parse($ocr_receipt_data['fields']['transaction_date'])
                             ->subDays(4)
@@ -1943,6 +1968,93 @@ class CompanyEmailController extends Controller
     protected function isDuplicateReceipt(int $expense_id, string $receipt_html, array $receipt_items): bool
     {
         return ExpenseReceipts::isDuplicateForExpense($expense_id, $receipt_html, $receipt_items);
+    }
+
+    protected function resolveAutoReceiptTransactionDate(mixed $rawTransactionDate, string $receiptContent): ?Carbon
+    {
+        $now = Carbon::now();
+
+        $parse = static function (mixed $value): ?Carbon {
+            if ($value instanceof \DateTimeInterface) {
+                return Carbon::instance($value);
+            }
+
+            if (! is_string($value)) {
+                return null;
+            }
+
+            $value = trim($value);
+            if ($value === '') {
+                return null;
+            }
+
+            try {
+                return Carbon::parse($value);
+            } catch (\Throwable) {
+                return null;
+            }
+        };
+
+        $parsed = $parse($rawTransactionDate);
+
+        // Guard against OCR year/day drift into the future (e.g. 2026-12-25).
+        // Allow a small buffer because processing can happen after midnight.
+        if ($parsed && $parsed->greaterThan($now->copy()->addDays(2))) {
+            $parsed = null;
+        }
+
+        // If OCR date is missing/invalid, try to extract the first date-with-time from the receipt body.
+        if (! $parsed && $receiptContent !== '') {
+            $patterns = [
+                // 12/12/25 09:49 AM
+                '/\b(\d{1,2}\/\d{1,2}\/\d{2,4})\s+\d{1,2}:\d{2}(?:\s*[AP]M)?\b/i',
+                // 12/12/25:09:49 AM
+                '/\b(\d{1,2}\/\d{1,2}\/\d{2,4})\s*:\s*\d{1,2}:\d{2}(?:\s*[AP]M)?\b/i',
+            ];
+
+            foreach ($patterns as $pattern) {
+                if (preg_match($pattern, $receiptContent, $m)) {
+                    $date = trim((string) ($m[1] ?? ''));
+                    if ($date !== '') {
+                        $candidate = null;
+
+                        if (preg_match('/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/', $date, $parts)) {
+                            $month = (int) ($parts[1] ?? 0);
+                            $day = (int) ($parts[2] ?? 0);
+                            $yearRaw = (string) ($parts[3] ?? '');
+
+                            if (strlen($yearRaw) === 2) {
+                                // Receipts in this app are contemporary; interpret 2-digit years as 20xx.
+                                $yearRaw = '20'.$yearRaw;
+                            }
+
+                            $year = (int) $yearRaw;
+
+                            if ($month >= 1 && $month <= 12 && $day >= 1 && $day <= 31 && $year >= 2000 && $year <= 2100) {
+                                $normalized = sprintf('%04d-%02d-%02d', $year, $month, $day);
+                                try {
+                                    $candidate = Carbon::createFromFormat('Y-m-d', $normalized);
+                                } catch (\Throwable) {
+                                    $candidate = null;
+                                }
+                            }
+                        }
+
+                        if ($candidate) {
+                            if ($candidate->greaterThan($now->copy()->addDays(2))) {
+                                continue;
+                            }
+
+                            $parsed = $candidate;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Final fallback: if still missing, use today's date to avoid writing a future date.
+        return $parsed ?: $now;
     }
 
     /**
