@@ -235,6 +235,72 @@ class ExpenseCreate extends Component
         return !$selectedVendor || $this->form->merchant_name != $selectedVendor->business_name;
     }
 
+    #[Computed]
+    public function notesSummary()
+    {
+        // Only show notes summary when editing an existing expense
+        if (!$this->expense->exists) {
+            return null;
+        }
+
+        $allNotes = [];
+
+        // Collect individual note parts from all receipts (uses orderedReceipts relationship)
+        foreach ($this->expense->orderedReceipts as $receipt) {
+            if (!empty($receipt->notes)) {
+                // Split by ' | ' to get individual parts, then merge
+                $parts = array_map('trim', explode(' | ', $receipt->notes));
+                foreach ($parts as $part) {
+                    if ($part !== '') {
+                        $allNotes[] = $part;
+                    }
+                }
+            }
+        }
+
+        // Fuzzy deduplicate notes to handle OCR variations
+        $unique = $this->fuzzyDeduplicateNotes($allNotes);
+
+        return !empty($unique) ? implode(', ', $unique) : null;
+    }
+
+    /**
+     * Deduplicate notes using fuzzy matching to handle OCR errors.
+     * Strings with >85% similarity are considered duplicates.
+     */
+    private function fuzzyDeduplicateNotes(array $notes): array
+    {
+        $unique = [];
+        
+        foreach ($notes as $note) {
+            $isDuplicate = false;
+            $noteLower = strtolower($note);
+            
+            foreach ($unique as $existing) {
+                $existingLower = strtolower($existing);
+                
+                // Exact match
+                if ($noteLower === $existingLower) {
+                    $isDuplicate = true;
+                    break;
+                }
+                
+                // Fuzzy match using similar_text percentage
+                similar_text($noteLower, $existingLower, $percent);
+                if ($percent > 85) {
+                    $isDuplicate = true;
+                    break;
+                }
+            }
+            
+            if (!$isDuplicate) {
+                $unique[] = $note;
+            }
+        }
+        
+        return $unique;
+    }
+
     public function createExpenseFromTransaction(Transaction $transaction)
     {
         $this->resetModal();

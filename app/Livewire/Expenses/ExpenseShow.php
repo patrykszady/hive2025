@@ -24,9 +24,7 @@ class ExpenseShow extends Component
         
         // Eager load with ordered receipts
         $this->expense->load([
-            'receipts' => function($query) {
-                $query->ordered();
-            },
+            'orderedReceipts',
             // Load distribution so Expense::project() withDefault can use the real name
             'distribution',
             // Load checks for many-to-many relationship with their bank accounts
@@ -56,23 +54,62 @@ class ExpenseShow extends Component
     #[Computed]
     public function notesSummary()
     {
-        $notes = [];
+        $allNotes = [];
         
-        // Add the expense note if it exists
-        // if($this->expense->note) {
-        //     $notes[] = $this->expense->note;
-        // }
-        
-        // Add notes from all receipts
-        if($this->expense->receipts()->exists()) {
-            foreach($this->expense->receipts as $receipt) {
-                if(!empty($receipt->notes)) {
-                    $notes[] = $receipt->notes;
+        // Collect individual note parts from all receipts (uses orderedReceipts relationship)
+        foreach ($this->expense->orderedReceipts as $receipt) {
+            if (!empty($receipt->notes)) {
+                // Split by ' | ' to get individual parts, then merge
+                $parts = array_map('trim', explode(' | ', $receipt->notes));
+                foreach ($parts as $part) {
+                    if ($part !== '') {
+                        $allNotes[] = $part;
+                    }
                 }
             }
         }
         
-        return !empty($notes) ? implode(', ', $notes) : null;
+        // Fuzzy deduplicate notes to handle OCR variations
+        $unique = $this->fuzzyDeduplicateNotes($allNotes);
+        
+        return !empty($unique) ? implode(', ', $unique) : null;
+    }
+
+    /**
+     * Deduplicate notes using fuzzy matching to handle OCR errors.
+     * Strings with >85% similarity are considered duplicates.
+     */
+    private function fuzzyDeduplicateNotes(array $notes): array
+    {
+        $unique = [];
+        
+        foreach ($notes as $note) {
+            $isDuplicate = false;
+            $noteLower = strtolower($note);
+            
+            foreach ($unique as $existing) {
+                $existingLower = strtolower($existing);
+                
+                // Exact match
+                if ($noteLower === $existingLower) {
+                    $isDuplicate = true;
+                    break;
+                }
+                
+                // Fuzzy match using similar_text percentage
+                similar_text($noteLower, $existingLower, $percent);
+                if ($percent > 85) {
+                    $isDuplicate = true;
+                    break;
+                }
+            }
+            
+            if (!$isDuplicate) {
+                $unique[] = $note;
+            }
+        }
+        
+        return $unique;
     }
 
     // Add this computed property

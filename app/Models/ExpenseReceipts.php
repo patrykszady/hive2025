@@ -26,6 +26,165 @@ class ExpenseReceipts extends Model
         return $this->belongsTo(Expense::class);
     }
 
+    public static function isDuplicateForExpense(int $expenseId, ?string $receiptHtml, array $receiptItems): bool
+    {
+        $newHtmlHash = static::receiptHtmlHash($receiptHtml);
+        $newLineItemsHash = static::receiptLineItemsHash($receiptItems);
+
+        $existingReceipts = static::query()
+            ->where('expense_id', $expenseId)
+            ->get(['id', 'receipt_html', 'receipt_items']);
+
+        foreach ($existingReceipts as $existingReceipt) {
+            $existingLineItemsHash = static::receiptLineItemsHash($existingReceipt->receipt_items ?? []);
+            if ($newLineItemsHash !== null && $existingLineItemsHash !== null && hash_equals($existingLineItemsHash, $newLineItemsHash)) {
+                return true;
+            }
+
+            $existingHtmlHash = static::receiptHtmlHash($existingReceipt->receipt_html);
+            if ($newHtmlHash !== '' && $existingHtmlHash !== '' && hash_equals($existingHtmlHash, $newHtmlHash)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static function receiptHtmlHash(?string $html): string
+    {
+        $normalized = static::normalizeReceiptHtml($html);
+        return $normalized === '' ? '' : sha1($normalized);
+    }
+
+    public static function receiptLineItemsHash(?array $receiptItems): ?string
+    {
+        $signature = static::normalizeLineItemsSignature($receiptItems ?? []);
+        if ($signature === []) {
+            return null;
+        }
+
+        return sha1(json_encode($signature, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+    }
+
+    private static function normalizeReceiptHtml(?string $html): string
+    {
+        if ($html === null) {
+            return '';
+        }
+
+        $html = str_replace(["\r\n", "\r"], "\n", $html);
+        $html = trim($html);
+
+        if ($html === '') {
+            return '';
+        }
+
+        // Collapse whitespace and remove whitespace between tags.
+        $html = preg_replace('/\s+/u', ' ', $html) ?? $html;
+        $html = preg_replace('/>\s+</u', '><', $html) ?? $html;
+
+        return trim($html);
+    }
+
+    /**
+     * Build a stable signature based on receipt line items plus stable fields.
+     * Includes: items, total, transaction_date, handwritten_notes, purchase_order.
+     * Intentionally ignores OCR-variable fields like merchant_name and Description which can vary per extraction.
+     */
+    private static function normalizeLineItemsSignature(array $receiptItems): array
+    {
+        // Must have at least a total to generate a signature
+        $total = $receiptItems['total'] ?? null;
+        if ($total === null) {
+            return [];
+        }
+
+        // Note: handwritten_notes are intentionally excluded from duplicate detection
+        // because they're prone to OCR variations (e.g., "Kemida" vs "Kemide").
+        // Handwritten notes are used for project matching, not receipt identity.
+
+        // Normalize purchase_order (string, can be empty or missing)
+        // Treat "0" as empty since it's a placeholder value from Home Depot receipts
+        $purchaseOrder = $receiptItems['purchase_order'] ?? null;
+        $normalizedPo = is_string($purchaseOrder) ? trim($purchaseOrder) : '';
+        if ($normalizedPo === '0') {
+            $normalizedPo = '';
+        }
+
+        // Use only total and transaction_date for duplicate detection.
+        // Line item counts and individual TotalPrice values are too OCR-prone:
+        // - OCR can split one item into two or merge items
+        // - Individual prices can have OCR errors (e.g., "2.61" vs "24.61")
+        // The receipt total is the most reliably OCR'd value.
+        $signature = [
+            'transaction_date' => static::normalizeValue($receiptItems['transaction_date'] ?? null),
+            'total' => static::normalizeValue($total),
+            'purchase_order' => $normalizedPo,
+        ];
+
+        return $signature;
+    }
+
+    private static function normalizeValue(mixed $value): mixed
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if (is_int($value)) {
+            return $value;
+        }
+
+        if (is_float($value)) {
+            // Stabilize float representation.
+            return rtrim(rtrim(number_format($value, 4, '.', ''), '0'), '.');
+        }
+
+        if (is_string($value)) {
+            $trimmed = trim($value);
+            if ($trimmed === '') {
+                return '';
+            }
+
+            if (is_numeric($trimmed)) {
+                $floatVal = (float) $trimmed;
+                return rtrim(rtrim(number_format($floatVal, 4, '.', ''), '0'), '.');
+            }
+
+            // Collapse whitespace.
+            return preg_replace('/\s+/u', ' ', $trimmed) ?? $trimmed;
+        }
+
+        if (is_array($value)) {
+            $isList = array_keys($value) === range(0, count($value) - 1);
+            if ($isList) {
+                $normalized = array_map(static fn ($v) => static::normalizeValue($v), $value);
+                usort($normalized, static function (mixed $a, mixed $b): int {
+                    return strcmp(json_encode($a, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), json_encode($b, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+                });
+                return $normalized;
+            }
+
+            $normalizedAssoc = [];
+            foreach ($value as $k => $v) {
+                $normalizedAssoc[(string) $k] = static::normalizeValue($v);
+            }
+            ksort($normalizedAssoc);
+            return $normalizedAssoc;
+        }
+
+        if (is_object($value)) {
+            $asArray = json_decode(json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), true);
+            return is_array($asArray) ? static::normalizeValue($asArray) : (string) $value;
+        }
+
+        return (string) $value;
+    }
+
     protected function notes(): Attribute
     {
         return Attribute::make(
@@ -39,8 +198,19 @@ class ExpenseReceipts extends Model
                     ? (array) $this->receipt_items['purchase_order']
                     : [];
 
-                // Combine, filter, and implode the notes
-                return implode(' | ', array_filter(array_merge($handwritten_notes, $purchase_order)));
+                // Combine, filter out empty/meaningless values, deduplicate
+                $combined = array_merge($handwritten_notes, $purchase_order);
+                $filtered = array_filter($combined, function ($note) {
+                    if (! is_string($note)) {
+                        return false;
+                    }
+                    $trimmed = trim($note);
+                    // Filter out empty strings and meaningless placeholder values
+                    return $trimmed !== '' && $trimmed !== '0';
+                });
+                $unique = array_unique(array_map('trim', $filtered));
+
+                return implode(' | ', $unique);
             }
         );
     }
@@ -48,7 +218,8 @@ class ExpenseReceipts extends Model
     // Add this scope for ordering receipts
     public function scopeOrdered($query)
     {
-        // First check if receipts have line items, then sort by date (newest first)
+        // First check if receipts have line items, then sort by ID (oldest first)
+        // This ensures receipt 1 is the first receipt, not the newest
         return $query->orderByRaw("
             CASE 
                 WHEN JSON_CONTAINS_PATH(receipt_items, 'one', '$.items') 
@@ -56,7 +227,7 @@ class ExpenseReceipts extends Model
                 THEN 1 
                 ELSE 0 
             END DESC
-        ")->latest();
+        ")->oldest('id');
     }
 
     // public function getReceiptItemsAttribute($value)

@@ -248,6 +248,15 @@ class Expense extends Model
         return $this->hasMany(ExpenseReceipts::class);
     }
 
+    /**
+     * Receipts ordered by line items presence (with items first), then by date.
+     * Single source of truth for receipt ordering across the app.
+     */
+    public function orderedReceipts(): HasMany
+    {
+        return $this->receipts()->ordered();
+    }
+
 
     public function associated(): HasMany
     {

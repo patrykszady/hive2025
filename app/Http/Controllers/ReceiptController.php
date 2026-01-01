@@ -866,7 +866,7 @@ class ReceiptController extends Controller
                 $line = $line_item['valueObject'];
 
                 $formatted_items[$key]['Description'] = $line['Description']['valueString'] ?? null;
-                $formatted_items[$key]['ProductCode'] = $line['ProductCode']['valueString'] ?? null;
+                $formatted_items[$key]['ProductCode'] = $this->sanitizeProductCode($line['ProductCode']['valueString'] ?? null);
 
                 // TotalPrice / Amount with robust fallbacks
                 if (isset($line['TotalPrice'])) {
@@ -1054,6 +1054,30 @@ class ReceiptController extends Controller
 
         $number = (float) $value;
         return $negative ? -$number : $number;
+    }
+
+    /**
+     * Sanitize a ProductCode extracted from OCR.
+     * Removes trailing suffixes like "-4.5" that are incorrectly appended by OCR.
+     * Product codes should only contain digits (UPC/EAN barcodes).
+     */
+    private function sanitizeProductCode(?string $code): ?string
+    {
+        if ($code === null || trim($code) === '') {
+            return null;
+        }
+
+        $code = trim($code);
+
+        // Remove anything after a hyphen (e.g., "081099015861-4.5" → "081099015861")
+        if (str_contains($code, '-')) {
+            $code = explode('-', $code)[0];
+        }
+
+        // Remove any non-digit characters (barcodes are numeric)
+        $code = preg_replace('/[^0-9]/', '', $code);
+
+        return $code !== '' ? $code : null;
     }
 
     //1-18-2023 combine the next 2 functions into one. Pass type = original or temp

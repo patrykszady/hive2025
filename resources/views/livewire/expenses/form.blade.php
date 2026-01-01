@@ -101,10 +101,8 @@
                         @if($expense->note)
                             <flux:description><i class="text-sky-800">{{$expense->note}}</i></flux:description>
                         @endif
-                        @if($expense->has('receipts'))
-                            @if(isset($expense->receipts()->first()->notes))
-                                <flux:description><i class="text-sky-800">{{$expense->receipts()->first()->notes}}</i></flux:description>
-                            @endif
+                        @if($this->notesSummary)
+                            <flux:description><i class="text-sky-800">{{$this->notesSummary}}</i></flux:description>
                         @endif
                     @endif
                 </div>

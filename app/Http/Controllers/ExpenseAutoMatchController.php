@@ -319,6 +319,17 @@ class ExpenseAutoMatchController extends Controller
                                 $score = max($score, $this->similarityScore($poStreetToken, $variantStreetToken));
                             }
                         }
+
+                        // Also compare individual significant PO tokens against variant's street token.
+                        // This handles cases like "M MARCELA" matching "17 N Marcella Rd" where
+                        // "marcela" should match "marcella" even without a house number prefix.
+                        $variantStreetToken = $this->extractStreetToken($variant);
+                        if ($variantStreetToken !== '') {
+                            $poTokens = array_filter(explode(' ', $po), fn ($t) => mb_strlen(trim($t)) >= 3);
+                            foreach ($poTokens as $poToken) {
+                                $score = max($score, $this->similarityScore(trim($poToken), $variantStreetToken));
+                            }
+                        }
                     }
 
                     $candidateProjectId = (int) ($candidate['id'] ?? 0);
@@ -965,6 +976,17 @@ class ExpenseAutoMatchController extends Controller
             $score = 0.0;
             foreach ($poVariants as $candidatePo) {
                 $score = max($score, $this->similarityScore($candidatePo, $distribution['normalized']));
+            }
+
+            // Also compare individual significant PO tokens against distribution name tokens.
+            // This handles cases like "Grey" matching "Greg Home" where
+            // "grey" should match "greg" even though the full strings differ.
+            $distTokens = array_filter(explode(' ', $distribution['normalized']), fn ($t) => mb_strlen(trim($t)) >= 3);
+            $poTokens = array_filter(explode(' ', $po), fn ($t) => mb_strlen(trim($t)) >= 3);
+            foreach ($poTokens as $poToken) {
+                foreach ($distTokens as $distToken) {
+                    $score = max($score, $this->similarityScore(trim($poToken), trim($distToken)));
+                }
             }
 
             if ($best === null || $score > $best['score']) {

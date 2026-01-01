@@ -1321,7 +1321,7 @@ class CompanyEmailController extends Controller
                             // Attach the currently processed receipt to the chosen expense.
                             // (saveExpenseReceipt moves the temp file into receipts/ and persists the receipt record)
                             if (isset($expense) && $expense instanceof Expense) {
-                                $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, null, true);
+                                $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, null, false);
                                 $didAttachReceipt = true;
                             }
                         } elseif ($duplicates->isEmpty()) {
@@ -1935,56 +1935,14 @@ class CompanyEmailController extends Controller
     }
 
     /**
-     * Check if a receipt is a duplicate based on content, invoice number, and line items.
+     * Check if a receipt is a duplicate for an expense.
+     *
+     * A duplicate is defined as having identical receipt HTML and/or identical receipt line items
+     * (plus stable fields like total/date when present), after normalization.
      */
     protected function isDuplicateReceipt(int $expense_id, string $receipt_html, array $receipt_items): bool
     {
-        // No conversion needed - receipt_items is now always an array
-        
-        // Extract invoice number from receipt items
-        $new_invoice_number = null;
-        if (is_array($receipt_items) && isset($receipt_items['invoice_number'])) {
-            $new_invoice_number = $receipt_items['invoice_number'];
-        }
-        
-        // Build signature for new receipt
-        $newItemsSignature = $this->buildItemsSignature($receipt_items ?? []);
-        
-        // Get existing receipts for this expense
-        $existing_receipts = ExpenseReceipts::where('expense_id', $expense_id)->get();
-        
-        foreach ($existing_receipts as $existing_receipt) {
-            // Check for exact HTML content match
-            if ($existing_receipt->receipt_html === $receipt_html) {
-                return true;
-            }
-            
-            // Check for invoice number match if both have invoice numbers
-            if ($new_invoice_number && $existing_receipt->receipt_items) {
-                if (isset($existing_receipt->receipt_items['invoice_number']) && 
-                    $existing_receipt->receipt_items['invoice_number'] === $new_invoice_number) {
-                    return true;
-                }
-            }
-            
-            // Check for line items similarity - this is the key improvement
-            if ($existing_receipt->receipt_items) {
-                $existingItemsSignature = $this->buildItemsSignature($existing_receipt->receipt_items);
-                
-                // If line items overlap significantly, consider it a duplicate
-                if ($this->itemsOverlap($newItemsSignature, $existingItemsSignature)) {
-                    // Additional check: if both have the same transaction total, it's very likely a duplicate
-                    $newTotal = $receipt_items['total'] ?? null;
-                    $existingTotal = $existing_receipt->receipt_items['total'] ?? null;
-                    
-                    if ($newTotal && $existingTotal && abs((float)$newTotal - (float)$existingTotal) < 0.01) {
-                        return true;
-                    }
-                }
-            }
-        }
-        
-        return false;
+        return ExpenseReceipts::isDuplicateForExpense($expense_id, $receipt_html, $receipt_items);
     }
 
     /**
