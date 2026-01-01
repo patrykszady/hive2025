@@ -816,7 +816,7 @@ class ReceiptController extends Controller
             // $transaction_date = preg_replace("/[^0-9]/", "", $transaction_date);
             $transaction_date = Carbon::parse($transaction_date);
             if ($transaction_date->year < date('Y', strtotime('-8 years'))) {
-                $transaction_date = $transaction_date->year(now()->format('Y'));
+                $transaction_date = $transaction_date->year(now()->year);
             }
 
             $transaction_date = $transaction_date->format('Y-m-d');
