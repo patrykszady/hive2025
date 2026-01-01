@@ -11,6 +11,8 @@ class EmailTemplate extends Model
 {
     use HasFactory;
 
+    protected $table = 'templates';
+
     protected $fillable = [
         'vendor_id',
         'name',

@@ -30,6 +30,8 @@ class RequestInsurance extends Mailable
     //Agent $agent,
     public function __construct($agent_expired_docs, Vendor $vendor, Vendor $requesting_vendor)
     {
+        $this->theme = 'transparent';
+
         $this->agent_expired_docs = $agent_expired_docs;
         // $this->agent = $agent;
         $this->vendor = $vendor;
@@ -49,7 +51,7 @@ class RequestInsurance extends Mailable
     {
         return new Envelope(
             from: new Address(config('nylas.certificates_email'), 'Hive Contractors'),
-            subject: $this->vendor->name.' Insurance Certificate',
+            subject: 'COI Request for '.$this->vendor->name,
         );
     }
 

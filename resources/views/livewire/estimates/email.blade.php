@@ -21,7 +21,7 @@
                 @endforeach
             </flux:select>
 
-            <flux:button href="{{ route('email_templates.index') }}" target="_blank" icon="plus">Add</flux:button>
+            <flux:button href="{{ route('templates.index') }}" target="_blank" icon="plus">Add</flux:button>
         </flux:input.group>
 
         <flux:input

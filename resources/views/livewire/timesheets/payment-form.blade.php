@@ -10,7 +10,7 @@
         }
     }
 }" x-init="initDate()">
-    <form wire:submit="{{$view_text['form_submit']}}">
+    <form id="payment-form" wire:submit="{{$view_text['form_submit']}}">
         <div class="grid max-w-xl grid-cols-5 gap-4 xl:relative lg:max-w-5xl sm:px-6">
             <div class="col-span-5 space-y-4 lg:col-span-2 lg:h-32 lg:sticky lg:top-5">
                 <flux:card>
@@ -33,7 +33,7 @@
                     <div class="space-y-2 mt-2">
                         <flux:button class="w-full">Check Total | <b>{{money($this->weekly_timesheets_total)}}</b></flux:button>
                         @can('viewAnyPayment', App\Models\Timesheet::class)
-                            <flux:button type="submit" variant="primary" class="w-full">{{$view_text['button_text']}}</flux:button>
+                            <flux:button wire:click="confirmPayment" variant="primary" class="w-full">{{$view_text['button_text']}}</flux:button>
                         @endcan
                     </div>
 
@@ -227,4 +227,26 @@
             </div>
         </div>
     </form>
+
+    {{-- Payment Confirmation Modal --}}
+    <flux:modal name="confirm-payment" class="md:w-96">
+        <div class="space-y-6">
+            <div>
+                <flux:heading size="lg">Confirm Payment</flux:heading>
+                <flux:text class="mt-2">Please verify the check amount before proceeding.</flux:text>
+            </div>
+
+            <div class="bg-zinc-100 dark:bg-zinc-800 rounded-lg p-4 text-center">
+                <flux:text class="text-sm text-zinc-500">Check Total</flux:text>
+                <flux:heading size="xl" class="!mt-1">{{money($this->weekly_timesheets_total)}}</flux:heading>
+            </div>
+
+            <div class="flex gap-2">
+                <flux:modal.close>
+                    <flux:button variant="ghost" class="w-full">Cancel</flux:button>
+                </flux:modal.close>
+                <flux:button wire:click="save" variant="primary" class="w-full">Confirm & Pay</flux:button>
+            </div>
+        </div>
+    </flux:modal>
 </div>

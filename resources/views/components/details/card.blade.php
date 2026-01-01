@@ -5,8 +5,18 @@
     'canEdit' => null,
     'expanded' => true,
     'details_text' => "Details",
-    'accordion' => true
+    'accordion' => true,
+    'nonLivewire' => false,
 ])
+
+@php
+    // When nonLivewire is true, force static rendering behaviors
+    if ($nonLivewire) {
+        $accordion = false;
+        $expanded = true;
+        $canEdit = false;
+    }
+@endphp
 
 <flux:card class="!px-5 py-2">
     {{-- HEADER - Always outside the accordion --}}

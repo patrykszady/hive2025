@@ -93,4 +93,14 @@ class VendorPolicy
     {
         //
     }
+
+    /**
+     * Determine whether the user can view vendor options settings.
+     *
+     * @return \Illuminate\Auth\Access\Response|bool
+     */
+    public function viewOptions(User $user): bool
+    {
+        return $user->vendor_role === 'Admin';
+    }
 }

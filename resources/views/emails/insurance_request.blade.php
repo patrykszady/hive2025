@@ -1,36 +1,62 @@
-<x-mail::message>
-Hello,
-<br>
-On behalf of <b>{{$vendor->business_name}}</b> we are requesting new certificates of insurance for the following policies that have expired. Please contact the insured directly if needed.
-<h3>Insured:</h3>
-<x-mail::panel>
-<b>{{$vendor->business_name}}</b>
-<br>
-{{$vendor->address}}
-@if(!is_null($vendor->address_2))
-<br>
-{{$vendor->address_2}}
+<x-mail::message :hide-footer="true" :show-header-brand="true">
+@php
+	$requestingVendorUrl = 'https://dashboard.hive.contractors/vendors/' . $requesting_vendor->id;
+	$insuredVendorUrl = 'https://dashboard.hive.contractors/vendors/' . $vendor->id;
+@endphp
+
+<div style="text-align: center;">
+<h1 class="title" style="text-align: center;">COI Request</h1>
+<p class="text" style="margin: 6px 0 8px; text-align: center;"><a href="{{ $requestingVendorUrl }}">{{ $requesting_vendor->name }}</a> is requesting updated Certificates of Insurance for <a href="{{ $insuredVendorUrl }}">{{ $vendor->name }}</a>.</p>
+</div>
+
+<hr style="border: none; border-top: 1px solid #cbd5e1; margin: 6px 0;">
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse; margin: 0;">
+	<tr>
+		<td style="padding: 6px 0; width: 120px; vertical-align: top;"><strong>Insured</strong></td>
+		<td style="padding: 6px 0; vertical-align: top;"><a href="{{ $insuredVendorUrl }}">{{ $vendor->name }}</a></td>
+	</tr>
+	<tr>
+		<td style="padding: 6px 0; width: 120px; vertical-align: top;">Address</td>
+		<td style="padding: 6px 0; vertical-align: top;">{{ $vendor->address }}@if(!is_null($vendor->address_2)), {{ $vendor->address_2 }}@endif, {{ $vendor->city }}, {{ $vendor->state }} {{ $vendor->zip_code }}</td>
+	</tr>
+</table>
+
+<hr style="border: none; border-top: 1px solid #cbd5e1; margin: 6px 0;">
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse; margin: 0;">
+	<tr>
+		<td style="padding: 6px 0; width: 120px; vertical-align: top;"><strong>Holder</strong></td>
+		<td style="padding: 6px 0; vertical-align: top;"><a href="{{ $requestingVendorUrl }}">{{ $requesting_vendor->name }}</a></td>
+	</tr>
+	<tr>
+		<td style="padding: 6px 0; width: 120px; vertical-align: top;">Address</td>
+		<td style="padding: 6px 0; vertical-align: top;">{{ $requesting_vendor->address }}@if(!is_null($requesting_vendor->address_2)), {{ $requesting_vendor->address_2 }}@endif, {{ $requesting_vendor->city }}, {{ $requesting_vendor->state }} {{ $requesting_vendor->zip_code }}</td>
+	</tr>
+</table>
+
+@if(!empty($agent_expired_docs) && count($agent_expired_docs) > 0)
+<hr style="border: none; border-top: 2px solid #cbd5e1; margin: 8px 0 6px;">
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse; margin: 0;">
+	<thead>
+		<tr>
+			<th align="left" style="padding: 8px 0; border-bottom: 1px solid #cbd5e1;">Policy</th>
+			<th align="left" style="padding: 8px 0; border-bottom: 1px solid #cbd5e1;">Number</th>
+			<th align="left" style="padding: 8px 0; border-bottom: 1px solid #cbd5e1;">Expiration</th>
+		</tr>
+	</thead>
+	<tbody>
+		@foreach($agent_expired_docs as $agent_expired_doc)
+			<tr>
+				<td style="padding: 8px 0; vertical-align: top;">{{ $agent_expired_doc->type }}</td>
+				<td style="padding: 8px 0; vertical-align: top;">{{ $agent_expired_doc->number }}</td>
+				<td style="padding: 8px 0; vertical-align: top;">{{ $agent_expired_doc->expiration_date->format('m/d/Y') }}</td>
+			</tr>
+		@endforeach
+	</tbody>
+</table>
 @endif
-<br>
-{{$vendor->city}}, {{$vendor->state}} {{$vendor->zip_code}}
-</x-mail::panel>
-<h3>Expired Policies:</h3>
-<x-mail::panel>
-@foreach($agent_expired_docs as $agent_expired_doc)
-<b>{{$agent_expired_doc->type}}</b> | Policy #: <u>{{$agent_expired_doc->number}}</u> | {{$agent_expired_doc->expiration_date->format('m/d/Y')}}<br>
-@endforeach
-</x-mail::panel>
-<h3>Holder:</h3>
-<x-mail::panel>
-<b>{{$requesting_vendor->business_name}}</b>
-<br>
-{{$requesting_vendor->address}}
-@if(!is_null($requesting_vendor->address_2))
-<br>
-{{$requesting_vendor->address_2}}
-@endif
-<br>
-{{$requesting_vendor->city}}, {{$requesting_vendor->state}} {{$requesting_vendor->zip_code}}
-</x-mail::panel>
+
 @include('emails.top_footer', ["sending_vendor" => $requesting_vendor->name])
 </x-mail::message>

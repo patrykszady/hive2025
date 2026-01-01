@@ -50,6 +50,8 @@ class ProjectDocumentGenerator
 
         $expenses = $expenses->sortBy('date');
 
+        // PDFs should use the vendor's timezone, not browser timezone
+        $timezone = vendor_timezone();
         $title = 'Reimbursements - ' . $project->id . ' - ' . $project->client->name . ' - ' . $project->project_name;
         $view = view('misc.print_reimbursments', compact('expenses', 'title'))->render();
 
@@ -64,6 +66,8 @@ class ProjectDocumentGenerator
             ])
             ->showBrowserHeaderAndFooter()
             ->showBackground()
+            ->headerHtml('<div style="font-size: 10px; width: 100%; padding: 0; margin: 0 5mm 0 10mm; display: flex; justify-content: space-between;"><span>' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</span><span>' . now()->setTimezone($timezone)->format('m/d/Y g:i A') . '</span></div>')
+            ->footerHtml('<div style="font-size: 10px; text-align: right; width: 100%; padding: 0; margin: 0 5mm 0 10mm;"><span class="pageNumber"></span> / <span class="totalPages"></span></div>')
             ->margins(10, 5, 10, 5)
             ->pdf();
 

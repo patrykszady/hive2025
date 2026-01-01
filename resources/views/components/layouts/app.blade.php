@@ -5,7 +5,10 @@
 
     {{-- BODY --}}
     {{-- $fullscreenClasses prop in render of Planner/Board --}}
-    <body class="{{isset($fullscreenClasses) ? 'h-screen overflow-hidden ' : 'min-h-screen '}} bg-zinc-100 dark:bg-zinc-800">
+    <body 
+        class="{{isset($fullscreenClasses) ? 'h-screen overflow-hidden ' : 'min-h-screen '}} bg-zinc-100 dark:bg-zinc-800"
+        @if(env('FAKE_BROWSER_DATE')) data-fake-today="{{ browser_today()->format('Y-m-d') }}" @endif
+    >
         <livewire:browser-timezone />
 
         <flux:sidebar sticky collapsible class="bg-zinc-50 dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-700 overflow-x-hidden flux-no-scrollbar">
@@ -15,18 +18,15 @@
                     $isVendorSelection = Route::is(['vendor_selection']);
                     $href = ($isVendorRoute || $isVendorSelection) ? null : route('dashboard');
                     $logo = asset('favicon.png');
-                    $name = \Illuminate\Support\Str::limit(
-                        $isVendorRoute || $isVendorSelection || !auth()->user()->vendor 
-                            ? env('APP_NAME') 
-                            : auth()->user()->vendor->name, 
-                        15
-                    );
+                    $name = $isVendorRoute || $isVendorSelection || !auth()->user()->vendor
+                        ? config('app.name')
+                        : auth()->user()->vendor->shortName;
                 @endphp
                 <flux:sidebar.brand
                     href="{{ $href }}"
                     logo="{{ $logo }}"
                     logo:dark="{{ $logo }}"
-                    name="{!! $name !!}"
+                    :name="$name"
                 />
                 <flux:sidebar.collapse class="in-data-flux-sidebar-on-desktop:not-in-data-flux-sidebar-collapsed-desktop:-mr-2" />
             </flux:sidebar.header>
@@ -35,7 +35,7 @@
                 $accountingGroups = ['banks*', 'distributions*', 'sheets*'];
                 $accountingExpanded = request()->is($accountingGroups) || request()->routeIs($accountingGroups);
                 $globalActionsExpanded = request()->is('transactions/match_vendor');
-                $settingsGroups = ['email_templates*', 'company_emails*', 'vendor_docs*'];
+                $settingsGroups = ['email_templates*', 'company_emails*', 'vendor_docs*', 'vendor_options*'];
                 $settingsExpanded = request()->is($settingsGroups) || request()->routeIs($settingsGroups);
             @endphp
 
@@ -126,10 +126,15 @@
                         auth()->user()->can('viewAny', App\Models\EmailTemplate::class)
                         || auth()->user()->can('viewAny', App\Models\CompanyEmail::class)
                         || auth()->user()->can('viewAny', App\Models\VendorDoc::class)
+                        || auth()->user()->can('viewOptions', App\Models\Vendor::class)
                     )
                         <flux:sidebar.group expandable heading="Settings" class="grid" icon="cog-6-tooth" :expanded="$settingsExpanded">
+                            @can('viewOptions', App\Models\Vendor::class)
+                                <flux:sidebar.item wire:navigate.hover href="/options" icon="adjustments-horizontal">Options</flux:sidebar.item>
+                            @endcan
+
                             @can('viewAny', App\Models\EmailTemplate::class)
-                                <flux:sidebar.item wire:navigate.hover href="/email_templates" icon="envelope-open">Email Templates</flux:sidebar.item>
+                                <flux:sidebar.item wire:navigate.hover href="/templates" icon="envelope-open">Templates</flux:sidebar.item>
                             @endcan
 
                             @can('viewAny', App\Models\CompanyEmail::class)

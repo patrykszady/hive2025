@@ -17,8 +17,10 @@ class SheetMonthly extends Component
 
     public function mount()
     {
-        $end_date = Carbon::today()->endOfMonth();
-        $start_date = Carbon::today()->startOfMonth()->subMonths(11);
+        $today = browser_today();
+
+        $end_date = $today->copy()->endOfMonth();
+        $start_date = $today->copy()->startOfMonth()->subMonths(11);
 
         // Create a period between the start and end dates
         $period = CarbonPeriod::create($start_date, '1 month', $end_date);
@@ -46,7 +48,7 @@ class SheetMonthly extends Component
             ->groupBy(fn($timesheet) => $timesheet->date->format('M y'))
             ->toBase();
 
-        $last_year_payments = Payment::whereBetween('date', [$start_date->subYear(), $end_date->subYear()])
+        $last_year_payments = Payment::whereBetween('date', [$start_date->copy()->subYear(), $end_date->copy()->subYear()])
             ->whereHas('project', fn($query) =>
                 $query->whereHas('latestStatus', fn($subQuery) =>
                     $subQuery->where('status_code', '!=', 11) // Exclude projects with latest status "VIEW ONLY"
@@ -54,7 +56,7 @@ class SheetMonthly extends Component
             )
             ->orderBy('date', 'DESC') // Sort payments by date descending
             ->get()
-            ->groupBy(fn($payment) => $payment->date->addYear()->format('M y'));
+            ->groupBy(fn($payment) => $payment->date->copy()->addYear()->format('M y'));
 
         foreach ($period as $month) {
             $monthKey = $month->format('M y');

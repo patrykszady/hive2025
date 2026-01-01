@@ -1,100 +1,56 @@
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
     {{-- HEAD --}}
-    @include('components.layouts.head')
+    @include('components.layouts.pdf-head')
 
     {{-- BODY --}}
-    {{--  class="min-h-screen" --}}
     <body>
         <flux:main>
-            {{-- <div style="page-break-before: always;"></div> --}}
-            @php
-                // Note: $vendor, $client, and $project are passed from the generator
-                // to avoid re-querying relationships with global scopes applied
-                $projectStatusTitle = $project?->latestStatus?->title;
-                $projectFinances = $project?->finances ?? [];
-            @endphp
-
             <div class="break-after-page space-y-4">
                 <div class="grid grid-cols-4 gap-4">
-                    {{-- VENDOR DETAILS --}}
                     <div class="col-span-2 space-y-4">
-                        <flux:card>
-                            <div class="flex justify-between">
-                                <flux:heading size="lg">Contractor Details</flux:heading>
+                        @if($vendorLogoDataUrl)
+                            <div>
+                                <img
+                                    src="{{ $vendorLogoDataUrl }}"
+                                    alt="{{ $vendor->business_name }} logo"
+                                    class="h-24 w-auto object-contain"
+                                />
                             </div>
-                            <x-lists.ul>
-                                <x-lists.search_li
-                                    :basic=true
-                                    :line_title="'Project Contractor'"
-                                    href="{{ $vendor ? route('vendors.show', $vendor) : '#' }}"
-                                    :line_data="optional($vendor)->business_name ?? 'Unknown Vendor'"
-                                    >
-                                </x-lists.search_li>
+                        @endif
 
-                                <x-lists.search_li
-                                    :basic=true
-                                    :line_title="'Address'"
-                                    :href_target="'blank'"
-                                    :line_data="optional($vendor)->full_address ?? 'No address on file'"
-                                    >
-                                </x-lists.search_li>
-                            </x-lists.ul>
-                        </flux:card>
-                        <flux:card>
-                            <div class="flex justify-between">
-                                <flux:heading size="lg">Homeowner Details</flux:heading>
-                            </div>
-                        </flux:card>
+                        {{-- VENDOR DETAILS --}}
+                        @include('livewire.vendors.vendor-details', [
+                            'vendor' => $vendor,
+                            'nonLivewire' => true,
+                            'titleOverride' => 'Contractor Details',
+                            'hide' => ['type'],
+                        ])
                     </div>
 
-                    {{-- DOCUMENT DETAILS --}}
-                    <div class="col-span-2 space-y-2">
-                        <flux:card>
-                            <div class="flex justify-between">
-                                <flux:heading size="lg">{{$type}} Details</flux:heading>
-                            </div>
-                            <x-lists.ul>
-                                <x-lists.search_li
-                                    :basic=true
-                                    :line_title="'Project Homeowner'"
-                                    href="{{ $client ? route('clients.show', $client) : '#' }}"
-                                    :line_data="optional($client)->name ?? 'Unknown Client'"
-                                    >
-                                </x-lists.search_li>
+                    <div class="col-span-2 space-y-4">
+                        {{-- DOCUMENT DETAILS --}}
+                        @include('livewire.estimates.estimate-details', [
+                            'estimate' => $estimate,
+                            'client' => $client,
+                            'project' => $project,
+                            'nonLivewire' => true,
+                            'titleOverride' => $type . ' Details',
+                            'estimateTotal' => $estimate_total,
+                            'hide' => ['total'],
+                        ])
 
-                                <x-lists.search_li
-                                    :basic=true
-                                    :line_title="'Project Name'"
-                                    href="{{ $project ? route('projects.show', $project->id) : '#' }}"
-                                    :line_data="optional($project)->project_name ?? 'Unknown Project'"
-                                    >
-                                </x-lists.search_li>
-
-                                <x-lists.search_li
-                                    :basic=true
-                                    :line_title="'Jobsite Address'"
-                                    href="{{ $project?->getAddressMapURI() }}"
-                                    :href_target="'blank'"
-                                    :line_data="optional($project)->full_address ?? 'No address on file'"
-                                    >
-                                </x-lists.search_li>
-
-                                <x-lists.search_li
-                                    :basic=true
-                                    :line_title="'Billing Address'"
-                                    :line_data="optional($client)->full_address ?? 'No billing address on file'"
-                                    >
-                                </x-lists.search_li>
-
-                                <x-lists.search_li
-                                    :basic=true
-                                    :line_title="$type"
-                                    :line_data="$estimate->number"
-                                    >
-                                </x-lists.search_li>
-                            </x-lists.ul>
-                        </flux:card>
+                        {{-- CONTACT DETAILS --}}
+                        @include('livewire.users.index', [
+                            'users' => $clientContacts,
+                            'client' => $client,
+                            'view' => 'clients.show',
+                            'view_text' => [
+                                'card_title' => 'Contact Details',
+                                'button_text' => 'Add Contact',
+                            ],
+                            'nonLivewire' => true,
+                        ])
                     </div>
                 </div>
 
@@ -314,115 +270,16 @@
                     </div>
                 @endif
 
-                @if($type == 'Estimate')
-                    <div style="page-break-before: always;"> </div>
-                    <div>
+                @if($type == 'Estimate' && !empty($contractBody))
+                    <div style="page-break-before: always;"> </div>
+
+                    {{-- Dynamic contract template --}}
+                    <div class="contract-body">
                         @if(empty($estimate->payments))
-                            <p><b><i>*The below Contract is a sample. It is not meant to be signed until a finalized Estimate is avaliable.</i></b></p>
+                            <p><b><i>*The below Contract is a sample. It is not meant to be signed until a finalized Estimate is available.</i></b></p>
                             <br>
                         @endif
-                        <h1 class="text-xl font-bold">CONTRACTOR AGREEMENT</h1>
-                        <p>THIS AGREEMENT made on {{today()->format('m/d/Y')}}, by and between {{ optional($vendor)->business_name ?? 'Unknown Vendor' }}, hereinafter called the Contractor, and {{ optional($client)->name ?? 'Unknown Client' }}, hereinafter called the Owner. WITNESSETH, that the Contractor and the Owner for the consideration named herein agree as follows:</p>
-                        <br>
-                        <h2 class="text-lg font-semibold">ARTICLE 1. SCOPE OF THE WORK</h2>
-                        <p>The Contractor shall furnish all the construction materials and perform all of the work shown on the drawings and/or described in the specifications entitled Estimate {{$estimate->number}}, as annexed hereto as it pertains to work to be performed on property located at: </p>
-                        <br>
-                        <p>{!! optional($project)->full_address ?? 'No address on file' !!}</p>
-                        <br>
-                        <p>The Owner is responsible for all finish materials unless otherwire noted in the Estimate.</p>
-                        <br>
-                        <h2 class="text-lg font-semibold">ARTICLE 2. TIME OF COMPLETION</h2>
-                        <p>The work to be performed under this Contract shall be commenced on or before {{$estimate->start_date ? $estimate->start_date->format('m/d/Y') : 'START_DATE_HERE'}}, provided all permits are approved in a timely manner prior to the start date and all finish material is available. The work shall be substantially completed {{$estimate->end_date ? $estimate->end_date->format('m/d/Y') : 'END_DATE_HERE'}}, provided no Change Orders are added to this estimate, inspections are readily available, and all finish material is available. Such changes will alter the completion date.</p>
-                        <br>
-                        <h2 class="text-lg font-semibold">ARTICLE 3. THE CONTRACT PRICE</h2>
-                        <p>The owner shall pay the Contractor for the material and labor to be performed under the Contract the sum of ---{{money($estimate_total)}}--- Dollars ($), {{$estimate_total_words}}, subject to additions and deductions pursuant to authorized change orders. </p>
-                        <br>
-                        <h2 class="text-lg font-semibold">ARTICLE 4. PROGRESS PAYMENTS</h2>
-                        <p>Payments of the Contract price shall be paid in the manner following and shall not be unreasonably withheld.</p>
-                        <p>Construction Payments:</p>
-
-                        @if(!empty($estimate->payments))
-                            <x-cards.body>
-                                <div class="grid grid-cols-4 gap-4">
-                                    <div class="col-span-3">
-                                        <table class="min-w-full divide-y divide-gray-300">
-                                            {{--  class="text-gray-900 border-b border-gray-400" --}}
-                                            <thead>
-                                                <tr>
-                                                    <th
-                                                        scope="col"
-                                                        class="px-3 py-2 text-sm font-semibold text-left text-gray-900"
-                                                        >
-                                                        Payment
-                                                    </th>
-                                                    <th
-                                                        scope="col"
-                                                        class="px-3 py-2 text-sm font-semibold text-left text-gray-900"
-                                                        >
-                                                        Description
-                                                    </th>
-                                                    <th
-                                                        scope="col"
-                                                        class="px-3 py-2 text-sm font-semibold text-left text-gray-900"
-                                                        >
-                                                        Amount
-                                                    </th>
-                                                </tr>
-                                            </thead>
-                                            <tbody class="divide-y divide-gray-200">
-                                                @if($estimate->payments)
-                                                    @foreach($estimate->payments as $key => $payment)
-                                                        <tr>
-                                                            <td class="px-3 py-2 text-sm text-gray-900 whitespace-nowrap">Payment {{$key + 1}}</td>
-                                                            <td class="px-3 py-2 text-sm text-gray-900 whitespace-nowrap">{{$payment['description']}}</td>
-                                                            <td class="px-3 py-2 text-sm text-gray-900 whitespace-nowrap">@if($loop->last && $payment['amount'] == '') Balance @else {{money($payment['amount'])}} @endif</td>
-                                                        </tr>
-                                                    @endforeach
-                                                @endif
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-                            </x-cards.body>
-                        @else
-                            <br>
-                            <p><b><i>PAYMENT SCHEDULE HERE. Avaliable when this Contract is ready to sign.</i></b></p>
-                            <br>
-                        @endif
-
-                        <hr>
-                        <p>Any Change Order payments due after that scope is completed. Payment for any stone, glass fabrications, and finish material reimbursments due upon purchase. Balance payment may be split if needed.</p>
-                        <br>
-                        <p>(continued on next page.) </p>
-                    </div>
-                    <div style="page-break-before: always;"> </div>
-                    <div>
-                        <h2 class="text-lg font-semibold">ARTICLE 5. GENERAL PROVISIONS</h2>
-                        <ol class="list-disc">
-                            <li>All work shall be completed in a workmanship-like manner and in compliance with all building codes and other applicable laws.</li>
-                            <li>To the extent required by law all work shall be performed by individuals duly licensed and authorized by law to perform said work.</li>
-                            <li>Contractor may at its discretion engage subcontractors to perform work hereunder, provided Contractor shall fully pay said subcontractor and in all instances remain responsible for the proper completion of this Contract.</li>
-                            <li>All change orders will be issued electronically on separate drawings and/or described in a separate specification entitled Estimate {{$estimate->number}}, section "Change Order".</li>
-                            <li>Contractor warrants it is adequately insured for injury to its employees and others incurring loss or injury as a result of the acts of Contractor or its employees and subcontractors.</li>
-                            <li>Contractor agrees to remove all debris and leave the premises in broom clean condition.</li>
-                            <li>In the event Owner shall fail to pay any periodic or installment payment due hereunder, Contractor may cease work without breach pending payment or resolution of any dispute.</li>
-                            <li>All disputes hereunder shall be resolved by binding arbitration in accordance with the rules of the American Arbitration Association.</li>
-                            <li>Contractor shall not be liable for any delay due to circumstances beyond its control including strikes, casualty or general unavailability of materials, change orders, permit and inspection delays, and scope of work adjustments.</li>
-                            <li>Contractor warrants all work for a period of 12 months following completion. Owner to notify contractor of a defect in a timely matter. Contractor to evaluate within 10 business days and provide a solution both parties agree upon. Contractor is not responsible for finish material defects.</li>
-                            {{-- <li>Contractor to provide 2 mechanical lien waivers. 1st partial lien waiver after 2nd payment clears and final lien waiver after last payment clears.</li> --}}
-                            {{-- <li>Contractor shall provide Owner a certificate of insurance for both, Workers Compensation Insurance, and General Liability Insurance. Contractor agrees to have Owner named as additional insureds under its General Liability policy. Owner to verify policy limits prior to Contract execution.</li> --}}
-                        </ol>
-                        <br>
-                        <br>
-                        <br>
-
-                        @if($estimate->payments)
-                            <p>Signed
-                            <br><br><br></p>
-                            <p>Owner or Authorized Representative _________ / ______/{{today()->format('Y')}}
-                            <br><br><br><br></p>
-                            <p>Contractor _________ / ______/{{today()->format('Y')}}</p>
-                        @endif
+                        {!! $contractBody !!}
                     </div>
                 @endif
             </div>

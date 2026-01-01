@@ -14,11 +14,16 @@ class EmailTemplateIndex extends Component
 {
     use AuthorizesRequests, WithPagination;
 
-    public $type = 'estimate';
+    public $type = 'email';
     public $showForm = false;
     public $editingTemplateId = null;
 
-    #[Title('Email Templates')]
+    #[Title('Templates')]
+
+    public function updatedType()
+    {
+        $this->resetPage();
+    }
 
     public function createTemplate()
     {
@@ -53,6 +58,14 @@ class EmailTemplateIndex extends Component
     #[Computed]
     public function templates()
     {
+        // For email type, show estimate and invoice templates
+        // For contract type, show contract templates
+        if ($this->type === 'email') {
+            return EmailTemplate::whereIn('type', ['estimate', 'invoice'])
+                ->orderBy('name')
+                ->paginate(20);
+        }
+
         return EmailTemplate::where('type', $this->type)
             ->orderBy('name')
             ->paginate(20);

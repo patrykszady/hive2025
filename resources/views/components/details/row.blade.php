@@ -7,18 +7,15 @@
     'align' => 'left',
     'indent' => 0,
     'truncate' => true,
+    'noCloak' => false,
 ])
 
-{{-- Calculate variables inline with Blade directives --}}
 @php
     $isRight = $align === 'right' || $attributes->get('right-align', false);
     $indentClass = ((int)($attributes->get('indent-level', $indent)) > 0) ? 'pl-' . ((int)($attributes->get('indent-level', $indent)) * 4) : '';
     $shouldTruncate = !$attributes->has('no-truncate') && $truncate;
-@endphp
-
-@php
-    // Allow opting out of cloaking with a `no-cloak` attribute
-    $useCloak = ! $attributes->has('no-cloak');
+    // Allow opting out of cloaking via prop or attribute
+    $useCloak = !$noCloak && !$attributes->has('no-cloak');
 @endphp
 <div
     class="relative flex flex-col sm:grid sm:grid-cols-4 gap-1 items-start py-2 sm:py-3 [&:not(:last-child)]:border-b [&:not(:last-child)]:border-zinc-800/15 dark:[&:not(:last-child)]:border-white/20"

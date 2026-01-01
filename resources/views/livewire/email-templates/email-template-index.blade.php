@@ -1,31 +1,32 @@
-<div>
-    <flux:header>
-        <flux:heading size="xl">Email Templates</flux:heading>
-        
-        <flux:spacer />
-        
-        <flux:button wire:click="createTemplate" icon="plus">New Template</flux:button>
-    </flux:header>
+<div class="max-w-4xl">
+    <flux:card class="space-y-2">
+        <div class="flex justify-between items-center">
+            <flux:heading size="lg">Templates</flux:heading>
+            <flux:button wire:click="createTemplate" icon="plus">New Template</flux:button>
+        </div>
 
-    <flux:main class="space-y-6">
-        {{-- Template Type Tabs --}}
-        <flux:tabs wire:model="type">
-            <flux:tab name="estimate">Estimate Templates</flux:tab>
-            <flux:tab name="invoice">Invoice Templates</flux:tab>
+        <flux:separator variant="subtle" />
+
+        {{-- Type Tabs (Email vs Contract) --}}
+        <flux:tabs wire:model.live="type">
+            <flux:tab name="email">Email Templates</flux:tab>
+            <flux:tab name="contract">Contract Templates</flux:tab>
         </flux:tabs>
 
         {{-- Templates Table --}}
-        <flux:table>
-            <flux:table.rows>
-                {{-- Header Row --}}
-                <flux:table.row>
-                    <flux:table.cell class="font-semibold">Name</flux:table.cell>
-                    <flux:table.cell class="font-semibold">Subject</flux:table.cell>
-                </flux:table.row>
+        <flux:table :paginate="$this->templates->hasPages() ? $this->templates : null">
+            <flux:table.columns>
+                <flux:table.column>Name</flux:table.column>
+                @if ($type !== 'contract')
+                    <flux:table.column>Subject</flux:table.column>
+                @endif
+                <flux:table.column class="w-20"></flux:table.column>
+            </flux:table.columns>
 
-                @foreach ($this->templates as $template)
+            <flux:table.rows>
+                @forelse ($this->templates as $template)
                     <flux:table.row :key="$template->id">
-                        <flux:table.cell class="font-medium">
+                        <flux:table.cell variant="strong">
                             <button 
                                 wire:click="editTemplate({{ $template->id }})" 
                                 class="text-left hover:underline focus:outline-none focus:underline"
@@ -34,23 +35,39 @@
                             </button>
                         </flux:table.cell>
                         
-                        <flux:table.cell class="text-sm text-zinc-600">
-                            {{ $template->subject }}
+                        @if ($type !== 'contract')
+                            <flux:table.cell class="text-sm text-zinc-600 dark:text-zinc-400">
+                                {{ $template->subject }}
+                            </flux:table.cell>
+                        @endif
+
+                        <flux:table.cell>
+                            <flux:button 
+                                wire:click="editTemplate({{ $template->id }})" 
+                                variant="ghost" 
+                                size="sm" 
+                                icon="pencil"
+                            />
                         </flux:table.cell>
                     </flux:table.row>
-                @endforeach
+                @empty
+                    <flux:table.row>
+                        <flux:table.cell colspan="{{ $type !== 'contract' ? 3 : 2 }}" class="text-center text-zinc-500 dark:text-zinc-400 py-8">
+                            No templates found. Create your first template to get started.
+                        </flux:table.cell>
+                    </flux:table.row>
+                @endforelse
             </flux:table.rows>
         </flux:table>
-
-        {{ $this->templates->links() }}
-    </flux:main>
+    </flux:card>
 
     {{-- Modal for Create/Edit --}}
-    <flux:modal name="template-form" class="space-y-4 min-w-96">
+    <flux:modal name="template-form" class="min-w-[600px] max-w-4xl w-full">
         @if ($showForm)
             <livewire:email-templates.email-template-form 
                 :templateId="$editingTemplateId" 
-                :key="$editingTemplateId ?? 'new'"
+                :type="$type"
+                :key="($editingTemplateId ?? 'new') . '-' . $type"
                 @close-form="closeForm"
                 @template-saved="closeForm"
             />

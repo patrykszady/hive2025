@@ -27,8 +27,9 @@ class CardsIndex extends Component
     public bool $showMobileFilters = false;
 
     public int $previousDaysLoaded = 0;
+    public int $futureDaysLoaded = 14;
 
-    private const PREVIOUS_DAYS_PER_LOAD = 3;
+    private const DAYS_PER_LOAD = 2;
 
     public function toggleMobileFilters(): void
     {
@@ -37,9 +38,14 @@ class CardsIndex extends Component
 
     public function loadPreviousDays(): void
     {
-        $this->previousDaysLoaded += self::PREVIOUS_DAYS_PER_LOAD;
+        $this->previousDaysLoaded += self::DAYS_PER_LOAD;
+        $this->dispatch('planner-scroll-to', direction: 'start');
+    }
 
-        $this->dispatch('planner-days-updated');
+    public function loadFutureDays(): void
+    {
+        $this->futureDaysLoaded += self::DAYS_PER_LOAD;
+        $this->dispatch('planner-scroll-to', direction: 'end');
     }
 
     public array $undatedTasksModalTasks = [];
@@ -75,14 +81,14 @@ class CardsIndex extends Component
     }
 
     /**
-     * Get 14 days starting from today
+     * Get days range based on loaded days
      */
     #[Computed]
     public function days()
     {
         $today = browser_today();
         $startDate = $today->copy()->subDays($this->previousDaysLoaded);
-        $endDate = $today->copy()->addDays(13); // 14 days forward (today + 13)
+        $endDate = $today->copy()->addDays($this->futureDaysLoaded - 1);
 
         return collect(CarbonPeriod::create($startDate, '1 day', $endDate));
     }
@@ -330,15 +336,16 @@ class CardsIndex extends Component
             return $days;
         };
         
-        $result = null;
+        $nextInfo = null;
+        $lastInfo = null;
         
-        // Prefer showing next task if available
+        // Calculate next task info if available
         if ($nextTaskDate) {
             $nextDate = Carbon::parse($nextTaskDate);
             $daysUntil = $countWeekdays($currentDay, $nextDate);
             
             if ($daysUntil > 0) {
-                $result = (object) [
+                $nextInfo = (object) [
                     'type' => 'next',
                     'days' => $daysUntil,
                     'label' => $daysUntil === 1 ? 'Next in 1 day' : "Next in {$daysUntil} days",
@@ -346,13 +353,13 @@ class CardsIndex extends Component
             }
         }
         
-        // If no next task, show last task info
-        if (!$result && $lastTaskDate) {
+        // Calculate last task info if available
+        if ($lastTaskDate) {
             $lastDate = Carbon::parse($lastTaskDate);
             $daysAgo = $countWeekdays($lastDate, $currentDay);
             
             if ($daysAgo > 0) {
-                $result = (object) [
+                $lastInfo = (object) [
                     'type' => 'last',
                     'days' => $daysAgo,
                     'label' => $daysAgo === 1 ? 'Last 1 day ago' : "Last {$daysAgo} days ago",
@@ -360,7 +367,16 @@ class CardsIndex extends Component
             }
         }
         
-        return $result;
+        // Return both if both exist, otherwise whichever one exists
+        if ($nextInfo && $lastInfo) {
+            return (object) [
+                'type' => 'both',
+                'next' => $nextInfo,
+                'last' => $lastInfo,
+            ];
+        }
+        
+        return $nextInfo ?? $lastInfo;
     }
 
     public function addTask($projectId = null, $date = null)

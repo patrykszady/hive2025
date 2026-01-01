@@ -222,35 +222,68 @@
 
     <!-- Planner Cards - 14 Day Kanban View -->
     <div
-        x-data="{ atLeft: true }"
-        x-init="$nextTick(() => { atLeft = $el.scrollLeft <= 10; })"
-        x-on:scroll.passive="atLeft = $el.scrollLeft <= 10"
-        class="relative flex-1 min-h-0 overflow-x-scroll overflow-y-hidden bg-zinc-100 dark:bg-zinc-800"
+        x-data="plannerScroll()"
+        x-init="init()"
+        class="relative flex-1 min-h-0 flex flex-col bg-zinc-100 dark:bg-zinc-800"
     >
-        <div class="flex h-full min-h-0 min-w-max">
-            {{-- Spacer for previous days button --}}
-            <div
-                aria-hidden="true"
-                class="self-stretch shrink-0 flex items-center justify-center bg-zinc-100 dark:bg-zinc-800"
-                :class="atLeft ? 'w-12' : 'w-4'"
+        {{-- Load Previous Days Button (left edge overlay) --}}
+        <div
+            x-show="atLeftEdge"
+            x-cloak
+            class="absolute left-0 top-0 bottom-0 z-20 flex items-center pl-2"
+        >
+            <flux:button
+                x-on:click="prepareForLoad('start'); $wire.loadPreviousDays()"
+                wire:loading.attr="disabled"
+                wire:target="loadPreviousDays"
+                variant="filled"
+                size="sm"
+                icon="chevron-left"
+                class="shadow-lg"
             >
-                <div x-show="atLeft" x-cloak>
-                    <flux:button
-                        wire:click="loadPreviousDays"
-                        variant="subtle"
-                        square
-                        icon="chevron-left"
-                        class="bg-white/90 dark:bg-zinc-800/90 shadow-sm"
-                        aria-label="Load previous days"
-                    />
-                </div>
-            </div>
+                Previous
+            </flux:button>
+        </div>
 
-            <div class="flex h-full min-h-0 min-w-max pr-4">
+        {{-- Load Future Days Button (right edge overlay) --}}
+        <div
+            x-show="atRightEdge"
+            x-cloak
+            class="absolute right-0 top-0 bottom-0 z-20 flex items-center pr-2"
+        >
+            <flux:button
+                x-on:click="prepareForLoad('end'); $wire.loadFutureDays()"
+                wire:loading.attr="disabled"
+                wire:target="loadFutureDays"
+                variant="filled"
+                size="sm"
+                icon-trailing="chevron-right"
+                class="shadow-lg"
+            >
+                Next
+            </flux:button>
+        </div>
+
+        {{-- Main scrollable area --}}
+        <div
+            x-ref="scrollContainer"
+            @scroll.passive="onScroll($event)"
+            class="flex-1 min-h-0 overflow-x-scroll overflow-y-hidden"
+        >
+            <div class="flex h-full min-h-0 min-w-max">
+            {{-- Left spacer that matches first day's background --}}
+            <div class="w-4 shrink-0 {{ $firstDayIsWeekend ? 'bg-zinc-200 dark:bg-zinc-700' : '' }}"></div>
             @foreach ($kanbanColumns as $dayData)
+                @php
+                    $weekendClass = $dayData->isWeekend 
+                        ? ($loop->first ? '-mb-4 pb-4 pt-0 bg-zinc-200 dark:bg-zinc-700' : '-my-4 py-4 bg-zinc-200 dark:bg-zinc-700')
+                        : '';
+                @endphp
                 <div
-                    wire:key="day-{{ $dayData->day->format('Y-m-d') }}"
-                    class="self-stretch shrink-0 {{ (! $loop->last && ! ($dayData->day->isFriday() || $dayData->day->isSunday())) ? 'pr-4' : '' }} {{ $dayData->isWeekend ? '-my-4 py-4 bg-zinc-200 dark:bg-zinc-700' : '' }}"
+                    wire:key="day-{{ $dayData->day->format('Y-m-d') }}-idx{{ $loop->index }}"
+                    data-day-index="{{ $loop->index }}"
+                    @if($dayData->isToday) data-today="true" @endif
+                    class="self-stretch shrink-0 {{ (! $loop->last && ! ($dayData->day->isFriday() || $dayData->day->isSunday())) ? 'pr-4' : '' }} {{ $weekendClass }}"
                 >
                     <div class="flex flex-col h-full min-h-0 {{ $dayData->isWeekend ? 'w-40' : 'w-80' }}">
                         {{-- Day Header --}}
@@ -269,21 +302,15 @@
                         <div class="flex-1 min-w-0 overflow-y-auto overflow-x-hidden space-y-2 flux-no-scrollbar">
                             @foreach ($dayData->columns as $projectColumn)
                                 @php
+                                    $dayIndex = $loop->parent->index;
                                     $hasTasks = $projectColumn->cards->count() > 0;
-                                    $hasUndatedTasks = $dayData->isToday && ($projectColumn->undated_tasks_count ?? 0) > 0;
-                                    $showTasks = $hasTasks || $hasUndatedTasks;
-                                    
-                                    // Determine opacity classes based on weekend and task state
-                                    $opacityClass = match(true) {
-                                        $dayData->isWeekend && !$showTasks => 'opacity-30 hover:opacity-60 transition-opacity',
-                                        $dayData->isWeekend => 'opacity-75',
-                                        !$showTasks => 'opacity-40 hover:opacity-70 transition-opacity',
-                                        default => '',
-                                    };
+                                    $hasUndatedTasks = ($projectColumn->undated_tasks_count ?? 0) > 0;
+                                    $isWeekend = $dayData->isWeekend;
                                 @endphp
                                 <div
-                                    wire:key="project-{{ $projectColumn->id }}-{{ $dayData->day->format('Y-m-d') }}"
-                                    class="min-w-0 {{ $opacityClass }}"
+                                    wire:key="project-{{ $projectColumn->id }}-{{ $dayData->day->format('Y-m-d') }}-idx{{ $dayIndex }}"
+                                    class="min-w-0 transition-opacity"
+                                    x-bind:class="getOpacityClass({{ $isWeekend ? 'true' : 'false' }}, {{ $hasTasks ? 'true' : 'false' }}, {{ $hasUndatedTasks ? 'true' : 'false' }}, {{ $dayIndex }})"
                                 >
                                     @php
                                         $latestStatus = $dayData->isWeekend ? null : $projectColumn->project->latestStatus;
@@ -325,14 +352,35 @@
                                                     <span class="block min-w-0 truncate">
                                                         {{ $projectColumn->project->client->last_names }} | {{ $projectColumn->project->project_name }}
                                                     </span>
+                                                    {{-- Task gap info (next/last task) - shown in subheading to preserve alignment, hidden on weekends --}}
+                                                    @if ($projectColumn->task_gap_info && !$dayData->isWeekend)
+                                                        <div
+                                                            wire:key="task-gap-{{ $projectColumn->id }}-idx{{ $dayIndex }}"
+                                                            x-show="firstVisibleDayIndex === {{ $dayIndex }}"
+                                                            x-cloak
+                                                            class="text-xs italic mt-0.5"
+                                                        >
+                                                            @if ($projectColumn->task_gap_info->type === 'both')
+                                                                <span class="text-amber-600 dark:text-amber-400">{{ $projectColumn->task_gap_info->last->label }}</span>
+                                                                <span class="mx-1 text-zinc-400">·</span>
+                                                                <span class="text-blue-600 dark:text-blue-400">{{ $projectColumn->task_gap_info->next->label }}</span>
+                                                            @elseif ($projectColumn->task_gap_info->type === 'next')
+                                                                <span class="text-blue-600 dark:text-blue-400">{{ $projectColumn->task_gap_info->label }}</span>
+                                                            @else
+                                                                <span class="text-amber-600 dark:text-amber-400">{{ $projectColumn->task_gap_info->label }}</span>
+                                                            @endif
+                                                        </div>
+                                                    @endif
                                                 </x-slot>
                                             </flux:kanban.column.header>
                                             <flux:kanban.column.cards>
-                                                @if ($dayData->isToday && ($projectColumn->undated_tasks_count ?? 0) > 0)
+                                                @if (($projectColumn->undated_tasks_count ?? 0) > 0)
                                                     <flux:kanban.card
+                                                        x-show="firstVisibleDayIndex === {{ $dayIndex }}"
+                                                        x-cloak
                                                         as="button"
                                                         class="min-w-0 w-full"
-                                                        wire:key="undated-tasks-{{ $projectColumn->id }}"
+                                                        wire:key="undated-tasks-{{ $projectColumn->id }}-idx{{ $dayIndex }}"
                                                         wire:click="openUndatedTasksModal({{ $projectColumn->id }})"
                                                         wire:target="openUndatedTasksModal({{ $projectColumn->id }})"
                                                         wire:loading.attr="disabled"
@@ -347,17 +395,6 @@
                                                             </span>
                                                         </div>
                                                     </flux:kanban.card>
-                                                @endif
-
-                                                {{-- Task gap info (next/last task) --}}
-                                                @if ($projectColumn->task_gap_info)
-                                                    <div class="px-2 py-1.5 text-xs text-zinc-500 dark:text-zinc-400 italic">
-                                                        @if ($projectColumn->task_gap_info->type === 'next')
-                                                            <span class="text-blue-600 dark:text-blue-400">{{ $projectColumn->task_gap_info->label }}</span>
-                                                        @else
-                                                            <span class="text-amber-600 dark:text-amber-400">{{ $projectColumn->task_gap_info->label }}</span>
-                                                        @endif
-                                                    </div>
                                                 @endif
 
                                                 @foreach ($projectColumn->cards as $task)
@@ -483,6 +520,8 @@
                     </div>
                 @endif
             @endforeach
+            {{-- Right spacer --}}
+            <div class="w-4 shrink-0"></div>
             </div>
         </div>
     </div>
@@ -560,3 +599,164 @@
     </flux:modal>
     </div>
 </div>
+
+@script
+<script>
+Alpine.data('plannerScroll', () => ({
+    firstVisibleDayIndex: 0,
+    atLeftEdge: true,
+    atRightEdge: false,
+    pendingScroll: null,
+    isAnimating: false,
+    
+    init() {
+        this.$nextTick(() => {
+            this.updateFirstVisible();
+            this.updateEdgeState();
+        });
+        
+        // Listen for scroll events from Livewire
+        Livewire.on('planner-scroll-to', (data) => {
+            this.handleScrollAfterLoad(data.direction);
+        });
+    },
+    
+    handleScrollAfterLoad(direction) {
+        // Wait for Livewire to finish DOM update
+        this.$nextTick(() => {
+            setTimeout(() => {
+                const container = this.$refs.scrollContainer;
+                if (!container || !this.pendingScroll) return;
+                
+                const oldScrollWidth = this.pendingScroll.scrollWidth;
+                const newScrollWidth = container.scrollWidth;
+                const deltaWidth = newScrollWidth - oldScrollWidth;
+                
+                if (direction === 'start' && deltaWidth > 0) {
+                    // For "Previous": new columns added at start
+                    // First, instantly position so user sees same content
+                    container.scrollLeft = deltaWidth;
+                    
+                    // Then animate scroll to 0
+                    this.animateScroll(container, deltaWidth, 0, 100);
+                } else if (direction === 'end') {
+                    // For "Next": new columns added at end
+                    const targetScroll = newScrollWidth - container.clientWidth;
+                    const startScroll = container.scrollLeft;
+                    
+                    this.animateScroll(container, startScroll, targetScroll, 100);
+                }
+                
+                this.pendingScroll = null;
+            }, 100);
+        });
+    },
+    
+    animateScroll(container, from, to, duration) {
+        if (this.isAnimating) return;
+        this.isAnimating = true;
+        
+        const startTime = performance.now();
+        const distance = to - from;
+        
+        const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+        
+        const step = (currentTime) => {
+            const elapsed = currentTime - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+            const easedProgress = easeOutCubic(progress);
+            
+            container.scrollLeft = from + (distance * easedProgress);
+            
+            // Update first visible during animation too
+            this.updateFirstVisible();
+            
+            if (progress < 1) {
+                requestAnimationFrame(step);
+            } else {
+                this.isAnimating = false;
+                this.updateFirstVisible();
+                this.updateEdgeState();
+            }
+        };
+        
+        requestAnimationFrame(step);
+    },
+
+    prepareForLoad(direction) {
+        const container = this.$refs.scrollContainer;
+        if (!container) {
+            this.pendingScroll = null;
+            return;
+        }
+
+        this.pendingScroll = {
+            direction,
+            scrollLeft: container.scrollLeft,
+            scrollWidth: container.scrollWidth,
+        };
+    },
+    
+    updateFirstVisible() {
+        const container = this.$refs.scrollContainer;
+        if (!container) return;
+        const dayColumns = container.querySelectorAll('[data-day-index]');
+        let firstIdx = 0;
+        const containerRect = container.getBoundingClientRect();
+        
+        for (const col of dayColumns) {
+            const colRect = col.getBoundingClientRect();
+            // Column is "first visible" if its left edge is within the container's visible area
+            // Use a small positive threshold to handle edge cases
+            if (colRect.left >= containerRect.left - 5) {
+                firstIdx = parseInt(col.dataset.dayIndex, 10);
+                break;
+            }
+        }
+        this.firstVisibleDayIndex = firstIdx;
+    },
+    
+    updateEdgeState() {
+        const container = this.$refs.scrollContainer;
+        if (!container) return;
+        const threshold = 50;
+        const maxScroll = container.scrollWidth - container.clientWidth;
+        this.atLeftEdge = container.scrollLeft <= threshold;
+        this.atRightEdge = container.scrollLeft >= maxScroll - threshold;
+    },
+    
+    scrollToDay(index) {
+        const container = this.$refs.scrollContainer;
+        if (!container) return;
+        const dayCol = container.querySelector('[data-day-index="' + index + '"]');
+        if (dayCol) {
+            dayCol.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
+        }
+    },
+    
+    scrollToToday() {
+        const container = this.$refs.scrollContainer;
+        if (!container) return;
+        const todayCol = container.querySelector('[data-today]');
+        if (todayCol) {
+            todayCol.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
+        }
+    },
+    
+    onScroll(e) {
+        this.updateFirstVisible();
+        this.updateEdgeState();
+    },
+    
+    getOpacityClass(isWeekend, hasTasks, hasUndatedTasks, dayIndex) {
+        const isFirstVisible = this.firstVisibleDayIndex === dayIndex;
+        const showTasks = hasTasks || (hasUndatedTasks && isFirstVisible);
+        
+        if (isWeekend && !showTasks) return 'opacity-30 hover:opacity-60';
+        if (isWeekend) return 'opacity-75';
+        if (!showTasks) return 'opacity-40 hover:opacity-70';
+        return '';
+    }
+}));
+</script>
+@endscript

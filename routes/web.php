@@ -59,6 +59,7 @@ use App\Livewire\VendorDocs\AuditShow;
 use App\Livewire\VendorDocs\VendorDocsIndex;
 use App\Livewire\Vendors\VendorPaymentCreate;
 use App\Livewire\Vendors\VendorSheetsTypeIndex;
+use App\Livewire\Vendors\VendorOptions;
 
 use App\Livewire\Vendors\VendorShow;
 use App\Livewire\Vendors\VendorsIndex;
@@ -250,6 +251,9 @@ Route::middleware(['auth', 'vendor.access'])->group(function () {
     Route::get('/planner/gantt', GanttIndex::class)->name('planner.gantt');
     Route::get('/planner/cards', CardsIndex::class)->name('planner.cards');
     
-    //EMAIL TEMPLATES
-    Route::get('/email_templates', EmailTemplateIndex::class)->name('email_templates.index');
+    //TEMPLATES
+    Route::get('/templates', EmailTemplateIndex::class)->name('templates.index');
+
+    //VENDOR OPTIONS
+    Route::get('/options', VendorOptions::class)->name('vendor_options.index');
 });

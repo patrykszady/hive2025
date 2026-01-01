@@ -57,12 +57,12 @@ class HourCreate extends Component
     {
         $this->authorize('create', Hour::class);
 
-        $this->selectedDate(Carbon::today(config('app.timezone'))->format('Y-m-d'));
+        $this->selectedDate(browser_today()->format('Y-m-d'));
 
         $confirmed_weeks =
             Timesheet::orderBy('date', 'DESC')
                 ->where('user_id', auth()->user()->id)
-                ->where('date', '>', Carbon::today(config('app.timezone'))->subWeeks(8))
+                ->where('date', '>', browser_today()->subWeeks(8))
                 ->get()
                 ->groupBy('date');
 
@@ -111,7 +111,7 @@ class HourCreate extends Component
             $this->selectedDate($value);
             $this->validate();
         }else{
-            $this->selectedDate(Carbon::today(config('app.timezone')));
+            $this->selectedDate(browser_today());
         }
     }
 

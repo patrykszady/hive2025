@@ -8,6 +8,12 @@
  */
 
 function getBrowserLocalDateString() {
+    // Check for server-side fake date (for testing)
+    const fakeToday = document.body?.dataset?.fakeToday;
+    if (fakeToday && /^\d{4}-\d{2}-\d{2}$/.test(fakeToday)) {
+        return fakeToday;
+    }
+
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');

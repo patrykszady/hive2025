@@ -23,7 +23,7 @@ class Vendor extends Model
 {
     use HasFactory, Searchable, HasAddress;
 
-    protected $fillable = ['business_name', 'business_type', 'sheets_type', 'category_id', 'address', 'address_2', 'city', 'state', 'zip_code', 'business_phone', 'business_email', 'timezone', 'created_at', 'updated_at'];
+    protected $fillable = ['business_name', 'business_type', 'sheets_type', 'category_id', 'address', 'address_2', 'city', 'state', 'zip_code', 'business_phone', 'business_email', 'timezone', 'short_name', 'created_at', 'updated_at'];
     // protected $appends = ['name'];
 
     protected function casts(): array
@@ -217,6 +217,43 @@ class Vendor extends Model
                 // Extract first part before ',' if available
                 $nameParts = explode(',', $attributes['business_name']);
                 return trim($nameParts[0]);
+            }
+        );
+    }
+
+    protected function shortName(): Attribute
+    {
+        return Attribute::make(
+            get: function (mixed $value, array $attributes): ?string {
+                $shortName = data_get($this->options, 'short_name');
+
+                if (! is_string($shortName) || $shortName === '') {
+                    return $this->name;
+                }
+
+                return $shortName;
+            },
+            set: function (mixed $value, array $attributes): array {
+                $options = [];
+
+                $rawOptions = $attributes['options'] ?? null;
+
+                if (is_string($rawOptions) && $rawOptions !== '') {
+                    $decoded = json_decode($rawOptions, true);
+                    if (is_array($decoded)) {
+                        $options = $decoded;
+                    }
+                } elseif (is_array($rawOptions)) {
+                    $options = $rawOptions;
+                }
+
+                if (! is_string($value) || $value === '') {
+                    unset($options['short_name']);
+                } else {
+                    $options['short_name'] = $value;
+                }
+
+                return ['options' => $options];
             }
         );
     }

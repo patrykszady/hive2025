@@ -163,6 +163,27 @@ class TimesheetPaymentCreate extends Component
             || $this->user_reimbursement_expenses->filter(fn ($e) => $this->selectedUserReimbursementExpenses[$e->id] ?? false)->isNotEmpty();
     }
 
+    /**
+     * Validate the payment form, then show confirmation modal if amount is not a round hundred.
+     */
+    public function confirmPayment()
+    {
+        $this->authorize('viewAnyPayment', Timesheet::class);
+        
+        // Sync computed total into a concrete property for validation
+        $this->payment_total = (float) $this->weekly_timesheets_total;
+        
+        $this->validate();
+        
+        // If amount is a round hundred, save directly without modal
+        if (fmod($this->payment_total, 100) == 0) {
+            return $this->save();
+        }
+        
+        // Open confirmation modal
+        $this->modal('confirm-payment')->show();
+    }
+
     public function save()
     {
         $this->authorize('viewAnyPayment', Timesheet::class);

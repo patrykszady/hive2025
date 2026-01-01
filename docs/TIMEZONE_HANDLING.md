@@ -4,13 +4,30 @@
 
 The application now properly handles timezones:
 - **Database**: All dates stored in UTC
-- **Display**: Dates shown in browser's local timezone
-- **Vendor Default**: Each vendor has a default timezone (America/Chicago)
+- **PDF Generation**: Uses vendor's timezone from database (`vendor_timezone()`)
+- **Browser Display** (planner, hours, etc.): Uses browser's local timezone
+- **Vendor Default**: Each vendor has a default timezone
+
+## Helper Functions
+
+### `vendor_timezone()`
+Use for **server-side rendering** like PDFs where the vendor's business timezone should apply.
+```php
+$timezone = vendor_timezone(); // Returns vendor's timezone or UTC
+now()->setTimezone(vendor_timezone())->format('m/d/Y');
+```
+
+### `browser_timezone()`
+Use for **interactive display** where the user's browser timezone is preferred.
+Falls back to: session → vendor timezone → app timezone (UTC).
+```php
+$timezone = browser_timezone(); // Returns browser session timezone or fallbacks
+```
 
 ## Configuration
 
 - `APP_TIMEZONE=UTC` - All database dates are stored in UTC
-- `vendors.timezone` - Each vendor's default timezone (defaults to America/Chicago)
+- `vendors.timezone` - Each vendor's default timezone (e.g., America/Chicago)
 
 ## Frontend Usage
 
