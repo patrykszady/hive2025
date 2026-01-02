@@ -313,10 +313,12 @@ class ExpenseAutoMatchController extends Controller
 
                         $score = max($score, $this->similarityScore($po, $variant));
 
+                        $score = max($score, $this->houseNumberOcrBoostScore($po, $variant, $poStreetToken));
+
                         if ($poStreetToken !== '') {
                             $variantStreetToken = $this->extractStreetToken($variant);
                             if ($variantStreetToken !== '') {
-                                $score = max($score, $this->similarityScore($poStreetToken, $variantStreetToken));
+                                $score = max($score, $this->similarityScoreWithOcrFixes($poStreetToken, $variantStreetToken));
                             }
                         }
 
@@ -327,7 +329,7 @@ class ExpenseAutoMatchController extends Controller
                         if ($variantStreetToken !== '') {
                             $poTokens = array_filter(explode(' ', $po), fn ($t) => mb_strlen(trim($t)) >= 3);
                             foreach ($poTokens as $poToken) {
-                                $score = max($score, $this->similarityScore(trim($poToken), $variantStreetToken));
+                                $score = max($score, $this->similarityScoreWithOcrFixes(trim($poToken), $variantStreetToken));
                             }
                         }
                     }
@@ -405,7 +407,9 @@ class ExpenseAutoMatchController extends Controller
                 '(project_id = 0 OR project_id IS NULL)',
                 'distribution_id IS NULL',
                 $includeNullSplits ? '(has_splits = false OR has_splits IS NULL)' : 'has_splits = false',
-                $includeNullStatus ? "(expense_status = 'No Project' OR expense_status IS NULL)" : "expense_status = 'No Project'",
+                $includeNullStatus
+                    ? "(expense_status = 'No Project' OR expense_status = 'Missing Info' OR expense_status IS NULL)"
+                    : "(expense_status = 'No Project' OR expense_status = 'Missing Info')",
             ];
 
             $updatedExpenseIds = [];
@@ -985,7 +989,7 @@ class ExpenseAutoMatchController extends Controller
             $poTokens = array_filter(explode(' ', $po), fn ($t) => mb_strlen(trim($t)) >= 3);
             foreach ($poTokens as $poToken) {
                 foreach ($distTokens as $distToken) {
-                    $score = max($score, $this->similarityScore(trim($poToken), trim($distToken)));
+                    $score = max($score, $this->tokenSimilarityScore(trim($poToken), trim($distToken)));
                 }
             }
 
@@ -1093,6 +1097,215 @@ class ExpenseAutoMatchController extends Controller
         }
 
         return max(0.0, min(1.0, $this->rawSimilarityScore($a, $b)));
+    }
+
+    protected function similarityScoreWithOcrFixes(string $a, string $b): float
+    {
+        $score = $this->similarityScore($a, $b);
+
+        // Only apply OCR-specific fixes to single-token comparisons.
+        if (str_contains($a, ' ') || str_contains($b, ' ')) {
+            return $score;
+        }
+
+        $aCollapsed = $this->collapseRepeatedLetters($a);
+        $bCollapsed = $this->collapseRepeatedLetters($b);
+
+        if ($aCollapsed !== $a || $bCollapsed !== $b) {
+            $score = max(
+                $score,
+                $this->similarityScore($aCollapsed, $b),
+                $this->similarityScore($a, $bCollapsed),
+                $this->similarityScore($aCollapsed, $bCollapsed),
+            );
+        }
+
+        return $score;
+    }
+
+    protected function tokenSimilarityScore(string $a, string $b): float
+    {
+        $a = trim($a);
+        $b = trim($b);
+
+        if ($a === '' || $b === '') {
+            return 0.0;
+        }
+
+        $score = $this->similarityScoreWithOcrFixes($a, $b);
+
+        // OCR often mangles the tail of a token while keeping the prefix.
+        // If the first 3+ characters match and edit distance is small, boost above threshold.
+        if ($score < 0.70) {
+            $minPrefix = 3;
+            if (strlen($a) >= 5 && strlen($b) >= 5 && substr($a, 0, $minPrefix) === substr($b, 0, $minPrefix)) {
+                $distance = levenshtein($a, $b);
+                $maxLen = max(strlen($a), strlen($b));
+
+                if ($maxLen > 0 && $distance <= 2) {
+                    $score = max($score, 0.80);
+                }
+            }
+        }
+
+        return $score;
+    }
+
+    protected function houseNumberOcrBoostScore(string $normalizedPo, string $normalizedVariant, string $poStreetToken): float
+    {
+        if (! $this->hasHouseNumberPrefix($normalizedPo)) {
+            return 0.0;
+        }
+
+        $poNumber = $this->extractLeadingNumber($normalizedPo);
+        $variantNumber = $this->extractLeadingNumber($normalizedVariant);
+
+        if ($poNumber === null || $variantNumber === null) {
+            return 0.0;
+        }
+
+        if (! $this->numbersAreOcrClose($poNumber, $variantNumber)) {
+            return 0.0;
+        }
+
+        $variantStreetToken = $this->extractStreetToken($normalizedVariant);
+
+        // When OCR is messy, require at least some street-name signal.
+        // Use a cheap character overlap heuristic as a backstop.
+        $overlap = ($poStreetToken !== '' && $variantStreetToken !== '')
+            ? $this->letterOverlapScore($poStreetToken, $variantStreetToken)
+            : 0.0;
+
+        if ($overlap >= 0.70) {
+            return 0.92;
+        }
+
+        if ($overlap >= 0.55) {
+            return 0.86;
+        }
+
+        return 0.0;
+    }
+
+    protected function extractLeadingNumber(string $normalizedText): ?string
+    {
+        if ($normalizedText === '') {
+            return null;
+        }
+
+        if (! preg_match('/^(\d+)/', $normalizedText, $m)) {
+            return null;
+        }
+
+        $num = $m[1] ?? null;
+
+        return is_string($num) && $num !== '' ? $num : null;
+    }
+
+    protected function numbersAreOcrClose(string $a, string $b): bool
+    {
+        if ($a === $b) {
+            return true;
+        }
+
+        // Only consider short house numbers.
+        if (strlen($a) < 2 || strlen($a) > 5 || strlen($b) < 2 || strlen($b) > 5) {
+            return false;
+        }
+
+        $confusable = [
+            '0' => ['8'],
+            '1' => ['7'],
+            '2' => ['4'],
+            '4' => ['2'],
+            '5' => ['6'],
+            '6' => ['5'],
+            '7' => ['1'],
+            '8' => ['0'],
+        ];
+
+        // Handle OCR dropping leading digit(s): "46" matching "126" or "146"
+        // Check if the shorter number is a suffix of the longer after allowing
+        // confusable substitutions on the overlapping portion.
+        if (strlen($a) !== strlen($b)) {
+            $short = strlen($a) < strlen($b) ? $a : $b;
+            $long = strlen($a) < strlen($b) ? $b : $a;
+
+            // Only allow 1-digit drop (difference of 1 in length).
+            if (strlen($long) - strlen($short) !== 1) {
+                return false;
+            }
+
+            // Check if suffix of long matches short with confusables.
+            $suffix = substr($long, 1);
+            if ($this->numbersMatchWithConfusables($short, $suffix, $confusable)) {
+                return true;
+            }
+
+            return false;
+        }
+
+        return $this->numbersMatchWithConfusables($a, $b, $confusable);
+    }
+
+    /**
+     * Check if two same-length digit strings match allowing OCR confusables.
+     *
+     * @param array<string, list<string>> $confusable
+     */
+    protected function numbersMatchWithConfusables(string $a, string $b, array $confusable): bool
+    {
+        if (strlen($a) !== strlen($b)) {
+            return false;
+        }
+
+        $len = strlen($a);
+        for ($i = 0; $i < $len; $i++) {
+            $da = $a[$i];
+            $db = $b[$i];
+
+            if ($da === $db) {
+                continue;
+            }
+
+            if (! isset($confusable[$da]) || ! in_array($db, $confusable[$da], true)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    protected function letterOverlapScore(string $a, string $b): float
+    {
+        $a = preg_replace('/[^a-z]/', '', strtolower($a)) ?? '';
+        $b = preg_replace('/[^a-z]/', '', strtolower($b)) ?? '';
+
+        if ($a === '' || $b === '') {
+            return 0.0;
+        }
+
+        $aSet = array_values(array_unique(str_split($a)));
+        $bSet = array_values(array_unique(str_split($b)));
+
+        $intersection = array_values(array_intersect($aSet, $bSet));
+
+        $denom = max(count($aSet), count($bSet));
+        if ($denom <= 0) {
+            return 0.0;
+        }
+
+        return count($intersection) / $denom;
+    }
+
+    protected function collapseRepeatedLetters(string $value): string
+    {
+        if ($value === '') {
+            return '';
+        }
+
+        // Example: "marcella" -> "marcela" (helps with OCR variations).
+        return preg_replace('/([a-z])\\1+/i', '$1', $value) ?? $value;
     }
 
     protected function rawSimilarityScore(string $a, string $b): float

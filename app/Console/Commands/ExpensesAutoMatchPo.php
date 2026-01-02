@@ -68,7 +68,7 @@ class ExpensesAutoMatchPo extends Command
             ];
         };
 
-        $runner = function () use ($onlyBelongsToVendorIds, $summaryAll, $includeNullStatus, $includeNullSplits, $preview, $previewAll, $previewLimit, &$matchRows): void {
+        $runner = function () use ($onlyBelongsToVendorIds, $onSummary, $summaryAll, $includeNullStatus, $includeNullSplits, $preview, $previewAll, $previewLimit, &$matchRows): void {
             $onDecision = null;
 
             if ($preview) {
