@@ -265,17 +265,27 @@ class Expense extends Model
 
     public function getAssociatedExpensesAttribute()
     {
-        if ($this->associated->isEmpty()) {
-            $associated_check = Expense::where('parent_expense_id', $this->id)->get();
+        $results = collect();
 
-            if (! $associated_check->isEmpty()) {
-                return $associated_check;
-            } else {
-                return null;
+        // If this expense has a parent, include the parent
+        if ($this->parent_expense_id) {
+            $parent = Expense::find($this->parent_expense_id);
+            if ($parent) {
+                $results->push($parent);
             }
-        } else {
-            return $this->associated;
+
+            // Also include siblings (other expenses with the same parent, excluding self)
+            $siblings = Expense::where('parent_expense_id', $this->parent_expense_id)
+                ->where('id', '!=', $this->id)
+                ->get();
+            $results = $results->merge($siblings);
         }
+
+        // Include children (expenses that have this expense as their parent)
+        $children = Expense::where('parent_expense_id', $this->id)->get();
+        $results = $results->merge($children);
+
+        return $results->isNotEmpty() ? $results->unique('id') : null;
     }
     /**
      * Unified accessor for "all" transactions relevant to this expense.

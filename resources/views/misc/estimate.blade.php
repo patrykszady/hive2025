@@ -7,28 +7,19 @@
     <body>
         <flux:main>
             <div class="break-after-page space-y-4">
-                <div class="grid grid-cols-4 gap-4">
+                <div class="grid grid-cols-5 gap-4 items-start">
                     <div class="col-span-2 space-y-4">
-                        @if($vendorLogoDataUrl)
-                            <div>
-                                <img
-                                    src="{{ $vendorLogoDataUrl }}"
-                                    alt="{{ $vendor->business_name }} logo"
-                                    class="h-24 w-auto object-contain"
-                                />
-                            </div>
-                        @endif
-
                         {{-- VENDOR DETAILS --}}
                         @include('livewire.vendors.vendor-details', [
                             'vendor' => $vendor,
+                            'vendorLogoDataUrl' => $vendorLogoDataUrl,
                             'nonLivewire' => true,
                             'titleOverride' => 'Contractor Details',
                             'hide' => ['type'],
                         ])
                     </div>
 
-                    <div class="col-span-2 space-y-4">
+                    <div class="col-span-3 space-y-4">
                         {{-- DOCUMENT DETAILS --}}
                         @include('livewire.estimates.estimate-details', [
                             'estimate' => $estimate,
@@ -57,7 +48,7 @@
                 {{-- SECTIONS --}}
                 <div class="col-span-4 space-y-4">
                     @foreach($sections as $index => $section)
-                        <flux:card>
+                        <flux:card style="{{ $index > 0 ? 'break-inside: avoid;' : '' }}">
                             <div class="flex justify-between">
                                 <flux:heading size="lg" class="text-lg font-extrabold">{{$section['name']}}</flux:heading>
                             </div>
@@ -107,6 +98,7 @@
                                 </thead>
                                 <tbody>
                                     @foreach($estimate->estimate_line_items()->where('section_id', $section->id)->orderBy('order', 'ASC')->get() as $key => $estimate_line_item)
+                                        <tbody style="break-inside: avoid;">
                                         <tr class="sm:border-b sm:border-gray-400">
                                             <td class="hidden px-3 py-5 text-right text-gray-500 align-text-top text-md sm:table-cell bg-gray-50">{{$index + 1}}.{{$estimate_line_item->order + 1}}</td>
                                             {{-- first td --}}
@@ -153,6 +145,7 @@
                                                 </div>
                                             </td>
                                         </tr>
+                                        </tbody>
                                     @endforeach
                                 </tbody>
                             </table>

@@ -1,12 +1,15 @@
 #!/bin/bash
 
-# Always run from project root
+# Unified startup script for all three Laravel apps
+# GSC (8003), Breck (8002), Hive2025 (8000)
+
 cd "$(dirname "$0")"
 
 LOG_DIR="storage/logs/dev"
 mkdir -p "$LOG_DIR"
 
-echo "🚀 Starting Hive2025 dev environment..."
+echo "🚀 Starting all Laravel applications..."
+echo ""
 
 # Helper to show status
 status() {
@@ -17,18 +20,24 @@ status() {
   fi
 }
 
-# 0) Clear Laravel caches to re-read .env
+# ==============================================================================
+# SHARED SERVICES (Redis, Meilisearch)
+# ==============================================================================
+echo "════════════════════════════════════════════════════════════════"
+echo "🔧 Starting Shared Services"
+echo "════════════════════════════════════════════════════════════════"
+
+# Clear Laravel caches
 echo "🧹 Clearing Laravel caches..."
-nohup php artisan config:clear --no-interaction >"$LOG_DIR/config_clear.log" 2>&1 &
-wait $!
+php artisan config:clear --no-interaction >"$LOG_DIR/config_clear.log" 2>&1
 status $? "Config cache cleared" "Config cache clear failed (see $LOG_DIR/config_clear.log)"
 
-# 1) Redis
+# Redis
 echo "🔄 Starting Redis..."
 sudo service redis-server start >/dev/null 2>&1
 status $? "Redis started (or already running)" "Failed to start Redis"
 
-# 2) Meilisearch (use host/key from .env)
+# Meilisearch
 MEILI_HOST=$(grep -E '^MEILISEARCH_HOST=' .env 2>/dev/null | cut -d '=' -f2- | tr -d '\r' | xargs)
 MEILI_KEY=$(grep -E '^MEILISEARCH_KEY=' .env 2>/dev/null | sed -E "s/^MEILISEARCH_KEY=['\"]?([^'\"]*)['\"]?/\1/" | tr -d '\r' | xargs)
 MEILI_HOST=${MEILI_HOST:-http://127.0.0.1:7700}
@@ -44,43 +53,110 @@ else
     nohup meilisearch --http-addr "$MEILI_HTTP_ADDR" >"$LOG_DIR/meilisearch.log" 2>&1 &
   fi
   MEILI_PID=$!
-  # Wait briefly and health-check
   sleep 1.2
   if curl -fsS "$MEILI_HOST/health" >/dev/null 2>&1; then
-    echo "✅ Meilisearch healthy (pid: $MEILI_PID) → $MEILI_HOST (logs: $LOG_DIR/meilisearch.log)"
+    echo "✅ Meilisearch healthy (pid: $MEILI_PID) → $MEILI_HOST"
   else
     echo "❌ Meilisearch not healthy at $MEILI_HOST → check $LOG_DIR/meilisearch.log"
   fi
 fi
 
-# 3) Horizon
+echo ""
+
+# ==============================================================================
+# GSC (Port 8003)
+# ==============================================================================
+GSC_DIR="/home/patryk/web/gsc"
+if [ ! -d "$GSC_DIR" ]; then
+  echo "❌ gsc directory not found at $GSC_DIR"
+else
+  echo "════════════════════════════════════════════════════════════════"
+  echo "📦 Starting GSC (Port 8003)"
+  echo "════════════════════════════════════════════════════════════════"
+  if lsof -Pi :8003 -sTCP:LISTEN -t >/dev/null 2>&1; then
+    GSC_PID=$(lsof -Pi :8003 -sTCP:LISTEN -t)
+    echo "✅ GSC server already running (pid: $GSC_PID)"
+  else
+    (cd "$GSC_DIR" && nohup php artisan serve --host=127.0.0.1 --port=8003 --no-interaction > storage/logs/serve.log 2>&1 &)
+    sleep 0.7
+    if lsof -Pi :8003 -sTCP:LISTEN -t >/dev/null 2>&1; then
+      echo "✅ GSC Laravel server started on port 8003"
+    else
+      echo "❌ GSC Laravel server failed to start"
+    fi
+  fi
+fi
+
+echo ""
+
+# ==============================================================================
+# BRECK (Port 8002)
+# ==============================================================================
+BRECK_DIR="/home/patryk/web/breck"
+if [ ! -d "$BRECK_DIR" ]; then
+  echo "❌ breck directory not found at $BRECK_DIR"
+else
+  echo "════════════════════════════════════════════════════════════════"
+  echo "📦 Starting BRECK (Port 8002)"
+  echo "════════════════════════════════════════════════════════════════"
+  if lsof -Pi :8002 -sTCP:LISTEN -t >/dev/null 2>&1; then
+    BRECK_PID=$(lsof -Pi :8002 -sTCP:LISTEN -t)
+    echo "✅ Breck server already running (pid: $BRECK_PID)"
+  else
+    if [ -f "$BRECK_DIR/start-dev.sh" ]; then
+      (cd "$BRECK_DIR" && ./start-dev.sh)
+    elif [ -f "$BRECK_DIR/.wsl-startup" ]; then
+      echo "ℹ️  Using .wsl-startup script for breck"
+      (cd "$BRECK_DIR" && source .wsl-startup)
+    else
+      (cd "$BRECK_DIR" && nohup php artisan serve --host=127.0.0.1 --port=8002 --no-interaction > storage/logs/serve.log 2>&1 &)
+      sleep 0.7
+      if lsof -Pi :8002 -sTCP:LISTEN -t >/dev/null 2>&1; then
+        echo "✅ Breck Laravel server started on port 8002"
+      else
+        echo "❌ Breck Laravel server failed to start"
+      fi
+    fi
+  fi
+fi
+
+echo ""
+
+# ==============================================================================
+# HIVE2025 (Port 8000)
+# ==============================================================================
+echo "════════════════════════════════════════════════════════════════"
+echo "📦 Starting HIVE2025 (Port 8000)"
+echo "════════════════════════════════════════════════════════════════"
+
+# Horizon
 echo "🔄 Starting Laravel Horizon..."
 nohup php artisan horizon --no-interaction >"$LOG_DIR/horizon.log" 2>&1 &
 HORIZON_PID=$!
 sleep 0.7
 if ps -p "$HORIZON_PID" >/dev/null 2>&1; then
-  echo "✅ Horizon started (pid: $HORIZON_PID) → logs: $LOG_DIR/horizon.log"
+  echo "✅ Horizon started (pid: $HORIZON_PID)"
 else
   echo "❌ Horizon failed → check logs: $LOG_DIR/horizon.log"
 fi
 
-# 4) Laravel dev server
+# Laravel dev server
 if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1; then
   SERVE_PID=$(lsof -Pi :8000 -sTCP:LISTEN -t)
   echo "✅ Laravel server already running (pid: $SERVE_PID)"
 else
-  echo "🔄 Starting Laravel dev server (http://127.0.0.1:8000)..."
+  echo "🔄 Starting Laravel dev server..."
   nohup php artisan serve --host=127.0.0.1 --port=8000 --no-interaction >"$LOG_DIR/serve.log" 2>&1 &
   SERVE_PID=$!
   sleep 0.7
   if ps -p "$SERVE_PID" >/dev/null 2>&1; then
-    echo "✅ Laravel server started (pid: $SERVE_PID) → logs: $LOG_DIR/serve.log"
+    echo "✅ Laravel server started (pid: $SERVE_PID)"
   else
     echo "❌ Laravel server failed → check logs: $LOG_DIR/serve.log"
   fi
 fi
 
-# 5) Vite dev server (npm run dev)
+# Vite dev server
 if lsof -Pi :5173 -sTCP:LISTEN -t >/dev/null 2>&1; then
   VITE_PID=$(lsof -Pi :5173 -sTCP:LISTEN -t)
   echo "✅ Vite already running (pid: $VITE_PID)"
@@ -90,15 +166,14 @@ else
   VITE_PID=$!
   sleep 0.7
   if ps -p "$VITE_PID" >/dev/null 2>&1; then
-    echo "✅ Vite dev server started (pid: $VITE_PID, default http://127.0.0.1:5173) → logs: $LOG_DIR/vite.log"
+    echo "✅ Vite dev server started (pid: $VITE_PID)"
   else
     echo "❌ Vite failed → check logs: $LOG_DIR/vite.log"
   fi
 fi
 
-# 6) Hookdeck tunnel (optional)
+# Hookdeck tunnel (optional)
 HOOKDECK_URL=""
-HOOKDECK_MAILTRAP_URL=""
 HOOKDECK_BIN="$(command -v hookdeck 2>/dev/null)"
 if [ -z "$HOOKDECK_BIN" ]; then
   HOOKDECK_BIN=$(ls "$HOME"/.nvm/versions/node/*/bin/hookdeck 2>/dev/null | tail -n1)
@@ -118,7 +193,7 @@ if [ -n "$HOOKDECK_BIN" ]; then
     --output compact >>"$HOOKDECK_LOG" 2>&1 &
   HOOKDECK_PID=$!
 
-  # Mailtrap webhook tunnel (for local webhook testing)
+  # Mailtrap webhook tunnel
   "$HOOKDECK_BIN" connection upsert mailtrap-local \
     --source-name mailtrap --source-type WEBHOOK \
     --destination-name mailtrap-local-cli --destination-type CLI \
@@ -129,28 +204,23 @@ if [ -n "$HOOKDECK_BIN" ]; then
     MAILTRAP_TOKEN="dev-mailtrap-webhook-token"
   fi
 
-  # Important: Mailtrap is configured with a full path like:
-  #   https://hkdk.events/<id>/webhooks/mailtrap/<token>
-  # Hookdeck forwards the incoming request path to localhost, so we must listen on "/"
-  # to avoid ending up with duplicated paths like:
-  #   /webhooks/mailtrap/<token>/webhooks/mailtrap/<token>
   nohup "$HOOKDECK_BIN" listen 8000 mailtrap mailtrap-local \
     --path "/" \
     --output compact >>"$HOOKDECK_LOG" 2>&1 &
   HOOKDECK_MAILTRAP_PID=$!
   sleep 2
+  
   if ps -p "$HOOKDECK_PID" >/dev/null 2>&1; then
     if [ -f "$HOOKDECK_LOG" ]; then
       HOOKDECK_URL=$(grep -o 'https://[^ ]*' "$HOOKDECK_LOG" | head -1)
     fi
     if [ -n "$HOOKDECK_URL" ]; then
-      echo "✅ Hookdeck tunnel started (pid: $HOOKDECK_PID) → $HOOKDECK_URL"
+      echo "✅ Hookdeck tunnel started → $HOOKDECK_URL"
     else
-      echo "✅ Hookdeck tunnel started (pid: $HOOKDECK_PID) → logs: $HOOKDECK_LOG"
+      echo "✅ Hookdeck tunnel started → logs: $HOOKDECK_LOG"
     fi
   else
     echo "❌ Hookdeck tunnel failed → check logs: $HOOKDECK_LOG"
-    HOOKDECK_PID=""
   fi
 
   if ps -p "${HOOKDECK_MAILTRAP_PID:-0}" >/dev/null 2>&1; then
@@ -158,30 +228,21 @@ if [ -n "$HOOKDECK_BIN" ]; then
       HOOKDECK_MAILTRAP_URL=$(grep -o 'https://hkdk\.events/[^ ]*' "$HOOKDECK_LOG" | tail -1)
     fi
     if [ -n "$HOOKDECK_MAILTRAP_URL" ]; then
-      echo "✅ Mailtrap webhook URL (paste into Mailtrap): ${HOOKDECK_MAILTRAP_URL}/webhooks/mailtrap/${MAILTRAP_TOKEN}"
+      echo "✅ Mailtrap webhook URL: ${HOOKDECK_MAILTRAP_URL}/webhooks/mailtrap/${MAILTRAP_TOKEN}"
     else
-      echo "✅ Mailtrap Hookdeck listener started (pid: ${HOOKDECK_MAILTRAP_PID:-n/a}) → see $HOOKDECK_LOG"
+      echo "✅ Mailtrap Hookdeck listener started"
     fi
-  else
-    echo "❌ Mailtrap Hookdeck listener failed → check logs: $HOOKDECK_LOG"
   fi
 else
   echo "ℹ️  Hookdeck CLI not found, skipping tunnel setup"
-  HOOKDECK_PID=""
 fi
 
 echo ""
-echo "🎉 Done! Services running:"
-echo "   • Redis ✅"
-echo "   • Meilisearch ✅ → $MEILI_HOST"
-echo "   • Horizon (pid: ${HORIZON_PID:-n/a})"
-echo "   • PHP server (pid: ${SERVE_PID:-n/a}) → http://127.0.0.1:8000"
-echo "   • Vite (pid: ${VITE_PID:-n/a}) → http://127.0.0.1:5173"
-if [ -n "$HOOKDECK_PID" ]; then
-  HOOKDECK_FALLBACK=${HOOKDECK_URL:-"see ${HOOKDECK_LOG:-$LOG_DIR/hookdeck.log}"}
-  echo "   • Hookdeck (pid: $HOOKDECK_PID) → $HOOKDECK_FALLBACK"
-fi
-
-if [ -n "${HOOKDECK_MAILTRAP_PID:-}" ]; then
-  echo "   • Hookdeck Mailtrap (pid: $HOOKDECK_MAILTRAP_PID)"
-fi
+echo "════════════════════════════════════════════════════════════════"
+echo "🎉 All applications started!"
+echo "════════════════════════════════════════════════════════════════"
+echo "📍 GSC:      http://127.0.0.1:8003"
+echo "📍 Breck:    http://127.0.0.1:8002"
+echo "📍 Hive2025: http://127.0.0.1:8000"
+echo "📍 Vite:     http://127.0.0.1:5173"
+echo "════════════════════════════════════════════════════════════════"

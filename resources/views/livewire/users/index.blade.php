@@ -16,11 +16,11 @@
 
     <flux:separator variant="subtle" />
 
-    <flux:table>
+    <flux:table class="{{ ($nonLivewire ?? false) ? 'whitespace-normal' : '' }}">
         <flux:table.columns>
             <flux:table.column>Name</flux:table.column>
             <flux:table.column>Phone</flux:table.column>
-            <flux:table.column>Email</flux:table.column>
+            <flux:table.column class="w-1/2">Email</flux:table.column>
             @if($view === 'vendors.show' || $view === 'vendor_registration')
                 <flux:table.column>Role</flux:table.column>
             @endif
@@ -44,7 +44,9 @@
                         </flux:table.cell>
                     @endif
                     <flux:table.cell>{{ $user->cell_phone }}</flux:table.cell>
-                    <flux:table.cell>{{ $user->email }}</flux:table.cell>
+                    <flux:table.cell class="whitespace-normal break-words">
+                        <span class="whitespace-normal break-words">{{ $user->email }}</span>
+                    </flux:table.cell>
                     @if($view === 'vendors.show' || $view === 'vendor_registration')
                         {{-- Show role only for vendor users --}}
                         <flux:table.cell>                            

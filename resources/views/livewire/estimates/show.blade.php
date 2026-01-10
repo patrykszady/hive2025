@@ -77,7 +77,7 @@
                                             {{-- wire:click="sectionDuplicateToEstimate({{$index}})" --}}
                                             <flux:menu.item wire:click="$dispatchTo('estimates.estimate-duplicate', 'duplicateToEstimateModal', { section: {{$section['id']}} })">Duplicate Section to Estimate</flux:menu.item>
                                             <flux:menu.separator />
-                                            <flux:menu.item wire:click="sectionDelete({{$index}})" variant="danger">Delete Section</flux:menu.item>
+                                            <flux:menu.item wire:click="sectionDelete({{$index}})" variant="danger">Disable Section</flux:menu.item>
                                         </flux:menu>
                                     </flux:dropdown>
                                 </flux:input.group>
@@ -155,13 +155,30 @@
             @endforeach
         </div>
 
-        <flux:button
-            wire:click="sectionAdd"
-            variant="primary"
-            icon="plus"
-            >
-            Section
-        </flux:button>
+        <flux:button.group>
+            <flux:button
+                wire:click="sectionAdd"
+                variant="primary"
+                icon="plus"
+                >
+                Section
+            </flux:button>
+
+            @if(count($trashedSections) > 0)
+                <flux:dropdown>
+                    <flux:button icon="arrow-path"></flux:button>
+
+                    <flux:menu>
+                        <flux:menu.heading>Restore Deleted Section</flux:menu.heading>
+                        @foreach($trashedSections as $trashedSection)
+                            <flux:menu.item wire:click="sectionRestore({{ $trashedSection['id'] }})">
+                                {{ $trashedSection['name'] ?? 'Unnamed Section' }} — {{ money($trashedSection['total']) }}
+                            </flux:menu.item>
+                        @endforeach
+                    </flux:menu>
+                </flux:dropdown>
+            @endif
+        </flux:button.group>
 
         <livewire:line-items.estimate-line-item-create :estimate="$estimate"/>
         <livewire:estimates.estimate-email />

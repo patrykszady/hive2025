@@ -24,7 +24,7 @@
     @if($isRight)
         {{-- RIGHT-ALIGNED: title is clickable --}}
         <div class="hidden sm:block sm:col-span-1"></div>
-        <flux:subheading class="{{ $shouldTruncate ? 'truncate' : '' }} sm:col-span-2 text-right pr-3 font-normal {{ $indentClass }}">
+        <flux:subheading class="{{ $shouldTruncate ? 'truncate' : 'whitespace-normal break-words' }} sm:col-span-2 text-right pr-3 font-normal {{ $indentClass }}">
             @if($href)
                 <flux:link href="{{ $href }}" target="_blank" variant="ghost" :accent="false" class="font-normal">
                     {{ $title }}
@@ -35,7 +35,7 @@
         </flux:subheading>
     @else
         {{-- LEFT-ALIGNED: content is clickable --}}
-        <flux:subheading class="{{ $shouldTruncate ? 'truncate' : '' }} {{ $indentClass }}">
+        <flux:subheading class="{{ $shouldTruncate ? 'truncate' : 'whitespace-normal break-words' }} {{ $indentClass }}">
             {{ $title }}
         </flux:subheading>
     @endif
@@ -43,7 +43,7 @@
     {{-- CONTENT --}}
     <div class="w-full {{ $isRight ? 'sm:col-span-1 text-right' : 'sm:col-span-3' }} {{ $copyable ? 'sm:pr-8' : '' }}">
         <div class="space-y-1">
-            <flux:heading class="!my-0 font-bold {{ $shouldTruncate ? 'truncate' : '' }}">
+            <flux:heading class="!my-0 font-bold {{ $shouldTruncate ? 'truncate' : 'whitespace-normal break-words' }}">
                 <span class="{{ $isRight ? 'float-right' : '' }}">
                     @if($href && !$isRight)
                         <flux:link href="{{ $href }}" target="_blank" variant="ghost" :accent="false" class="font-bold">

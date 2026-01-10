@@ -7,6 +7,7 @@ use App\Livewire\Projects\ProjectFinances;
 use App\Models\Estimate;
 use App\Models\EstimateLineItem;
 use App\Models\EstimateSection;
+use App\Models\Bid;
 use App\Livewire\Estimates\EstimatesIndex;
 
 use Flux;
@@ -34,6 +35,8 @@ class EstimateShow extends Component
 
     public $sections = [];
 
+    public $trashedSections = [];
+
     protected $listeners = ['refreshComponent' => 'estimate_refresh'];
 
     protected function rules()
@@ -46,11 +49,14 @@ class EstimateShow extends Component
     public function mount()
     {
         $this->sections = $this->estimate->estimate_sections->toArray();
+        $this->trashedSections = $this->estimate->estimate_sections()->onlyTrashed()->get()->toArray();
 
         //11-1-2023 MOVE to EstiamteCreate
         //start with one section and an ADD card/button for line items
         if (empty($this->sections)) {
             $this->create_new_section();
+            $this->estimate_refresh();
+        } else {
             $this->estimate_refresh();
         }
     }
@@ -61,8 +67,46 @@ class EstimateShow extends Component
         $this->estimate = $this->estimate->fresh(['estimate_sections.estimate_line_items']);
         
         // Get fresh section data with updated totals from database
-        $this->sections = $this->estimate->estimate_sections()
-            ->with('estimate_line_items')
+        $sections = $this->estimate->estimate_sections()
+            ->with(['estimate_line_items', 'bid'])
+            ->get();
+
+        // If totals got out of sync (e.g. section was restored but total became 0), fix it.
+        // Only repair obviously-broken totals to avoid unintended changes.
+        $bidIdsToRecalculate = [];
+        foreach ($sections as $section) {
+            $computedTotal = (float) $section->estimate_line_items->sum('total');
+            $storedTotal = (float) $section->total;
+
+            if ($storedTotal === 0.0 && $computedTotal > 0.0) {
+                $section->total = $computedTotal;
+                $section->save();
+
+                if (! empty($section->bid_id)) {
+                    $bidIdsToRecalculate[] = $section->bid_id;
+                }
+            }
+        }
+
+        foreach (array_unique($bidIdsToRecalculate) as $bidId) {
+            $bid = Bid::find($bidId);
+            if (! $bid) {
+                continue;
+            }
+
+            $bid->amount = EstimateSection::where('bid_id', $bid->id)->sum('total');
+            $bid->save();
+
+            if ((float) $bid->amount === 0.0) {
+                $bid->delete();
+            }
+        }
+
+        $this->sections = $sections->toArray();
+
+        // Get trashed sections for restore functionality
+        $this->trashedSections = $this->estimate->estimate_sections()
+            ->onlyTrashed()
             ->get()
             ->toArray();
             
@@ -72,9 +116,17 @@ class EstimateShow extends Component
 
     public function create_new_section($name = null, $estimate_id = null)
     {
+        $targetEstimateId = $this->estimate->id ?? $estimate_id;
+        $currentMaxOrder = EstimateSection::query()
+            ->where('estimate_id', $targetEstimateId)
+            ->where('order', '<', 999999)
+            ->max('order');
+
+        $nextOrder = is_null($currentMaxOrder) ? 0 : $currentMaxOrder + 1;
+
         return EstimateSection::create([
-            'estimate_id' => $this->estimate->id ?? $estimate_id,
-            'order' => empty($this->sections) ? 0 : collect($this->sections)->max('order') + 1,
+            'estimate_id' => $targetEstimateId,
+            'order' => $nextOrder,
             'name' => $name,
             'total' => 0.00,
             'deleted_at' => null,
@@ -96,21 +148,73 @@ class EstimateShow extends Component
         );
     }
 
+    public function sectionRestore(int $sectionId)
+    {
+        $section = EstimateSection::withTrashed()->findOrFail($sectionId);
+        $section->restore();
+
+        $currentMaxOrder = EstimateSection::query()
+            ->where('estimate_id', $section->estimate_id)
+            ->where('order', '<', 999999)
+            ->max('order');
+
+        $section->order = is_null($currentMaxOrder) ? 0 : $currentMaxOrder + 1;
+        $section->save();
+
+        // Restore the line items without triggering observers that mutate section totals.
+        EstimateLineItem::withoutEvents(function () use ($section) {
+            $section->estimate_line_items()->onlyTrashed()->restore();
+        });
+
+        $section->total = $section->estimate_line_items()->sum('total');
+        $section->save();
+
+        $bid = $section->bid;
+        if ($bid) {
+            $bid->amount = EstimateSection::where('bid_id', $bid->id)->sum('total');
+            $bid->save();
+
+            if ((float) $bid->amount === 0.0) {
+                $bid->delete();
+            }
+        }
+
+        $this->estimate_refresh();
+
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Section Restored',
+            text: 'Section ' . ($section->name ?? 'Unnamed') . ' has been restored.',
+        );
+    }
+
     public function sectionDelete($section_index)
     {
         $section_data = $this->sections[$section_index];
         $section = EstimateSection::findOrFail($section_data['id']);
 
-        // Get all line items for this section
-        $line_items = $this->estimate->estimate_line_items()->where('section_id', $section->id)->get();
+        // Push deleted sections to the end so restores can be reinserted cleanly.
+        $section->order = 999999;
+        $section->save();
 
-        // Delete all line items first
-        foreach ($line_items as $line_item) {
-            $line_item->delete();
-        }
+        // Disable the section and its line items, but don't mutate stored totals.
+        EstimateLineItem::withoutEvents(function () use ($section) {
+            $section->estimate_line_items()->delete();
+        });
 
-        // Delete the section
         $section->delete();
+
+        $bid = $section->bid;
+        if ($bid) {
+            $bid->amount = EstimateSection::where('bid_id', $bid->id)->sum('total');
+            $bid->save();
+
+            if ((float) $bid->amount === 0.0) {
+                $bid->delete();
+            }
+        }
 
         $this->estimate_refresh();
 
@@ -118,8 +222,8 @@ class EstimateShow extends Component
             duration: 10000,
             position: 'top right',
             variant: 'success',
-            heading: 'Section Deleted',
-            text: 'Section and all its line items have been deleted.',
+            heading: 'Section Disabled',
+            text: 'Section and all its line items have been disabled.',
         );
     }
 

@@ -59,6 +59,7 @@
             :content="$project->full_address ?? $estimate->project->full_address"
             :href="$project?->getAddressMapURI() ?? $estimate->project->getAddressMapURI()"
             :copyable="!($nonLivewire ?? false)"
+            no-truncate
             :no-cloak="$nonLivewire ?? false"
         />
 
@@ -68,6 +69,7 @@
                 <x-details.row 
                     title="Billing Address" 
                     :content="$client->full_address ?? $estimate->client->full_address"
+                    no-truncate
                     :no-cloak="$nonLivewire ?? false"
                 />
             @endif

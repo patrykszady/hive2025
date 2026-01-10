@@ -39,6 +39,25 @@ class ExpenseCreate extends Component
 
     protected $listeners = ['resetModal', 'editExpense', 'newExpense', 'createExpenseFromTransaction', 'hasSplits'];
 
+    protected function toastExpenseSuccess(Expense $expense, string $heading, ?string $text = null): void
+    {
+        $slots = [
+            'heading' => $heading,
+            'text' => $text,
+            'action' => 'Go to expense',
+        ];
+
+        $this->dispatch('toast-show',
+            duration: 5000,
+            slots: array_filter($slots, fn ($value) => ! is_null($value)),
+            dataset: [
+                'variant' => 'success',
+                'position' => 'top end',
+                'route' => route('expenses.show', $expense),
+            ],
+        );
+    }
+
     public function mount()
     {
         $this->expense = Expense::make();
@@ -383,14 +402,7 @@ class ExpenseCreate extends Component
         $expense = $this->form->update();
         $this->modal('expenses_form_modal')->close();
 
-        Flux::toast(
-            duration: 5000,
-            position: 'top right',
-            variant: 'success',
-            heading: 'Expense Updated.',
-            // route / href / wire:click
-            text: money($expense->amount),
-        );
+        $this->toastExpenseSuccess($expense, 'Expense Updated.', money($expense->amount));
 
         $this->dispatch('resetSplits')->to('expenses.expense-splits-create');
         $this->dispatch('refreshComponent')->to('expenses.expense-index');
@@ -432,14 +444,7 @@ class ExpenseCreate extends Component
         
         $this->modal('expenses_form_modal')->close();
 
-        Flux::toast(
-            duration: 5000,
-            position: 'top right',
-            variant: 'success',
-            heading: 'Expense Created.',
-            // route / href / wire:click
-            text: '',
-        );
+        $this->toastExpenseSuccess($expense, 'Expense Created.');
 
         $this->resetModal();
         

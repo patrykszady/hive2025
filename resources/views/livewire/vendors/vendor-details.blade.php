@@ -35,6 +35,15 @@
     @endunless
     
     <x-slot:details>
+        @if(($nonLivewire ?? false) && isset($vendorLogoDataUrl) && is_string($vendorLogoDataUrl) && $vendorLogoDataUrl !== '')
+            <div class="py-2 flex justify-start">
+                <img
+                    src="{{ $vendorLogoDataUrl }}"
+                    alt="{{ $vendor->business_name }} logo"
+                    class="h-24 w-auto object-contain"
+                />
+            </div>
+        @endif
 
         <x-details.row title="Name" :content="$vendor->business_name" :no-cloak="$nonLivewire ?? false" />
         @unless(in_array('type', $hide ?? []))
