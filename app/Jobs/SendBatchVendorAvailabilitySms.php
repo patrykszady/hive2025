@@ -48,10 +48,21 @@ class SendBatchVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
      */
     public function handle(): void
     {
+        $log = Log::channel('vendor_sms');
+        
+        $log->info("Job started for vendor {$this->vendorId}", [
+            'vendor_id' => $this->vendorId,
+            'task_ids' => $this->taskIds,
+            'current_time' => now()->toDateTimeString(),
+        ]);
+
         // Check if within business hours, if not, re-queue for next morning
         if (! $this->isWithinBusinessHours()) {
             $nextMorning = $this->getNextBusinessHoursStart();
-            Log::info("SendBatchVendorAvailabilitySms: Outside business hours, re-queuing for vendor {$this->vendorId} at {$nextMorning->format('Y-m-d H:i')}");
+            $log->info("Outside business hours, re-queuing", [
+                'vendor_id' => $this->vendorId,
+                'next_run' => $nextMorning->toDateTimeString(),
+            ]);
             
             self::dispatch($this->vendorId, $this->taskIds)
                 ->delay($nextMorning);
@@ -62,41 +73,117 @@ class SendBatchVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
         $vendor = Vendor::find($this->vendorId);
 
         if (! $vendor) {
-            Log::info("SendBatchVendorAvailabilitySms: Vendor {$this->vendorId} not found, skipping");
+            $log->warning("Vendor not found, skipping", ['vendor_id' => $this->vendorId]);
+            return;
+        }
 
+        // Get admin users with cell phones for this vendor
+        $adminUsers = $vendor->getAdminUsersWithCellPhones();
+
+        $log->info("Vendor found", [
+            'vendor_id' => $vendor->id,
+            'vendor_name' => $vendor->name,
+            'business_phone' => $vendor->business_phone,
+            'admin_users_count' => $adminUsers->count(),
+            'admin_user_phones' => $adminUsers->map(fn ($u) => [
+                'user_id' => $u->id,
+                'name' => $u->name,
+                'cell_phone' => $u->cell_phone,
+            ])->toArray(),
+        ]);
+
+        if ($adminUsers->isEmpty()) {
+            $log->warning("No admin users with cell phones found, skipping", [
+                'vendor_id' => $vendor->id,
+                'vendor_name' => $vendor->name,
+            ]);
             return;
         }
 
         // Find all tasks for this vendor that need notifications
+        // Tasks with vendor_status = 'requested' and no token haven't had SMS sent yet
         $tasks = Task::with(['project', 'owner'])
             ->where('vendor_id', $this->vendorId)
-            ->whereNull('vendor_status')
+            ->where('vendor_status', Task::VENDOR_STATUS_REQUESTED)
+            ->whereNull('vendor_status_token')
             ->whereNotNull('start_date')
             ->where('start_date', '>=', now()->startOfDay())
             ->orderBy('start_date')
             ->get();
 
-        if ($tasks->isEmpty()) {
-            Log::info("SendBatchVendorAvailabilitySms: No eligible tasks for vendor {$this->vendorId}, skipping");
+        $log->info("Found eligible tasks", [
+            'vendor_id' => $this->vendorId,
+            'task_count' => $tasks->count(),
+            'task_ids' => $tasks->pluck('id')->toArray(),
+        ]);
 
+        if ($tasks->isEmpty()) {
+            $log->info("No eligible tasks, skipping", ['vendor_id' => $this->vendorId]);
             return;
         }
 
-        // Generate tokens for all tasks
+        // Generate tokens for all tasks (status is already 'requested', just need to set token)
         $taskTokens = [];
         foreach ($tasks as $task) {
             $token = bin2hex(random_bytes(32));
             $task->update([
-                'vendor_status' => Task::VENDOR_STATUS_REQUESTED,
                 'vendor_status_token' => $token,
             ]);
             $taskTokens[$task->id] = $token;
+            
+            $log->debug("Generated token for task", [
+                'task_id' => $task->id,
+                'task_title' => $task->title,
+                'project' => $task->project?->short_address,
+                'start_date' => $task->start_date?->toDateString(),
+            ]);
         }
 
-        // Send consolidated notification
-        $vendor->notify(new VendorAvailabilityNotification($tasks, $taskTokens));
+        // Send consolidated notification to each admin user
+        $notification = new VendorAvailabilityNotification($tasks, $taskTokens);
+        $successCount = 0;
+        $failureCount = 0;
 
-        Log::info("SendBatchVendorAvailabilitySms: Sent batch availability request for " . $tasks->count() . " task(s) to vendor {$vendor->id}");
+        foreach ($adminUsers as $adminUser) {
+            try {
+                $adminUser->notify($notification);
+                $successCount++;
+                
+                $log->info("SMS notification sent successfully", [
+                    'vendor_id' => $vendor->id,
+                    'vendor_name' => $vendor->name,
+                    'admin_user_id' => $adminUser->id,
+                    'admin_user_name' => $adminUser->name,
+                    'phone' => $adminUser->routeNotificationForTwilio(),
+                    'task_count' => $tasks->count(),
+                    'task_ids' => $tasks->pluck('id')->toArray(),
+                ]);
+            } catch (\Exception $e) {
+                $failureCount++;
+                $log->error("Failed to send SMS notification to admin user", [
+                    'vendor_id' => $vendor->id,
+                    'vendor_name' => $vendor->name,
+                    'admin_user_id' => $adminUser->id,
+                    'admin_user_name' => $adminUser->name,
+                    'phone' => $adminUser->routeNotificationForTwilio(),
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                ]);
+                // Continue sending to other admins even if one fails
+            }
+        }
+
+        $log->info("SMS batch complete", [
+            'vendor_id' => $vendor->id,
+            'admin_users_count' => $adminUsers->count(),
+            'success_count' => $successCount,
+            'failure_count' => $failureCount,
+        ]);
+
+        // If all failed, throw exception to trigger job retry
+        if ($successCount === 0 && $failureCount > 0) {
+            throw new \RuntimeException("All SMS notifications failed for vendor {$vendor->id}");
+        }
     }
 
     /**

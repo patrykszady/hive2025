@@ -31,7 +31,7 @@ class BackfillReceiptPurchaseOrders extends Command
             ->whereNotNull('receipt_html')
             ->where('receipt_html', '!=', '')
             ->where(function ($query) {
-                $query->whereRaw("JSON_EXTRACT(receipt_items, '$.purchase_order') IS NULL")
+                $query->whereRaw("JSON_TYPE(JSON_EXTRACT(receipt_items, '$.purchase_order')) = 'NULL'")
                     ->orWhereRaw("JSON_EXTRACT(receipt_items, '$.purchase_order') = ''")
                     ->orWhereRaw("JSON_EXTRACT(receipt_items, '$.purchase_order') = 'null'");
             })

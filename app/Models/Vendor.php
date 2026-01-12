@@ -116,6 +116,7 @@ class Vendor extends Model
 
     /**
      * Route notifications for the Twilio channel.
+     * Returns the business_phone formatted for Twilio.
      */
     public function routeNotificationForTwilio(): ?string
     {
@@ -132,6 +133,21 @@ class Vendor extends Model
 
         // Default: add + to whatever we have
         return '+'.$phone;
+    }
+
+    /**
+     * Get all admin users for this vendor who have cell phones.
+     * Used for sending vendor availability SMS notifications.
+     *
+     * @return \Illuminate\Support\Collection<User>
+     */
+    public function getAdminUsersWithCellPhones(): \Illuminate\Support\Collection
+    {
+        return $this->users()
+            ->wherePivot('role_id', 1) // role_id 1 = Admin
+            ->whereNotNull('cell_phone')
+            ->where('cell_phone', '!=', '')
+            ->get();
     }
 
     public function transactions_bulk_match(): HasMany

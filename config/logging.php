@@ -100,6 +100,13 @@ return [
             'days' => 30,
         ],
 
+        'vendor_sms' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/vendor_sms.log'),
+            'level' => 'debug',
+            'days' => 30,
+        ],
+
         'receipt_processing' => [
             'driver' => 'daily',
             'path' => storage_path('logs/receipt_processing.log'),

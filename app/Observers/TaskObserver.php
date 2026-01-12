@@ -7,6 +7,7 @@ use App\Models\Project;
 use App\Models\Task;
 use App\Http\Controllers\TaskReminderController;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Log;
 
 class TaskObserver
 {
@@ -89,14 +90,16 @@ class TaskObserver
             }
         }
 
-        // Queue vendor availability SMS if vendor was just assigned or dates changed
+        // Queue vendor availability SMS if vendor was just assigned, dates changed,
+        // or vendor is assigned but status was never set (legacy tasks)
         $originalVendorId = $task->getOriginal('vendor_id');
         $newVendorId = $task->vendor_id;
         $vendorChanged = $originalVendorId != $newVendorId;
         $datesChanged = $task->getOriginal('start_date') != $task->start_date 
             || $task->getOriginal('end_date') != $task->end_date;
+        $needsStatusSet = $task->vendor_id && $task->vendor_status === null;
 
-        if ($vendorChanged || $datesChanged) {
+        if ($vendorChanged || $datesChanged || $needsStatusSet) {
             $this->queueVendorNotificationIfNeeded($task);
         }
     }
@@ -168,24 +171,50 @@ class TaskObserver
      */
     private function queueVendorNotificationIfNeeded(Task $task): void
     {
+        $log = Log::channel('vendor_sms');
+
         // Must have a vendor assigned
         if (!$task->vendor_id) {
             return;
         }
 
-        // Vendor status should be null (not already requested/confirmed/rejected)
-        if ($task->vendor_status !== null) {
+        $logContext = [
+            'task_id' => $task->id,
+            'vendor_id' => $task->vendor_id,
+            'vendor_status' => $task->vendor_status,
+            'vendor_status_token' => $task->vendor_status_token,
+            'start_date' => $task->start_date?->toDateString(),
+        ];
+
+        // Skip if already confirmed/rejected (but allow re-requesting if status was cleared)
+        if (in_array($task->vendor_status, [Task::VENDOR_STATUS_CONFIRMED, Task::VENDOR_STATUS_REJECTED], true)) {
+            $log->debug("TaskObserver: Skipping - vendor already confirmed/rejected", $logContext);
+            return;
+        }
+
+        // Skip if already requested and SMS was sent (has token)
+        if ($task->vendor_status === Task::VENDOR_STATUS_REQUESTED && $task->vendor_status_token !== null) {
+            $log->debug("TaskObserver: Skipping - already requested with token", $logContext);
             return;
         }
 
         // Task should have dates set
         if (!$task->start_date) {
+            $log->debug("TaskObserver: Skipping - no start date", $logContext);
             return;
         }
 
         // Task start date should be in the future (or today)
         if ($task->start_date->isPast() && !$task->start_date->isToday()) {
+            $log->debug("TaskObserver: Skipping - start date is in the past", $logContext);
             return;
+        }
+
+        // Set vendor_status to 'requested' immediately so it shows in the UI
+        // The token remains null until the SMS is actually sent
+        if ($task->vendor_status !== Task::VENDOR_STATUS_REQUESTED) {
+            $task->updateQuietly(['vendor_status' => Task::VENDOR_STATUS_REQUESTED]);
+            $log->info("TaskObserver: Set vendor_status to 'requested'", $logContext);
         }
 
         // Dispatch the job with a 1 hour delay, keyed by vendor_id
@@ -194,5 +223,10 @@ class TaskObserver
         // find ALL eligible tasks for that vendor at that time.
         SendBatchVendorAvailabilitySms::dispatch($task->vendor_id)
             ->delay(now()->addHour());
+
+        $log->info("TaskObserver: Queued SendBatchVendorAvailabilitySms job with 1-hour delay", [
+            ...$logContext,
+            'scheduled_for' => now()->addHour()->toDateTimeString(),
+        ]);
     }
 }

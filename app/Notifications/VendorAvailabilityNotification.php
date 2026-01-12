@@ -9,6 +9,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Notifications\Notification;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class VendorAvailabilityNotification extends Notification implements ShouldQueue
 {
@@ -67,16 +68,13 @@ class VendorAvailabilityNotification extends Notification implements ShouldQueue
         $task = $task ?? $this->tasks;
         $token = is_array($this->tokens) ? ($this->tokens[$task->id] ?? reset($this->tokens)) : $this->tokens;
 
-        $vendorName = $notifiable->short_name ?? $notifiable->name ?? 'there';
+        $vendorName = $task->vendor?->short_name ?? $task->vendor?->name ?? 'Hi';
         $ownerName = $task->owner?->short_name ?? $task->owner?->name ?? 'Your contractor';
         $project = $task->project;
 
         $address = $this->formatFullAddress($project);
 
-        $dateRange = $task->start_date->format('M j');
-        if ($task->end_date && ! $task->start_date->eq($task->end_date)) {
-            $dateRange .= ' - ' . $task->end_date->format('M j');
-        }
+        $dateRange = $this->formatDateWithTime($task);
 
         $baseUrl = config('app.dev_webhook_url') ?: config('app.url');
         $responseUrl = $baseUrl . "/vendor/availability/{$token}";
@@ -102,8 +100,8 @@ class VendorAvailabilityNotification extends Notification implements ShouldQueue
      */
     protected function formatMultiTaskMessage(object $notifiable): string
     {
-        $vendorName = $notifiable->short_name ?? $notifiable->name ?? 'there';
         $firstTask = $this->tasks->first();
+        $vendorName = $firstTask->vendor?->short_name ?? $firstTask->vendor?->name ?? 'Hi';
         $ownerName = $firstTask->owner?->short_name ?? $firstTask->owner?->name ?? 'Your contractor';
 
         $lines = [
@@ -116,10 +114,7 @@ class VendorAvailabilityNotification extends Notification implements ShouldQueue
             $project = $task->project;
             $address = $this->formatFullAddress($project);
 
-            $dateRange = $task->start_date->format('M j');
-            if ($task->end_date && ! $task->start_date->eq($task->end_date)) {
-                $dateRange .= ' - ' . $task->end_date->format('M j');
-            }
+            $dateRange = $this->formatDateWithTime($task);
 
             $lines[] = "\"{$task->title}\"";
             $lines[] = $address;
@@ -169,6 +164,50 @@ class VendorAvailabilityNotification extends Notification implements ShouldQueue
     }
 
     /**
+     * Format date range with optional time from task options.
+     * Outputs: "Jan 13" or "Jan 13 @ 7AM" or "Jan 13 - Jan 15"
+     */
+    protected function formatDateWithTime(Task $task): string
+    {
+        $startDate = $task->start_date;
+        $endDate = $task->end_date;
+        $hasMultipleDays = $endDate && ! $startDate->eq($endDate);
+
+        // Check for time settings in options (may be object or array)
+        $options = $task->options;
+        $timeSettings = is_object($options) ? ($options->time_settings ?? null) : ($options['time_settings'] ?? null);
+        $dateKey = $startDate->format('Y-m-d');
+        $startTime = null;
+
+        if ($timeSettings) {
+            $daySettings = is_object($timeSettings) ? ($timeSettings->$dateKey ?? null) : ($timeSettings[$dateKey] ?? null);
+            if ($daySettings) {
+                $useTime = is_object($daySettings) ? ($daySettings->use_time ?? false) : ($daySettings['use_time'] ?? false);
+                if ($useTime) {
+                    $startTime = is_object($daySettings) ? ($daySettings->start_time ?? null) : ($daySettings['start_time'] ?? null);
+                }
+            }
+        }
+
+        // Format base date
+        $dateStr = $startDate->format('M j');
+
+        // Add time if available and single day
+        if ($startTime && ! $hasMultipleDays) {
+            // Convert "07:00" to "7AM" format
+            $timeFormatted = \Carbon\Carbon::createFromFormat('H:i', $startTime)->format('gA');
+            $dateStr .= " @ {$timeFormatted}";
+        }
+
+        // Add end date for multi-day tasks
+        if ($hasMultipleDays) {
+            $dateStr .= ' - ' . $endDate->format('M j');
+        }
+
+        return $dateStr;
+    }
+
+    /**
      * Shorten a URL using TinyURL API.
      */
     protected function shortenUrl(string $url): ?string
@@ -179,10 +218,26 @@ class VendorAvailabilityNotification extends Notification implements ShouldQueue
             ]);
 
             if ($response->successful()) {
-                return $response->body();
+                $shortUrl = $response->body();
+                
+                Log::channel('vendor_sms')->info("URL shortened", [
+                    'original_url' => $url,
+                    'short_url' => $shortUrl,
+                ]);
+                
+                return $shortUrl;
             }
+            
+            Log::channel('vendor_sms')->warning("TinyURL API returned non-success", [
+                'original_url' => $url,
+                'status' => $response->status(),
+                'body' => $response->body(),
+            ]);
         } catch (\Exception $e) {
-            // Silently fail and return original URL
+            Log::channel('vendor_sms')->error("TinyURL shortening failed", [
+                'original_url' => $url,
+                'error' => $e->getMessage(),
+            ]);
         }
 
         return null;
