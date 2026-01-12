@@ -4,6 +4,7 @@ namespace App\Channels;
 
 use App\Notifications\TaskReminderNotification;
 use App\Notifications\TaskUpdateNotification;
+use App\Notifications\VendorAvailabilityNotification;
 use Illuminate\Notifications\Notification;
 use Illuminate\Support\Facades\Log;
 use Twilio\Rest\Client;
@@ -30,7 +31,9 @@ class TwilioChannel
 
         if (
             app()->environment(['local', 'development'])
-            && ($notification instanceof TaskReminderNotification || $notification instanceof TaskUpdateNotification)
+            && ($notification instanceof TaskReminderNotification 
+                || $notification instanceof TaskUpdateNotification
+                || $notification instanceof VendorAvailabilityNotification)
         ) {
             $phone = config('services.twilio.dev_to', '+12249993880');
         }

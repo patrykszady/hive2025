@@ -172,6 +172,51 @@ else
   fi
 fi
 
+# Ngrok tunnel (for vendor SMS response links)
+NGROK_BIN="$(command -v ngrok 2>/dev/null)"
+if [ -n "$NGROK_BIN" ]; then
+  if pgrep -x ngrok >/dev/null 2>&1; then
+    echo "✅ Ngrok already running"
+    # Try to get the existing URL
+    NGROK_URL=$(curl -s http://127.0.0.1:4040/api/tunnels 2>/dev/null | grep -o '"public_url":"https://[^"]*' | head -1 | cut -d'"' -f4)
+    if [ -n "$NGROK_URL" ]; then
+      echo "   → $NGROK_URL"
+      # Update .env if different
+      CURRENT_DEV_URL=$(grep -E '^DEV_WEBHOOK_URL=' .env 2>/dev/null | cut -d '=' -f2- | tr -d '\r' | xargs)
+      if [ "$CURRENT_DEV_URL" != "$NGROK_URL" ]; then
+        sed -i "s|^DEV_WEBHOOK_URL=.*|DEV_WEBHOOK_URL=$NGROK_URL|" .env
+        echo "   → Updated DEV_WEBHOOK_URL in .env"
+      fi
+    fi
+  else
+    echo "🔄 Starting Ngrok tunnel on port 8000..."
+    nohup "$NGROK_BIN" http 8000 >"$LOG_DIR/ngrok.log" 2>&1 &
+    NGROK_PID=$!
+    sleep 2
+    if ps -p "$NGROK_PID" >/dev/null 2>&1; then
+      NGROK_URL=$(curl -s http://127.0.0.1:4040/api/tunnels 2>/dev/null | grep -o '"public_url":"https://[^"]*' | head -1 | cut -d'"' -f4)
+      if [ -n "$NGROK_URL" ]; then
+        echo "✅ Ngrok tunnel started → $NGROK_URL"
+        # Update DEV_WEBHOOK_URL in .env
+        if grep -q '^DEV_WEBHOOK_URL=' .env 2>/dev/null; then
+          sed -i "s|^DEV_WEBHOOK_URL=.*|DEV_WEBHOOK_URL=$NGROK_URL|" .env
+        else
+          echo "DEV_WEBHOOK_URL=$NGROK_URL" >> .env
+        fi
+        echo "   → Updated DEV_WEBHOOK_URL in .env"
+      else
+        echo "✅ Ngrok started (pid: $NGROK_PID) - check $LOG_DIR/ngrok.log for URL"
+      fi
+    else
+      echo "❌ Ngrok failed to start → check logs: $LOG_DIR/ngrok.log"
+    fi
+  fi
+else
+  echo "ℹ️  Ngrok not found, skipping tunnel setup (vendor SMS links will use local URL)"
+fi
+
+echo ""
+
 # Hookdeck tunnel (optional)
 HOOKDECK_URL=""
 HOOKDECK_BIN="$(command -v hookdeck 2>/dev/null)"
@@ -245,4 +290,7 @@ echo "📍 GSC:      http://127.0.0.1:8003"
 echo "📍 Breck:    http://127.0.0.1:8002"
 echo "📍 Hive2025: http://127.0.0.1:8000"
 echo "📍 Vite:     http://127.0.0.1:5173"
+if [ -n "$NGROK_URL" ]; then
+  echo "📍 Ngrok:    $NGROK_URL"
+fi
 echo "════════════════════════════════════════════════════════════════"

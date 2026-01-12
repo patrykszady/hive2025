@@ -72,6 +72,8 @@
                 </x-slot:footer>
             </x-details.card>
 
+            <livewire:projects.upcoming-tasks :project="$project" lazy />
+
             {{-- PROJECT TIMELINE --}}
             {{-- <div class="h-180">
                 <livewire:planner.cards-index type="project" :project-id="$project->id" lazy />
@@ -307,5 +309,7 @@
                 @endif
             </div>
 		@endcan
-	</div>
+    </div>
+
+    <livewire:tasks.task-create />
 </div>

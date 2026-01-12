@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
-    {{-- HEAD --}}
-    @include('components.layouts.head')
+    {{-- HEAD (print-specific, uses built CSS for Browsershot compatibility) --}}
+    @include('components.layouts.head-print')
 
     {{-- BODY --}}
     <body class="min-h-screen">

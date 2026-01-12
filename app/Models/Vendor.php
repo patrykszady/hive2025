@@ -17,11 +17,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Casts\Attribute;
+use Illuminate\Notifications\Notifiable;
 use Carbon\Carbon;
 
 class Vendor extends Model
 {
-    use HasFactory, Searchable, HasAddress;
+    use HasFactory, Notifiable, Searchable, HasAddress;
 
     protected $fillable = ['business_name', 'business_type', 'sheets_type', 'category_id', 'address', 'address_2', 'city', 'state', 'zip_code', 'business_phone', 'business_email', 'timezone', 'short_name', 'created_at', 'updated_at'];
     // protected $appends = ['name'];
@@ -111,6 +112,26 @@ class Vendor extends Model
     public function task(): HasMany
     {
         return $this->hasMany(Task::class);
+    }
+
+    /**
+     * Route notifications for the Twilio channel.
+     */
+    public function routeNotificationForTwilio(): ?string
+    {
+        if (! $this->business_phone) {
+            return null;
+        }
+
+        $phone = preg_replace('/[^0-9]/', '', $this->business_phone);
+
+        // If it's a 10-digit US number, add +1
+        if (strlen($phone) === 10) {
+            return '+1'.$phone;
+        }
+
+        // Default: add + to whatever we have
+        return '+'.$phone;
     }
 
     public function transactions_bulk_match(): HasMany

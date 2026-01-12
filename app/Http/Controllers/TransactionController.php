@@ -2187,8 +2187,63 @@ class TransactionController extends Controller
         }
     }
 
+    /**
+     * Update existing unmatched expenses (project_id=0, distribution_id=null) 
+     * based on bulk match rules.
+     */
+    protected function updateExistingExpensesWithBulkMatches(): void
+    {
+        $bulkMatches = TransactionBulkMatch::with('vendor')->get();
+
+        foreach ($bulkMatches as $match) {
+            $query = Expense::withoutGlobalScopes()
+                ->whereNull('deleted_at')
+                ->where('belongs_to_vendor_id', $match->belongs_to_vendor_id)
+                ->where('vendor_id', $match->vendor_id)
+                ->where(function ($q) {
+                    $q->where('project_id', 0)
+                      ->orWhereNull('project_id');
+                })
+                ->whereNull('distribution_id');
+
+            // Apply amount matching based on amount_type
+            if ($match->amount !== null) {
+                $amountType = $match->options['amount_type'] ?? '=';
+                if ($amountType !== 'ANY') {
+                    $query->where('amount', $amountType, $match->amount);
+                }
+            }
+
+            // Apply description matching if set
+            if (isset($match->options['desc']) && $match->options['desc']) {
+                $query->where('note', 'LIKE', '%' . $match->options['desc'] . '%');
+            }
+
+            $expenses = $query->get();
+
+            foreach ($expenses as $expense) {
+                // Check if this expense has splits - if so, skip (already processed)
+                if ($expense->splits()->exists()) {
+                    continue;
+                }
+
+                // If match has splits, create them
+                if (!empty($match->options['splits'])) {
+                    $this->transaction_vendor_bulk_match_splits($match, $expense, $expense->amount);
+                } else {
+                    // Otherwise just set the distribution
+                    $expense->distribution_id = $match->distribution_id;
+                    $expense->save();
+                }
+            }
+        }
+    }
+
     public function transaction_vendor_bulk_match()
     {
+        // First, update existing unmatched expenses based on bulk match rules
+        $this->updateExistingExpensesWithBulkMatches();
+
         $vendor_receipt_accounts = ReceiptAccount::withoutGlobalScopes()->with('vendor')->get()->groupBy('belongs_to_vendor_id');
 
         foreach($vendor_receipt_accounts as $vendor_id => $receipt_accounts){

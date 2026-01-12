@@ -360,8 +360,8 @@
         <flux:spacer />
         <flux:button
             x-data="{ 
-                businessType: @entangle('form.business_type'),
-                zipCode: @entangle('zip_code')
+                businessType: $wire.entangle('form.business_type'),
+                zipCode: $wire.entangle('zip_code')
             }"
             x-show="businessType === 'Retail' || (businessType !== 'Retail' && zipCode)"
             type="submit"

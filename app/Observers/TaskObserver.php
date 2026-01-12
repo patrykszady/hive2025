@@ -2,6 +2,7 @@
 
 namespace App\Observers;
 
+use App\Jobs\SendBatchVendorAvailabilitySms;
 use App\Models\Project;
 use App\Models\Task;
 use App\Http\Controllers\TaskReminderController;
@@ -26,6 +27,9 @@ class TaskObserver
                 $reminderController->notifyTodayTaskChanges($task, [], $task->user_ids);
             }
         }
+
+        // Queue vendor availability SMS if vendor is assigned
+        $this->queueVendorNotificationIfNeeded($task);
     }
 
     public function creating(Task $task): void
@@ -83,6 +87,17 @@ class TaskObserver
                     $originalEndDate
                 );
             }
+        }
+
+        // Queue vendor availability SMS if vendor was just assigned or dates changed
+        $originalVendorId = $task->getOriginal('vendor_id');
+        $newVendorId = $task->vendor_id;
+        $vendorChanged = $originalVendorId != $newVendorId;
+        $datesChanged = $task->getOriginal('start_date') != $task->start_date 
+            || $task->getOriginal('end_date') != $task->end_date;
+
+        if ($vendorChanged || $datesChanged) {
+            $this->queueVendorNotificationIfNeeded($task);
         }
     }
 
@@ -143,5 +158,41 @@ class TaskObserver
             $reminderController = new TaskReminderController();
             $reminderController->notifyTodayTaskChanges($task, $task->user_ids, []);
         }
+    }
+
+    /**
+     * Queue vendor availability SMS notification if conditions are met.
+     * The job will be dispatched with a 1 hour delay to allow for task edits.
+     * ShouldBeUnique ensures only one job per vendor, consolidating multiple tasks
+     * assigned to the same vendor within the hour into a single SMS.
+     */
+    private function queueVendorNotificationIfNeeded(Task $task): void
+    {
+        // Must have a vendor assigned
+        if (!$task->vendor_id) {
+            return;
+        }
+
+        // Vendor status should be null (not already requested/confirmed/rejected)
+        if ($task->vendor_status !== null) {
+            return;
+        }
+
+        // Task should have dates set
+        if (!$task->start_date) {
+            return;
+        }
+
+        // Task start date should be in the future (or today)
+        if ($task->start_date->isPast() && !$task->start_date->isToday()) {
+            return;
+        }
+
+        // Dispatch the job with a 1 hour delay, keyed by vendor_id
+        // Using ShouldBeUnique, if another task for the same vendor is created within the hour,
+        // the new dispatch will be ignored. The original job will run after 1 hour and
+        // find ALL eligible tasks for that vendor at that time.
+        SendBatchVendorAvailabilitySms::dispatch($task->vendor_id)
+            ->delay(now()->addHour());
     }
 }

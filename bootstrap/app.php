@@ -22,6 +22,9 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->throttleApi();
 
+        // Trust all proxies (ngrok, cloudflare, etc.) for proper HTTPS detection
+        $middleware->trustProxies(at: '*');
+
         $middleware->replaceInGroup('web', \Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class, \App\Http\Middleware\VerifyCsrfToken::class);
 
         $middleware->alias([

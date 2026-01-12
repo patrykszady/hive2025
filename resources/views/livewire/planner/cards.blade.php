@@ -491,6 +491,17 @@
                                                                         title="{{ $taskVendor->name }}"
                                                                     />
                                                                     <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">{{ $taskVendor->name }}</span>
+                                                                    
+                                                                    @if($task->vendor_status)
+                                                                        @php $statusUi = $task->vendor_status_ui; @endphp
+                                                                        <flux:badge 
+                                                                            size="sm" 
+                                                                            :color="$statusUi['flux'] ?? 'zinc'"
+                                                                            :icon="$statusUi['icon'] ?? null"
+                                                                        >
+                                                                            {{ $statusUi['label'] ?? ucfirst($task->vendor_status) }}
+                                                                        </flux:badge>
+                                                                    @endif
                                                                 @endif
                                                             </div>
                                                         @endif
@@ -589,6 +600,21 @@
                                         title="{{ $task['vendor']['name'] }}"
                                     />
                                     <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">{{ $task['vendor']['name'] }}</span>
+                                    
+                                    @if (!empty($task['vendor_status']))
+                                        @php 
+                                            $statusUi = \App\Models\Task::VENDOR_STATUS_UI[$task['vendor_status']] ?? null;
+                                        @endphp
+                                        @if($statusUi)
+                                            <flux:badge 
+                                                size="sm" 
+                                                :color="$statusUi['flux'] ?? 'zinc'"
+                                                :icon="$statusUi['icon'] ?? null"
+                                            >
+                                                {{ $statusUi['label'] ?? ucfirst($task['vendor_status']) }}
+                                            </flux:badge>
+                                        @endif
+                                    @endif
                                 @endif
                             </div>
                         @endif

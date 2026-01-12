@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\PlaidWebhookController;
 use App\Http\Controllers\VendorDocsController;
 use App\Http\Controllers\Api\EmailTrackingController;
 use App\Http\Controllers\Api\MailtrapWebhookController;
+use App\Http\Controllers\VendorAvailabilityController;
 
 use App\Livewire\Auth\CantLogin;
 use App\Livewire\Auth\Login;
@@ -78,6 +79,13 @@ Route::middleware('guest')->group(function () {
     Route::get('verify-reset-code/{token}', VerifyResetCode::class)->name('verify.reset.code');
 
     Route::get('registration', Registration::class)->name('registration');
+});
+
+// Public vendor availability response routes (no auth required)
+Route::prefix('vendor/availability')->name('vendor.availability.')->group(function () {
+    Route::get('{token}', [VendorAvailabilityController::class, 'index'])->name('index');
+    Route::get('{token}/confirm/{taskId}', [VendorAvailabilityController::class, 'confirm'])->name('confirm');
+    Route::get('{token}/reject/{taskId}', [VendorAvailabilityController::class, 'reject'])->name('reject');
 });
 
 Route::middleware('auth')->group(function () {

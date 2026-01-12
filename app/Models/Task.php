@@ -23,7 +23,30 @@ class Task extends Model
     protected $fillable = [
         'title', 'project_id', 'start_date', 'end_date', 'order', 'options',
         'type', 'vendor_id', 'user_ids', 'progress', 'notes', 'belongs_to_vendor_id',
-        'created_by_user_id', 'created_at', 'updated_at', 'deleted_at', 'parent_task_id'
+        'created_by_user_id', 'created_at', 'updated_at', 'deleted_at', 'parent_task_id',
+        'vendor_status', 'vendor_status_token'
+    ];
+
+    public const VENDOR_STATUS_REQUESTED = 'requested';
+    public const VENDOR_STATUS_CONFIRMED = 'confirmed';
+    public const VENDOR_STATUS_REJECTED = 'rejected';
+
+    public const VENDOR_STATUS_UI = [
+        self::VENDOR_STATUS_REQUESTED => [
+            'label' => 'Requested',
+            'flux' => 'yellow',
+            'icon' => 'clock',
+        ],
+        self::VENDOR_STATUS_CONFIRMED => [
+            'label' => 'Confirmed',
+            'flux' => 'green',
+            'icon' => 'check-circle',
+        ],
+        self::VENDOR_STATUS_REJECTED => [
+            'label' => 'Rejected',
+            'flux' => 'red',
+            'icon' => 'x-circle',
+        ],
     ];
 
     /**
@@ -39,6 +62,18 @@ class Task extends Model
             'start_date' => 'date',
             'end_date' => 'date',
         ];
+    }
+
+    /**
+     * Get the vendor status UI config.
+     *
+     * @return Attribute<array{label:string,flux:string,icon:string}|null, never>
+     */
+    public function vendorStatusUi(): Attribute
+    {
+        return Attribute::make(
+            get: fn () => self::VENDOR_STATUS_UI[$this->vendor_status] ?? null,
+        );
     }
 
     public const TYPE_UI = [
@@ -154,6 +189,14 @@ class Task extends Model
     public function vendor(): BelongsTo
     {
         return $this->belongsTo(Vendor::class);
+    }
+
+    /**
+     * The company (vendor) that owns this task.
+     */
+    public function owner(): BelongsTo
+    {
+        return $this->belongsTo(Vendor::class, 'belongs_to_vendor_id');
     }
 
     // Parent-Child relationships

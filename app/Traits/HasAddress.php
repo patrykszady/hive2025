@@ -136,7 +136,8 @@ trait HasAddress
 
     /**
      * Get a URL to view this address on a map
-     * Automatically detects iOS devices and uses Apple Maps, otherwise Google Maps
+        * Automatically detects iOS devices and uses the system Maps handler (default Maps app),
+        * otherwise falls back to Google Maps web.
      *
      * @param string|null $provider Map provider (google or apple) - auto-detects if null
      * @return string|null
@@ -152,16 +153,22 @@ trait HasAddress
         // Auto-detect device if provider not explicitly specified
         if ($provider === null) {
             $userAgent = request()->header('User-Agent', '');
-            $isIOS = (stripos($userAgent, 'iPhone') !== false || 
-                     stripos($userAgent, 'iPad') !== false || 
-                     stripos($userAgent, 'iPod') !== false);
-            
-            $provider = $isIOS ? 'apple' : 'google';
+            $isIOS = (stripos($userAgent, 'iPhone') !== false
+                || stripos($userAgent, 'iPad') !== false
+                || stripos($userAgent, 'iPod') !== false
+                // iPadOS (and sometimes iOS “Request Desktop Website”) can identify as Macintosh,
+                // but still include "Mobile" in the UA.
+                || (stripos($userAgent, 'Macintosh') !== false && stripos($userAgent, 'Mobile') !== false));
+
+            $provider = $isIOS ? 'system' : 'google';
         }
-        
-        return $provider === 'apple'
-            ? "https://maps.apple.com/?q={$query}"
-            : "https://www.google.com/maps/search/?api=1&query={$query}";
+
+        return match ($provider) {
+            // iOS scheme: lets the OS open the user's default Maps app.
+            'system' => "maps://?q={$query}",
+            'apple' => "https://maps.apple.com/?q={$query}",
+            default => "https://www.google.com/maps/search/?api=1&query={$query}",
+        };
     }
 
     /**

@@ -7,6 +7,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Dev Webhook URL
+    |--------------------------------------------------------------------------
+    |
+    | When set, this URL is used for webhook callbacks in development (e.g.,
+    | vendor availability SMS links). Use ngrok or expose to create a public
+    | tunnel to your local environment.
+    |
+    */
+
+    'dev_webhook_url' => env('DEV_WEBHOOK_URL'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Timezone
     |--------------------------------------------------------------------------
     |

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\TransactionVendorBulkMatchJob;
 use App\Models\CompanyEmail;
 use App\Models\Expense;
 use App\Models\ExpenseReceipts;
@@ -542,6 +543,9 @@ class ReceiptController extends Controller
 
             sleep(1);
         }
+
+        // Queue bulk match job to immediately process any new expenses with matching rules
+        TransactionVendorBulkMatchJob::dispatch();
     }
 
     public function azure_document_model($doc_type, $ocr_path)
@@ -751,7 +755,7 @@ class ReceiptController extends Controller
             }
 
             if (! is_string($poRegex) || $poRegex === '') {
-                $poRegex = '/(?:PO\s*\/\s*JOB\s*NAME|PO\s*NUMBER|PO\s*#|P\.?O\.?\s*#?|JOB\s*NAME)\s*:\s*([^\r\n]{1,80})/i';
+                $poRegex = '/(?:PO\s*\/\s*JOB\s*NAME|PO\s*NUMBER|PO\s*#|P\.?O\.?\s*#?|JOB\s*NAME|PRO\s*JobName)\s*:\s*([^\r\n]{1,80})/i';
             }
 
             if (preg_match($poRegex, $content, $matches)) {

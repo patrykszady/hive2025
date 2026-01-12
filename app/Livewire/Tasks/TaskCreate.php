@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Tasks;
 
+use App\Models\Project;
 use App\Models\Task;
 use App\Models\Vendor;
 use App\Models\TaskDependency;
@@ -35,6 +36,34 @@ class TaskCreate extends Component
     ];
 
     protected $listeners = ['editTask', 'addTask'];
+
+    private function ensureProjectOptionLoaded(?int $projectId): void
+    {
+        if (! $projectId) {
+            return;
+        }
+
+        $existingIds = collect($this->projects)
+            ->map(fn ($project) => is_object($project) ? ($project->id ?? null) : (is_array($project) ? ($project['id'] ?? null) : null))
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->values();
+
+        if ($existingIds->contains((int) $projectId)) {
+            return;
+        }
+
+        $project = Project::query()
+            ->with('latestStatus')
+            ->whereKey($projectId)
+            ->first();
+
+        if (! $project) {
+            return;
+        }
+
+        $this->projects = array_values(array_merge([$project], (array) $this->projects));
+    }
 
     #[Computed]
     public function taskTypeTextClasses(): array
@@ -282,6 +311,7 @@ class TaskCreate extends Component
         // Set the appropriate fields based on what was passed
         if ($project_id) {
             $this->form->project_id = $project_id;
+            $this->ensureProjectOptionLoaded((int) $project_id);
         }
 
         if ($vendor_id) {
@@ -300,6 +330,8 @@ class TaskCreate extends Component
         $this->handleTaskOperation('start', $task);
         $this->resetFormFields();
         $this->setupViewText('edit');
+
+        $this->ensureProjectOptionLoaded((int) $task->project_id);
         
         // Simply use the task as-is without reloading
         $this->form->setTask($task);
