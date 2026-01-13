@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Task;
+use App\Models\Vendor;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\View\View;
 
@@ -11,14 +12,27 @@ class VendorAvailabilityController extends Controller
     /**
      * Show all pending tasks for a vendor to approve/reject.
      */
-    public function index(string $token): View
+    public function index(string $token): View|RedirectResponse
     {
-        // Find any task with this token (regardless of status) to get the vendor
-        $task = Task::where('vendor_status_token', $token)
-            ->with(['vendor'])
-            ->first();
+        $vendor = Vendor::where('availability_token', $token)->first();
 
-        if (! $task || ! $task->vendor) {
+        // Legacy support: old SMS links used per-task tokens.
+        if (! $vendor) {
+            $task = Task::where('vendor_status_token', $token)
+                ->with(['vendor'])
+                ->first();
+
+            if ($task?->vendor) {
+                $vendor = $task->vendor;
+
+                $canonicalToken = $vendor->getOrCreateAvailabilityToken();
+                if ($canonicalToken !== $token) {
+                    return redirect()->route('vendor.availability.index', $canonicalToken);
+                }
+            }
+        }
+
+        if (! $vendor) {
             return view('vendor.availability-index', [
                 'valid' => false,
                 'message' => 'This link is no longer valid.',
@@ -28,8 +42,8 @@ class VendorAvailabilityController extends Controller
             ]);
         }
 
-        // Get all tasks for this vendor (any status)
-        $vendor = $task->vendor;
+        $canonicalToken = $vendor->getOrCreateAvailabilityToken();
+
         $allTasks = Task::where('vendor_id', $vendor->id)
             ->whereIn('vendor_status', [
                 Task::VENDOR_STATUS_REQUESTED,
@@ -44,7 +58,7 @@ class VendorAvailabilityController extends Controller
             'valid' => true,
             'tasks' => $allTasks,
             'vendor' => $vendor,
-            'token' => $token,
+            'token' => $canonicalToken,
         ]);
     }
 
@@ -53,7 +67,15 @@ class VendorAvailabilityController extends Controller
      */
     public function confirm(string $token, int $taskId): RedirectResponse
     {
+        $vendor = Vendor::where('availability_token', $token)->first();
+
+        if (! $vendor) {
+            return redirect()->route('vendor.availability.index', $token)
+                ->with('error', 'This link is no longer valid.');
+        }
+
         $task = Task::where('id', $taskId)
+            ->where('vendor_id', $vendor->id)
             ->where('vendor_status', Task::VENDOR_STATUS_REQUESTED)
             ->first();
 
@@ -75,7 +97,15 @@ class VendorAvailabilityController extends Controller
      */
     public function reject(string $token, int $taskId): RedirectResponse
     {
+        $vendor = Vendor::where('availability_token', $token)->first();
+
+        if (! $vendor) {
+            return redirect()->route('vendor.availability.index', $token)
+                ->with('error', 'This link is no longer valid.');
+        }
+
         $task = Task::where('id', $taskId)
+            ->where('vendor_id', $vendor->id)
             ->where('vendor_status', Task::VENDOR_STATUS_REQUESTED)
             ->first();
 

@@ -27,6 +27,50 @@ class Task extends Model
         'vendor_status', 'vendor_status_token'
     ];
 
+    /**
+     * Accessor used by the vendor availability page.
+     * Example: "Jan 13, 2026 @ 7AM"
+     */
+    public function getDateWithTimeAttribute(): string
+    {
+        $startDate = $this->start_date;
+        $endDate = $this->end_date;
+
+        if (! $startDate) {
+            return '';
+        }
+
+        $hasMultipleDays = $endDate && ! $startDate->eq($endDate);
+
+        $options = $this->options;
+        $timeSettings = is_object($options) ? ($options->time_settings ?? null) : ($options['time_settings'] ?? null);
+        $dateKey = $startDate->format('Y-m-d');
+        $startTime = null;
+
+        if ($timeSettings) {
+            $daySettings = is_object($timeSettings) ? ($timeSettings->$dateKey ?? null) : ($timeSettings[$dateKey] ?? null);
+            if ($daySettings) {
+                $useTime = is_object($daySettings) ? ($daySettings->use_time ?? false) : ($daySettings['use_time'] ?? false);
+                if ($useTime) {
+                    $startTime = is_object($daySettings) ? ($daySettings->start_time ?? null) : ($daySettings['start_time'] ?? null);
+                }
+            }
+        }
+
+        $dateStr = $startDate->format('M j, Y');
+
+        if ($startTime && ! $hasMultipleDays) {
+            $timeFormatted = Carbon::createFromFormat('H:i', $startTime)->format('gA');
+            $dateStr .= " @ {$timeFormatted}";
+        }
+
+        if ($hasMultipleDays) {
+            $dateStr .= ' - ' . $endDate->format('M j, Y');
+        }
+
+        return $dateStr;
+    }
+
     public const VENDOR_STATUS_REQUESTED = 'requested';
     public const VENDOR_STATUS_CONFIRMED = 'confirmed';
     public const VENDOR_STATUS_REJECTED = 'rejected';

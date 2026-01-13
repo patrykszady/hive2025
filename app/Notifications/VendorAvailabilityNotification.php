@@ -4,6 +4,7 @@ namespace App\Notifications;
 
 use App\Channels\TwilioChannel;
 use App\Models\Task;
+use App\Models\Vendor;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\Eloquent\Collection;
@@ -66,7 +67,6 @@ class VendorAvailabilityNotification extends Notification implements ShouldQueue
     protected function formatSingleTaskMessage(object $notifiable, ?Task $task = null): string
     {
         $task = $task ?? $this->tasks;
-        $token = is_array($this->tokens) ? ($this->tokens[$task->id] ?? reset($this->tokens)) : $this->tokens;
 
         $vendorName = $task->vendor?->short_name ?? $task->vendor?->name ?? 'Hi';
         $ownerName = $task->owner?->short_name ?? $task->owner?->name ?? 'Your contractor';
@@ -76,11 +76,7 @@ class VendorAvailabilityNotification extends Notification implements ShouldQueue
 
         $dateRange = $this->formatDateWithTime($task);
 
-        $baseUrl = config('app.dev_webhook_url') ?: config('app.url');
-        $responseUrl = $baseUrl . "/vendor/availability/{$token}";
-
-        // Try to shorten the URL
-        $shortUrl = $this->shortenUrl($responseUrl) ?? $responseUrl;
+        $shortUrl = $this->vendorAvailabilityUrl($task);
 
         // Strip https:// to avoid rich link preview on iOS
         $displayUrl = preg_replace('#^https?://#', '', $shortUrl);
@@ -89,7 +85,7 @@ class VendorAvailabilityNotification extends Notification implements ShouldQueue
             . "{$ownerName} assigned\n"
             . "\"{$task->title}\"\n"
             . "{$address}\n"
-            . "📅 {$dateRange}\n"
+            . "{$dateRange}\n"
             . "\n"
             . "Tap to respond 👇\n"
             . "{$displayUrl}";
@@ -118,21 +114,64 @@ class VendorAvailabilityNotification extends Notification implements ShouldQueue
 
             $lines[] = "\"{$task->title}\"";
             $lines[] = $address;
-            $lines[] = "📅 {$dateRange}";
+            $lines[] = "{$dateRange}";
             $lines[] = "";
         }
 
-        // Use first task's token - the page shows all pending tasks for this vendor
-        $firstToken = $this->tokens[$firstTask->id] ?? reset($this->tokens);
-        $baseUrl = config('app.dev_webhook_url') ?: config('app.url');
-        $responseUrl = $baseUrl . "/vendor/availability/{$firstToken}";
-        $shortUrl = $this->shortenUrl($responseUrl) ?? $responseUrl;
+        $shortUrl = $this->vendorAvailabilityUrl($firstTask);
         $displayUrl = preg_replace('#^https?://#', '', $shortUrl);
 
         $lines[] = "Tap to respond 👇";
         $lines[] = $displayUrl;
 
         return implode("\n", $lines);
+    }
+
+    protected function vendorAvailabilityUrl(Task $task): string
+    {
+        $vendor = $task->vendor;
+        $devWebhookUrl = config('app.dev_webhook_url');
+        $baseUrl = $devWebhookUrl ?: config('app.url');
+
+        if (! $vendor) {
+            return $baseUrl . '/vendor/availability';
+        }
+
+        $token = $vendor->getOrCreateAvailabilityToken();
+        $responseUrl = $baseUrl . "/vendor/availability/{$token}";
+
+        // In dev/local we use ngrok (DEV_WEBHOOK_URL) which changes frequently,
+        // so we always generate a fresh short URL (don't cache).
+        if (! empty($devWebhookUrl)) {
+            Log::channel('vendor_sms')->info('DEV_WEBHOOK_URL set; generating fresh short URL', [
+                'vendor_id' => $vendor->id,
+                'token' => $token,
+                'original_url' => $responseUrl,
+            ]);
+
+            return $this->shortenUrl($responseUrl) ?? $responseUrl;
+        }
+
+        // In production, use cached short URL if available
+        $cached = $vendor->availability_short_url;
+        if (! empty($cached)) {
+            Log::channel('vendor_sms')->info('Using cached short URL', [
+                'vendor_id' => $vendor->id,
+                'token' => $token,
+                'original_url' => $responseUrl,
+                'short_url' => $cached,
+            ]);
+
+            return $cached;
+        }
+
+        $shortUrl = $this->shortenUrl($responseUrl) ?? $responseUrl;
+
+        if ($shortUrl !== $responseUrl) {
+            $vendor->forceFill(['availability_short_url' => $shortUrl])->saveQuietly();
+        }
+
+        return $shortUrl;
     }
 
     /**
@@ -208,17 +247,18 @@ class VendorAvailabilityNotification extends Notification implements ShouldQueue
     }
 
     /**
-     * Shorten a URL using TinyURL API.
+     * Shorten a URL using is.gd API (more reliable than TinyURL).
      */
     protected function shortenUrl(string $url): ?string
     {
         try {
-            $response = Http::timeout(5)->get('https://tinyurl.com/api-create.php', [
+            $response = Http::timeout(5)->get('https://is.gd/create.php', [
+                'format' => 'simple',
                 'url' => $url,
             ]);
 
             if ($response->successful()) {
-                $shortUrl = $response->body();
+                $shortUrl = trim($response->body());
                 
                 Log::channel('vendor_sms')->info("URL shortened", [
                     'original_url' => $url,
@@ -228,7 +268,7 @@ class VendorAvailabilityNotification extends Notification implements ShouldQueue
                 return $shortUrl;
             }
             
-            Log::channel('vendor_sms')->warning("TinyURL API returned non-success", [
+            Log::channel('vendor_sms')->warning("is.gd API returned non-success", [
                 'original_url' => $url,
                 'status' => $response->status(),
                 'body' => $response->body(),

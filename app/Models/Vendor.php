@@ -24,7 +24,7 @@ class Vendor extends Model
 {
     use HasFactory, Notifiable, Searchable, HasAddress;
 
-    protected $fillable = ['business_name', 'business_type', 'sheets_type', 'category_id', 'address', 'address_2', 'city', 'state', 'zip_code', 'business_phone', 'business_email', 'timezone', 'short_name', 'created_at', 'updated_at'];
+    protected $fillable = ['business_name', 'business_type', 'sheets_type', 'category_id', 'address', 'address_2', 'city', 'state', 'zip_code', 'business_phone', 'business_email', 'timezone', 'short_name', 'availability_token', 'availability_short_url', 'created_at', 'updated_at'];
     // protected $appends = ['name'];
 
     protected function casts(): array
@@ -61,6 +61,18 @@ class Vendor extends Model
     public function searchableAs(): string
     {
         return env('APP_ENV') == 'local' ? 'vendors_index_dev' : 'vendors_index';
+    }
+
+    public function getOrCreateAvailabilityToken(): string
+    {
+        if (! empty($this->availability_token)) {
+            return $this->availability_token;
+        }
+
+        $token = bin2hex(random_bytes(32));
+        $this->forceFill(['availability_token' => $token])->saveQuietly();
+
+        return $token;
     }
 
     public function vendor_categories(): BelongsToMany

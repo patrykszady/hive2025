@@ -77,17 +77,34 @@
                                             <flux:icon.map-pin class="size-4 shrink-0" />
                                             <span class="truncate">{{ $task->project->address }}</span>
                                         </a>
+
+                                        @php
+                                            $cityState = collect([
+                                                $task->project?->city,
+                                                $task->project?->state,
+                                            ])->filter()->implode(', ');
+
+                                            $cityStateZip = trim(implode(' ', array_filter([
+                                                $cityState,
+                                                $task->project?->zip_code,
+                                            ])));
+                                        @endphp
+
+                                        @if($cityStateZip)
+                                            <div class="text-sm text-zinc-600 dark:text-zinc-400">
+                                                {{ $cityStateZip }}
+                                            </div>
+                                        @endif
                                     @else
                                         <flux:subheading class="truncate">No location</flux:subheading>
                                     @endif
                                     <div class="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
-                                        <flux:icon.calendar class="size-3.5" />
-                                        <span>
-                                            {{ $task->start_date->format('M j, Y') }}
-                                            @if($task->end_date && !$task->start_date->eq($task->end_date))
-                                                - {{ $task->end_date->format('M j, Y') }}
-                                            @endif
-                                        </span>
+                                        <flux:icon.clock class="size-4 shrink-0" />
+                                        <span>{{ $task->date_with_time }}</span>
+
+                                        @if($task->start_date?->isTomorrow())
+                                            <flux:badge size="xs" inset="top bottom" color="sky">Tomorrow</flux:badge>
+                                        @endif
                                     </div>
                                 </div>
 

@@ -58,12 +58,18 @@ class SendVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
             return;
         }
 
-        // Generate a token and save to DB
-        $token = bin2hex(random_bytes(32));
-        $task->update([
+        // Ensure the task has a token (do not regenerate existing token so old links keep working)
+        $token = $task->vendor_status_token ?: bin2hex(random_bytes(32));
+
+        $updates = [
             'vendor_status' => Task::VENDOR_STATUS_REQUESTED,
-            'vendor_status_token' => $token,
-        ]);
+        ];
+
+        if (! $task->vendor_status_token) {
+            $updates['vendor_status_token'] = $token;
+        }
+
+        $task->update($updates);
 
         // Send the notification
         $vendor->notify(new VendorAvailabilityNotification($task, $token));

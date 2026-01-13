@@ -18,8 +18,10 @@ class SendBatchVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
     /**
      * Business hours for sending vendor SMS (same as team member task SMS).
      */
-    protected const BUSINESS_HOURS_START = 7; // 7am
-    protected const BUSINESS_HOURS_END = 18; // 6pm
+    protected const BUSINESS_TIMEZONE = 'America/Chicago';
+    protected const BUSINESS_HOURS_START_HOUR = 6;
+    protected const BUSINESS_HOURS_START_MINUTE = 30; // 6:30am
+    protected const BUSINESS_HOURS_END_HOUR = 20; // 8:00pm
 
     /**
      * The number of seconds after which the job's unique lock will be released.
@@ -59,10 +61,13 @@ class SendBatchVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
         // Check if within business hours, if not, re-queue for next morning
         if (! $this->isWithinBusinessHours()) {
             $nextMorning = $this->getNextBusinessHoursStart();
-            $log->info("Outside business hours, re-queuing", [
+            $log->info(
+                "SendBatchVendorAvailabilitySms: Outside business hours, re-queuing for vendor {$this->vendorId} at {$nextMorning->toDateTimeString()}",
+                [
                 'vendor_id' => $this->vendorId,
                 'next_run' => $nextMorning->toDateTimeString(),
-            ]);
+                ]
+            );
             
             self::dispatch($this->vendorId, $this->taskIds)
                 ->delay($nextMorning);
@@ -122,25 +127,25 @@ class SendBatchVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
             return;
         }
 
-        // Generate tokens for all tasks (status is already 'requested', just need to set token)
-        $taskTokens = [];
+        $vendorToken = $vendor->getOrCreateAvailabilityToken();
+
+        // Mark tasks as sent by setting a (vendor-level) token on each task
         foreach ($tasks as $task) {
-            $token = bin2hex(random_bytes(32));
             $task->update([
-                'vendor_status_token' => $token,
+                'vendor_status_token' => $vendorToken,
             ]);
-            $taskTokens[$task->id] = $token;
             
-            $log->debug("Generated token for task", [
+            $log->debug("Set vendor token for task", [
                 'task_id' => $task->id,
                 'task_title' => $task->title,
                 'project' => $task->project?->short_address,
                 'start_date' => $task->start_date?->toDateString(),
+                'vendor_token' => $vendorToken,
             ]);
         }
 
         // Send consolidated notification to each admin user
-        $notification = new VendorAvailabilityNotification($tasks, $taskTokens);
+        $notification = new VendorAvailabilityNotification($tasks, $vendorToken);
         $successCount = 0;
         $failureCount = 0;
 
@@ -191,9 +196,12 @@ class SendBatchVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
      */
     private function isWithinBusinessHours(): bool
     {
-        $now = Carbon::now();
-        
-        return $now->hour >= self::BUSINESS_HOURS_START && $now->hour < self::BUSINESS_HOURS_END;
+        $now = Carbon::now(self::BUSINESS_TIMEZONE);
+
+        $start = $now->copy()->setTime(self::BUSINESS_HOURS_START_HOUR, self::BUSINESS_HOURS_START_MINUTE);
+        $end = $now->copy()->setTime(self::BUSINESS_HOURS_END_HOUR, 0);
+
+        return $now->greaterThanOrEqualTo($start) && $now->lessThan($end);
     }
 
     /**
@@ -201,14 +209,13 @@ class SendBatchVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
      */
     private function getNextBusinessHoursStart(): Carbon
     {
-        $now = Carbon::now();
-        
-        // If before business hours today, return today at start hour
-        if ($now->hour < self::BUSINESS_HOURS_START) {
-            return $now->copy()->setTime(self::BUSINESS_HOURS_START, 0);
+        $now = Carbon::now(self::BUSINESS_TIMEZONE);
+
+        $startToday = $now->copy()->setTime(self::BUSINESS_HOURS_START_HOUR, self::BUSINESS_HOURS_START_MINUTE);
+        if ($now->lessThan($startToday)) {
+            return $startToday;
         }
-        
-        // Otherwise return tomorrow at start hour
-        return $now->copy()->addDay()->setTime(self::BUSINESS_HOURS_START, 0);
+
+        return $now->copy()->addDay()->setTime(self::BUSINESS_HOURS_START_HOUR, self::BUSINESS_HOURS_START_MINUTE);
     }
 }

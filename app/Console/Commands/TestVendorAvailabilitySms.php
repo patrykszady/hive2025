@@ -116,22 +116,26 @@ class TestVendorAvailabilitySms extends Command
             ])
         );
 
-        // Generate tokens for all tasks
-        $taskTokens = [];
+        $vendorToken = $vendor->getOrCreateAvailabilityToken();
+
+        // Mark tasks as sent by setting vendor token (do not overwrite existing legacy tokens)
         foreach ($tasks as $task) {
-            $token = bin2hex(random_bytes(32));
-            $task->update([
+            $updates = [
                 'vendor_status' => Task::VENDOR_STATUS_REQUESTED,
-                'vendor_status_token' => $token,
-            ]);
-            $taskTokens[$task->id] = $token;
+            ];
+
+            if (! $task->vendor_status_token) {
+                $updates['vendor_status_token'] = $vendorToken;
+            }
+
+            $task->update($updates);
         }
 
         $this->newLine();
         $this->info("Sending SMS to dev number: " . config('services.twilio.dev_to', '+12249993880'));
 
         // Send the notification directly (bypasses queue for immediate testing)
-        $notification = new VendorAvailabilityNotification($tasks, $taskTokens);
+        $notification = new VendorAvailabilityNotification($tasks, $vendorToken);
 
         try {
             $channel = new TwilioChannel();
@@ -152,10 +156,8 @@ class TestVendorAvailabilitySms extends Command
             }
 
             $this->newLine();
-            $this->line("Response page links sent in SMS:");
-            foreach ($taskTokens as $taskId => $token) {
-                $this->line("  Task {$taskId}: {$baseUrl}/vendor/availability/{$token}");
-            }
+            $this->line("Response page link sent in SMS:");
+            $this->line("  {$baseUrl}/vendor/availability/{$vendorToken}");
 
             return 0;
         } catch (\Exception $e) {
