@@ -2,10 +2,9 @@
 
 namespace App\Channels;
 
-use App\Notifications\ClientScheduleNotification;
-use App\Notifications\TaskReminderNotification;
-use App\Notifications\TaskUpdateNotification;
-use App\Notifications\VendorAvailabilityNotification;
+use App\Notifications\ClientScheduleSmsNotification;
+use App\Notifications\TeamTaskSmsNotification;
+use App\Notifications\VendorAvailabilitySmsNotification;
 use Illuminate\Notifications\Notification;
 use Illuminate\Support\Facades\Log;
 use Twilio\Rest\Client;
@@ -29,35 +28,43 @@ class TwilioChannel
     public function send($notifiable, Notification $notification)
     {
         $phone = $notifiable->routeNotificationFor('twilio');
-        $isVendorSms = $notification instanceof VendorAvailabilityNotification;
-        $isClientScheduleSms = $notification instanceof ClientScheduleNotification;
-        $logChannel = $isVendorSms ? 'vendor_sms' : 'task_reminder';
+        $isVendorSms = $notification instanceof VendorAvailabilitySmsNotification;
+        $isClientScheduleSms = $notification instanceof ClientScheduleSmsNotification;
+        $isTeamTaskSms = $notification instanceof TeamTaskSmsNotification;
+
+        $logChannel = match (true) {
+            $isVendorSms => 'vendor_sms',
+            $isClientScheduleSms => 'client_sms',
+            $isTeamTaskSms => 'team_sms',
+            default => null,
+        };
 
         if (
             app()->environment(['local', 'development'])
-            && ($notification instanceof TaskReminderNotification 
-                || $notification instanceof TaskUpdateNotification
-                || $notification instanceof VendorAvailabilityNotification
-                || $notification instanceof ClientScheduleNotification)
+            && ($notification instanceof TeamTaskSmsNotification 
+                || $notification instanceof VendorAvailabilitySmsNotification
+                || $notification instanceof ClientScheduleSmsNotification)
         ) {
             $originalPhone = $phone;
             $phone = config('services.twilio.dev_to', '+12249993880');
             
-            if ($isVendorSms || $isClientScheduleSms) {
-                Log::channel($logChannel)->info("Dev environment: redirecting SMS", [
+            if (is_string($logChannel)) {
+                Log::channel($logChannel)->info('Dev environment: redirecting SMS', [
                     'original_phone' => $originalPhone,
                     'redirected_to' => $phone,
                     'notifiable_type' => get_class($notifiable),
                     'notifiable_id' => $notifiable->id ?? null,
+                    'notification' => get_class($notification),
                 ]);
             }
         }
 
         if (!$phone) {
-            if ($isVendorSms || $isClientScheduleSms) {
-                Log::channel($logChannel)->warning("No phone number available, skipping SMS", [
+            if (is_string($logChannel)) {
+                Log::channel($logChannel)->warning('No phone number available, skipping SMS', [
                     'notifiable_type' => get_class($notifiable),
                     'notifiable_id' => $notifiable->id ?? null,
+                    'notification' => get_class($notification),
                 ]);
             }
             return;
@@ -65,15 +72,16 @@ class TwilioChannel
 
         $message = $notification->toTwilio($notifiable);
 
-        if ($isVendorSms || $isClientScheduleSms) {
-            Log::channel($logChannel)->info("Sending SMS via Twilio", [
+        if (is_string($logChannel)) {
+            Log::channel($logChannel)->info('Sending SMS via Twilio', [
                 'phone' => $phone,
                 'message_length' => strlen($message),
                 'from' => config('services.twilio.from'),
                 'notifiable_type' => get_class($notifiable),
                 'notifiable_id' => $notifiable->id ?? null,
+                'notification' => get_class($notification),
             ]);
-            Log::channel($logChannel)->debug("SMS message content", [
+            Log::channel($logChannel)->debug('SMS message content', [
                 'message' => $message,
             ]);
         }
@@ -87,19 +95,23 @@ class TwilioChannel
                 ]
             );
             
-            if ($isVendorSms) {
-                Log::channel($logChannel)->info("SMS sent successfully", [
+            if (is_string($logChannel)) {
+                Log::channel($logChannel)->info('SMS sent successfully', [
                     'phone' => $phone,
                     'twilio_sid' => $result->sid ?? null,
                     'status' => $result->status ?? null,
+                    'notification' => get_class($notification),
                 ]);
             }
         } catch (\Exception $e) {
-            Log::channel($logChannel)->error('SMS failed to send', ApiErrorFormatter::format($e, [
-                'notifiable_type' => get_class($notifiable),
-                'notifiable_id' => $notifiable->id ?? null,
-                'phone' => $phone,
-            ]));
+            if (is_string($logChannel)) {
+                Log::channel($logChannel)->error('SMS failed to send', ApiErrorFormatter::format($e, [
+                    'notifiable_type' => get_class($notifiable),
+                    'notifiable_id' => $notifiable->id ?? null,
+                    'phone' => $phone,
+                    'notification' => get_class($notification),
+                ]));
+            }
 
             throw $e;
         }

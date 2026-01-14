@@ -69,13 +69,13 @@ Schedule::command('client:send-schedule-sms tomorrow')
     ->onOneServer();
 
 // Send "today" reminders at 7 AM each morning
-Schedule::command('client:send-schedule-sms today')
-    ->dailyAt('07:00')
-    ->timezone('America/Chicago')
-    ->name('client-schedule-sms-today')
-    ->environments(['production'])
-    ->withoutOverlapping()
-    ->onOneServer();
+// Schedule::command('client:send-schedule-sms today')
+//     ->dailyAt('07:00')
+//     ->timezone('America/Chicago')
+//     ->name('client-schedule-sms-today')
+//     ->environments(['production'])
+//     ->withoutOverlapping()
+//     ->onOneServer();
 
 //Plaid/Transaction tasks
 // Disabled - using ITEM webhooks (ERROR, PENDING_EXPIRATION, USER_PERMISSION_REVOKED) instead
@@ -202,12 +202,12 @@ Schedule::command('tasks:send-tomorrow-reminders')
     ->onOneServer();
 
 // Process all task notifications
-Schedule::command('tasks:process-notifications')
-    ->everyMinute()
-    ->name('process-task-notifications')
-    ->environments(['production'])
-    ->withoutOverlapping()
-    ->onOneServer();
+// Schedule::command('tasks:process-notifications')
+//     ->everyMinute()
+//     ->name('process-task-notifications')
+//     ->environments(['production'])
+//     ->withoutOverlapping()
+//     ->onOneServer();
     
 // Search index maintenance - sync settings and reimport vendor index
 Schedule::command('scout:sync-index-settings')

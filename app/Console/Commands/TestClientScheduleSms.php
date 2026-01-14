@@ -6,7 +6,7 @@ use App\Channels\TwilioChannel;
 use App\Models\Project;
 use App\Models\Task;
 use App\Models\User;
-use App\Notifications\ClientScheduleNotification;
+use App\Notifications\ClientScheduleSmsNotification;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 
@@ -113,7 +113,7 @@ class TestClientScheduleSms extends Command
         $this->info("Schedule URL: {$url}");
 
         // Create the notification
-        $notification = new ClientScheduleNotification(
+        $notification = new ClientScheduleSmsNotification(
             $project,
             $recipientFirstName,
             $type,

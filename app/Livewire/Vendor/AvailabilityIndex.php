@@ -301,6 +301,8 @@ class AvailabilityIndex extends Component
         return view('livewire.vendor.availability-index', [
             'tasks' => $this->getTasks(),
             'vendor' => $this->getVendor(),
-        ])->layout('components.layouts.guest');
+        ])->layout('components.layouts.guest', [
+            'title' => 'Tasks',
+        ]);
     }
 }

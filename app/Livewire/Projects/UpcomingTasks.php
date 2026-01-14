@@ -77,11 +77,21 @@ class UpcomingTasks extends Component
     {
         $today = $this->getToday();
 
+        // Show tasks for the *current week* (Mon-Sun), including earlier days.
+        // This keeps the weekly view useful mid-week (e.g. a task on Tuesday still shows on Wednesday).
+        $todayCarbon = Carbon::parse($today);
+        $startOfWeek = $todayCarbon->copy()->startOfWeek(Carbon::MONDAY);
+        $endOfWeek = $todayCarbon->copy()->endOfWeek(Carbon::SUNDAY);
+
+        $startOfWeekStr = $startOfWeek->format('Y-m-d');
+        $endOfWeekStr = $endOfWeek->format('Y-m-d');
+
         $tasks = Task::query()
             ->where('project_id', $this->project->id)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
-            ->whereDate('end_date', '>=', $today)
+            ->whereDate('start_date', '<=', $endOfWeekStr)
+            ->whereDate('end_date', '>=', $startOfWeekStr)
             ->with('vendor')
             ->orderBy('start_date')
             ->orderBy('end_date')
@@ -110,14 +120,6 @@ class UpcomingTasks extends Component
 
         // Build grouped tasks with all days in range (including empty days)
         $grouped = collect();
-        $todayCarbon = Carbon::parse($today);
-        $todayStr = $todayCarbon->format('Y-m-d');
-
-        // Show from start of week (Monday) through end of current week (Sunday)
-        $startOfWeek = $todayCarbon->copy()->startOfWeek(Carbon::MONDAY);
-        $endOfWeek = $todayCarbon->copy()->endOfWeek(Carbon::SUNDAY);
-        $startOfWeekStr = $startOfWeek->format('Y-m-d');
-        $endOfWeekStr = $endOfWeek->format('Y-m-d');
 
         $startDate = $startOfWeek->copy();
         $endDate = $endOfWeek->copy();
@@ -159,7 +161,6 @@ class UpcomingTasks extends Component
     public function nextTaskInfo(): ?object
     {
         $today = $this->getToday();
-        $todayStr = $today->format('Y-m-d');
         $weekEnd = $today->copy()->endOfWeek(Carbon::SUNDAY);
         $weekEndStr = $weekEnd->format('Y-m-d');
 
@@ -168,7 +169,7 @@ class UpcomingTasks extends Component
             ->where('project_id', $this->project->id)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
-            ->whereDate('end_date', '>=', $today)
+            ->whereDate('start_date', '>', $weekEndStr)
             ->get();
 
         // Collect all task dates beyond the displayed week
@@ -226,11 +227,15 @@ class UpcomingTasks extends Component
     {
         $today = $this->getToday();
 
+        $startOfWeek = $today->copy()->startOfWeek(Carbon::MONDAY)->format('Y-m-d');
+        $endOfWeek = $today->copy()->endOfWeek(Carbon::SUNDAY)->format('Y-m-d');
+
         return Task::query()
             ->where('project_id', $this->project->id)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
-            ->whereDate('end_date', '>=', $today)
+            ->whereDate('start_date', '<=', $endOfWeek)
+            ->whereDate('end_date', '>=', $startOfWeek)
             ->count();
     }
 

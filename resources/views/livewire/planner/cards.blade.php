@@ -268,56 +268,163 @@
         <div
             x-ref="scrollContainer"
             @scroll.passive="onScroll($event)"
-            class="flex-1 min-h-0 overflow-x-scroll overflow-y-hidden"
+            class="flex-1 min-h-0 overflow-x-scroll overflow-y-auto"
         >
-            <div class="flex h-full min-h-0 min-w-max">
-            {{-- Left spacer that matches first day's background --}}
-            <div class="w-4 shrink-0 {{ $firstDayIsWeekend ? 'bg-zinc-200 dark:bg-zinc-700' : '' }}"></div>
+            @php
+                $projectCount = $kanbanColumns->first()?->columns->count() ?? 0;
+            @endphp
+            @php
+                // Build a grid that can have a 16px spacer between most days,
+                // but *no* spacer between Saturday and Sunday.
+                $dayColumnIndices = [];
+                $spacerAfterDayColumnIndices = [];
+                $gridTemplateColumns = 'auto ';
+
+                $currentGridCol = 2; // col 1 is the left spacer
+                $totalDays = $kanbanColumns->count();
+
+                foreach ($kanbanColumns as $index => $dayData) {
+                    $dayColumnIndices[$index] = $currentGridCol;
+                    $gridTemplateColumns .= 'auto ';
+                    $currentGridCol++;
+
+                    $isLast = ($index === $totalDays - 1);
+                    // Always add a spacer after each day (except the last) so Sat/Sun have spacing,
+                    // while weekend background can still span across the spacer.
+                    $addSpacerAfterThisDay = ! $isLast;
+
+                    if ($addSpacerAfterThisDay) {
+                        $spacerAfterDayColumnIndices[$index] = $currentGridCol;
+                        $gridTemplateColumns .= '1rem '; // matches Tailwind w-4
+                        $currentGridCol++;
+                    }
+                }
+
+                $gridTemplateColumns .= 'auto'; // right spacer
+
+                // Build contiguous weekend runs (typically Sat+Sun)
+                $weekendRuns = [];
+                $runStart = null;
+                foreach ($kanbanColumns as $index => $dayData) {
+                    if ($dayData->isWeekend) {
+                        if ($runStart === null) {
+                            $runStart = $index;
+                        }
+                    } else {
+                        if ($runStart !== null) {
+                            $weekendRuns[] = [$runStart, $index - 1];
+                            $runStart = null;
+                        }
+                    }
+                }
+                if ($runStart !== null) {
+                    $weekendRuns[] = [$runStart, $totalDays - 1];
+                }
+            @endphp
+
+            <div class="grid min-w-max" style="grid-template-columns: {{ $gridTemplateColumns }}; grid-template-rows: auto repeat({{ $projectCount }}, auto);">
+            {{-- Left spacer --}}
+            <div class="w-4 shrink-0 {{ $firstDayIsWeekend ? 'bg-zinc-200 dark:bg-zinc-700' : '' }}" style="grid-column: 1; grid-row: 1 / -1;"></div>
+
+            {{-- Weekend background blocks (full height, behind content) --}}
+            @foreach ($weekendRuns as [$startIndex, $endIndex])
+                @php
+                    $startCol = $dayColumnIndices[$startIndex];
+                    $endColExclusive = $dayColumnIndices[$endIndex] + 1;
+
+                    // If weekend starts at first day, extend background to include left spacer (col 1)
+                    if ($startIndex === 0) {
+                        $startCol = 1;
+                    }
+
+                    // Optional half-width extensions into adjacent spacer columns,
+                    // to match the "bleed" effect from the original layout.
+                    $leftSpacerCol = null;
+                    if ($startIndex > 0 && array_key_exists($startIndex - 1, $spacerAfterDayColumnIndices)) {
+                        $leftSpacerCol = $spacerAfterDayColumnIndices[$startIndex - 1];
+                    }
+                    $rightSpacerCol = null;
+                    if (array_key_exists($endIndex, $spacerAfterDayColumnIndices)) {
+                        $rightSpacerCol = $spacerAfterDayColumnIndices[$endIndex];
+                    }
+                @endphp
+
+                @if ($leftSpacerCol)
+                    <div
+                        aria-hidden="true"
+                        class="pointer-events-none z-0 relative"
+                        style="grid-column: {{ $leftSpacerCol }}; grid-row: 1 / -1;"
+                    >
+                        <div class="absolute inset-y-0 right-0 w-1/2 bg-zinc-200 dark:bg-zinc-700"></div>
+                    </div>
+                @endif
+
+                <div
+                    aria-hidden="true"
+                    class="bg-zinc-200 dark:bg-zinc-700 pointer-events-none z-0"
+                    style="grid-column: {{ $startCol }} / {{ $endColExclusive }}; grid-row: 1 / -1;"
+                ></div>
+
+                @if ($rightSpacerCol)
+                    <div
+                        aria-hidden="true"
+                        class="pointer-events-none z-0 relative"
+                        style="grid-column: {{ $rightSpacerCol }}; grid-row: 1 / -1;"
+                    >
+                        <div class="absolute inset-y-0 left-0 w-1/2 bg-zinc-200 dark:bg-zinc-700"></div>
+                    </div>
+                @endif
+            @endforeach
+
             @foreach ($kanbanColumns as $dayData)
                 @php
-                    $weekendClass = $dayData->isWeekend 
-                        ? ($loop->first ? '-mb-4 pb-4 pt-0 bg-zinc-200 dark:bg-zinc-700' : '-my-4 py-4 bg-zinc-200 dark:bg-zinc-700')
-                        : '';
+                    $dayColIndex = $dayColumnIndices[$loop->index];
+                    $isWeekend = $dayData->isWeekend;
                 @endphp
                 <div
-                    wire:key="day-{{ $dayData->day->format('Y-m-d') }}-idx{{ $loop->index }}"
+                    wire:key="day-header-{{ $dayData->day->format('Y-m-d') }}-idx{{ $loop->index }}"
                     data-day-index="{{ $loop->index }}"
                     @if($dayData->isToday) data-today="true" @endif
-                    class="self-stretch shrink-0 {{ (! $loop->last && ! ($dayData->day->isFriday() || $dayData->day->isSunday())) ? 'pr-4' : '' }} {{ $weekendClass }}"
+                    class="shrink-0 relative z-20 sticky top-0 {{ $isWeekend ? 'w-40 bg-zinc-200 dark:bg-zinc-700' : 'w-80 bg-zinc-100 dark:bg-zinc-800' }}"
+                    style="grid-column: {{ $dayColIndex }}; grid-row: 1;"
                 >
-                    <div class="flex flex-col h-full min-h-0 {{ $dayData->isWeekend ? 'w-40' : 'w-80' }}">
-                        {{-- Day Header --}}
-                        <div class="flex items-center justify-between p-3 mb-3 {{ $dayData->isWeekend ? 'opacity-75' : '' }}">
-                            <flux:heading size="lg" class="{{ $dayData->isToday ? 'text-blue-600 dark:text-blue-400' : '' }}">
-                                {{ $dayData->title }}
-                            </flux:heading>
-                            @if ($dayData->isToday)
-                                <flux:badge color="blue" size="sm">Today</flux:badge>
-                            @elseif ($dayData->isTomorrow && ! $dayData->isWeekend)
-                                <flux:badge color="zinc" size="sm">Tomorrow</flux:badge>
-                            @endif
-                        </div>
+                    {{-- Day Header --}}
+                    <div class="flex items-center justify-between p-3 mb-3 {{ $isWeekend ? 'opacity-75' : '' }}">
+                        <flux:heading size="lg" class="{{ $dayData->isToday ? 'text-blue-600 dark:text-blue-400' : '' }}">
+                            {{ $dayData->title }}
+                        </flux:heading>
+                        @if ($dayData->isToday)
+                            <flux:badge color="blue" size="sm">Today</flux:badge>
+                        @elseif ($dayData->isTomorrow && ! $dayData->isWeekend)
+                            <flux:badge color="zinc" size="sm">Tomorrow</flux:badge>
+                        @endif
+                    </div>
+                </div>
+                
+                {{-- Project Cells for this day --}}
+                @foreach ($dayData->columns as $projectColumn)
+                    @php
+                        $dayIndex = $dayData->dayIndex;
+                        // +2 because row 1 is header
+                        $projectRowIndex = $loop->index + 2;
+                        $hasTasks = $projectColumn->cards->count() > 0;
+                        $hasUndatedTasks = ($projectColumn->undated_tasks_count ?? 0) > 0;
+                        $isWeekend = $dayData->isWeekend;
+                    @endphp
+                    <div
+                        wire:key="project-{{ $projectColumn->id }}-{{ $dayData->day->format('Y-m-d') }}"
+                        class="min-w-0 pb-2 relative z-10 {{ $isWeekend ? 'w-40' : 'w-80' }}"
+                        style="grid-column: {{ $dayColIndex }}; grid-row: {{ $projectRowIndex }};"
+                    >
+                        @php
+                            $latestStatus = $dayData->isWeekend ? null : $projectColumn->project->latestStatus;
+                        @endphp
 
-                        {{-- Project Columns (vertical stack using Flux Kanban) --}}
-                        <div class="flex-1 min-w-0 overflow-y-auto overflow-x-hidden space-y-2 flux-no-scrollbar">
-                            @foreach ($dayData->columns as $projectColumn)
-                                @php
-                                    $dayIndex = $loop->parent->index;
-                                    $hasTasks = $projectColumn->cards->count() > 0;
-                                    $hasUndatedTasks = ($projectColumn->undated_tasks_count ?? 0) > 0;
-                                    $isWeekend = $dayData->isWeekend;
-                                @endphp
-                                <div
-                                    wire:key="project-{{ $projectColumn->id }}-{{ $dayData->day->format('Y-m-d') }}-idx{{ $dayIndex }}"
-                                    class="min-w-0 transition-opacity"
-                                    x-bind:class="getOpacityClass({{ $isWeekend ? 'true' : 'false' }}, {{ $hasTasks ? 'true' : 'false' }}, {{ $hasUndatedTasks ? 'true' : 'false' }}, {{ $dayIndex }})"
-                                >
-                                    @php
-                                        $latestStatus = $dayData->isWeekend ? null : $projectColumn->project->latestStatus;
-                                    @endphp
-
-                                    <flux:kanban class="w-full [&>div]:w-full [&>div]:min-w-0 [&>div]:flex-1">
-                                        <flux:kanban.column class="!w-full !max-w-full bg-white dark:bg-zinc-900 rounded-lg shadow-sm">
+                        <flux:kanban
+                            class="w-full [&>div]:w-full [&>div]:min-w-0 [&>div]:flex-1"
+                            x-bind:class="getOpacityClass({{ $isWeekend ? 'true' : 'false' }}, {{ $hasTasks ? 'true' : 'false' }}, {{ $hasUndatedTasks ? 'true' : 'false' }}, {{ $dayIndex }})"
+                        >
+                            <flux:kanban.column class="!w-full !max-w-full bg-white dark:bg-zinc-900 rounded-lg shadow-sm">
                                             <flux:kanban.column.header
                                                 class="min-w-0 w-full [&>div:first-child>div:first-child]:!min-w-0 [&>div:first-child>div:first-child]:!flex-1 [&>div:first-child>div:first-child]:truncate [&>div:first-child>div:last-child]:!shrink-0 [&_[data-flux-subheading]]:!min-w-0 [&_[data-flux-subheading]]:truncate"
                                             >
@@ -495,6 +602,8 @@
                                                                     @if($task->vendor_status)
                                                                         @php $statusUi = $task->vendor_status_ui; @endphp
                                                                         <flux:badge 
+                                                                            x-show="firstVisibleDayIndex === {{ $dayIndex }}"
+                                                                            x-cloak
                                                                             size="sm" 
                                                                             :color="$statusUi['flux'] ?? 'zinc'"
                                                                             :icon="$statusUi['icon'] ?? null"
@@ -510,29 +619,11 @@
                                             </flux:kanban.column.cards>
                                         </flux:kanban.column>
                                     </flux:kanban>
-                                </div>
-                            @endforeach
-                        </div>
                     </div>
-                </div>
-
-                @if (! $loop->last && ($dayData->day->isFriday() || $dayData->day->isSunday()))
-                    <div
-                        aria-hidden="true"
-                        class="self-stretch shrink-0 w-4 relative -my-4 py-4"
-                    >
-                        @if ($dayData->day->isFriday())
-                            <div class="absolute inset-y-0 right-0 w-1/2 bg-zinc-200 dark:bg-zinc-700"></div>
-                        @elseif ($dayData->day->isSunday())
-                            <div class="absolute inset-y-0 left-0 w-1/2 bg-zinc-200 dark:bg-zinc-700"></div>
-                        @endif
-
-                        <div class="absolute inset-y-0 left-1/2 -translate-x-1/2 border-l border-zinc-300/50 dark:border-zinc-600/40"></div>
-                    </div>
-                @endif
+                @endforeach
             @endforeach
             {{-- Right spacer --}}
-            <div class="w-4 shrink-0"></div>
+            <div class="w-4 shrink-0" style="grid-column: -1; grid-row: 1 / -1;"></div>
             </div>
         </div>
     </div>

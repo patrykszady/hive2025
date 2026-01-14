@@ -3,32 +3,21 @@
 namespace App\Jobs;
 
 use App\Channels\TwilioChannel;
-use App\Models\ClientScheduleSmsLog;
 use App\Models\Project;
+use App\Models\SmsLog;
 use App\Models\Task;
 use App\Models\User;
-use App\Notifications\ClientScheduleNotification;
+use App\Notifications\ClientScheduleSmsNotification;
+use App\Services\SmsScheduleService;
 use Carbon\Carbon;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Illuminate\Support\Facades\Log;
 
 class SendClientScheduleChangeSms implements ShouldQueue
 {
     use Queueable;
 
     public int $projectId;
-
-    /**
-     * Throttle window in minutes - don't send more than one "changed" SMS per client per project.
-     */
-    protected int $throttleMinutes = 30;
-
-    /**
-     * Business hours (in project's vendor timezone).
-     */
-    protected int $businessHourStart = 8;  // 8 AM
-    protected int $businessHourEnd = 18;   // 6 PM
 
     /**
      * Create a new job instance.
@@ -42,9 +31,9 @@ class SendClientScheduleChangeSms implements ShouldQueue
     /**
      * Execute the job.
      */
-    public function handle(): void
+    public function handle(SmsScheduleService $smsService): void
     {
-        $log = Log::channel('vendor_sms');
+        $log = $smsService->getLogger('client');
 
         $project = Project::with(['client', 'client.users', 'createdByVendor'])->find($this->projectId);
 
@@ -54,21 +43,21 @@ class SendClientScheduleChangeSms implements ShouldQueue
             return;
         }
 
-        // Check if within business hours (using vendor's timezone)
-        $timezone = $project->createdByVendor?->timezone ?? config('app.timezone');
-        $now = Carbon::now($timezone);
-
-        if (! $this->isBusinessHours($now)) {
-            $log->info("SendClientScheduleChangeSms: Outside business hours, skipping", [
+        // Check if within business hours
+        if (! $smsService->isWithinBusinessHours()) {
+            // Re-queue for next business hours
+            $nextStart = $smsService->getNextBusinessHoursStart();
+            $log->info("SendClientScheduleChangeSms: Outside business hours, re-queuing", [
                 'project_id' => $this->projectId,
-                'hour' => $now->hour,
-                'timezone' => $timezone,
+                'next_run' => $nextStart->toDateTimeString(),
             ]);
+
+            self::dispatch($this->projectId)->delay($nextStart);
 
             return;
         }
 
-        $todayStr = Carbon::today($timezone)->format('Y-m-d');
+        $todayStr = $smsService->getToday()->format('Y-m-d');
 
         // Get tasks for today
         $tasks = Task::where('project_id', $this->projectId)
@@ -106,11 +95,12 @@ class SendClientScheduleChangeSms implements ShouldQueue
             return;
         }
 
-        $currentHash = ClientScheduleSmsLog::generateTasksHash($tasks);
+        $currentHash = SmsLog::generateTasksHash($tasks);
+        $throttleMinutes = $smsService->getThrottleMinutes();
 
         foreach ($clientUsers as $user) {
             // Check throttle - don't send if recently notified
-            if (ClientScheduleSmsLog::wasRecentlyNotified($this->projectId, $user->id, $this->throttleMinutes)) {
+            if (SmsLog::wasRecentlyNotified(SmsLog::CHANNEL_CLIENT, $user->id, $throttleMinutes, $this->projectId)) {
                 $log->info("SendClientScheduleChangeSms: Throttled, recently notified", [
                     'project_id' => $this->projectId,
                     'user_id' => $user->id,
@@ -120,13 +110,14 @@ class SendClientScheduleChangeSms implements ShouldQueue
             }
 
             // Check if tasks actually changed since last notification
-            $lastLog = ClientScheduleSmsLog::where('project_id', $this->projectId)
+            $lastLog = SmsLog::where('channel', SmsLog::CHANNEL_CLIENT)
+                ->where('project_id', $this->projectId)
                 ->where('user_id', $user->id)
                 ->where('target_date', $todayStr)
                 ->latest()
                 ->first();
 
-            if ($lastLog && $lastLog->tasks_hash === $currentHash) {
+            if ($lastLog && $lastLog->content_hash === $currentHash) {
                 $log->info("SendClientScheduleChangeSms: Tasks unchanged, skipping", [
                     'project_id' => $this->projectId,
                     'user_id' => $user->id,
@@ -136,24 +127,8 @@ class SendClientScheduleChangeSms implements ShouldQueue
             }
 
             // Send the notification
-            $this->sendNotification($project, $user, $tasks, $todayStr, $currentHash);
+            $this->sendNotification($project, $user, $tasks, $todayStr, $currentHash, $smsService);
         }
-    }
-
-    /**
-     * Check if current time is within business hours.
-     */
-    protected function isBusinessHours(Carbon $now): bool
-    {
-        $hour = $now->hour;
-        $dayOfWeek = $now->dayOfWeek;
-
-        // Skip weekends
-        if ($dayOfWeek === Carbon::SATURDAY || $dayOfWeek === Carbon::SUNDAY) {
-            return false;
-        }
-
-        return $hour >= $this->businessHourStart && $hour < $this->businessHourEnd;
     }
 
     /**
@@ -180,12 +155,13 @@ class SendClientScheduleChangeSms implements ShouldQueue
         User $user,
         \Illuminate\Support\Collection $tasks,
         string $todayStr,
-        string $tasksHash
+        string $tasksHash,
+        SmsScheduleService $smsService
     ): void {
-        $log = Log::channel('vendor_sms');
+        $log = $smsService->getLogger('client');
 
         try {
-            $notification = new ClientScheduleNotification(
+            $notification = new ClientScheduleSmsNotification(
                 $project,
                 $user->first_name ?? 'there',
                 'changed',
@@ -197,12 +173,13 @@ class SendClientScheduleChangeSms implements ShouldQueue
             $channel->send($user, $notification);
 
             // Log the send
-            ClientScheduleSmsLog::create([
-                'project_id' => $project->id,
+            SmsLog::logSent([
+                'channel' => SmsLog::CHANNEL_CLIENT,
+                'type' => SmsLog::TYPE_CHANGED,
                 'user_id' => $user->id,
-                'type' => 'changed',
+                'project_id' => $project->id,
                 'target_date' => $todayStr,
-                'tasks_hash' => $tasksHash,
+                'content_hash' => $tasksHash,
             ]);
 
             $log->info("SendClientScheduleChangeSms: Sent successfully", [

@@ -95,8 +95,10 @@ class TaskCreate extends Component
     public function vendors()
     {
         // Use Scout search to sort by ytd_expense_sum
+        // Must specify take() to override Scout's default limit of 20
         return Vendor::search('*')
             ->orderBy('ytd_expense_sum', 'desc')
+            ->take(1000)
             ->get();
     }
 

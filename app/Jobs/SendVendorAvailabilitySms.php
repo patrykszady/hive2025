@@ -3,7 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Task;
-use App\Notifications\VendorAvailabilityNotification;
+use App\Notifications\VendorAvailabilitySmsNotification;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -72,7 +72,7 @@ class SendVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
         $task->update($updates);
 
         // Send the notification
-        $vendor->notify(new VendorAvailabilityNotification($task, $token));
+        $vendor->notify(new VendorAvailabilitySmsNotification($task, $token));
 
         Log::info("SendVendorAvailabilitySms: Sent availability request for task {$this->taskId} to vendor {$vendor->id}");
     }

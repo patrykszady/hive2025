@@ -3,11 +3,11 @@
 namespace App\Console\Commands;
 
 use App\Channels\TwilioChannel;
-use App\Models\ClientScheduleSmsLog;
 use App\Models\Project;
+use App\Models\SmsLog;
 use App\Models\Task;
 use App\Models\User;
-use App\Notifications\ClientScheduleNotification;
+use App\Notifications\ClientScheduleSmsNotification;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
@@ -74,7 +74,7 @@ class SendClientScheduleSms extends Command
 
             foreach ($clientUsers as $user) {
                 // Check if already sent
-                if (ClientScheduleSmsLog::wasAlreadySent($project->id, $user->id, $type, $targetDateStr)) {
+                if (SmsLog::wasAlreadySent(SmsLog::CHANNEL_CLIENT, $type, $user->id, $targetDateStr, $project->id)) {
                     $this->line("  ⏭ Project #{$project->id} → {$user->first_name}: Already sent.");
                     $skippedCount++;
 
@@ -176,7 +176,7 @@ class SendClientScheduleSms extends Command
         string $targetDateStr
     ): bool {
         try {
-            $notification = new ClientScheduleNotification(
+            $notification = new ClientScheduleSmsNotification(
                 $project,
                 $user->first_name ?? 'there',
                 $type,
@@ -188,12 +188,13 @@ class SendClientScheduleSms extends Command
             $channel->send($user, $notification);
 
             // Log the send
-            ClientScheduleSmsLog::create([
-                'project_id' => $project->id,
-                'user_id' => $user->id,
+            SmsLog::logSent([
+                'channel' => SmsLog::CHANNEL_CLIENT,
                 'type' => $type,
+                'user_id' => $user->id,
+                'project_id' => $project->id,
                 'target_date' => $targetDateStr,
-                'tasks_hash' => ClientScheduleSmsLog::generateTasksHash($tasks),
+                'content_hash' => SmsLog::generateTasksHash($tasks),
             ]);
 
             return true;

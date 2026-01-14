@@ -12,7 +12,7 @@ use Illuminate\Notifications\Notification;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
-class VendorAvailabilityNotification extends Notification implements ShouldQueue
+class VendorAvailabilitySmsNotification extends Notification implements ShouldQueue
 {
     use Queueable;
 

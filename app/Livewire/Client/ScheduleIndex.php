@@ -292,6 +292,8 @@ class ScheduleIndex extends Component
     public function render()
     {
         return view('livewire.client.schedule-index')
-            ->layout('components.layouts.guest');
+            ->layout('components.layouts.guest', [
+                'title' => 'Schedule',
+            ]);
     }
 }

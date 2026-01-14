@@ -5,7 +5,7 @@ namespace App\Console\Commands;
 use App\Channels\TwilioChannel;
 use App\Models\Task;
 use App\Models\Vendor;
-use App\Notifications\VendorAvailabilityNotification;
+use App\Notifications\VendorAvailabilitySmsNotification;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
 
@@ -135,7 +135,7 @@ class TestVendorAvailabilitySms extends Command
         $this->info("Sending SMS to dev number: " . config('services.twilio.dev_to', '+12249993880'));
 
         // Send the notification directly (bypasses queue for immediate testing)
-        $notification = new VendorAvailabilityNotification($tasks, $vendorToken);
+        $notification = new VendorAvailabilitySmsNotification($tasks, $vendorToken);
 
         try {
             $channel = new TwilioChannel();

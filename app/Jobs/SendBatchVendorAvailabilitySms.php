@@ -2,26 +2,18 @@
 
 namespace App\Jobs;
 
+use App\Models\SmsLog;
 use App\Models\Task;
 use App\Models\Vendor;
-use App\Notifications\VendorAvailabilityNotification;
-use Carbon\Carbon;
+use App\Notifications\VendorAvailabilitySmsNotification;
+use App\Services\SmsScheduleService;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Illuminate\Support\Facades\Log;
 
 class SendBatchVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
 {
     use Queueable;
-
-    /**
-     * Business hours for sending vendor SMS (same as team member task SMS).
-     */
-    protected const BUSINESS_TIMEZONE = 'America/Chicago';
-    protected const BUSINESS_HOURS_START_HOUR = 6;
-    protected const BUSINESS_HOURS_START_MINUTE = 30; // 6:30am
-    protected const BUSINESS_HOURS_END_HOUR = 20; // 8:00pm
 
     /**
      * The number of seconds after which the job's unique lock will be released.
@@ -48,9 +40,9 @@ class SendBatchVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
     /**
      * Execute the job.
      */
-    public function handle(): void
+    public function handle(SmsScheduleService $smsService): void
     {
-        $log = Log::channel('vendor_sms');
+        $log = $smsService->getLogger('vendor');
         
         $log->info("Job started for vendor {$this->vendorId}", [
             'vendor_id' => $this->vendorId,
@@ -59,8 +51,8 @@ class SendBatchVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
         ]);
 
         // Check if within business hours, if not, re-queue for next morning
-        if (! $this->isWithinBusinessHours()) {
-            $nextMorning = $this->getNextBusinessHoursStart();
+        if (! $smsService->isWithinBusinessHours()) {
+            $nextMorning = $smsService->getNextBusinessHoursStart();
             $log->info(
                 "SendBatchVendorAvailabilitySms: Outside business hours, re-queuing for vendor {$this->vendorId} at {$nextMorning->toDateTimeString()}",
                 [
@@ -145,7 +137,7 @@ class SendBatchVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
         }
 
         // Send consolidated notification to each admin user
-        $notification = new VendorAvailabilityNotification($tasks, $vendorToken);
+        $notification = new VendorAvailabilitySmsNotification($tasks, $vendorToken);
         $successCount = 0;
         $failureCount = 0;
 
@@ -153,6 +145,19 @@ class SendBatchVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
             try {
                 $adminUser->notify($notification);
                 $successCount++;
+                
+                // Log the send for each task
+                foreach ($tasks as $task) {
+                    SmsLog::logSent([
+                        'channel' => SmsLog::CHANNEL_VENDOR,
+                        'type' => SmsLog::TYPE_AVAILABILITY,
+                        'user_id' => $adminUser->id,
+                        'project_id' => $task->project_id,
+                        'task_id' => $task->id,
+                        'vendor_id' => $vendor->id,
+                        'target_date' => $task->start_date?->format('Y-m-d'),
+                    ]);
+                }
                 
                 $log->info("SMS notification sent successfully", [
                     'vendor_id' => $vendor->id,
@@ -189,33 +194,5 @@ class SendBatchVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
         if ($successCount === 0 && $failureCount > 0) {
             throw new \RuntimeException("All SMS notifications failed for vendor {$vendor->id}");
         }
-    }
-
-    /**
-     * Check if current time is within business hours.
-     */
-    private function isWithinBusinessHours(): bool
-    {
-        $now = Carbon::now(self::BUSINESS_TIMEZONE);
-
-        $start = $now->copy()->setTime(self::BUSINESS_HOURS_START_HOUR, self::BUSINESS_HOURS_START_MINUTE);
-        $end = $now->copy()->setTime(self::BUSINESS_HOURS_END_HOUR, 0);
-
-        return $now->greaterThanOrEqualTo($start) && $now->lessThan($end);
-    }
-
-    /**
-     * Get the next business hours start time.
-     */
-    private function getNextBusinessHoursStart(): Carbon
-    {
-        $now = Carbon::now(self::BUSINESS_TIMEZONE);
-
-        $startToday = $now->copy()->setTime(self::BUSINESS_HOURS_START_HOUR, self::BUSINESS_HOURS_START_MINUTE);
-        if ($now->lessThan($startToday)) {
-            return $startToday;
-        }
-
-        return $now->copy()->addDay()->setTime(self::BUSINESS_HOURS_START_HOUR, self::BUSINESS_HOURS_START_MINUTE);
     }
 }

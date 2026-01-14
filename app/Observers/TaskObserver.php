@@ -101,7 +101,7 @@ class TaskObserver
         // or vendor is assigned but status was never set (legacy tasks)
         $originalVendorId = $task->getOriginal('vendor_id');
         $newVendorId = $task->vendor_id;
-        $vendorChanged = $originalVendorId != $newVendorId;
+        $vendorChanged = $originalVendorId != $newVendorId && $newVendorId !== null;
         
         // Check if dates changed (start_date, end_date, or options->dates)
         $originalOptions = $task->getOriginal('options');
@@ -113,9 +113,30 @@ class TaskObserver
             || $originalOptionsDates != $newOptionsDates;
         $needsStatusSet = $task->vendor_id && $task->vendor_status === null;
 
-        // If dates changed and task has a vendor with a response, reset status to require re-confirmation
-        // BUT only if the change came from the dashboard (authenticated user), not from the vendor's public page
+        // But only if the change came from the dashboard (authenticated user), not from the vendor's public page
         $isFromDashboard = auth()->check();
+
+        // If vendor changed, reset status to require confirmation from the new vendor
+        if ($vendorChanged && $isFromDashboard) {
+            $log = Log::channel('vendor_sms');
+            $log->info("TaskObserver: Vendor changed from dashboard, resetting vendor status for new vendor confirmation", [
+                'task_id' => $task->id,
+                'old_vendor_id' => $originalVendorId,
+                'new_vendor_id' => $newVendorId,
+                'old_status' => $task->vendor_status,
+                'changed_by_user_id' => auth()->id(),
+            ]);
+            
+            // Reset status and clear token so new SMS will be sent to the new vendor
+            $task->updateQuietly([
+                'vendor_status' => null,
+                'vendor_status_token' => null,
+            ]);
+            $task->refresh();
+            $needsStatusSet = true;
+        }
+
+        // If dates changed and task has a vendor with a response, reset status to require re-confirmation
         
         if ($datesChanged && $task->vendor_id && $isFromDashboard && in_array($task->vendor_status, [Task::VENDOR_STATUS_CONFIRMED, Task::VENDOR_STATUS_REJECTED], true)) {
             $log = Log::channel('vendor_sms');
@@ -243,9 +264,11 @@ class TaskObserver
             return;
         }
 
-        // Task start date should be in the future (or today)
-        if ($task->start_date->isPast() && !$task->start_date->isToday()) {
-            $log->debug("TaskObserver: Skipping - start date is in the past", $logContext);
+        // Task should be current or future (end_date >= today, or start_date >= today)
+        $today = Carbon::today();
+        $taskEndDate = $task->end_date ?? $task->start_date;
+        if ($taskEndDate->lt($today)) {
+            $log->debug("TaskObserver: Skipping - task has already ended", $logContext);
             return;
         }
 

@@ -136,7 +136,34 @@ class CardsIndex extends Component
     #[Computed]
     public function activeProjects()
     {
-        $query = Project::status(self::PLANNER_PROJECT_STATUS_CODES)
+        // Get the visible date range
+        $startDate = $this->days->first()->format('Y-m-d');
+        $endDate = $this->days->last()->format('Y-m-d');
+
+        // Build base query: projects with planner statuses OR projects with tasks in the visible date range
+        $query = Project::query()
+            ->where(function ($q) use ($startDate, $endDate) {
+                // Include projects with planner statuses
+                $q->whereHas('latestStatus', function ($statusQuery) {
+                    $statusQuery->whereIn('status_code', self::PLANNER_PROJECT_STATUS_CODES);
+                })
+                // OR include projects that have tasks in the visible date range (regardless of status)
+                ->orWhereHas('tasks', function ($taskQuery) use ($startDate, $endDate) {
+                    $taskQuery->where(function ($tq) use ($startDate, $endDate) {
+                        // Tasks with selected dates in the visible range
+                        $tq->whereRaw("JSON_OVERLAPS(JSON_EXTRACT(options, '$.dates'), ?)", [
+                            json_encode($this->days->map->format('Y-m-d')->values()->toArray())
+                        ])
+                        // OR tasks with start_date in range
+                        ->orWhereBetween('start_date', [$startDate, $endDate])
+                        // OR tasks spanning the range
+                        ->orWhere(function ($rangeQ) use ($startDate, $endDate) {
+                            $rangeQ->where('start_date', '<=', $endDate)
+                                   ->where('end_date', '>=', $startDate);
+                        });
+                    });
+                });
+            })
             ->with(['tasks' => function ($query) {
                 $taskQuery = $query
                     ->with(['vendor'])
@@ -194,11 +221,11 @@ class CardsIndex extends Component
 
         $tomorrow = $today->copy()->addDay();
 
-        return $this->days->map(function ($day) use ($today, $tomorrow) {
+        return $this->days->map(function ($day, $dayIndex) use ($today, $tomorrow) {
             $dayFormat = $day->format('Y-m-d');
 
             // Show ALL active projects in each day column
-            $projectColumns = $this->activeProjects->map(function ($project) use ($day, $dayFormat) {
+            $projectColumns = $this->activeProjects->map(function ($project) use ($day, $dayFormat, $dayIndex, $today) {
                 $undatedTasksCount = $project->tasks
                     ->filter(function ($task) {
                         $selectedDates = $task->options->dates ?? [];
@@ -258,7 +285,7 @@ class CardsIndex extends Component
                     }
                 })->values();
 
-                // Calculate next/last task info for this project on this day
+                // Calculate next/last task info for this project relative to this specific day
                 $taskGapInfo = null;
                 if ($dayTasks->isEmpty()) {
                     $taskGapInfo = $this->calculateTaskGapInfo($project, $day);
@@ -274,9 +301,11 @@ class CardsIndex extends Component
                     'task_gap_info' => $taskGapInfo,
                 ];
             });
+            // Note: No longer filtering here - all projects stay to maintain grid alignment
 
             return (object) [
                 'day' => $day,
+                'dayIndex' => $dayIndex,
                 'title' => $day->format('D, M j'),
                 'isToday' => $day->isSameDay($today),
                 'isTomorrow' => $day->isSameDay($tomorrow),
@@ -364,6 +393,12 @@ class CardsIndex extends Component
 
             // Check if this project has any tasks in the visible day range
             $hasTasksInRange = $dayCells->contains(fn($cell) => $cell->cards->count() > 0);
+            
+            // Check if project has a planner status (Prep, Scheduled, Active, Service Call)
+            $hasPlannerStatus = in_array(
+                $project->latestStatus?->status_code ?? 0,
+                self::PLANNER_PROJECT_STATUS_CODES
+            );
 
             return (object) [
                 'id' => $project->id,
@@ -371,9 +406,13 @@ class CardsIndex extends Component
                 'project' => $project,
                 'undated_tasks_count' => $undatedTasksCount,
                 'hasTasksInRange' => $hasTasksInRange,
+                'hasPlannerStatus' => $hasPlannerStatus,
                 'dayCells' => $dayCells,
             ];
-        })->values();
+        })
+        // Filter: only show projects with planner status OR tasks visible in range
+        ->filter(fn($row) => $row->hasPlannerStatus || $row->hasTasksInRange)
+        ->values();
     }
 
     /**
@@ -399,16 +438,20 @@ class CardsIndex extends Component
 
     /**
      * Calculate task gap info for a project on a given day
-     * Returns info about next upcoming task or last past task (excluding weekends)
+     * Returns info about next upcoming task or last past task
      */
     private function calculateTaskGapInfo($project, Carbon $currentDay): ?object
     {
-        $currentDayFormat = $currentDay->format('Y-m-d');
+        $currentDayFormat = $currentDay->copy()->startOfDay()->format('Y-m-d');
         
-        // Get all task dates for this project
+        // Get all tasks for this project (unfiltered - we need ALL tasks to calculate gaps correctly)
+        // The $project->tasks relationship may be filtered by vendor/user, so we query directly
+        $allTasks = \App\Models\Task::where('project_id', $project->id)->get();
+        
+        // Collect all task dates from all tasks
         $allTaskDates = collect();
         
-        foreach ($project->tasks as $task) {
+        foreach ($allTasks as $task) {
             $selectedDates = $task->options->dates ?? [];
             
             if (!empty($selectedDates)) {
@@ -416,6 +459,7 @@ class CardsIndex extends Component
                     $allTaskDates->push($date);
                 }
             } elseif ($task->start_date) {
+                // Fallback to start_date if no selected dates
                 $allTaskDates->push(Carbon::parse($task->start_date)->format('Y-m-d'));
             }
         }
@@ -426,54 +470,39 @@ class CardsIndex extends Component
             return null;
         }
         
-        // Find next task date (after current day)
-        $nextTaskDate = $allTaskDates->first(fn($date) => $date > $currentDayFormat);
+        // Find next task date (first date after current day)
+        $nextTaskDate = $allTaskDates->filter(fn($date) => $date > $currentDayFormat)->first();
         
-        // Find last task date (before current day)
-        $lastTaskDate = $allTaskDates->last(fn($date) => $date < $currentDayFormat);
-        
-        // Calculate weekday difference (excluding weekends)
-        $countWeekdays = function (Carbon $from, Carbon $to): int {
-            $days = 0;
-            $current = $from->copy();
-            
-            while ($current->lt($to)) {
-                $current->addDay();
-                if (!$current->isWeekend()) {
-                    $days++;
-                }
-            }
-            
-            return $days;
-        };
+        // Find last task date (last date before current day)
+        $lastTaskDate = $allTaskDates->filter(fn($date) => $date < $currentDayFormat)->last();
         
         $nextInfo = null;
         $lastInfo = null;
         
         // Calculate next task info if available
         if ($nextTaskDate) {
-            $nextDate = Carbon::parse($nextTaskDate);
-            $daysUntil = $countWeekdays($currentDay, $nextDate);
+            $nextDate = Carbon::parse($nextTaskDate)->startOfDay();
+            $daysUntil = (int) $currentDay->copy()->startOfDay()->diffInDays($nextDate);
             
             if ($daysUntil > 0) {
                 $nextInfo = (object) [
                     'type' => 'next',
                     'days' => $daysUntil,
-                    'label' => $daysUntil === 1 ? 'Next in 1 day' : "Next in {$daysUntil} days",
+                    'label' => $daysUntil === 1 ? 'Next tomorrow' : "Next in {$daysUntil} days",
                 ];
             }
         }
         
         // Calculate last task info if available
         if ($lastTaskDate) {
-            $lastDate = Carbon::parse($lastTaskDate);
-            $daysAgo = $countWeekdays($lastDate, $currentDay);
+            $lastDate = Carbon::parse($lastTaskDate)->startOfDay();
+            $daysAgo = (int) $lastDate->diffInDays($currentDay->copy()->startOfDay());
             
             if ($daysAgo > 0) {
                 $lastInfo = (object) [
                     'type' => 'last',
                     'days' => $daysAgo,
-                    'label' => $daysAgo === 1 ? 'Last 1 day ago' : "Last {$daysAgo} days ago",
+                    'label' => $daysAgo === 1 ? 'Last yesterday' : "Last {$daysAgo} days ago",
                 ];
             }
         }
@@ -563,6 +592,7 @@ class CardsIndex extends Component
             'dayHeaders' => $this->dayHeaders,
             'projectRows' => $this->projectRows,
         ])->layout('components.layouts.app', [
+            'title' => 'Planner',
             'fullscreenClasses' => '!p-0 h-full overflow-hidden flex flex-col',
         ]);
     }

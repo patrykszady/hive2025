@@ -61,11 +61,12 @@
                         'showAvatars' => $showAvatars,
                         'taskUsers' => $taskUsers,
                         'taskVendor' => $taskVendor,
+                        'showProjectInfo' => $showProjectInfo ?? false,
                     ])
                 </flux:kanban.card>
             @else
                 <flux:kanban.card
-                    class="min-w-0 w-full"
+                    class="min-w-0 w-full transition hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:shadow-sm hover:border-zinc-300 dark:hover:border-zinc-600"
                     wire:key="upcoming-task-{{ $task->id }}-{{ $date }}"
                 >
                     @include('components.upcoming-tasks-list-card-content', [
@@ -78,6 +79,7 @@
                         'showAvatars' => $showAvatars,
                         'taskUsers' => $taskUsers,
                         'taskVendor' => $taskVendor,
+                        'showProjectInfo' => $showProjectInfo ?? false,
                     ])
                 </flux:kanban.card>
             @endif

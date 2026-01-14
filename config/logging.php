@@ -93,9 +93,16 @@ return [
             'days' => 30,
         ],
 
-        'task_reminder' => [
+        'team_sms' => [
             'driver' => 'daily',
-            'path' => storage_path('logs/task_reminder.log'),
+            'path' => storage_path('logs/team_sms.log'),
+            'level' => 'debug',
+            'days' => 30,
+        ],
+
+        'client_sms' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/client_sms.log'),
             'level' => 'debug',
             'days' => 30,
         ],

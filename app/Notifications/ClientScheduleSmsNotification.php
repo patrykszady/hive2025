@@ -13,7 +13,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
-class ClientScheduleNotification extends Notification implements ShouldQueue
+class ClientScheduleSmsNotification extends Notification implements ShouldQueue
 {
     use Queueable;
 
@@ -144,20 +144,57 @@ class ClientScheduleNotification extends Notification implements ShouldQueue
     }
 
     /**
+     * Get the vendor's timezone for this project.
+     */
+    protected function getVendorTimezone(): string
+    {
+        $vendor = $this->project->createdByVendor;
+
+        if ($vendor && is_string($vendor->timezone) && $vendor->timezone !== '') {
+            return $vendor->timezone;
+        }
+
+        return (string) config('app.timezone');
+    }
+
+    /**
      * Format task date and arrival time for SMS display.
      */
     protected function formatTaskDateTime(object $task): ?string
     {
+        $tz = $this->getVendorTimezone();
+
         // Determine target date from type (changed is always today)
         $targetDate = ($this->type === 'today' || $this->type === 'changed')
-            ? Carbon::today()
-            : Carbon::tomorrow();
+            ? Carbon::today($tz)
+            : Carbon::tomorrow($tz);
+
+        // Get the actual scheduled date(s) from task options
+        $selectedDates = (array) data_get($task->options, 'dates', []);
         $targetDateStr = $targetDate->format('Y-m-d');
 
-        // Format date nicely (e.g., "Wed, Jan 14")
-        $dateLabel = $targetDate->format('D, M j');
+        // Find which date in the task matches our target day
+        $matchingDateStr = null;
+        foreach ($selectedDates as $dateStr) {
+            if ($dateStr === $targetDateStr) {
+                $matchingDateStr = $dateStr;
+                break;
+            }
+        }
 
-        // Try to get arrival time from task options
+        // Fallback to task start_date if no matching date found in options
+        if (! $matchingDateStr && $task->start_date) {
+            $matchingDateStr = Carbon::parse($task->start_date)->format('Y-m-d');
+        }
+
+        if (! $matchingDateStr) {
+            return null;
+        }
+
+        // Format date nicely (e.g., "Wed, Jan 14")
+        $dateLabel = Carbon::parse($matchingDateStr, $tz)->format('D, M j');
+
+        // Try to get arrival time from task options->time_settings for this specific date
         $arrivalTime = null;
         if (isset($task->options)) {
             $options = is_object($task->options) ? $task->options : (object) $task->options;
@@ -165,8 +202,8 @@ class ClientScheduleNotification extends Notification implements ShouldQueue
 
             if ($timeSettings) {
                 $daySettings = is_object($timeSettings)
-                    ? ($timeSettings->{$targetDateStr} ?? null)
-                    : ($timeSettings[$targetDateStr] ?? null);
+                    ? ($timeSettings->{$matchingDateStr} ?? null)
+                    : ($timeSettings[$matchingDateStr] ?? null);
 
                 if ($daySettings) {
                     $useTime = is_object($daySettings)

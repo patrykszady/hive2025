@@ -2,10 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\SmsLog;
 use App\Models\User;
 use App\Models\Task;
-use App\Notifications\TaskReminderNotification;
-use App\Notifications\TaskUpdateNotification;
+use App\Notifications\TeamTaskSmsNotification;
+use App\Services\SmsScheduleService;
 use Carbon\Carbon;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Log;
@@ -14,25 +15,16 @@ use Illuminate\Support\Facades\Redis;
 
 class TaskReminderController extends Controller
 {
-    protected $notification_delay = 5; // Delay in minutes for task updates
-    protected $business_hours_start = 7; // 7am
-    protected $business_hours_end = 18; // 6pm
+    protected SmsScheduleService $smsService;
 
-    /**
-     * Check if current time is within business hours
-     */
-    private function isWithinBusinessHours()
+    public function __construct()
     {
-        $now = Carbon::now();
-        $startHour = $this->business_hours_start;
-        $endHour = $this->business_hours_end; 
-
-        return $now->hour >= $startHour && $now->hour < $endHour;
+        $this->smsService = app(SmsScheduleService::class);
     }
 
     /**
      * Notify users about changes to their tasks for the current day
-     * With a 5-minute delay that resets with each change
+     * With a configurable delay that resets with each change
      */
     public function notifyTodayTaskChanges($task, $originalUserIds, $newUserIds, $originalStartDate = null, $originalEndDate = null)
     {
@@ -65,7 +57,7 @@ class TaskReminderController extends Controller
         ];
         
         // Check if we're within business hours
-        $withinBusinessHours = $this->isWithinBusinessHours();
+        $withinBusinessHours = $this->smsService->isWithinBusinessHours();
         
         // Determine which users are affected by this change
         $affectedUserIds = array_unique(array_merge($removedUserIds, $addedUserIds));
@@ -111,7 +103,7 @@ class TaskReminderController extends Controller
                 }
             } catch (\Exception $e) {
                 $stats['errors']++;
-                Log::channel('task_reminder')->error('Failed to queue task update', ApiErrorFormatter::format($e, [
+                $this->smsService->getLogger('team')->error('Failed to queue task update', ApiErrorFormatter::format($e, [
                     'user_id' => $userId,
                 ]));
             }
@@ -163,7 +155,7 @@ class TaskReminderController extends Controller
     
     /**
      * Send all pending task updates queued for morning
-     * To be run by a scheduled command at 7am
+     * To be run by a scheduled command at business hours start
      */
     public function sendPendingTaskUpdates()
     {
@@ -232,11 +224,11 @@ class TaskReminderController extends Controller
         // Store notification data
         Redis::hset($delayedKey, $userId, json_encode($notificationData));
         
-        // Set expiration timer
+        // Set expiration timer using config delay
         $timerKey = "task_notification_timer:{$userId}:{$today->format('Y-m-d')}";
+        $delayMinutes = $this->smsService->getChangeDelayMinutes();
         
-        // FIX: Use $this-> to access class property
-        Redis::set($timerKey, now()->addMinutes($this->notification_delay)->timestamp);
+        Redis::set($timerKey, now()->addMinutes($delayMinutes)->timestamp);
     }
     
     /**
@@ -287,7 +279,19 @@ class TaskReminderController extends Controller
             
             // Send notification (dev/local are forced to the Twilio dev number)
             if (app()->environment(['production', 'local', 'development'])) {
-                $user->notify(new TaskUpdateNotification($currentTasks, $removedTasks, $today));
+                $user->notify(new TeamTaskSmsNotification($currentTasks, $today, 'update', $removedTasks));
+                
+                // Log the send for each task
+                foreach ($currentTasks as $task) {
+                    SmsLog::logSent([
+                        'channel' => SmsLog::CHANNEL_TEAM,
+                        'type' => SmsLog::TYPE_UPDATE,
+                        'user_id' => $user->id,
+                        'project_id' => $task->project_id,
+                        'task_id' => $task->id,
+                        'target_date' => $today->format('Y-m-d'),
+                    ]);
+                }
             }
             
             // Remove from Redis
@@ -301,7 +305,7 @@ class TaskReminderController extends Controller
             $result['sent'] = true;
         } catch (\Exception $e) {
             $result['error'] = true;
-            Log::channel('task_reminder')->error('Failed to process notification', ApiErrorFormatter::format($e, [
+            $this->smsService->getLogger('team')->error('Failed to process notification', ApiErrorFormatter::format($e, [
                 'user_id' => $userId,
             ]));
         }
@@ -330,11 +334,6 @@ class TaskReminderController extends Controller
 
         // Group tasks by user
         foreach ($tasks as $task) {
-            // Skip if no project or no address
-            // if (!$task->project || !$task->project->address) {
-            //     continue;
-            // }
-
             // Check if tomorrow is a weekend day and if it's excluded in options
             if ($this->shouldSkipWeekendTask($task, $tomorrow)) {
                 continue;
@@ -365,14 +364,28 @@ class TaskReminderController extends Controller
             $userTaskList = $userData['tasks'];
 
             try {
+                // Check if already sent for tomorrow
+                $tomorrowStr = $tomorrow->format('Y-m-d');
+                if (SmsLog::wasAlreadySent(SmsLog::CHANNEL_TEAM, SmsLog::TYPE_REMINDER, $user->id, $tomorrowStr)) {
+                    continue;
+                }
+                
                 // Dev/local are forced to the Twilio dev number
                 if (app()->environment(['production', 'local', 'development'])) {
-                    $user->notify(new TaskReminderNotification($userTaskList, $tomorrow));
+                    $user->notify(new TeamTaskSmsNotification($userTaskList, $tomorrow, 'reminder'));
+                    
+                    // Log the send
+                    SmsLog::logSent([
+                        'channel' => SmsLog::CHANNEL_TEAM,
+                        'type' => SmsLog::TYPE_REMINDER,
+                        'user_id' => $user->id,
+                        'target_date' => $tomorrowStr,
+                    ]);
                 }
                 $successCount++;
             } catch (\Exception $e) {
                 $errorCount++;
-                Log::channel('task_reminder')->error('Failed to queue task reminder notification', ApiErrorFormatter::format($e, [
+                $this->smsService->getLogger('team')->error('Failed to queue task reminder notification', ApiErrorFormatter::format($e, [
                     'user_id' => $user->id,
                     'user_name' => $user->full_name,
                     'phone' => $user->cell_phone,
@@ -462,9 +475,8 @@ class TaskReminderController extends Controller
             $stats['errors'] += $result['error'] ? 1 : 0;
         }
         
-        // 2. Process morning notifications if it's after 7am
-        $now = Carbon::now();
-        if ($now->hour >= 7) {
+        // 2. Process morning notifications if within business hours
+        if ($this->smsService->isWithinBusinessHours()) {
             $allMorningUpdates = Redis::hgetall($morningKey);
             
             foreach ($allMorningUpdates as $userId => $updateJson) {

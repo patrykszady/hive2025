@@ -16,6 +16,21 @@
     @endif
 </div>
 
+@if(($showProjectInfo ?? false) && $task->project)
+    <div class="mt-1">
+        <a 
+            href="{{ route('projects.show', $task->project) }}"
+            wire:click.stop
+            class="text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 hover:underline truncate"
+        >
+            {{ $task->project->short_address ?? 'No project' }}
+            @if($task->project->client)
+                — {{ $task->project->client->name }}
+            @endif
+        </a>
+    </div>
+@endif
+
 @if($showAvatars && ($taskUsers->count() > 0 || $taskVendor))
     <div class="flex items-center gap-2 mt-2 min-w-0">
         @if($taskUsers->count() > 0)
