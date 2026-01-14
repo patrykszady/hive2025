@@ -3,6 +3,7 @@
 namespace App\Observers;
 
 use App\Jobs\SendBatchVendorAvailabilitySms;
+use App\Jobs\SendClientScheduleChangeSms;
 use App\Models\Project;
 use App\Models\Task;
 use App\Http\Controllers\TaskReminderController;
@@ -16,6 +17,9 @@ class TaskObserver
      */
     public function created(Task $task): void
     {
+        // Notify clients if new task is for today
+        $this->queueClientNotificationIfNeeded($task);
+
         // For newly created tasks, check if they include today and have users assigned
         if ($task->user_ids && !empty($task->user_ids)) {
             $today = Carbon::today();
@@ -51,6 +55,9 @@ class TaskObserver
      */
     public function updated(Task $task): void
     {
+        // Notify clients if task for today was changed
+        $this->queueClientNotificationIfNeeded($task);
+
         // Get the original (before update) and current (after update) values
         $originalUserIds = $task->getOriginal('user_ids') ?? [];
         $newUserIds = $task->user_ids ?? [];
@@ -95,11 +102,40 @@ class TaskObserver
         $originalVendorId = $task->getOriginal('vendor_id');
         $newVendorId = $task->vendor_id;
         $vendorChanged = $originalVendorId != $newVendorId;
+        
+        // Check if dates changed (start_date, end_date, or options->dates)
+        $originalOptions = $task->getOriginal('options');
+        $originalOptionsDates = is_object($originalOptions) ? ($originalOptions->dates ?? []) : (is_array($originalOptions) ? ($originalOptions['dates'] ?? []) : []);
+        $newOptionsDates = is_object($task->options) ? ($task->options->dates ?? []) : (is_array($task->options) ? ($task->options['dates'] ?? []) : []);
+        
         $datesChanged = $task->getOriginal('start_date') != $task->start_date 
-            || $task->getOriginal('end_date') != $task->end_date;
+            || $task->getOriginal('end_date') != $task->end_date
+            || $originalOptionsDates != $newOptionsDates;
         $needsStatusSet = $task->vendor_id && $task->vendor_status === null;
 
-        if ($vendorChanged || $datesChanged || $needsStatusSet) {
+        // If dates changed and task has a vendor with a response, reset status to require re-confirmation
+        // BUT only if the change came from the dashboard (authenticated user), not from the vendor's public page
+        $isFromDashboard = auth()->check();
+        
+        if ($datesChanged && $task->vendor_id && $isFromDashboard && in_array($task->vendor_status, [Task::VENDOR_STATUS_CONFIRMED, Task::VENDOR_STATUS_REJECTED], true)) {
+            $log = Log::channel('vendor_sms');
+            $log->info("TaskObserver: Dates changed from dashboard, resetting vendor status for re-confirmation", [
+                'task_id' => $task->id,
+                'vendor_id' => $task->vendor_id,
+                'old_status' => $task->vendor_status,
+                'changed_by_user_id' => auth()->id(),
+            ]);
+            
+            // Reset status and clear token so new SMS will be sent
+            $task->updateQuietly([
+                'vendor_status' => null,
+                'vendor_status_token' => null,
+            ]);
+            $task->refresh();
+            $needsStatusSet = true;
+        }
+
+        if ($vendorChanged || ($datesChanged && $isFromDashboard) || $needsStatusSet) {
             $this->queueVendorNotificationIfNeeded($task);
         }
     }
@@ -117,6 +153,9 @@ class TaskObserver
      */
     public function deleted(Task $task): void
     {
+        // Notify clients if a task for today was deleted
+        $this->queueClientNotificationIfNeeded($task);
+
         // When a task is deleted, notify affected users
         $today = Carbon::today();
         $taskIncludesToday = ($task->start_date && $task->end_date) ?
@@ -228,5 +267,44 @@ class TaskObserver
             ...$logContext,
             'scheduled_for' => now()->addHour()->toDateTimeString(),
         ]);
+    }
+
+    /**
+     * Queue client schedule change notification if task is for today.
+     */
+    protected function queueClientNotificationIfNeeded(Task $task): void
+    {
+        $today = Carbon::today();
+
+        // Check if task includes today (using options->dates if available)
+        $todayStr = $today->format('Y-m-d');
+        $selectedDates = (array) data_get($task->options, 'dates', []);
+
+        $taskIncludesToday = false;
+
+        if (! empty($selectedDates)) {
+            $taskIncludesToday = in_array($todayStr, $selectedDates);
+        } elseif ($task->start_date && $task->end_date) {
+            $taskIncludesToday = Carbon::parse($task->start_date)->lte($today)
+                && Carbon::parse($task->end_date)->gte($today);
+        }
+
+        if (! $taskIncludesToday) {
+            return;
+        }
+
+        // Only dispatch from authenticated dashboard changes
+        if (! auth()->check()) {
+            return;
+        }
+
+        $log = Log::channel('vendor_sms');
+        $log->info("TaskObserver: Queueing client schedule change notification", [
+            'task_id' => $task->id,
+            'project_id' => $task->project_id,
+            'changed_by_user_id' => auth()->id(),
+        ]);
+
+        SendClientScheduleChangeSms::dispatch($task->project_id);
     }
 }

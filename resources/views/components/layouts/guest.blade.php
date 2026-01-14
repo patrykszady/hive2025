@@ -3,6 +3,7 @@
     @include('components.layouts.head')
 
     <body>
+        <livewire:browser-timezone />
         <div class="h-screen font-sans antialiased text-gray-900">
             {{ $slot }}
         </div>

@@ -76,19 +76,16 @@ class VendorAvailabilityNotification extends Notification implements ShouldQueue
 
         $dateRange = $this->formatDateWithTime($task);
 
-        $shortUrl = $this->vendorAvailabilityUrl($task);
-
-        // Strip https:// to avoid rich link preview on iOS
-        $displayUrl = preg_replace('#^https?://#', '', $shortUrl);
+        $url = $this->vendorAvailabilityUrl($task);
 
         return "{$vendorName}\n"
             . "{$ownerName} assigned\n"
+            . "\n"
             . "\"{$task->title}\"\n"
             . "{$address}\n"
             . "{$dateRange}\n"
             . "\n"
-            . "Tap to respond 👇\n"
-            . "{$displayUrl}";
+            . "Reply: {$url} ✓";
     }
 
     /**
@@ -118,11 +115,9 @@ class VendorAvailabilityNotification extends Notification implements ShouldQueue
             $lines[] = "";
         }
 
-        $shortUrl = $this->vendorAvailabilityUrl($firstTask);
-        $displayUrl = preg_replace('#^https?://#', '', $shortUrl);
+        $url = $this->vendorAvailabilityUrl($firstTask);
 
-        $lines[] = "Tap to respond 👇";
-        $lines[] = $displayUrl;
+        $lines[] = "Reply: {$url} ✓";
 
         return implode("\n", $lines);
     }
@@ -130,48 +125,19 @@ class VendorAvailabilityNotification extends Notification implements ShouldQueue
     protected function vendorAvailabilityUrl(Task $task): string
     {
         $vendor = $task->vendor;
+
+        // Use ngrok in dev, dashboard.hive.contractors in prod
         $devWebhookUrl = config('app.dev_webhook_url');
-        $baseUrl = $devWebhookUrl ?: config('app.url');
+        $baseUrl = $devWebhookUrl ?: 'https://dashboard.hive.contractors';
 
         if (! $vendor) {
-            return $baseUrl . '/vendor/availability';
+            return $baseUrl . '/v';
         }
 
         $token = $vendor->getOrCreateAvailabilityToken();
-        $responseUrl = $baseUrl . "/vendor/availability/{$token}";
 
-        // In dev/local we use ngrok (DEV_WEBHOOK_URL) which changes frequently,
-        // so we always generate a fresh short URL (don't cache).
-        if (! empty($devWebhookUrl)) {
-            Log::channel('vendor_sms')->info('DEV_WEBHOOK_URL set; generating fresh short URL', [
-                'vendor_id' => $vendor->id,
-                'token' => $token,
-                'original_url' => $responseUrl,
-            ]);
-
-            return $this->shortenUrl($responseUrl) ?? $responseUrl;
-        }
-
-        // In production, use cached short URL if available
-        $cached = $vendor->availability_short_url;
-        if (! empty($cached)) {
-            Log::channel('vendor_sms')->info('Using cached short URL', [
-                'vendor_id' => $vendor->id,
-                'token' => $token,
-                'original_url' => $responseUrl,
-                'short_url' => $cached,
-            ]);
-
-            return $cached;
-        }
-
-        $shortUrl = $this->shortenUrl($responseUrl) ?? $responseUrl;
-
-        if ($shortUrl !== $responseUrl) {
-            $vendor->forceFill(['availability_short_url' => $shortUrl])->saveQuietly();
-        }
-
-        return $shortUrl;
+        // Use short /v/{token} route
+        return $baseUrl . "/v/{$token}";
     }
 
     /**
@@ -247,12 +213,12 @@ class VendorAvailabilityNotification extends Notification implements ShouldQueue
     }
 
     /**
-     * Shorten a URL using is.gd API (more reliable than TinyURL).
+     * Shorten a URL using v.gd API.
      */
     protected function shortenUrl(string $url): ?string
     {
         try {
-            $response = Http::timeout(5)->get('https://is.gd/create.php', [
+            $response = Http::timeout(5)->get('https://v.gd/create.php', [
                 'format' => 'simple',
                 'url' => $url,
             ]);
@@ -260,7 +226,7 @@ class VendorAvailabilityNotification extends Notification implements ShouldQueue
             if ($response->successful()) {
                 $shortUrl = trim($response->body());
                 
-                Log::channel('vendor_sms')->info("URL shortened", [
+                Log::channel('vendor_sms')->info("URL shortened via v.gd", [
                     'original_url' => $url,
                     'short_url' => $shortUrl,
                 ]);
@@ -268,13 +234,13 @@ class VendorAvailabilityNotification extends Notification implements ShouldQueue
                 return $shortUrl;
             }
             
-            Log::channel('vendor_sms')->warning("is.gd API returned non-success", [
+            Log::channel('vendor_sms')->warning("v.gd API returned non-success", [
                 'original_url' => $url,
                 'status' => $response->status(),
                 'body' => $response->body(),
             ]);
         } catch (\Exception $e) {
-            Log::channel('vendor_sms')->error("TinyURL shortening failed", [
+            Log::channel('vendor_sms')->error("v.gd shortening failed", [
                 'original_url' => $url,
                 'error' => $e->getMessage(),
             ]);

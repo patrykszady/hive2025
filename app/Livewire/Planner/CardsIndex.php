@@ -287,6 +287,117 @@ class CardsIndex extends Component
     }
 
     /**
+     * Get project rows for grid-based layout
+     * Structure: projects as rows, each with cells for each visible day
+     */
+    #[Computed]
+    public function projectRows()
+    {
+        $today = browser_today();
+        $tomorrow = $today->copy()->addDay();
+
+        return $this->activeProjects->map(function ($project) use ($today, $tomorrow) {
+            $projectTasks = $project->tasks;
+
+            // Get undated tasks count for this project
+            $undatedTasksCount = $projectTasks->filter(function ($task) {
+                $selectedDates = $task->options->dates ?? [];
+                return empty($selectedDates) && is_null($task->start_date);
+            })->count();
+
+            // Map each day to a cell for this project
+            $dayCells = $this->days->map(function ($day, $dayIndex) use ($project, $projectTasks, $today, $tomorrow, $undatedTasksCount) {
+                $dayFormat = $day->format('Y-m-d');
+
+                // Filter tasks for this day
+                $dayTasks = $projectTasks->filter(function ($task) use ($day, $dayFormat) {
+                    $selectedDates = $task->options->dates ?? [];
+
+                    // If task has specific selected dates, check if this day is one of them
+                    if (!empty($selectedDates)) {
+                        return in_array($dayFormat, $selectedDates);
+                    }
+
+                    // If task has a start_date, check if it matches this day
+                    if ($task->start_date) {
+                        $taskStartDate = Carbon::parse($task->start_date);
+                        $taskOptions = $task->options;
+
+                        if (!$taskStartDate->isSameDay($day)) {
+                            return false;
+                        }
+
+                        if ($day->isSaturday() && !($taskOptions->saturday ?? false)) {
+                            return false;
+                        }
+
+                        if ($day->isSunday() && !($taskOptions->sunday ?? false)) {
+                            return false;
+                        }
+
+                        return true;
+                    }
+
+                    // Task has no dates and no start_date - it's an undated task, don't show in day cells
+                    return false;
+                })->values();
+
+                // Calculate next/last task info for this project on this day
+                $taskGapInfo = null;
+                if ($dayTasks->isEmpty()) {
+                    $taskGapInfo = $this->calculateTaskGapInfo($project, $day);
+                }
+
+                return (object) [
+                    'day' => $day,
+                    'dayIndex' => $dayIndex,
+                    'dayFormat' => $dayFormat,
+                    'dayTitle' => $day->format('D, M j'),
+                    'isToday' => $day->isSameDay($today),
+                    'isTomorrow' => $day->isSameDay($tomorrow),
+                    'isWeekend' => $day->isWeekend(),
+                    'cards' => $dayTasks,
+                    'task_gap_info' => $taskGapInfo,
+                    'undated_tasks_count' => $undatedTasksCount,
+                ];
+            })->values();
+
+            // Check if this project has any tasks in the visible day range
+            $hasTasksInRange = $dayCells->contains(fn($cell) => $cell->cards->count() > 0);
+
+            return (object) [
+                'id' => $project->id,
+                'title' => $project->short_address,
+                'project' => $project,
+                'undated_tasks_count' => $undatedTasksCount,
+                'hasTasksInRange' => $hasTasksInRange,
+                'dayCells' => $dayCells,
+            ];
+        })->values();
+    }
+
+    /**
+     * Get day headers for the grid layout
+     */
+    #[Computed]
+    public function dayHeaders()
+    {
+        $today = browser_today();
+        $tomorrow = $today->copy()->addDay();
+
+        return $this->days->map(function ($day, $index) use ($today, $tomorrow) {
+            return (object) [
+                'day' => $day,
+                'dayIndex' => $index,
+                'title' => $day->format('D, M j'),
+                'isToday' => $day->isSameDay($today),
+                'isTomorrow' => $day->isSameDay($tomorrow),
+                'isWeekend' => $day->isWeekend(),
+            ];
+        })->values();
+    }
+
+    /**
      * Calculate task gap info for a project on a given day
      * Returns info about next upcoming task or last past task (excluding weekends)
      */
@@ -449,6 +560,8 @@ class CardsIndex extends Component
     {
         return view('livewire.planner.cards', [
             'kanbanColumns' => $this->kanbanColumns,
+            'dayHeaders' => $this->dayHeaders,
+            'projectRows' => $this->projectRows,
         ])->layout('components.layouts.app', [
             'fullscreenClasses' => '!p-0 h-full overflow-hidden flex flex-col',
         ]);

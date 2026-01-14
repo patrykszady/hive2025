@@ -69,7 +69,8 @@ class Vendor extends Model
             return $this->availability_token;
         }
 
-        $token = bin2hex(random_bytes(32));
+        // 8 bytes = 16 hex chars - short enough for SMS but still unique
+        $token = bin2hex(random_bytes(8));
         $this->forceFill(['availability_token' => $token])->saveQuietly();
 
         return $token;

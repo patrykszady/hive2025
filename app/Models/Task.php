@@ -29,7 +29,7 @@ class Task extends Model
 
     /**
      * Accessor used by the vendor availability page.
-     * Example: "Jan 13, 2026 @ 7AM"
+     * Example: "Mon, Jan 13, 2026 @ 7AM"
      */
     public function getDateWithTimeAttribute(): string
     {
@@ -57,7 +57,7 @@ class Task extends Model
             }
         }
 
-        $dateStr = $startDate->format('M j, Y');
+        $dateStr = $startDate->format('D, M j, Y');
 
         if ($startTime && ! $hasMultipleDays) {
             $timeFormatted = Carbon::createFromFormat('H:i', $startTime)->format('gA');
@@ -65,7 +65,7 @@ class Task extends Model
         }
 
         if ($hasMultipleDays) {
-            $dateStr .= ' - ' . $endDate->format('M j, Y');
+            $dateStr .= ' - ' . $endDate->format('D, M j, Y');
         }
 
         return $dateStr;
@@ -74,6 +74,7 @@ class Task extends Model
     public const VENDOR_STATUS_REQUESTED = 'requested';
     public const VENDOR_STATUS_CONFIRMED = 'confirmed';
     public const VENDOR_STATUS_REJECTED = 'rejected';
+    public const VENDOR_STATUS_PROPOSED = 'proposed';
 
     public const VENDOR_STATUS_UI = [
         self::VENDOR_STATUS_REQUESTED => [
@@ -90,6 +91,11 @@ class Task extends Model
             'label' => 'Rejected',
             'flux' => 'red',
             'icon' => 'x-circle',
+        ],
+        self::VENDOR_STATUS_PROPOSED => [
+            'label' => 'Proposed',
+            'flux' => 'indigo',
+            'icon' => 'calendar',
         ],
     ];
 

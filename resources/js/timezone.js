@@ -7,6 +7,25 @@
  * <time x-datetime="{{ $date->toIso8601String() }}" x-datetime-format="relative"></time>
  */
 
+// Set timezone and date cookies immediately so PHP can read them on first request
+(function setTimezoneCookies() {
+    try {
+        const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const date = `${year}-${month}-${day}`;
+        
+        // Set cookies with 1 year expiry, accessible by PHP
+        const expires = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toUTCString();
+        document.cookie = `browser_timezone=${encodeURIComponent(timezone)}; expires=${expires}; path=/; SameSite=Lax`;
+        document.cookie = `browser_date=${date}; expires=${expires}; path=/; SameSite=Lax`;
+    } catch (e) {
+        // ignore errors
+    }
+})();
+
 function getBrowserLocalDateString() {
     // Check for server-side fake date (for testing)
     const fakeToday = document.body?.dataset?.fakeToday;

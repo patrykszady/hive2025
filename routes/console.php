@@ -58,6 +58,25 @@ Schedule::command('nylas:sync-contacts')
     ->withoutOverlapping()
     ->onOneServer();
 
+// Client Schedule SMS Notifications
+// Send "tomorrow" reminders at 7 PM each night
+Schedule::command('client:send-schedule-sms tomorrow')
+    ->dailyAt('19:00')
+    ->timezone('America/Chicago')
+    ->name('client-schedule-sms-tomorrow')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer();
+
+// Send "today" reminders at 7 AM each morning
+Schedule::command('client:send-schedule-sms today')
+    ->dailyAt('07:00')
+    ->timezone('America/Chicago')
+    ->name('client-schedule-sms-today')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer();
+
 //Plaid/Transaction tasks
 // Disabled - using ITEM webhooks (ERROR, PENDING_EXPIRATION, USER_PERMISSION_REVOKED) instead
 // Schedule::call(function () {

@@ -10,7 +10,6 @@ use App\Http\Controllers\Api\PlaidWebhookController;
 use App\Http\Controllers\VendorDocsController;
 use App\Http\Controllers\Api\EmailTrackingController;
 use App\Http\Controllers\Api\MailtrapWebhookController;
-use App\Http\Controllers\VendorAvailabilityController;
 
 use App\Livewire\Auth\CantLogin;
 use App\Livewire\Auth\Login;
@@ -21,6 +20,7 @@ use App\Livewire\Banks\BankShow;
 use App\Livewire\Categories\CategoriesIndex;
 use App\Livewire\Checks\CheckShow;
 use App\Livewire\Checks\ChecksIndex;
+use App\Livewire\Client\ScheduleIndex as ClientScheduleIndex;
 use App\Livewire\Clients\ClientsIndex;
 use App\Livewire\Clients\ClientsShow;
 use App\Livewire\CompanyEmails\CompanyEmailsIndex;
@@ -62,6 +62,7 @@ use App\Livewire\Vendors\VendorPaymentCreate;
 use App\Livewire\Vendors\VendorSheetsTypeIndex;
 use App\Livewire\Vendors\VendorOptions;
 
+use App\Livewire\Vendor\AvailabilityIndex as VendorAvailabilityIndex;
 use App\Livewire\Vendors\VendorShow;
 use App\Livewire\Vendors\VendorsIndex;
 use Illuminate\Support\Facades\Auth;
@@ -81,11 +82,20 @@ Route::middleware('guest')->group(function () {
     Route::get('registration', Registration::class)->name('registration');
 });
 
+// Short URL for SMS (redirects to full availability page)
+Route::get('v/{token}', VendorAvailabilityIndex::class)->name('vendor.availability.short');
+
+// Short URL for client schedule SMS
+Route::get('s/{token}', ClientScheduleIndex::class)->name('client.schedule.short');
+
 // Public vendor availability response routes (no auth required)
 Route::prefix('vendor/availability')->name('vendor.availability.')->group(function () {
-    Route::get('{token}', [VendorAvailabilityController::class, 'index'])->name('index');
-    Route::get('{token}/confirm/{taskId}', [VendorAvailabilityController::class, 'confirm'])->name('confirm');
-    Route::get('{token}/reject/{taskId}', [VendorAvailabilityController::class, 'reject'])->name('reject');
+    Route::get('{token}', VendorAvailabilityIndex::class)->name('index');
+});
+
+// Public client schedule routes (no auth required)
+Route::prefix('client/schedule')->name('client.schedule.')->group(function () {
+    Route::get('{token}', ClientScheduleIndex::class)->name('index');
 });
 
 Route::middleware('auth')->group(function () {

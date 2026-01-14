@@ -25,6 +25,12 @@ return Application::configure(basePath: dirname(__DIR__))
         // Trust all proxies (ngrok, cloudflare, etc.) for proper HTTPS detection
         $middleware->trustProxies(at: '*');
 
+        // Exclude browser timezone cookies from encryption so PHP can read them
+        $middleware->encryptCookies(except: [
+            'browser_timezone',
+            'browser_date',
+        ]);
+
         $middleware->replaceInGroup('web', \Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class, \App\Http\Middleware\VerifyCsrfToken::class);
 
         $middleware->alias([

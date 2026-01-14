@@ -24,7 +24,7 @@ class UserTasks extends Component
             })
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
-            ->with(['project.client'])
+            ->with(['project.client', 'vendor'])
             ->orderBy('start_date')
             ->orderBy('end_date')
             ->limit(10)

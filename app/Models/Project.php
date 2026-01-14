@@ -101,6 +101,22 @@ class Project extends Model
     }
 
     /**
+     * Get or create a schedule token for public client schedule access.
+     */
+    public function getOrCreateScheduleToken(): string
+    {
+        if (! empty($this->schedule_token)) {
+            return $this->schedule_token;
+        }
+
+        // 8 bytes = 16 hex chars - short enough for SMS but still unique
+        $token = bin2hex(random_bytes(8));
+        $this->forceFill(['schedule_token' => $token])->saveQuietly();
+
+        return $token;
+    }
+
+    /**
      * Get the name of the index associated with the model.
      */
     public function searchableAs(): string

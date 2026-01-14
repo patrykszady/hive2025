@@ -730,11 +730,19 @@ Alpine.data('plannerScroll', () => ({
         let firstIdx = 0;
         const containerRect = container.getBoundingClientRect();
         
+        // Find the first column that has at least 50% visible
         for (const col of dayColumns) {
             const colRect = col.getBoundingClientRect();
-            // Column is "first visible" if its left edge is within the container's visible area
-            // Use a small positive threshold to handle edge cases
-            if (colRect.left >= containerRect.left - 5) {
+            const colWidth = colRect.width || 1;
+            
+            // Calculate how much of the column is visible within the container
+            const visibleLeft = Math.max(colRect.left, containerRect.left);
+            const visibleRight = Math.min(colRect.right, containerRect.right);
+            const visibleWidth = Math.max(0, visibleRight - visibleLeft);
+            const visibleRatio = visibleWidth / colWidth;
+            
+            // Column is "first visible" if at least 50% is still in view
+            if (visibleRatio >= 0.5) {
                 firstIdx = parseInt(col.dataset.dayIndex, 10);
                 break;
             }

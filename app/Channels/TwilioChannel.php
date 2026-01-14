@@ -2,6 +2,7 @@
 
 namespace App\Channels;
 
+use App\Notifications\ClientScheduleNotification;
 use App\Notifications\TaskReminderNotification;
 use App\Notifications\TaskUpdateNotification;
 use App\Notifications\VendorAvailabilityNotification;
@@ -29,18 +30,20 @@ class TwilioChannel
     {
         $phone = $notifiable->routeNotificationFor('twilio');
         $isVendorSms = $notification instanceof VendorAvailabilityNotification;
+        $isClientScheduleSms = $notification instanceof ClientScheduleNotification;
         $logChannel = $isVendorSms ? 'vendor_sms' : 'task_reminder';
 
         if (
             app()->environment(['local', 'development'])
             && ($notification instanceof TaskReminderNotification 
                 || $notification instanceof TaskUpdateNotification
-                || $notification instanceof VendorAvailabilityNotification)
+                || $notification instanceof VendorAvailabilityNotification
+                || $notification instanceof ClientScheduleNotification)
         ) {
             $originalPhone = $phone;
             $phone = config('services.twilio.dev_to', '+12249993880');
             
-            if ($isVendorSms) {
+            if ($isVendorSms || $isClientScheduleSms) {
                 Log::channel($logChannel)->info("Dev environment: redirecting SMS", [
                     'original_phone' => $originalPhone,
                     'redirected_to' => $phone,
@@ -51,7 +54,7 @@ class TwilioChannel
         }
 
         if (!$phone) {
-            if ($isVendorSms) {
+            if ($isVendorSms || $isClientScheduleSms) {
                 Log::channel($logChannel)->warning("No phone number available, skipping SMS", [
                     'notifiable_type' => get_class($notifiable),
                     'notifiable_id' => $notifiable->id ?? null,
@@ -62,7 +65,7 @@ class TwilioChannel
 
         $message = $notification->toTwilio($notifiable);
 
-        if ($isVendorSms) {
+        if ($isVendorSms || $isClientScheduleSms) {
             Log::channel($logChannel)->info("Sending SMS via Twilio", [
                 'phone' => $phone,
                 'message_length' => strlen($message),

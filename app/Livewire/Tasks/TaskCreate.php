@@ -9,6 +9,8 @@ use App\Models\TaskDependency;
 use App\Livewire\Forms\TaskForm;
 use App\Livewire\Planner\GanttIndex;
 use App\Livewire\Planner\CardsIndex;
+use App\Livewire\Projects\UpcomingTasks;
+use App\Livewire\Dashboard\UserTasks;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Flux;
@@ -274,6 +276,8 @@ class TaskCreate extends Component
     {
         $this->dispatch('refreshComponent')->to(GanttIndex::class);
         $this->dispatch('refreshComponent')->to(CardsIndex::class);
+        $this->dispatch('refreshComponent')->to(UpcomingTasks::class);
+        $this->dispatch('refreshComponent')->to(UserTasks::class);
     }
 
     /**

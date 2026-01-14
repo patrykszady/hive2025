@@ -1,27 +1,61 @@
 <?php
 
-namespace App\Livewire\Projects;
+namespace App\Livewire\Client;
 
 use App\Models\Project;
 use App\Models\Task;
-use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Locked;
 use Livewire\Component;
 
-class UpcomingTasks extends Component
+class ScheduleIndex extends Component
 {
     protected $listeners = ['refreshComponent' => '$refresh'];
 
-    public Project $project;
+    #[Locked]
+    public string $token = '';
+
+    #[Locked]
+    public ?int $projectId = null;
+
+    public bool $valid = false;
+    public string $message = '';
+
+    public function mount(string $token): void
+    {
+        $this->token = $token;
+
+        $project = Project::where('schedule_token', $token)->first();
+
+        if (! $project) {
+            $this->valid = false;
+            $this->message = 'This link is no longer valid.';
+
+            return;
+        }
+
+        $this->valid = true;
+        $this->projectId = $project->id;
+    }
+
+    public function getProject()
+    {
+        if (! $this->projectId) {
+            return null;
+        }
+
+        return Project::with(['client', 'createdByVendor'])->find($this->projectId);
+    }
 
     /**
      * Get the timezone for this project's vendor.
      */
     protected function getProjectTimezone(): string
     {
-        $vendor = $this->project->createdByVendor;
+        $project = $this->getProject();
+        $vendor = $project?->createdByVendor;
 
         if ($vendor && is_string($vendor->timezone) && $vendor->timezone !== '') {
             return $vendor->timezone;
@@ -39,13 +73,29 @@ class UpcomingTasks extends Component
     }
 
     /**
+     * Get today's date for the view (for Today/Tomorrow badges).
+     * Uses browser date if available, otherwise falls back to project vendor timezone.
+     */
+    protected function getBrowserToday(): Carbon
+    {
+        $browserDate = browser_date();
+        
+        if ($browserDate) {
+            return Carbon::createFromFormat('Y-m-d', $browserDate)->startOfDay();
+        }
+
+        // Fallback to project's vendor timezone (not UTC)
+        return Carbon::today($this->getProjectTimezone());
+    }
+
+    /**
      * Get today's date string (Y-m-d) for the view.
      * Uses browser timezone so "Today" badge reflects the user's local time.
      */
     #[Computed]
     public function todayDate(): string
     {
-        return browser_today()->format('Y-m-d');
+        return $this->getBrowserToday()->format('Y-m-d');
     }
 
     /**
@@ -55,7 +105,7 @@ class UpcomingTasks extends Component
     #[Computed]
     public function tomorrowDate(): string
     {
-        return browser_today()->addDay()->format('Y-m-d');
+        return $this->getBrowserToday()->addDay()->format('Y-m-d');
     }
 
     /**
@@ -68,50 +118,31 @@ class UpcomingTasks extends Component
     }
 
     /**
-     * Get tasks grouped by date, with multi-day tasks appearing on each day
+     * Get tasks grouped by date, with multi-day tasks appearing on each day.
      * 
      * @return Collection<string, Collection<int, Task>>
      */
     #[Computed]
     public function groupedTasks(): Collection
     {
+        if (! $this->projectId) {
+            return collect();
+        }
+
         $today = $this->getToday();
 
         $tasks = Task::query()
-            ->where('project_id', $this->project->id)
+            ->where('project_id', $this->projectId)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
             ->whereDate('end_date', '>=', $today)
-            ->with('vendor')
             ->orderBy('start_date')
             ->orderBy('end_date')
             ->get();
 
-        // Eager load users
-        $allUserIds = $tasks
-            ->pluck('user_ids')
-            ->flatten()
-            ->filter()
-            ->unique()
-            ->values();
-
-        $usersById = $allUserIds->isNotEmpty()
-            ? User::query()->whereIn('id', $allUserIds)->get()->keyBy('id')
-            : collect();
-
-        foreach ($tasks as $task) {
-            $assignedUsers = collect($task->user_ids ?? [])
-                ->map(fn ($userId) => $usersById->get($userId))
-                ->filter()
-                ->values();
-
-            $task->setRelation('users', $assignedUsers);
-        }
-
         // Build grouped tasks with all days in range (including empty days)
         $grouped = collect();
         $todayCarbon = Carbon::parse($today);
-        $todayStr = $todayCarbon->format('Y-m-d');
 
         // Show from start of week (Monday) through end of current week (Sunday)
         $startOfWeek = $todayCarbon->copy()->startOfWeek(Carbon::MONDAY);
@@ -153,19 +184,22 @@ class UpcomingTasks extends Component
     }
 
     /**
-     * Get info about the next task after the displayed week
+     * Get info about the next task after the displayed week.
      */
     #[Computed]
     public function nextTaskInfo(): ?object
     {
+        if (! $this->projectId) {
+            return null;
+        }
+
         $today = $this->getToday();
         $todayStr = $today->format('Y-m-d');
         $weekEnd = $today->copy()->endOfWeek(Carbon::SUNDAY);
         $weekEndStr = $weekEnd->format('Y-m-d');
 
-        // Get all tasks for this project
         $tasks = Task::query()
-            ->where('project_id', $this->project->id)
+            ->where('project_id', $this->projectId)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
             ->whereDate('end_date', '>=', $today)
@@ -219,15 +253,19 @@ class UpcomingTasks extends Component
     }
 
     /**
-     * Get total task count for the badge
+     * Get total task count for the badge.
      */
     #[Computed]
     public function taskCount(): int
     {
+        if (! $this->projectId) {
+            return 0;
+        }
+
         $today = $this->getToday();
 
         return Task::query()
-            ->where('project_id', $this->project->id)
+            ->where('project_id', $this->projectId)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
             ->whereDate('end_date', '>=', $today)
@@ -235,23 +273,25 @@ class UpcomingTasks extends Component
     }
 
     /**
-     * Get tasks that have no scheduled dates
-     *
-     * @return Collection<int, Task>
+     * Get unscheduled tasks (tasks without dates selected).
      */
     #[Computed]
     public function unscheduledTasks(): Collection
     {
+        if (! $this->projectId) {
+            return collect();
+        }
+
         return Task::query()
-            ->where('project_id', $this->project->id)
+            ->where('project_id', $this->projectId)
             ->whereNull('start_date')
-            ->with('vendor')
             ->orderBy('created_at')
             ->get();
     }
 
     public function render()
     {
-        return view('livewire.projects.upcoming-tasks');
+        return view('livewire.client.schedule-index')
+            ->layout('components.layouts.guest');
     }
 }
