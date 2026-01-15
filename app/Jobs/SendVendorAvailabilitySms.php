@@ -3,7 +3,9 @@
 namespace App\Jobs;
 
 use App\Models\Task;
+use App\Models\Vendor;
 use App\Notifications\VendorAvailabilitySmsNotification;
+use App\Services\SmsScheduleService;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -37,12 +39,27 @@ class SendVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
     /**
      * Execute the job.
      */
-    public function handle(): void
+    public function handle(SmsScheduleService $smsService): void
     {
         $task = Task::with(['vendor', 'project', 'owner'])->find($this->taskId);
 
         if (!$task) {
             Log::info("SendVendorAvailabilitySms: Task {$this->taskId} not found, skipping");
+            return;
+        }
+
+        $owningVendor = $task->project?->createdByVendor;
+
+        if (! $this->smsEnabledForVendor($owningVendor)) {
+            return;
+        }
+
+        $vendorTimezone = $owningVendor?->timezone;
+
+        if (! $smsService->isWithinBusinessHours($vendorTimezone)) {
+            $nextStart = $smsService->getNextBusinessHoursStart($vendorTimezone);
+            self::dispatch($this->taskId)->delay($nextStart);
+
             return;
         }
 
@@ -103,5 +120,16 @@ class SendVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
         }
 
         return true;
+    }
+
+    private function smsEnabledForVendor(?Vendor $vendor): bool
+    {
+        if (! $vendor) {
+            return true;
+        }
+
+        $baseEnabled = (bool) data_get($vendor->options, 'sms_enabled', true);
+
+        return (bool) data_get($vendor->options, 'sms_vendor_enabled', $baseEnabled);
     }
 }

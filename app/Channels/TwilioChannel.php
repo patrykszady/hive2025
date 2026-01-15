@@ -79,6 +79,15 @@ class TwilioChannel
 
         $message = $notification->toTwilio($notifiable);
 
+        if (is_string($logChannel)) {
+            Log::channel($logChannel)->debug('SMS message content', [
+                'message' => $message,
+                'notifiable_type' => get_class($notifiable),
+                'notifiable_id' => $notifiable->id ?? null,
+                'notification' => get_class($notification),
+            ]);
+        }
+
         try {
             $result = $this->twilio->messages->create(
                 $phone,

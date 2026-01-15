@@ -58,18 +58,6 @@ class SendTeamScheduleChangeSms implements ShouldQueue, ShouldBeUnique
             return;
         }
 
-        // Check if within business hours
-        if (! $smsService->isWithinBusinessHours()) {
-            $nextStart = $smsService->getNextBusinessHoursStart();
-            $log->info("SendTeamScheduleChangeSms: Outside business hours, re-queuing", [
-                'user_id' => $this->userId,
-                'next_run' => $nextStart->toDateTimeString(),
-            ]);
-
-            self::dispatch($this->userId)->delay($nextStart);
-            return;
-        }
-
         $today = $smsService->getToday();
         $todayStr = $today->format('Y-m-d');
 
@@ -90,6 +78,24 @@ class SendTeamScheduleChangeSms implements ShouldQueue, ShouldBeUnique
 
                 return true; // If no specific dates, task spans the range
             });
+
+        if ($tasks->isEmpty()) {
+            return;
+        }
+
+        $owningVendor = $tasks->first()?->project?->createdByVendor;
+        if (! $this->smsEnabledForVendor($owningVendor)) {
+            return;
+        }
+
+        $vendorTimezone = $owningVendor?->timezone;
+
+        // Check if within business hours
+        if (! $smsService->isWithinBusinessHours($vendorTimezone)) {
+            $nextStart = $smsService->getNextBusinessHoursStart($vendorTimezone);
+            self::dispatch($this->userId)->delay($nextStart);
+            return;
+        }
 
         // Check throttle - don't send if recently notified with same content
         $currentHash = SmsLog::generateTasksHash($tasks);
@@ -156,5 +162,16 @@ class SendTeamScheduleChangeSms implements ShouldQueue, ShouldBeUnique
 
             report($e);
         }
+    }
+
+    private function smsEnabledForVendor(?\App\Models\Vendor $vendor): bool
+    {
+        if (! $vendor) {
+            return true;
+        }
+
+        $baseEnabled = (bool) data_get($vendor->options, 'sms_enabled', true);
+
+        return (bool) data_get($vendor->options, 'sms_team_enabled', $baseEnabled);
     }
 }

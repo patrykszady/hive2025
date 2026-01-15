@@ -43,29 +43,44 @@ class SendBatchVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
     public function handle(SmsScheduleService $smsService): void
     {
         $log = $smsService->getLogger('vendor');
-        
+        // Find all tasks for this vendor that need notifications
+        // Tasks with vendor_status = 'requested' and no token haven't had SMS sent yet
+        $tasks = Task::with(['project.createdByVendor', 'owner'])
+            ->where('vendor_id', $this->vendorId)
+            ->where('vendor_status', Task::VENDOR_STATUS_REQUESTED)
+            ->whereNull('vendor_status_token')
+            ->whereNotNull('start_date')
+            ->where('start_date', '>=', now()->startOfDay())
+            ->orderBy('start_date')
+            ->get();
+
+        if ($tasks->isEmpty()) {
+            return;
+        }
+
+        $owningVendor = $tasks->first()?->project?->createdByVendor;
+
+        if (! $this->smsEnabledForVendor($owningVendor)) {
+            return;
+        }
+
+        $vendorTimezone = $owningVendor?->timezone;
+
+        // Check if within business hours, if not, re-queue for next morning
+        if (! $smsService->isWithinBusinessHours($vendorTimezone)) {
+            $nextMorning = $smsService->getNextBusinessHoursStart($vendorTimezone);
+
+            self::dispatch($this->vendorId, $this->taskIds)
+                ->delay($nextMorning);
+
+            return;
+        }
+
         $log->info("Job started for vendor {$this->vendorId}", [
             'vendor_id' => $this->vendorId,
             'task_ids' => $this->taskIds,
             'current_time' => now()->toDateTimeString(),
         ]);
-
-        // Check if within business hours, if not, re-queue for next morning
-        if (! $smsService->isWithinBusinessHours()) {
-            $nextMorning = $smsService->getNextBusinessHoursStart();
-            $log->info(
-                "SendBatchVendorAvailabilitySms: Outside business hours, re-queuing for vendor {$this->vendorId} at {$nextMorning->toDateTimeString()}",
-                [
-                'vendor_id' => $this->vendorId,
-                'next_run' => $nextMorning->toDateTimeString(),
-                ]
-            );
-            
-            self::dispatch($this->vendorId, $this->taskIds)
-                ->delay($nextMorning);
-            
-            return;
-        }
 
         $vendor = Vendor::find($this->vendorId);
 
@@ -97,27 +112,11 @@ class SendBatchVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
             return;
         }
 
-        // Find all tasks for this vendor that need notifications
-        // Tasks with vendor_status = 'requested' and no token haven't had SMS sent yet
-        $tasks = Task::with(['project', 'owner'])
-            ->where('vendor_id', $this->vendorId)
-            ->where('vendor_status', Task::VENDOR_STATUS_REQUESTED)
-            ->whereNull('vendor_status_token')
-            ->whereNotNull('start_date')
-            ->where('start_date', '>=', now()->startOfDay())
-            ->orderBy('start_date')
-            ->get();
-
         $log->info("Found eligible tasks", [
             'vendor_id' => $this->vendorId,
             'task_count' => $tasks->count(),
             'task_ids' => $tasks->pluck('id')->toArray(),
         ]);
-
-        if ($tasks->isEmpty()) {
-            $log->info("No eligible tasks, skipping", ['vendor_id' => $this->vendorId]);
-            return;
-        }
 
         $vendorToken = $vendor->getOrCreateAvailabilityToken();
 
@@ -194,5 +193,16 @@ class SendBatchVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
         if ($successCount === 0 && $failureCount > 0) {
             throw new \RuntimeException("All SMS notifications failed for vendor {$vendor->id}");
         }
+    }
+
+    private function smsEnabledForVendor(?Vendor $vendor): bool
+    {
+        if (! $vendor) {
+            return true;
+        }
+
+        $baseEnabled = (bool) data_get($vendor->options, 'sms_enabled', true);
+
+        return (bool) data_get($vendor->options, 'sms_vendor_enabled', $baseEnabled);
     }
 }

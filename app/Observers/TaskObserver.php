@@ -7,6 +7,8 @@ use App\Jobs\SendClientScheduleChangeSms;
 use App\Jobs\SendTeamScheduleChangeSms;
 use App\Models\Project;
 use App\Models\Task;
+use App\Models\Vendor;
+use App\Services\SmsScheduleService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
 
@@ -261,16 +263,27 @@ class TaskObserver
             return;
         }
 
+        if (! $this->smsEnabledForTask($task, 'client')) {
+            return;
+        }
+
+        $smsService = app(SmsScheduleService::class);
+        $vendorTimezone = $this->getOwningVendor($task)?->timezone;
+        $sendAt = $smsService->isWithinBusinessHours($vendorTimezone)
+            ? now()->addMinutes(15)
+            : $smsService->getNextBusinessHoursStart($vendorTimezone);
+
         $log = Log::channel('client_sms');
-        $log->info("TaskObserver: Queueing client schedule change notification with 15-min delay", [
+        $log->info("TaskObserver: Queueing client schedule change notification", [
             'task_id' => $task->id,
             'project_id' => $task->project_id,
             'changed_by_user_id' => auth()->id(),
+            'scheduled_for' => $sendAt->toDateTimeString(),
         ]);
 
         // Dispatch with 15-minute delay - ShouldBeUnique consolidates multiple changes
         SendClientScheduleChangeSms::dispatch($task->project_id)
-            ->delay(now()->addMinutes(15));
+            ->delay($sendAt);
     }
 
     /**
@@ -307,6 +320,10 @@ class TaskObserver
             return;
         }
 
+        if (! $this->smsEnabledForTask($task, 'team')) {
+            return;
+        }
+
         // Determine affected users - use provided arrays or fall back to task's current users
         if (empty($originalUserIds) && empty($newUserIds)) {
             $affectedUserIds = $task->user_ids ?? [];
@@ -318,17 +335,46 @@ class TaskObserver
             return;
         }
 
+        $smsService = app(SmsScheduleService::class);
+        $vendorTimezone = $this->getOwningVendor($task)?->timezone;
+        $sendAt = $smsService->isWithinBusinessHours($vendorTimezone)
+            ? now()->addMinutes(15)
+            : $smsService->getNextBusinessHoursStart($vendorTimezone);
+
         $log = Log::channel('team_sms');
-        $log->info("TaskObserver: Queueing team schedule change notifications with 15-min delay", [
+        $log->info("TaskObserver: Queueing team schedule change notifications", [
             'task_id' => $task->id,
             'affected_user_ids' => $affectedUserIds,
             'changed_by_user_id' => auth()->id(),
+            'scheduled_for' => $sendAt->toDateTimeString(),
         ]);
 
         // Dispatch a job for each affected user - ShouldBeUnique consolidates by user_id
         foreach ($affectedUserIds as $userId) {
             SendTeamScheduleChangeSms::dispatch($userId)
-                ->delay(now()->addMinutes(15));
+                ->delay($sendAt);
         }
+    }
+
+    private function smsEnabledForTask(Task $task, string $type): bool
+    {
+        $vendor = $this->getOwningVendor($task);
+
+        if (! $vendor) {
+            return true;
+        }
+
+        $baseEnabled = (bool) data_get($vendor->options, 'sms_enabled', true);
+
+        return match ($type) {
+            'client' => (bool) data_get($vendor->options, 'sms_client_enabled', $baseEnabled),
+            'team' => (bool) data_get($vendor->options, 'sms_team_enabled', $baseEnabled),
+            default => $baseEnabled,
+        };
+    }
+
+    private function getOwningVendor(Task $task): ?Vendor
+    {
+        return $task->project?->createdByVendor;
     }
 }

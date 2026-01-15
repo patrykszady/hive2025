@@ -58,15 +58,14 @@ class SendClientScheduleChangeSms implements ShouldQueue, ShouldBeUnique
             return;
         }
 
+        if (! $this->smsEnabledForProject($project)) {
+            return;
+        }
+
         // Check if within business hours
         if (! $smsService->isWithinBusinessHours()) {
             // Re-queue for next business hours
             $nextStart = $smsService->getNextBusinessHoursStart();
-            $log->info("SendClientScheduleChangeSms: Outside business hours, re-queuing", [
-                'project_id' => $this->projectId,
-                'next_run' => $nextStart->toDateTimeString(),
-            ]);
-
             self::dispatch($this->projectId)->delay($nextStart);
 
             return;
@@ -205,5 +204,18 @@ class SendClientScheduleChangeSms implements ShouldQueue, ShouldBeUnique
 
             report($e);
         }
+    }
+
+    private function smsEnabledForProject(Project $project): bool
+    {
+        $vendor = $project->createdByVendor;
+
+        if (! $vendor) {
+            return true;
+        }
+
+        $baseEnabled = (bool) data_get($vendor->options, 'sms_enabled', true);
+
+        return (bool) data_get($vendor->options, 'sms_client_enabled', $baseEnabled);
     }
 }
