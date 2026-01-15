@@ -6,7 +6,43 @@
 >
     <x-slot name="header">
         <div class="min-w-0">
-            <flux:heading size="lg" class="!mb-0">{{ str_replace('Task', $form->type ?? 'Task', $view_text['card_title']) }}</flux:heading>
+            <div class="flex items-center gap-2">
+                <flux:heading size="lg" class="!mb-0">{{ str_replace('Task', $form->type ?? 'Task', $view_text['card_title']) }}</flux:heading>
+                @if($view_text['form_submit'] === 'edit' && $form->task && $form->task->vendor_id)
+                    @php
+                        $statusUi = $form->task->vendor_status_ui;
+                        $canRespond = in_array($form->task->vendor_status, [\App\Models\Task::VENDOR_STATUS_REQUESTED, \App\Models\Task::VENDOR_STATUS_PROPOSED], true);
+                        $isConfirmed = $form->task->vendor_status === \App\Models\Task::VENDOR_STATUS_CONFIRMED;
+                        $canToggle = $canRespond || $isConfirmed;
+                    @endphp
+                    @if($statusUi)
+                        <flux:button.group>
+                            <flux:badge size="sm" :color="$statusUi['flux'] ?? 'zinc'" :icon="$statusUi['icon'] ?? null" class="rounded-r-none">
+                                {{ $statusUi['label'] ?? ucfirst($form->task->vendor_status) }}
+                            </flux:badge>
+                            @if($isConfirmed)
+                                <flux:button
+                                    size="xs"
+                                    icon="x-mark"
+                                    variant="outline"
+                                    class="hover:text-red-600 hover:border-red-600"
+                                    wire:click="resetVendorAvailability"
+                                    :disabled="! $canToggle"
+                                ></flux:button>
+                            @else
+                                <flux:button
+                                    size="xs"
+                                    icon="check"
+                                    variant="outline"
+                                    class="hover:text-green-600 hover:border-green-600"
+                                    wire:click="confirmVendorAvailability"
+                                    :disabled="! $canToggle"
+                                ></flux:button>
+                            @endif
+                        </flux:button.group>
+                    @endif
+                @endif
+            </div>
             @if(isset($form->task))
                 <flux:subheading>{{$form->task->title}}</flux:subheading>
             @endif
@@ -51,21 +87,6 @@
                         Notes
                     </button>
                 @endif
-                {{-- @if($view_text['form_submit'] === 'edit' && $form->task)
-                    <!-- Replace the "Dependencies" tab button with "Related Tasks" -->
-                    <button
-                        @click="activeTab = 'dependencies'"
-                        :class="activeTab === 'dependencies' ? activeClasses : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
-                        class="py-2 px-1 border-b-2 font-medium text-sm flex items-center gap-2"
-                    >
-                        Related Tasks
-
-                        <!-- Use red badge if any dependency is blocking, blue otherwise -->
-                        <flux:badge size="sm" color="{{ $this->hasBlockingDependency ? 'red' : 'blue' }}">
-                            {{ $form->task->total_dependencies_count }}
-                        </flux:badge>
-                    </button>
-                @endif --}}
             </nav>
         </div>
 
@@ -91,9 +112,9 @@
                     />
 
                     {{-- VENDOR --}}
+                    <flux:label>Vendor</flux:label>
                     <flux:select
                         wire:model.live="form.vendor_id"
-                        label="Vendor"
                         variant="listbox"
                         searchable
                         clearable
@@ -335,123 +356,16 @@
                                 </flux:kanban.column>
                             </flux:kanban>
                         </div>
-                        </div>
-                    </div>
-                </div>
-        @endif
-
-        {{-- <!-- Updated Dependencies Panel (now called Related Tasks) -->
-        @if($view_text['form_submit'] === 'edit' && $form->task)
-            <div x-show="activeTab === 'dependencies'">
-                <div class="relative">
-                    <div class="space-y-6">
-                        <!-- Tasks This Depends On (Prerequisites) -->
-                        @if($form->task->predecessorDependencies->count() > 0)
-                            <div class="space-y-3">
-                                <flux:subheading>Tasks This Depends On</flux:subheading>
-                                <div class="space-y-2">
-                                    @foreach($form->task->predecessorDependencies as $dependency)
-                                        <x-task-dependency-card :dependency="$dependency" mode="predecessor" />
-                                    @endforeach
-                                </div>
-                            </div>
-
-                            <flux:separator />
-                        @endif
-
-                        <!-- Tasks That Depend On This (Successors) -->
-                        @if($form->task->successorDependencies->count() > 0)
-                            <div class="space-y-3">
-                                <flux:subheading>Tasks That Depend On This</flux:subheading>
-                                <div class="space-y-2">
-                                    @foreach($form->task->successorDependencies as $dependency)
-                                        <x-task-dependency-card :dependency="$dependency" mode="successor" />
-                                    @endforeach
-                                </div>
-                            </div>
-                        @else
-                            <div class="mt-4 text-sm text-gray-500">No tasks depend on this task.</div>
-                        @endif
-
-                        <flux:separator />
-
-                        <!-- Add New Dependency Section - Keep this unchanged -->
-                        <div class="space-y-4">
-                            <flux:subheading>Add New Dependency</flux:subheading>
-
-                            <flux:select wire:model="selectedPredecessorId" label="Prerequisite Task" placeholder="Select a task that must complete first...">
-                                @foreach($this->availableTasks as $availableTask)
-                                    <flux:select.option value="{{ $availableTask->id }}">
-                                        <div>
-                                            <div class="font-medium">{{ $availableTask->title }}</div>
-                                            @if($availableTask->start_date && $availableTask->end_date)
-                                                <div class="text-xs text-gray-500">
-                                                    {{ $availableTask->start_date->format('M j') }} - {{ $availableTask->end_date->format('M j') }}
-                                                </div>
-                                            @endif
-                                        </div>
-                                    </flux:select.option>
-                                @endforeach
-                            </flux:select>
-
-                            <div class="grid grid-cols-2 gap-4">
-                                <flux:field>
-                                    <flux:label>
-                                        Dependency Type
-
-                                        <flux:tooltip toggleable>
-                                            <flux:button icon="information-circle" size="sm" variant="ghost" />
-
-                                            <flux:tooltip.content>
-                                                <ul class="text-sm">
-                                                    <li>• <strong>Finish to Start:</strong> Prerequisite must finish before this task starts</li>
-                                                    <li>• <strong>Start to Start:</strong> Both tasks start at the same time</li>
-                                                    <li>• <strong>Finish to Finish:</strong> Both tasks finish at the same time</li>
-                                                    <li>• <strong>Start to Finish:</strong> This task finishes when prerequisite starts</li>
-                                                </ul>
-                                            </flux:tooltip.content>
-                                        </flux:tooltip> <!-- FIXED: Close tooltip tag properly -->
-                                    </flux:label> <!-- Then close label tag -->
-
-                                    <flux:select wire:model="dependencyType">
-                                        <flux:select.option value="finish_to_start">Finish to Start</flux:select.option>
-                                        <flux:select.option value="start_to_start">Start to Start</flux:select.option>
-                                        <flux:select.option value="finish_to_finish">Finish to Finish</flux:select.option>
-                                        <flux:select.option value="start_to_finish">Start to Finish</flux:select.option>
-                                    </flux:select>
-                                </flux:field>
-
-                                <flux:field>
-                                    <flux:label class="!mb-4 !mt-2">Lag Days</flux:label>
-                                    <flux:input
-                                        wire:model="lagDays"
-                                        type="number"
-                                        placeholder="0"
-                                    />
-                                    <flux:description class="!mt-1">Positive for delay, negative for overlap.</flux:description>
-                                </flux:field>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="mt-6">
-                        <!-- STICKY FOOTER -->
-                        <div class="sticky bottom-0 flex justify-end space-x-2">
-                            <flux:button
-                                wire:click="addDependency"
-                                variant="primary"
-                            >
-                                Add Dependency
-                            </flux:button>
-                        </div>
                     </div>
                 </div>
             </div>
-        @endif --}}
+        @endif
+
     </div>
 
     <x-slot name="footer">
-        <div class="flex-1"></div>
+        <flux:spacer />
+
         @if($view_text['form_submit'] === 'edit')
             <flux:button type="button" wire:click="duplicateTask">Duplicate</flux:button>
         @endif

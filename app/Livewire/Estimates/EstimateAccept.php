@@ -21,8 +21,6 @@ class EstimateAccept extends Component
 
     public $payments_outstanding = 0;
 
-    public $include_reimbursement = true;
-
     public $start_date = null;
 
     public $end_date = null;
@@ -35,7 +33,6 @@ class EstimateAccept extends Component
             'sections.*.bid_index' => 'nullable',
             'payments.*.description' => 'required|min:3',
             'payments.*.amount' => 'nullable',
-            'include_reimbursement' => 'nullable',
             'start_date' => 'nullable',
             'end_date' => 'nullable',
         ];
@@ -45,10 +42,6 @@ class EstimateAccept extends Component
     {
         $this->estimate = $estimate;
         $this->project = $estimate->project;
-
-        if (! is_null($this->estimate->reimbursments)) {
-            $this->include_reimbursement = true;
-        }
 
         $this->bids = $this->project->bids()->vendorBids($this->estimate->vendor->id)->with('estimate_sections')->orderBy('type')->get();
 
@@ -118,6 +111,20 @@ class EstimateAccept extends Component
         // Refresh the estimate model to get fresh data
         $this->estimate = $this->estimate->fresh();
         $this->project = $this->estimate->project;
+
+        // Reload bids to include any newly created change orders
+        $this->bids = $this->project->bids()->vendorBids($this->estimate->vendor->id)->with('estimate_sections')->orderBy('type')->get();
+
+        if ($this->bids->isEmpty()) {
+            $bid = Bid::create([
+                'amount' => 0.00,
+                'type' => 1,
+                'project_id' => $this->project->id,
+                'vendor_id' => auth()->user()->vendor->id,
+            ]);
+
+            $this->bids->push($bid);
+        }
 
         // Reload sections with fresh data
         $sections = $this->estimate
@@ -191,8 +198,6 @@ class EstimateAccept extends Component
         } else {
             $estimate = $this->estimate;
             $estimate_options = $this->estimate->options;
-
-            $estimate_options['include_reimbursement'] = $this->include_reimbursement;
 
             if ($this->payments->where('amount', '!=', '')->sum('amount') != 0) {
                 $estimate_options['payments'] = $this->payments->toArray();

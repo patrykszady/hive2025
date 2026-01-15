@@ -33,6 +33,17 @@
                 <flux:error name="short_name" />
             </flux:field>
 
+            {{-- SMS Notifications --}}
+            <flux:field>
+                <flux:label>SMS Notifications</flux:label>
+                <flux:description>Enable or disable all SMS sending for your company.</flux:description>
+                <div class="mt-2 flex items-center gap-2">
+                    <flux:switch wire:model.live="sms_enabled" align="left" />
+                    <span class="text-sm text-zinc-600">{{ $sms_enabled ? 'Enabled' : 'Disabled' }}</span>
+                </div>
+                <flux:error name="sms_enabled" />
+            </flux:field>
+
             {{-- Business Logo --}}
             <div class="space-y-3">
                 <flux:file-upload wire:model="logo" label="Business Logo" :error="$errors->first('logo')">

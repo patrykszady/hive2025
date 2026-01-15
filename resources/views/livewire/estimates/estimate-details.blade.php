@@ -11,7 +11,7 @@
 
                 <flux:menu>
                     @can('update', $estimate)
-                        <flux:menu.item icon="check-circle" wire:click="$dispatchTo('estimates.estimate-accept', 'accept')">Finalize Estimate</flux:menu.item>
+                        <flux:menu.item icon="cog-6-tooth" wire:click="$dispatchTo('estimates.estimate-accept', 'accept')">Settings</flux:menu.item>
                     @endcan
                     
                     <flux:menu.item icon="document-duplicate" wire:click="$dispatchTo('estimates.estimate-duplicate', 'duplicateModal', { estimate: {{$estimate->id}} })">Duplicate Estimate</flux:menu.item>
@@ -45,6 +45,7 @@
             :content="$client->name ?? $estimate->client->name"
             :href="route('clients.show', $client->id ?? $estimate->client->id)"
             :no-cloak="$nonLivewire ?? false"
+            :navigate="!($nonLivewire ?? false)"
         />
 
         <x-details.row 
@@ -52,28 +53,45 @@
             :content="$project->project_name ?? $estimate->project->project_name"
             :href="route('projects.show', $project->id ?? $estimate->project->id)"
             :no-cloak="$nonLivewire ?? false"
+            :navigate="!($nonLivewire ?? false)"
         />
 
-        <x-details.row 
-            title="Jobsite Address" 
-            :content="$project->full_address ?? $estimate->project->full_address"
-            :href="$project?->getAddressMapURI() ?? $estimate->project->getAddressMapURI()"
-            :copyable="!($nonLivewire ?? false)"
-            no-truncate
-            :no-cloak="$nonLivewire ?? false"
-        />
+        @php
+            $jobsiteAddress = $project->full_address ?? $estimate->project->full_address;
+            $billingAddress = $client->full_address ?? $estimate->client->full_address;
+            $sameAddress = $jobsiteAddress === $billingAddress;
+        @endphp
 
+        @if($sameAddress)
+            <x-details.row 
+                title="Address" 
+                :content="$jobsiteAddress"
+                :href="$project?->getAddressMapURI() ?? $estimate->project->getAddressMapURI()"
+                :copyable="!($nonLivewire ?? false)"
+                no-truncate
+                :no-cloak="$nonLivewire ?? false"
+            />
+        @else
+            <x-details.row 
+                title="Jobsite Address" 
+                :content="$jobsiteAddress"
+                :href="$project?->getAddressMapURI() ?? $estimate->project->getAddressMapURI()"
+                :copyable="!($nonLivewire ?? false)"
+                no-truncate
+                :no-cloak="$nonLivewire ?? false"
+            />
 
-        @unless(in_array('billing address', $hide ?? []))
-            @if($client?->full_address ?? $estimate->client?->full_address)
-                <x-details.row 
-                    title="Billing Address" 
-                    :content="$client->full_address ?? $estimate->client->full_address"
-                    no-truncate
-                    :no-cloak="$nonLivewire ?? false"
-                />
-            @endif
-        @endunless
+            @unless(in_array('billing address', $hide ?? []))
+                @if($billingAddress)
+                    <x-details.row 
+                        title="Billing Address" 
+                        :content="$billingAddress"
+                        no-truncate
+                        :no-cloak="$nonLivewire ?? false"
+                    />
+                @endif
+            @endunless
+        @endif
 
         <x-details.row 
             title="Number" 

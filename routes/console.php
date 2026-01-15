@@ -58,24 +58,48 @@ Schedule::command('nylas:sync-contacts')
     ->withoutOverlapping()
     ->onOneServer();
 
-// Client Schedule SMS Notifications
-// Send "tomorrow" reminders at 7 PM each night
-Schedule::command('client:send-schedule-sms tomorrow')
-    ->dailyAt('19:00')
-    ->timezone('America/Chicago')
-    ->name('client-schedule-sms-tomorrow')
-    ->environments(['production'])
-    ->withoutOverlapping()
-    ->onOneServer();
+// Schedule SMS Notifications
+// Send "tomorrow" reminders at 7 PM each night (client, vendor, team)
+Schedule::command('schedule:send-sms client tomorrow')
+  ->dailyAt('19:00')
+  ->timezone('America/Chicago')
+  ->name('schedule-sms-client-tomorrow')
+  ->environments(['production'])
+  ->withoutOverlapping()
+  ->onOneServer();
 
-// Send "today" reminders at 7 AM each morning
-// Schedule::command('client:send-schedule-sms today')
-//     ->dailyAt('07:00')
-//     ->timezone('America/Chicago')
-//     ->name('client-schedule-sms-today')
-//     ->environments(['production'])
-//     ->withoutOverlapping()
-//     ->onOneServer();
+Schedule::command('schedule:send-sms vendor tomorrow')
+  ->dailyAt('19:00')
+  ->timezone('America/Chicago')
+  ->name('schedule-sms-vendor-tomorrow')
+  ->environments(['production'])
+  ->withoutOverlapping()
+  ->onOneServer();
+
+Schedule::command('schedule:send-sms team tomorrow')
+  ->dailyAt('19:00')
+  ->timezone('America/Chicago')
+  ->name('schedule-sms-team-tomorrow')
+  ->environments(['production'])
+  ->withoutOverlapping()
+  ->onOneServer();
+
+// Send "today" reminders at 7 AM each morning (client, vendor)
+Schedule::command('schedule:send-sms client today')
+  ->dailyAt('07:00')
+  ->timezone('America/Chicago')
+  ->name('schedule-sms-client-today')
+  ->environments(['production'])
+  ->withoutOverlapping()
+  ->onOneServer();
+
+Schedule::command('schedule:send-sms vendor today')
+  ->dailyAt('07:00')
+  ->timezone('America/Chicago')
+  ->name('schedule-sms-vendor-today')
+  ->environments(['production'])
+  ->withoutOverlapping()
+  ->onOneServer();
 
 //Plaid/Transaction tasks
 // Disabled - using ITEM webhooks (ERROR, PENDING_EXPIRATION, USER_PERMISSION_REVOKED) instead
@@ -192,23 +216,6 @@ Schedule::call(function () {
     ->withoutOverlapping()
     ->onOneServer();
 
-// Daily user/team member task reminders for next day
-Schedule::command('tasks:send-tomorrow-reminders')
-    ->dailyAt('19:00')
-    ->timezone('America/Chicago')
-    ->name('send-tomorrow-reminders')
-    ->environments(['production'])
-    ->withoutOverlapping()
-    ->onOneServer();
-
-// Process all task notifications
-// Schedule::command('tasks:process-notifications')
-//     ->everyMinute()
-//     ->name('process-task-notifications')
-//     ->environments(['production'])
-//     ->withoutOverlapping()
-//     ->onOneServer();
-    
 // Search index maintenance - sync settings and reimport vendor index
 Schedule::command('scout:sync-index-settings')
     ->dailyAt('02:00')

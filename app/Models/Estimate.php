@@ -97,12 +97,7 @@ class Estimate extends Model
 
     public function getReimbursmentsAttribute()
     {
-        $includeReimbursement = $this->options['include_reimbursement'] ?? false;
-
-        if (! $includeReimbursement) {
-            return null;
-        }
-
+        // Reimbursements are always included
         $projectFinances = $this->project?->finances;
 
         return data_get($projectFinances, 'reimbursments');

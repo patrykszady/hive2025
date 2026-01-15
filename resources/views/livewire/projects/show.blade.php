@@ -22,6 +22,7 @@
                         title="Project Client" 
                         :content="$project->client->name"
                         :href="route('clients.show', $project->client)"
+                        :navigate="true"
                     />
 
                     {{-- Project Name --}}
@@ -267,7 +268,7 @@
             </div>
 
             <div class="col-span-4 space-y-4 lg:col-span-2 lg:col-start-3">
-                @if(in_array($this->project->latestStatus->title, ['Active', 'Complete',  'Service Call', 'Service Call Complete', 'VIEW ONLY']))
+                @if(in_array($this->project->latestStatus->title, ['Active', 'Complete', 'Service Call', 'VIEW ONLY']))
                     {{-- PROJECT PAYMENTS --}}
                     <livewire:payments.payments-index :project="$project" :view="'projects.show'" lazy />
 

@@ -19,6 +19,7 @@ class VendorOptions extends Component
     public string $short_name = '';
     public $logo = null;
     public ?string $existing_logo = null;
+    public bool $sms_enabled = true;
 
     #[Title('Options')]
 
@@ -30,6 +31,7 @@ class VendorOptions extends Component
         $this->timezone = $this->vendor->timezone ?? '';
         $this->short_name = $this->vendor->options?->short_name ?? '';
         $this->existing_logo = $this->vendor->options?->logo ?? null;
+        $this->sms_enabled = (bool) data_get($this->vendor->options, 'sms_enabled', true);
     }
 
     protected function rules(): array
@@ -38,6 +40,7 @@ class VendorOptions extends Component
             'timezone' => 'nullable|string|max:50',
             'short_name' => 'nullable|string|max:100',
             'logo' => 'nullable|image|max:10240', // 10MB max
+            'sms_enabled' => 'boolean',
         ];
     }
 
@@ -52,6 +55,7 @@ class VendorOptions extends Component
         // Build options object
         $options = (array) ($this->vendor->options ?? []);
         $options['short_name'] = $this->short_name ?: null;
+        $options['sms_enabled'] = $this->sms_enabled;
 
         // Handle logo upload
         if ($this->logo) {

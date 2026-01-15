@@ -10,12 +10,19 @@ use App\Models\User;
 use App\Notifications\ClientScheduleSmsNotification;
 use App\Services\SmsScheduleService;
 use Carbon\Carbon;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 
-class SendClientScheduleChangeSms implements ShouldQueue
+class SendClientScheduleChangeSms implements ShouldQueue, ShouldBeUnique
 {
     use Queueable;
+
+    /**
+     * The number of seconds after which the job's unique lock will be released.
+     * This allows consolidation of multiple task changes for the same project.
+     */
+    public int $uniqueFor = 900; // 15 minutes
 
     public int $projectId;
 
@@ -26,6 +33,14 @@ class SendClientScheduleChangeSms implements ShouldQueue
     {
         $this->projectId = $projectId;
         $this->onQueue('default');
+    }
+
+    /**
+     * The unique ID of the job - prevents duplicate jobs for the same project.
+     */
+    public function uniqueId(): string
+    {
+        return 'client_schedule_sms_' . $this->projectId;
     }
 
     /**
@@ -181,15 +196,8 @@ class SendClientScheduleChangeSms implements ShouldQueue
                 'target_date' => $todayStr,
                 'content_hash' => $tasksHash,
             ]);
-
-            $log->info("SendClientScheduleChangeSms: Sent successfully", [
-                'project_id' => $project->id,
-                'user_id' => $user->id,
-                'user_phone' => $user->phone,
-                'tasks_count' => $tasks->count(),
-            ]);
         } catch (\Exception $e) {
-            $log->error("SendClientScheduleChangeSms: Failed to send", [
+            $log->error("SendClientScheduleChangeSms: Failed", [
                 'project_id' => $project->id,
                 'user_id' => $user->id,
                 'error' => $e->getMessage(),

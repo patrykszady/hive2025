@@ -8,6 +8,7 @@
     'indent' => 0,
     'truncate' => true,
     'noCloak' => false,
+    'navigate' => false,
 ])
 
 @php
@@ -26,9 +27,15 @@
         <div class="hidden sm:block sm:col-span-1"></div>
         <flux:subheading class="{{ $shouldTruncate ? 'truncate' : 'whitespace-normal break-words' }} sm:col-span-2 text-right pr-3 font-normal {{ $indentClass }}">
             @if($href)
-                <flux:link href="{{ $href }}" target="_blank" variant="ghost" :accent="false" class="font-normal">
-                    {{ $title }}
-                </flux:link>
+                @if($navigate)
+                    <flux:link href="{{ $href }}" variant="ghost" :accent="false" class="font-normal" wire:navigate.hover>
+                        {{ $title }}
+                    </flux:link>
+                @else
+                    <flux:link href="{{ $href }}" target="_blank" variant="ghost" :accent="false" class="font-normal">
+                        {{ $title }}
+                    </flux:link>
+                @endif
             @else
                 {{ $title }}
             @endif
@@ -46,9 +53,15 @@
             <flux:heading class="!my-0 font-bold {{ $shouldTruncate ? 'truncate' : 'whitespace-normal break-words' }}">
                 <span class="{{ $isRight ? 'float-right' : '' }}">
                     @if($href && !$isRight)
-                        <flux:link href="{{ $href }}" target="_blank" variant="ghost" :accent="false" class="font-bold">
-                            {!! $content ?? $slot !!}
-                        </flux:link>
+                        @if($navigate)
+                            <flux:link href="{{ $href }}" variant="ghost" :accent="false" class="font-bold" wire:navigate.hover>
+                                {!! $content ?? $slot !!}
+                            </flux:link>
+                        @else
+                            <flux:link href="{{ $href }}" target="_blank" variant="ghost" :accent="false" class="font-bold">
+                                {!! $content ?? $slot !!}
+                            </flux:link>
+                        @endif
                     @else
                         {!! $content ?? $slot !!}
                     @endif

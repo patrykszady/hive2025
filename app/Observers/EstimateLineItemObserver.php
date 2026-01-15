@@ -73,7 +73,10 @@ class EstimateLineItemObserver
             $bid->amount = $bid_sections_sum;
             $bid->save();
 
-            if ($bid->amount == 0.00) {
+            // Only delete the bid if no sections reference it anymore
+            // (not just when amount is 0, as sections may still be assigned to it)
+            $sectionsUsingBid = EstimateSection::where('bid_id', $bid->id)->count();
+            if ($bid->amount == 0.00 && $sectionsUsingBid === 0) {
                 $bid->delete();
             }
         }

@@ -100,7 +100,7 @@
                                     @foreach($estimate->estimate_line_items()->where('section_id', $section->id)->orderBy('order', 'ASC')->get() as $key => $estimate_line_item)
                                         <tbody style="break-inside: avoid;">
                                         <tr class="sm:border-b sm:border-gray-400">
-                                            <td class="hidden px-3 py-5 text-right text-gray-500 align-text-top text-md sm:table-cell bg-gray-50">{{$index + 1}}.{{$estimate_line_item->order + 1}}</td>
+                                            <td class="hidden px-3 py-5 text-right text-gray-500 align-text-top text-md sm:table-cell bg-gray-50">{{$index + 1}}.{{$key + 1}}</td>
                                             {{-- first td --}}
 
                                             <td class="pl-4 pr-3 text-md max-w-0 sm:pl-6 bg-gray-50">
@@ -162,7 +162,7 @@
 
                 {{-- ESTIMATE TOTAL --}}
                 @if($type != 'Work Order')
-                    @if($projectStatusTitle && !in_array($projectStatusTitle, ['Active', 'Complete', 'Service Call', 'Service Call Complete']))
+                    @if($projectStatusTitle && !in_array($projectStatusTitle, ['Active', 'Complete', 'Service Call']))
                         <div class="flex justify-between">
                             <div></div>
                             <x-lists.ul
@@ -221,7 +221,7 @@
 
                         {{-- PROJECT FINANCES --}}
                         <div class="col-span-2">
-                            @if($projectStatusTitle && in_array($projectStatusTitle, ['Active', 'Complete', 'Service Call', 'Service Call Complete']))
+                            @if($projectStatusTitle && in_array($projectStatusTitle, ['Active', 'Complete', 'Service Call']))
                                 <flux:card>
                                     <div class="flex justify-between">
                                         <flux:heading size="lg">{{$type}} Finances</flux:heading>

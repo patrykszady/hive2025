@@ -124,13 +124,17 @@ class EstimateShow extends Component
 
         $nextOrder = is_null($currentMaxOrder) ? 0 : $currentMaxOrder + 1;
 
-        return EstimateSection::create([
+        $section = EstimateSection::create([
             'estimate_id' => $targetEstimateId,
             'order' => $nextOrder,
             'name' => $name,
             'total' => 0.00,
             'deleted_at' => null,
         ]);
+
+        $this->maybeCreateChangeOrderBid($section);
+
+        return $section;
     }
 
     public function sectionAdd()
@@ -170,6 +174,18 @@ class EstimateShow extends Component
         $section->save();
 
         $bid = $section->bid;
+        
+        // If the section had a bid_id but the bid was deleted, create a new change order bid
+        if (! $bid && $section->bid_id) {
+            $section->bid_id = null;
+            $section->save();
+            // Create a new change order bid for this restored section
+            $this->maybeCreateChangeOrderBid($section);
+            // Refresh section to get updated bid_id
+            $section->refresh();
+            $bid = $section->bid;
+        }
+        
         if ($bid) {
             $bid->amount = EstimateSection::where('bid_id', $bid->id)->sum('total');
             $bid->save();
@@ -180,6 +196,7 @@ class EstimateShow extends Component
         }
 
         $this->estimate_refresh();
+        $this->dispatch('refresh')->to('projects.project-finances');
 
         Flux::toast(
             duration: 5000,
@@ -217,6 +234,7 @@ class EstimateShow extends Component
         }
 
         $this->estimate_refresh();
+        $this->dispatch('refresh')->to('projects.project-finances');
 
         Flux::toast(
             duration: 10000,
@@ -242,6 +260,43 @@ class EstimateShow extends Component
             // route / href / wire:click
             text: 'Section '.$section->name,
         );
+    }
+
+    protected function maybeCreateChangeOrderBid(EstimateSection $section): void
+    {
+        $estimate = $section->estimate;
+        $project = $estimate?->project;
+        $projectId = $estimate?->project_id;
+        $vendorId = $estimate?->belongs_to_vendor_id;
+
+        if (! $projectId || ! $vendorId || ! $project) {
+            return;
+        }
+
+        // Ensure latestStatus is loaded
+        $project->loadMissing('latestStatus');
+
+        // Only auto-create change order bids for Active or Service Call projects
+        $statusTitle = $project->latestStatus?->title;
+        $activeStatuses = ['Active', 'Service Call'];
+
+        if (! in_array($statusTitle, $activeStatuses, true)) {
+            return;
+        }
+
+        $nextType = (int) (Bid::where('project_id', $projectId)
+            ->where('vendor_id', $vendorId)
+            ->max('type') ?? 1) + 1;
+
+        $bid = Bid::create([
+            'amount' => 0.00,
+            'type' => $nextType,
+            'project_id' => $projectId,
+            'vendor_id' => $vendorId,
+        ]);
+
+        $section->bid_id = $bid->id;
+        $section->save();
     }
 
     public function disableEstimate()

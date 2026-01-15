@@ -52,35 +52,44 @@
                 <flux:card class="space-y-2" x-sort:item="{{$section['id']}}" x-bind:key="{{$section['id']}}">
                     {{-- HEADING --}}
                     <flux:heading>
-                        <div class="flex justify-between group">
-                            <div class="grid grid-cols-2 gap-4">
-                                <flux:input.group>
-                                    {{-- on clickaway sectionUpdate --}}
-                                    <flux:input
-                                        wire:keydown.enter="sectionUpdate({{$index}})"
-                                        wire:blur="sectionUpdate({{$index}})"
-                                        wire:model.live="sections.{{$index}}.name"
-                                        type="text"
-                                        required
-                                        placeholder="Section Name"
-                                        kbd="Enter"
-                                    />
+                        <div class="flex justify-between group" x-data="{ editing: false }">
+                            <div class="flex items-center gap-2">
+                                {{-- Display mode: show name as text with dropdown --}}
+                                <template x-if="!editing">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-base font-semibold">{{ $section['name'] ?: 'Unnamed Section' }}</span>
+                                        <flux:dropdown>
+                                            <flux:button size="sm" icon="ellipsis-vertical" variant="ghost"></flux:button>
 
-                                    <flux:dropdown>
-                                        <flux:button icon-trailing="chevron-down"></flux:button>
+                                            <flux:menu>
+                                                <flux:menu.item icon="pencil" x-on:click="editing = true; $nextTick(() => $refs.nameInput?.focus())">Edit Name</flux:menu.item>
+                                                <flux:menu.separator />
+                                                <flux:menu.item icon="document-duplicate" wire:click="sectionDuplicate({{$index}})">Duplicate Section</flux:menu.item>
+                                                <flux:menu.item icon="arrow-up-on-square" wire:click="$dispatchTo('estimates.estimate-duplicate', 'duplicateToEstimateModal', { section: {{$section['id']}} })">Duplicate to Estimate</flux:menu.item>
+                                                <flux:menu.separator />
+                                                <flux:menu.item icon="trash" wire:click="sectionDelete({{$index}})" variant="danger">Disable Section</flux:menu.item>
+                                            </flux:menu>
+                                        </flux:dropdown>
+                                    </div>
+                                </template>
 
-                                        <flux:menu>
-                                            <flux:menu.item wire:click="sectionUpdate({{$index}})">Update Section Name</flux:menu.item>
-                                            <flux:menu.separator />
-                                            <flux:menu.item wire:click="sectionDuplicate({{$index}})">Duplicate Section</flux:menu.item>
-                                            <flux:menu.separator />
-                                            {{-- wire:click="sectionDuplicateToEstimate({{$index}})" --}}
-                                            <flux:menu.item wire:click="$dispatchTo('estimates.estimate-duplicate', 'duplicateToEstimateModal', { section: {{$section['id']}} })">Duplicate Section to Estimate</flux:menu.item>
-                                            <flux:menu.separator />
-                                            <flux:menu.item wire:click="sectionDelete({{$index}})" variant="danger">Disable Section</flux:menu.item>
-                                        </flux:menu>
-                                    </flux:dropdown>
-                                </flux:input.group>
+                                {{-- Edit mode: show input --}}
+                                <template x-if="editing">
+                                    <flux:input.group>
+                                        <flux:input
+                                            x-ref="nameInput"
+                                            wire:model.defer="sections.{{$index}}.name"
+                                            x-on:keydown.enter="$wire.sectionUpdate({{$index}}); editing = false"
+                                            x-on:keydown.escape="editing = false"
+                                            type="text"
+                                            required
+                                            placeholder="Section Name"
+                                            kbd="Enter"
+                                        />
+                                        <flux:button icon="check" variant="primary" x-on:click="$wire.sectionUpdate({{$index}}); editing = false"></flux:button>
+                                        <flux:button icon="x-mark" variant="ghost" x-on:click="editing = false"></flux:button>
+                                    </flux:input.group>
+                                </template>
                             </div>
                             <flux:icon.chevron-up-down
                                 variant="solid"

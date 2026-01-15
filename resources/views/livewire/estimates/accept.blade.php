@@ -1,4 +1,4 @@
-<x-form-modal name="accept_estimate_modal" title="Finalize Estimate">
+<x-form-modal name="accept_estimate_modal" title="Settings">
     <form id="accept_estimate_modal_form" wire:submit="save" class="space-y-4">
         <flux:card>
             {{-- HEADING --}}
@@ -42,20 +42,6 @@
                     @endforeach
                 </flux:table.rows>
             </flux:table>
-        </flux:card>
-
-        <flux:card>
-            {{-- HEADING --}}
-            <div class="flex justify-between">
-                <flux:heading size="lg">Reimbursements</flux:heading>
-                <span>{{money($project->finances['reimbursments'])}}</span>
-            </div>
-            <flux:subheading>Include Project Reimbursements in Estimate.</flux:subheading>
-
-            <flux:radio.group wire:model="include_reimbursement" variant="segmented" size="sm">
-                <flux:radio value="true" label="Include" />
-                <flux:radio value="false" label="Don't Include" />
-            </flux:radio.group>
         </flux:card>
 
         <flux:card>
@@ -130,6 +116,6 @@
 
     <x-slot name="footer">
         <flux:spacer />
-        <flux:button type="submit" form="accept_estimate_modal_form" variant="primary">Finalize</flux:button>
+        <flux:button type="submit" form="accept_estimate_modal_form" variant="primary">Update</flux:button>
     </x-slot>
 </x-form-modal>

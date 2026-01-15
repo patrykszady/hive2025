@@ -157,7 +157,7 @@ class TestVendorAvailabilitySms extends Command
 
             $this->newLine();
             $this->line("Response page link sent in SMS:");
-            $this->line("  {$baseUrl}/vendor/availability/{$vendorToken}");
+            $this->line("  {$baseUrl}/v/{$vendorToken}");
 
             return 0;
         } catch (\Exception $e) {

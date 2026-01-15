@@ -655,4 +655,94 @@ class TaskCreate extends Component
     {
         return view('livewire.tasks.create');
     }
+
+    public function confirmVendorAvailability(): void
+    {
+        if (! $this->form->task) {
+            return;
+        }
+
+        $task = Task::find($this->form->task->id);
+
+        if (! $task || ! $task->vendor_id) {
+            Flux::toast(text: 'Vendor not assigned.', variant: 'danger');
+            return;
+        }
+
+        $this->authorize('update', $task);
+
+        if (! in_array($task->vendor_status, [Task::VENDOR_STATUS_REQUESTED, Task::VENDOR_STATUS_PROPOSED], true)) {
+            Flux::toast(text: 'Task is not awaiting vendor response.', variant: 'danger');
+            return;
+        }
+
+        $task->update([
+            'vendor_status' => Task::VENDOR_STATUS_CONFIRMED,
+        ]);
+
+        $this->form->task->refresh();
+        $this->refreshPlannerComponents();
+
+        Flux::toast(text: 'Vendor confirmed for this task.', variant: 'success');
+    }
+
+    public function rejectVendorAvailability(): void
+    {
+        if (! $this->form->task) {
+            return;
+        }
+
+        $task = Task::find($this->form->task->id);
+
+        if (! $task || ! $task->vendor_id) {
+            Flux::toast(text: 'Vendor not assigned.', variant: 'danger');
+            return;
+        }
+
+        $this->authorize('update', $task);
+
+        if (! in_array($task->vendor_status, [Task::VENDOR_STATUS_REQUESTED, Task::VENDOR_STATUS_PROPOSED], true)) {
+            Flux::toast(text: 'Task is not awaiting vendor response.', variant: 'danger');
+            return;
+        }
+
+        $task->update([
+            'vendor_status' => Task::VENDOR_STATUS_REJECTED,
+        ]);
+
+        $this->form->task->refresh();
+        $this->refreshPlannerComponents();
+
+        Flux::toast(text: 'Vendor rejected for this task.', variant: 'success');
+    }
+
+    public function resetVendorAvailability(): void
+    {
+        if (! $this->form->task) {
+            return;
+        }
+
+        $task = Task::find($this->form->task->id);
+
+        if (! $task || ! $task->vendor_id) {
+            Flux::toast(text: 'Vendor not assigned.', variant: 'danger');
+            return;
+        }
+
+        $this->authorize('update', $task);
+
+        if ($task->vendor_status !== Task::VENDOR_STATUS_CONFIRMED) {
+            Flux::toast(text: 'Task is not confirmed.', variant: 'danger');
+            return;
+        }
+
+        $task->update([
+            'vendor_status' => Task::VENDOR_STATUS_REQUESTED,
+        ]);
+
+        $this->form->task->refresh();
+        $this->refreshPlannerComponents();
+
+        Flux::toast(text: 'Vendor status reset to requested.', variant: 'success');
+    }
 }

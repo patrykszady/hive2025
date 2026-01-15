@@ -5,6 +5,7 @@ namespace App\Channels;
 use App\Notifications\ClientScheduleSmsNotification;
 use App\Notifications\TeamTaskSmsNotification;
 use App\Notifications\VendorAvailabilitySmsNotification;
+use App\Notifications\VendorScheduleSmsNotification;
 use Illuminate\Notifications\Notification;
 use Illuminate\Support\Facades\Log;
 use Twilio\Rest\Client;
@@ -28,7 +29,8 @@ class TwilioChannel
     public function send($notifiable, Notification $notification)
     {
         $phone = $notifiable->routeNotificationFor('twilio');
-        $isVendorSms = $notification instanceof VendorAvailabilitySmsNotification;
+        $isVendorSms = $notification instanceof VendorAvailabilitySmsNotification
+            || $notification instanceof VendorScheduleSmsNotification;
         $isClientScheduleSms = $notification instanceof ClientScheduleSmsNotification;
         $isTeamTaskSms = $notification instanceof TeamTaskSmsNotification;
 
@@ -39,10 +41,23 @@ class TwilioChannel
             default => null,
         };
 
+        if (! $this->smsEnabledFor($notification, $notifiable)) {
+            if (is_string($logChannel)) {
+                Log::channel($logChannel)->info('SMS disabled in vendor options, skipping', [
+                    'notifiable_type' => get_class($notifiable),
+                    'notifiable_id' => $notifiable->id ?? null,
+                    'notification' => get_class($notification),
+                ]);
+            }
+
+            return;
+        }
+
         if (
             app()->environment(['local', 'development'])
-            && ($notification instanceof TeamTaskSmsNotification 
+            && ($notification instanceof TeamTaskSmsNotification
                 || $notification instanceof VendorAvailabilitySmsNotification
+                || $notification instanceof VendorScheduleSmsNotification
                 || $notification instanceof ClientScheduleSmsNotification)
         ) {
             $originalPhone = $phone;
@@ -72,20 +87,6 @@ class TwilioChannel
 
         $message = $notification->toTwilio($notifiable);
 
-        if (is_string($logChannel)) {
-            Log::channel($logChannel)->info('Sending SMS via Twilio', [
-                'phone' => $phone,
-                'message_length' => strlen($message),
-                'from' => config('services.twilio.from'),
-                'notifiable_type' => get_class($notifiable),
-                'notifiable_id' => $notifiable->id ?? null,
-                'notification' => get_class($notification),
-            ]);
-            Log::channel($logChannel)->debug('SMS message content', [
-                'message' => $message,
-            ]);
-        }
-
         try {
             $result = $this->twilio->messages->create(
                 $phone,
@@ -96,11 +97,10 @@ class TwilioChannel
             );
             
             if (is_string($logChannel)) {
-                Log::channel($logChannel)->info('SMS sent successfully', [
+                Log::channel($logChannel)->info('SMS sent', [
                     'phone' => $phone,
                     'twilio_sid' => $result->sid ?? null,
-                    'status' => $result->status ?? null,
-                    'notification' => get_class($notification),
+                    'notification' => class_basename($notification),
                 ]);
             }
         } catch (\Exception $e) {
@@ -115,5 +115,31 @@ class TwilioChannel
 
             throw $e;
         }
+    }
+
+    private function smsEnabledFor(Notification $notification, $notifiable): bool
+    {
+        $vendor = null;
+
+        if ($notification instanceof ClientScheduleSmsNotification) {
+            $vendor = $notification->project->createdByVendor;
+        } elseif ($notification instanceof VendorScheduleSmsNotification) {
+            $vendor = $notification->vendor;
+        } elseif ($notification instanceof VendorAvailabilitySmsNotification) {
+            $tasks = $notification->tasks;
+            if ($tasks instanceof \App\Models\Task) {
+                $vendor = $tasks->vendor;
+            } else {
+                $vendor = $tasks->first()?->vendor;
+            }
+        } elseif ($notification instanceof TeamTaskSmsNotification) {
+            $vendor = $notifiable->vendor ?? null;
+        }
+
+        if (! $vendor) {
+            return true;
+        }
+
+        return (bool) data_get($vendor->options, 'sms_enabled', true);
     }
 }

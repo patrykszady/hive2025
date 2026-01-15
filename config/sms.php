@@ -40,7 +40,7 @@ return [
 
     'day_of_changes' => [
         // Delay in minutes before sending (allows batching rapid changes)
-        'delay_minutes' => (int) env('SMS_CHANGE_DELAY_MINUTES', 5),
+        'delay_minutes' => (int) env('SMS_CHANGE_DELAY_MINUTES', 15),
 
         // Throttle window - don't send more than one SMS per entity per window
         'throttle_minutes' => (int) env('SMS_THROTTLE_MINUTES', 30),

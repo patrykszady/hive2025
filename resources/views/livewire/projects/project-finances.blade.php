@@ -73,7 +73,7 @@
                 <flux:table.cell>{{money($finances['payments'])}}</flux:table.cell>
             </flux:table.row>
 
-            @if(in_array($this->project->latestStatus->title, ['Complete',  'Service Call', 'Service Call Complete']))
+            @if(in_array($this->project->latestStatus->title, ['Complete', 'Service Call']))
                 <flux:table.cell variant="strong">PROFIT</flux:table.cell>
                 <flux:table.cell variant="strong">{{money($finances['profit'])}}</flux:table.cell>
             @endif
