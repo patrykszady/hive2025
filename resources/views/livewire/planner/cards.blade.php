@@ -495,7 +495,7 @@
                                                     >
                                                         <div class="flex items-center justify-between gap-2 min-w-0">
                                                             <flux:heading size="sm" class="min-w-0 truncate text-orange-600 dark:text-orange-400">
-                                                                No date tasks
+                                                                Unscheduled Tasks
                                                             </flux:heading>
                                                             <span class="text-xs text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
                                                                 {{ $projectColumn->undated_tasks_count }}
@@ -633,7 +633,7 @@
 
     <flux:modal name="planner_undated_tasks_modal" class="space-y-4 min-w-[22rem]">
         <div class="space-y-1">
-            <flux:heading size="lg">No date tasks</flux:heading>
+            <flux:heading size="lg">Unscheduled tasks</flux:heading>
             @if ($undatedTasksModalProjectTitle)
                 <flux:subheading class="truncate">{{ $undatedTasksModalProjectTitle }}</flux:subheading>
             @endif
@@ -641,9 +641,7 @@
 
         <flux:separator variant="subtle" />
 
-        @if (empty($undatedTasksModalTasks))
-            <flux:text class="text-sm text-zinc-600 dark:text-zinc-400">No undated tasks found.</flux:text>
-        @else
+        @if (!empty($undatedTasksModalTasks))
             <div class="space-y-2">
                 @foreach ($undatedTasksModalTasks as $task)
                     <flux:kanban.card

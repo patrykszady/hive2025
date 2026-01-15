@@ -37,6 +37,16 @@ class TeamTaskSmsNotification extends Notification implements ShouldQueue
     }
 
     /**
+     * Get the tasks collection.
+     *
+     * @return mixed
+     */
+    public function getTasks(): mixed
+    {
+        return $this->tasks;
+    }
+
+    /**
      * Get the notification's delivery channels.
      */
     public function via($notifiable)

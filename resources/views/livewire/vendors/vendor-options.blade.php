@@ -36,12 +36,48 @@
             {{-- SMS Notifications --}}
             <flux:field>
                 <flux:label>SMS Notifications</flux:label>
-                <flux:description>Enable or disable all SMS sending for your company.</flux:description>
-                <div class="mt-2 flex items-center gap-2">
-                    <flux:switch wire:model.live="sms_enabled" align="left" />
-                    <span class="text-sm text-zinc-600">{{ $sms_enabled ? 'Enabled' : 'Disabled' }}</span>
+                <flux:description>Choose which task SMS types are enabled for your company.</flux:description>
+
+                <div class="mt-2 flex flex-col gap-4">
+                    <div class="flex items-center justify-between gap-4">
+                        <div>
+                            <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Team SMS</div>
+                            <div class="text-xs text-zinc-500">Daily reminders and schedule changes for your team.</div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <flux:switch wire:model.live="sms_team_enabled" align="left" />
+                            <span class="text-sm text-zinc-600">{{ $sms_team_enabled ? 'Enabled' : 'Disabled' }}</span>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-between gap-4">
+                        <div>
+                            <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Client SMS</div>
+                            <div class="text-xs text-zinc-500">Schedule changes and updates sent to clients.</div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <flux:switch wire:model.live="sms_client_enabled" align="left" />
+                            <span class="text-sm text-zinc-600">{{ $sms_client_enabled ? 'Enabled' : 'Disabled' }}</span>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-between gap-4">
+                        <div>
+                            <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Vendor SMS</div>
+                            <div class="text-xs text-zinc-500">Availability and schedule notifications to subcontractors.</div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <flux:switch wire:model.live="sms_vendor_enabled" align="left" />
+                            <span class="text-sm text-zinc-600">{{ $sms_vendor_enabled ? 'Enabled' : 'Disabled' }}</span>
+                        </div>
+                    </div>
                 </div>
-                <flux:error name="sms_enabled" />
+
+                <div class="mt-2 space-y-1">
+                    <flux:error name="sms_team_enabled" />
+                    <flux:error name="sms_client_enabled" />
+                    <flux:error name="sms_vendor_enabled" />
+                </div>
             </flux:field>
 
             {{-- Business Logo --}}

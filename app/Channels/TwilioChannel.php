@@ -42,14 +42,6 @@ class TwilioChannel
         };
 
         if (! $this->smsEnabledFor($notification, $notifiable)) {
-            if (is_string($logChannel)) {
-                Log::channel($logChannel)->info('SMS disabled in vendor options, skipping', [
-                    'notifiable_type' => get_class($notifiable),
-                    'notifiable_id' => $notifiable->id ?? null,
-                    'notification' => get_class($notification),
-                ]);
-            }
-
             return;
         }
 
@@ -117,29 +109,81 @@ class TwilioChannel
         }
     }
 
+    /**
+     * Check if SMS is enabled for the vendor that owns the project/task.
+     *
+     * We always check the "owning" vendor (project->createdByVendor) rather than
+     * the recipient vendor. If GS Construction (vendor 1) has SMS disabled, no
+     * SMS should go out for their projects—not to clients, team members, or subcontractors.
+     */
     private function smsEnabledFor(Notification $notification, $notifiable): bool
     {
-        $vendor = null;
+        $owningVendor = $this->resolveOwningVendor($notification, $notifiable);
 
-        if ($notification instanceof ClientScheduleSmsNotification) {
-            $vendor = $notification->project->createdByVendor;
-        } elseif ($notification instanceof VendorScheduleSmsNotification) {
-            $vendor = $notification->vendor;
-        } elseif ($notification instanceof VendorAvailabilitySmsNotification) {
-            $tasks = $notification->tasks;
-            if ($tasks instanceof \App\Models\Task) {
-                $vendor = $tasks->vendor;
-            } else {
-                $vendor = $tasks->first()?->vendor;
-            }
-        } elseif ($notification instanceof TeamTaskSmsNotification) {
-            $vendor = $notifiable->vendor ?? null;
-        }
-
-        if (! $vendor) {
+        if (! $owningVendor) {
             return true;
         }
 
-        return (bool) data_get($vendor->options, 'sms_enabled', true);
+        $optionKey = $this->smsOptionKeyFor($notification);
+
+        if (! $optionKey) {
+            return true;
+        }
+        $defaultEnabled = (bool) data_get($owningVendor->options, 'sms_enabled', true);
+
+        return (bool) data_get($owningVendor->options, $optionKey, $defaultEnabled);
+    }
+
+    /**
+     * Resolve the vendor that owns the project/task (the one sending SMS).
+     */
+    private function resolveOwningVendor(Notification $notification, $notifiable): ?\App\Models\Vendor
+    {
+        if ($notification instanceof ClientScheduleSmsNotification) {
+            return $notification->project->createdByVendor;
+        }
+
+        if ($notification instanceof VendorScheduleSmsNotification) {
+            // Get the owning vendor from the first task's project
+            $task = $notification->tasks->first();
+
+            return $task?->project?->createdByVendor;
+        }
+
+        if ($notification instanceof VendorAvailabilitySmsNotification) {
+            $tasks = $notification->tasks;
+            $task = $tasks instanceof \App\Models\Task ? $tasks : $tasks->first();
+
+            return $task?->project?->createdByVendor;
+        }
+
+        if ($notification instanceof TeamTaskSmsNotification) {
+            // Team members work for the owning vendor - get from first task's project
+            $tasks = $notification->getTasks();
+            $task = is_array($tasks) ? ($tasks[0] ?? null) : $tasks->first();
+
+            return $task?->project?->createdByVendor;
+        }
+
+        return null;
+    }
+
+    private function smsOptionKeyFor(Notification $notification): ?string
+    {
+        if ($notification instanceof ClientScheduleSmsNotification) {
+            return 'sms_client_enabled';
+        }
+
+        if ($notification instanceof VendorScheduleSmsNotification
+            || $notification instanceof VendorAvailabilitySmsNotification
+        ) {
+            return 'sms_vendor_enabled';
+        }
+
+        if ($notification instanceof TeamTaskSmsNotification) {
+            return 'sms_team_enabled';
+        }
+
+        return null;
     }
 }

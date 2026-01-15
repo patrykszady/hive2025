@@ -299,7 +299,7 @@ class SendScheduleSms extends Command
 
         $tasks = $scheduleSmsService->getTasksForDate(
             $tomorrow,
-            ['project.client', 'users']
+            ['project.client']
         )->filter(function (Task $task) {
             return ! empty($task->user_ids) && is_array($task->user_ids);
         });

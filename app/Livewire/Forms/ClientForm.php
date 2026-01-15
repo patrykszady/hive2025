@@ -12,9 +12,9 @@ class ClientForm extends Form
 {
     use AuthorizesRequests;
 
-    public ?User $user;
+    public ?User $user = null;
 
-    public ?Client $client;
+    public ?Client $client = null;
 
     #[Rule('nullable')]
     public $client_name = '';
@@ -25,13 +25,13 @@ class ClientForm extends Form
     #[Rule('nullable|min:1')]
     public $source = null;
 
-    public function setUser(User $user)
+    public function setUser(User $user): void
     {
         $this->user = $user;
         $this->client_name = $user->full_name;
     }
 
-    public function setClient(Client $client)
+    public function setClient(Client $client): void
     {
         $this->client = $client;
 
@@ -44,7 +44,7 @@ class ClientForm extends Form
         $this->client_name = $client->name;
     }
 
-    public function update()
+    public function update(): Client
     {
         $this->validate();
 
@@ -68,9 +68,13 @@ class ClientForm extends Form
         return $this->client;
     }
 
-    public function store()
+    public function store(): Client
     {
         $this->validate();
+
+        if (! $this->user) {
+            $this->user = auth()->user();
+        }
 
         $client = Client::create([
             'business_name' => $this->business_name,

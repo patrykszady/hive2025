@@ -8,40 +8,6 @@
         <div class="min-w-0">
             <div class="flex items-center gap-2">
                 <flux:heading size="lg" class="!mb-0">{{ str_replace('Task', $form->type ?? 'Task', $view_text['card_title']) }}</flux:heading>
-                @if($view_text['form_submit'] === 'edit' && $form->task && $form->task->vendor_id)
-                    @php
-                        $statusUi = $form->task->vendor_status_ui;
-                        $canRespond = in_array($form->task->vendor_status, [\App\Models\Task::VENDOR_STATUS_REQUESTED, \App\Models\Task::VENDOR_STATUS_PROPOSED], true);
-                        $isConfirmed = $form->task->vendor_status === \App\Models\Task::VENDOR_STATUS_CONFIRMED;
-                        $canToggle = $canRespond || $isConfirmed;
-                    @endphp
-                    @if($statusUi)
-                        <flux:button.group>
-                            <flux:badge size="sm" :color="$statusUi['flux'] ?? 'zinc'" :icon="$statusUi['icon'] ?? null" class="rounded-r-none">
-                                {{ $statusUi['label'] ?? ucfirst($form->task->vendor_status) }}
-                            </flux:badge>
-                            @if($isConfirmed)
-                                <flux:button
-                                    size="xs"
-                                    icon="x-mark"
-                                    variant="outline"
-                                    class="hover:text-red-600 hover:border-red-600"
-                                    wire:click="resetVendorAvailability"
-                                    :disabled="! $canToggle"
-                                ></flux:button>
-                            @else
-                                <flux:button
-                                    size="xs"
-                                    icon="check"
-                                    variant="outline"
-                                    class="hover:text-green-600 hover:border-green-600"
-                                    wire:click="confirmVendorAvailability"
-                                    :disabled="! $canToggle"
-                                ></flux:button>
-                            @endif
-                        </flux:button.group>
-                    @endif
-                @endif
             </div>
             @if(isset($form->task))
                 <flux:subheading>{{$form->task->title}}</flux:subheading>
@@ -129,6 +95,44 @@
                             </flux:select.option>
                         @endforeach
                     </flux:select>
+
+                    @if($view_text['form_submit'] === 'edit' && $form->task && $form->task->vendor_id)
+                        @php
+                            $statusUi = $form->task->vendor_status_ui;
+                            $canRespond = in_array($form->task->vendor_status, [\App\Models\Task::VENDOR_STATUS_REQUESTED, \App\Models\Task::VENDOR_STATUS_PROPOSED], true);
+                            $isConfirmed = $form->task->vendor_status === \App\Models\Task::VENDOR_STATUS_CONFIRMED;
+                            $canToggle = $canRespond || $isConfirmed;
+                        @endphp
+                        @if($statusUi)
+                            <div class="mt-2 flex items-center justify-between">
+                                <div class="text-xs text-zinc-500">Vendor Status</div>
+                                <flux:button.group>
+                                    <flux:badge size="sm" :color="$statusUi['flux'] ?? 'zinc'" :icon="$statusUi['icon'] ?? null" class="rounded-r-none">
+                                        {{ $statusUi['label'] ?? ucfirst($form->task->vendor_status) }}
+                                    </flux:badge>
+                                    @if($isConfirmed)
+                                        <flux:button
+                                            size="xs"
+                                            icon="x-mark"
+                                            variant="outline"
+                                            class="hover:text-red-600 hover:border-red-600"
+                                            wire:click="resetVendorAvailability"
+                                            :disabled="! $canToggle"
+                                        ></flux:button>
+                                    @else
+                                        <flux:button
+                                            size="xs"
+                                            icon="check"
+                                            variant="outline"
+                                            class="hover:text-green-600 hover:border-green-600"
+                                            wire:click="confirmVendorAvailability"
+                                            :disabled="! $canToggle"
+                                        ></flux:button>
+                                    @endif
+                                </flux:button.group>
+                            </div>
+                        @endif
+                    @endif
 
                     {{-- USERS --}}
                     <flux:select wire:model.blur="form.user_ids" multiple label="Team Members" variant="listbox" placeholder="Assign team members...">
