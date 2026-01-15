@@ -319,6 +319,11 @@ class User extends Authenticatable
         return '+' . $phone;
     }
 
+    public function routeNotificationForTelnyx(): ?string
+    {
+        return $this->routeNotificationForTwilio();
+    }
+
     /**
      * Get the via vendor for this user based on current vendor context
      */

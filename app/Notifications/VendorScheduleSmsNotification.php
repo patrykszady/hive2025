@@ -2,6 +2,7 @@
 
 namespace App\Notifications;
 
+use App\Channels\TelnyxChannel;
 use App\Channels\TwilioChannel;
 use App\Models\Task;
 use App\Models\Vendor;
@@ -39,7 +40,9 @@ class VendorScheduleSmsNotification extends Notification implements ShouldQueue
      */
     public function via(object $notifiable): array
     {
-        return [TwilioChannel::class];
+        $provider = (string) config('services.sms.provider', 'twilio');
+
+        return [$provider === 'telnyx' ? TelnyxChannel::class : TwilioChannel::class];
     }
 
     public function toTwilio(object $notifiable): string
@@ -70,6 +73,11 @@ class VendorScheduleSmsNotification extends Notification implements ShouldQueue
         $lines[] = 'Details: ' . $this->vendorAvailabilityUrl();
 
         return implode("\n", $lines);
+    }
+
+    public function toTelnyx(object $notifiable): string
+    {
+        return $this->toTwilio($notifiable);
     }
 
     protected function vendorAvailabilityUrl(): string

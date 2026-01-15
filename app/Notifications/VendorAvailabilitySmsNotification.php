@@ -2,6 +2,7 @@
 
 namespace App\Notifications;
 
+use App\Channels\TelnyxChannel;
 use App\Channels\TwilioChannel;
 use App\Models\Task;
 use App\Models\Vendor;
@@ -41,7 +42,9 @@ class VendorAvailabilitySmsNotification extends Notification implements ShouldQu
      */
     public function via(object $notifiable): array
     {
-        return [TwilioChannel::class];
+        $provider = (string) config('services.sms.provider', 'twilio');
+
+        return [$provider === 'telnyx' ? TelnyxChannel::class : TwilioChannel::class];
     }
 
     /**
@@ -59,6 +62,11 @@ class VendorAvailabilitySmsNotification extends Notification implements ShouldQu
         }
 
         return $this->formatMultiTaskMessage($notifiable);
+    }
+
+    public function toTelnyx(object $notifiable): string
+    {
+        return $this->toTwilio($notifiable);
     }
 
     /**

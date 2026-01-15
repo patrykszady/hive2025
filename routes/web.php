@@ -10,6 +10,9 @@ use App\Http\Controllers\Api\PlaidWebhookController;
 use App\Http\Controllers\VendorDocsController;
 use App\Http\Controllers\Api\EmailTrackingController;
 use App\Http\Controllers\Api\MailtrapWebhookController;
+use App\Http\Controllers\Api\TeamsSmsReplyController;
+use App\Http\Controllers\Api\TelnyxVoiceController;
+use App\Http\Controllers\Api\TelnyxMessagingController;
 
 use App\Livewire\Auth\CantLogin;
 use App\Livewire\Auth\Login;
@@ -88,6 +91,12 @@ Route::get('v/{token}', VendorAvailabilityIndex::class)->name('vendor.availabili
 // Short URL for client schedule SMS
 Route::get('s/{token}', ClientScheduleIndex::class)->name('client.schedule.short');
 
+// Legal pages (public, no auth required)
+Route::prefix('legal')->name('legal.')->group(function () {
+    Route::view('privacy', 'legal.privacy-policy')->name('privacy');
+    Route::view('terms', 'legal.terms-of-service')->name('terms');
+});
+
 // Public vendor availability response routes (no auth required)
 Route::prefix('vendor/availability')->name('vendor.availability.')->group(function () {
     Route::get('{token}', VendorAvailabilityIndex::class)->name('index');
@@ -161,6 +170,28 @@ Route::post('webhooks/plaid', [PlaidWebhookController::class, 'handle'])->name('
 
 // Mailtrap webhooks (no auth required - token is validated in the URL)
 Route::post('webhooks/mailtrap/{token}', [MailtrapWebhookController::class, 'handle'])->name('webhooks.mailtrap');
+
+// Microsoft Teams -> Hive webhook (typically called via Power Automate)
+Route::post('webhooks/teams/sms-reply', [TeamsSmsReplyController::class, 'handle'])->name('teams.sms.reply');
+
+// Telnyx Voice webhooks (no auth required - Telnyx sends these directly)
+// Telnyx uses a single webhook URL for all events
+Route::prefix('webhooks/telnyx/voice')->name('telnyx.voice.')->group(function () {
+    Route::post('/', [TelnyxVoiceController::class, 'handleWebhook'])->name('webhook');
+});
+
+// Telnyx Messaging webhooks (no auth required - Telnyx sends these directly)
+Route::prefix('webhooks/telnyx/messaging')->name('telnyx.messaging.')->group(function () {
+    Route::post('/', [TelnyxMessagingController::class, 'handleWebhook'])->name('webhook');
+});
+
+// Telnyx API endpoints (requires auth - called from Hive UI)
+Route::middleware('auth')->group(function () {
+    Route::post('api/telnyx/click-to-call', [TelnyxVoiceController::class, 'initiateClickToCall'])
+        ->name('telnyx.click-to-call');
+    Route::post('api/telnyx/send-sms', [TelnyxMessagingController::class, 'sendReply'])
+        ->name('telnyx.send-sms');
+});
 
 // Email tracking pixel (no auth required - loaded by email clients)
 Route::get('t/o', [EmailTrackingController::class, 'trackOpen'])->name('email.track.open');

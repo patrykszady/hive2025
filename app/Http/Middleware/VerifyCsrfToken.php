@@ -14,5 +14,7 @@ class VerifyCsrfToken extends Middleware
     protected $except = [
         'webhooks/plaid',
         'webhooks/mailtrap/*',
+        'webhooks/teams/*',
+        'webhooks/telnyx/*',
     ];
 }

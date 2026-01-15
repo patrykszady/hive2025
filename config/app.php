@@ -31,5 +31,27 @@ return [
 
     'timezone' => env('APP_TIMEZONE', 'UTC'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Physical Business Address
+    |--------------------------------------------------------------------------
+    |
+    | The physical mailing address for legal notices, privacy policy, etc.
+    |
+    */
+
+    'physical_address' => env('APP_PHYSICAL_ADDRESS', ''),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Long Application Name
+    |--------------------------------------------------------------------------
+    |
+    | The full legal name of the application for legal documents.
+    |
+    */
+
+    'long_name' => env('LONG_APP_NAME', 'Hive Contractors'),
+
     // ... rest of config
 ];

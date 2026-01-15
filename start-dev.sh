@@ -172,44 +172,61 @@ else
   fi
 fi
 
-# Ngrok tunnel (for vendor SMS response links)
+# Ngrok tunnels (for webhooks on all 3 apps)
+# Uses ~/.config/ngrok/ngrok.yml which defines tunnels: hive (8000), breck (8002), gsc (8003)
 NGROK_BIN="$(command -v ngrok 2>/dev/null)"
 if [ -n "$NGROK_BIN" ]; then
+  # Kill any existing ngrok processes to ensure clean state
   if pgrep -x ngrok >/dev/null 2>&1; then
-    echo "✅ Ngrok already running"
-    # Try to get the existing URL
-    NGROK_URL=$(curl -s http://127.0.0.1:4040/api/tunnels 2>/dev/null | grep -o '"public_url":"https://[^"]*' | head -1 | cut -d'"' -f4)
-    if [ -n "$NGROK_URL" ]; then
-      echo "   → $NGROK_URL"
-      # Update .env if different
+    echo "🔄 Restarting Ngrok tunnels (killing existing)..."
+    pkill -x ngrok 2>/dev/null
+    sleep 1
+  fi
+
+  echo "🔄 Starting Ngrok tunnels for all apps (hive:8000, breck:8002, gsc:8003)..."
+  nohup "$NGROK_BIN" start --all >"$LOG_DIR/ngrok.log" 2>&1 &
+  NGROK_PID=$!
+  sleep 3
+
+  if ps -p "$NGROK_PID" >/dev/null 2>&1; then
+    # Fetch all tunnel URLs from ngrok API
+    TUNNELS_JSON=$(curl -s http://127.0.0.1:4040/api/tunnels 2>/dev/null)
+
+    # Extract URLs for each tunnel by matching the port in config.addr
+    HIVE_URL=$(echo "$TUNNELS_JSON" | grep -o '"public_url":"https://[^"]*","proto":"https","config":{"addr":"http://localhost:8000"' | grep -o 'https://[^"]*' | head -1)
+    BRECK_URL=$(echo "$TUNNELS_JSON" | grep -o '"public_url":"https://[^"]*","proto":"https","config":{"addr":"http://localhost:8002"' | grep -o 'https://[^"]*' | head -1)
+    GSC_URL=$(echo "$TUNNELS_JSON" | grep -o '"public_url":"https://[^"]*","proto":"https","config":{"addr":"http://localhost:8003"' | grep -o 'https://[^"]*' | head -1)
+
+    # Function to update DEV_WEBHOOK_URL in a .env file
+    update_env_webhook() {
+      local ENV_FILE="$1"
+      local NEW_URL="$2"
+      local APP_NAME="$3"
+      if [ -f "$ENV_FILE" ] && [ -n "$NEW_URL" ]; then
+        if grep -q '^DEV_WEBHOOK_URL=' "$ENV_FILE" 2>/dev/null; then
+          sed -i "s|^DEV_WEBHOOK_URL=.*|DEV_WEBHOOK_URL=$NEW_URL|" "$ENV_FILE"
+        else
+          echo "DEV_WEBHOOK_URL=$NEW_URL" >> "$ENV_FILE"
+        fi
+        echo "   ✅ $APP_NAME → $NEW_URL"
+      fi
+    }
+
+    echo "✅ Ngrok tunnels started:"
+    update_env_webhook "/home/patryk/web/hive2025/.env" "$HIVE_URL" "Hive (8000)"
+    update_env_webhook "/home/patryk/web/breck/.env" "$BRECK_URL" "Breck (8002)"
+    update_env_webhook "/home/patryk/web/gsc/.env" "$GSC_URL" "GSC (8003)"
+
+    # Also update HIVE_URL in this .env for local reference
+    if [ -n "$HIVE_URL" ]; then
       CURRENT_DEV_URL=$(grep -E '^DEV_WEBHOOK_URL=' .env 2>/dev/null | cut -d '=' -f2- | tr -d '\r' | xargs)
-      if [ "$CURRENT_DEV_URL" != "$NGROK_URL" ]; then
-        sed -i "s|^DEV_WEBHOOK_URL=.*|DEV_WEBHOOK_URL=$NGROK_URL|" .env
-        echo "   → Updated DEV_WEBHOOK_URL in .env"
+      if [ "$CURRENT_DEV_URL" != "$HIVE_URL" ]; then
+        sed -i "s|^DEV_WEBHOOK_URL=.*|DEV_WEBHOOK_URL=$HIVE_URL|" .env
       fi
     fi
   else
-    echo "🔄 Starting Ngrok tunnel on port 8000..."
-    nohup "$NGROK_BIN" http 8000 >"$LOG_DIR/ngrok.log" 2>&1 &
-    NGROK_PID=$!
-    sleep 2
-    if ps -p "$NGROK_PID" >/dev/null 2>&1; then
-      NGROK_URL=$(curl -s http://127.0.0.1:4040/api/tunnels 2>/dev/null | grep -o '"public_url":"https://[^"]*' | head -1 | cut -d'"' -f4)
-      if [ -n "$NGROK_URL" ]; then
-        echo "✅ Ngrok tunnel started → $NGROK_URL"
-        # Update DEV_WEBHOOK_URL in .env
-        if grep -q '^DEV_WEBHOOK_URL=' .env 2>/dev/null; then
-          sed -i "s|^DEV_WEBHOOK_URL=.*|DEV_WEBHOOK_URL=$NGROK_URL|" .env
-        else
-          echo "DEV_WEBHOOK_URL=$NGROK_URL" >> .env
-        fi
-        echo "   → Updated DEV_WEBHOOK_URL in .env"
-      else
-        echo "✅ Ngrok started (pid: $NGROK_PID) - check $LOG_DIR/ngrok.log for URL"
-      fi
-    else
-      echo "❌ Ngrok failed to start → check logs: $LOG_DIR/ngrok.log"
-    fi
+    echo "❌ Ngrok failed to start → check logs: $LOG_DIR/ngrok.log"
+    echo "   Tip: Make sure ~/.config/ngrok/ngrok.yml exists with tunnel definitions"
   fi
 else
   echo "ℹ️  Ngrok not found, skipping tunnel setup (vendor SMS links will use local URL)"
