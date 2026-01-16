@@ -724,16 +724,86 @@ Alpine.data('plannerScroll', () => ({
     pendingScroll: null,
     isAnimating: false,
     
+    // Axis locking state for touch scrolling
+    touchStartX: null,
+    touchStartY: null,
+    scrollStartX: null,
+    scrollStartY: null,
+    lockedAxis: null, // 'x', 'y', or null
+    axisLockThreshold: 10, // pixels to determine direction
+    
     init() {
         this.$nextTick(() => {
             this.updateFirstVisible();
             this.updateEdgeState();
+            this.setupAxisLocking();
         });
         
         // Listen for scroll events from Livewire
         Livewire.on('planner-scroll-to', (data) => {
             this.handleScrollAfterLoad(data.direction);
         });
+    },
+    
+    setupAxisLocking() {
+        const container = this.$refs.scrollContainer;
+        if (!container || !('ontouchstart' in window)) return;
+        
+        container.addEventListener('touchstart', this.handleTouchStart.bind(this), { passive: true });
+        container.addEventListener('touchmove', this.handleTouchMove.bind(this), { passive: false });
+        container.addEventListener('touchend', this.handleTouchEnd.bind(this), { passive: true });
+        container.addEventListener('touchcancel', this.handleTouchEnd.bind(this), { passive: true });
+    },
+    
+    handleTouchStart(e) {
+        if (e.touches.length !== 1) return;
+        
+        const touch = e.touches[0];
+        const container = this.$refs.scrollContainer;
+        
+        this.touchStartX = touch.clientX;
+        this.touchStartY = touch.clientY;
+        this.scrollStartX = container.scrollLeft;
+        this.scrollStartY = container.scrollTop;
+        this.lockedAxis = null;
+    },
+    
+    handleTouchMove(e) {
+        if (e.touches.length !== 1 || this.touchStartX === null) return;
+        
+        const touch = e.touches[0];
+        const deltaX = touch.clientX - this.touchStartX;
+        const deltaY = touch.clientY - this.touchStartY;
+        const container = this.$refs.scrollContainer;
+        
+        // Determine the axis to lock to if not already locked
+        if (this.lockedAxis === null) {
+            const absDeltaX = Math.abs(deltaX);
+            const absDeltaY = Math.abs(deltaY);
+            
+            if (absDeltaX > this.axisLockThreshold || absDeltaY > this.axisLockThreshold) {
+                this.lockedAxis = absDeltaX > absDeltaY ? 'x' : 'y';
+            }
+        }
+        
+        // If axis is locked, prevent default and manually scroll only in the locked direction
+        if (this.lockedAxis) {
+            e.preventDefault();
+            
+            if (this.lockedAxis === 'x') {
+                container.scrollLeft = this.scrollStartX - deltaX;
+            } else {
+                container.scrollTop = this.scrollStartY - deltaY;
+            }
+        }
+    },
+    
+    handleTouchEnd(e) {
+        this.touchStartX = null;
+        this.touchStartY = null;
+        this.scrollStartX = null;
+        this.scrollStartY = null;
+        this.lockedAxis = null;
     },
     
     handleScrollAfterLoad(direction) {

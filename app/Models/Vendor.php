@@ -148,11 +148,6 @@ class Vendor extends Model
         return '+'.$phone;
     }
 
-    public function routeNotificationForTelnyx(): ?string
-    {
-        return $this->routeNotificationForTwilio();
-    }
-
     /**
      * Get all admin users for this vendor who have cell phones.
      * Used for sending vendor availability SMS notifications.

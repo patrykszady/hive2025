@@ -2,7 +2,6 @@
 
 namespace App\Notifications;
 
-use App\Channels\TelnyxChannel;
 use App\Channels\TwilioChannel;
 use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
@@ -52,9 +51,7 @@ class TeamTaskSmsNotification extends Notification implements ShouldQueue
      */
     public function via($notifiable)
     {
-        $provider = (string) config('services.sms.provider', 'twilio');
-
-        return [$provider === 'telnyx' ? TelnyxChannel::class : TwilioChannel::class];
+        return [TwilioChannel::class];
     }
 
     /**
@@ -65,11 +62,6 @@ class TeamTaskSmsNotification extends Notification implements ShouldQueue
         return $this->type === 'reminder' 
             ? $this->buildReminderMessage($notifiable)
             : $this->buildUpdateMessage($notifiable);
-    }
-
-    public function toTelnyx(object $notifiable): string
-    {
-        return (string) $this->toTwilio($notifiable);
     }
 
     /**

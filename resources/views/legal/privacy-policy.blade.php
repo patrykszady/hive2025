@@ -115,7 +115,7 @@
         <h3>3.4 Carrier Disclaimer</h3>
         <p>
             Carriers are not liable for delayed or undelivered messages. We use third-party SMS providers
-            (such as Telnyx or Twilio) to deliver messages.
+            (such as Twilio) to deliver messages.
         </p>
 
         <h2>4. Financial Data (Plaid)</h2>
@@ -219,7 +219,7 @@
         </p>
         <ul>
             <li><strong>Email:</strong> {{ config('mail.from.address') }}</li>
-            <li><strong>Phone:</strong> {{ config('services.telnyx.from') }}</li>
+            <li><strong>Phone:</strong> {{ config('services.twilio.from') }}</li>
             <li><strong>Address:</strong> {{ config('app.physical_address') }}</li>
         </ul>
     </div>

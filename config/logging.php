@@ -134,12 +134,5 @@ return [
             'level' => 'info',
             'days' => 30,
         ],
-
-        'telnyx' => [
-            'driver' => 'daily',
-            'path' => storage_path('logs/telnyx.log'),
-            'level' => 'debug',
-            'days' => 30,
-        ],
     ],
 ];
