@@ -909,7 +909,6 @@ class TransactionController extends Controller
                 $transaction_check_desc = VendorTransaction::where('deposit_check', $deposit_check_type)->where('plaid_inst_id', $institution)->pluck('desc');
 
                 $transactions = Transaction::where('expense_id', null)
-                    ->where('vendor_id', null)
                     ->where('check_number', null)
                     // ->where('check_id', NULL)
                     ->where('deposit', null)
@@ -949,6 +948,7 @@ class TransactionController extends Controller
                         //TRANSFER
                     } elseif ($deposit_check_type === 3) {
                         $transaction->check_number = '1010101';
+                        $transaction->vendor_id = null;
 
                         //DEPOSIT
                     } elseif ($deposit_check_type === 1) {

@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Unified startup script for all three Laravel apps
-# GSC (8003), Breck (8002), Hive2025 (8000)
+# Unified startup script for all four Laravel apps
+# GSC (8003), Breck (8002), Hive2025 (8000), Test (8005)
 
 cd "$(dirname "$0")"
 
@@ -123,6 +123,32 @@ fi
 echo ""
 
 # ==============================================================================
+# TEST (Port 8005)
+# ==============================================================================
+TEST_DIR="/home/patryk/web/test"
+if [ ! -d "$TEST_DIR" ]; then
+  echo "❌ test directory not found at $TEST_DIR"
+else
+  echo "════════════════════════════════════════════════════════════════"
+  echo "📦 Starting TEST (Port 8005)"
+  echo "════════════════════════════════════════════════════════════════"
+  if lsof -Pi :8005 -sTCP:LISTEN -t >/dev/null 2>&1; then
+    TEST_PID=$(lsof -Pi :8005 -sTCP:LISTEN -t)
+    echo "✅ Test server already running (pid: $TEST_PID)"
+  else
+    (cd "$TEST_DIR" && nohup php artisan serve --host=127.0.0.1 --port=8005 --no-interaction > storage/logs/serve.log 2>&1 &)
+    sleep 0.7
+    if lsof -Pi :8005 -sTCP:LISTEN -t >/dev/null 2>&1; then
+      echo "✅ Test Laravel server started on port 8005"
+    else
+      echo "❌ Test Laravel server failed to start"
+    fi
+  fi
+fi
+
+echo ""
+
+# ==============================================================================
 # HIVE2025 (Port 8000)
 # ==============================================================================
 echo "════════════════════════════════════════════════════════════════"
@@ -173,7 +199,7 @@ else
 fi
 
 # Ngrok tunnels (for webhooks on all 3 apps)
-# Uses ~/.config/ngrok/ngrok.yml which defines tunnels: hive (8000), breck (8002), gsc (8003)
+# Uses ~/.config/ngrok/ngrok.yml which defines tunnels: hive (8000), breck (8002), gsc (8003), test (8005)
 NGROK_BIN="$(command -v ngrok 2>/dev/null)"
 if [ -n "$NGROK_BIN" ]; then
   # Kill any existing ngrok processes to ensure clean state
@@ -183,7 +209,7 @@ if [ -n "$NGROK_BIN" ]; then
     sleep 1
   fi
 
-  echo "🔄 Starting Ngrok tunnels for all apps (hive:8000, breck:8002, gsc:8003)..."
+  echo "🔄 Starting Ngrok tunnels for all apps (hive:8000, breck:8002, gsc:8003, test:8005)..."
   nohup "$NGROK_BIN" start --all >"$LOG_DIR/ngrok.log" 2>&1 &
   NGROK_PID=$!
   sleep 3
@@ -192,10 +218,19 @@ if [ -n "$NGROK_BIN" ]; then
     # Fetch all tunnel URLs from ngrok API
     TUNNELS_JSON=$(curl -s http://127.0.0.1:4040/api/tunnels 2>/dev/null)
 
-    # Extract URLs for each tunnel by matching the port in config.addr
-    HIVE_URL=$(echo "$TUNNELS_JSON" | grep -o '"public_url":"https://[^"]*","proto":"https","config":{"addr":"http://localhost:8000"' | grep -o 'https://[^"]*' | head -1)
-    BRECK_URL=$(echo "$TUNNELS_JSON" | grep -o '"public_url":"https://[^"]*","proto":"https","config":{"addr":"http://localhost:8002"' | grep -o 'https://[^"]*' | head -1)
-    GSC_URL=$(echo "$TUNNELS_JSON" | grep -o '"public_url":"https://[^"]*","proto":"https","config":{"addr":"http://localhost:8003"' | grep -o 'https://[^"]*' | head -1)
+    # Extract URLs using jq if available, fallback to grep-based extraction
+    if command -v jq >/dev/null 2>&1; then
+      HIVE_URL=$(echo "$TUNNELS_JSON" | jq -r '.tunnels[] | select(.config.addr | contains(":8000")) | .public_url' 2>/dev/null | head -1)
+      BRECK_URL=$(echo "$TUNNELS_JSON" | jq -r '.tunnels[] | select(.config.addr | contains(":8002")) | .public_url' 2>/dev/null | head -1)
+      GSC_URL=$(echo "$TUNNELS_JSON" | jq -r '.tunnels[] | select(.config.addr | contains(":8003")) | .public_url' 2>/dev/null | head -1)
+      TEST_URL=$(echo "$TUNNELS_JSON" | jq -r '.tunnels[] | select(.config.addr | contains(":8005")) | .public_url' 2>/dev/null | head -1)
+    else
+      # Fallback: extract by tunnel name
+      HIVE_URL=$(echo "$TUNNELS_JSON" | grep -o '"name":"hive"[^}]*"public_url":"https://[^"]*' | grep -o 'https://[^"]*' | head -1)
+      BRECK_URL=$(echo "$TUNNELS_JSON" | grep -o '"name":"breck"[^}]*"public_url":"https://[^"]*' | grep -o 'https://[^"]*' | head -1)
+      GSC_URL=$(echo "$TUNNELS_JSON" | grep -o '"name":"gsc"[^}]*"public_url":"https://[^"]*' | grep -o 'https://[^"]*' | head -1)
+      TEST_URL=$(echo "$TUNNELS_JSON" | grep -o '"name":"test"[^}]*"public_url":"https://[^"]*' | grep -o 'https://[^"]*' | head -1)
+    fi
 
     # Function to update DEV_WEBHOOK_URL in a .env file
     update_env_webhook() {
@@ -216,6 +251,7 @@ if [ -n "$NGROK_BIN" ]; then
     update_env_webhook "/home/patryk/web/hive2025/.env" "$HIVE_URL" "Hive (8000)"
     update_env_webhook "/home/patryk/web/breck/.env" "$BRECK_URL" "Breck (8002)"
     update_env_webhook "/home/patryk/web/gsc/.env" "$GSC_URL" "GSC (8003)"
+    update_env_webhook "/home/patryk/web/test/.env" "$TEST_URL" "Test (8005)"
 
     # Also update HIVE_URL in this .env for local reference
     if [ -n "$HIVE_URL" ]; then
@@ -306,8 +342,15 @@ echo "════════════════════════�
 echo "📍 GSC:      http://127.0.0.1:8003"
 echo "📍 Breck:    http://127.0.0.1:8002"
 echo "📍 Hive2025: http://127.0.0.1:8000"
+echo "📍 Test:     http://127.0.0.1:8005"
 echo "📍 Vite:     http://127.0.0.1:5173"
-if [ -n "$NGROK_URL" ]; then
-  echo "📍 Ngrok:    $NGROK_URL"
+if [ -n "$HIVE_URL" ]; then
+  echo "📍 Hive Ngrok: $HIVE_URL"
+fi
+if [ -n "$BRECK_URL" ]; then
+  echo "📍 Breck Ngrok: $BRECK_URL"
+fi
+if [ -n "$GSC_URL" ]; then
+  echo "📍 GSC Ngrok: $GSC_URL"
 fi
 echo "════════════════════════════════════════════════════════════════"

@@ -131,15 +131,6 @@ class ScheduleIndex extends Component
 
         $today = $this->getToday();
 
-        $tasks = Task::query()
-            ->where('project_id', $this->projectId)
-            ->whereNotNull('start_date')
-            ->whereNotNull('end_date')
-            ->whereDate('end_date', '>=', $today)
-            ->orderBy('start_date')
-            ->orderBy('end_date')
-            ->get();
-
         // Build grouped tasks with all days in range (including empty days)
         $grouped = collect();
         $todayCarbon = Carbon::parse($today);
@@ -149,6 +140,21 @@ class ScheduleIndex extends Component
         $endOfWeek = $todayCarbon->copy()->endOfWeek(Carbon::SUNDAY);
         $startOfWeekStr = $startOfWeek->format('Y-m-d');
         $endOfWeekStr = $endOfWeek->format('Y-m-d');
+
+        // Get tasks that have any date within the current week
+        // Don't filter by end_date >= today, as tasks earlier in the week should still appear
+        $tasks = Task::query()
+            ->where('project_id', $this->projectId)
+            ->whereNotNull('start_date')
+            ->whereNotNull('end_date')
+            ->where(function ($query) use ($startOfWeekStr, $endOfWeekStr) {
+                // Task overlaps with the current week
+                $query->whereDate('start_date', '<=', $endOfWeekStr)
+                      ->whereDate('end_date', '>=', $startOfWeekStr);
+            })
+            ->orderBy('start_date')
+            ->orderBy('end_date')
+            ->get();
 
         $startDate = $startOfWeek->copy();
         $endDate = $endOfWeek->copy();
