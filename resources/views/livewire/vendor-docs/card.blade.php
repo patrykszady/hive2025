@@ -1,4 +1,4 @@
-<flux:card class="mt-4 space-y-2" x-data="{ expanded: false }">
+<flux:card class="mt-4 space-y-2" x-data="{ expanded: {{ request()->routeIs('vendor_docs.index') ? 'true' : 'false' }} }">
     <div class="flex justify-between">
         <div class="flex items-center gap-3 flex-1 cursor-pointer" @click="expanded = !expanded">
             <flux:heading size="lg">

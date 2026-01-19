@@ -17,17 +17,19 @@
 </div>
 
 @if(($showProjectInfo ?? false) && $task->project)
-    <div class="mt-1">
+    <div class="mt-1 space-y-0.5">
         <a 
             href="{{ route('projects.show', $task->project) }}"
             wire:click.stop
             class="text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 hover:underline truncate"
         >
             {{ $task->project->short_address ?? 'No project' }}
-            @if($task->project->client)
-                — {{ $task->project->client->name }}
-            @endif
         </a>
+        @if($task->project->client)
+            <div class="text-xs text-zinc-500 dark:text-zinc-400 truncate">
+                {{ $task->project->client->last_names }}
+            </div>
+        @endif
     </div>
 @endif
 

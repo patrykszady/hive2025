@@ -58,7 +58,7 @@ class User extends Authenticatable
         return $this->belongsToMany(Vendor::class)
             ->using(UserVendor::class)
             ->withTimestamps()
-            ->withPivot(['is_employed', 'role_id', 'via_vendor_id', 'start_date', 'end_date', 'hourly_rate']);
+            ->withPivot(['is_employed', 'role_id', 'via_vendor_id', 'start_date', 'end_date', 'hourly_rate', 'options']);
     }
 
     //User's default/logged in vendor

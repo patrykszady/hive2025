@@ -59,43 +59,77 @@ Schedule::command('nylas:sync-contacts')
     ->onOneServer();
 
 // Schedule SMS Notifications
-// Send "tomorrow" reminders at 7 PM each night (client, vendor, team)
+// Shared notification schedule config
+$notifyTimezone = config('sms.business_hours.timezone', 'America/Chicago');
+$notifyStartTime = sprintf('%02d:%02d', config('sms.business_hours.start_hour', 7), config('sms.business_hours.start_minute', 0));
+$notifyEndTime = sprintf('%02d:%02d', config('sms.business_hours.end_hour', 20) - 1, 0); // 1 hour before end (7 PM default)
+
+// Send "tomorrow" reminders at configured end time each night (client, vendor, team)
 Schedule::command('schedule:send-sms client tomorrow')
-  ->dailyAt('19:00')
-  ->timezone('America/Chicago')
+  ->dailyAt($notifyEndTime)
+  ->timezone($notifyTimezone)
   ->name('schedule-sms-client-tomorrow')
   ->environments(['production'])
   ->withoutOverlapping()
   ->onOneServer();
 
+// Web Push notifications - "today" at configured start hour
+Schedule::job(new \App\Jobs\SendTaskPushNotifications('today'))
+  ->dailyAt($notifyStartTime)
+  ->timezone($notifyTimezone)
+  ->name('push-notifications-today')
+  ->environments(['production'])
+  ->withoutOverlapping()
+  ->onOneServer();
+
+// Web Push notifications - "tomorrow" at configured end time
+Schedule::job(new \App\Jobs\SendTaskPushNotifications('tomorrow'))
+  ->dailyAt($notifyEndTime)
+  ->timezone($notifyTimezone)
+  ->name('push-notifications-tomorrow')
+  ->environments(['production'])
+  ->withoutOverlapping()
+  ->onOneServer();
+
+// Web Push notifications - "update" every 15 minutes during the day
+$notifyUpdateStart = sprintf('%02d:15', config('sms.business_hours.start_hour', 7));
+Schedule::job(new \App\Jobs\SendTaskPushNotifications('update'))
+  ->everyFifteenMinutes()
+  ->between($notifyUpdateStart, $notifyEndTime)
+  ->timezone($notifyTimezone)
+  ->name('push-notifications-update')
+  ->environments(['production'])
+  ->withoutOverlapping()
+  ->onOneServer();
+
 Schedule::command('schedule:send-sms vendor tomorrow')
-  ->dailyAt('19:00')
-  ->timezone('America/Chicago')
+  ->dailyAt($notifyEndTime)
+  ->timezone($notifyTimezone)
   ->name('schedule-sms-vendor-tomorrow')
   ->environments(['production'])
   ->withoutOverlapping()
   ->onOneServer();
 
 Schedule::command('schedule:send-sms team tomorrow')
-  ->dailyAt('19:00')
-  ->timezone('America/Chicago')
+  ->dailyAt($notifyEndTime)
+  ->timezone($notifyTimezone)
   ->name('schedule-sms-team-tomorrow')
   ->environments(['production'])
   ->withoutOverlapping()
   ->onOneServer();
 
-// Send "today" reminders at 7 AM each morning (client, vendor)
+// Send "today" reminders at configured start time each morning (client, vendor)
 Schedule::command('schedule:send-sms client today')
-  ->dailyAt('07:00')
-  ->timezone('America/Chicago')
+  ->dailyAt($notifyStartTime)
+  ->timezone($notifyTimezone)
   ->name('schedule-sms-client-today')
   ->environments(['production'])
   ->withoutOverlapping()
   ->onOneServer();
 
 Schedule::command('schedule:send-sms vendor today')
-  ->dailyAt('07:00')
-  ->timezone('America/Chicago')
+  ->dailyAt($notifyStartTime)
+  ->timezone($notifyTimezone)
   ->name('schedule-sms-vendor-today')
   ->environments(['production'])
   ->withoutOverlapping()

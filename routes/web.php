@@ -5,6 +5,7 @@ use App\Http\Controllers\ExpenseAutoMatchController;
 use App\Http\Controllers\LeadController;
 use App\Http\Controllers\ReceiptController;
 use App\Http\Controllers\TransactionController;
+use App\Http\Controllers\PushSubscriptionController;
 use App\Http\Controllers\PlaidTransactionSyncController;
 use App\Http\Controllers\Api\PlaidWebhookController;
 use App\Http\Controllers\VendorDocsController;
@@ -178,6 +179,14 @@ Route::middleware(['auth', 'vendor.access'])->group(function () {
     
     // All protected routes
     Route::get('/dashboard', DashboardShow::class)->name('dashboard');
+
+    // Push subscription routes
+    Route::get('/push/vapid-public-key', [PushSubscriptionController::class, 'vapidPublicKey'])
+        ->name('push.vapid-public-key');
+    Route::post('/push/subscribe', [PushSubscriptionController::class, 'store'])
+        ->name('push.subscribe');
+    Route::post('/push/unsubscribe', [PushSubscriptionController::class, 'destroy'])
+        ->name('push.unsubscribe');
 
     // Stream vendor docs with case-insensitive lookup and proper headers
     Route::get('files/vendor_docs/{filename}', [VendorDocsController::class, 'document'])->name('vendor_docs.show');

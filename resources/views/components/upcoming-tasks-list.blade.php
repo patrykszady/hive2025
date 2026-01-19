@@ -12,8 +12,27 @@
 
 <flux:card>
     <div class="flex items-center justify-between mb-4">
-        <flux:heading size="lg">{{ $title }}</flux:heading>
-        <flux:badge size="sm" color="zinc">{{ $taskCount }}</flux:badge>
+        <div class="flex items-center gap-2">
+            <flux:heading size="lg">{{ $title }}</flux:heading>
+            <flux:badge size="sm" color="zinc">{{ $taskCount }}</flux:badge>
+        </div>
+        @auth
+            <div
+                x-data="{ supported: false, permission: 'default' }"
+                x-init="supported = 'Notification' in window; permission = supported ? Notification.permission : 'default'"
+                class="flex items-center gap-2"
+                x-cloak
+            >
+                <flux:button
+                    size="sm"
+                    variant="primary"
+                    x-show="supported && permission !== 'granted'"
+                    x-on:click.prevent="window.HiveTaskNotifications?.enable()?.then((result) => { if (result?.enabled) { permission = 'granted'; } })"
+                >
+                    Enable notifications
+                </flux:button>
+            </div>
+        @endauth
     </div>
 
     @if($groupedTasks->isEmpty())

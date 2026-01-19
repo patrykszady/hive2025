@@ -33,6 +33,7 @@
         "livewire/livewire": "^3.6",
         "log1x/laravel-webfonts": "^1.0",
         "meilisearch/meilisearch-php": "^1.15",
+        "minishlink/web-push": "^10.0",
         "nesbot/carbon": "^3.0",
         "nyholm/psr7": "*",
         "opcodesio/log-viewer": "^3.4",

@@ -27,4 +27,9 @@ return [
     'two_captcha' => [
         'api_key' => env('TWOCAPTCHA_API_KEY'),
     ],
+
+    'vapid' => [
+        'public_key' => env('VAPID_PUBLIC_KEY'),
+        'private_key' => env('VAPID_PRIVATE_KEY'),
+    ],
 ];

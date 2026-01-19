@@ -3,6 +3,7 @@
 namespace App\Livewire\VendorDocs;
 
 use App\Models\Vendor;
+use App\Models\VendorDoc;
 
 use Livewire\Component;
 
@@ -21,7 +22,16 @@ class VendorDocsCard extends Component
     public function render()
     {
         $this->authorize('create', VendorDoc::class);
-        $this->vendor_docs = $this->vendor->vendor_docs()->orderBy('expiration_date', 'DESC')->with('agent')->get();
+        $docs = $this->vendor->vendor_docs()
+            ->whereIn('type', ['general', 'workers'])
+            ->orderByDesc('expiration_date')
+            ->with('agent')
+            ->get();
+
+        $this->vendor_docs = $docs
+            ->groupBy('type')
+            ->map(fn ($group) => $group->first())
+            ->values();
 
         foreach ($this->vendor_docs as $doc) {
             if ($doc->expiration_date <= today()) {
