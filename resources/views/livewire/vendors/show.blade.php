@@ -3,7 +3,7 @@
         <div class="col-span-4 space-y-4 lg:col-span-2">
             {{-- VENDOR DETAILS --}}
             <div class="col-span-4 lg:col-span-2">
-                <livewire:vendors.vendor-details :vendor="$vendor">
+                <livewire:vendors.vendor-details :vendor="$vendor" />
             </div>
 
             {{-- VENDOR TIMELINE --}}

@@ -314,5 +314,96 @@
             </div>
         </div>
     </div>
+
+    <footer class="bg-white dark:bg-gray-900">
+        <div class="mx-auto max-w-7xl px-6 py-16 sm:py-24 lg:px-8 lg:py-32">
+            <div class="xl:grid xl:grid-cols-3 xl:gap-8">
+                <div class="space-y-6">
+                    <div class="space-y-3">
+                        <img src="{{ asset('favicon.png') }}" alt="Hive Contractors" class="h-10" />
+                        <a href="{{ route('welcome') }}" class="text-base font-semibold text-gray-900 hover:text-gray-700 dark:text-white dark:hover:text-gray-300">Hive Contractors</a>
+                    </div>
+                    <div class="text-sm/6 font-normal text-gray-600 dark:text-gray-400">
+                        <div>305 S Ridge St, PO Box 1504</div>
+                        <div>Breckenridge, CO 80424</div>
+                        <div>
+                            <a href="tel:+12249993880" class="font-normal hover:text-gray-900 dark:hover:text-white">(224) 999-3880</a>
+                        </div>
+                        <div>
+                            <a href="mailto:{{ config('mail.from.address') }}" class="font-normal hover:text-gray-900 dark:hover:text-white">{{ config('mail.from.address') }}</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-16 grid grid-cols-2 gap-8 xl:col-span-2 xl:mt-0">
+                    <div class="md:grid md:grid-cols-2 md:gap-8">
+                        <div>
+                            <h3 class="text-sm/6 font-semibold text-gray-900 dark:text-white">Solutions</h3>
+                            <ul role="list" class="mt-6 space-y-4 hidden">
+                                <li>
+                                    <a href="#" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Marketing</a>
+                                </li>
+                                <li>
+                                    <a href="#" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Analytics</a>
+                                </li>
+                                <li>
+                                    <a href="#" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Automation</a>
+                                </li>
+                                <li>
+                                    <a href="#" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Commerce</a>
+                                </li>
+                                <li>
+                                    <a href="#" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Insights</a>
+                                </li>
+                            </ul>
+                        </div>
+                        <div class="mt-10 md:mt-0">
+                            <h3 class="text-sm/6 font-semibold text-gray-900 dark:text-white">Support</h3>
+                            <ul role="list" class="mt-6 space-y-4 hidden">
+                                <li>
+                                    <a href="#" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Submit ticket</a>
+                                </li>
+                                <li>
+                                    <a href="#" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Documentation</a>
+                                </li>
+                                <li>
+                                    <a href="#" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Guides</a>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="md:grid md:grid-cols-2 md:gap-8">
+                        <div>
+                            <h3 class="text-sm/6 font-semibold text-gray-900 dark:text-white">Company</h3>
+                            <ul role="list" class="mt-6 space-y-4 hidden">
+                                <li>
+                                    <a href="#" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">About</a>
+                                </li>
+                                <li>
+                                    <a href="#" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Blog</a>
+                                </li>
+                                <li>
+                                    <a href="#" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Jobs</a>
+                                </li>
+                                <li>
+                                    <a href="#" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Press</a>
+                                </li>
+                            </ul>
+                        </div>
+                        <div class="mt-10 md:mt-0">
+                            <h3 class="text-sm/6 font-semibold text-gray-900 dark:text-white">Legal</h3>
+                            <ul role="list" class="mt-6 space-y-4">
+                                <li>
+                                    <a href="{{ route('legal.terms') }}" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Terms of service</a>
+                                </li>
+                                <li>
+                                    <a href="{{ route('legal.privacy') }}" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Privacy policy</a>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </footer>
 </x-guest-layout>
 

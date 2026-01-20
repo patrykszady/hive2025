@@ -2,7 +2,7 @@
     <div class="grid max-w-xl grid-cols-4 gap-4 xl:relative lg:max-w-5xl sm:px-6">
         <div class="col-span-4 space-y-4 lg:col-span-2">
             {{-- USER DETAILS --}}
-            <livewire:users.user-details :user="$user" wire:key="user-details-{{ $user->id }}">
+            <livewire:users.user-details :user="$user" wire:key="user-details-{{ $user->id }}" />
 
             {{-- VENDOR DETAILS --}}
             {{-- @if($user->this_vendor)
@@ -14,7 +14,7 @@
         @can('update', $user)
             @if($user->isEmployed())
                 <div class="space-y-2 col-span-4 lg:col-span-4">
-                    <livewire:users.user-finances :user="$user" lazy>
+                    <livewire:users.user-finances :user="$user" lazy />
                 </div>
             @endif
         @endcan

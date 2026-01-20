@@ -99,14 +99,16 @@ class EstimateDocumentGenerator
 
         $view = view('misc.estimate', compact('estimate', 'vendor', 'client', 'clientContacts', 'project', 'sections', 'payments', 'title', 'estimate_total', 'estimate_total_words', 'type', 'reimbursements', 'contractBody', 'vendorLogoDataUrl', 'projectStatusTitle', 'projectFinances'))->render();
 
-        $binary = Browsershot::html($view)
+        $browsershot = Browsershot::html($view)
             ->newHeadless()
+            ->timeout(120)
+            ->waitUntilNetworkIdle()
             ->addChromiumArguments([
                 'no-sandbox',
                 'disable-setuid-sandbox',
                 'disable-dev-shm-usage',
                 'disable-gpu',
-                'single-process',
+                'disable-software-rasterizer',
                 'allow-file-access-from-files',
             ])
             ->scale(0.8)
@@ -114,8 +116,28 @@ class EstimateDocumentGenerator
             ->showBackground()
             ->headerHtml('<div style="font-size: 10px; width: 100%; padding: 0; margin: 0 5mm 0 10mm; display: flex; justify-content: space-between;"><span>' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</span><span>' . now()->setTimezone($timezone)->format('m/d/Y g:i A') . '</span></div>')
             ->footerHtml('<div style="font-size: 10px; text-align: right; width: 100%; padding: 0; margin: 0 5mm 0 10mm;"><span class="pageNumber"></span> / <span class="totalPages"></span></div>')
-            ->margins(10, 5, 10, 5)
-            ->pdf();
+            ->margins(10, 5, 10, 5);
+
+        // Set node binary path for NVM environments
+        if ($nodeBinary = env('NODE_PATH')) {
+            $browsershot->setNodeBinary($nodeBinary);
+            
+            // Also set the node modules path for Puppeteer
+            $nodeDir = dirname($nodeBinary);
+            $nodeModulesPath = dirname(dirname($nodeDir)) . '/lib/node_modules';
+            if (is_dir($nodeModulesPath)) {
+                $browsershot->setNodeModulePath($nodeModulesPath);
+            }
+        }
+
+        if ($chromePath = env('CHROME_PATH')) {
+            $browsershot->setChromePath($chromePath);
+        }
+
+        // Write HTML to temp file to avoid process argument length limits
+        $browsershot->writeOptionsToFile();
+
+        $binary = $browsershot->pdf();
 
         $result = [
             'binary' => $binary,
