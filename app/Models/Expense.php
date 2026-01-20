@@ -238,7 +238,23 @@ class Expense extends Model
         return $this->hasMany(ExpenseSplits::class);
     }
 
-    public function transactions(): HasMany
+    /**
+     * Many-to-many relationship: one expense can have multiple transactions,
+     * and one transaction can belong to multiple expenses.
+     * This replaces the old HasMany relationship that relied on transactions.expense_id
+     */
+    public function transactions(): BelongsToMany
+    {
+        return $this->belongsToMany(Transaction::class, 'expense_transaction')
+            ->withTimestamps();
+    }
+
+    /**
+     * Legacy relationship for transactions linked via the expense_id column.
+     * Use this during migration period to access old-style linked transactions.
+     * @deprecated Use transactions() instead
+     */
+    public function legacyTransactions(): HasMany
     {
         return $this->hasMany(Transaction::class);
     }
@@ -284,6 +300,17 @@ class Expense extends Model
         // Include children (expenses that have this expense as their parent)
         $children = Expense::where('parent_expense_id', $this->id)->get();
         $results = $results->merge($children);
+
+        // Include expenses that share the same transaction(s) via pivot table
+        $transactionIds = $this->transactions()->pluck('transactions.id');
+        if ($transactionIds->isNotEmpty()) {
+            $sharedExpenses = Expense::whereHas('transactions', function ($query) use ($transactionIds) {
+                $query->whereIn('transactions.id', $transactionIds);
+            })
+                ->where('id', '!=', $this->id)
+                ->get();
+            $results = $results->merge($sharedExpenses);
+        }
 
         return $results->isNotEmpty() ? $results->unique('id') : null;
     }

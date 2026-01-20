@@ -8,6 +8,7 @@ use App\Traits\HasNumericSearch;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Laravel\Scout\Searchable;
@@ -157,6 +158,16 @@ class Transaction extends Model
         //     'id' => 'No Expense',
         // ]);
         return $this->belongsTo(Expense::class);
+    }
+
+    /**
+     * Many-to-many relationship: one transaction can belong to multiple expenses.
+     * This is used when a single bank transaction covers multiple expense records.
+     */
+    public function expenses(): BelongsToMany
+    {
+        return $this->belongsToMany(Expense::class, 'expense_transaction')
+            ->withTimestamps();
     }
 
     public function bank_account(): BelongsTo

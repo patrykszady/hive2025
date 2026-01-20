@@ -1,3 +1,4 @@
+<div>
 <x-form-modal
     name="project_distributions_modal"
     :title="$project && $project->short_address ? $project->short_address.' Distributions' : 'Project distributions'"
@@ -97,3 +98,68 @@
         </x-slot>
     @endif
 </x-form-modal>
+
+{{-- Bulk Assign Modal --}}
+<x-form-modal
+    name="bulk_distributions_modal"
+    title="Bulk Assign Distributions"
+    class="max-w-lg"
+>
+    <x-slot name="subtitle">
+        <flux:subheading>
+            Assign the same distribution percentages to all completed projects without distributions.
+        </flux:subheading>
+    </x-slot>
+
+    <form id="bulk_distributions_form" wire:submit="storeBulk" class="space-y-2">
+        <div class="grid grid-cols-1 gap-2">
+            @foreach ($distributions as $index => $distribution)
+                <flux:card class="p-3">
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="min-w-0">
+                            <flux:heading size="sm" class="truncate">{{ $distribution['name'] }}</flux:heading>
+                        </div>
+
+                        <div class="w-28 shrink-0">
+                            <flux:input.group>
+                                <flux:input
+                                    type="number"
+                                    inputmode="numeric"
+                                    min="0"
+                                    max="100"
+                                    step="5"
+                                    placeholder="0"
+                                    wire:model.blur="distributions.{{ $index }}.percent"
+                                />
+                                <flux:input.group.suffix>%</flux:input.group.suffix>
+                            </flux:input.group>
+                            <flux:error name="distributions.{{ $index }}.percent" />
+                        </div>
+                    </div>
+                </flux:card>
+            @endforeach
+        </div>
+
+        <flux:error name="percent_distributions_sum" />
+    </form>
+
+    <x-slot name="footer">
+        <flux:modal.close>
+            <flux:button type="button" variant="subtle">Cancel</flux:button>
+        </flux:modal.close>
+
+        <div class="flex-1 flex justify-center">
+            <flux:button
+                type="button"
+                variant="filled"
+                color="{{ $this->percent_sum === 100 ? 'green' : 'orange' }}"
+                disabled
+            >
+                {{ $this->percent_sum > 0 ? $this->percent_sum.'%' : '—%' }}
+            </flux:button>
+        </div>
+
+        <flux:button type="submit" form="bulk_distributions_form" variant="primary">Assign All</flux:button>
+    </x-slot>
+</x-form-modal>
+</div>

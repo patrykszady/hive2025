@@ -1207,89 +1207,104 @@ class TransactionController extends Controller
 
     public function add_transaction_to_multi_expenses()
     {
-        dd('in add_transaction_to_multi_expenses');
+        $matchedCount = 0;
         $hive_vendors = Vendor::hiveVendors()->get();
+
         foreach ($hive_vendors as $hive_vendor) {
             $hive_vendor_bank_account_ids = $hive_vendor->bank_accounts->pluck('id');
 
-            //find Expenses per Vendor that have at least 2 expenses sin Transactions
-            //associate expenses.. each Expense has the same Transaction
-            $transactions = Transaction::
-                // where('id', 20541)
-                whereIn('bank_account_id', $hive_vendor_bank_account_ids)
-                    ->whereNull('expense_id')
-                //whereDoesntHave payments
-                    ->doesntHave('payments')
-                    ->whereNull('check_number')
-                // ->whereBetween('transaction_date', [$start_date, $end_date])
-
-                //03/08/2023 floatDiffInDays dateDiff? orderBy faster I think?
-                    ->orderBy('transaction_date', 'desc')
-                    ->get();
+            // Find unmatched transactions (no expense_id and no expenses via pivot table)
+            $transactions = Transaction::whereIn('bank_account_id', $hive_vendor_bank_account_ids)
+                ->whereNull('expense_id')
+                ->whereDoesntHave('expenses') // No expenses linked via pivot table
+                ->doesntHave('payments')
+                ->whereNull('check_number')
+                ->whereNull('deposit')
+                ->whereNotNull('vendor_id')
+                ->where('amount', '>', 0) // Only positive amounts for now
+                ->whereDate('transaction_date', '>=', Carbon::now()->subMonths(12))
+                ->orderBy('transaction_date', 'desc')
+                ->limit(500)
+                ->get();
 
             foreach ($transactions as $transaction) {
-                $start_date = $transaction->transaction_date->subDays(7)->format('Y-m-d');
-                $end_date = $transaction->transaction_date->addDays(7)->format('Y-m-d');
+                $start_date = $transaction->transaction_date->copy()->subDays(7)->format('Y-m-d');
+                $end_date = $transaction->transaction_date->copy()->addDays(14)->format('Y-m-d');
 
-                $expenses =
-                    Expense::whereNull('deleted_at')
-                        ->where('belongs_to_vendor_id', $hive_vendor->id)
-                        ->where('vendor_id', $transaction->vendor_id)
-                        ->whereNull('paid_by')
-                        ->whereDoesntHave('transactions')
-                        ->whereBetween('date', [$start_date, $end_date])
-                        ->get();
+                // Find unmatched expenses for the same vendor within date range
+                $expenses = Expense::whereNull('deleted_at')
+                    ->where('belongs_to_vendor_id', $hive_vendor->id)
+                    ->where('vendor_id', $transaction->vendor_id)
+                    ->whereNull('paid_by')
+                    ->whereDoesntHave('transactions') // Use new pivot relationship
+                    ->whereDoesntHave('legacyTransactions') // Also check old expense_id links
+                    ->whereBetween('date', [$start_date, $end_date])
+                    ->where('amount', '>', 0)
+                    ->get();
 
-                //run subsetSums here, if any combination equals $transaction->amount, use those!
-                if ($expenses->count() >= 2) {
-                    //summy
-                    //clear array before next foreach statement
-                    $expense_resluts = [];
+                // Need at least 2 expenses to match
+                if ($expenses->count() < 2) {
+                    continue;
+                }
 
-                    $expenses_ids = $expenses->pluck('id')->toArray();
-                    $expenses_plucked = $expenses->pluck('amount')->toArray();
+                $expenses_ids = $expenses->pluck('id')->toArray();
+                $expenses_amounts = $expenses->pluck('amount', 'id')->toArray();
 
-                    $arr = array_values(array_filter($expenses_plucked));
-                    $n = count($arr);
-                    $ids = $expenses_ids;
+                $arr = array_values(array_map('floatval', $expenses_amounts));
+                $n = count($arr);
+                $ids = array_keys($expenses_amounts);
 
-                    // Skip subset matching if too many items (prevent memory exhaustion)
-                    if ($n > 14) {
-                        Log::warning('Too many expenses to match - skipping subset sum matching', [
-                            'transaction_id' => $transaction->id,
-                            'expense_count' => $n,
-                        ]);
-                        continue;
-                    }
+                // Skip subset matching if too many items (prevent memory exhaustion)
+                if ($n > 14) {
+                    Log::warning('Too many expenses to match - skipping subset sum matching', [
+                        'transaction_id' => $transaction->id,
+                        'expense_count' => $n,
+                    ]);
+                    continue;
+                }
 
-                    //model
-                    $results = collect($this->subsetSums($arr, $n, $ids, 'expense'))->sortBy('sum');
+                // Find all subsets that sum to the transaction amount
+                $results = collect($this->subsetSums($arr, $n, $ids, 'expense'))->sortBy('sum');
 
-                    foreach ($results as $key => $result) {
-                        $sum = number_format($result['sum'], 2, '.', '');
-                        //this can happen multiple of times.. eg transaction_id 6230
-
-                        //is this Transaction a RETURN CHECK "DEPOSIT"?
-                        if ($sum == $transaction->amount) {
-                            $expense_resluts[] = $result;
-                        }
-                    }
-
-                    $expense_resluts = collect($expense_resluts);
-
-                    if (! $expense_resluts->isEmpty()) {
-                        $expense_array = $expense_resluts[0]['expenses'];
-
-                        foreach ($expense_array as $expense) {
-                            // $transaction
-                            $save_expense = Expense::findOrFail($expense['expense_id']);
-                            $save_expense->transaction_id = $transaction->id;
-                            $save_expense->save();
-                        }
+                $matchingSubsets = [];
+                foreach ($results as $result) {
+                    $sum = number_format($result['sum'], 2, '.', '');
+                    if ($sum == number_format($transaction->amount, 2, '.', '')) {
+                        $matchingSubsets[] = $result;
                     }
                 }
+
+                if (empty($matchingSubsets)) {
+                    continue;
+                }
+
+                // Use the first matching subset (smallest number of expenses that sum to transaction)
+                $bestMatch = collect($matchingSubsets)->sortBy(fn($r) => count($r['expenses']))->first();
+                $expenseIds = collect($bestMatch['expenses'])->pluck('expense_id')->toArray();
+
+                // Link all matching expenses to this transaction via pivot table
+                $transaction->expenses()->attach($expenseIds);
+                $matchedCount++;
+
+                // Re-index linked expenses in Meilisearch (status changes to "Complete")
+                Expense::withoutGlobalScopes()
+                    ->whereIn('id', $expenseIds)
+                    ->get()
+                    ->each(fn($expense) => $expense->searchable());
+
+                Log::info('Multi-expense match found', [
+                    'transaction_id' => $transaction->id,
+                    'transaction_amount' => $transaction->amount,
+                    'expense_ids' => $expenseIds,
+                    'expenses_sum' => $bestMatch['sum'],
+                ]);
             }
         }
+
+        return response()->json([
+            'matched' => $matchedCount,
+            'message' => "Matched {$matchedCount} transactions to multiple expenses",
+        ]);
     }
 
     public function add_check_id_to_transactions()

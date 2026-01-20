@@ -14,6 +14,8 @@ class DistributionProjectsForm extends Component
 
     public ?Project $project = null;
 
+    public bool $isBulkMode = false;
+
     /**
      * @var array<int, array{id:int,name:string,percent:int|null,amount:float|null}>
      */
@@ -27,7 +29,7 @@ class DistributionProjectsForm extends Component
         'form_submit' => 'store',
     ];
 
-    protected $listeners = ['addDis'];
+    protected $listeners = ['addDis', 'bulkAssign'];
 
     protected function rules()
     {
@@ -178,6 +180,74 @@ class DistributionProjectsForm extends Component
             variant: 'success',
             heading: 'Project distributions updated.',
             text: 'Saved distribution splits for '.$this->project->short_address.'.',
+        );
+    }
+
+    public function bulkAssign(): void
+    {
+        $this->authorize('viewAny', Distribution::class);
+
+        $this->project = null;
+        $this->isBulkMode = true;
+        $this->resetModal();
+
+        $this->modal('bulk_distributions_modal')->show();
+    }
+
+    public function storeBulk(): void
+    {
+        $this->authorize('viewAny', Distribution::class);
+
+        $this->validate([
+            'distributions.*.percent' => 'nullable|integer|min:0|max:100',
+            'percent_distributions_sum' => 'required|integer|min:100|max:100',
+        ]);
+
+        // Get all completed projects without distributions
+        $projects = Project::query()
+            ->whereDoesntHave('distributions')
+            ->whereHas('statuses', function ($query) {
+                $query->where('status_code', 7);
+            })
+            ->get();
+
+        $count = 0;
+
+        foreach ($projects as $project) {
+            $profit = (float) data_get($project->finances ?? [], 'profit', 0);
+
+            $syncData = [];
+
+            foreach ($this->distributions as $row) {
+                $percent = (int) ($row['percent'] ?? 0);
+
+                if ($percent <= 0) {
+                    continue;
+                }
+
+                $syncData[(int) $row['id']] = [
+                    'percent' => $percent,
+                    'amount' => round($profit * ($percent / 100), 2),
+                ];
+            }
+
+            if (!empty($syncData)) {
+                $project->distributions()->sync($syncData);
+                $count++;
+            }
+        }
+
+        $this->isBulkMode = false;
+        $this->modal('bulk_distributions_modal')->close();
+
+        $this->dispatch('refreshComponent')->to('distributions.distributions-index');
+
+        Flux::toast(
+            duration: 4000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Bulk distributions assigned.',
+            text: "Assigned distributions to {$count} projects.",
         );
     }
 

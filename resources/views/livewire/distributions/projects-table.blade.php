@@ -1,8 +1,17 @@
 <flux:card>
-    <div class="flex justify-between">
+    <div class="flex justify-between items-center">
         <flux:heading size="lg">
             Projects <b>{{ $type }}</b> Distributions
         </flux:heading>
+        @if ($type === 'Without' && $projects->count() > 0)
+            <flux:button
+                size="sm"
+                variant="primary"
+                wire:click="$dispatchTo('distributions.distribution-projects-form', 'bulkAssign')"
+            >
+                Assign All Projects
+            </flux:button>
+        @endif
     </div>
 
     <div class="space-y-2">

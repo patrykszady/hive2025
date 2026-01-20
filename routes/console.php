@@ -175,6 +175,13 @@ Schedule::call(function () {
   ->onOneServer();
 
 Schedule::call(function () {
+    app(\App\Http\Controllers\TransactionController::class)->add_transaction_to_multi_expenses();
+})->everyTenMinutes()
+  ->name('add-transaction-to-multi-expenses')
+  ->withoutOverlapping()
+  ->onOneServer();
+
+Schedule::call(function () {
     app(\App\Http\Controllers\TransactionController::class)->add_check_id_to_transactions();
 })->everyTenMinutes()
   ->name('add-check-id-to-transactions')
