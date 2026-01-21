@@ -2,6 +2,7 @@
     'disablePaidBy' => false,
     'hideBasicFields' => false,
     'disableChecks' => false,
+    'showWhenPaidBy' => false,
 ])
 
 @unless($hideBasicFields)
@@ -26,7 +27,7 @@
 @endunless
 
 {{-- BANK AND CHECK DETAILS --}}
-<div x-show="!$wire.form.paid_by" x-transition>
+<div x-show="!$wire.form.paid_by || {{ $showWhenPaidBy ? 'true' : 'false' }}" x-transition>
     <div class="space-y-4">
         @if($hideBasicFields)
             {{-- Bank select with direct flux components --}}

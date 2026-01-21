@@ -154,32 +154,51 @@
         {{-- ATTACH TO EXISTING CHECK (Optional) --}}
         <div
             x-data="{ open: @entangle('form.paid_by'), existing_check: @entangle('existing_check_id') }"
-            x-show="!open"
+            x-show="true"
             x-transition
             >
-            <flux:select 
-                wire:model.live="existing_check_id" 
-                label="Attach to Existing Check (Optional)"
-                placeholder="Create new check or select existing..."
-                searchable
-            >
-                <flux:select.option value="">Create New Check</flux:select.option>
-                @foreach($this->available_checks as $check)
-                    <flux:select.option value="{{$check['id']}}">{{$check['label']}}</flux:select.option>
-                @endforeach
-            </flux:select>
-            <flux:description>Select an existing check to add this expense to it, or leave blank to create a new check.</flux:description>
+            <div class="flex flex-wrap items-end gap-3">
+                <div class="grow min-w-[16rem]">
+                    <flux:select 
+                        wire:model.live="existing_check_id" 
+                        label="Attach to Existing Check (Optional)"
+                        placeholder="Create new check or select existing..."
+                        searchable
+                        x-bind:disabled="open"
+                    >
+                        <flux:select.option value="">Create New Check</flux:select.option>
+                        @foreach($this->available_checks as $check)
+                            <flux:select.option value="{{$check['id']}}">{{$check['label']}}</flux:select.option>
+                        @endforeach
+                    </flux:select>
+                    <flux:description>Select an existing check to add this expense to it, or leave blank to create a new check.</flux:description>
+                </div>
+                @if(isset($expense->id) && ($expense->check_id || $expense->checks->isNotEmpty()))
+                    <flux:button
+                        size="sm"
+                        variant="danger"
+                        x-on:click.stop="if (confirm('Remove this expense from all checks?')) { $wire.removeCheckAssociation() }"
+                    >
+                        Remove from Check
+                    </flux:button>
+                @endif
+            </div>
         </div>
 
         {{-- CHECK --}}
         {{-- SHOULD Be a component here --}}
         <div
-            x-data="{ open: @entangle('form.paid_by'), project_id: @entangle('form.project_id'), splits: @entangle('splits'), existing_check: @entangle('existing_check_id') }"
-            x-show="(project_id || splits) && !open && !existing_check"
+            x-data="{ open: @entangle('form.paid_by'), project_id: @entangle('form.project_id'), splits: @entangle('splits'), existing_check: @entangle('existing_check_id'), has_check: {{ isset($expense->id) && ($expense->check_id || $expense->checks->isNotEmpty()) ? 'true' : 'false' }} }"
+            x-show="(project_id || splits || has_check) && !existing_check"
             x-transition
             >
-            @include('livewire.checks._payment_form', ['hideBasicFields' => true])
+            @include('livewire.checks._payment_form', [
+                'hideBasicFields' => true,
+                'disableChecks' => (bool) $form->paid_by,
+                'showWhenPaidBy' => true,
+            ])
         </div>
+
 
         {{-- RECEIPT --}}
         <div

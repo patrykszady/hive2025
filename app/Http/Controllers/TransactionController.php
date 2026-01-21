@@ -1378,6 +1378,11 @@ class TransactionController extends Controller
                 ->whereNull('check_id')
                 ->whereNull('expense_id')
                 ->where('check_number', $check_number)
+                // Exclude returned checks - they are reversals, not the original check
+                ->where(function ($query) {
+                    $query->whereNull('plaid_merchant_description')
+                        ->orWhere('plaid_merchant_description', 'NOT LIKE', '%RETURNED%');
+                })
                 ->when($bank_account_ids, function ($query, $bank_account_ids) {
                     return $query->whereIn('bank_account_id', $bank_account_ids);
                 })
@@ -1448,6 +1453,11 @@ class TransactionController extends Controller
                 ->whereNull('check_id')
                 ->whereNull('expense_id')
                 ->whereNull('deposit')
+                // Exclude returned checks - they are reversals, not the original check
+                ->where(function ($query) {
+                    $query->whereNull('plaid_merchant_description')
+                        ->orWhere('plaid_merchant_description', 'NOT LIKE', '%RETURNED%');
+                })
                 //11/23/2024 per hive vendor... checks table foreach bank_account_id
                 // ->whereIn('bank_account_id', $check->bank_account_id ? $check->bank_account->bank->accounts->pluck('id') : [NULL])
                 ->when($bank_account_ids, function ($query, $bank_account_ids) {
@@ -1494,9 +1504,125 @@ class TransactionController extends Controller
         unset($checks, $transactions, $bank_account_ids);
         gc_collect_cycles();
         
+        // Match returned check transactions to their original checks
+        $this->matchReturnedChecksToOriginalChecks();
+        
         // Now match checks to expenses using many-to-many relationship
         // Find expenses that don't have checks (via pivot) and match checks that sum to expense amount
         $this->matchChecksToExpenses();
+    }
+    
+    /**
+     * Create separate check and expense records for "RETURNED CHECK" transactions.
+     * Links returned expense to original expense via parent_expense_id.
+     */
+    protected function matchReturnedChecksToOriginalChecks(): void
+    {
+        // Find unmatched returned check transactions
+        $returnedTransactions = Transaction::withoutGlobalScopes()
+            ->whereNull('deleted_at')
+            ->whereNull('check_id')
+            ->whereNotNull('check_number')
+            ->where('plaid_merchant_description', 'LIKE', '%RETURNED%CHECK%')
+            ->where('amount', '<', 0) // Returned checks are negative (money coming back)
+            ->get();
+        
+        foreach ($returnedTransactions as $returnedTransaction) {
+            // Find the original check transaction with matching check_number and bank
+            $originalTransaction = Transaction::withoutGlobalScopes()
+                ->whereNull('deleted_at')
+                ->whereNotNull('check_id')
+                ->where('check_number', $returnedTransaction->check_number)
+                ->where('bank_account_id', $returnedTransaction->bank_account_id)
+                ->where('amount', '>', 0) // Original is positive (money going out)
+                ->first();
+            
+            if (!$originalTransaction || !$originalTransaction->check_id) {
+                continue;
+            }
+            
+            $originalCheck = Check::withoutGlobalScopes()->find($originalTransaction->check_id);
+            if (!$originalCheck) {
+                continue;
+            }
+            
+            // Find the original expense linked to the original check
+            $originalExpense = Expense::withoutGlobalScopes()
+                ->whereNull('deleted_at')
+                ->where('check_id', $originalCheck->id)
+                ->first();
+            
+            // Create a new "Returned Check" record
+            $returnedCheck = Check::create([
+                'check_type' => 'Returned Check',
+                'check_number' => $originalCheck->check_number,
+                'date' => $returnedTransaction->transaction_date,
+                'amount' => $returnedTransaction->amount, // Negative amount
+                'bank_account_id' => $originalCheck->bank_account_id,
+                'vendor_id' => $originalCheck->vendor_id,
+                'belongs_to_vendor_id' => $originalCheck->belongs_to_vendor_id,
+                'created_by_user_id' => 0,
+            ]);
+            
+            // Link returned transaction to the new returned check
+            $returnedTransaction->check_id = $returnedCheck->id;
+            $returnedTransaction->vendor_id = $originalCheck->vendor_id;
+            $returnedTransaction->save();
+            
+            // Find or create a returned expense linked to original expense
+            if ($originalExpense) {
+                // Check if a returned expense already exists (from prior runs or manual creation)
+                $returnedExpense = Expense::withoutGlobalScopes()
+                    ->whereNull('deleted_at')
+                    ->where('amount', $returnedTransaction->amount)
+                    ->where('vendor_id', $originalExpense->vendor_id)
+                    ->whereBetween('date', [
+                        $returnedTransaction->transaction_date->copy()->subDays(3)->format('Y-m-d'),
+                        $returnedTransaction->transaction_date->copy()->addDays(3)->format('Y-m-d'),
+                    ])
+                    ->first();
+                
+                if ($returnedExpense) {
+                    // Update existing expense to link to returned check and original expense
+                    $returnedExpense->check_id = $returnedCheck->id;
+                    $returnedExpense->parent_expense_id = $originalExpense->id;
+                    $returnedExpense->save();
+                } else {
+                    // Create new returned expense
+                    $returnedExpense = Expense::create([
+                        'date' => $returnedTransaction->transaction_date,
+                        'amount' => $returnedTransaction->amount, // Negative amount
+                        'distribution_id' => $originalExpense->distribution_id,
+                        'vendor_id' => $originalExpense->vendor_id,
+                        'check_id' => $returnedCheck->id,
+                        'category_id' => $originalExpense->category_id,
+                        'parent_expense_id' => $originalExpense->id,
+                        'belongs_to_vendor_id' => $originalExpense->belongs_to_vendor_id,
+                        'created_by_user_id' => 0,
+                    ]);
+                }
+                
+                // Link transaction to the new expense
+                $returnedTransaction->expense_id = $returnedExpense->id;
+                $returnedTransaction->save();
+                
+                Log::channel('add_check_id_to_transactions')->info('Created returned check and expense', [
+                    'returned_transaction_id' => $returnedTransaction->id,
+                    'returned_check_id' => $returnedCheck->id,
+                    'returned_expense_id' => $returnedExpense->id,
+                    'original_check_id' => $originalCheck->id,
+                    'original_expense_id' => $originalExpense->id,
+                    'check_number' => $returnedTransaction->check_number,
+                ]);
+            } else {
+                Log::channel('add_check_id_to_transactions')->info('Created returned check (no original expense found)', [
+                    'returned_transaction_id' => $returnedTransaction->id,
+                    'returned_check_id' => $returnedCheck->id,
+                    'original_check_id' => $originalCheck->id,
+                    'check_number' => $returnedTransaction->check_number,
+                ]);
+            }
+        }
     }
     
     /**
@@ -1608,6 +1734,11 @@ class TransactionController extends Controller
             ->whereNull('check_id')
             ->whereNull('expense_id')
             ->where('check_number', $check_number)
+            // Exclude returned checks - they are reversals, not the original check
+            ->where(function ($query) {
+                $query->whereNull('plaid_merchant_description')
+                    ->orWhere('plaid_merchant_description', 'NOT LIKE', '%RETURNED%');
+            })
             ->when($bank_account_ids, function ($query, $bank_account_ids) {
                 return $query->whereIn('bank_account_id', $bank_account_ids);
             })

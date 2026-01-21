@@ -59,8 +59,30 @@ class ExpensesAssociated extends Component
 
     public function save()
     {
-        $this->expense->parent_expense_id = $this->associate_expense;
-        $this->expense->save();
+        $associate = Expense::findOrFail($this->associate_expense);
+        $current = $this->expense->fresh();
+
+        $associateRootId = $associate->parent_expense_id ?: $associate->id;
+        $currentRootId = $current->parent_expense_id ?: $current->id;
+
+        if ($associateRootId !== $currentRootId) {
+            $currentGroupIds = Expense::query()
+                ->where(function ($query) use ($currentRootId) {
+                    $query->where('id', $currentRootId)
+                        ->orWhere('parent_expense_id', $currentRootId);
+                })
+                ->pluck('id');
+
+            if ($currentGroupIds->isNotEmpty()) {
+                Expense::query()
+                    ->whereIn('id', $currentGroupIds)
+                    ->where('id', '!=', $associateRootId)
+                    ->update(['parent_expense_id' => $associateRootId]);
+            }
+        } elseif ($current->id !== $associateRootId) {
+            $current->parent_expense_id = $associateRootId;
+            $current->save();
+        }
 
         $this->dispatch('refreshComponent')->to('expenses.expense-show');
         $this->modal('associated_expenses_form_modal')->close();

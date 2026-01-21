@@ -19,6 +19,25 @@
                             <flux:button icon-trailing="chevron-down" size="sm"></flux:button>
                             <flux:menu>
                                 <flux:menu.item wire:click="$dispatchTo('expenses.expenses-associated', 'addAssociatedExpense', { expense: {{$expense->id}}})">Link Expenses</flux:menu.item>
+                                @php
+                                    $linkedChecks = $expense->checks->isNotEmpty()
+                                        ? $expense->checks
+                                        : collect();
+                                    if ($expense->check) {
+                                        $linkedChecks = $linkedChecks->concat(collect([$expense->check]));
+                                    }
+                                    $linkedChecks = $linkedChecks->unique('id');
+                                @endphp
+                                @if($linkedChecks->isNotEmpty())
+                                    <flux:menu.separator />
+                                    @foreach($linkedChecks as $check)
+                                        <flux:menu.item
+                                            x-on:click.stop="if (confirm('Remove this expense from the check?')) { $wire.removeFromCheck({{ $check->id }}) }"
+                                        >
+                                            Remove from Check {{ $check->check_number ?? $check->id }}
+                                        </flux:menu.item>
+                                    @endforeach
+                                @endif
                             </flux:menu>
                         </flux:dropdown>
                     </flux:button.group>

@@ -58,7 +58,26 @@
 
     {{-- Hide expenses card on project page when there are no expenses --}}
     @if($view !== 'projects.show' || $this->expenses->isNotEmpty())
-    <flux:card class="overflow-hidden">
+    <flux:card class="overflow-hidden" x-data="{
+        init() {
+            window.addEventListener('remove-expense-row', (event) => {
+                const expenseId = event.detail.id;
+                // Remove main expense row
+                const row = document.querySelector(`[data-expense-row='${expenseId}']`);
+                if (row) {
+                    row.style.transition = 'opacity 0.3s ease-out';
+                    row.style.opacity = '0';
+                    setTimeout(() => row.remove(), 300);
+                }
+                // Remove any split rows for this expense
+                document.querySelectorAll(`[data-expense-split-parent='${expenseId}']`).forEach(splitRow => {
+                    splitRow.style.transition = 'opacity 0.3s ease-out';
+                    splitRow.style.opacity = '0';
+                    setTimeout(() => splitRow.remove(), 300);
+                });
+            });
+        }
+    }">
         <div class="space-y-4">
             <div>
                 <flux:heading size="lg">Expenses</flux:heading>
@@ -95,7 +114,7 @@
 
                 <flux:table.rows>
                     @foreach ($this->expenses as $expense)
-                        <flux:table.row :key="$expense->id">
+                        <flux:table.row :key="$expense->id" data-expense-row="{{ $expense->id }}">
                             <flux:table.cell
                                 x-data="{
                                     canEdit: {{ auth()->user()->can('create', App\Models\Expense::class) ? 'true' : 'false' }},
@@ -143,7 +162,7 @@
                                 @if($view === 'projects.show' && (string)$split->project_id !== (string)$project_id)
                                     @continue
                                 @endif
-                                <flux:table.row :key="'split-' . $split->id" class="bg-gray-50 dark:bg-gray-800/50 [&_td]:!py-2">
+                                <flux:table.row :key="'split-' . $split->id" class="bg-gray-50 dark:bg-gray-800/50 [&_td]:!py-2" data-expense-split-parent="{{ $expense->id }}">
                                     <flux:table.cell class="text-sm text-gray-600 dark:text-gray-400 tabular-nums w-[14%] min-w-[5.5rem] !pl-10 !pe-8">
                                         <div class="pe-4">{{ display_money($split->amount) }}</div>
                                     </flux:table.cell>

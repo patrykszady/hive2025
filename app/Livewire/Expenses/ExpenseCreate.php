@@ -399,8 +399,12 @@ class ExpenseCreate extends Component
             return $this->addError('no_splits', 'Splits required if Project is Split');
         }
 
+        $expenseId = $this->expense->id;
         $expense = $this->form->update();
         $this->modal('expenses_form_modal')->close();
+
+        // Optimistically remove row before server refresh (will be re-added with updated data)
+        $this->js('window.dispatchEvent(new CustomEvent("remove-expense-row", { detail: { id: ' . $expenseId . ' } }))');
 
         $this->toastExpenseSuccess($expense, 'Expense Updated.', money($expense->amount));
 
@@ -409,10 +413,64 @@ class ExpenseCreate extends Component
         $this->dispatch('refreshComponent')->to('expenses.expense-show');
     }
 
+    public function removeCheckAssociation(): void
+    {
+        if (! $this->expense->exists) {
+            return;
+        }
+
+        $this->authorize('update', $this->expense);
+
+        $checkIds = collect();
+        if ($this->expense->check_id) {
+            $checkIds->push($this->expense->check_id);
+        }
+        $checkIds = $checkIds->merge($this->expense->checks()->pluck('checks.id'));
+
+        $this->expense->check_id = null;
+        $this->expense->save();
+        $this->expense->checks()->detach();
+
+        $this->existing_check_id = null;
+        $this->clearCheckFields();
+
+        foreach ($checkIds->unique() as $checkId) {
+            $check = Check::find($checkId);
+            if (! $check) {
+                continue;
+            }
+
+            $check->load(['expenses', 'expensesMany', 'timesheets']);
+            $expenseSum = $check->expenses
+                ->concat($check->expensesMany)
+                ->unique('id')
+                ->sum('amount');
+            $check->amount = $expenseSum + $check->timesheets->sum('amount');
+            $check->save();
+        }
+
+        $this->expense->refresh();
+        $this->dispatch('refreshComponent')->to('expenses.expense-show');
+        $this->dispatch('refreshComponent')->to('expenses.expense-index');
+        $this->dispatch('refreshComponent')->to('checks.check-show');
+
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Expense removed from check.',
+            text: '',
+        );
+    }
+
     public function remove()
     {
+        $expenseId = $this->expense->id;
         $this->form->delete();
         $this->modal('expenses_form_modal')->close();
+
+        // Optimistically remove row immediately
+        $this->js('window.dispatchEvent(new CustomEvent("remove-expense-row", { detail: { id: ' . $expenseId . ' } }))');
 
         Flux::toast(
             duration: 5000,

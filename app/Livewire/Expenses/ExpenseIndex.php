@@ -8,6 +8,8 @@ use App\Models\ExpenseSplits;
 use App\Models\Project;
 use App\Models\Transaction;
 use App\Models\Vendor;
+use App\Models\Check;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Cache;
@@ -50,6 +52,38 @@ class ExpenseIndex extends Component
     {
         $this->resetPage('expenses-page');
         $this->resetPage('transactions-page');
+    }
+
+    public function detachExpenseFromCheck(int $expenseId): void
+    {
+        if (! is_numeric($this->check)) {
+            return;
+        }
+
+        $expense = Expense::findOrFail($expenseId);
+        $this->authorize('update', $expense);
+
+        if ((int) $expense->check_id === (int) $this->check) {
+            $expense->check_id = null;
+            $expense->save();
+        } else {
+            DB::table('check_expense')
+                ->where('check_id', $this->check)
+                ->where('expense_id', $expense->id)
+                ->delete();
+        }
+
+        $check = Check::find($this->check);
+        if ($check) {
+            $expenseSum = $check->expenses
+                ->concat($check->expensesMany)
+                ->unique('id')
+                ->sum('amount');
+            $check->amount = $expenseSum + $check->timesheets->sum('amount');
+            $check->save();
+        }
+
+        $this->dispatch('refreshComponent')->to('checks.check-show');
     }
 
     public function mount()
@@ -123,9 +157,12 @@ class ExpenseIndex extends Component
                 $searchAmount = round((float) $this->amount, 2);
                 
                 // Use Scout for exact amount match on parent expenses
-                // Add amount filter to filterConditions for exact match
+                // Add amount filter to filterConditions for exact match (both positive and negative)
                 $filterConditions = $this->buildFilterConditions();
-                $filterConditions[] = "amount = {$searchAmount}";
+                // Search for both positive and negative amounts with same absolute value
+                $negativeAmount = -abs($searchAmount);
+                $positiveAmount = abs($searchAmount);
+                $filterConditions[] = "(amount = {$positiveAmount} OR amount = {$negativeAmount})";
                 
                 // Pass empty string as search query since we're filtering by amount
                 $baseExpenses = Expense::scopedSearch(
@@ -135,21 +172,32 @@ class ExpenseIndex extends Component
                     $this->sortDirection
                 )->take(10000)->get();
 
-                // Parent expenses whose split equals amount
+                // Parent expenses whose split equals amount (positive or negative)
                 $splitParentsQuery = Expense::query()
                     ->select(['id','amount','date','vendor_id','project_id','distribution_id','check_id','paid_by'])
-                    ->whereHas('splits', function ($q) use ($searchAmount) {
-                        $q->whereRaw('ROUND(amount, 2) = ?', [$searchAmount]);
+                    ->whereHas('splits', function ($q) use ($positiveAmount, $negativeAmount) {
+                        $q->whereRaw('ROUND(amount, 2) = ? OR ROUND(amount, 2) = ?', [$positiveAmount, $negativeAmount]);
                     });
             } else { // prefix
                 [$min, $upperExclusive] = $this->amountPrefixBounds();
                 // Direct Eloquent range query to capture ALL matching amounts regardless of date order
+                // Include both positive and negative amounts in the range
                 $user = auth()->user();
                 $baseQuery = Expense::query()
                     ->select(['id','amount','date','vendor_id','project_id','distribution_id','check_id','paid_by'])
                     ->where('belongs_to_vendor_id', $user->vendor->id)
-                    ->where('amount', '>=', $min)
-                    ->where('amount', '<', $upperExclusive);
+                    ->where(function ($q) use ($min, $upperExclusive) {
+                        // Positive range
+                        $q->where(function ($q2) use ($min, $upperExclusive) {
+                            $q2->where('amount', '>=', $min)
+                               ->where('amount', '<', $upperExclusive);
+                        })
+                        // Negative range (mirror the positive range)
+                        ->orWhere(function ($q2) use ($min, $upperExclusive) {
+                            $q2->where('amount', '>', -$upperExclusive)
+                               ->where('amount', '<=', -$min);
+                        });
+                    });
 
                 // Member role restriction replicating scopedSearch security
                 if ($user->vendor_role === 'Member') {
@@ -180,8 +228,18 @@ class ExpenseIndex extends Component
                 $splitParentsQuery = Expense::query()
                     ->select(['id','amount','date','vendor_id','project_id','distribution_id','check_id','paid_by'])
                     ->whereHas('splits', function ($q) use ($min, $upperExclusive) {
-                        $q->where('amount', '>=', $min)
-                          ->where('amount', '<', $upperExclusive);
+                        $q->where(function ($q2) use ($min, $upperExclusive) {
+                            // Positive range
+                            $q2->where(function ($q3) use ($min, $upperExclusive) {
+                                $q3->where('amount', '>=', $min)
+                                   ->where('amount', '<', $upperExclusive);
+                            })
+                            // Negative range
+                            ->orWhere(function ($q3) use ($min, $upperExclusive) {
+                                $q3->where('amount', '>', -$upperExclusive)
+                                   ->where('amount', '<=', -$min);
+                            });
+                        });
                     });
             }
 

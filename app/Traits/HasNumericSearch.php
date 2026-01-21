@@ -20,23 +20,27 @@ trait HasNumericSearch
             $candidate = trim($searchQuery);
             
             // Complete amounts ending with .00 or .0 - use exact filter for precision
+            // Include both positive and negative amounts
             if ($candidate !== '' && preg_match('/^-?\d+\.(00|0)$/', $candidate)) {
-                $amountValue = (float) $candidate;
-                $augmentedFilters[] = "amount = {$amountValue}";
+                $amountValue = abs((float) $candidate);
+                $negativeValue = -$amountValue;
+                $augmentedFilters[] = "(amount = {$amountValue} OR amount = {$negativeValue})";
                 $actualQuery = '';
             }
             // Negative amounts - use exact filter to preserve sign precision  
             elseif ($candidate !== '' && preg_match('/^-\d+(\.\d+)?$/', $candidate)) {
                 $amountValue = (float) $candidate;
-                $augmentedFilters[] = "amount = {$amountValue}";
+                $positiveValue = abs($amountValue);
+                $augmentedFilters[] = "(amount = {$amountValue} OR amount = {$positiveValue})";
                 $actualQuery = '';
             }
             // Patterns ending with decimal point (like "62.") - use range filter for prefix matching
+            // Include both positive and negative ranges
             elseif ($candidate !== '' && preg_match('/^(\d+)\.$/', $candidate, $matches)) {
                 $baseNumber = (int) $matches[1];
                 $lowerBound = (float) $baseNumber;
                 $upperBound = (float) ($baseNumber + 1);
-                $augmentedFilters[] = "amount >= {$lowerBound} AND amount < {$upperBound}";
+                $augmentedFilters[] = "((amount >= {$lowerBound} AND amount < {$upperBound}) OR (amount > -{$upperBound} AND amount <= -{$lowerBound}))";
                 $actualQuery = '';
             }
             // All other patterns (like "69", "62.1") - use text search for substring matching

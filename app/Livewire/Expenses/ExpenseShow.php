@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Expenses;
 
+use App\Models\Check;
 use App\Models\Expense;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Title;
@@ -31,6 +32,34 @@ class ExpenseShow extends Component
             'checks.bank_account.bank',
         ]);
 
+    }
+
+    public function removeFromCheck(int $checkId): void
+    {
+        $this->authorize('update', $this->expense);
+
+        $check = Check::findOrFail($checkId);
+
+        if ((int) $this->expense->check_id === (int) $check->id) {
+            $this->expense->check_id = null;
+            $this->expense->save();
+        }
+
+        if ($this->expense->checks()->where('checks.id', $check->id)->exists()) {
+            $this->expense->checks()->detach($check->id);
+        }
+
+        $check->load(['expenses', 'expensesMany', 'timesheets']);
+        $expenseSum = $check->expenses
+            ->concat($check->expensesMany)
+            ->unique('id')
+            ->sum('amount');
+        $check->amount = $expenseSum + $check->timesheets->sum('amount');
+        $check->save();
+
+        $this->expense->refresh();
+        $this->expense->load(['checks.bank_account.bank']);
+        $this->dispatch('refreshComponent');
     }
     
     // Manual toggle method for checkbox selection
