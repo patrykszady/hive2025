@@ -35,6 +35,11 @@ class ProjectStatus extends Model
 
     /**
      * Status code to badge color mapping
+     * 
+     * Colors chosen for visual distinction in dropdowns:
+     * - Active (green): clearly "go/current"
+     * - Complete (sky): clearly "done/cold" - distinct from green
+     * - Cancelled/VIEW ONLY (red/gray): clearly "don't use"
      */
     protected const STATUS_COLORS = [
         1 => 'zinc',      // Invited
@@ -43,7 +48,7 @@ class ProjectStatus extends Model
         4 => 'amber',     // Project Prep
         5 => 'lime',      // Scheduled
         6 => 'green',     // Active
-        7 => 'teal',      // Complete
+        7 => 'sky',       // Complete - changed from teal for better distinction from green
         8 => 'orange',    // Service Call
         10 => 'red',      // Cancelled
         11 => 'gray',     // VIEW ONLY
