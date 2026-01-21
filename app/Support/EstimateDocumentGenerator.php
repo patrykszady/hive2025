@@ -101,7 +101,7 @@ class EstimateDocumentGenerator
 
         $browsershot = Browsershot::html($view)
             ->newHeadless()
-            ->timeout(120)
+            ->timeout(180)
             ->waitUntilNetworkIdle()
             ->addChromiumArguments([
                 'no-sandbox',
@@ -110,6 +110,13 @@ class EstimateDocumentGenerator
                 'disable-gpu',
                 'disable-software-rasterizer',
                 'allow-file-access-from-files',
+                'disable-extensions',
+                'disable-background-networking',
+                'disable-sync',
+                'disable-translate',
+                'no-first-run',
+                'safebrowsing-disable-auto-update',
+                'disable-features=VizDisplayCompositor',
             ])
             ->scale(0.8)
             ->showBrowserHeaderAndFooter()
@@ -128,6 +135,11 @@ class EstimateDocumentGenerator
             if (is_dir($nodeModulesPath)) {
                 $browsershot->setNodeModulePath($nodeModulesPath);
             }
+            
+            // Ensure Chrome path is in PATH for web server context
+            $browsershot->setEnvironmentOptions([
+                'DISPLAY' => ':0',
+            ]);
         }
 
         if ($chromePath = env('CHROME_PATH')) {
@@ -136,6 +148,9 @@ class EstimateDocumentGenerator
 
         // Write HTML to temp file to avoid process argument length limits
         $browsershot->writeOptionsToFile();
+
+        // Set process timeout to match browsershot timeout
+        $browsershot->setProcessTimeout(180);
 
         $binary = $browsershot->pdf();
 
