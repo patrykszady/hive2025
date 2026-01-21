@@ -94,6 +94,7 @@ class Expense extends Model
 
         // A transaction can be directly attached to the expense or via a related check
         $hasTransactions = $this->transactions()->exists()
+            || $this->sharedTransactions()->exists()
             || $this->check()->whereHas('transactions')->exists()
             || ! is_null($this->paid_by);
 
@@ -239,24 +240,22 @@ class Expense extends Model
     }
 
     /**
-     * Many-to-many relationship: one expense can have multiple transactions,
-     * and one transaction can belong to multiple expenses.
-     * This replaces the old HasMany relationship that relied on transactions.expense_id
+     * Primary relationship: transactions linked via the expense_id column.
+     * This is the standard 1:1 expense-to-transaction link.
      */
-    public function transactions(): BelongsToMany
+    public function transactions(): HasMany
     {
-        return $this->belongsToMany(Transaction::class, 'expense_transaction')
-            ->withTimestamps();
+        return $this->hasMany(Transaction::class);
     }
 
     /**
-     * Legacy relationship for transactions linked via the expense_id column.
-     * Use this during migration period to access old-style linked transactions.
-     * @deprecated Use transactions() instead
+     * Many-to-many relationship for when a single transaction covers multiple expenses.
+     * Use this for multi-expense scenarios only (e.g., one $400.84 transaction split across expenses).
      */
-    public function legacyTransactions(): HasMany
+    public function sharedTransactions(): BelongsToMany
     {
-        return $this->hasMany(Transaction::class);
+        return $this->belongsToMany(Transaction::class, 'expense_transaction')
+            ->withTimestamps();
     }
 
     public function receipts(): HasMany
@@ -301,11 +300,11 @@ class Expense extends Model
         $children = Expense::where('parent_expense_id', $this->id)->get();
         $results = $results->merge($children);
 
-        // Include expenses that share the same transaction(s) via pivot table
-        $transactionIds = $this->transactions()->pluck('transactions.id');
-        if ($transactionIds->isNotEmpty()) {
-            $sharedExpenses = Expense::whereHas('transactions', function ($query) use ($transactionIds) {
-                $query->whereIn('transactions.id', $transactionIds);
+        // Include expenses that share the same transaction(s) via pivot table (multi-expense scenarios)
+        $sharedTransactionIds = $this->sharedTransactions()->pluck('transactions.id');
+        if ($sharedTransactionIds->isNotEmpty()) {
+            $sharedExpenses = Expense::whereHas('sharedTransactions', function ($query) use ($sharedTransactionIds) {
+                $query->whereIn('transactions.id', $sharedTransactionIds);
             })
                 ->where('id', '!=', $this->id)
                 ->get();
@@ -317,13 +316,20 @@ class Expense extends Model
     /**
      * Unified accessor for "all" transactions relevant to this expense.
      * Returns this expense's own transactions if present; otherwise falls back
-     * to transactions on the related check; empty collection if none.
+     * to shared transactions (multi-expense), then check transactions; empty collection if none.
      */
     public function allTransactions()
     {
+        // First check legacy 1:1 expense_id link
         $own = $this->transactions()->get();
         if ($own->isNotEmpty()) {
             return $own;
+        }
+        
+        // Check many-to-many pivot table (for multi-expense scenarios)
+        $shared = $this->sharedTransactions()->get();
+        if ($shared->isNotEmpty()) {
+            return $shared;
         }
         
         // Check many-to-many checks relationship first

@@ -1260,8 +1260,8 @@ class TransactionController extends Controller
                     ->where('belongs_to_vendor_id', $hive_vendor->id)
                     ->where('vendor_id', $transaction->vendor_id)
                     ->whereNull('paid_by')
-                    ->whereDoesntHave('transactions') // Use new pivot relationship
-                    ->whereDoesntHave('legacyTransactions') // Also check old expense_id links
+                    ->whereDoesntHave('transactions') // Check legacy expense_id links
+                    ->whereDoesntHave('sharedTransactions') // Also check pivot table links
                     ->whereBetween('date', [$start_date, $end_date])
                     ->where('amount', '>', 0)
                     ->get();
