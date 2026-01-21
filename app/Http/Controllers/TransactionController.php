@@ -1308,6 +1308,7 @@ class TransactionController extends Controller
 
                 // Link all matching expenses to this transaction via pivot table
                 $transaction->expenses()->attach($expenseIds);
+                $transaction->searchable();
                 $matchedCount++;
 
                 // Re-index linked expenses in Meilisearch (status changes to "Complete")

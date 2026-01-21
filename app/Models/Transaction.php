@@ -95,6 +95,7 @@ class Transaction extends Model
         $array['transaction_date'] = $this->transaction_date->timestamp;
         $array['posted_date'] = $this->posted_date ? $this->posted_date->timestamp : null;
         $array['deposit'] = $this->deposit ? ($this->payments->isEmpty() ? 'NO_PAYMENTS' : 'HAS_PAYMENTS') : 'NOT_DEPOSIT';
+        $array['expenses_count'] = $this->expenses()->count();
         
         // Ensure amount is consistently cast to float like Expense model
         $array['amount'] = (float) $this->amount;
@@ -127,6 +128,7 @@ class Transaction extends Model
                 "__soft_deleted = 0",
                 $bankAccountFilter,
                 "expense_id IS NULL",
+                "expenses_count = 0",
                 "check_id IS NULL",
                 'deposit IN ["NOT_DEPOSIT", "NO_PAYMENTS"]',
             ];
