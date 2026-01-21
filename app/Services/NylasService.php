@@ -1040,10 +1040,11 @@ class NylasService
         // Get inbox folder ID from company email's api_json if available
         $inboxFolderId = $companyEmail->api_json['INBOX_FOLDER'] ?? null;
         
-        // In non-production, look back a year to test with older messages
+        // Use the configured lookback period (defaults to 7 days via config)
+        // In non-production, allow a slightly longer window for testing (30 days max)
         $lookbackDate = env('APP_ENV') === 'production'
             ? $receivedAfter
-            : Carbon::now()->subYear();
+            : max($receivedAfter, Carbon::now()->subDays(30));
         
         // Build base query params.
         // Use field selection to reduce response size and avoid provider timeouts.
@@ -1137,6 +1138,15 @@ class NylasService
 
         // Fast filtering using pre-built criteria
         $aggregated = [];
+        
+        // Collect all subject patterns for forwarded email matching
+        $allSubjectPatterns = [];
+        foreach ($receiptCriteria as $subjects) {
+            foreach ($subjects as $subject) {
+                $allSubjectPatterns[] = $subject;
+            }
+        }
+        
         foreach ($allMessages as $m) {
             if (empty($m['id'])) {
                 continue;
@@ -1145,26 +1155,22 @@ class NylasService
             $fromEmail = strtolower($m['from'][0]['email'] ?? '');
             $messageSubject = strtolower($m['subject'] ?? '');
             
-            // NOTE: We intentionally do not use message bodies here (we use field selection
-            // to keep list requests small and reduce provider timeouts). If a message
-            // matches criteria, sendForwardCopy() will fetch the full message.
-            // (Forwarded email parsing happens later when forwarding, using full message fetch.)
-
-            // Clean subject - remove Fw:, Fwd:, Re: prefixes for matching
+            // Detect forwarded emails and clean subject
+            $isForwardedEmail = (bool) preg_match('/^(fw:|fwd:)\s*/i', $messageSubject);
             $cleanSubject = preg_replace('/^(fw:|fwd:|re:)\s*/i', '', $messageSubject);
             
             // Check all receipt criteria (both specific emails and domain patterns)
-            $messageIncluded = false;
+            $matched = false;
             foreach ($receiptCriteria as $address => $requiredSubjects) {
                 $isMatch = str_starts_with($address, '@') 
                     ? str_ends_with($fromEmail, $address)  // Domain pattern
                     : $fromEmail === $address;            // Exact email
                 
                 if ($isMatch) {
-                    // If no subject requirements or subject matches
+                    // If no subject requirements, include message
                     if (empty($requiredSubjects)) {
                         $aggregated[$m['id']] = $m;
-                        $messageIncluded = true;
+                        $matched = true;
                         break; // Found match, no need to check other criteria
                     }
                     
@@ -1172,13 +1178,20 @@ class NylasService
                     foreach ($requiredSubjects as $reqSubject) {
                         if (str_contains($cleanSubject, $reqSubject)) {
                             $aggregated[$m['id']] = $m;
-                            $messageIncluded = true;
-                            break; // Break inner loop only
+                            $matched = true;
+                            break 2; // Break both loops - found a match
                         }
                     }
-                    
-                    // If we found a match, no need to check more criteria
-                    if ($messageIncluded) {
+                }
+            }
+            
+            // Special handling for forwarded emails: if sender doesn't match any receipt,
+            // check if the subject EXACTLY matches a receipt pattern. This allows users
+            // to forward receipts from personal accounts while avoiding false positives.
+            if (!$matched && $isForwardedEmail) {
+                foreach ($allSubjectPatterns as $pattern) {
+                    if ($cleanSubject === $pattern) {
+                        $aggregated[$m['id']] = $m;
                         break;
                     }
                 }
