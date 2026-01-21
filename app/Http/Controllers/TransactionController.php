@@ -25,6 +25,7 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
 
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 
 class TransactionController extends Controller
@@ -1207,8 +1208,26 @@ class TransactionController extends Controller
 
     public function add_transaction_to_multi_expenses()
     {
+        $checkpointCacheKey = 'transactions:add-transaction-to-multi-expenses:last-checked-transaction-id';
+        $baseCutoffDate = Carbon::create(2017, 1, 1);
+        $lastCheckedTransactionId = Cache::get($checkpointCacheKey);
+        $cutoffDate = $baseCutoffDate;
+
+        if ($lastCheckedTransactionId) {
+            $lastCheckedTransaction = Transaction::withoutGlobalScopes()->find($lastCheckedTransactionId);
+
+            if ($lastCheckedTransaction?->transaction_date) {
+                $cutoffDate = $lastCheckedTransaction->transaction_date->copy()->subMonths(3);
+                if ($cutoffDate->lt($baseCutoffDate)) {
+                    $cutoffDate = $baseCutoffDate;
+                }
+            }
+        }
+
         $matchedCount = 0;
         $hive_vendors = Vendor::hiveVendors()->get();
+        $latestCheckedTransactionDate = null;
+        $latestCheckedTransactionId = null;
 
         foreach ($hive_vendors as $hive_vendor) {
             $hive_vendor_bank_account_ids = $hive_vendor->bank_accounts->pluck('id');
@@ -1222,12 +1241,17 @@ class TransactionController extends Controller
                 ->whereNull('deposit')
                 ->whereNotNull('vendor_id')
                 ->where('amount', '>', 0) // Only positive amounts for now
-                ->whereDate('transaction_date', '>=', Carbon::now()->subMonths(12))
+                ->whereDate('transaction_date', '>=', $cutoffDate)
                 ->orderBy('transaction_date', 'desc')
                 ->limit(500)
                 ->get();
 
             foreach ($transactions as $transaction) {
+                if (!$latestCheckedTransactionDate || $transaction->transaction_date->gt($latestCheckedTransactionDate)) {
+                    $latestCheckedTransactionDate = $transaction->transaction_date->copy();
+                    $latestCheckedTransactionId = $transaction->id;
+                }
+
                 $start_date = $transaction->transaction_date->copy()->subDays(7)->format('Y-m-d');
                 $end_date = $transaction->transaction_date->copy()->addDays(14)->format('Y-m-d');
 
@@ -1299,6 +1323,10 @@ class TransactionController extends Controller
                     'expenses_sum' => $bestMatch['sum'],
                 ]);
             }
+        }
+
+        if ($latestCheckedTransactionId) {
+            Cache::forever($checkpointCacheKey, $latestCheckedTransactionId);
         }
 
         return response()->json([

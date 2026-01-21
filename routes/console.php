@@ -178,7 +178,7 @@ Schedule::call(function () {
     app(\App\Http\Controllers\TransactionController::class)->add_transaction_to_multi_expenses();
 })->everyTenMinutes()
   ->name('add-transaction-to-multi-expenses')
-  ->withoutOverlapping(expiresAt: 10) // Auto-release lock after 10 minutes
+  ->withoutOverlapping()
   ->onOneServer();
 
 Schedule::call(function () {
