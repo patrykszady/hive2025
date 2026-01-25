@@ -72,11 +72,6 @@ class EstimatePolicy
             return false;
         }
         
-        // Check if the estimate's project is in a state that allows updates
-        if (in_array($estimate->project->latestStatus->status_code, [7, 8, 10, 11])) { // Complete, Service Call, Cancelled, VIEW_ONLY
-            return false;
-        }
-        
         return true;
     }
 

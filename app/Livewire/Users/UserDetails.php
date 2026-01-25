@@ -3,9 +3,11 @@
 namespace App\Livewire\Users;
 
 use App\Models\User;
+use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
-use Livewire\Component;
 use Livewire\Attributes\Computed;
+use Livewire\Component;
 
 class UserDetails extends Component
 {
@@ -15,7 +17,34 @@ class UserDetails extends Component
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 
-    public function render()
+    #[Computed]
+    public function passkeys(): Collection
+    {
+        return $this->user
+            ->webAuthnCredentials()
+            ->latest('created_at')
+            ->get();
+    }
+
+    public function revokePasskey(string $credentialId): void
+    {
+        $this->authorize('update', $this->user);
+
+        $credential = $this->user
+            ->webAuthnCredentials()
+            ->whereKey($credentialId)
+            ->firstOrFail();
+
+        if ($credential->disabled_at) {
+            return;
+        }
+
+        $credential->disable();
+
+        $this->dispatch('refreshComponent');
+    }
+
+    public function render(): View
     {
         return view('livewire.users.details');
     }

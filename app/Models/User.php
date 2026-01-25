@@ -9,11 +9,14 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Laragear\WebAuthn\Contracts\WebAuthnAuthenticatable;
+use Laragear\WebAuthn\WebAuthnAuthentication;
+use Laragear\WebAuthn\WebAuthnData;
 use Laravel\Sanctum\HasApiTokens;
 
-class User extends Authenticatable
+class User extends Authenticatable implements WebAuthnAuthenticatable
 {
-    use HasApiTokens, HasFactory, Notifiable;
+    use HasApiTokens, HasFactory, Notifiable, WebAuthnAuthentication;
 
     protected $fillable = [
         'first_name',
@@ -41,6 +44,33 @@ class User extends Authenticatable
             'registration' => 'array',
             'email_verified_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Return WebAuthn data for passkey registration.
+     */
+    public function webAuthnData(): WebAuthnData
+    {
+        $displayName = trim((string) $this->full_name);
+
+        if ($displayName === '') {
+            $displayName = (string) $this->email;
+        }
+
+        if ($displayName === '') {
+            $displayName = 'Hive User ' . $this->id;
+        }
+
+        $userName = (string) $this->email;
+
+        if ($userName === '') {
+            $userName = 'user-' . $this->id;
+        }
+
+        return new WebAuthnData(
+            name: $userName,
+            displayName: $displayName,
+        );
     }
 
     /**

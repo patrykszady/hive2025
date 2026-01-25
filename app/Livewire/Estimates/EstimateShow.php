@@ -37,6 +37,8 @@ class EstimateShow extends Component
 
     public $trashedSections = [];
 
+    public $trashedLineItems = [];
+
     protected $listeners = ['refreshComponent' => 'estimate_refresh'];
 
     protected function rules()
@@ -50,6 +52,7 @@ class EstimateShow extends Component
     {
         $this->sections = $this->estimate->estimate_sections->toArray();
         $this->trashedSections = $this->estimate->estimate_sections()->onlyTrashed()->get()->toArray();
+        $this->loadTrashedLineItems();
 
         //11-1-2023 MOVE to EstiamteCreate
         //start with one section and an ADD card/button for line items
@@ -59,6 +62,19 @@ class EstimateShow extends Component
         } else {
             $this->estimate_refresh();
         }
+    }
+
+    protected function loadTrashedLineItems(): void
+    {
+        $this->trashedLineItems = EstimateLineItem::onlyTrashed()
+            ->where('estimate_id', $this->estimate->id)
+            ->whereHas('section', function ($query) {
+                $query->whereNull('deleted_at');
+            })
+            ->get()
+            ->groupBy('section_id')
+            ->map(fn ($items) => $items->toArray())
+            ->toArray();
     }
 
     public function estimate_refresh()
@@ -109,9 +125,52 @@ class EstimateShow extends Component
             ->onlyTrashed()
             ->get()
             ->toArray();
+
+        // Get trashed line items for restore functionality
+        $this->loadTrashedLineItems();
             
         // Notify EstimateAccept component to refresh its data
         $this->dispatch('refreshComponent')->to('estimates.estimate-accept');
+    }
+
+    public function lineItemRestore(int $lineItemId): void
+    {
+        $lineItem = EstimateLineItem::onlyTrashed()->findOrFail($lineItemId);
+        $section = EstimateSection::findOrFail($lineItem->section_id);
+
+        // Restore the line item
+        $lineItem->restore();
+
+        // Place it at the end of the section's line items
+        $currentMaxOrder = EstimateLineItem::where('section_id', $section->id)
+            ->where('order', '<', 999999)
+            ->max('order');
+        $lineItem->order = is_null($currentMaxOrder) ? 0 : $currentMaxOrder + 1;
+        $lineItem->save();
+
+        // Update section total
+        $section->total = $section->estimate_line_items()->sum('total');
+        $section->save();
+
+        // Update bid if applicable
+        if ($section->bid_id) {
+            $bid = Bid::find($section->bid_id);
+            if ($bid) {
+                $bid->amount = EstimateSection::where('bid_id', $bid->id)->sum('total');
+                $bid->save();
+            }
+        }
+
+        $this->estimate_refresh();
+        $this->dispatch('refresh')->to('projects.project-finances');
+
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Line Item Restored',
+            text: $lineItem->name . ' has been restored to ' . ($section->name ?? 'Unnamed Section') . '.',
+        );
     }
 
     public function create_new_section($name = null, $estimate_id = null)

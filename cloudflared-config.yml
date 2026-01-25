@@ -1,0 +1,7 @@
+tunnel: hive-dev
+credentials-file: /home/patryk/.cloudflared/2f84efc0-98d3-42b6-8ddf-c53d0bb0ce27.json
+
+ingress:
+  - hostname: dev.hive.contractors
+    service: http://127.0.0.1:8000
+  - service: http_status:404

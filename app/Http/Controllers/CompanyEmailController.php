@@ -2147,8 +2147,14 @@ class CompanyEmailController extends Controller
             $companyEmail
         );
 
-        // Forward each matching message
+        // Forward each matching message (only if it would match a receipt in central processing)
         foreach ($matchingMessages as $message) {
+            // Validate that this message would actually match a receipt before forwarding
+            // This prevents forwarding emails that pass the loose criteria but fail findMatchingReceipt
+            if (!$this->validateMessageWouldMatchReceipt($grantId, $message)) {
+                continue;
+            }
+
             $this->nylasService->sendForwardCopy(
                 $grantId,
                 $message['id'],
@@ -2156,6 +2162,52 @@ class CompanyEmailController extends Controller
                 $companyEmail->id
             );
         }
+    }
+
+    /**
+     * Validate that a message would match a receipt when processed in the central mailbox.
+     * This prevents forwarding emails that pass the loose filtering but would fail findMatchingReceipt.
+     * 
+     * Strategy:
+     * 1. First try to match using the direct sender email
+     * 2. If no match, fetch the message body and try to extract the original sender
+     *    (handles forwarded emails regardless of subject prefix)
+     */
+    protected function validateMessageWouldMatchReceipt(string $grantId, array $message): bool
+    {
+        $fromEmail = strtolower($message['from'][0]['email'] ?? '');
+        $subject = $message['subject'] ?? '';
+        
+        // Clean subject for matching (remove Fw:/Fwd:/Re: prefixes)
+        $cleanSubject = preg_replace('/^(fw:|fwd:|re:)\s*/i', '', $subject);
+        
+        // First, try matching with the direct sender
+        $receipt = $this->findMatchingReceipt($fromEmail, $cleanSubject);
+        
+        if ($receipt !== null) {
+            return true;
+        }
+        
+        // If no match with direct sender, try extracting original sender from body
+        // This handles forwarded emails regardless of whether they have Fw:/Fwd: prefix
+        $fullMessage = $this->nylasService->getMessage($grantId, $message['id'], true);
+        $bodyHtml = $fullMessage['data']['body'] ?? '';
+        
+        if (!empty($bodyHtml)) {
+            // Extract original sender from email body (common in forwarded/copied emails)
+            if (preg_match('/From:.*?([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i', $bodyHtml, $matches)) {
+                $extractedEmail = strtolower(trim($matches[1]));
+                if (!empty($extractedEmail) && filter_var($extractedEmail, FILTER_VALIDATE_EMAIL)) {
+                    $receipt = $this->findMatchingReceipt($extractedEmail, $cleanSubject);
+                    
+                    if ($receipt !== null) {
+                        return true;
+                    }
+                }
+            }
+        }
+        
+        return false;
     }
 
     /**

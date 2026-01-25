@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\MailtrapWebhookController;
 
 use App\Livewire\Auth\CantLogin;
 use App\Livewire\Auth\Login;
+use App\Livewire\Auth\OneTimeCodeLogin;
 use App\Livewire\Auth\Register;
 use App\Livewire\Auth\VerifyResetCode;
 use App\Livewire\Banks\BankIndex;
@@ -66,8 +67,28 @@ use App\Livewire\Vendors\VendorOptions;
 use App\Livewire\Vendor\AvailabilityIndex as VendorAvailabilityIndex;
 use App\Livewire\Vendors\VendorShow;
 use App\Livewire\Vendors\VendorsIndex;
+use App\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
+use Laragear\WebAuthn\Http\Routes as WebAuthnRoutes;
+use App\Livewire\Auth\PasskeySetup;
+
+Route::get('robots.txt', function () {
+    $noIndexHosts = array_filter(array_map('trim', explode(',', (string) config('app.noindex_hosts', ''))));
+    $disallowAll = in_array(request()->getHost(), $noIndexHosts, true);
+
+    $content = $disallowAll
+        ? "User-agent: *\nDisallow: /\n"
+        : "User-agent: *\nDisallow:\n";
+
+    $response = response($content, 200, ['Content-Type' => 'text/plain']);
+
+    if ($disallowAll) {
+        $response->headers->set('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
+    }
+
+    return $response;
+})->name('robots');
 
 //if guests go to '/', if logged in go to dashboard (or to /vendor_selection if not set and User has multiple)
 Route::middleware('guest')->group(function () {
@@ -78,10 +99,18 @@ Route::middleware('guest')->group(function () {
     Route::get('login', Login::class)->name('login');
     Route::get('register', Register::class)->name('register');
     Route::get('cant-login', CantLogin::class)->name('cant.login');
+    Route::get('one-time-login', OneTimeCodeLogin::class)->name('one-time-login');
     Route::get('verify-reset-code/{token}', VerifyResetCode::class)->name('verify.reset.code');
 
     Route::get('registration', Registration::class)->name('registration');
 });
+
+// Passkey setup page (requires auth)
+Route::middleware('auth')->group(function () {
+    Route::get('passkey/setup', PasskeySetup::class)->name('passkey.setup');
+});
+
+WebAuthnRoutes::register()->withoutMiddleware(VerifyCsrfToken::class);
 
 // Short URL for SMS (redirects to full availability page)
 Route::get('v/{token}', VendorAvailabilityIndex::class)->name('vendor.availability.short');

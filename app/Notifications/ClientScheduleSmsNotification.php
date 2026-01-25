@@ -105,7 +105,7 @@ class ClientScheduleSmsNotification extends Notification implements ShouldQueue
      */
     protected function clientScheduleUrl(Project $project): string
     {
-        // Use ngrok in dev, dashboard.hive.contractors in prod
+        // Use DEV_WEBHOOK_URL in dev, dashboard.hive.contractors in prod
         $devWebhookUrl = config('app.dev_webhook_url');
         $baseUrl = $devWebhookUrl ?: 'https://dashboard.hive.contractors';
 

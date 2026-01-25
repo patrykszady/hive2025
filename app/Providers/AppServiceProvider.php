@@ -29,6 +29,7 @@ use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 use Opcodes\LogViewer\Facades\LogViewer;
 
@@ -71,9 +72,9 @@ class AppServiceProvider extends ServiceProvider
             return $value;
         });
 
-        // if (isset($_SERVER['HTTPS']) && ($_SERVER['HTTPS'] == 'on' || $_SERVER['HTTPS'] == 1) || isset($_SERVER['HTTP_X_FORWARDED_PROTO']) &&  $_SERVER['HTTP_X_FORWARDED_PROTO'] == 'https') {
-        //     \URL::forceScheme('https');
-        // }
+        if (! app()->runningInConsole() && request()->isSecure()) {
+            URL::forceScheme('https');
+        }
         /**
          * Paginate a standard Laravel Collection.
          *

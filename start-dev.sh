@@ -77,7 +77,7 @@ else
     GSC_PID=$(lsof -Pi :8003 -sTCP:LISTEN -t)
     echo "✅ GSC server already running (pid: $GSC_PID)"
   else
-    (cd "$GSC_DIR" && nohup php artisan serve --host=127.0.0.1 --port=8003 --no-interaction > storage/logs/serve.log 2>&1 &)
+    (cd "$GSC_DIR" && nohup php artisan serve --host=0.0.0.0 --port=8003 --no-interaction > storage/logs/serve.log 2>&1 &)
     sleep 0.7
     if lsof -Pi :8003 -sTCP:LISTEN -t >/dev/null 2>&1; then
       echo "✅ GSC Laravel server started on port 8003"
@@ -109,7 +109,7 @@ else
       echo "ℹ️  Using .wsl-startup script for breck"
       (cd "$BRECK_DIR" && source .wsl-startup)
     else
-      (cd "$BRECK_DIR" && nohup php artisan serve --host=127.0.0.1 --port=8002 --no-interaction > storage/logs/serve.log 2>&1 &)
+      (cd "$BRECK_DIR" && nohup php artisan serve --host=0.0.0.0 --port=8002 --no-interaction > storage/logs/serve.log 2>&1 &)
       sleep 0.7
       if lsof -Pi :8002 -sTCP:LISTEN -t >/dev/null 2>&1; then
         echo "✅ Breck Laravel server started on port 8002"
@@ -136,7 +136,7 @@ else
     TEST_PID=$(lsof -Pi :8005 -sTCP:LISTEN -t)
     echo "✅ Test server already running (pid: $TEST_PID)"
   else
-    (cd "$TEST_DIR" && nohup php artisan serve --host=127.0.0.1 --port=8005 --no-interaction > storage/logs/serve.log 2>&1 &)
+    (cd "$TEST_DIR" && nohup php artisan serve --host=0.0.0.0 --port=8005 --no-interaction > storage/logs/serve.log 2>&1 &)
     sleep 0.7
     if lsof -Pi :8005 -sTCP:LISTEN -t >/dev/null 2>&1; then
       echo "✅ Test Laravel server started on port 8005"
@@ -172,7 +172,7 @@ if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1; then
   echo "✅ Laravel server already running (pid: $SERVE_PID)"
 else
   echo "🔄 Starting Laravel dev server..."
-  nohup php artisan serve --host=127.0.0.1 --port=8000 --no-interaction >"$LOG_DIR/serve.log" 2>&1 &
+  nohup php artisan serve --host=0.0.0.0 --port=8000 --no-interaction >"$LOG_DIR/serve.log" 2>&1 &
   SERVE_PID=$!
   sleep 0.7
   if ps -p "$SERVE_PID" >/dev/null 2>&1; then
@@ -188,7 +188,7 @@ if lsof -Pi :5173 -sTCP:LISTEN -t >/dev/null 2>&1; then
   echo "✅ Vite already running (pid: $VITE_PID)"
 else
   echo "🔄 Starting Vite (npm run dev)..."
-  nohup npm run dev >"$LOG_DIR/vite.log" 2>&1 &
+  nohup npm run dev -- --host 0.0.0.0 --port 5173 >"$LOG_DIR/vite.log" 2>&1 &
   VITE_PID=$!
   sleep 0.7
   if ps -p "$VITE_PID" >/dev/null 2>&1; then
@@ -198,75 +198,30 @@ else
   fi
 fi
 
-# Ngrok tunnels (for webhooks on all 3 apps)
-# Uses ~/.config/ngrok/ngrok.yml which defines tunnels: hive (8000), breck (8002), gsc (8003), test (8005)
-NGROK_BIN="$(command -v ngrok 2>/dev/null)"
-if [ -n "$NGROK_BIN" ]; then
-  # Kill any existing ngrok processes to ensure clean state
-  if pgrep -x ngrok >/dev/null 2>&1; then
-    echo "🔄 Restarting Ngrok tunnels (killing existing)..."
-    pkill -x ngrok 2>/dev/null
-    sleep 1
-  fi
+    echo ""
 
-  echo "🔄 Starting Ngrok tunnels for all apps (hive:8000, breck:8002, gsc:8003, test:8005)..."
-  nohup "$NGROK_BIN" start --all >"$LOG_DIR/ngrok.log" 2>&1 &
-  NGROK_PID=$!
-  sleep 3
+    # ==============================================================================
+    # CLOUDFLARE TUNNEL (dev.hive.contractors)
+    # ==============================================================================
+    echo "════════════════════════════════════════════════════════════════"
+    echo "🌐 Starting Cloudflare Tunnel (dev.hive.contractors)"
+    echo "════════════════════════════════════════════════════════════════"
 
-  if ps -p "$NGROK_PID" >/dev/null 2>&1; then
-    # Fetch all tunnel URLs from ngrok API
-    TUNNELS_JSON=$(curl -s http://127.0.0.1:4040/api/tunnels 2>/dev/null)
-
-    # Extract URLs using jq if available, fallback to grep-based extraction
-    if command -v jq >/dev/null 2>&1; then
-      HIVE_URL=$(echo "$TUNNELS_JSON" | jq -r '.tunnels[] | select(.config.addr | contains(":8000")) | .public_url' 2>/dev/null | head -1)
-      BRECK_URL=$(echo "$TUNNELS_JSON" | jq -r '.tunnels[] | select(.config.addr | contains(":8002")) | .public_url' 2>/dev/null | head -1)
-      GSC_URL=$(echo "$TUNNELS_JSON" | jq -r '.tunnels[] | select(.config.addr | contains(":8003")) | .public_url' 2>/dev/null | head -1)
-      TEST_URL=$(echo "$TUNNELS_JSON" | jq -r '.tunnels[] | select(.config.addr | contains(":8005")) | .public_url' 2>/dev/null | head -1)
+    CLOUDFLARED_CONFIG="/home/patryk/web/hive2025/cloudflared-config.yml"
+    if pgrep -f "cloudflared tunnel .*hive-dev" >/dev/null 2>&1; then
+      TUNNEL_PID=$(pgrep -f "cloudflared tunnel .*hive-dev" | head -n 1)
+      echo "✅ Cloudflare tunnel already running (pid: $TUNNEL_PID)"
     else
-      # Fallback: extract by tunnel name
-      HIVE_URL=$(echo "$TUNNELS_JSON" | grep -o '"name":"hive"[^}]*"public_url":"https://[^"]*' | grep -o 'https://[^"]*' | head -1)
-      BRECK_URL=$(echo "$TUNNELS_JSON" | grep -o '"name":"breck"[^}]*"public_url":"https://[^"]*' | grep -o 'https://[^"]*' | head -1)
-      GSC_URL=$(echo "$TUNNELS_JSON" | grep -o '"name":"gsc"[^}]*"public_url":"https://[^"]*' | grep -o 'https://[^"]*' | head -1)
-      TEST_URL=$(echo "$TUNNELS_JSON" | grep -o '"name":"test"[^}]*"public_url":"https://[^"]*' | grep -o 'https://[^"]*' | head -1)
-    fi
-
-    # Function to update DEV_WEBHOOK_URL in a .env file
-    update_env_webhook() {
-      local ENV_FILE="$1"
-      local NEW_URL="$2"
-      local APP_NAME="$3"
-      if [ -f "$ENV_FILE" ] && [ -n "$NEW_URL" ]; then
-        if grep -q '^DEV_WEBHOOK_URL=' "$ENV_FILE" 2>/dev/null; then
-          sed -i "s|^DEV_WEBHOOK_URL=.*|DEV_WEBHOOK_URL=$NEW_URL|" "$ENV_FILE"
-        else
-          echo "DEV_WEBHOOK_URL=$NEW_URL" >> "$ENV_FILE"
-        fi
-        echo "   ✅ $APP_NAME → $NEW_URL"
-      fi
-    }
-
-    echo "✅ Ngrok tunnels started:"
-    update_env_webhook "/home/patryk/web/hive2025/.env" "$HIVE_URL" "Hive (8000)"
-    update_env_webhook "/home/patryk/web/breck/.env" "$BRECK_URL" "Breck (8002)"
-    update_env_webhook "/home/patryk/web/gsc/.env" "$GSC_URL" "GSC (8003)"
-    update_env_webhook "/home/patryk/web/test/.env" "$TEST_URL" "Test (8005)"
-
-    # Also update HIVE_URL in this .env for local reference
-    if [ -n "$HIVE_URL" ]; then
-      CURRENT_DEV_URL=$(grep -E '^DEV_WEBHOOK_URL=' .env 2>/dev/null | cut -d '=' -f2- | tr -d '\r' | xargs)
-      if [ "$CURRENT_DEV_URL" != "$HIVE_URL" ]; then
-        sed -i "s|^DEV_WEBHOOK_URL=.*|DEV_WEBHOOK_URL=$HIVE_URL|" .env
+      echo "🔄 Starting Cloudflare tunnel..."
+      nohup cloudflared tunnel --config "$CLOUDFLARED_CONFIG" run hive-dev >"$LOG_DIR/cloudflared.log" 2>&1 &
+      TUNNEL_PID=$!
+      sleep 0.7
+      if ps -p "$TUNNEL_PID" >/dev/null 2>&1; then
+        echo "✅ Cloudflare tunnel started (pid: $TUNNEL_PID)"
+      else
+        echo "❌ Cloudflare tunnel failed → check logs: $LOG_DIR/cloudflared.log"
       fi
     fi
-  else
-    echo "❌ Ngrok failed to start → check logs: $LOG_DIR/ngrok.log"
-    echo "   Tip: Make sure ~/.config/ngrok/ngrok.yml exists with tunnel definitions"
-  fi
-else
-  echo "ℹ️  Ngrok not found, skipping tunnel setup (vendor SMS links will use local URL)"
-fi
 
 echo ""
 
@@ -306,6 +261,19 @@ if [ -n "$HOOKDECK_BIN" ]; then
     --path "/" \
     --output compact >>"$HOOKDECK_LOG" 2>&1 &
   HOOKDECK_MAILTRAP_PID=$!
+
+  # Public app URL (HTTP source supports GET)
+  echo "APP_HTTP_LISTENER_START" >>"$HOOKDECK_LOG"
+  "$HOOKDECK_BIN" connection upsert app-local \
+    --source-name http --source-type HTTP \
+    --source-allowed-methods GET,POST,PUT,PATCH,DELETE \
+    --destination-name app-local-cli --destination-type CLI \
+    --destination-cli-path /l >>"$HOOKDECK_LOG" 2>&1
+
+  nohup "$HOOKDECK_BIN" listen 8000 http app-local \
+    --path "/l" \
+    --output compact >>"$HOOKDECK_LOG" 2>&1 &
+  HOOKDECK_APP_PID=$!
   sleep 2
   
   if ps -p "$HOOKDECK_PID" >/dev/null 2>&1; then
@@ -331,6 +299,18 @@ if [ -n "$HOOKDECK_BIN" ]; then
       echo "✅ Mailtrap Hookdeck listener started"
     fi
   fi
+
+  if ps -p "${HOOKDECK_APP_PID:-0}" >/dev/null 2>&1; then
+    if [ -f "$HOOKDECK_LOG" ]; then
+      HOOKDECK_APP_URL=$(awk '/APP_HTTP_LISTENER_START/{found=1} found && /https:\/\/hkdk\.events\// {match($0, /https:\/\/hkdk\.events\/[^ ]+/); print substr($0, RSTART, RLENGTH); exit}' "$HOOKDECK_LOG")
+    fi
+    if [ -n "$HOOKDECK_APP_URL" ]; then
+      echo "✅ Public app URL: ${HOOKDECK_APP_URL}"
+      echo "ℹ️  Set DEV_WEBHOOK_URL=${HOOKDECK_APP_URL} if needed"
+    else
+      echo "✅ Hookdeck app HTTP listener started"
+    fi
+  fi
 else
   echo "ℹ️  Hookdeck CLI not found, skipping tunnel setup"
 fi
@@ -344,13 +324,4 @@ echo "📍 Breck:    http://127.0.0.1:8002"
 echo "📍 Hive2025: http://127.0.0.1:8000"
 echo "📍 Test:     http://127.0.0.1:8005"
 echo "📍 Vite:     http://127.0.0.1:5173"
-if [ -n "$HIVE_URL" ]; then
-  echo "📍 Hive Ngrok: $HIVE_URL"
-fi
-if [ -n "$BRECK_URL" ]; then
-  echo "📍 Breck Ngrok: $BRECK_URL"
-fi
-if [ -n "$GSC_URL" ]; then
-  echo "📍 GSC Ngrok: $GSC_URL"
-fi
 echo "════════════════════════════════════════════════════════════════"

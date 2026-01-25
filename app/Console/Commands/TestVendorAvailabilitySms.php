@@ -152,7 +152,7 @@ class TestVendorAvailabilitySms extends Command
                 $this->line("Using DEV_WEBHOOK_URL: {$baseUrl}");
             } else {
                 $this->warn("⚠ No DEV_WEBHOOK_URL set - links will use local URL");
-                $this->line("  Set DEV_WEBHOOK_URL in .env to a public tunnel (ngrok, etc.)");
+                $this->line("  Set DEV_WEBHOOK_URL in .env to a public URL");
             }
 
             $this->newLine();

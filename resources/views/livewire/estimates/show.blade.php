@@ -150,12 +150,29 @@
                     {{-- FOOTER --}}
                     <flux:separator variant="subtle"/>
                     <div class="flex justify-between">
-                        <flux:button
-                            wire:click="$dispatchTo('line-items.estimate-line-item-create', 'addToEstimate', { section_id: {{$section['id']}} })"
-                            icon="plus"
-                            >
-                            Item
-                        </flux:button>
+                        <flux:button.group>
+                            <flux:button
+                                wire:click="$dispatchTo('line-items.estimate-line-item-create', 'addToEstimate', { section_id: {{$section['id']}} })"
+                                icon="plus"
+                                >
+                                Item
+                            </flux:button>
+
+                            @if(!empty($trashedLineItems[$section['id']]))
+                                <flux:dropdown>
+                                    <flux:button icon="arrow-path"></flux:button>
+
+                                    <flux:menu>
+                                        <flux:menu.heading>Restore Deleted Items</flux:menu.heading>
+                                        @foreach($trashedLineItems[$section['id']] as $trashedLineItem)
+                                            <flux:menu.item wire:click="lineItemRestore({{ $trashedLineItem['id'] }})">
+                                                {{ $trashedLineItem['name'] }} — {{ money($trashedLineItem['total']) }}
+                                            </flux:menu.item>
+                                        @endforeach
+                                    </flux:menu>
+                                </flux:dropdown>
+                            @endif
+                        </flux:button.group>
                         <flux:button disabled>
                             {{money($section['total'])}}
                         </flux:button>

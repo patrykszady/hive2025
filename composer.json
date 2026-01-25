@@ -22,6 +22,7 @@
         "ilovepdf/ilovepdf-php": "^1.2",
         "intervention/image": "^2.7",
         "itsgoingd/clockwork": "^5.1",
+        "laragear/webauthn": "^4.1",
         "laravel/framework": "^12.00",
         "laravel/horizon": "^5.30",
         "laravel/nightwatch": "^1.7",

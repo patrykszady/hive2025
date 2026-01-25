@@ -22,7 +22,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->throttleApi();
 
-        // Trust all proxies (ngrok, cloudflare, etc.) for proper HTTPS detection
+        // Trust all proxies (e.g. Cloudflare, Tailscale Serve) for proper HTTPS detection
         $middleware->trustProxies(at: '*');
 
         // Exclude browser timezone cookies from encryption so PHP can read them
@@ -32,6 +32,8 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
 
         $middleware->replaceInGroup('web', \Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class, \App\Http\Middleware\VerifyCsrfToken::class);
+
+        $middleware->appendToGroup('web', \App\Http\Middleware\NoIndexSubdomains::class);
 
         $middleware->alias([
             'vendor.access' => \App\Http\Middleware\VendorAccessControl::class,

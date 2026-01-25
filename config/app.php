@@ -11,12 +11,24 @@ return [
     |--------------------------------------------------------------------------
     |
     | When set, this URL is used for webhook callbacks in development (e.g.,
-    | vendor availability SMS links). Use ngrok or expose to create a public
-    | tunnel to your local environment.
+    | vendor availability SMS links). Use Hookdeck to create a public URL
+    | to your local environment.
     |
     */
 
     'dev_webhook_url' => env('DEV_WEBHOOK_URL'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | No-Index Hosts
+    |--------------------------------------------------------------------------
+    |
+    | Comma-separated list of hosts that should not be indexed by search
+    | engines (e.g., dev/staging subdomains).
+    |
+    */
+
+    'noindex_hosts' => env('NOINDEX_HOSTS', 'dev.hive.contractors,dashboard.hive.contractors'),
 
     /*
     |--------------------------------------------------------------------------
