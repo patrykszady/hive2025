@@ -82,6 +82,11 @@ class Login extends Component
         $this->redirect(route('one-time-login'), navigate: true);
     }
 
+    public function showPasswordLogin(): void
+    {
+        $this->hasPasskey = false;
+    }
+
     #[Title('Login')]
     public function render()
     {

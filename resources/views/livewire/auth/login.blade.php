@@ -117,16 +117,29 @@
 
                             <flux:separator text="or"/>
 
-                            <flux:button 
-                                type="button"
-                                wire:click="startOneTimeLogin"
-                                variant="outline"
-                                class="w-full"
-                                icon="envelope" 
-                                icon:variant="outline"
-                            >
-                                Use one-time code
-                            </flux:button>
+                            <div class="flex gap-2">
+                                <flux:button 
+                                    type="button"
+                                    wire:click="startOneTimeLogin"
+                                    variant="outline"
+                                    class="flex-1"
+                                    icon="envelope" 
+                                    icon:variant="outline"
+                                >
+                                    One-time code
+                                </flux:button>
+
+                                <flux:button 
+                                    type="button"
+                                    wire:click="showPasswordLogin"
+                                    variant="outline"
+                                    class="flex-1"
+                                    icon="key" 
+                                    icon:variant="outline"
+                                >
+                                    Password
+                                </flux:button>
+                            </div>
                         @else
                             {{-- No passkey: show password form --}}
                             <form wire:submit="login" class="space-y-6">
