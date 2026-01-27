@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Payments;
 
+use App\Livewire\Concerns\HasToJsonMethod;
 use App\Models\Payment;
 use App\Models\Project;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
@@ -12,7 +13,7 @@ use Livewire\WithPagination;
 
 class PaymentsIndex extends Component
 {
-    use AuthorizesRequests, WithPagination;
+    use AuthorizesRequests, WithPagination, HasToJsonMethod;
 
     public Project $project;
 

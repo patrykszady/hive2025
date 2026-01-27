@@ -167,7 +167,7 @@
                                 
                                 <flux:table.rows>
                                     @foreach($expense->splits as $split)
-                                        <flux:table.row :class="$selectedSplitId == $split->id ? 'bg-blue-50 dark:bg-blue-900/10' : ''">
+                                        <flux:table.row :class="$selectedSplitId == $split->id ? 'bg-indigo-50 dark:bg-indigo-900/10' : ''">
                                             @if($this->hasReceiptLineItems)
                                                 <flux:table.cell class="!pl-5 pr-5">
                                                     <flux:button 

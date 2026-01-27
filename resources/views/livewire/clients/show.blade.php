@@ -1,5 +1,5 @@
 <div>
-    <div class="grid grid-cols-4 gap-4 max-w-3xl">
+    <div class="grid grid-cols-4 gap-4 max-w-5xl lg:grid-cols-6">
         <div class="col-span-4 lg:col-span-2">
             {{-- CLIENT DETAILS --}}
             <x-details.card 
@@ -38,23 +38,17 @@
                             :copyable="true"
                         />
                     @endif
-
-                    {{-- Client Source --}}
-                    <x-details.row 
-                        title="Source" 
-                        :content="$client->source"
-                    />
                 </x-slot:details>
             </x-details.card>
         </div>
 
         {{-- CLIENT USERS --}}
-        <div class="col-span-4 lg:col-span-2">
+        <div class="col-span-4 lg:col-span-4">
             <livewire:users.users-index :client="$client" :view="'clients.show'"/>
         </div>
 
         {{-- CLIENT PROJECT --}}
-        <div class="col-span-4 lg:col-span-2">
+        <div class="col-span-4 lg:col-span-3">
             <livewire:projects.projects-index :client="$client" :view="'clients.index'" />
         </div>
     </div>

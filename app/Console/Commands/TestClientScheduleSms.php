@@ -2,11 +2,11 @@
 
 namespace App\Console\Commands;
 
-use App\Channels\TwilioChannel;
 use App\Models\Project;
 use App\Models\Task;
 use App\Models\User;
 use App\Notifications\ClientScheduleSmsNotification;
+use App\Support\SmsChannel;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 
@@ -157,7 +157,7 @@ class TestClientScheduleSms extends Command
         };
 
         try {
-            $channel = app(TwilioChannel::class);
+            $channel = app(SmsChannel::get());
             $channel->send($mockNotifiable, $notification);
 
             $this->info('✅ SMS sent successfully!');

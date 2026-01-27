@@ -68,8 +68,16 @@ class PaymentCreate extends Component
         // Date will be set by browser's local date via Alpine.js
     }
 
-    public function updated($field)
+    public function updated($field, $value): void
     {
+        if (preg_match('/^projects\.(\d+)\.amount$/', (string) $field, $matches) === 1) {
+            $index = (int) $matches[1];
+            $sanitized = $this->sanitizeAmount($value);
+            if (isset($this->projects[$index]) && is_array($this->projects[$index])) {
+                $this->projects[$index]['amount'] = $sanitized;
+            }
+        }
+
         $this->validateOnly($field);
     }
 
@@ -144,7 +152,9 @@ class PaymentCreate extends Component
 
     public function getClientPaymentSumProperty()
     {
-        return collect($this->projects)->where('amount', '!=', null)->sum('amount');
+        return collect($this->projects)
+            ->where('amount', '!=', null)
+            ->sum(fn ($project) => $this->parseAmount($project['amount'] ?? null));
     }
 
     // 8-31-2022 | 9-10-2023 similar on VendorPaymentForm
@@ -171,8 +181,8 @@ class PaymentCreate extends Component
 
     public function save()
     {
-    // Validate field-level rules first (allows null per-project amounts, enforces numeric and not zero when filled)
-    $this->validate();
+        $this->normalizeProjectAmounts();
+        $this->validate();
         //validate payment total is greater than $0
         //if less than or equal to 0... send back with error
         if ($this->getClientPaymentSumProperty() === 0) {
@@ -189,8 +199,8 @@ class PaymentCreate extends Component
     {
         // $this->authorize('update', $this->payment ?? Payment::class);
 
-    // Validate field-level rules first
-    $this->validate();
+        $this->normalizeProjectAmounts();
+        $this->validate();
         // Optional: allow zero if editing? Keep same validation as save for consistency
         if ($this->getClientPaymentSumProperty() === 0) {
             return $this->addError('payment_total_min', 'Payment total needs to include at least 1 project and not equal $0.00');
@@ -200,6 +210,37 @@ class PaymentCreate extends Component
 
         $this->modal('payment_form_modal')->close();
         $this->dispatch('refreshComponent')->to('payments.payment-show');
+    }
+
+    private function normalizeProjectAmounts(): void
+    {
+        foreach ($this->projects as $index => $project) {
+            if (!is_array($project)) {
+                continue;
+            }
+
+            $this->projects[$index]['amount'] = $this->sanitizeAmount($project['amount'] ?? null);
+        }
+    }
+
+    private function sanitizeAmount($value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        $clean = preg_replace('/[^0-9.\-]/', '', (string) $value);
+        if ($clean === null || $clean === '' || $clean === '-' || $clean === '.') {
+            return null;
+        }
+
+        return $clean;
+    }
+
+    private function parseAmount($value): float
+    {
+        $sanitized = $this->sanitizeAmount($value);
+        return $sanitized === null ? 0.0 : (float) $sanitized;
     }
 
     public function remove()

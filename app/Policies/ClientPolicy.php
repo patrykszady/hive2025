@@ -27,6 +27,12 @@ class ClientPolicy
      */
     public function view(User $user, Client $client): bool
     {
+        // Client users can only view clients they are associated with
+        if ($user->is_client_user) {
+            return $user->clients()->where('clients.id', $client->id)->exists();
+        }
+
+        // Vendor users can view all clients (scoped by vendor elsewhere)
         return true;
     }
 

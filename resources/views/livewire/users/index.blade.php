@@ -33,6 +33,19 @@
                         <flux:table.cell variant="strong">
                             {{ $user->full_name }}
                         </flux:table.cell>
+                    @elseif($view === 'clients.show' && auth()->user()->can('update', $client))
+                        <flux:table.cell
+                            wire:navigate.hover
+                            href="{{route('users.show', $user->id)}}"
+                            variant="strong"
+                            class="cursor-pointer"
+                            >
+                            {{ $user->full_name }}
+                        </flux:table.cell>
+                    @elseif($view === 'clients.show')
+                        <flux:table.cell variant="strong">
+                            {{ $user->full_name }}
+                        </flux:table.cell>
                     @else
                         <flux:table.cell
                             wire:navigate.hover

@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Estimates;
 
+use App\Livewire\Concerns\HasToJsonMethod;
 use App\Models\Estimate;
 use App\Models\Project;
 
@@ -14,7 +15,7 @@ use Livewire\WithPagination;
 
 class EstimatesIndex extends Component
 {
-    use AuthorizesRequests, WithPagination;
+    use AuthorizesRequests, WithPagination, HasToJsonMethod;
 
     public $view = 'estimates.index';
 

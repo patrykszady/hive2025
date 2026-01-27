@@ -70,7 +70,13 @@
                             <div>
                                 <flux:input.group>
                                     <flux:input.group.prefix>$</flux:input.group.prefix>
-                                    <flux:input wire:model.live="projects.{{$index}}.amount" type="number" inputmode="decimal" step="0.01" placeholder="99.99" />
+                                    <flux:input
+                                        wire:model.blur="projects.{{$index}}.amount"
+                                        type="number"
+                                        step="0.01"
+                                        inputmode="decimal"
+                                        placeholder="0.00"
+                                    />
                                 </flux:input.group>
                             </div>
                         </div>

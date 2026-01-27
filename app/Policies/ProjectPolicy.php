@@ -22,6 +22,12 @@ class ProjectPolicy
      */
     public function view(User $user, Project $project): bool
     {
+        // Client users can only view projects belonging to their clients
+        if ($user->is_client_user) {
+            $clientIds = $user->clients()->pluck('clients.id');
+            return $project->client_id && $clientIds->contains($project->client_id);
+        }
+        
         return true;
     }
 
@@ -110,7 +116,17 @@ class ProjectPolicy
      */
     public function viewFinancials(User $user, Project $project): bool
     {
-        // Only check if user has admin role
-        return $user->vendor_role === 'Admin';
+        // Vendors with admin role can view financials
+        if ($user->vendor_role === 'Admin') {
+            return true;
+        }
+
+        // Client users can view financials for their own projects
+        if ($user->is_client_user) {
+            $clientIds = $user->clients()->pluck('clients.id');
+            return $project->client_id && $clientIds->contains($project->client_id);
+        }
+
+        return false;
     }
 }

@@ -16,6 +16,42 @@ class VendorAccessControl
         $user = auth()->user();
         $routeName = $request->route()->getName();
         
+        // Client-only users: allow access to client routes, forbid elsewhere
+        if ($user->is_client_user) {
+            // Allow client users to access client routes
+            if (str_starts_with($routeName, 'clients.')) {
+                return $next($request);
+            }
+            
+            // Allow client users to access project routes (for their projects)
+            if (str_starts_with($routeName, 'projects.')) {
+                return $next($request);
+            }
+
+            // Allow client users to access estimates routes
+            if (str_starts_with($routeName, 'estimates.')) {
+                return $next($request);
+            }
+
+            // Allow client users to access payments routes
+            if (str_starts_with($routeName, 'payments.')) {
+                return $next($request);
+            }
+
+            // Allow client users to access client schedule routes
+            if (str_starts_with($routeName, 'client.schedule.')) {
+                return $next($request);
+            }
+            
+            // Let them use vendor_selection to pick a client
+            if ($routeName === 'vendor_selection') {
+                return $next($request);
+            }
+            
+            // Forbid access to all other routes
+            abort(403);
+        }
+        
         // Special handling for vendor registration route
         if ($routeName === 'vendor_registration') {
             $vendorParam = $request->route('vendor');

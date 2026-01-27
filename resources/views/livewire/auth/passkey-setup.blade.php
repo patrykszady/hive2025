@@ -50,7 +50,7 @@
     <!-- Right side - Decorative (optional, matches login page) -->
     <div class="hidden lg:flex flex-1 items-center justify-center bg-zinc-100 dark:bg-zinc-800/50">
         <div class="max-w-md p-8 text-center">
-            <flux:icon.shield-check class="w-24 h-24 mx-auto text-sky-500 mb-6" />
+            <flux:icon.shield-check class="w-24 h-24 mx-auto text-indigo-500 mb-6" />
             <h2 class="text-2xl font-bold text-zinc-800 dark:text-zinc-200 mb-4">
                 Passwordless Authentication
             </h2>

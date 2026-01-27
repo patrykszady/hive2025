@@ -2,13 +2,13 @@
 
 namespace App\Jobs;
 
-use App\Channels\TwilioChannel;
 use App\Models\Project;
 use App\Models\SmsLog;
 use App\Models\Task;
 use App\Models\User;
 use App\Notifications\ClientScheduleSmsNotification;
 use App\Services\SmsScheduleService;
+use App\Support\SmsChannel;
 use Carbon\Carbon;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -183,7 +183,7 @@ class SendClientScheduleChangeSms implements ShouldQueue, ShouldBeUnique
             );
 
             // Use the user directly - it has routeNotificationForTwilio() method
-            $channel = app(TwilioChannel::class);
+            $channel = app(SmsChannel::get());
             $channel->send($user, $notification);
 
             // Log the send

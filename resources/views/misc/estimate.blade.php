@@ -222,42 +222,7 @@
                         {{-- PROJECT FINANCES --}}
                         <div class="col-span-2">
                             @if($projectStatusTitle && in_array($projectStatusTitle, ['Active', 'Complete', 'Service Call']))
-                                <flux:card>
-                                    <div class="flex justify-between">
-                                        <flux:heading size="lg">{{$type}} Finances</flux:heading>
-                                    </div>
-                                    <flux:separator variant="subtle" />
-                                    <flux:table>
-                                        <flux:table.rows>
-                                            <flux:table.row>
-                                                <flux:table.cell>Estimate</flux:table.cell>
-                                                <flux:table.cell>{{ money(data_get($projectFinances, 'estimate', 0)) }}</flux:table.cell>
-                                            </flux:table.row>
-                                            <flux:table.row>
-                                                <flux:table.cell>Change Order</flux:table.cell>
-                                                <flux:table.cell>{{ money(data_get($projectFinances, 'change_orders', 0)) }}</flux:table.cell>
-                                            </flux:table.row>
-                                            @if($reimbursements)
-                                                <flux:table.row>
-                                                    <flux:table.cell>Reimbursements</flux:table.cell>
-                                                    <flux:table.cell>{{money($reimbursements)}}</flux:table.cell>
-                                                </flux:table.row>
-                                            @endif
-                                            <flux:table.row>
-                                                <flux:table.cell variant="strong">TOTAL ESTIMATE</flux:table.cell>
-                                                <flux:table.cell variant="strong">{{money($estimate_total + ($reimbursements ?? 0))}}</flux:table.cell>
-                                            </flux:table.row>
-                                            <flux:table.row>
-                                                <flux:table.cell variant="strong">TOTAL PAYMENTS</flux:table.cell>
-                                                <flux:table.cell variant="strong">-{{money($payments->sum('amount'))}}</flux:table.cell>
-                                            </flux:table.row>
-                                            <flux:table.row>
-                                                <flux:table.cell variant="strong">BALANCE</flux:table.cell>
-                                                <flux:table.cell variant="strong">{{money(($estimate_total + ($reimbursements ?? 0)) - $payments->sum('amount'))}}</flux:table.cell>
-                                            </flux:table.row>
-                                        </flux:table.rows>
-                                    </flux:table>
-                                </flux:card>
+                                <x-client-finances :project="$project" :title="$type . ' Finances'" />
                             @endif
                         </div>
                     </div>

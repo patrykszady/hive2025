@@ -48,16 +48,16 @@ class ExpenseSplits extends Model
 
     public function getDateAttribute()
     {
-        return $this->expense->date;
+        return $this->expense?->date;
     }
 
     public function getVendorAttribute()
     {
-        return $this->expense->vendor;
+        return $this->expense?->vendor;
     }
 
     public function getVendorIdAttribute()
     {
-        return $this->expense->vendor_id;
+        return $this->expense?->vendor_id;
     }
 }

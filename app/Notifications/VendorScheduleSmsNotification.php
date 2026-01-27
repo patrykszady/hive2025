@@ -2,9 +2,9 @@
 
 namespace App\Notifications;
 
-use App\Channels\TwilioChannel;
 use App\Models\Task;
 use App\Models\Vendor;
+use App\Support\SmsChannel;
 use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -39,7 +39,7 @@ class VendorScheduleSmsNotification extends Notification implements ShouldQueue
      */
     public function via(object $notifiable): array
     {
-        return [TwilioChannel::class];
+        return [SmsChannel::get()];
     }
 
     public function toTwilio(object $notifiable): string

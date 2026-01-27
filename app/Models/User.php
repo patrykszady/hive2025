@@ -371,4 +371,34 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
             }
         );
     }
+
+    /**
+     * Check if this user is a client-only user (no vendor relationships).
+     */
+    protected function isClientUser(): Attribute
+    {
+        return Attribute::make(
+            get: fn () => $this->vendors()->count() === 0 && $this->clients()->count() > 0
+        );
+    }
+
+    /**
+     * Check if this user has any vendor relationships.
+     */
+    protected function isVendorUser(): Attribute
+    {
+        return Attribute::make(
+            get: fn () => $this->vendors()->count() > 0
+        );
+    }
+
+    /**
+     * Get the primary client for a client-only user.
+     */
+    protected function primaryClient(): Attribute
+    {
+        return Attribute::make(
+            get: fn () => $this->clients()->first()
+        );
+    }
 }

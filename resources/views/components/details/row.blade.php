@@ -70,7 +70,7 @@
 
             {{-- SECONDARY CONTENT (NOTES) --}}
             @if($secondary_content)
-                <div class="text-sky-800 text-sm italic">
+                <div class="text-indigo-800 text-sm italic">
                     {!! is_string($secondary_content) ? $secondary_content : '' !!}
                 </div>
             @endif

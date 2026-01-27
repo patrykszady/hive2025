@@ -2,7 +2,6 @@
 
 namespace App\Console\Commands;
 
-use App\Channels\TwilioChannel;
 use App\Models\Project;
 use App\Models\SmsLog;
 use App\Models\Task;
@@ -13,6 +12,7 @@ use App\Notifications\VendorScheduleSmsNotification;
 use App\Services\ScheduleSmsService;
 use App\Services\SmsScheduleService;
 use App\Support\ApiErrorFormatter;
+use App\Support\SmsChannel;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
@@ -387,7 +387,7 @@ class SendScheduleSms extends Command
                 $tasks
             );
 
-            $channel = app(TwilioChannel::class);
+            $channel = app(SmsChannel::get());
             $channel->send($user, $notification);
 
             SmsLog::logSent([

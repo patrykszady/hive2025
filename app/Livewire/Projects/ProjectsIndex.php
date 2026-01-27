@@ -42,11 +42,22 @@ class ProjectsIndex extends Component
         if ($this->client) {
             $this->client_id = $this->client->id;
         } else {
-            $this->clients = Client::orderBy('created_at', 'DESC')->get();
+            // Client users only see their own clients
+            if (auth()->user()->is_client_user) {
+                $this->clients = auth()->user()->clients()->get();
+            } else {
+                $this->clients = Client::orderBy('created_at', 'DESC')->get();
+            }
         }
 
         // Special case for view mode
         if ($this->view == true) {
+            $this->project_status_title = [];
+            return;
+        }
+        
+        // Client users see all projects by default (no status filter)
+        if (auth()->user()->is_client_user) {
             $this->project_status_title = [];
             return;
         }
@@ -121,6 +132,16 @@ class ProjectsIndex extends Component
         } else {
             $client_ids = [];
         }
+        
+        // Client users can only see projects belonging to their clients
+        $userClientIds = [];
+        if (auth()->user()->is_client_user) {
+            $userClientIds = auth()->user()->clients()->pluck('clients.id')->toArray();
+            // If no specific client selected, filter to user's clients
+            if (empty($client_ids)) {
+                $client_ids = $userClientIds;
+            }
+        }
 
         return Project::with(['latestStatus', 'client.users'])
             ->when(!empty($this->project_status_title), function ($query) {
@@ -140,7 +161,7 @@ class ProjectsIndex extends Component
                     $query->whereIn('status_code', $codes);
                 });
             })
-            ->when($this->client !== null, function ($query) use ($client_ids) {
+            ->when(!empty($client_ids), function ($query) use ($client_ids) {
                 $query->whereIn('client_id', $client_ids);
             })
             ->orderByLatestStatusDateDesc()
@@ -160,6 +181,10 @@ class ProjectsIndex extends Component
                 $client_ids = [$this->client->id];
             }
             $baseQuery->whereIn('client_id', $client_ids);
+        } elseif (auth()->user()->is_client_user) {
+            // Client users only see stats for their client's projects
+            $userClientIds = auth()->user()->clients()->pluck('clients.id')->toArray();
+            $baseQuery->whereIn('client_id', $userClientIds);
         }
 
         $projectIds = (clone $baseQuery)->pluck('id');

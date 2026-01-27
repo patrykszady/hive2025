@@ -156,7 +156,13 @@ class Client extends Model
     {
         return Attribute::make(
             get: function ($value, array $attributes) {
-                return $this->vendors()->wherePivot('vendor_id', auth()->user()->vendor->id)->first()?->pivot->source;
+                $vendorId = auth()->user()?->vendor?->id;
+
+                if (!$vendorId) {
+                    return null;
+                }
+
+                return $this->vendors()->wherePivot('vendor_id', $vendorId)->first()?->pivot->source;
             }
         );
     }

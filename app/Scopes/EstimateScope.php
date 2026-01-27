@@ -16,10 +16,17 @@ class EstimateScope implements Scope
         if (auth()->guest()) {
 
         } else {
+            $user = auth()->user();
+
+            // Client users or users without a vendor should see all estimates (filtered by project elsewhere)
+            if ($user->is_client_user || ! $user->vendor) {
+                return;
+            }
+
             //->whereNotNull('plaid_access_token')
             $builder
                 // ->whereJsonContains('sections', ['name' => 'Master Bath'])
-                ->where('belongs_to_vendor_id', auth()->user()->vendor->id);
+                ->where('belongs_to_vendor_id', $user->vendor->id);
         }
     }
 }

@@ -12,12 +12,12 @@
                 <flux:menu>
                     @can('update', $estimate)
                         <flux:menu.item icon="cog-6-tooth" wire:click="$dispatchTo('estimates.estimate-accept', 'accept')">Settings</flux:menu.item>
-                    @endcan
-                    
-                    <flux:menu.item icon="document-duplicate" wire:click="$dispatchTo('estimates.estimate-duplicate', 'duplicateModal', { estimate: {{$estimate->id}} })">Duplicate Estimate</flux:menu.item>
-                    <flux:menu.item icon="envelope" wire:click="$dispatchTo('estimates.estimate-email', 'compose', { estimate: {{$estimate->id}} })">Email Estimate</flux:menu.item>
+                        
+                        <flux:menu.item icon="document-duplicate" wire:click="$dispatchTo('estimates.estimate-duplicate', 'duplicateModal', { estimate: {{$estimate->id}} })">Duplicate Estimate</flux:menu.item>
+                        <flux:menu.item icon="envelope" wire:click="$dispatchTo('estimates.estimate-email', 'compose', { estimate: {{$estimate->id}} })">Email Estimate</flux:menu.item>
 
-                    <flux:menu.separator />
+                        <flux:menu.separator />
+                    @endcan
 
                     <flux:menu.submenu heading="Export" icon="arrow-down-tray">
                         <flux:menu.item icon="document-text" wire:click="create_pdf('estimate')" wire:loading.attr="disabled" wire:loading.class="opacity-50" wire:target="create_pdf">Export Estimate</flux:menu.item>
@@ -26,14 +26,16 @@
                         <flux:menu.item icon="table-cells" wire:click="export_csv">Export Excel Estimate</flux:menu.item>
                     </flux:menu.submenu>
 
-                    @if($estimate->status === 'Active')
-                        <flux:menu.separator />
-                        <flux:menu.item icon="x-circle" wire:click="disableEstimate" variant="danger">Disable Estimate</flux:menu.item>
-                    @else
-                        <flux:menu.separator />
-                        <flux:menu.item icon="arrow-path" wire:click="activateEstimate">Restore Estimate</flux:menu.item>
-                        <flux:menu.item icon="trash" wire:click="removeEstimate" variant="danger">Delete Estimate</flux:menu.item>
-                    @endif
+                    @can('update', $estimate)
+                        @if($estimate->status === 'Active')
+                            <flux:menu.separator />
+                            <flux:menu.item icon="x-circle" wire:click="disableEstimate" variant="danger">Disable Estimate</flux:menu.item>
+                        @else
+                            <flux:menu.separator />
+                            <flux:menu.item icon="arrow-path" wire:click="activateEstimate">Restore Estimate</flux:menu.item>
+                            <flux:menu.item icon="trash" wire:click="removeEstimate" variant="danger">Delete Estimate</flux:menu.item>
+                        @endif
+                    @endcan
                 </flux:menu>
             </flux:dropdown>
         </x-slot:header_buttons>

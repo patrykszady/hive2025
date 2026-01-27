@@ -2,8 +2,15 @@
 
 return [
     'sms' => [
-        // Supported: 'twilio'
-        'provider' => env('SMS_PROVIDER', 'twilio'),
+        // Supported: 'twilio', 'telnyx'
+        'provider' => env('SMS_PROVIDER', 'telnyx'),
+    ],
+
+    'telnyx' => [
+        'api_key' => env('TELNYX_API_KEY'),
+        'messaging_profile_id' => env('TELNYX_MESSAGING_PROFILE_ID'),
+        'from' => env('TELNYX_FROM'),
+        'dev_to' => env('TELNYX_DEV_TO'),
     ],
 
     'mailtrap-sdk' => [

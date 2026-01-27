@@ -105,7 +105,13 @@ class TaskCreate extends Component
     #[Computed]
     public function employees()
     {
-        return auth()->user()->vendor->users()->employed()->get();
+        $vendor = auth()->user()?->vendor;
+
+        if (!$vendor) {
+            return collect();
+        }
+
+        return $vendor->users()->employed()->get();
     }
 
     #[Computed]
@@ -138,6 +144,13 @@ class TaskCreate extends Component
         $this->form->time_settings = [];
     }
 
+    public function toggleArrivalTime(string $date): void
+    {
+        $current = data_get($this->form->time_settings, "$date.use_time", false);
+
+        data_set($this->form->time_settings, "$date.use_time", ! $current);
+    }
+
     /**
      * Update end time to 2 hours after start time
      */
@@ -151,7 +164,6 @@ class TaskCreate extends Component
         
         try {
             $endTime = Carbon::createFromFormat('H:i', $startTime)
-                ->addHours(2)
                 ->format('H:i');
             
             $this->form->time_settings[$date]['end_time'] = $endTime;

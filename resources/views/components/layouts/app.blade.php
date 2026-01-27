@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" translate="no">
     {{-- HEAD --}}
     @include('components.layouts.head')
 
@@ -41,111 +41,122 @@
 
             @if(!Route::is(['vendor_selection', 'vendor_registration']))
                 <flux:sidebar.nav>
-                    {{-- SYSTEM ERRORS --}}
+                    @if(auth()->user()->is_client_user)
+                        @php
+                            $client = auth()->user()->clients()->first();
+                            $clientHome = $client ? route('clients.show', $client) : route('vendor_selection');
+                        @endphp
+                        <flux:sidebar.item wire:navigate.hover icon="home" href="{{ $clientHome }}">Home</flux:sidebar.item>
+                        <flux:sidebar.item wire:navigate.hover icon="folder" href="/projects">Projects</flux:sidebar.item>
+                    @else
+                        {{-- SYSTEM ERRORS --}}
 
-                    {{-- BANK ERRORS --}}
-                    @can('viewAny', App\Models\Bank::class)
-                        @if(!auth()->user()->vendor->banks()->whereNotNull('plaid_access_token')->get()->where('plaid_options.error', '!=', FALSE)->isEmpty())
-                            <flux:sidebar.item wire:navigate.hover icon="building-library" href="/banks" badge="Error">Banks</flux:sidebar.item>
-                            <flux:separator class="my-2" />
-                        @endif
-                    @endcan
+                        {{-- BANK ERRORS --}}
+                        @can('viewAny', App\Models\Bank::class)
+                            @if(!auth()->user()->vendor->banks()->whereNotNull('plaid_access_token')->get()->where('plaid_options.error', '!=', FALSE)->isEmpty())
+                                <flux:sidebar.item wire:navigate.hover icon="building-library" href="/banks" badge="Error">Banks</flux:sidebar.item>
+                                <flux:separator class="my-2" />
+                            @endif
+                        @endcan
 
-                    {{-- NAVIGATION --}}
-                    <flux:sidebar.item wire:navigate.hover icon="home" href="/dashboard">Home</flux:sidebar.item>
+                        {{-- NAVIGATION --}}
+                        <flux:sidebar.item wire:navigate.hover icon="home" href="/dashboard">Home</flux:sidebar.item>
 
-                    @can('viewAny', App\Models\Lead::class)
-                        <flux:sidebar.item wire:navigate.hover icon="magnifying-glass-plus" href="/leads">Leads</flux:sidebar.item>
-                    @endcan
+                        @can('viewAny', App\Models\Lead::class)
+                            <flux:sidebar.item wire:navigate.hover icon="magnifying-glass-plus" href="/leads">Leads</flux:sidebar.item>
+                        @endcan
 
-                    <flux:sidebar.item wire:navigate.hover icon="folder" href="/projects">Projects</flux:sidebar.item>
-                    <flux:sidebar.item wire:navigate.hover icon="calendar" href="{{ route('planner.cards') }}">Planner</flux:sidebar.item>
+                        <flux:sidebar.item wire:navigate.hover icon="folder" href="/projects">Projects</flux:sidebar.item>
+                        <flux:sidebar.item wire:navigate.hover icon="calendar" href="{{ route('planner.cards') }}">Planner</flux:sidebar.item>
 
-                    @canany(['viewAny', 'create'], App\Models\Expense::class)
-                        <flux:sidebar.group expandable heading="Finances" icon="credit-card" class="grid" :expanded="true">
-                            <flux:sidebar.item wire:navigate.hover href="/expenses" icon="credit-card">Expenses</flux:sidebar.item>
-                            @can('viewAny', App\Models\Bank::class)
-                                <flux:sidebar.item wire:navigate.hover href="/payments" icon="banknotes">Payments</flux:sidebar.item>
-                            @endcan
-
-                            @can('viewAny', App\Models\Check::class)
-                                <flux:sidebar.item wire:navigate.hover href="/checks" icon="pencil-square">Checks</flux:sidebar.item>
-                            @endcan
-                        </flux:sidebar.group>
-                    @endcanany
-
-                    <flux:sidebar.item wire:navigate.hover icon="user-group" href="/vendors">Vendors</flux:sidebar.item>
-                    @can('viewAny', App\Models\Client::class)
-                        <flux:sidebar.item wire:navigate.hover icon="users" href="/clients">Clients</flux:sidebar.item>
-                    @endcan
-                    
-                    @canany(['create', 'viewAny', 'viewAnyPayment', 'viewPayment'], [
-                        App\Models\Hour::class, 
-                        App\Models\Timesheet::class, 
-                        [App\Models\Timesheet::class, auth()->user()]
-                    ])
-                        <flux:sidebar.group expandable heading="Timesheets" class="grid" icon="clock" :expanded="true">
-                            @can('create', App\Models\Hour::class)
-                                <flux:sidebar.item wire:navigate.hover href="/hours/create" icon="clock">Hours</flux:sidebar.item>
-                            @endcan
-                            @can('viewAny', App\Models\Timesheet::class)
-                                <flux:sidebar.item wire:navigate.hover href="/timesheets" icon="document-currency-dollar">Timesheets</flux:sidebar.item>
-                            @endcan
-    
-                            @can('viewAnyPayment', App\Models\Timesheet::class)
-                                <flux:sidebar.item wire:navigate.hover href="/timesheets/payments" icon="currency-dollar">Payments</flux:sidebar.item>
-                            @else
-                                @can('viewPayment', [App\Models\Timesheet::class, auth()->user()])
-                                    <flux:sidebar.item wire:navigate.hover href="/timesheets/payment/{{auth()->id()}}" icon="currency-dollar">Balance</flux:sidebar.item>
+                        @canany(['viewAny', 'create'], App\Models\Expense::class)
+                            <flux:sidebar.group expandable heading="Finances" icon="credit-card" class="grid" :expanded="true">
+                                <flux:sidebar.item wire:navigate.hover href="/expenses" icon="credit-card">Expenses</flux:sidebar.item>
+                                @can('viewAny', App\Models\Bank::class)
+                                    <flux:sidebar.item wire:navigate.hover href="/payments" icon="banknotes">Payments</flux:sidebar.item>
                                 @endcan
-                            @endcan
-                        </flux:sidebar.group>
-                    @endcanany
 
-                    @can('viewAny', App\Models\Bank::class)
-                        <flux:sidebar.group expandable heading="Accounting" class="grid" icon="document-currency-dollar" :expanded="$accountingExpanded">
-                            <flux:sidebar.item wire:navigate.hover href="/banks" icon="building-library">Banks</flux:sidebar.item>
-                            <flux:sidebar.item wire:navigate.hover href="/distributions" icon="receipt-percent">Distributions</flux:sidebar.item>
-                            <flux:sidebar.item wire:navigate.hover href="/sheets" icon="document-currency-dollar">Sheets</flux:sidebar.item>
-                        </flux:sidebar.group>
-                    @endcan
+                                @can('viewAny', App\Models\Check::class)
+                                    <flux:sidebar.item wire:navigate.hover href="/checks" icon="pencil-square">Checks</flux:sidebar.item>
+                                @endcan
+                            </flux:sidebar.group>
+                        @endcanany
+
+                        <flux:sidebar.item wire:navigate.hover icon="user-group" href="/vendors">Vendors</flux:sidebar.item>
+                        @can('viewAny', App\Models\Client::class)
+                            <flux:sidebar.item wire:navigate.hover icon="users" href="/clients">Clients</flux:sidebar.item>
+                        @endcan
+                        
+                        @canany(['create', 'viewAny', 'viewAnyPayment', 'viewPayment'], [
+                            App\Models\Hour::class, 
+                            App\Models\Timesheet::class, 
+                            [App\Models\Timesheet::class, auth()->user()]
+                        ])
+                            <flux:sidebar.group expandable heading="Timesheets" class="grid" icon="clock" :expanded="true">
+                                @can('create', App\Models\Hour::class)
+                                    <flux:sidebar.item wire:navigate.hover href="/hours/create" icon="clock">Hours</flux:sidebar.item>
+                                @endcan
+                                @can('viewAny', App\Models\Timesheet::class)
+                                    <flux:sidebar.item wire:navigate.hover href="/timesheets" icon="document-currency-dollar">Timesheets</flux:sidebar.item>
+                                @endcan
+        
+                                @can('viewAnyPayment', App\Models\Timesheet::class)
+                                    <flux:sidebar.item wire:navigate.hover href="/timesheets/payments" icon="currency-dollar">Payments</flux:sidebar.item>
+                                @else
+                                    @can('viewPayment', [App\Models\Timesheet::class, auth()->user()])
+                                        <flux:sidebar.item wire:navigate.hover href="/timesheets/payment/{{auth()->id()}}" icon="currency-dollar">Balance</flux:sidebar.item>
+                                    @endcan
+                                @endcan
+                            </flux:sidebar.group>
+                        @endcanany
+
+                        @can('viewAny', App\Models\Bank::class)
+                            <flux:sidebar.group expandable heading="Accounting" class="grid" icon="document-currency-dollar" :expanded="$accountingExpanded">
+                                <flux:sidebar.item wire:navigate.hover href="/banks" icon="building-library">Banks</flux:sidebar.item>
+                                <flux:sidebar.item wire:navigate.hover href="/distributions" icon="receipt-percent">Distributions</flux:sidebar.item>
+                                <flux:sidebar.item wire:navigate.hover href="/sheets" icon="document-currency-dollar">Sheets</flux:sidebar.item>
+                            </flux:sidebar.group>
+                        @endcan
+                    @endif
                 </flux:sidebar.nav>
             @endif
 
             <flux:sidebar.spacer />
 
             <flux:sidebar.nav>
-                @can('admin_login_as_user', App\Models\User::class)
-                    <flux:sidebar.group expandable heading="Global Actions" class="grid" icon="eye-slash" :expanded="$globalActionsExpanded">
-                        <flux:sidebar.item wire:navigate.hover href="/transactions/match_vendor">Match Vendor</flux:sidebar.item>
-                    </flux:sidebar.group>
-                @endcan
-                
-                @if(!Route::is(['vendor_selection', 'vendor_registration']))
-                    @if(
-                        auth()->user()->can('viewAny', App\Models\EmailTemplate::class)
-                        || auth()->user()->can('viewAny', App\Models\CompanyEmail::class)
-                        || auth()->user()->can('viewAny', App\Models\VendorDoc::class)
-                        || auth()->user()->can('viewOptions', App\Models\Vendor::class)
-                    )
-                        <flux:sidebar.group expandable heading="Settings" class="grid" icon="cog-6-tooth" :expanded="$settingsExpanded">
-                            @can('viewOptions', App\Models\Vendor::class)
-                                <flux:sidebar.item wire:navigate.hover href="/options" icon="adjustments-horizontal">Options</flux:sidebar.item>
-                            @endcan
-
-                            @can('viewAny', App\Models\EmailTemplate::class)
-                                <flux:sidebar.item wire:navigate.hover href="/templates" icon="envelope-open">Templates</flux:sidebar.item>
-                            @endcan
-
-                            @can('viewAny', App\Models\CompanyEmail::class)
-                                <flux:sidebar.item wire:navigate.hover href="/company_emails" icon="inbox-stack">Email Accounts</flux:sidebar.item>
-                                <flux:sidebar.item wire:navigate.hover href="/company_emails" icon="receipt-percent">Expense Bulk Match</flux:sidebar.item>
-                            @endcan
-
-                            @can('viewAny', App\Models\VendorDoc::class)
-                                <flux:sidebar.item wire:navigate.hover href="/vendor_docs" icon="eye-slash">Vendor Docs</flux:sidebar.item>
-                            @endcan
+                @if(!auth()->user()->is_client_user)
+                    @can('admin_login_as_user', App\Models\User::class)
+                        <flux:sidebar.group expandable heading="Global Actions" class="grid" icon="eye-slash" :expanded="$globalActionsExpanded">
+                            <flux:sidebar.item wire:navigate.hover href="/transactions/match_vendor">Match Vendor</flux:sidebar.item>
                         </flux:sidebar.group>
+                    @endcan
+                    
+                    @if(!Route::is(['vendor_selection', 'vendor_registration']))
+                        @if(
+                            auth()->user()->can('viewAny', App\Models\EmailTemplate::class)
+                            || auth()->user()->can('viewAny', App\Models\CompanyEmail::class)
+                            || auth()->user()->can('viewAny', App\Models\VendorDoc::class)
+                            || auth()->user()->can('viewOptions', App\Models\Vendor::class)
+                        )
+                            <flux:sidebar.group expandable heading="Settings" class="grid" icon="cog-6-tooth" :expanded="$settingsExpanded">
+                                @can('viewOptions', App\Models\Vendor::class)
+                                    <flux:sidebar.item wire:navigate.hover href="/options" icon="adjustments-horizontal">Options</flux:sidebar.item>
+                                @endcan
+
+                                @can('viewAny', App\Models\EmailTemplate::class)
+                                    <flux:sidebar.item wire:navigate.hover href="/templates" icon="envelope-open">Templates</flux:sidebar.item>
+                                @endcan
+
+                                @can('viewAny', App\Models\CompanyEmail::class)
+                                    <flux:sidebar.item wire:navigate.hover href="/company_emails" icon="inbox-stack">Email Accounts</flux:sidebar.item>
+                                    <flux:sidebar.item wire:navigate.hover href="/company_emails" icon="receipt-percent">Expense Bulk Match</flux:sidebar.item>
+                                @endcan
+
+                                @can('viewAny', App\Models\VendorDoc::class)
+                                    <flux:sidebar.item wire:navigate.hover href="/vendor_docs" icon="eye-slash">Vendor Docs</flux:sidebar.item>
+                                @endcan
+                            </flux:sidebar.group>
+                        @endif
                     @endif
                 @endif
             </flux:sidebar.nav>

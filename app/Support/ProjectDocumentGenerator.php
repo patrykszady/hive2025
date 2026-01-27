@@ -3,6 +3,8 @@
 namespace App\Support;
 
 use App\Models\Project;
+use App\Scopes\ExpenseScope;
+use App\Scopes\ExpenseSplitsScope;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Spatie\Browsershot\Browsershot;
@@ -18,8 +20,21 @@ class ProjectDocumentGenerator
     {
         $project = $project->fresh(['expenses.vendor', 'expenses.receipts', 'expenseSplits.project', 'expenseSplits.expense.vendor', 'expenseSplits.expense.receipts', 'client']);
 
-        $expenses = $project->expenses()->where('reimbursment', 'Client')->get();
-        $splits = $project->expenseSplits()->where('reimbursment', 'Client')->get();
+        $expenses = $project->expenses()
+            ->withoutGlobalScope(ExpenseScope::class)
+            ->where('reimbursment', 'Client')
+            ->with(['vendor', 'receipts', 'project'])
+            ->get();
+        $splits = $project->expenseSplits()
+            ->withoutGlobalScope(ExpenseSplitsScope::class)
+            ->where('reimbursment', 'Client')
+            ->with([
+                'project',
+                'expense' => fn ($query) => $query
+                    ->withoutGlobalScope(ExpenseScope::class)
+                    ->with(['vendor', 'receipts', 'project']),
+            ])
+            ->get();
 
         foreach ($expenses as $expense) {
             $receipt = $expense->receipts()->latest()->first();
@@ -33,7 +48,9 @@ class ProjectDocumentGenerator
         }
 
         foreach ($splits as $split) {
-            $receipt = optional($split->expense)->receipts()->latest()->first();
+            $receipt = $split->expense
+                ? $split->expense->receipts()->latest()->first()
+                : null;
             if ($receipt) {
                 $split->receipt = $receipt;
                 $split->receipt_html = $receipt->receipt_html;

@@ -390,11 +390,11 @@
                 >
                     {{-- Day Header --}}
                     <div class="flex items-center justify-between p-3 mb-3 {{ $isWeekend ? 'opacity-75' : '' }}">
-                        <flux:heading size="lg" class="{{ $dayData->isToday ? 'text-blue-600 dark:text-blue-400' : '' }}">
+                        <flux:heading size="lg" class="{{ $dayData->isToday ? 'text-indigo-600 dark:text-indigo-400' : '' }}">
                             {{ $dayData->title }}
                         </flux:heading>
                         @if ($dayData->isToday)
-                            <flux:badge color="blue" size="sm">Today</flux:badge>
+                            <flux:badge color="indigo" size="sm">Today</flux:badge>
                         @elseif ($dayData->isTomorrow && ! $dayData->isWeekend)
                             <flux:badge color="zinc" size="sm">Tomorrow</flux:badge>
                         @endif
@@ -470,9 +470,9 @@
                                                             @if ($projectColumn->task_gap_info->type === 'both')
                                                                 <span class="text-amber-600 dark:text-amber-400">{{ $projectColumn->task_gap_info->last->label }}</span>
                                                                 <span class="mx-1 text-zinc-400">·</span>
-                                                                <span class="text-blue-600 dark:text-blue-400">{{ $projectColumn->task_gap_info->next->label }}</span>
+                                                                <span class="text-indigo-600 dark:text-indigo-400">{{ $projectColumn->task_gap_info->next->label }}</span>
                                                             @elseif ($projectColumn->task_gap_info->type === 'next')
-                                                                <span class="text-blue-600 dark:text-blue-400">{{ $projectColumn->task_gap_info->label }}</span>
+                                                                <span class="text-indigo-600 dark:text-indigo-400">{{ $projectColumn->task_gap_info->label }}</span>
                                                             @else
                                                                 <span class="text-amber-600 dark:text-amber-400">{{ $projectColumn->task_gap_info->label }}</span>
                                                             @endif
@@ -602,8 +602,6 @@
                                                                     @if($task->vendor_status)
                                                                         @php $statusUi = $task->vendor_status_ui; @endphp
                                                                         <flux:badge 
-                                                                            x-show="firstVisibleDayIndex === {{ $dayIndex }}"
-                                                                            x-cloak
                                                                             size="sm" 
                                                                             :color="$statusUi['flux'] ?? 'zinc'"
                                                                             :icon="$statusUi['icon'] ?? null"

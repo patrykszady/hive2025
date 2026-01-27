@@ -60,6 +60,20 @@ class Login extends Component
             session()->regenerate();
 
             $user = Auth::user();
+            
+            // Client-only users go to their client home
+            if ($user->is_client_user) {
+                $client = $user->primary_client;
+
+                if ($client) {
+                    $this->redirect(route('clients.show', $client), navigate: true);
+                    return;
+                }
+
+                $this->redirect(route('clients.index'), navigate: true);
+                return;
+            }
+            
             if ($user->webAuthnCredentials()->count() === 0) {
                 $this->redirect(route('passkey.setup'), navigate: true);
                 return;

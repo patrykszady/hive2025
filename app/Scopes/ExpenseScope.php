@@ -13,6 +13,12 @@ class ExpenseScope implements Scope
         $user = auth()->user();
 
         if ($user) {
+            // Client users should not see any expenses
+            if ($user->is_client_user || !$user->vendor) {
+                $builder->whereRaw('1 = 0'); // Return no results
+                return;
+            }
+
             // Get the user's via_vendor_id from pivot
             $userVendorPivot = $user->vendors()
                 ->where('vendors.id', $user->vendor->id)

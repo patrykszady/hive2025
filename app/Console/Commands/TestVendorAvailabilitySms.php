@@ -2,10 +2,10 @@
 
 namespace App\Console\Commands;
 
-use App\Channels\TwilioChannel;
 use App\Models\Task;
 use App\Models\Vendor;
 use App\Notifications\VendorAvailabilitySmsNotification;
+use App\Support\SmsChannel;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
 
@@ -132,13 +132,14 @@ class TestVendorAvailabilitySms extends Command
         }
 
         $this->newLine();
-        $this->info("Sending SMS to dev number: " . config('services.twilio.dev_to', '+12249993880'));
+        $devTo = config('services.telnyx.dev_to') ?: config('services.twilio.dev_to', '+12249993880');
+        $this->info("Sending SMS to dev number: " . $devTo);
 
         // Send the notification directly (bypasses queue for immediate testing)
         $notification = new VendorAvailabilitySmsNotification($tasks, $vendorToken);
 
         try {
-            $channel = new TwilioChannel();
+            $channel = app(SmsChannel::get());
             $channel->send($vendor, $notification);
 
             $baseUrl = config('app.dev_webhook_url') ?: config('app.url');

@@ -18,7 +18,19 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->redirectGuestsTo(fn () => route('login'));
-        $middleware->redirectUsersTo(AppServiceProvider::HOME);
+        $middleware->redirectUsersTo(function () {
+            $user = auth()->user();
+
+            if ($user?->is_client_user) {
+                $client = $user->primary_client;
+
+                return $client
+                    ? route('clients.show', $client)
+                    : route('clients.index');
+            }
+
+            return AppServiceProvider::HOME;
+        });
 
         $middleware->throttleApi();
 

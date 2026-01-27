@@ -32,6 +32,11 @@ echo "🧹 Clearing Laravel caches..."
 php artisan config:clear --no-interaction >"$LOG_DIR/config_clear.log" 2>&1
 status $? "Config cache cleared" "Config cache clear failed (see $LOG_DIR/config_clear.log)"
 
+# MySQL
+echo "🔄 Starting MySQL..."
+sudo service mysql start >/dev/null 2>&1
+status $? "MySQL started (or already running)" "Failed to start MySQL"
+
 # Redis
 echo "🔄 Starting Redis..."
 sudo service redis-server start >/dev/null 2>&1

@@ -20,9 +20,13 @@ class ExpenseSplitsScope implements Scope
         if (is_null($user)) {
 
         } else {
+            if ($user->is_client_user || ! $user->vendor) {
+                $builder->whereRaw('1 = 0');
+                return;
+            }
             //if Admin..all Expenses ... if Member...only expenses the User Paid For....?
             if ($user->vendor_role == 'Admin') {
-                $builder->where('belongs_to_vendor_id', auth()->user()->vendor->id);
+                $builder->where('belongs_to_vendor_id', $user->vendor->id);
             } elseif ($user->vendor_role == 'Member') {
                 $builder->where('belongs_to_vendor_id', $user->vendor->id);
             } else {

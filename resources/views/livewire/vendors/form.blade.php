@@ -56,7 +56,7 @@
                         </flux:text>
 
                         @foreach($existing_vendors as $vendor_found)
-                            <flux:card class="!border !border-blue-300 !p-1 !pl-2 hover:!border-blue-400 !bg-blue-50/75 hover:!bg-blue-100/75">
+                            <flux:card class="!border !border-indigo-300 !p-1 !pl-2 hover:!border-indigo-400 !bg-indigo-50/75 hover:!bg-indigo-100/75">
                                 <div class="flex justify-between items-center w-full">
                                     <div class="flex-1 min-w-0 mr-2"> <!-- Added min-w-0 to allow truncation -->
                                         <flux:heading class="truncate text-zinc-700 hover:text-zinc-900">
@@ -85,7 +85,7 @@
                         </flux:text>
 
                         @foreach($new_vendors_for_company as $new_vendor_found)
-                            <flux:card class="!border !border-blue-300 !p-1 !pl-2 hover:!border-blue-400 !bg-blue-50/75 hover:!bg-blue-100/75">
+                            <flux:card class="!border !border-indigo-300 !p-1 !pl-2 hover:!border-indigo-400 !bg-indigo-50/75 hover:!bg-indigo-100/75">
                                 <div class="flex justify-between items-center">
                                     <flux:heading class="truncate text-gray-700">
                                         {{$new_vendor_found->name}}
@@ -276,10 +276,10 @@
             
             <!-- Total Expenses -->
             <div class="mb-4">
-                <flux:card class="bg-blue-50">
+                <flux:card class="bg-indigo-50">
                     <div class="flex justify-between items-center">
                         <flux:heading size="sm">Total Expenses</flux:heading>
-                        <flux:heading size="lg" class="text-blue-700">{{ money($this->totalExpenses) }}</flux:heading>
+                        <flux:heading size="lg" class="text-indigo-700">{{ money($this->totalExpenses) }}</flux:heading>
                     </div>
                 </flux:card>
             </div>

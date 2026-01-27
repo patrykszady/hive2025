@@ -2,19 +2,23 @@
 
 namespace App\Livewire\Projects;
 
+use App\Livewire\Concerns\HasToJsonMethod;
 use App\Models\EmailTracking;
 use App\Models\Project;
 use App\Models\User;
+use App\Support\ProjectDocumentGenerator;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 use Livewire\WithPagination;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ProjectShow extends Component
 {
     use AuthorizesRequests;
+    use HasToJsonMethod;
     use WithPagination;
 
     public Project $project;
@@ -43,6 +47,19 @@ class ProjectShow extends Component
     {
         $this->project->load('distributions');
         $this->showDistributions = true;
+    }
+
+    public function print_reimbursements(): StreamedResponse
+    {
+        $this->authorize('view', $this->project);
+
+        $document = ProjectDocumentGenerator::generateReimbursements($this->project);
+
+        return response()->streamDownload(function () use ($document) {
+            echo $document['binary'];
+        }, $document['filename'], [
+            'Content-Type' => 'application/pdf',
+        ]);
     }
 
     #[Computed]

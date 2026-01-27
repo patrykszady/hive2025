@@ -30,7 +30,7 @@
                             <flux:table.rows>
                             @if(!is_array($expense_line_items))
                                 @foreach($expense_line_items->items as $line_item_index => $line_item)
-                                    <flux:table.row class="transition-colors duration-150 {{ (isset($split['items']) && isset($split['items'][$line_item_index]['checkbox']) && $split['items'][$line_item_index]['checkbox'] == true) ? 'bg-blue-50 dark:bg-blue-900/10' : '' }}">
+                                    <flux:table.row class="transition-colors duration-150 {{ (isset($split['items']) && isset($split['items'][$line_item_index]['checkbox']) && $split['items'][$line_item_index]['checkbox'] == true) ? 'bg-indigo-50 dark:bg-indigo-900/10' : '' }}">
                                         <flux:table.cell class="!pl-5 pr-5 text-center">
                                             <flux:checkbox
                                                 wire:model.live="expense_splits.{{$index}}.items.{{$line_item_index}}.checkbox"

@@ -2,6 +2,7 @@
 
 namespace App\Livewire\ProjectStatus;
 
+use App\Livewire\Concerns\HasToJsonMethod;
 use App\Models\Project;
 use App\Models\ProjectStatus;
 use Flux;
@@ -10,6 +11,8 @@ use Livewire\Component;
 
 class StatusCreate extends Component
 {
+    use HasToJsonMethod;
+
     // use AuthorizesRequests;
 
     public Project $project;
@@ -35,6 +38,10 @@ class StatusCreate extends Component
 
     public function update_project()
     {
+        if (auth()->user()?->is_client_user) {
+            abort(403);
+        }
+
         $this->validate([
             'project_status' => 'required',
         ]);
@@ -96,6 +103,10 @@ class StatusCreate extends Component
 
     public function editStatus($statusId)
     {
+        if (auth()->user()?->is_client_user) {
+            abort(403);
+        }
+
         $status = ProjectStatus::findOrFail($statusId);
         
         // Authorize - only owner or admin can edit
@@ -119,6 +130,10 @@ class StatusCreate extends Component
 
     public function updateStatus()
     {
+        if (auth()->user()?->is_client_user) {
+            abort(403);
+        }
+
         $this->validate([
             'editingStatusCode' => 'required',
             'editingStatusDate' => 'required|date',
@@ -150,6 +165,10 @@ class StatusCreate extends Component
 
     public function deleteStatus()
     {
+        if (auth()->user()?->is_client_user) {
+            abort(403);
+        }
+
         if (!$this->editingStatusId) {
             return;
         }

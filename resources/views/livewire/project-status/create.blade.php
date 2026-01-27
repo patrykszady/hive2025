@@ -30,15 +30,17 @@
                                         <flux:badge size="sm" :color="$status->badgeColor">{{ $status->title }}</flux:badge>
                                         <span class="text-xs text-gray-500">{{$status->start_date->format('m/d/y')}}</span>
                                         
-                                        {{-- Edit button - hidden by default, shown on group hover (desktop only) --}}
-                                        <button 
-                                            wire:click="editStatus({{ $status->id }})"
-                                            type="button"
-                                            class="hidden md:group-hover:inline-flex text-gray-400 hover:text-blue-600 transition-colors"
-                                            title="Edit status"
-                                        >
-                                            <flux:icon.pencil variant="micro" />
-                                        </button>
+                                        @can('update', $project)
+                                            {{-- Edit button - hidden by default, shown on group hover (desktop only) --}}
+                                            <button 
+                                                wire:click="editStatus({{ $status->id }})"
+                                                type="button"
+                                                class="hidden md:group-hover:inline-flex text-gray-400 hover:text-indigo-600 transition-colors"
+                                                title="Edit status"
+                                            >
+                                                <flux:icon.pencil variant="micro" />
+                                            </button>
+                                        @endcan
                                     </div>
                                     
                                     @if($loop->index < count($statuses) - 1)
@@ -92,9 +94,11 @@
                         @endphp
                         
                         <li class="relative flex gap-x-4 pb-1">
-                            <div class="absolute top-0 left-0 flex justify-center w-6 -bottom-1">
-                                <div class="w-px bg-gray-200"></div>
-                            </div>
+                            @can('update', $project)
+                                <div class="absolute top-0 left-0 flex justify-center w-6 -bottom-1">
+                                    <div class="w-px bg-gray-200"></div>
+                                </div>
+                            @endcan
                             <div class="relative flex items-center justify-center flex-none w-6 h-6 bg-white">
                             </div>
                             <div class="flex-auto py-0.5">
@@ -102,14 +106,16 @@
                             </div>
                         </li>
                         
-                        <li class="relative flex gap-x-4 pt-1">
-                            <div class="relative flex items-center justify-center flex-none w-6 h-6 bg-white">
-                                <div class="h-1.5 w-1.5 rounded-full bg-gray-100 ring-1 ring-gray-300"></div>
-                            </div>
-                            <div class="flex-auto">
-                                @include('livewire.project-status._status_controls')
-                            </div>
-                        </li>
+                        @can('update', $project)
+                            <li class="relative flex gap-x-4 pt-1">
+                                <div class="relative flex items-center justify-center flex-none w-6 h-6 bg-white">
+                                    <div class="h-1.5 w-1.5 rounded-full bg-gray-100 ring-1 ring-gray-300"></div>
+                                </div>
+                                <div class="flex-auto">
+                                    @include('livewire.project-status._status_controls')
+                                </div>
+                            </li>
+                        @endcan
 
                     </ul>
                 </flux:accordion.content>
@@ -117,6 +123,7 @@
         </flux:accordion>
     </flux:card>
 
+    @can('update', $project)
     {{-- Edit Status Modal --}}
     <x-form-modal name="edit_status_modal" title="Edit Status">
         <form id="edit_status_modal_form" wire:submit="updateStatus" class="space-y-4">
@@ -155,4 +162,5 @@
             <flux:button type="submit" form="edit_status_modal_form" variant="primary">Save Changes</flux:button>
         </x-slot>
     </x-form-modal>
+    @endcan
 </div>

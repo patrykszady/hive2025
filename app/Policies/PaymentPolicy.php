@@ -12,6 +12,11 @@ class PaymentPolicy
 
     public function viewAny(User $user): bool
     {
+        // Client users can view payments for their projects
+        if ($user->is_client_user) {
+            return true;
+        }
+
         if ($user->vendor_role !== 'Admin') {
             return false;
         }
@@ -21,6 +26,12 @@ class PaymentPolicy
     
     public function view(User $user, Payment $payment): bool
     {
+        // Client users can view payments for their projects
+        if ($user->is_client_user) {
+            $clientIds = $user->clients->pluck('id')->toArray();
+            return in_array($payment->project?->client_id, $clientIds);
+        }
+
         if ($user->vendor_role !== 'Admin') {
             return false;
         }

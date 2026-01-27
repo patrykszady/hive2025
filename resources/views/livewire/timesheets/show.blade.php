@@ -51,15 +51,35 @@
                         @foreach($weekly_hours as $timesheet)
                             <flux:table.row :key="$timesheet->id">
                                 <flux:table.cell variant="strong">
-                                    <a wire:navigate.hover href="{{$timesheet->check ? route('checks.show', $timesheet->check->id) : (!$timesheet->check && $timesheet->check_id ? '' : (auth()->user()->vendor_role === 'Admin' ? route('timesheets.payment', $timesheet->user_id) : ''))}}">{{ money($timesheet->amount) }}</a>
+                                    <a
+                                        wire:navigate.hover
+                                        href="{{$timesheet->check ? route('checks.show', $timesheet->check->id) : (!$timesheet->check && $timesheet->check_id ? '' : (auth()->user()->vendor_role === 'Admin' ? route('timesheets.payment', $timesheet->user_id) : ''))}}"
+                                        class="hover:underline"
+                                    >
+                                        {{ money($timesheet->amount) }}
+                                    </a>
                                 </flux:table.cell>
                                 <flux:table.cell>{{ $timesheet->hours}}</flux:table.cell>
                                 <flux:table.cell>
-                                    <a wire:navigate.hover href="{{route('projects.show', $timesheet->project->id)}}">{{ Str::limit($timesheet->project->name, 15) }}</a>
+                                    <a
+                                        wire:navigate.hover
+                                        href="{{route('projects.show', $timesheet->project->id)}}"
+                                        class="hover:underline"
+                                    >
+                                        {{ Str::limit($timesheet->project->name, 15) }}
+                                    </a>
                                 </flux:table.cell>
 
                                 @if($timesheet->check)
-                                    <flux:table.cell>{{ $timesheet->check && $timesheet->check_id ? $timesheet->check->check_type != 'Check' ? $timesheet->check->check_type . ' #' . $timesheet->check->id : $timesheet->check->check_number : '' }}</flux:table.cell>
+                                    <flux:table.cell>
+                                        <a
+                                            wire:navigate.hover
+                                            href="{{ route('checks.show', $timesheet->check->id) }}"
+                                            class="hover:underline"
+                                        >
+                                            {{ $timesheet->check->check_type != 'Check' ? $timesheet->check->check_type . ' #' . $timesheet->check->id : $timesheet->check->check_number }}
+                                        </a>
+                                    </flux:table.cell>
                                 @elseif(!$timesheet->check && $timesheet->check_id && !$timesheet->vendor_id)
                                     <flux:table.cell>Paid By</flux:table.cell>
                                 @else

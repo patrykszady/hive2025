@@ -2,9 +2,9 @@
 
 namespace App\Notifications;
 
-use App\Channels\TwilioChannel;
 use App\Models\Task;
 use App\Models\Vendor;
+use App\Support\SmsChannel;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\Eloquent\Collection;
@@ -41,7 +41,7 @@ class VendorAvailabilitySmsNotification extends Notification implements ShouldQu
      */
     public function via(object $notifiable): array
     {
-        return [TwilioChannel::class];
+        return [SmsChannel::get()];
     }
 
     /**

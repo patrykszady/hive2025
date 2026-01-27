@@ -44,17 +44,24 @@ class ClientsIndex extends Component
     #[Computed]
     public function clients()
     {
-        $clients =
-            Client::when($this->client_name_search, function ($query) {
-                return $query->whereHas('users', function ($query) {
-                    return $query->where('last_name', 'like', "%{$this->client_name_search}%")
-                        ->orWhere('first_name', 'like', "%{$this->client_name_search}%");
-                });
-            })
-                ->orWhere('address', 'like', "%{$this->client_name_search}%")
-                ->orWhere('business_name', 'like', "%{$this->client_name_search}%")
-                ->tap(fn ($query) => $this->sortBy ? $query->orderBy($this->sortBy, $this->sortDirection) : $query)
-                ->paginate(10);
+        $clients = Client::when($this->client_name_search, function ($query) {
+            $search = $this->client_name_search;
+
+            return $query->where(function ($query) use ($search) {
+                $query->where('business_name', 'like', "%{$search}%")
+                    ->orWhere('address', 'like', "%{$search}%")
+                    ->orWhere('address_2', 'like', "%{$search}%")
+                    ->orWhere('city', 'like', "%{$search}%")
+                    ->orWhere('state', 'like', "%{$search}%")
+                    ->orWhere('zip_code', 'like', "%{$search}%")
+                    ->orWhereHas('users', function ($query) use ($search) {
+                        $query->where('last_name', 'like', "%{$search}%")
+                            ->orWhere('first_name', 'like', "%{$search}%");
+                    });
+            });
+        })
+            ->tap(fn ($query) => $this->sortBy ? $query->orderBy($this->sortBy, $this->sortDirection) : $query)
+            ->paginate(10);
 
         return $clients;
     }

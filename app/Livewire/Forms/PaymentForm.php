@@ -37,10 +37,19 @@ class PaymentForm extends Form
         if (isset($component->projects) && !empty($component->projects)) {
             $group = $this->payment->payments; // Collection of grouped payments (parent+children or transaction group)
             $amountsByProject = $group->mapWithKeys(fn($p) => [$p->project_id => $p->amount]);
-            foreach ($component->projects as $pid => $proj) {
-                if (is_array($proj)) {
-                    $component->projects[$pid]['amount'] = $amountsByProject[$pid] ?? ($component->projects[$pid]['amount'] ?? null);
+            foreach ($component->projects as $index => $proj) {
+                if (!is_array($proj)) {
+                    continue;
                 }
+
+                $projectId = $proj['id'] ?? null;
+                if ($projectId === null) {
+                    continue;
+                }
+
+                $rawAmount = $amountsByProject[$projectId]
+                    ?? ($component->projects[$index]['amount'] ?? null);
+                $component->projects[$index]['amount'] = $this->formatAmount($rawAmount);
             }
         }
     }
@@ -51,7 +60,7 @@ class PaymentForm extends Form
         $projects = collect($this->component->projects ?? [])
             ->filter(function ($p) {
                 if (!is_array($p)) { return false; }
-                return isset($p['amount']) && $p['amount'] !== null && $p['amount'] !== '' && (float)$p['amount'] != 0.0;
+                return $this->parseAmount($p['amount'] ?? null) !== 0.0;
             })
             ->values();
 
@@ -62,8 +71,9 @@ class PaymentForm extends Form
         $parentPaymentId = null;
         $lastPayment = null;
         foreach ($projects as $index => $project) {
+            $amount = $this->parseAmount($project['amount'] ?? null);
             $payload = [
-                'amount' => (float) $project['amount'],
+                'amount' => $amount,
                 'project_id' => $project['id'],
                 'date' => $this->date,
                 'reference' => (string) $this->invoice,
@@ -96,7 +106,7 @@ class PaymentForm extends Form
         // Gather selected projects with an amount
         $component = $this->component;
         $selected = collect($component->projects ?? [])
-            ->filter(fn($p) => is_array($p) && isset($p['amount']) && $p['amount'] !== null && $p['amount'] !== '' && (float)$p['amount'] != 0.0)
+            ->filter(fn($p) => is_array($p) && $this->parseAmount($p['amount'] ?? null) !== 0.0)
             ->unique('id')
             ->values();
         $selectedProjectIds = $selected->pluck('id')->all();
@@ -104,8 +114,9 @@ class PaymentForm extends Form
         // If switching to a single project, just update this payment record in place.
         if (count($selectedProjectIds) === 1) {
             $proj = $selected->first();
+            $amount = $this->parseAmount($proj['amount'] ?? null);
             $this->payment->fill([
-                'amount' => (float) $proj['amount'],
+                'amount' => $amount,
                 'project_id' => $proj['id'],
                 'date' => $this->date,
                 'reference' => (string) $this->invoice,
@@ -118,8 +129,9 @@ class PaymentForm extends Form
 
         // Update existing or create new payments for selected projects
         foreach ($selected as $proj) {
+            $amount = $this->parseAmount($proj['amount'] ?? null);
             $payload = [
-                'amount' => (float) $proj['amount'],
+                'amount' => $amount,
                 'project_id' => $proj['id'],
                 'date' => $this->date,
                 'reference' => (string) $this->invoice,
@@ -160,5 +172,28 @@ class PaymentForm extends Form
 
         // Return the parent (or current) payment fresh for redirection context
         return Payment::find($rootId) ?? $this->payment->fresh();
+    }
+
+    private function parseAmount($value): float
+    {
+        if ($value === null || $value === '') {
+            return 0.0;
+        }
+
+        $clean = preg_replace('/[^0-9.\-]/', '', (string) $value);
+        if ($clean === null || $clean === '' || $clean === '-' || $clean === '.') {
+            return 0.0;
+        }
+
+        return (float) $clean;
+    }
+
+    private function formatAmount($value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return number_format((float) $value, 2, '.', '');
     }
 }

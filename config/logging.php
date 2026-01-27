@@ -114,6 +114,13 @@ return [
             'days' => 30,
         ],
 
+        'telnyx' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/telnyx.log'),
+            'level' => 'debug',
+            'days' => 30,
+        ],
+
         'receipt_processing' => [
             'driver' => 'daily',
             'path' => storage_path('logs/receipt_processing.log'),

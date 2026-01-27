@@ -18,7 +18,7 @@
                 @foreach($receipt->receipt_items['items'] as $index => $line_item)
                     <flux:table.row 
                         wire:key="receipt-desc-{{ $index }}"
-                        class="transition-colors duration-150 !border-none {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) === true)) ? 'bg-blue-50 dark:bg-blue-900/10 print:!bg-transparent' : '' }}"
+                        class="transition-colors duration-150 !border-none {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) === true)) ? 'bg-indigo-50 dark:bg-indigo-900/10 print:!bg-transparent' : '' }}"
                     >
                         <flux:table.cell colspan="4" class="!pl-5 !pr-5 !pb-0" title="{{$line_item['Description'] ?? ''}}">
                             <div class="truncate w-full transition-opacity transition-colors duration-150 {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) !== true)) ? 'text-gray-300 line-through opacity-50' : '' }}">
@@ -29,7 +29,7 @@
                     
                     <flux:table.row 
                         wire:key="receipt-data-{{ $index }}"
-                        class="transition-colors duration-150 !py-0 {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) === true)) ? 'bg-blue-50 dark:bg-blue-900/10 print:!bg-transparent' : '' }} {{ $loop->last ? '' : 'border-b border-zinc-800/15 dark:border-white/20' }}">
+                        class="transition-colors duration-150 !py-0 {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) === true)) ? 'bg-indigo-50 dark:bg-indigo-900/10 print:!bg-transparent' : '' }} {{ $loop->last ? '' : 'border-b border-zinc-800/15 dark:border-white/20' }}">
                         <flux:table.cell class="!pl-5" align="end">
                             <span class="transition-opacity transition-colors duration-150 {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) !== true)) ? 'text-gray-300 line-through opacity-50' : '' }}">
                                 @if(isset($receipt->expense->vendor) && $receipt->expense->vendor->sku_search_url)

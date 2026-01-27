@@ -47,14 +47,20 @@
                 <flux:table.rows>
                     @foreach ($this->payments as $payment)
                         <flux:table.row :key="$payment->id">
-                            <flux:table.cell
-                                wire:navigate.hover
-                                href="{{route('payments.show', $payment->id)}}"
-                                variant="strong"
-                                class="cursor-pointer"
-                                >
-                                {{ money($payment->amount) }}
-                            </flux:table.cell>
+                            @if(auth()->user()->is_client_user)
+                                <flux:table.cell variant="strong">
+                                    {{ money($payment->amount) }}
+                                </flux:table.cell>
+                            @else
+                                <flux:table.cell
+                                    wire:navigate.hover
+                                    href="{{route('payments.show', $payment->id)}}"
+                                    variant="strong"
+                                    class="cursor-pointer"
+                                    >
+                                    {{ money($payment->amount) }}
+                                </flux:table.cell>
+                            @endif
                             <flux:table.cell>{{ $payment->date->format('m/d/Y') }}</flux:table.cell>
                             @if(!in_array($view, ['projects.show', 'estimate.pdf']))
                                 <flux:table.cell

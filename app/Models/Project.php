@@ -372,8 +372,17 @@ class Project extends Model
     {
         return Attribute::make(
             get: function ($value, array $attributes) {
-                $expenses_sum = $this->expenses()->where('reimbursment', 'Client')->sum('amount');
-                $splits_sum = $this->expenseSplits()->where('reimbursment', 'Client')->sum('amount');
+                $expenses_sum = \App\Models\Expense::query()
+                    ->withoutGlobalScope(\App\Scopes\ExpenseScope::class)
+                    ->where('project_id', $this->id)
+                    ->where('reimbursment', 'Client')
+                    ->sum('amount');
+
+                $splits_sum = \App\Models\ExpenseSplits::query()
+                    ->withoutGlobalScope(\App\Scopes\ExpenseSplitsScope::class)
+                    ->where('project_id', $this->id)
+                    ->where('reimbursment', 'Client')
+                    ->sum('amount');
 
                 $finances = [];
                 $bid_estimate_total = (float) $this->bids()->where('type', 1)->sum('amount');

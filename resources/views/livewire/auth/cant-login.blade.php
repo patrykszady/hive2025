@@ -68,7 +68,7 @@
                                 type="button" 
                                 wire:click="resendVerificationCode"
                                 x-show="canResend"
-                                class="text-sm text-blue-600 hover:text-blue-500"
+                                class="text-sm text-indigo-600 hover:text-indigo-500"
                             >
                                 Didn't receive code? Send again
                             </button>
@@ -114,7 +114,7 @@ x
     <div class="flex-1 p-4 max-lg:hidden">
         <div class="bg-gray-50 rounded-lg h-full w-full flex flex-col items-center justify-center p-16 text-center">
             <div class="mb-6">
-                <flux:icon icon="shield-check" class="w-16 h-16 text-blue-600 mx-auto" />
+                <flux:icon icon="shield-check" class="w-16 h-16 text-indigo-600 mx-auto" />
             </div>
             
             <flux:heading size="lg" class="mb-4">Secure Account Recovery</flux:heading>

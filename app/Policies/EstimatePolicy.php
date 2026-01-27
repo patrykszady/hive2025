@@ -13,6 +13,11 @@ class EstimatePolicy
      */
     public function viewAny(User $user): bool
     {
+        // Client users can view estimates for their projects
+        if ($user->is_client_user) {
+            return true;
+        }
+
         // First check if user is Admin
         if ($user->vendor_role !== 'Admin') {
             return false;
@@ -31,6 +36,14 @@ class EstimatePolicy
      */
     public function view(User $user, Estimate $estimate): bool
     {
+        // Client users can view estimates for their client projects
+        if ($user->is_client_user) {
+            $clientId = $estimate->project?->client?->id;
+
+            return $clientId !== null
+                && $user->clients()->whereKey($clientId)->exists();
+        }
+
         // First check if user is Admin
         if ($user->vendor_role !== 'Admin') {
             return false;

@@ -23,14 +23,14 @@
     --color-zinc-950: var(--color-slate-950);
 }
 @theme {
-    --color-accent: var(--color-blue-500);
-    --color-accent-content: var(--color-blue-600);
+    --color-accent: var(--color-indigo-500);
+    --color-accent-content: var(--color-indigo-600);
     --color-accent-foreground: var(--color-white);
 }
 @layer theme {
     .dark {
-        --color-accent: var(--color-blue-500);
-        --color-accent-content: var(--color-blue-400);  /* Using blue-400 */
+        --color-accent: var(--color-indigo-500);
+        --color-accent-content: var(--color-indigo-400);
         --color-accent-foreground: var(--color-white);
     }
 }
@@ -40,6 +40,42 @@
   [role="button"]:not(:disabled) {
     cursor: pointer;
   }
+}
+
+/* Site-wide indigo focus styling for inputs - keep zinc default, indigo on focus */
+[data-flux-control]:focus {
+  border-color: var(--color-indigo-500) !important;
+  outline-color: var(--color-indigo-500) !important;
+  --tw-ring-color: var(--color-indigo-500) !important;
+}
+
+.dark [data-flux-control]:focus {
+  border-color: var(--color-indigo-500) !important;
+  outline-color: var(--color-indigo-500) !important;
+  --tw-ring-color: var(--color-indigo-500) !important;
+}
+
+/* Input group focus styling */
+[data-flux-input-group]:focus-within [data-flux-input-group-prefix],
+[data-flux-input-group]:focus-within [data-flux-input-group-suffix] {
+  border-color: var(--color-indigo-500) !important;
+}
+
+.dark [data-flux-input-group]:focus-within [data-flux-input-group-prefix],
+.dark [data-flux-input-group]:focus-within [data-flux-input-group-suffix] {
+  border-color: var(--color-indigo-500) !important;
+}
+
+/* Remove number input spinners globally */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
 }
 
 /* Ensure sidebar stays fixed while main content scrolls */

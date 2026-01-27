@@ -11,17 +11,19 @@
 
             <flux:separator variant="subtle" />
 
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-{{ auth()->user()->is_client_user ? '2' : '3' }} gap-4">
                 <flux:input wire:model.live="project_name_search" label="Project" icon="magnifying-glass" placeholder="Search projects..." />
 
-                <flux:select wire:model.live="client_id" label="Client" variant="listbox" searchable placeholder="All Clients...">
-                    <x-slot name="search">
-                        <flux:select.search placeholder="Search..." />
-                    </x-slot>
-                    @foreach ($clients as $client)
-                        <flux:select.option value="{{$client->id}}">{{ $client->name }}</flux:select.option>
-                    @endforeach
-                </flux:select>
+                @if(!auth()->user()->is_client_user)
+                    <flux:select wire:model.live="client_id" label="Client" variant="listbox" searchable placeholder="All Clients...">
+                        <x-slot name="search">
+                            <flux:select.search placeholder="Search..." />
+                        </x-slot>
+                        @foreach ($clients as $client)
+                            <flux:select.option value="{{$client->id}}">{{ $client->name }}</flux:select.option>
+                        @endforeach
+                    </flux:select>
+                @endif
 
                 <flux:select variant="listbox" label="Status" multiple placeholder="Choose status..." wire:model.live="project_status_title">
                     @foreach($projectStatuses as $status)
@@ -54,7 +56,7 @@
                     @else
                         {{-- Original order: Address, Client, Name, Status --}}
                         <flux:table.column class="w-[30%] min-w-0">Address</flux:table.column>
-                        @if($view != 'clients.index')
+                        @if($view != 'clients.index' && !auth()->user()->is_client_user)
                             <flux:table.column class="w-[25%] min-w-0">Client</flux:table.column>
                         @endif
                         <flux:table.column class="w-[25%] min-w-0">Name</flux:table.column>
@@ -87,7 +89,7 @@
                                     >
                                     <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->address }}">{{ $project->short_address }}</div>
                                 </flux:table.cell>
-                                @if($view != 'clients.index')
+                                @if($view != 'clients.index' && !auth()->user()->is_client_user)
                                     <flux:table.cell
                                         wire:navigate.hover
                                         href="{{route('clients.show', $project->client->id)}}"
@@ -114,6 +116,7 @@
     </flux:card>
 
     {{-- EMAIL TRACKING CARD --}}
+    @if(!auth()->user()->is_client_user)
     <flux:card class="space-y-2">
         <div class="flex justify-between items-center">
             <flux:heading size="lg">Email Tracking</flux:heading>
@@ -162,7 +165,7 @@
                             </flux:table.cell>
                             <flux:table.cell>
                                 @if($event->project)
-                                    <a wire:navigate.hover href="{{ route('projects.show', $event->project_id) }}" class="text-blue-600 hover:underline">
+                                    <a wire:navigate.hover href="{{ route('projects.show', $event->project_id) }}" class="text-indigo-600 hover:underline">
                                         {{ $event->project->project_name }}
                                     </a>
                                 @else
@@ -218,4 +221,5 @@
             </flux:table>
         </div>
     </flux:card>
+    @endif
 </div>

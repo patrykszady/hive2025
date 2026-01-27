@@ -7,6 +7,9 @@
     <body class="min-h-screen">
         <flux:main>
             <flux:card>
+                @php
+                    $totalAmount = $expenses->sum(fn ($expense) => $expense->amount ?? $expense->selectedSplit?->amount ?? 0);
+                @endphp
                 <flux:table>
                     <flux:table.columns>
                         <flux:table.column>Date</flux:table.column>
@@ -16,10 +19,13 @@
 
                     <flux:table.rows>
                         @foreach($expenses as $key => $expense)
+                            @php
+                                $rowAmount = $expense->amount ?? $expense->selectedSplit?->amount ?? 0;
+                            @endphp
                             <flux:table.row>
-                                <flux:table.cell>{{$expense->date->format('m/d/Y')}}</flux:table.cell>
+                                <flux:table.cell>{{ $expense->date?->format('m/d/Y') ?? '—' }}</flux:table.cell>
                                 <flux:table.cell>{{$expense->business_name}}</flux:table.cell>
-                                <flux:table.cell variant="strong">{{money($expense->amount)}}</flux:table.cell>
+                                <flux:table.cell variant="strong">{{ money($rowAmount) }}</flux:table.cell>
                             </flux:table.row>
                         @endforeach
                     </flux:table.rows>
@@ -27,7 +33,7 @@
                     <flux:table.row>
                         <flux:table.cell></flux:table.cell>
                         <flux:table.cell variant="strong" class="text-right">TOTAL</flux:table.cell>
-                        <flux:table.cell variant="strong">{{money($expenses->sum('amount'))}}</flux:table.cell>
+                        <flux:table.cell variant="strong">{{ money($totalAmount) }}</flux:table.cell>
                     </flux:table.row>
                 </flux:table>
             </flux:card>
@@ -59,7 +65,7 @@
                                     </span>
                                     <br>
                                     <span class="text-gray-700 text-sm">
-                                        {{money($expense->amount)}}
+                                        {{ money($expense->amount ?? $expense->selectedSplit?->amount ?? 0) }}
                                     </span>
                                 </li>
 
@@ -69,7 +75,7 @@
                                     </span>
                                     <br>
                                     <span class="text-gray-700 text-sm">
-                                        {{$expense->date->format('m/d/Y')}}
+                                        {{ $expense->date?->format('m/d/Y') ?? '—' }}
                                     </span>
                                 </li>
 

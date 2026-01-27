@@ -14,9 +14,16 @@ class BidScope implements Scope
         if (auth()->guest()) {
 
         } else {
+            $user = auth()->user();
+
+            // Client users or users without a vendor should see all bids for the project
+            if ($user->is_client_user || !$user->vendor) {
+                return;
+            }
+
             $project_ids = Project::pluck('id')->toArray();
 
-            $builder->whereIn('project_id', $project_ids)->where('vendor_id', auth()->user()->vendor->id);
+            $builder->whereIn('project_id', $project_ids)->where('vendor_id', $user->vendor->id);
         }
     }
 }

@@ -4,7 +4,7 @@
         class="group shadow hover:shadow-md p-3 !border-2 
         {{ $isBlocking 
             ? '!bg-red-50/50 hover:!bg-red-100/70 !border-dashed !border-red-500' 
-            : 'bg-blue-50/50 hover:bg-blue-100/70 !border-blue-500' 
+            : 'bg-indigo-50/50 hover:bg-indigo-100/70 !border-indigo-500' 
         }}"
     >
         <!-- Card Content -->
@@ -12,7 +12,7 @@
             <!-- Main Content -->
             <div class="flex-grow min-w-0">
                 <!-- Title -->
-                <flux:heading size="sm" class="{{ $isBlocking ? '!text-red-800' : 'text-blue-700' }}">
+                <flux:heading size="sm" class="{{ $isBlocking ? '!text-red-800' : 'text-indigo-700' }}">
                     {{ $task->title }}
                 </flux:heading>
                 

@@ -9,6 +9,8 @@ use App\Models\EstimateLineItem;
 use App\Models\EstimateSection;
 use App\Models\Bid;
 use App\Livewire\Estimates\EstimatesIndex;
+use App\Support\ProjectDocumentGenerator;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 use Flux;
 
@@ -62,6 +64,25 @@ class EstimateShow extends Component
         } else {
             $this->estimate_refresh();
         }
+    }
+
+    public function print_reimbursements(): StreamedResponse
+    {
+        $project = $this->estimate->project;
+
+        if ($project === null) {
+            abort(404);
+        }
+
+        $this->authorize('view', $project);
+
+        $document = ProjectDocumentGenerator::generateReimbursements($project);
+
+        return response()->streamDownload(function () use ($document) {
+            echo $document['binary'];
+        }, $document['filename'], [
+            'Content-Type' => 'application/pdf',
+        ]);
     }
 
     protected function loadTrashedLineItems(): void

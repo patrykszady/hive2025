@@ -15,6 +15,11 @@ class TimesheetScope implements Scope
         } else {
             $user = auth()->user();
 
+            if ($user->is_client_user || ! $user->vendor) {
+                $builder->whereRaw('1 = 0');
+                return;
+            }
+
             //if Admin..all Expenses ... if Member...only expenses the User Paid For....?
             if ($user->vendor_role == 'Admin') {
                 $builder->where('vendor_id', $user->vendor->id);

@@ -10,11 +10,11 @@
         <flux:separator variant="subtle" />
 
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <flux:input wire:model.live="client_name_search" label="Client Name" icon="magnifying-glass" placeholder="Search Clients" />
+            <flux:input wire:model.live.debounce.500ms="client_name_search" label="Client or Address" icon="magnifying-glass" placeholder="Search by name or address" />
         </div>
     </flux:card>
 
-    <flux:card>
+    <flux:card wire:loading.class="opacity-50 pointer-events-none">
         <flux:heading size="lg">Clients</flux:heading>
 
         <div>

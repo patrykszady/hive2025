@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Projects;
 
+use App\Livewire\Concerns\HasToJsonMethod;
 use App\Models\Project;
 use App\Models\Task;
 use App\Models\User;
@@ -12,6 +13,8 @@ use Livewire\Component;
 
 class UpcomingTasks extends Component
 {
+    use HasToJsonMethod;
+
     protected $listeners = ['refreshComponent' => '$refresh'];
 
     public Project $project;

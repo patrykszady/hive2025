@@ -8,6 +8,7 @@ use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\PushSubscriptionController;
 use App\Http\Controllers\PlaidTransactionSyncController;
 use App\Http\Controllers\Api\PlaidWebhookController;
+use App\Http\Controllers\Api\TelnyxWebhookController;
 use App\Http\Controllers\VendorDocsController;
 use App\Http\Controllers\Api\EmailTrackingController;
 use App\Http\Controllers\Api\MailtrapWebhookController;
@@ -194,6 +195,9 @@ Route::get('receipts/amazon_orders_api', [ReceiptController::class, 'amazon_orde
 
 // Plaid webhooks (no auth required - Plaid sends these directly)
 Route::post('webhooks/plaid', [PlaidWebhookController::class, 'handle'])->name('webhooks.plaid');
+
+// Telnyx webhooks (SMS delivery status, inbound messages)
+Route::post('webhooks/telnyx/messaging', [TelnyxWebhookController::class, 'handle'])->name('webhooks.telnyx.messaging');
 
 // Mailtrap webhooks (no auth required - token is validated in the URL)
 Route::post('webhooks/mailtrap/{token}', [MailtrapWebhookController::class, 'handle'])->name('webhooks.mailtrap');

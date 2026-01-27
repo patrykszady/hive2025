@@ -2,7 +2,7 @@
 
 namespace App\Notifications;
 
-use App\Channels\TwilioChannel;
+use App\Support\SmsChannel;
 use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -51,7 +51,7 @@ class TeamTaskSmsNotification extends Notification implements ShouldQueue
      */
     public function via($notifiable)
     {
-        return [TwilioChannel::class];
+        return [SmsChannel::get()];
     }
 
     /**

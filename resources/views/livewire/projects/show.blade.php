@@ -73,7 +73,9 @@
                 </x-slot:footer>
             </x-details.card>
 
-            <livewire:projects.upcoming-tasks :project="$project" lazy />
+            @if(in_array($project->latestStatus?->status_code, [4, 5, 6, 8, 11]))
+                <livewire:projects.upcoming-tasks :project="$project" lazy />
+            @endif
 
             {{-- PROJECT TIMELINE --}}
             {{-- <div class="h-180">
@@ -88,28 +90,29 @@
                     <livewire:estimates.estimates-index :project="$project" :view="'projects.show'" lazy />
                 @endcan
 
-                {{-- EMAIL TRACKING --}}
-                <div x-data="{ loaded: false }" x-intersect.once="$wire.loadEmailTracking(); loaded = true">
-                    @if(!$showEmailTracking)
-                        <flux:card class="space-y-4 animate-pulse">
-                            <div class="h-6 bg-zinc-300 dark:bg-zinc-700 rounded w-1/3"></div>
-                            <div class="h-px bg-zinc-200 dark:bg-zinc-700"></div>
-                            <div class="space-y-3">
-                                @for ($i = 0; $i < 3; $i++)
-                                    <div class="h-12 bg-zinc-200 dark:bg-zinc-800 rounded"></div>
-                                @endfor
+                @can('update', $project)
+                    {{-- EMAIL TRACKING --}}
+                    <div x-data="{ loaded: false }" x-intersect.once="$wire.loadEmailTracking(); loaded = true">
+                        @if(!$showEmailTracking)
+                            <flux:card class="space-y-4 animate-pulse">
+                                <div class="h-6 bg-zinc-300 dark:bg-zinc-700 rounded w-1/3"></div>
+                                <div class="h-px bg-zinc-200 dark:bg-zinc-700"></div>
+                                <div class="space-y-3">
+                                    @for ($i = 0; $i < 3; $i++)
+                                        <div class="h-12 bg-zinc-200 dark:bg-zinc-800 rounded"></div>
+                                    @endfor
+                                </div>
+                            </flux:card>
+                        @elseif($this->emailTrackingEvents->count() > 0)
+                            <flux:card class="space-y-2">
+                            <div class="flex justify-between items-center">
+                                <flux:heading size="lg">Email Tracking</flux:heading>
                             </div>
-                        </flux:card>
-                    @elseif($this->emailTrackingEvents->count() > 0)
-                        <flux:card class="space-y-2">
-                        <div class="flex justify-between items-center">
-                            <flux:heading size="lg">Email Tracking</flux:heading>
-                        </div>
 
-                        <flux:separator variant="subtle" />
+                            <flux:separator variant="subtle" />
 
-                        <div class="-mx-6 overflow-hidden">
-                            <flux:table class="[:where(&)]:p-0 [:where(&)]:space-y-0 [&_th]:!px-6 [&_td]:!px-6 w-full">
+                            <div class="-mx-6 overflow-hidden">
+                                <flux:table class="[:where(&)]:p-0 [:where(&)]:space-y-0 [&_th]:!px-6 [&_td]:!px-6 w-full">
                                 <flux:table.columns>
                                     <flux:table.column>Event</flux:table.column>
                                     <flux:table.column>Template</flux:table.column>
@@ -254,63 +257,83 @@
                                     @endforeach
                                 </flux:table.rows>
                             </flux:table>
-                        </div>
-                    </flux:card>
-                    @endif
-                </div>
-
-                {{-- PROEJCT LIFESPAN --}}
-                <livewire:project-status.status-create :project="$project" lazy />
-            </div>
-
-            <div class="col-span-4 space-y-4 lg:col-span-2">
-                <livewire:expenses.expense-index :project_id="$project->id" :view="'projects.show'" lazy />
-            </div>
-
-            <div class="col-span-4 space-y-4 lg:col-span-2 lg:col-start-3">
-                @if(in_array($this->project->latestStatus->title, ['Active', 'Complete', 'Service Call', 'VIEW ONLY']))
-                    {{-- PROJECT PAYMENTS --}}
-                    <livewire:payments.payments-index :project="$project" :view="'projects.show'" lazy />
-
-                    {{-- PROJECT FINANCIALS --}}
-                    <livewire:projects.project-finances :project="$project" lazy />
-
-                    {{-- PROJECT DISTRIBUTIONS --}}
-                    <div x-data="{ loaded: false }" x-intersect.once="$wire.loadDistributions(); loaded = true">
-                        @if(!$showDistributions)
-                            <flux:card class="space-y-4 animate-pulse">
-                                <div class="h-6 bg-zinc-300 dark:bg-zinc-700 rounded w-1/2"></div>
-                                <div class="h-px bg-zinc-200 dark:bg-zinc-700"></div>
-                                <div class="space-y-2">
-                                    @for ($i = 0; $i < 2; $i++)
-                                        <div class="h-8 bg-zinc-200 dark:bg-zinc-800 rounded"></div>
-                                    @endfor
-                                </div>
-                            </flux:card>
-                        @elseif($this->project->distributions->isNotEmpty())
-                            <flux:card class="space-y-2">
-                            {{-- HEADING --}}
-                            <div class="flex justify-between">
-                                <flux:heading size="lg" class="mb-0">Project Distributions</flux:heading>
                             </div>
-
-                            <flux:separator variant="subtle" />
-
-                            {{-- DETAILS --}}
-                            <x-lists.details_list>
-                                @foreach($this->project->distributions as $distribution)
-                                    <x-lists.details_item title="{{$distribution->name}}" detail="{{money($distribution->pivot->amount) . ' | ' . $distribution->pivot->percent . '%'}}" href="{{route('distributions.show', $distribution->id)}}" />
-                                @endforeach
-                            </x-lists.details_list>
                         </flux:card>
                         @endif
                     </div>
+                @endcan
 
-
-                @endif
+                {{-- PROJECT LIFESPAN --}}
+                <livewire:project-status.status-create :project="$project" lazy />
             </div>
+
+            @can('update', $project)
+                <div class="col-span-4 space-y-4 lg:col-span-2">
+                    <livewire:expenses.expense-index :project_id="$project->id" :view="'projects.show'" lazy />
+                </div>
+            @endcan
+
+            @can('update', $project)
+                <div class="col-span-4 space-y-4 lg:col-span-2 lg:col-start-3">
+                    @if(in_array($this->project->latestStatus->title, ['Active', 'Complete', 'Service Call', 'VIEW ONLY']))
+                        {{-- PROJECT PAYMENTS --}}
+                        <livewire:payments.payments-index :project="$project" :view="'projects.show'" lazy />
+
+                        {{-- PROJECT FINANCIALS --}}
+                        <livewire:projects.project-finances :project="$project" lazy />
+
+                        {{-- PROJECT DISTRIBUTIONS --}}
+                        <div x-data="{ loaded: false }" x-intersect.once="$wire.loadDistributions(); loaded = true">
+                            @if(!$showDistributions)
+                                <flux:card class="space-y-4 animate-pulse">
+                                    <div class="h-6 bg-zinc-300 dark:bg-zinc-700 rounded w-1/2"></div>
+                                    <div class="h-px bg-zinc-200 dark:bg-zinc-700"></div>
+                                    <div class="space-y-2">
+                                        @for ($i = 0; $i < 2; $i++)
+                                            <div class="h-8 bg-zinc-200 dark:bg-zinc-800 rounded"></div>
+                                        @endfor
+                                    </div>
+                                </flux:card>
+                            @elseif($this->project->distributions->isNotEmpty())
+                                <flux:card class="space-y-2">
+                                {{-- HEADING --}}
+                                <div class="flex justify-between">
+                                    <flux:heading size="lg" class="mb-0">Project Distributions</flux:heading>
+                                </div>
+
+                                <flux:separator variant="subtle" />
+
+                                {{-- DETAILS --}}
+                                <x-lists.details_list>
+                                    @foreach($this->project->distributions as $distribution)
+                                        <x-lists.details_item title="{{$distribution->name}}" detail="{{money($distribution->pivot->amount) . ' | ' . $distribution->pivot->percent . '%'}}" href="{{route('distributions.show', $distribution->id)}}" />
+                                    @endforeach
+                                </x-lists.details_list>
+                            </flux:card>
+                            @endif
+                        </div>
+                    @endif
+                </div>
+            @endcan
+            @cannot('update', $project)
+                {{-- CLIENT USER: Payments & Simplified Finances --}}
+                <div class="col-span-4 space-y-4 lg:col-span-2 lg:col-start-3">
+                    @if(in_array($this->project->latestStatus->title, ['Active', 'Complete', 'Service Call', 'VIEW ONLY']))
+                        {{-- CLIENT PAYMENTS (read-only) --}}
+                        <livewire:payments.payments-index :project="$project" :view="'estimate.pdf'" lazy />
+
+                        {{-- CLIENT-FRIENDLY PROJECT FINANCES --}}
+                        <x-client-finances
+                            :project="$this->project"
+                            :showReimbursementDownload="true"
+                        />
+                    @endif
+                </div>
+            @endcannot
 		@endcan
     </div>
 
-    <livewire:tasks.task-create />
+    @can('update', $project)
+        <livewire:tasks.task-create />
+    @endcan
 </div>

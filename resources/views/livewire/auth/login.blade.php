@@ -171,8 +171,10 @@
                                 variant="outline"
                                 class="w-full"
                             >
-                                <flux:icon.envelope class="w-5 h-5 mr-2" />
-                                Use one-time code
+                                <span class="inline-flex items-center justify-center gap-2">
+                                    <flux:icon.envelope class="w-5 h-5" />
+                                    <span>Use one-time code</span>
+                                </span>
                             </flux:button>
                         @endif
                     </div>
@@ -183,7 +185,7 @@
 
     <!-- Right side - Testimonial -->
     <div class="flex-1 p-4 max-lg:hidden">
-        <div class="text-white relative rounded-lg h-full w-full bg-blue-900 flex flex-col items-start justify-end p-16">
+        <div class="text-white relative rounded-lg h-full w-full bg-indigo-900 flex flex-col items-start justify-end p-16">
             <div class="flex gap-2 mb-4">
                 <flux:icon.star variant="solid" />
                 <flux:icon.star variant="solid" />
