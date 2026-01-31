@@ -87,13 +87,25 @@
                                 @endif
 
                                 <flux:table.cell>
-                                    <flux:badge 
-                                        size="sm" 
-                                        :color="$timesheet->status == 'Paid' ? 'green' : ($timesheet->status == 'Not Paid' ? 'red' : 'yellow')" 
-                                        inset="top bottom"
-                                    >
-                                        {{ $timesheet->status }}
-                                    </flux:badge>
+                                    @if($timesheet->status == 'Pay' && auth()->user()->vendor_role === 'Admin')
+                                        <a wire:navigate.hover href="{{ route('timesheets.payment', $timesheet->user_id) }}">
+                                            <flux:badge 
+                                                size="sm" 
+                                                color="yellow" 
+                                                inset="top bottom"
+                                            >
+                                                {{ $timesheet->status }}
+                                            </flux:badge>
+                                        </a>
+                                    @else
+                                        <flux:badge 
+                                            size="sm" 
+                                            :color="$timesheet->status == 'Paid' ? 'green' : ($timesheet->status == 'Not Paid' ? 'red' : 'yellow')" 
+                                            inset="top bottom"
+                                        >
+                                            {{ $timesheet->status }}
+                                        </flux:badge>
+                                    @endif
                                 </flux:table.cell>
                             </flux:table.row>
                         @endforeach

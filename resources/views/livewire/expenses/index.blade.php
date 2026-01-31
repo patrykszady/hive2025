@@ -213,7 +213,7 @@
             init() {
                 window.addEventListener('remove-transaction-row', (event) => {
                     const transactionId = event.detail.id;
-                    const row = document.querySelector(`[wire\\\\:key='${transactionId}']`);
+                    const row = document.querySelector(`[data-transaction-row='${transactionId}']`);
                     if (row) {
                         row.style.transition = 'opacity 0.3s ease-out';
                         row.style.opacity = '0';
@@ -239,7 +239,7 @@
 
                         <flux:table.rows>
                             @foreach ($this->transactions as $transaction)
-                                <flux:table.row :key="$transaction->id">
+                                <flux:table.row :key="$transaction->id" data-transaction-row="{{ $transaction->id }}">
                                     <flux:table.cell
                                         wire:click="$dispatchTo('expenses.expense-create', 'createExpenseFromTransaction', { transaction: {{$transaction->id}}})"
                                         variant="strong"

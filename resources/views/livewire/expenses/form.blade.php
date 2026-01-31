@@ -47,16 +47,16 @@
             </flux:select>
             
             @if($this->shouldShowMerchantName)
-                <flux:description><i class="text-indigo-800">{{$form->merchant_name}}</i></flux:description>
+                <flux:description><i class="text-sky-800">{{$form->merchant_name}}</i></flux:description>
             @endif
 
             @if($expense || $form->transaction)
                 @if((is_null($expense->vendor_id) AND isset($form->transaction->plaid_merchant_description)) OR isset($expense->note))
                     @if(isset($form->transaction->plaid_merchant_name))
-                        <flux:description><i class="text-indigo-800">Name: {{$form->transaction->plaid_merchant_name}}</i></flux:description>
+                        <flux:description><i class="text-sky-800">Name: {{$form->transaction->plaid_merchant_name}}</i></flux:description>
                     @endif
                     @if(isset($form->transaction->plaid_merchant_description) && $form->transaction->plaid_merchant_description != $form->transaction->plaid_merchant_name)
-                        <flux:description><i class="text-indigo-800">Desc: {{$form->transaction->plaid_merchant_description}}</i></flux:description>
+                        <flux:description><i class="text-sky-800">Desc: {{$form->transaction->plaid_merchant_description}}</i></flux:description>
                     @endif
                 @endif
             @endif
@@ -105,10 +105,10 @@
 
                     @if($expense)
                         @if($expense->note)
-                            <flux:description><i class="text-indigo-800">{{$expense->note}}</i></flux:description>
+                            <flux:description><i class="text-sky-800">{{$expense->note}}</i></flux:description>
                         @endif
                         @if($this->notesSummary)
-                            <flux:description><i class="text-indigo-800">{{$this->notesSummary}}</i></flux:description>
+                            <flux:description><i class="text-sky-800">{{$this->notesSummary}}</i></flux:description>
                         @endif
                     @endif
                 </div>

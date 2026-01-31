@@ -26,6 +26,7 @@
                     <flux:calendar
                         wire:model.live="selected_date"
                         wire:loading.class.delay="opacity-50"
+                        min="{{$this->minDate}}"
                         ::max="$store.timezone.today"
                         start-day="1"
                         unavailable="{{$this->days}}"
