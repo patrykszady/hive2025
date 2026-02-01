@@ -231,7 +231,14 @@ Schedule::call(function () {
   ->onOneServer();
 
 Schedule::call(function () {
-  app(\App\Http\Controllers\ExpenseAutoMatchController::class)->runNoProjectExpenseAutoMatch();
+  app(\App\Http\Controllers\ExpenseAutoMatchController::class)->runNoProjectExpenseAutoMatch(
+      null,
+      null,
+      null,
+      false,
+      true,
+      true,
+  );
 })->everyTenMinutes()
   ->name('match-expense-po-to-project')
   ->withoutOverlapping()

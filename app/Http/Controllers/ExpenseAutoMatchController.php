@@ -937,8 +937,12 @@ class ExpenseAutoMatchController extends Controller
         $length = mb_strlen($normalizedFirst);
 
         // Too-short POs (e.g. "A", "PP") are almost always noise.
-        // Keep 3-digit numeric POs (e.g. "901"), which are common in this dataset.
-        if ($length <= 2) {
+        // Keep 2- or 3-digit numeric POs (e.g. "17", "901"), which are common in this dataset.
+        if ($length <= 1) {
+            return null;
+        }
+
+        if ($length === 2 && ! preg_match('/^\d{2}$/', $normalizedFirst)) {
             return null;
         }
 

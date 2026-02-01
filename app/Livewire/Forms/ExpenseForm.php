@@ -100,10 +100,11 @@ class ExpenseForm extends Form
         $this->vendor_id = $expense->vendor_id;
 
         // If distribution is set, encode project selector as "D:{id}"
-        if (!empty($expense->distribution_id)) {
+        if (! empty($expense->distribution_id)) {
             $this->project_id = 'D:' . $expense->distribution_id;
         } else {
-            $this->project_id = $expense->project_id;
+            $projectId = (int) ($expense->project_id ?? 0);
+            $this->project_id = $projectId > 0 ? $projectId : null;
         }
 
         $this->reimbursment = $expense->reimbursment;
@@ -152,12 +153,15 @@ class ExpenseForm extends Form
     public function expenseDetails()
     {
         if (is_numeric($this->project_id)) {
-            $project_id = $this->project_id;
+            $project_id = (int) $this->project_id;
+            if ($project_id <= 0) {
+                $project_id = null;
+            }
             $distribution_id = null;
             $dist_user = null;
         } elseif (isset($this->project_id)) {
             $project_id = null;
-            $distribution_id = substr($this->project_id, 2);
+            $distribution_id = substr((string) $this->project_id, 2);
             $dist_user = null;
         } elseif ($this->component->split) {
             $project_id = null;
