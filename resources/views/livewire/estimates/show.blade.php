@@ -257,6 +257,14 @@
                 Section
             </flux:button>
 
+            <flux:button
+                wire:click="$dispatchTo('estimates.estimate-a-i-generator', 'openAIGenerator')"
+                variant="filled"
+                icon="sparkles"
+                >
+                AI Generate
+            </flux:button>
+
             @if(count($trashedSections) > 0)
                 <flux:dropdown>
                     <flux:button icon="arrow-path"></flux:button>
@@ -274,6 +282,7 @@
         </flux:button.group>
 
         <livewire:line-items.estimate-line-item-create :estimate="$estimate"/>
+        <livewire:estimates.estimate-a-i-generator :estimate="$estimate"/>
         <livewire:estimates.estimate-email />
         @endcan
     </div>
