@@ -31,12 +31,12 @@
 
                 {{-- Floorplan Upload --}}
                 <div>
-                    <flux:label>Floorplan (Optional)</flux:label>
+                    <flux:label>Floorplan (Optional, CSV preferred)</flux:label>
                     <div class="mt-2">
                         <input
                             type="file"
                             wire:model="floorplan"
-                            accept=".pdf,.jpg,.jpeg,.png"
+                            accept=".pdf,.jpg,.jpeg,.png,.csv"
                             class="block w-full text-sm text-zinc-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-zinc-100 file:text-zinc-700 hover:file:bg-zinc-200 dark:file:bg-zinc-800 dark:file:text-zinc-300 dark:hover:file:bg-zinc-700"
                         />
                     </div>
@@ -60,16 +60,17 @@
                 @endif
 
                 {{-- Actions --}}
-                <div class="flex justify-end gap-2">
-                    <flux:button variant="ghost" x-on:click="$flux.modal('estimate-ai-generator-modal').close()">
+                <div class="flex items-center justify-end gap-3 flex-nowrap">
+                    <flux:button variant="ghost" class="whitespace-nowrap inline-flex items-center" x-on:click="$flux.modal('estimate-ai-generator-modal').close()">
                         Cancel
                     </flux:button>
-                    <flux:button type="submit" variant="primary" icon="sparkles" :disabled="$isGenerating">
-                        <span wire:loading.remove wire:target="generate">
+                    <flux:button type="submit" variant="primary" class="whitespace-nowrap inline-flex items-center" :disabled="$isGenerating">
+                        <span wire:loading.remove wire:target="generate" class="inline-flex items-center gap-2 whitespace-nowrap">
+                            <flux:icon.sparkles class="w-4 h-4" />
                             Generate Estimate
                         </span>
-                        <span wire:loading wire:target="generate" class="flex items-center">
-                            <flux:icon.arrow-path class="w-4 h-4 mr-2 animate-spin" />
+                        <span wire:loading wire:target="generate" class="inline-flex items-center gap-2 whitespace-nowrap">
+                            <flux:icon.arrow-path class="w-4 h-4 animate-spin" />
                             Generating...
                         </span>
                     </flux:button>
@@ -144,17 +145,23 @@
 
                 {{-- Actions --}}
                 <div class="flex justify-between">
-                    <flux:button variant="ghost" wire:click="$set('showPreview', false)">
+                    <flux:button variant="ghost" class="whitespace-nowrap" wire:click="$set('showPreview', false)">
                         <flux:icon.arrow-left class="w-4 h-4 mr-2" />
                         Back to Edit
                     </flux:button>
                     <div class="flex gap-2">
-                        <flux:button variant="ghost" x-on:click="$flux.modal('estimate-ai-generator-modal').close()">
+                        <flux:button variant="ghost" class="whitespace-nowrap" x-on:click="$flux.modal('estimate-ai-generator-modal').close()">
                             Cancel
                         </flux:button>
-                        <flux:button variant="primary" wire:click="applyEstimate">
-                            <flux:icon.check class="w-4 h-4 mr-2" />
-                            Apply {{ count($generatedItems) }} Items
+                        <flux:button variant="primary" class="whitespace-nowrap inline-flex items-center" wire:click="applyEstimate" wire:loading.attr="disabled">
+                            <span wire:loading.remove wire:target="applyEstimate" class="inline-flex items-center gap-2">
+                                <flux:icon.check class="w-4 h-4" />
+                                Apply {{ count($generatedItems) }} Items
+                            </span>
+                            <span wire:loading wire:target="applyEstimate" class="inline-flex items-center gap-2">
+                                <flux:icon.arrow-path class="w-4 h-4 animate-spin" />
+                                Applying...
+                            </span>
                         </flux:button>
                     </div>
                 </div>

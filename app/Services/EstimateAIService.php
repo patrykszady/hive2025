@@ -55,6 +55,16 @@ class EstimateAIService
      */
     public function generateEstimate(string $inquiry, ?array $floorplanData = null, int $vendorId = 1): array
     {
+        $requestId = uniqid('est_ai_');
+
+        Log::channel('estimate_ai')->info('Estimate generation started', [
+            'request_id' => $requestId,
+            'vendor_id' => $vendorId,
+            'inquiry' => $inquiry,
+            'has_floorplan' => ! empty($floorplanData),
+            'floorplan_data' => $floorplanData,
+        ]);
+
         try {
             // Get available line items for this vendor
             $availableLineItems = $this->getAvailableLineItems($vendorId);
@@ -62,11 +72,24 @@ class EstimateAIService
             // Narrow line items to relevant categories to avoid large prompts
             $availableLineItems = $this->filterRelevantLineItems($availableLineItems, $inquiry);
 
+            Log::channel('estimate_ai')->debug('Line items filtered', [
+                'request_id' => $requestId,
+                'available_count' => $availableLineItems->count(),
+                'categories' => $availableLineItems->pluck('category')->unique()->values()->all(),
+            ]);
+
             // Get example estimates for context (bathroom remodels)
             $exampleEstimates = $this->getExampleEstimates($vendorId);
 
             // Build the prompt
             $prompt = $this->buildPrompt($inquiry, $floorplanData, $availableLineItems, $exampleEstimates);
+
+            Log::channel('estimate_ai')->debug('Prompt built', [
+                'request_id' => $requestId,
+                'prompt_length' => strlen($prompt),
+                'example_estimates_count' => count($exampleEstimates),
+                'prompt' => $prompt,
+            ]);
 
             // Call OpenAI
             $response = $this->client->chat()->create([
@@ -81,16 +104,44 @@ class EstimateAIService
 
             $content = $response['choices'][0]['message']['content'];
 
+            Log::channel('estimate_ai')->debug('OpenAI response received', [
+                'request_id' => $requestId,
+                'response_length' => strlen($content),
+                'raw_response' => $content,
+                'usage' => $response['usage'] ?? null,
+            ]);
+
             // Parse the JSON response
             $result = $this->parseResponse($content);
+
+            if ($result['success']) {
+                $result['line_items'] = $this->normalizeLineItems($result['line_items']);
+            }
 
             if ($result['success'] && ! empty($floorplanData)) {
                 $result['line_items'] = $this->applyFloorplanQuantities($result['line_items'], $floorplanData);
             }
 
+            Log::channel('estimate_ai')->info('Estimate generation completed', [
+                'request_id' => $requestId,
+                'success' => $result['success'],
+                'line_items_count' => count($result['line_items']),
+                'reasoning' => $result['reasoning'] ?? null,
+                'line_items' => $result['line_items'],
+            ]);
+
             return $result;
         } catch (\Exception $e) {
             $message = $e->getMessage();
+
+            Log::channel('estimate_ai')->error('Estimate generation failed', [
+                'request_id' => $requestId,
+                'error' => $message,
+                'exception_class' => get_class($e),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            // Keep the original default channel log for error monitoring
             Log::error('EstimateAIService error: ' . $message);
 
             $friendlyMessage = $message;
@@ -112,14 +163,25 @@ class EstimateAIService
      */
     public function applyToEstimate(Estimate $estimate, EstimateSection $section, array $generatedItems): array
     {
+        Log::channel('estimate_ai')->info('Applying AI line items to estimate', [
+            'estimate_id' => $estimate->id,
+            'section_id' => $section->id,
+            'generated_items_count' => count($generatedItems),
+        ]);
+
         $createdItems = [];
         $currentOrder = $section->estimate_line_items()->max('order') ?? -1;
+        $skippedItems = [];
 
         foreach ($generatedItems as $item) {
             // Find the matching line item by ID
             $lineItem = LineItem::find($item['line_item_id']);
 
             if (! $lineItem) {
+                $skippedItems[] = [
+                    'line_item_id' => $item['line_item_id'] ?? null,
+                    'reason' => 'Line item not found',
+                ];
                 continue;
             }
 
@@ -150,6 +212,22 @@ class EstimateAIService
         // Update section total
         $section->total = $section->estimate_line_items()->sum('total');
         $section->save();
+
+        Log::channel('estimate_ai')->info('Applied AI line items to estimate', [
+            'estimate_id' => $estimate->id,
+            'section_id' => $section->id,
+            'created_count' => count($createdItems),
+            'skipped_count' => count($skippedItems),
+            'skipped_items' => $skippedItems,
+            'section_total' => $section->total,
+            'created_items' => collect($createdItems)->map(fn ($item) => [
+                'id' => $item->id,
+                'name' => $item->name,
+                'quantity' => $item->quantity,
+                'cost' => $item->cost,
+                'total' => $item->total,
+            ])->all(),
+        ]);
 
         return $createdItems;
     }
@@ -405,6 +483,12 @@ PROMPT;
         $data = json_decode($json, true);
 
         if (json_last_error() !== JSON_ERROR_NONE) {
+            Log::channel('estimate_ai')->warning('Failed to parse AI response', [
+                'error' => json_last_error_msg(),
+                'raw_content' => $content,
+                'extracted_json' => $json,
+            ]);
+
             return [
                 'success' => false,
                 'line_items' => [],
@@ -418,5 +502,64 @@ PROMPT;
             'line_items' => $data['line_items'] ?? [],
             'reasoning' => $data['reasoning'] ?? '',
         ];
+    }
+
+    protected function normalizeLineItems(array $items): array
+    {
+        $lineItemIds = collect($items)
+            ->pluck('line_item_id')
+            ->filter()
+            ->unique()
+            ->values();
+
+        if ($lineItemIds->isEmpty()) {
+            return $items;
+        }
+
+        $lineItems = LineItem::query()
+            ->whereIn('id', $lineItemIds)
+            ->get(['id', 'name', 'cost', 'unit_type'])
+            ->keyBy('id');
+
+        $normalized = [];
+        $changes = [];
+
+        foreach ($items as $item) {
+            $lineItemId = $item['line_item_id'] ?? null;
+            $lineItem = $lineItemId ? $lineItems->get($lineItemId) : null;
+
+            $quantity = $item['quantity'] ?? 1;
+            if (! is_numeric($quantity)) {
+                $quantity = 1;
+            }
+
+            $quantity = (float) $quantity;
+
+            if ($lineItem) {
+                $originalCost = $item['cost'] ?? null;
+                $item['name'] = $item['name'] ?? $lineItem->name;
+                $item['cost'] = (float) $lineItem->cost;
+
+                if ($originalCost !== null && (float) $originalCost !== (float) $lineItem->cost) {
+                    $changes[] = [
+                        'line_item_id' => $lineItem->id,
+                        'name' => $item['name'],
+                        'original_cost' => $originalCost,
+                        'normalized_cost' => $lineItem->cost,
+                    ];
+                }
+            }
+
+            $item['quantity'] = $quantity;
+            $normalized[] = $item;
+        }
+
+        if ($changes !== []) {
+            Log::channel('estimate_ai')->info('Normalized AI line item costs to catalog pricing', [
+                'changes' => $changes,
+            ]);
+        }
+
+        return $normalized;
     }
 }

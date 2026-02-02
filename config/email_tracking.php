@@ -16,8 +16,17 @@ return [
 
     // Filter out opens/clicks that are likely the sender (or internal staff) viewing their own copy.
     // This uses (a) per-message sender_email stored on the matching 'sent' row metadata when available,
-    // and (b) the actual From address stored on the 'sent' row (from_email).
+    // (b) the actual From address stored on the 'sent' row (from_email), and
+    // (c) internal/staff domains that should be excluded from tracking.
     'mailtrap_filter_sender_opens' => env('MAILTRAP_FILTER_SENDER_OPENS', true),
+
+    // Comma-separated list of internal/staff email domains to ignore for open tracking.
+    // Opens from these domains will be treated as "sender" opens and ignored.
+    // Example: "gs.construction,mycompany.com" to ignore opens from staff email addresses.
+    'internal_domains' => array_values(array_filter(
+        array_map('trim', explode(',', (string) env('EMAIL_TRACKING_INTERNAL_DOMAINS', ''))),
+        static fn (string $value): bool => $value !== ''
+    )),
 
     // If an opened/clicked event happens "too soon" after our tracked 'sent' event (same tracking_id),
     // treat it as automated prefetch/scanning.

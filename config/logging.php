@@ -141,5 +141,12 @@ return [
             'level' => 'info',
             'days' => 30,
         ],
+
+        'estimate_ai' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/estimate_ai.log'),
+            'level' => 'debug',
+            'days' => 90,
+        ],
     ],
 ];

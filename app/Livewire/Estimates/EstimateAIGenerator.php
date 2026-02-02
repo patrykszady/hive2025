@@ -39,7 +39,7 @@ class EstimateAIGenerator extends Component
     {
         return [
             'inquiry' => 'required|min:10',
-            'floorplan' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
+            'floorplan' => 'nullable|file|mimes:pdf,jpg,jpeg,png,csv|max:10240',
             'sectionId' => 'required|exists:estimate_sections,id',
         ];
     }
@@ -155,11 +155,21 @@ class EstimateAIGenerator extends Component
             return null;
         }
 
-        $apiKey = config('services.ocr_space.api_key');
-        $endpoint = config('services.ocr_space.endpoint');
-
         $extension = $this->floorplan->getClientOriginalExtension();
         $filename = $this->floorplan->getClientOriginalName();
+
+        if (strtolower($extension) === 'csv') {
+            $metrics = $this->extractCsvFloorplanMetrics(file_get_contents($this->floorplan->getRealPath()));
+
+            return array_merge([
+                'filename' => $filename,
+                'type' => 'csv',
+                'source' => 'csv',
+            ], $metrics);
+        }
+
+        $apiKey = config('services.ocr_space.api_key');
+        $endpoint = config('services.ocr_space.endpoint');
 
         if (empty($apiKey) || empty($endpoint)) {
             return [
@@ -226,6 +236,289 @@ class EstimateAIGenerator extends Component
             'cement_board_sqft' => $cementBoardSqft ? round($cementBoardSqft, 2) : null,
             'ceiling_height_ft' => $dimensions ? 8 : null,
         ];
+    }
+
+    protected function extractCsvFloorplanMetrics(string $contents): array
+    {
+        $rows = $this->parseCsvRows($contents);
+
+        if (count($rows) < 2) {
+            return [
+                'floor_sqft' => null,
+                'wall_sqft' => null,
+                'cement_board_sqft' => null,
+                'ceiling_height_ft' => null,
+            ];
+        }
+
+        $header = array_shift($rows);
+        $normalizedHeaders = array_map($this->normalizeCsvHeader(...), $header);
+
+        // Detect Polycam key-value format: Room, Description, Value
+        if ($this->isPolycamFormat($normalizedHeaders)) {
+            return $this->extractPolycamMetrics($rows);
+        }
+
+        // Fallback to columnar format parsing
+        $floorAreaIndex = $this->findCsvColumn($normalizedHeaders, ['floor', 'area']);
+        $wallAreaIndex = $this->findCsvColumn($normalizedHeaders, ['wall', 'area']);
+        $ceilingHeightIndex = $this->findCsvColumn($normalizedHeaders, ['ceiling', 'height']);
+
+        $areaIndex = $this->findCsvColumn($normalizedHeaders, ['area']);
+        $surfaceIndex = $this->findCsvColumn($normalizedHeaders, ['surface'])
+            ?? $this->findCsvColumn($normalizedHeaders, ['type'])
+            ?? $this->findCsvColumn($normalizedHeaders, ['name']);
+
+        $floorSqft = 0.0;
+        $wallSqft = 0.0;
+        $ceilingHeight = null;
+        $hasFloor = false;
+        $hasWall = false;
+
+        foreach ($rows as $row) {
+            if ($floorAreaIndex !== null) {
+                $value = $this->parseCsvNumber($row[$floorAreaIndex] ?? null);
+                if ($value !== null) {
+                    $floorSqft += $value;
+                    $hasFloor = true;
+                }
+            }
+
+            if ($wallAreaIndex !== null) {
+                $value = $this->parseCsvNumber($row[$wallAreaIndex] ?? null);
+                if ($value !== null) {
+                    $wallSqft += $value;
+                    $hasWall = true;
+                }
+            }
+
+            if ($ceilingHeightIndex !== null) {
+                $value = $this->parseCsvNumber($row[$ceilingHeightIndex] ?? null);
+                if ($value !== null) {
+                    $ceilingHeight = max($ceilingHeight ?? 0, $value);
+                }
+            }
+
+            if ($areaIndex !== null && $surfaceIndex !== null) {
+                $area = $this->parseCsvNumber($row[$areaIndex] ?? null);
+                $surface = strtolower(trim((string) ($row[$surfaceIndex] ?? '')));
+
+                if ($area !== null) {
+                    if (! $hasFloor && str_contains($surface, 'floor')) {
+                        $floorSqft += $area;
+                        $hasFloor = true;
+                    }
+
+                    if (! $hasWall && str_contains($surface, 'wall')) {
+                        $wallSqft += $area;
+                        $hasWall = true;
+                    }
+                }
+            }
+        }
+
+        $floorSqft = $floorSqft > 0 ? round($floorSqft, 2) : null;
+        $wallSqft = $wallSqft > 0 ? round($wallSqft, 2) : null;
+        $cementBoardSqft = ($floorSqft || $wallSqft) ? round(($floorSqft ?? 0) + ($wallSqft ?? 0), 2) : null;
+        $ceilingHeight = $ceilingHeight ? round($ceilingHeight, 2) : null;
+
+        return [
+            'floor_sqft' => $floorSqft,
+            'wall_sqft' => $wallSqft,
+            'cement_board_sqft' => $cementBoardSqft,
+            'ceiling_height_ft' => $ceilingHeight,
+        ];
+    }
+
+    protected function isPolycamFormat(array $normalizedHeaders): bool
+    {
+        // Polycam exports: Room, Description, Value
+        $hasRoom = in_array('room', $normalizedHeaders);
+        $hasDescription = in_array('description', $normalizedHeaders);
+        $hasValue = in_array('value', $normalizedHeaders);
+
+        return $hasRoom && $hasDescription && $hasValue;
+    }
+
+    protected function extractPolycamMetrics(array $rows): array
+    {
+        $floorSqft = null;
+        $wallSqft = null;
+        $ceilingHeight = null;
+        $perimeter = null;
+
+        foreach ($rows as $row) {
+            $description = strtolower(trim($row[1] ?? ''));
+            $value = trim($row[2] ?? '');
+
+            // Floor area: "Floor area [ft^2]" or "Total livable floor area [ft^2]"
+            if (str_contains($description, 'floor area') && str_contains($description, 'ft')) {
+                $parsed = $this->parsePolycamValue($value);
+                if ($parsed !== null) {
+                    // Use Total livable floor area if available, otherwise individual room
+                    if (str_contains($description, 'livable') || $floorSqft === null) {
+                        $floorSqft = $parsed;
+                    }
+                }
+            }
+
+            // Wall area: "Wall area [ft^2]"
+            if (str_contains($description, 'wall area') && str_contains($description, 'ft')) {
+                $parsed = $this->parsePolycamValue($value);
+                if ($parsed !== null && $wallSqft === null) {
+                    $wallSqft = $parsed;
+                }
+            }
+
+            // Ceiling height: "Ceiling height [ft]"
+            if (str_contains($description, 'ceiling height')) {
+                $parsed = $this->parsePolycamFeetInches($value);
+                if ($parsed !== null) {
+                    $ceilingHeight = $parsed;
+                }
+            }
+
+            // Perimeter: "Perimeter [ft]"
+            if (str_contains($description, 'perimeter') && str_contains($description, 'ft')) {
+                $parsed = $this->parsePolycamFeetInches($value);
+                if ($parsed !== null) {
+                    $perimeter = $parsed;
+                }
+            }
+        }
+
+        $cementBoardSqft = ($floorSqft || $wallSqft)
+            ? round(($floorSqft ?? 0) + ($wallSqft ?? 0), 2)
+            : null;
+
+        return [
+            'floor_sqft' => $floorSqft ? round($floorSqft, 2) : null,
+            'wall_sqft' => $wallSqft ? round($wallSqft, 2) : null,
+            'cement_board_sqft' => $cementBoardSqft,
+            'ceiling_height_ft' => $ceilingHeight ? round($ceilingHeight, 2) : null,
+            'perimeter_ft' => $perimeter ? round($perimeter, 2) : null,
+        ];
+    }
+
+    protected function parsePolycamValue(string $value): ?float
+    {
+        // Handle simple numeric values like "64.0" or "274.6"
+        $clean = trim($value);
+        if ($clean === '') {
+            return null;
+        }
+
+        // Remove any units suffix
+        $clean = preg_replace('/\s*(ft\^?2?|sq\s*ft|sqft|sf)?\s*$/i', '', $clean);
+        $clean = str_replace(',', '', $clean);
+
+        if (is_numeric($clean)) {
+            return (float) $clean;
+        }
+
+        return null;
+    }
+
+    protected function parsePolycamFeetInches(string $value): ?float
+    {
+        // Handle feet-inches format like "8' 0.0"" or "35' 5.0""
+        $clean = trim($value);
+
+        // Pattern: X' Y.Z" or X' Y"
+        if (preg_match("/(\d+(?:\.\d+)?)\s*'\s*(\d+(?:\.\d+)?)\s*\"?/", $clean, $matches)) {
+            $feet = (float) $matches[1];
+            $inches = (float) $matches[2];
+            return $feet + ($inches / 12);
+        }
+
+        // Pattern: just feet X'
+        if (preg_match("/(\d+(?:\.\d+)?)\s*'/", $clean, $matches)) {
+            return (float) $matches[1];
+        }
+
+        // Plain number
+        if (is_numeric($clean)) {
+            return (float) $clean;
+        }
+
+        return null;
+    }
+
+    protected function parseCsvRows(string $contents): array
+    {
+        $rows = [];
+        $handle = fopen('php://temp', 'r+');
+        fwrite($handle, $contents);
+        rewind($handle);
+
+        while (($row = fgetcsv($handle)) !== false) {
+            if ($row === [null] || $row === false) {
+                continue;
+            }
+
+            $isEmpty = true;
+            foreach ($row as $cell) {
+                if (trim((string) $cell) !== '') {
+                    $isEmpty = false;
+                    break;
+                }
+            }
+
+            if (! $isEmpty) {
+                $rows[] = $row;
+            }
+        }
+
+        fclose($handle);
+
+        return $rows;
+    }
+
+    protected function normalizeCsvHeader(string $value): string
+    {
+        $normalized = preg_replace('/[^a-z0-9]+/i', ' ', $value);
+
+        return strtolower(trim(preg_replace('/\s+/', ' ', $normalized)));
+    }
+
+    protected function findCsvColumn(array $headers, array $tokens): ?int
+    {
+        foreach ($headers as $index => $header) {
+            $matches = true;
+            foreach ($tokens as $token) {
+                if (! str_contains($header, $token)) {
+                    $matches = false;
+                    break;
+                }
+            }
+
+            if ($matches) {
+                return $index;
+            }
+        }
+
+        return null;
+    }
+
+    protected function parseCsvNumber($value): ?float
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $clean = trim((string) $value);
+        if ($clean === '') {
+            return null;
+        }
+
+        $clean = str_replace([',', ' '], ['', ''], $clean);
+        $clean = preg_replace('/[^0-9.\-]/', '', $clean);
+
+        if ($clean === '' || $clean === '-' || $clean === '.') {
+            return null;
+        }
+
+        return (float) $clean;
     }
 
     protected function extractLabeledSqft(string $text, array $labels): ?float

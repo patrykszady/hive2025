@@ -142,6 +142,62 @@ it('ignores opened events for the sent from email', function () {
         ->toBe(0);
 });
 
+it('ignores opened events from internal domain email addresses', function () {
+    config(['email_tracking.mailtrap_webhook_token' => 'test-token']);
+    config(['email_tracking.mailtrap_filter_sender_opens' => true]);
+    config(['email_tracking.internal_domains' => ['mycompany.com', 'staff.example.com']]);
+
+    $trackingId = (string) Str::uuid();
+
+    EmailTracking::create([
+        'message_id' => $trackingId,
+        'event_type' => 'sent',
+        'recipient_emails' => ['vendor@external.com', 'alice@mycompany.com'],
+        'metadata' => [
+            'sender_email' => 'bob@mycompany.com',
+            'from_email' => 'no-reply@mycompany.com',
+            'tracking_id' => $trackingId,
+        ],
+        'event_at' => now()->subMinute(),
+    ]);
+
+    // Open from internal domain should be ignored
+    $payload = [
+        'events' => [[
+            'event_type' => 'opened',
+            'recipient_email' => 'alice@mycompany.com',
+            'tracking_id' => $trackingId,
+            'message_id' => 'provider-msg-1',
+            'event_id' => 'provider-evt-internal',
+            'timestamp' => now()->toIso8601String(),
+            'user_agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        ]],
+    ];
+
+    $this->postJson('/webhooks/mailtrap/test-token', $payload)->assertSuccessful();
+
+    expect(EmailTracking::query()->where('message_id', $trackingId)->where('event_type', 'opened')->count())
+        ->toBe(0, 'Open from internal domain should be ignored');
+
+    // Open from external domain should be tracked
+    $payloadExternal = [
+        'events' => [[
+            'event_type' => 'opened',
+            'recipient_email' => 'vendor@external.com',
+            'tracking_id' => $trackingId,
+            'message_id' => 'provider-msg-1',
+            'event_id' => 'provider-evt-external',
+            'timestamp' => now()->addSeconds(10)->toIso8601String(),
+            'user_agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        ]],
+    ];
+
+    $this->postJson('/webhooks/mailtrap/test-token', $payloadExternal)->assertSuccessful();
+
+    expect(EmailTracking::query()->where('message_id', $trackingId)->where('event_type', 'opened')->count())
+        ->toBe(1, 'Open from external domain should be tracked');
+});
+
 it('ignores opened events for emails not in the original recipient list', function () {
     config(['email_tracking.mailtrap_webhook_token' => 'test-token']);
     config(['email_tracking.mailtrap_filter_sender_opens' => true]);

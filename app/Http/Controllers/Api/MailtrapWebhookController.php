@@ -329,6 +329,43 @@ class MailtrapWebhookController extends Controller
             return true;
         }
 
+        // Check if the recipient's domain is an internal/staff domain
+        if ($this->isInternalDomain($recipientEmail)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if an email address belongs to an internal/staff domain.
+     */
+    protected function isInternalDomain(string $email): bool
+    {
+        $internalDomains = (array) config('email_tracking.internal_domains', []);
+
+        if (empty($internalDomains)) {
+            return false;
+        }
+
+        $emailDomain = Str::after($email, '@');
+
+        if ($emailDomain === '' || $emailDomain === $email) {
+            return false;
+        }
+
+        $emailDomain = strtolower($emailDomain);
+
+        foreach ($internalDomains as $internalDomain) {
+            if (! is_string($internalDomain) || $internalDomain === '') {
+                continue;
+            }
+
+            if ($emailDomain === strtolower(trim($internalDomain))) {
+                return true;
+            }
+        }
+
         return false;
     }
 
