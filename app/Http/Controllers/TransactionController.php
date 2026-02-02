@@ -1656,9 +1656,14 @@ class TransactionController extends Controller
                 ->whereDoesntHave('expenses') // No expenses via legacy check_id
                 ->whereBetween('date', [$start_date, $end_date])
                 ->where(function($query) use ($expense) {
-                    // Match vendor if check has one
+                    // Either: check vendor matches expense vendor
+                    // Or: check has no vendor BUT it's a paper check with a check number (not a Transfer)
+                    // This prevents Transfers with no vendor from auto-matching to random expenses
                     $query->where('vendor_id', $expense->vendor_id)
-                          ->orWhereNull('vendor_id');
+                          ->orWhere(function($q) {
+                              $q->whereNull('vendor_id')
+                                ->where('check_type', '!=', 'Transfer');
+                          });
                 })
                 ->orderBy('date', 'ASC')
                 ->limit(20) // Limit to 20 checks max to prevent excessive subset combinations

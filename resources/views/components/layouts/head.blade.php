@@ -80,6 +80,12 @@
                 right: 0 !important;
                 z-index: 60 !important;
                 background: transparent !important;
+                pointer-events: none !important;
+            }
+
+            /* Re-enable pointer events for interactive children */
+            [data-flux-header] > * {
+                pointer-events: auto !important;
             }
 
             /* When the sidebar is open on mobile, hide the header toggle overlay */

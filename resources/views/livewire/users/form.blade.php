@@ -142,19 +142,11 @@
     <x-slot name="footer">
         <flux:spacer />
         <flux:button
-            x-data="{
-                userForm: $wire.user_form,
-                modelId: $wire.model.id,
-                modelType: $wire.model.type,
-                formUserId: $wire.form.user_id,
-                role: $wire.form.role,
-                viaVendor: $wire.form.via_vendor
-            }"
-            x-show="userForm && (
-                modelId == 'NEW' || 
-                (formUserId && modelType == 'client') ||
-                (formUserId && modelType == 'vendor' && ((viaVendor && viaVendor != 'NEW_VIA') || role == 1)) ||
-                (modelType == 'user')
+            x-show="$wire.user_form && (
+                ($wire.model.id == 'NEW' && $wire.form.first_name && $wire.form.last_name && $wire.form.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test($wire.form.email)) || 
+                ($wire.form.user_id && $wire.model.type == 'client') ||
+                ($wire.form.user_id && $wire.model.type == 'vendor' && (($wire.form.via_vendor && $wire.form.via_vendor != 'NEW_VIA') || $wire.form.role == 1)) ||
+                ($wire.model.type == 'user')
             )"
             type="submit"
             form="user_form_modal_form"

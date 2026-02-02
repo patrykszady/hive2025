@@ -32,7 +32,7 @@
             {{-- Optional extras next to the title (e.g., badges) --}}
             {{ $title_extras ?? '' }}
         </div>
-        <div class="flex items-center min-h-[2.25rem] flex-shrink-0">
+        <div class="flex items-center min-h-[2.25rem] flex-shrink-0 relative z-10">
             {{-- Show buttons if canEdit is null or true --}}
             @if($canEdit === null || $canEdit)
                 {{ $header_buttons ?? '' }}

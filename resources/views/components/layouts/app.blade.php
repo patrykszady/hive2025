@@ -177,7 +177,7 @@
             </flux:dropdown>
         </flux:sidebar>
 
-        <flux:header class="lg:hidden print:hidden">
+        <flux:header class="lg:hidden lg:pointer-events-none print:hidden">
             <flux:button
                 class="lg:hidden bg-white/60 dark:bg-zinc-900/50 backdrop-blur-[2px] border border-zinc-200/60 dark:border-zinc-700/60 shadow-sm rounded-lg"
                 variant="subtle"
