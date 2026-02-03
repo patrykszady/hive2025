@@ -60,7 +60,7 @@ class Login extends Component
             session()->regenerate();
 
             $user = Auth::user();
-            
+
             // Client-only users go to their client home
             if ($user->is_client_user) {
                 $client = $user->primary_client;
@@ -73,12 +73,13 @@ class Login extends Component
                 $this->redirect(route('clients.index'), navigate: true);
                 return;
             }
-            
-            if ($user->webAuthnCredentials()->count() === 0) {
-                $this->redirect(route('passkey.setup'), navigate: true);
+
+            if (!$user->webAuthnCredentials()->whereNull('disabled_at')->exists()) {
+                session()->put('passkey_prompt', true);
+                $this->redirect(route('dashboard'), navigate: true);
                 return;
             }
-
+            
             $this->redirectIntended(default: route('dashboard'), navigate: true);
             return;
         }

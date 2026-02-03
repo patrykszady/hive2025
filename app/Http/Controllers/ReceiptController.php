@@ -771,7 +771,9 @@ class ReceiptController extends Controller
         }
         
         //TOTAL TAX
-        if (isset($ocr_receipt_extract_prefix['TotalTax'])) {
+        if (isset($ocr_receipt_extract_prefix['TotalTaxAmount'])) {
+            $total_tax = $this->extractCurrencyAmount($ocr_receipt_extract_prefix['TotalTaxAmount']);
+        } elseif (isset($ocr_receipt_extract_prefix['TotalTax'])) {
             if (isset($ocr_receipt_extract_prefix['TotalTax']['valueCurrency'])) {
                 $total_tax = $ocr_receipt_extract_prefix['TotalTax']['valueCurrency']['amount'];
             } elseif (isset($ocr_receipt_extract_prefix['TotalTax']['valueNumber'])) {
@@ -848,7 +850,9 @@ class ReceiptController extends Controller
         }
 
         //SUBTOTAL
-        if (isset($ocr_receipt_extract_prefix['SubTotal'])) {
+        if (isset($ocr_receipt_extract_prefix['SubtotalAmount'])) {
+            $subtotal = $this->extractCurrencyAmount($ocr_receipt_extract_prefix['SubtotalAmount']);
+        } elseif (isset($ocr_receipt_extract_prefix['SubTotal'])) {
             $subtotal = $this->extractCurrencyAmount($ocr_receipt_extract_prefix['SubTotal']);
         } elseif (isset($ocr_receipt_extract_prefix['Subtotal'])) {
             $subtotal = $this->extractCurrencyAmount($ocr_receipt_extract_prefix['Subtotal']);
@@ -857,8 +861,15 @@ class ReceiptController extends Controller
         }
 
         //ITEMS
-        if(isset($ocr_receipt_extract_prefix['Items'])){
-            $items = $ocr_receipt_extract_prefix['Items']['valueArray'];
+        if (isset($ocr_receipt_extract_prefix['Items'])) {
+            $items = $ocr_receipt_extract_prefix['Items']['valueArray'] ?? [];
+        } elseif (isset($ocr_receipt_extract_prefix['LineItems'])) {
+            $items = $ocr_receipt_extract_prefix['LineItems']['valueArray'] ?? [];
+        } else {
+            $items = [];
+        }
+
+        if (! empty($items)) {
 
             $formatted_items = [];
             foreach($items as $key => $line_item) {
@@ -875,6 +886,8 @@ class ReceiptController extends Controller
                 // TotalPrice / Amount with robust fallbacks
                 if (isset($line['TotalPrice'])) {
                     $formatted_items[$key]['TotalPrice'] = $this->extractCurrencyAmount($line['TotalPrice']);
+                } elseif (isset($line['TotalAmount'])) {
+                    $formatted_items[$key]['TotalPrice'] = $this->extractCurrencyAmount($line['TotalAmount']);
                 } elseif (isset($line['Amount'])) {
                     $formatted_items[$key]['TotalPrice'] = $this->extractCurrencyAmount($line['Amount']);
                 } else {
@@ -896,23 +909,51 @@ class ReceiptController extends Controller
                     $formatted_items[$key]['Price'] = $formatted_items[$key]['TotalPrice'];
                 }
             }
-        }else{
+        } else {
             $formatted_items = null;
         }
 
         //AMOUNT
         $amount = NULL;
-        if (isset($ocr_receipt_extract_prefix['Total'])) {
+        if (isset($ocr_receipt_extract_prefix['TotalAmount'])) {
+            $amount = $this->extractCurrencyAmount($ocr_receipt_extract_prefix['TotalAmount']);
+        } elseif (isset($ocr_receipt_extract_prefix['Total'])) {
             $amount = $this->extractCurrencyAmount($ocr_receipt_extract_prefix['Total']);
         } elseif (isset($ocr_receipt_extract_prefix['InvoiceTotal'])) {
             $amount = $this->extractCurrencyAmount($ocr_receipt_extract_prefix['InvoiceTotal']);
         } elseif (isset($ocr_receipt_extract_prefix['SubTotal']) && isset($ocr_receipt_extract_prefix['TotalTax'])) {
             $amount = (float) ($this->extractCurrencyAmount($ocr_receipt_extract_prefix['SubTotal']) ?? 0) + (float) ($this->extractCurrencyAmount($ocr_receipt_extract_prefix['TotalTax']) ?? 0);
+        } elseif (isset($ocr_receipt_extract_prefix['SubtotalAmount']) && isset($ocr_receipt_extract_prefix['TotalTaxAmount'])) {
+            $amount = (float) ($this->extractCurrencyAmount($ocr_receipt_extract_prefix['SubtotalAmount']) ?? 0) + (float) ($this->extractCurrencyAmount($ocr_receipt_extract_prefix['TotalTaxAmount']) ?? 0);
         } elseif (isset($key_value_pairs)) {
             if (! $key_value_pairs->where('key.content', 'Authorized Amount:')->isEmpty()) {
                 $amount = $key_value_pairs->where('key.content', 'Authorized Amount:')->first()->value->content;
             }
-        } else {
+        }
+
+        if ($amount === NULL && is_array($formatted_items)) {
+            $lineItemsTotal = $this->sumLineItemTotals($formatted_items);
+            if (! is_null($lineItemsTotal)) {
+                $amount = $lineItemsTotal;
+            }
+        }
+
+        $contentTotal = null;
+        if (isset($ocr_receipt_extracted['content']) && is_string($ocr_receipt_extracted['content'])) {
+            $contentTotal = $this->extractTotalFromContent($ocr_receipt_extracted['content']);
+        }
+
+        if ($amount === NULL && ! is_null($contentTotal)) {
+            $amount = $contentTotal;
+        }
+
+        if (! is_null($contentTotal) && ! is_null($amount)) {
+            if ($amount < 1 || $contentTotal > ($amount * 10)) {
+                $amount = $contentTotal;
+            }
+        }
+
+        if ($amount === NULL) {
             //if coming from ExpensesNewForm, allow $amount above to be empty.
             if (! is_null($expense_amount)) {
                 $amount = $expense_amount;
@@ -946,6 +987,10 @@ class ReceiptController extends Controller
         }
 
         if (empty($total_tax) && empty($subtotal) && isset($amount)) {
+            $subtotal = $amount;
+        }
+
+        if (! is_null($amount) && ! is_null($subtotal) && $subtotal < 1 && $amount >= 1 && empty($total_tax)) {
             $subtotal = $amount;
         }
 
@@ -999,6 +1044,26 @@ class ReceiptController extends Controller
     private function extractCurrencyAmount(mixed $field): ?float
     {
         if (is_array($field)) {
+            if (isset($field['valueObject']) && is_array($field['valueObject'])) {
+                $valueObject = $field['valueObject'];
+
+                if (isset($valueObject['Amount'])) {
+                    return $this->extractCurrencyAmount($valueObject['Amount']);
+                }
+
+                if (isset($valueObject['amount'])) {
+                    return $this->extractCurrencyAmount($valueObject['amount']);
+                }
+            }
+
+            if (isset($field['Amount'])) {
+                return $this->extractCurrencyAmount($field['Amount']);
+            }
+
+            if (isset($field['amount'])) {
+                return $this->extractCurrencyAmount($field['amount']);
+            }
+
             if (isset($field['valueCurrency']['amount'])) {
                 return (float) $field['valueCurrency']['amount'];
             }
@@ -1018,6 +1083,48 @@ class ReceiptController extends Controller
             return (float) $field;
         } elseif (is_string($field)) {
             return $this->parseAmountFromString($field);
+        }
+
+        return null;
+    }
+
+    private function sumLineItemTotals(array $items): ?float
+    {
+        $total = 0.0;
+        $found = false;
+
+        foreach ($items as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+
+            $lineTotal = $item['TotalPrice'] ?? null;
+            if (is_numeric($lineTotal)) {
+                $total += (float) $lineTotal;
+                $found = true;
+            }
+        }
+
+        return $found ? $total : null;
+    }
+
+    private function extractTotalFromContent(string $content): ?float
+    {
+        $patterns = [
+            '/\b(?:TOTAL|AMOUNT\s+DUE|AMOUNT|BALANCE|CHARGE|PAYMENT)\b[^0-9]{0,20}(\d{1,3}(?:,\d{3})*(?:\.\d{2}))/i',
+            '/\b(\d{1,3}(?:,\d{3})*(?:\.\d{2}))\s+(?:master\s*card|visa|amex|discover|card|debit|credit|mc)\b/i',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match_all($pattern, $content, $matches) && ! empty($matches[1])) {
+                $candidate = $matches[1][count($matches[1]) - 1] ?? null;
+                if (is_string($candidate)) {
+                    $amount = $this->parseAmountFromString($candidate);
+                    if (! is_null($amount)) {
+                        return $amount;
+                    }
+                }
+            }
         }
 
         return null;

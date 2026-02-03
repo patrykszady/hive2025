@@ -187,7 +187,7 @@
                             </flux:table.cell>
                             <flux:table.cell>
                                 @if($event->project)
-                                    <a wire:navigate.hover href="{{ route('projects.show', $event->project_id) }}" class="text-indigo-600 hover:underline">
+                                    <a wire:navigate.hover href="{{ route('projects.show', $event->project_id) }}" class="font-semibold text-zinc-900 dark:text-zinc-100 hover:text-indigo-600 dark:hover:text-indigo-400">
                                         {{ $event->project->project_name }}
                                     </a>
                                 @else

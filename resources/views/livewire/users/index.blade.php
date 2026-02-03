@@ -38,7 +38,7 @@
                             wire:navigate.hover
                             href="{{route('users.show', $user->id)}}"
                             variant="strong"
-                            class="cursor-pointer"
+                            class="cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400"
                             >
                             {{ $user->full_name }}
                         </flux:table.cell>

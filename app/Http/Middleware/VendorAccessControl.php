@@ -18,6 +18,14 @@ class VendorAccessControl
         
         // Client-only users: allow access to client routes, forbid elsewhere
         if ($user->is_client_user) {
+            if ($routeName === 'dashboard') {
+                $client = $user->primary_client;
+
+                return $client
+                    ? redirect()->route('clients.show', $client)
+                    : redirect()->route('clients.index');
+            }
+
             // Allow client users to access client routes
             if (str_starts_with($routeName, 'clients.')) {
                 return $next($request);
