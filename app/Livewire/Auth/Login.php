@@ -75,8 +75,7 @@ class Login extends Component
             }
 
             if (!$user->webAuthnCredentials()->whereNull('disabled_at')->exists()) {
-                session()->put('passkey_prompt', true);
-                $this->redirect(route('dashboard'), navigate: true);
+                $this->redirect(route('passkey.setup'), navigate: true);
                 return;
             }
             

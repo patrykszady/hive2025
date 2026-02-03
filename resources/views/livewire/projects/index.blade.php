@@ -53,7 +53,9 @@
                         {{-- Order for client view: Name, Address, Contractor, Status --}}
                         <flux:table.column class="w-[30%] min-w-0">Name</flux:table.column>
                         <flux:table.column class="w-[30%] min-w-0">Address</flux:table.column>
-                        <flux:table.column class="w-[25%] min-w-0">Contractor</flux:table.column>
+                        @if(auth()->user()->is_client_user)
+                            <flux:table.column class="w-[25%] min-w-0">Contractor</flux:table.column>
+                        @endif
                     @else
                         {{-- Original order: Address, Client, Name, Contractor, Status (client users only) --}}
                         <flux:table.column class="w-[30%] min-w-0">Address</flux:table.column>
@@ -86,11 +88,13 @@
                                     class="cursor-pointer w-[35%] min-w-0 hover:text-indigo-600 dark:hover:text-indigo-400">
                                     <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->address }}">{{ $project->short_address }}</div>
                                 </flux:table.cell>
-                                <flux:table.cell class="w-[25%] min-w-0">
-                                    <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->createdByVendor?->business_name ?? $project->createdByVendor?->name }}">
-                                        {{ $project->createdByVendor?->business_name ?? $project->createdByVendor?->name ?? '—' }}
-                                    </div>
-                                </flux:table.cell>
+                                @if(auth()->user()->is_client_user)
+                                    <flux:table.cell class="w-[25%] min-w-0">
+                                        <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->createdByVendor?->business_name ?? $project->createdByVendor?->name }}">
+                                            {{ $project->createdByVendor?->business_name ?? $project->createdByVendor?->name ?? '—' }}
+                                        </div>
+                                    </flux:table.cell>
+                                @endif
                             @else
                                 {{-- Original order: Address (bold), Client, Name, Contractor, Status --}}
                                 <flux:table.cell

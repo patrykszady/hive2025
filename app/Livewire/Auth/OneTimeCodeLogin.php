@@ -223,6 +223,11 @@ class OneTimeCodeLogin extends Component
         Auth::login($this->user, remember: true);
 
         session()->flash('message', 'Welcome back!');
+        if (!Auth::user()->webAuthnCredentials()->whereNull('disabled_at')->exists()) {
+            $this->redirect(route('passkey.setup'), navigate: true);
+            return;
+        }
+
         $this->redirect(route('dashboard'), navigate: true);
     }
 

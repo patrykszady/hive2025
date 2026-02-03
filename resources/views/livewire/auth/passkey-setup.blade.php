@@ -85,6 +85,10 @@
             errorDiv.classList.add('hidden');
         }
 
+        function showNotCompletedMessage() {
+            showError('Passkey setup was cancelled. You can try again or skip for now.');
+        }
+
         registerBtn.addEventListener('click', async function() {
             errorDiv.classList.add('hidden');
             registerBtn.disabled = true;
@@ -108,12 +112,16 @@
                     return;
                 }
 
-                showError(error?.message || 'Failed to register passkey. Please try again.');
+                if (error?.name === 'NotAllowedError' || error?.message?.includes('credentials creation was not completed')) {
+                    showNotCompletedMessage();
+                } else {
+                    showError(error?.message || 'Failed to register passkey. Please try again.');
+                }
             } catch (exception) {
                 console.error('Passkey registration error:', exception);
                 
-                if (exception?.name === 'NotAllowedError') {
-                    showError('Passkey setup was cancelled. You can try again or skip for now.');
+                if (exception?.name === 'NotAllowedError' || exception?.message?.includes('credentials creation was not completed')) {
+                    showNotCompletedMessage();
                 } else if (exception?.name === 'InvalidStateError') {
                     showError('A passkey is already registered on this device.');
                 } else {

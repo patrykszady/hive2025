@@ -534,14 +534,16 @@ class EstimateShow extends Component
                 ], (new Style)->setFontBold()->setBorder($border));
 
                 foreach ($section->estimate_line_items as $line_item) {
+                    $hideUnitFields = $line_item->unit_type === 'no_unit';
+
                     $writer->addRow([
                         '' => $index + 1 .'.'.$line_item->order + 1,
                         'title' => $line_item->name,
                         'category' => $line_item->category,
                         'sub_category' => $line_item->sub_category,
-                        'quantity' => $line_item->quantity,
-                        'unit' => $line_item->unit_type,
-                        'cost' => $line_item->cost,
+                        'quantity' => $hideUnitFields ? null : $line_item->quantity,
+                        'unit' => $hideUnitFields ? null : $line_item->unit_type,
+                        'cost' => $hideUnitFields ? null : $line_item->cost,
                         'total' => $line_item->total,
                     ]);
                 }
