@@ -258,23 +258,11 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
     }
 
     /**
-     * Format cell_phone with proper phone format
+     * Normalize cell_phone to store only digits.
      */
     protected function cellPhone(): Attribute
     {
         return Attribute::make(
-            get: function ($value) {
-                if (!$value) {
-                    return null;
-                }
-                
-                // Format 10-digit number as (XXX) XXX-XXXX
-                if (strlen($value) === 10) {
-                    return '(' . substr($value, 0, 3) . ') ' . substr($value, 3, 3) . '-' . substr($value, 6);
-                }
-                
-                return $value;
-            },
             set: function ($value) {
                 if (!$value) {
                     return null;

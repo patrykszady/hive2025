@@ -1,23 +1,36 @@
 <x-form-modal name="user_form_modal" :title="$view_text['card_title']">
     <form id="user_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="space-y-4">
-        {{-- PHONE --}}
-        <flux:input
-            wire:model.live.debounce.1000ms="user_cell"
-            x-bind:disabled="$wire.model.type == 'user'"
-            label="User Cell Phone"
-            type="number"
-            size="lg"
-            maxlength="10"
-            minlength="10"
-            inputmode="numeric"
-            placeholder="8474304439"
-            autofocus
-        />
+        {{-- PHONE - Use form.cell_phone for client_member edit, user_cell for other flows --}}
+        @if($model['type'] === 'client_member')
+            <flux:input
+                wire:model.live.debounce.500ms="form.cell_phone"
+                label="User Cell Phone"
+                type="text"
+                size="lg"
+                maxlength="10"
+                inputmode="numeric"
+                placeholder="8474304439"
+                mask="9999999999"
+            />
+        @else
+            <flux:input
+                wire:model.live.debounce.500ms="user_cell"
+                x-bind:disabled="$wire.model.type == 'user'"
+                label="User Cell Phone"
+                type="number"
+                size="lg"
+                maxlength="10"
+                minlength="10"
+                inputmode="numeric"
+                placeholder="8474304439"
+                autofocus
+            />
+        @endif
 
         {{-- 1/12/2023 if no user_cell or if updated ONLY --}}
         <div
             x-data="{ user_cell: @entangle('user_cell'), user_form: @entangle('user_form') }"
-            x-show="user_cell.length == 10 && !user_form"
+            x-show="$wire.model.type !== 'client_member' && user_cell.length == 10 && !user_form"
             >
             <flux:button
                 wire:click="user_cell_find"
@@ -36,23 +49,22 @@
             class="space-y-4"
             >
             <flux:input
-                wire:model.live="form.first_name"
-                x-bind:disabled="$wire.model.type != 'user' && $wire.form.user_id"
+                wire:model.live.debounce.500ms="form.first_name"
+                x-bind:disabled="$wire.model.type == 'client_member' || ($wire.model.type != 'user' && $wire.form.user_id)"
                 label="First Name"
                 type="text"
                 placeholder="First Name"
             />
             <flux:input
-                wire:model.live="form.last_name"
-                x-bind:disabled="$wire.model.type != 'user' && $wire.form.user_id"
+                wire:model.live.debounce.500ms="form.last_name"
+                x-bind:disabled="$wire.model.type == 'client_member' || ($wire.model.type != 'user' && $wire.form.user_id)"
                 label="Last Name"
                 type="text"
                 placeholder="Last Name"
             />
             <flux:input
-                wire:model.live.debounce.250ms="form.email"
-                {{-- ) || $wire.isRegistered --}}
-                x-bind:disabled="$wire.model.type != 'user' && $wire.form.user_id"
+                wire:model.live.debounce.500ms="form.email"
+                x-bind:disabled="$wire.model.type != 'user' && $wire.model.type != 'client_member' && $wire.form.user_id"
                 label="Email"
                 placeholder="Email"
             />
@@ -146,7 +158,8 @@
                 ($wire.model.id == 'NEW' && $wire.form.first_name && $wire.form.last_name && $wire.form.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test($wire.form.email)) || 
                 ($wire.form.user_id && $wire.model.type == 'client') ||
                 ($wire.form.user_id && $wire.model.type == 'vendor' && (($wire.form.via_vendor && $wire.form.via_vendor != 'NEW_VIA') || $wire.form.role == 1)) ||
-                ($wire.model.type == 'user')
+                ($wire.model.type == 'user') ||
+                ($wire.model.type == 'client_member' && $wire.form.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test($wire.form.email))
             )"
             type="submit"
             form="user_form_modal_form"

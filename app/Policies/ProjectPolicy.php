@@ -79,7 +79,7 @@ class ProjectPolicy
      */
     public function restore(User $user, Project $project): bool
     {
-        //
+        return $user->vendor_role === 'Admin';
     }
 
     /**

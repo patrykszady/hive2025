@@ -40,6 +40,36 @@
   [role="button"]:not(:disabled) {
     cursor: pointer;
   }
+
+  a:hover,
+  button:not(:disabled):hover,
+  [role="button"]:not(:disabled):hover,
+  [data-flux-link]:hover,
+  [wire\:navigate]:hover,
+  [wire\:navigate\.hover]:hover,
+  [wire\:click]:hover {
+    color: var(--color-indigo-600);
+  }
+}
+
+.dark a:hover,
+.dark button:not(:disabled):hover,
+.dark [role="button"]:not(:disabled):hover,
+.dark [data-flux-link]:hover,
+.dark [wire\:navigate]:hover,
+.dark [wire\:navigate\.hover]:hover,
+.dark [wire\:click]:hover {
+  color: var(--color-indigo-400);
+}
+
+.details-row [data-flux-link],
+.details-row [data-flux-link]:hover {
+  text-decoration: none !important;
+}
+
+[data-flux-link],
+[data-flux-link]:hover {
+  text-decoration: none !important;
 }
 
 /* Site-wide indigo focus styling for inputs - keep zinc default, indigo on focus */

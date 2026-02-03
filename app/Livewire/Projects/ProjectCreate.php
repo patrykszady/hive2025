@@ -202,7 +202,7 @@ class ProjectCreate extends Component
 
     public function delete()
     {
-        $this->authorize('forceDelete', $this->project);
+        $this->authorize('delete', $this->project);
 
         $this->form->delete();
 

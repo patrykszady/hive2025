@@ -19,7 +19,7 @@
     $useCloak = !$noCloak && !$attributes->has('no-cloak');
 @endphp
 <div
-    class="relative flex flex-col sm:grid sm:grid-cols-4 gap-1 items-start py-2 sm:py-3 [&:not(:last-child)]:border-b [&:not(:last-child)]:border-zinc-800/15 dark:[&:not(:last-child)]:border-white/20"
+    class="details-row relative flex flex-col sm:grid sm:grid-cols-4 gap-1 items-start py-2 sm:py-3 [&:not(:last-child)]:border-b [&:not(:last-child)]:border-zinc-800/15 dark:[&:not(:last-child)]:border-white/20"
     @if($useCloak) x-data="{}" x-cloak @endif
 >
     @if($isRight)
@@ -28,11 +28,11 @@
         <flux:subheading class="{{ $shouldTruncate ? 'truncate' : 'whitespace-normal break-words' }} sm:col-span-2 text-right pr-3 font-normal {{ $indentClass }}">
             @if($href)
                 @if($navigate)
-                    <flux:link href="{{ $href }}" variant="ghost" :accent="false" class="font-normal" wire:navigate.hover>
+                    <flux:link href="{{ $href }}" variant="ghost" :accent="false" class="font-normal no-underline hover:no-underline hover:text-indigo-600 dark:hover:text-indigo-400" wire:navigate.hover>
                         {{ $title }}
                     </flux:link>
                 @else
-                    <flux:link href="{{ $href }}" target="_blank" variant="ghost" :accent="false" class="font-normal">
+                    <flux:link href="{{ $href }}" target="_blank" variant="ghost" :accent="false" class="font-normal no-underline hover:no-underline hover:text-indigo-600 dark:hover:text-indigo-400">
                         {{ $title }}
                     </flux:link>
                 @endif
@@ -54,11 +54,11 @@
                 <span class="{{ $isRight ? 'float-right' : '' }}">
                     @if($href && !$isRight)
                         @if($navigate)
-                            <flux:link href="{{ $href }}" variant="ghost" :accent="false" class="font-bold" wire:navigate.hover>
+                            <flux:link href="{{ $href }}" variant="ghost" :accent="false" class="font-bold no-underline hover:no-underline hover:text-indigo-600 dark:hover:text-indigo-400" wire:navigate.hover>
                                 {!! $content ?? $slot !!}
                             </flux:link>
                         @else
-                            <flux:link href="{{ $href }}" target="_blank" variant="ghost" :accent="false" class="font-bold">
+                            <flux:link href="{{ $href }}" target="_blank" variant="ghost" :accent="false" class="font-bold no-underline hover:no-underline hover:text-indigo-600 dark:hover:text-indigo-400">
                                 {!! $content ?? $slot !!}
                             </flux:link>
                         @endif

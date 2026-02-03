@@ -16,9 +16,12 @@ class CompanyEmailsScope implements Scope
     public function apply(Builder $builder, Model $model)
     {
         if (auth()->guest()) {
-
-        } else {
+            // No scope applied for guests
+        } elseif (auth()->user()->vendor) {
             $builder->where('vendor_id', auth()->user()->vendor->id);
+        } else {
+            // User has no vendor (e.g., client user) - return no results
+            $builder->whereRaw('1 = 0');
         }
     }
 }

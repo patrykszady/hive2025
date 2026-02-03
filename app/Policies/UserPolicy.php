@@ -120,6 +120,16 @@ class UserPolicy
     }
 
     /**
+     * Determine whether a client user can update their own contact info.
+     * Client users can only update their own email and cell phone.
+     */
+    public function update_client_member(User $user, User $model): bool
+    {
+        // Client users can only edit their own profile
+        return $user->is_client_user && $user->id === $model->id;
+    }
+
+    /**
      * Determine whether the user can update the model.
      *
      * @return \Illuminate\Auth\Access\Response|bool

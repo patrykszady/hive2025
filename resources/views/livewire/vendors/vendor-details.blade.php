@@ -9,8 +9,8 @@
         <x-slot:header_buttons>
             @if($vendor->id != auth()->user()->vendor->id && $vendor->business_type != 'Retail')
                 {{-- Show payment button + dropdown for other non-retail vendors --}}
-                <flux:button.group>
-                    <flux:button size="sm" href="{{route('vendors.payment', $vendor->id)}}">
+                <flux:button.group class="w-full sm:w-auto">
+                    <flux:button size="sm" href="{{route('vendors.payment', $vendor->id)}}" wire:navigate class="w-full sm:w-auto">
                         Make Payment
                     </flux:button>
                     <flux:dropdown position="bottom" align="end">

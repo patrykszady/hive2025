@@ -42,6 +42,14 @@
                             >
                             {{ $user->full_name }}
                         </flux:table.cell>
+                    @elseif($view === 'clients.show' && auth()->user()->can('update_client_member', $user))
+                        <flux:table.cell
+                            wire:click="$dispatchTo('users.user-create', 'editClientMember', { user: {{$user->id}} })"
+                            variant="strong"
+                            class="cursor-pointer hover:text-indigo-600"
+                            >
+                            {{ $user->full_name }}
+                        </flux:table.cell>
                     @elseif($view === 'clients.show')
                         <flux:table.cell variant="strong">
                             {{ $user->full_name }}
@@ -56,7 +64,7 @@
                             {{ $user->full_name }}
                         </flux:table.cell>
                     @endif
-                    <flux:table.cell>{{ $user->cell_phone }}</flux:table.cell>
+                    <flux:table.cell>{{ $user->cell_phone ? preg_replace('/^(\d{3})(\d{3})(\d{4})$/', '($1) $2-$3', $user->cell_phone) : '' }}</flux:table.cell>
                     <flux:table.cell class="whitespace-normal break-words">
                         <span class="whitespace-normal break-words">{{ $user->email }}</span>
                     </flux:table.cell>

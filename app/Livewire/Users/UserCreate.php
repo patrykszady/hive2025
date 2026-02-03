@@ -31,34 +31,35 @@ class UserCreate extends Component
     ];
 
     public $model = ['type' => null, 'id' => null];
-    public $user_cell = false;
+    public $user_cell = '';
     public $user_form = false;
 
     public $via_vendors = [];
     public $via_client = null;
 
-    protected $listeners = ['refreshComponent' => '$refresh', 'newMember', 'editMember', 'removeMember', 'ViaVendorId'];
+    protected $listeners = ['refreshComponent' => '$refresh', 'newMember', 'editMember', 'editClientMember', 'removeMember', 'ViaVendorId'];
 
     public function rules()
     {
         return [
-            'user_cell' => 'required|digits:10',
+            'user_cell' => ['required', 'digits:10'],
         ];
     }
 
     public function updated($field, $value)
     {
         if ($field == 'user_cell') {
-            $this->form->reset();
-            $this->user_form = false;
+            // Don't reset when editing existing user or client member
+            if ($this->model['type'] !== 'user' && $this->model['type'] !== 'client_member') {
+                $this->form->reset();
+                $this->user_form = false;
+            }
         }
 
         if ($field == 'form.role') {
             $this->form->via_vendor = null;
             $this->form->hourly_rate = null;
         }
-
-        $this->validateOnly($field);
     }
 
     public function user_cell_find()
@@ -148,7 +149,7 @@ class UserCreate extends Component
 
     public function editMember(User $user)
     {
-        $this->user_cell = $user->cell_phone;
+        $this->user_cell = $user->cell_phone ?? '';
         $this->user_form = true;
 
         // //creating new Vendor or Client or adding Team Member/Client User to existing Vendor or Client
@@ -162,6 +163,58 @@ class UserCreate extends Component
         $this->view_text['form_submit'] = 'edit';
 
         $this->modal('user_form_modal')->show();
+    }
+
+    /**
+     * Edit a client member's contact information (email/cell phone).
+     * This is for client users editing other client members.
+     */
+    public function editClientMember(User $user)
+    {
+        $this->authorize('update_client_member', $user);
+
+        $this->user_cell = $user->cell_phone ?? '';
+        $this->user_form = true;
+
+        $this->model['type'] = 'client_member';
+        $this->model['id'] = $user->id;
+
+        $this->form->setUser($user);
+
+        $this->view_text['card_title'] = 'Edit Contact Info';
+        $this->view_text['button_text'] = 'Update';
+        $this->view_text['form_submit'] = 'editClientMemberSave';
+
+        $this->modal('user_form_modal')->show();
+    }
+
+    /**
+     * Save client member contact info changes (email/cell phone only).
+     */
+    public function editClientMemberSave()
+    {
+        $user = User::findOrFail($this->model['id']);
+        $this->authorize('update_client_member', $user);
+
+        // Form object handles validation via rules() and messages()
+        $this->form->validate();
+
+        $user->update([
+            'email' => $this->form->email,
+            'cell_phone' => $this->form->cell_phone,
+        ]);
+
+        $this->dispatch('refreshComponent')->to(UsersIndex::class);
+        
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Contact info updated.',
+            text: '',
+        );
+
+        $this->modal('user_form_modal')->close();
     }
 
     public function removeMember(User $user)
