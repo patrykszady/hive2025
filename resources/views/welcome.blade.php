@@ -1,23 +1,88 @@
 @section('title', 'Hive Contractors')
 <x-guest-layout>
+    @php
+        $navItems = [
+            ['href' => '#features', 'label' => 'Features', 'icon' => 'sparkles', 'anchor' => true],
+            ['href' => route('legal.privacy'), 'label' => 'Privacy', 'icon' => 'shield-check', 'anchor' => false],
+            ['href' => route('legal.terms'), 'label' => 'Terms', 'icon' => 'document-text', 'anchor' => false],
+        ];
+    @endphp
+    <flux:header sticky container class="!bg-white/70 dark:!bg-zinc-900/90 !backdrop-blur border-b border-zinc-200/80 dark:border-zinc-700/80 !py-2 lg:!py-1 !items-center !top-0 !z-50">
+        <div class="flex items-center gap-2 flex-1">
+            <flux:brand 
+                href="{{ route('welcome') }}" 
+                logo="{{ asset('favicon.png') }}" 
+                name="Hive Contractors" 
+                class="dark:hidden" 
+                x-on:click.prevent="if (window.smoothScrollTo) { window.smoothScrollTo(0, 800); history.pushState(null, '', '/'); }"
+            />
+            <flux:brand 
+                href="{{ route('welcome') }}" 
+                logo="{{ asset('favicon.png') }}" 
+                name="Hive Contractors" 
+                class="hidden! dark:flex" 
+                x-on:click.prevent="if (window.smoothScrollTo) { window.smoothScrollTo(0, 800); history.pushState(null, '', '/'); }"
+            />
+        </div>
+
+        <div class="flex-1 justify-center max-lg:hidden flex">
+            <flux:navbar class="-mb-px">
+                @foreach ($navItems as $item)
+                    @if ($item['anchor'])
+                        <flux:navbar.item
+                            href="{{ $item['href'] }}"
+                            x-on:click.prevent="history.pushState(null, '', '{{ $item['href'] }}'); const el = document.querySelector('{{ $item['href'] }}'); if (el && window.smoothScrollTo) { window.smoothScrollTo(el.getBoundingClientRect().top + window.pageYOffset - 80, 800); }"
+                        >{{ $item['label'] }}</flux:navbar.item>
+                    @else
+                        <flux:navbar.item href="{{ $item['href'] }}" wire:navigate.hover>{{ $item['label'] }}</flux:navbar.item>
+                    @endif
+                @endforeach
+            </flux:navbar>
+        </div>
+
+        <div class="flex items-center gap-2 flex-1 justify-end">
+            <flux:button
+                href="{{ route('login') }}"
+                class="max-lg:hidden !px-3 !py-2 text-sm font-semibold border border-transparent hover:border-zinc-300 dark:hover:border-zinc-600"
+                wire:navigate.hover
+            >
+                Sign in
+            </flux:button>
+            <flux:button href="{{ route('registration') }}" class="!bg-indigo-600 hover:!bg-indigo-500 !text-white font-semibold !px-3 !py-2 text-sm" wire:navigate.hover>Get started</flux:button>
+
+            <flux:dropdown class="lg:hidden" position="bottom" align="end">
+                <flux:button variant="ghost" icon="bars-2" aria-label="Menu" class="!px-2 !py-2" />
+                <flux:navmenu>
+                    @foreach ($navItems as $item)
+                        @if ($item['anchor'])
+                            <flux:navmenu.item
+                                href="{{ $item['href'] }}"
+                                icon="{{ $item['icon'] }}"
+                                x-on:click.prevent="history.pushState(null, '', '{{ $item['href'] }}'); const el = document.querySelector('{{ $item['href'] }}'); if (el && window.smoothScrollTo) { window.smoothScrollTo(el.getBoundingClientRect().top + window.pageYOffset - 80, 800); }"
+                            >
+                                {{ $item['label'] }}
+                            </flux:navmenu.item>
+                        @else
+                            <flux:navmenu.item href="{{ $item['href'] }}" icon="{{ $item['icon'] }}" wire:navigate.hover>
+                                {{ $item['label'] }}
+                            </flux:navmenu.item>
+                        @endif
+                    @endforeach
+                    <flux:navmenu.separator />
+                    <flux:navmenu.item href="{{ route('login') }}" icon="arrow-right-end-on-rectangle" wire:navigate.hover>Sign in</flux:navmenu.item>
+                </flux:navmenu>
+            </flux:dropdown>
+        </div>
+    </flux:header>
+
     <div class="relative overflow-hidden bg-white isolate">
-        {{-- <svg class="absolute inset-0 -z-10 h-full w-full stroke-gray-200 [mask-image:radial-gradient(100%_100%_at_top_right,white,transparent)]"
-            aria-hidden="true">
-            <defs>
-                <pattern id="0787a7c5-978c-4f66-83c7-11c213f99cb7" width="200" height="200" x="50%" y="-1"
-                    patternUnits="userSpaceOnUse">
-                    <path d="M.5 200V.5H200" fill="none" />
-                </pattern>
-            </defs>
-            <rect width="100%" height="100%" stroke-width="0" fill="url(#0787a7c5-978c-4f66-83c7-11c213f99cb7)" />
-        </svg> --}}
         <div class="px-6 pt-10 pb-24 mx-auto max-w-7xl sm:pb-32 lg:flex lg:px-8 lg:py-40">
             <div class="max-w-2xl mx-auto lg:mx-0 lg:max-w-xl lg:shrink-0 lg:pt-8">
-                <a href="{{route('registration')}}">
+                <a href="{{route('registration')}}" wire:navigate.hover>
                     <img class="h-36" src="{{ asset('favicon.png') }}" alt="{{env('APP_NAME')}}">
                 </a>
                 <div class="mt-24 sm:mt-32 lg:mt-16">
-                    <a href="{{route('registration')}}" class="inline-flex space-x-6">
+                    <a href="{{route('registration')}}" class="inline-flex space-x-6" wire:navigate.hover>
                         <span
                             class="px-3 py-1 text-sm font-semibold leading-6 text-indigo-600 rounded-full bg-indigo-600/10 ring-1 ring-inset ring-indigo-600/10">
                             Start Today
@@ -34,20 +99,20 @@
                         </span>
                     </a>
                 </div>
-                <h1 class="mt-10 text-4xl font-bold tracking-tight text-gray-900 sm:text-6xl">
-                    Join Hive Contractors
+                <h1 class="mt-10 text-4xl font-bold tracking-tight text-gray-900 sm:text-6xl scroll-mt-24" id="features">
+                    The CRM built for small contractors
                 </h1>
                 <p class="mt-6 text-lg leading-8 text-gray-600">
-                    Welcome to Hive Contractors! Our goal is to maximize your bottom line without interrupting what you do best - moving your construction projects forward.
-                    We understand your time is valuable, that's why we seamlessly integrate with your existing workflow, empowering you to focus on your team & homeowners while we take care of the details.
+                    Hive Contractors brings your business under one roof. Automate finances, vendor collaboration,
+                    homeowner updates, schedules, timesheets, COIs, receipts, and audits—so you can focus on building.
                     <br>
                     <b>Made by Contractors. For Contractors.<b>
                 </p>
                 <div class="flex items-center mt-10 gap-x-6">
-                    <a href="{{route('registration')}}" class="rounded-md bg-indigo-600 px-3.5 py-1.5 text-base font-semibold leading-7 text-white shadow-xs hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">
+                    <a href="{{route('registration')}}" class="rounded-md bg-indigo-600 px-3.5 py-1.5 text-base font-semibold leading-7 text-white shadow-xs hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600" wire:navigate.hover>
                         Create your Hive
                     </a>
-                    <a href="{{route('login')}}" class="text-base font-semibold leading-7 text-gray-900">Log in<span aria-hidden="true">→</span></a>
+                    <a href="{{route('login')}}" class="text-base font-semibold leading-7 text-gray-900" wire:navigate.hover>Log in<span aria-hidden="true">→</span></a>
                 </div>
             </div>
             <div class="flex max-w-2xl mx-auto mt-16 sm:mt-24 lg:ml-10 lg:mr-0 lg:mt-0 lg:max-w-none lg:flex-none xl:ml-32">
@@ -74,16 +139,17 @@
                 class="grid max-w-2xl grid-cols-1 mx-auto gap-x-8 gap-y-16 sm:gap-y-20 lg:mx-0 lg:max-w-none lg:grid-cols-2">
                 <div class="lg:ml-auto lg:pl-4 lg:pt-4">
                     <div class="lg:max-w-lg">
-                        <a href="{{route('registration')}}" class="inline-flex space-x-6">
+                        <a href="{{route('registration')}}" class="inline-flex space-x-6" wire:navigate.hover>
                             <h2 class="text-base font-semibold leading-7 text-indigo-600">
                                 Join Hive Contractors
                             </h2>
                         </a>
 
-                        <p class="mt-2 text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl">Projects automated</p>
+                        <p class="mt-2 text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl">Automation that pays for itself</p>
                         <p class="mt-6 text-lg font-normal leading-8 text-gray-600">
-                            {{-- Automate your construction project finances. Your project finances sorted & organized automatically. Understand your project finances with ease. --}}
-                            Simplify and streamline your construction project (finances, scheduling, estimates) with Hive Contractors. Let Hive take care of sorting and organizing your project finances automatically, giving you a clear understanding of your financials effortlessly so you can focus on your projects.
+                            Hive Contractors is a CRM built for small contractors—combining finances, scheduling,
+                            and project management in one automated workspace. Everything connects, so work moves
+                            faster with less effort.
                         </p>
                         <dl class="max-w-xl mt-10 space-y-8 text-base leading-7 text-gray-600 lg:max-w-none">
                             <div class="relative pl-9">
@@ -92,11 +158,11 @@
                                         fill="currentColor" aria-hidden="true">
                                         <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clip-rule="evenodd" />
                                     </svg>
-                                    Receipts & invoices.
+                                    Finances + QuickBooks sync.
                                 </dt>
                                 <dd class="inline font-normal">
-                                    No more sifting through piles of paperwork. Hive intelligently sorts and links your email and physical receipts with your bank transactions, ensuring all your financial records are in sync.
-                                    {{-- Your email and physical receipts sorted and linked with your bank transactions. --}}
+                                    Automatically consolidate receipts and transactions, with clean books and quick access
+                                    to balance sheets and profit & loss statements.
                                 </dd>
                             </div>
                             <div class="relative pl-9">
@@ -105,11 +171,10 @@
                                         fill="currentColor" aria-hidden="true">
                                         <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clip-rule="evenodd" />
                                     </svg>
-                                    Subcontractor bids & payments.
+                                    Vendor-to-vendor collaboration.
                                 </dt>
                                 <dd class="inline font-normal">
-                                    Stay ahead of the game with seamless interconnectivity between General Contractors and Subcontractors. Hive allows everyone involved in each project to update bids with change orders, keep everyone informed about upcoming payments and know exactly who is owed what.
-                                    {{-- Interconnectivity between General Contractors and Subcontractors so everyone involved on each project is able to stay ahead, know what's coming in and who is owed. --}}
+                                    Streamline bids, payments, and certificates of insurance across your vendor network.
                                 </dd>
                             </div>
                             <div class="relative pl-9">
@@ -118,10 +183,10 @@
                                         fill="currentColor" aria-hidden="true">
                                         <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clip-rule="evenodd" />
                                     </svg>
-                                    Estimates, Invoices, and Change Orders.
+                                    Estimates, invoices, and change orders.
                                 </dt>
                                 <dd class="inline font-normal">
-                                    Create estimates, change orders, and invoices in a flash on the go from your phone.
+                                    Win bids faster with professional docs and one-click conversions.
                                 </dd>
                             </div>
                             <div class="relative pl-9">
@@ -130,10 +195,10 @@
                                         fill="currentColor" aria-hidden="true">
                                         <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clip-rule="evenodd" />
                                     </svg>
-                                    Scheduling and Team Member Managment.
+                                    Project schedules (Gantt + Kanban).
                                 </dt>
                                 <dd class="inline font-normal">
-                                    {{-- Put an end to countless of calls.  --}}
+                                    Keep teams aligned with live timelines, dependencies, and task boards.
                                 </dd>
                             </div>
                             <div class="relative pl-9">
@@ -142,10 +207,10 @@
                                         fill="currentColor" aria-hidden="true">
                                         <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clip-rule="evenodd" />
                                     </svg>
-                                    Employee timesheets & payments.
+                                    Team schedules + timesheets.
                                 </dt>
                                 <dd class="inline font-normal">
-                                    Track your employee's time dedicated to each project effortlessly. With just a click, you can generate accurate timesheets and pay your employees and subcontractors promptly.
+                                    Track time, availability, and payroll across jobs without spreadsheets.
                                 </dd>
                             </div>
                             <div class="relative pl-9">
@@ -154,16 +219,16 @@
                                         fill="currentColor" aria-hidden="true">
                                         <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clip-rule="evenodd" />
                                     </svg>
-                                    Audits & taxes.
+                                    Homeowner hubs + COI + audits.
                                 </dt>
                                 <dd class="inline font-normal">
-                                    Say goodbye to the stress of preparing for audits and taxes. Hive automates the process by keeping track of certificates of insurance and payments, bringing accurate audits and taxes to you with just a click.
+                                    Give clients real-time project updates, keep COIs current, and run one‑click audits.
                                 </dd>
                             </div>
                         </dl>
                     </div>
                     <div class="mt-8">
-                        <a href="{{route('registration')}}" class="inline-flex rounded-md bg-indigo-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-xs hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">
+                        <a href="{{route('registration')}}" class="inline-flex rounded-md bg-indigo-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-xs hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600" wire:navigate.hover>
                             Create you Hive
                         </a>
                     </div>
@@ -210,7 +275,7 @@
             </div>
 
             <div class="max-w-2xl m-10 mx-auto lg:text-center gap-x-6">
-                <a href="{{route('registration')}}" class="px-4 py-3 text-base font-semibold leading-7 text-white bg-indigo-600 rounded-md shadow-xs hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">
+                <a href="{{route('registration')}}" class="px-4 py-3 text-base font-semibold leading-7 text-white bg-indigo-600 rounded-md shadow-xs hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600" wire:navigate.hover>
                     Create your Hive
                 </a>
             </div>
@@ -300,7 +365,7 @@
                     Managing projects is hard enough. Let us take care of the details.
                 </p> --}}
                 <div class="flex items-center justify-center mt-10 gap-x-6">
-                    <a href="{{route('registration')}}"
+                    <a href="{{route('registration')}}" wire:navigate.hover
                         class="rounded-md bg-white px-3.5 py-2.5 text-sm font-semibold text-indigo-600 shadow-xs hover:bg-indigo-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">
                         Create your Hive
                     </a>
@@ -316,90 +381,50 @@
     </div>
 
     <footer class="bg-white dark:bg-gray-900">
-        <div class="mx-auto max-w-7xl px-6 py-16 sm:py-24 lg:px-8 lg:py-32">
-            <div class="xl:grid xl:grid-cols-3 xl:gap-8">
+        <div class="mx-auto max-w-7xl px-6 pt-16 pb-8 sm:pt-24 lg:px-8 lg:pt-28">
+            <div class="grid gap-12 lg:grid-cols-3">
                 <div class="space-y-6">
-                    <div class="space-y-3">
-                        <img src="{{ asset('favicon.png') }}" alt="Hive Contractors" class="h-10" />
-                        <a href="{{ route('welcome') }}" class="text-base font-semibold text-gray-900 hover:text-gray-700 dark:text-white dark:hover:text-gray-300">Hive Contractors</a>
+                    <div class="flex items-center gap-3">
+                        <img src="{{ asset('favicon.png') }}" alt="Hive Contractors" class="h-9" />
+                        <a href="{{ route('welcome') }}" class="text-base font-semibold text-gray-900 hover:text-gray-700 dark:text-white dark:hover:text-gray-300" wire:navigate.hover>Hive Contractors</a>
                     </div>
-                    <div class="text-sm/6 font-normal text-gray-600 dark:text-gray-400">
+                    <p class="text-sm/6 text-balance text-gray-600 dark:text-gray-400 font-normal">
+                        Purpose-built CRM for contractors—streamline projects, vendors, finances, and client updates in one place.
+                    </p>
+                    <div class="text-sm/6 text-gray-600 dark:text-gray-400 font-normal">
                         <div>305 S Ridge St, PO Box 1504</div>
                         <div>Breckenridge, CO 80424</div>
                         <div>
-                            <a href="tel:+12249993880" class="font-normal hover:text-gray-900 dark:hover:text-white">(224) 999-3880</a>
+                            <a href="tel:+12249993880" class="hover:text-gray-900 dark:hover:text-white font-normal">(224) 999-3880</a>
                         </div>
                         <div>
-                            <a href="mailto:{{ config('mail.from.address') }}" class="font-normal hover:text-gray-900 dark:hover:text-white">{{ config('mail.from.address') }}</a>
+                            <a href="mailto:{{ config('mail.from.address') }}" class="hover:text-gray-900 dark:hover:text-white font-normal">{{ config('mail.from.address') }}</a>
                         </div>
                     </div>
                 </div>
-                <div class="mt-16 grid grid-cols-2 gap-8 xl:col-span-2 xl:mt-0">
-                    <div class="md:grid md:grid-cols-2 md:gap-8">
-                        <div>
-                            <h3 class="text-sm/6 font-semibold text-gray-900 dark:text-white">Solutions</h3>
-                            <ul role="list" class="mt-6 space-y-4 hidden">
-                                <li>
-                                    <a href="#" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Marketing</a>
-                                </li>
-                                <li>
-                                    <a href="#" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Analytics</a>
-                                </li>
-                                <li>
-                                    <a href="#" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Automation</a>
-                                </li>
-                                <li>
-                                    <a href="#" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Commerce</a>
-                                </li>
-                                <li>
-                                    <a href="#" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Insights</a>
-                                </li>
-                            </ul>
-                        </div>
-                        <div class="mt-10 md:mt-0">
-                            <h3 class="text-sm/6 font-semibold text-gray-900 dark:text-white">Support</h3>
-                            <ul role="list" class="mt-6 space-y-4 hidden">
-                                <li>
-                                    <a href="#" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Submit ticket</a>
-                                </li>
-                                <li>
-                                    <a href="#" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Documentation</a>
-                                </li>
-                                <li>
-                                    <a href="#" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Guides</a>
-                                </li>
-                            </ul>
-                        </div>
+                <div class="grid gap-8 sm:grid-cols-2 lg:col-span-2">
+                    <div>
+                        <h3 class="text-sm/6 font-semibold text-gray-900 dark:text-white">Product</h3>
+                        <ul role="list" class="mt-4 space-y-3">
+                            <li>
+                                <a href="#features" class="text-sm/6 text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-300 font-normal">Features</a>
+                            </li>
+                            <li>
+                                <a href="{{ route('registration') }}" class="text-sm/6 text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-300 font-normal" wire:navigate.hover>Get started</a>
+                            </li>
+                            <li>
+                                <a href="{{ route('login') }}" class="text-sm/6 text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-300 font-normal" wire:navigate.hover>Sign in</a>
+                            </li>
+                        </ul>
                     </div>
-                    <div class="md:grid md:grid-cols-2 md:gap-8">
-                        <div>
-                            <h3 class="text-sm/6 font-semibold text-gray-900 dark:text-white">Company</h3>
-                            <ul role="list" class="mt-6 space-y-4 hidden">
-                                <li>
-                                    <a href="#" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">About</a>
-                                </li>
-                                <li>
-                                    <a href="#" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Blog</a>
-                                </li>
-                                <li>
-                                    <a href="#" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Jobs</a>
-                                </li>
-                                <li>
-                                    <a href="#" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Press</a>
-                                </li>
-                            </ul>
-                        </div>
-                        <div class="mt-10 md:mt-0">
-                            <h3 class="text-sm/6 font-semibold text-gray-900 dark:text-white">Legal</h3>
-                            <ul role="list" class="mt-6 space-y-4">
-                                <li>
-                                    <a href="{{ route('legal.terms') }}" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Terms of service</a>
-                                </li>
-                                <li>
-                                    <a href="{{ route('legal.privacy') }}" class="text-sm/6 font-normal text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Privacy policy</a>
-                                </li>
-                            </ul>
-                        </div>
+                </div>
+            </div>
+            <div class="mt-12 border-t border-gray-900/10 pt-6 text-sm/6 text-gray-600 dark:border-white/10 dark:text-gray-400 font-normal">
+                <div class="flex flex-col items-center gap-3 sm:flex-row sm:justify-center sm:gap-6">
+                    <span>&copy; {{ date('Y') }} {{ config('app.name') }}. All rights reserved.</span>
+                    <div class="flex items-center gap-4">
+                        <a href="{{ route('legal.terms') }}" class="text-sm/6 text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-300 font-normal" wire:navigate.hover>Terms of service</a>
+                        <a href="{{ route('legal.privacy') }}" class="text-sm/6 text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-300 font-normal" wire:navigate.hover>Privacy policy</a>
                     </div>
                 </div>
             </div>

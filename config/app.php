@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Facade;
 
 return [
+    'url' => env('APP_URL', 'https://hub.hive.contractors'),
     'log_max_files' => 180,
 
     /*
@@ -28,7 +29,7 @@ return [
     |
     */
 
-    'noindex_hosts' => env('NOINDEX_HOSTS', 'dev.hive.contractors,dashboard.hive.contractors'),
+    'noindex_hosts' => env('NOINDEX_HOSTS', 'dev.hive.contractors,hub.hive.contractors'),
 
     /*
     |--------------------------------------------------------------------------
@@ -64,6 +65,13 @@ return [
     */
 
     'long_name' => env('LONG_APP_NAME', 'Hive Contractors'),
+
+    'domain_routing' => env('DOMAIN_ROUTING', false),
+
+    'public_host' => env('PUBLIC_HOST', 'hive.contractors'),
+
+    'hub_host' => env('HUB_HOST', 'hub.hive.contractors'),
+
 
     // ... rest of config
 ];

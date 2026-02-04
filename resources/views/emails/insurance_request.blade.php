@@ -1,7 +1,8 @@
 <x-mail::message :hide-footer="true" :show-header-brand="true">
 @php
-	$requestingVendorUrl = 'https://dashboard.hive.contractors/vendors/' . $requesting_vendor->id;
-	$insuredVendorUrl = 'https://dashboard.hive.contractors/vendors/' . $vendor->id;
+	$baseUrl = rtrim((string) config('app.url'), '/');
+	$requestingVendorUrl = $baseUrl . '/vendors/' . $requesting_vendor->id;
+	$insuredVendorUrl = $baseUrl . '/vendors/' . $vendor->id;
 @endphp
 
 <div style="text-align: center;">

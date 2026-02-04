@@ -29,7 +29,8 @@ trait ProcessesVendorDocs
         $vendorId = null,
         $belongsToVendorId = null,
         $messageId = null,
-        $grantId = null
+        $grantId = null,
+        $sourceLabel = null
     ) {
         // Normalize the file path
         $normalizedFilePath = ltrim($filePath, 'files/');
@@ -43,12 +44,13 @@ trait ProcessesVendorDocs
                 'insured_name' => 'Insured Name',
                 'holder_name' => 'Certificate Holder Name',
             ];
+            $minConfidence = 0.4;
             
             $missingFields = [];
             foreach ($requiredFields as $fieldKey => $fieldLabel) {
                 $field = $insuranceInfo[$fieldKey] ?? null;
                 $hasValue = !empty($field['valueString'] ?? '');
-                $hasConfidence = ($field['confidence'] ?? 0) >= 0.5;
+                $hasConfidence = ($field['confidence'] ?? 0) >= $minConfidence;
                 
                 if (!$hasValue || !$hasConfidence) {
                     $missingFields[] = $fieldLabel . ' (confidence: ' . ($field['confidence'] ?? 0) . ')';
@@ -106,7 +108,8 @@ trait ProcessesVendorDocs
             $agent = $this->processAgent($insuranceInfo);
 
             // 8. Generate permanent filename and copy file
-            $fileName = "{$matchedBelongsToVendorId}-{$matchedVendorId}-" . now()->format('Y-m-d-H-i-s') . ".{$docType}";
+            $labelSuffix = $sourceLabel ? '-'.$sourceLabel : '';
+            $fileName = "{$matchedBelongsToVendorId}-{$matchedVendorId}-" . now()->format('Y-m-d-H-i-s') . "{$labelSuffix}.{$docType}";
             $newFilePath = "vendor_docs/{$fileName}";
 
             if (!$this->copyToPermanentLocation($normalizedFilePath, $newFilePath)) {
@@ -242,6 +245,9 @@ trait ProcessesVendorDocs
             return $result;
         }
 
+        $completePolicies = [];
+        $partialBuckets = [];
+
         foreach ($insuranceInfo[$policyKey]['valueArray'] as $policy) {
             if (!isset($policy['valueObject'])) {
                 continue;
@@ -249,15 +255,74 @@ trait ProcessesVendorDocs
 
             $policyObject = $policy['valueObject'];
 
-            // Extract policy data
             $policyNumber = $policyObject["{$type}_policy_number"]['valueString'] ?? null;
             $effectiveDate = $policyObject["{$type}_eff"]['valueDate'] ?? $policyObject["{$type}_eff"]['valueString'] ?? null;
             $expirationDate = $policyObject["{$type}_exp"]['valueDate'] ?? $policyObject["{$type}_exp"]['valueString'] ?? null;
 
-            // Validate required fields
+            if ($policyNumber && $effectiveDate && $expirationDate) {
+                $key = $policyNumber.'|'.$effectiveDate.'|'.$expirationDate;
+                $completePolicies[$key] = [
+                    'policy_number' => $policyNumber,
+                    'effective_date' => $effectiveDate,
+                    'expiration_date' => $expirationDate,
+                ];
+                continue;
+            }
+
+            $bucketKey = $policyNumber ?: 'unknown';
+            $partialBuckets[$bucketKey][] = [
+                'policy_number' => $policyNumber,
+                'effective_date' => $effectiveDate,
+                'expiration_date' => $expirationDate,
+            ];
+        }
+
+        if (isset($partialBuckets['unknown'])) {
+            $knownPolicyNumbers = array_values(array_filter(array_keys($partialBuckets), fn ($key) => $key !== 'unknown'));
+            if (count($knownPolicyNumbers) === 1) {
+                $targetKey = $knownPolicyNumbers[0];
+                $partialBuckets[$targetKey] = array_merge($partialBuckets[$targetKey] ?? [], $partialBuckets['unknown']);
+                unset($partialBuckets['unknown']);
+            }
+        }
+
+        $mergedPolicies = $completePolicies;
+
+        foreach ($partialBuckets as $bucketKey => $partials) {
+            if ($bucketKey !== 'unknown' && collect($completePolicies)->contains(fn ($policy) => $policy['policy_number'] === $bucketKey)) {
+                continue;
+            }
+
+            $merged = [
+                'policy_number' => null,
+                'effective_date' => null,
+                'expiration_date' => null,
+            ];
+
+            foreach ($partials as $partial) {
+                if (!$merged['policy_number'] && !empty($partial['policy_number'])) {
+                    $merged['policy_number'] = $partial['policy_number'];
+                }
+                if (!$merged['effective_date'] && !empty($partial['effective_date'])) {
+                    $merged['effective_date'] = $partial['effective_date'];
+                }
+                if (!$merged['expiration_date'] && !empty($partial['expiration_date'])) {
+                    $merged['expiration_date'] = $partial['expiration_date'];
+                }
+            }
+
+            $key = ($merged['policy_number'] ?: $bucketKey).'|'.($merged['effective_date'] ?: 'unknown').'|'.($merged['expiration_date'] ?: 'unknown');
+            $mergedPolicies[$key] = $merged;
+        }
+
+        foreach ($mergedPolicies as $policyData) {
+            $policyNumber = $policyData['policy_number'] ?? null;
+            $effectiveDate = $policyData['effective_date'] ?? null;
+            $expirationDate = $policyData['expiration_date'] ?? null;
+
             if (!$policyNumber || !$effectiveDate || !$expirationDate) {
                 Log::channel('vendor_docs')->warning('Incomplete policy data', [
-                    'file' => $fileName, // Using the permanent filename here since it's policy-specific
+                    'file' => $fileName,
                     'type' => $type,
                     'policy_number' => $policyNumber,
                     'effective_date' => $effectiveDate,
@@ -268,7 +333,6 @@ trait ProcessesVendorDocs
                 continue;
             }
 
-            // Create or find vendor document
             $vendorDoc = VendorDoc::withoutGlobalScopes()->firstOrCreate(
                 [
                     'number' => $policyNumber,
@@ -283,7 +347,6 @@ trait ProcessesVendorDocs
                 ]
             );
 
-            // Associate agent if available
             if ($vendorDoc->wasRecentlyCreated && $agent) {
                 $vendorDoc->agent()->associate($agent);
                 $vendorDoc->save();
@@ -308,7 +371,7 @@ trait ProcessesVendorDocs
     //Resolve the vendor ID by name with a fallback to address.
     protected function resolveVendorId(array $insuranceInfo, $nameKey, $addressKey)
     {
-        $name = $insuranceInfo[$nameKey]['valueString'] ?? '';
+        $name = $this->normalizeVendorName($insuranceInfo[$nameKey]['valueString'] ?? '');
         $address = $insuranceInfo[$addressKey]['valueString'] ?? '';
         
         // Try to match by business name first (with address for disambiguation)
@@ -320,6 +383,16 @@ trait ProcessesVendorDocs
         }
         
         return $calculatedId;
+    }
+
+    private function normalizeVendorName(string $name): string
+    {
+        $trimmed = trim($name);
+        if ($trimmed === '') {
+            return '';
+        }
+
+        return trim((string) preg_replace('/%.*$/', '', $trimmed));
     }
 
     protected function matchBusinessNameAndReturnId($businessName, $businessAddress = null)

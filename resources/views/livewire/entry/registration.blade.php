@@ -10,7 +10,7 @@
 
             <flux:heading class="text-center" size="xl">Register your Hive</flux:heading>
 
-            <div class="space-y-6">
+            <div class="space-y-6" wire:transition>
                 {{-- CELL PHONE --}}
                 @if($step === 'phone')
                 <div class="space-y-6">
@@ -23,7 +23,7 @@
                         required
                     />
 
-                    @if($user_cell_valid)
+                    <div wire:show="user_cell_valid" x-transition.duration.150ms wire:cloak>
                         <flux:button 
                             wire:click="user_cell_confirm"
                             variant="primary" 
@@ -31,7 +31,7 @@
                         >
                             Confirm Number
                         </flux:button>
-                    @endif
+                    </div>
                 </div>
                 @endif
 

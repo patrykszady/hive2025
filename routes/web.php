@@ -91,6 +91,22 @@ Route::get('robots.txt', function () {
     return $response;
 })->name('robots');
 
+$publicRoutes = function () {
+    Route::middleware('guest')->group(function () {
+        Route::get('/', function () {
+            return view('welcome');
+        })->name('welcome');
+    });
+
+    // Legal pages (public, no auth required)
+    Route::prefix('legal')->name('legal.')->group(function () {
+        Route::view('privacy', 'legal.privacy-policy')->name('privacy');
+        Route::view('terms', 'legal.terms-of-service')->name('terms');
+    });
+};
+
+$hubRoutes = function () {
+
 //if guests go to '/', if logged in go to dashboard (or to /vendor_selection if not set and User has multiple)
 Route::middleware('guest')->group(function () {
     Route::get('/', function () {
@@ -106,6 +122,12 @@ Route::middleware('guest')->group(function () {
     Route::get('registration', Registration::class)->name('registration');
 });
 
+// Legal pages (public, no auth required)
+Route::prefix('legal')->name('legal.')->group(function () {
+    Route::view('privacy', 'legal.privacy-policy')->name('privacy');
+    Route::view('terms', 'legal.terms-of-service')->name('terms');
+});
+
 // Passkey setup page (requires auth)
 Route::middleware('auth')->group(function () {
     Route::get('passkey/setup', PasskeySetup::class)->name('passkey.setup');
@@ -119,11 +141,6 @@ Route::get('v/{token}', VendorAvailabilityIndex::class)->name('vendor.availabili
 // Short URL for client schedule SMS
 Route::get('s/{token}', ClientScheduleIndex::class)->name('client.schedule.short');
 
-// Legal pages (public, no auth required)
-Route::prefix('legal')->name('legal.')->group(function () {
-    Route::view('privacy', 'legal.privacy-policy')->name('privacy');
-    Route::view('terms', 'legal.terms-of-service')->name('terms');
-});
 
 // Public vendor availability response routes (no auth required)
 Route::prefix('vendor/availability')->name('vendor.availability.')->group(function () {
@@ -210,8 +227,12 @@ Route::middleware(['auth', 'vendor.access'])->group(function () {
     Route::get('vendor/registration/{vendor}', VendorRegistration::class)
         ->name('vendor_registration');
     
+    Route::get('/dashboard', function () {
+        return redirect('/hub');
+    });
+
     // All protected routes
-    Route::get('/dashboard', DashboardShow::class)->name('dashboard');
+    Route::get('/hub', DashboardShow::class)->name('dashboard');
 
     // Push subscription routes
     Route::get('/push/vapid-public-key', [PushSubscriptionController::class, 'vapidPublicKey'])
@@ -323,3 +344,14 @@ Route::middleware(['auth', 'vendor.access'])->group(function () {
     //VENDOR OPTIONS
     Route::get('/options', VendorOptions::class)->name('vendor_options.index');
 });
+
+};
+
+$useDomainRouting = (bool) config('app.domain_routing');
+
+if ($useDomainRouting) {
+    Route::domain(config('app.public_host'))->group($publicRoutes);
+    Route::domain(config('app.hub_host'))->group($hubRoutes);
+} else {
+    $hubRoutes();
+}

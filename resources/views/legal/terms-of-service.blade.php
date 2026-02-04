@@ -1,7 +1,7 @@
 <x-layouts.guest>
 <div class="max-w-4xl mx-auto px-4 py-12 bg-white min-h-screen">
     <h1 class="text-3xl font-bold mb-2">Terms of Service</h1>
-    <p class="text-gray-500 mb-8">Last Updated: {{ now()->format('F j, Y') }}</p>
+    <p class="text-gray-500 mb-8">Last Updated: January 16, 2026</p>
 
     <div class="prose prose-lg max-w-none">
         <p>

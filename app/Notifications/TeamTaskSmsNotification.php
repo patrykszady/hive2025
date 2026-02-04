@@ -150,9 +150,9 @@ class TeamTaskSmsNotification extends Notification implements ShouldQueue
     protected function getDashboardUrl(): string
     {
         $devWebhookUrl = config('app.dev_webhook_url');
-        $baseUrl = $devWebhookUrl ?: 'https://dashboard.hive.contractors';
+        $baseUrl = $devWebhookUrl ?: (string) config('app.url');
 
-        return $baseUrl . '/dashboard';
+        return $baseUrl . '/hub';
     }
 
     /**

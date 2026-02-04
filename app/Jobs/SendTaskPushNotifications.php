@@ -165,7 +165,7 @@ class SendTaskPushNotifications implements ShouldQueue
             'body' => $body,
             'tag' => "task-reminder-{$this->notificationType}-{$dateStr}",
             'data' => [
-                'url' => '/dashboard',
+                'url' => '/hub',
             ],
         ];
     }

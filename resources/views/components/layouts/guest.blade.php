@@ -4,8 +4,10 @@
 
     <body>
         <livewire:browser-timezone />
-        <div class="h-screen font-sans antialiased text-gray-900">
-            {{ $slot }}
+        <div class="min-h-screen font-sans antialiased text-gray-900">
+            <div data-page-fade class="transition-opacity duration-200">
+                {{ $slot }}
+            </div>
         </div>
 
         

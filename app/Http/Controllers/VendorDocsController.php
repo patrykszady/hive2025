@@ -90,6 +90,25 @@ class VendorDocsController extends Controller
                 Storage::disk('files')->put($tempFilePath, $attachmentContent);
                 $tempFilePath = 'files/'.$tempFilePath;
 
+                if ($docType === 'pdf') {
+                    $splitPaths = $this->splitPdfIntoPages(ltrim($tempFilePath, 'files/'), $attachmentId);
+                    if (!empty($splitPaths)) {
+                        foreach ($splitPaths as $index => $splitPath) {
+                            $pageLabel = 'page-'.((int) $index + 1);
+                            $this->handleVendorDocProcessing(
+                                'files/'.$splitPath,
+                                $docType,
+                                null,
+                                null,
+                                $messageId,
+                                $grantId,
+                                $pageLabel
+                            );
+                        }
+                        continue;
+                    }
+                }
+
                 // Process the document
                 $this->handleVendorDocProcessing(
                     $tempFilePath,
@@ -101,6 +120,76 @@ class VendorDocsController extends Controller
                 );
             }
         }
+    }
+
+    private function splitPdfIntoPages(string $relativePath, string $attachmentId): array
+    {
+        $publicKey = env('I_LOVE_PDF_PUBLIC');
+        $secretKey = env('I_LOVE_PDF_SECRET');
+
+        if (empty($publicKey) || empty($secretKey)) {
+            Log::channel('vendor_docs')->warning('Missing iLovePDF credentials - skipping split', [
+                'file' => $relativePath,
+            ]);
+            return [];
+        }
+
+        $absolutePath = Storage::disk('files')->path($relativePath);
+        if (!file_exists($absolutePath)) {
+            Log::channel('vendor_docs')->warning('Split source file missing', [
+                'file' => $relativePath,
+            ]);
+            return [];
+        }
+
+        $splitDir = "_temp_vendor_docs/split_{$attachmentId}";
+        Storage::disk('files')->makeDirectory($splitDir);
+        $splitAbsDir = Storage::disk('files')->path($splitDir);
+
+        try {
+            $ilovepdf = new Ilovepdf($publicKey, $secretKey);
+            $task = $ilovepdf->newTask('split');
+            $task->addFile($absolutePath);
+            $task->setFixedRange(1);
+            $task->setPackagedFilename('split_'.$attachmentId);
+            $task->setOutputFilename('page');
+            $task->execute();
+
+            $zipContent = $task->blob();
+            $zipPath = $splitAbsDir.'/split.zip';
+            file_put_contents($zipPath, $zipContent);
+
+            $zip = new \ZipArchive();
+            if ($zip->open($zipPath) === true) {
+                $zip->extractTo($splitAbsDir);
+                $zip->close();
+            } else {
+                Log::channel('vendor_docs')->warning('Failed to open split zip', [
+                    'file' => $relativePath,
+                    'zip' => $zipPath,
+                ]);
+                return [];
+            }
+
+            $files = collect(File::files($splitAbsDir))
+                ->filter(function ($file) {
+                    return strtolower($file->getExtension()) === 'pdf';
+                })
+                ->sortBy(fn ($file) => $file->getFilename())
+                ->values();
+
+            $diskRoot = Storage::disk('files')->path('');
+            return $files->map(function ($file) use ($diskRoot): string {
+                $relative = str_replace($diskRoot, '', $file->getPathname());
+                return ltrim(str_replace(DIRECTORY_SEPARATOR, '/', $relative), '/');
+            })->all();
+        } catch (Exception $e) {
+            Log::channel('vendor_docs')->error('Failed to split PDF', ApiErrorFormatter::format($e, [
+                'file' => $relativePath,
+            ]));
+        }
+
+        return [];
     }
 
     public function moveEmailBasedOnMatchingResults($messageId, $grantId, $matchedVendorId, $matchedBelongsToVendorId)

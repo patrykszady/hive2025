@@ -13,19 +13,116 @@ function setPageFadeHidden(hidden) {
 	});
 }
 
-// Initial paint: show content on next frame so CSS has applied.
+// Custom smooth scroll with visible animation (600ms duration)
+function smoothScrollTo(targetY, duration = 600) {
+	const startY = window.pageYOffset;
+	const distance = targetY - startY;
+	let startTime = null;
+
+	function easeInOutCubic(t) {
+		return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+	}
+
+	function step(currentTime) {
+		if (!startTime) startTime = currentTime;
+		const elapsed = currentTime - startTime;
+		const progress = Math.min(elapsed / duration, 1);
+		const eased = easeInOutCubic(progress);
+
+		window.scrollTo(0, startY + distance * eased);
+
+		if (progress < 1) {
+			requestAnimationFrame(step);
+		}
+	}
+
+	requestAnimationFrame(step);
+}
+
+// Expose globally for Alpine handlers
+window.smoothScrollTo = smoothScrollTo;
+
+// Get hash from inline script or current URL
+const initialHash = window.__initialHash || window.location.hash;
+
+// Initial paint: ensure content is visible immediately.
 document.addEventListener('DOMContentLoaded', () => {
-	requestAnimationFrame(() => setPageFadeHidden(false));
+	setPageFadeHidden(false);
+
+	if (!initialHash) {
+		return;
+	}
+
+	const target = document.querySelector(initialHash);
+	if (!target) {
+		return;
+	}
+
+	// Small delay to let page settle, then smooth scroll
+	setTimeout(() => {
+		const top = target.getBoundingClientRect().top + window.pageYOffset - 80;
+		smoothScrollTo(top, 800);
+	}, 200);
 });
 
-// Livewire navigate: hide during swap, show after.
+// Livewire navigate: hide during navigation, show after
 document.addEventListener('livewire:navigating', () => {
 	setPageFadeHidden(true);
 });
 
 document.addEventListener('livewire:navigated', () => {
-	requestAnimationFrame(() => setPageFadeHidden(false));
+	// Small delay to ensure DOM is ready, then fade in
+	setTimeout(() => {
+		setPageFadeHidden(false);
+	}, 50);
+
+	// Handle hash scrolling after navigation
+	const hash = window.location.hash;
+	if (!hash) {
+		return;
+	}
+
+	const target = document.querySelector(hash);
+	if (!target) {
+		return;
+	}
+
+	// Wait for fade-in to complete, then scroll
+	setTimeout(() => {
+		const top = target.getBoundingClientRect().top + window.pageYOffset - 80;
+		smoothScrollTo(top, 800);
+	}, 300);
 });
+
+// Handle anchor link clicks for smooth scrolling
+document.addEventListener('click', (event) => {
+	const anchor = event.target?.closest?.('a[href^="#"]');
+	if (!anchor) {
+		return;
+	}
+
+	// Skip if this anchor has wire:navigate (let Livewire handle it)
+	if (anchor.hasAttribute('wire:navigate') || anchor.hasAttribute('wire:navigate.hover')) {
+		return;
+	}
+
+	const href = anchor.getAttribute('href');
+	if (!href || href === '#') {
+		return;
+	}
+
+	const target = document.querySelector(href);
+	if (!target) {
+		return;
+	}
+
+	event.preventDefault();
+	event.stopPropagation();
+	history.pushState(null, '', href);
+
+	const top = target.getBoundingClientRect().top + window.pageYOffset - 80;
+	smoothScrollTo(top, 800);
+}, true); // Use capture phase to get event before Flux components
 
 window.addEventListener('vendor-registration:complete', (event) => {
 	const detail = event?.detail ?? {};

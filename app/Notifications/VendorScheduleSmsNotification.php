@@ -75,7 +75,7 @@ class VendorScheduleSmsNotification extends Notification implements ShouldQueue
     protected function vendorAvailabilityUrl(): string
     {
         $devWebhookUrl = config('app.dev_webhook_url');
-        $baseUrl = $devWebhookUrl ?: 'https://dashboard.hive.contractors';
+        $baseUrl = $devWebhookUrl ?: (string) config('app.url');
 
         $token = $this->vendor->getOrCreateAvailabilityToken();
 

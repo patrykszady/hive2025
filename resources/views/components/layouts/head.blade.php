@@ -1,4 +1,13 @@
 <head>
+    {{-- Prevent browser hash jump - must run before any rendering --}}
+    <script>
+        if (window.location.hash) {
+            window.__initialHash = window.location.hash;
+            history.scrollRestoration = 'manual';
+            window.scrollTo(0, 0);
+        }
+    </script>
+
     @if(env('APP_ENV') == 'production')
         <!-- Google tag (gtag.js) -->
         <script async src="https://www.googletagmanager.com/gtag/js?id={{env('GOOGLE_ANALYTICS_GTAG')}}"></script>

@@ -5,8 +5,8 @@
 
 <x-mail::layout>
 <x-slot:header>
-<x-mail::header :url="'https://dashboard.hive.contractors'">
-<img src="https://dashboard.hive.contractors/favicon.png" class="logo" alt="Hive Contractors" height="72px">
+<x-mail::header :url="config('app.url')">
+<img src="{{ rtrim((string) config('app.url'), '/') }}/favicon.png" class="logo" alt="Hive Contractors" height="72px">
 @if (! empty($showHeaderBrand))
 <span style="display: block; margin-top: 10px; font-weight: 700; letter-spacing: 0.02em; text-decoration: none; color: inherit;">Hive Contractors</span>
 @endif

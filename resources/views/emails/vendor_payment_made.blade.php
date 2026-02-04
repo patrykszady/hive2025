@@ -1,8 +1,9 @@
 <x-mail::message :hide-footer="true" :show-header-brand="true">
 @php
-	$checkUrl = 'https://dashboard.hive.contractors/checks/' . $check->id;
-	$payingVendorUrl = 'https://dashboard.hive.contractors/vendors/' . $paying_vendor->id;
-	$receivingVendorUrl = 'https://dashboard.hive.contractors/vendors/' . $vendor->id;
+	$baseUrl = rtrim((string) config('app.url'), '/');
+	$checkUrl = $baseUrl . '/checks/' . $check->id;
+	$payingVendorUrl = $baseUrl . '/vendors/' . $paying_vendor->id;
+	$receivingVendorUrl = $baseUrl . '/vendors/' . $vendor->id;
 @endphp
 
 <div style="text-align: center;">
@@ -31,7 +32,7 @@
 | Amount | Project |
 | :----- | :------ |
 @foreach($check->expenses as $expense)
-| {{ money($expense->amount) }} | <a href="https://dashboard.hive.contractors/projects/{{ $expense->project->id }}">{{ $expense->project->name }}</a> |
+| {{ money($expense->amount) }} | <a href="{{ $baseUrl }}/projects/{{ $expense->project->id }}">{{ $expense->project->name }}</a> |
 @endforeach
 </x-mail::table>
 @endif

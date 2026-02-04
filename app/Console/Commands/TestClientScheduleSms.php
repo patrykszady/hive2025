@@ -107,7 +107,7 @@ class TestClientScheduleSms extends Command
         // Generate token and URL
         $token = $project->getOrCreateScheduleToken();
         $devWebhookUrl = config('app.dev_webhook_url');
-        $baseUrl = $devWebhookUrl ?: 'https://dashboard.hive.contractors';
+        $baseUrl = $devWebhookUrl ?: (string) config('app.url');
         $url = $baseUrl . "/s/{$token}";
 
         $this->info("Schedule URL: {$url}");

@@ -60,7 +60,7 @@
                         @endcan
 
                         {{-- NAVIGATION --}}
-                        <flux:sidebar.item wire:navigate.hover icon="home" href="/dashboard">Home</flux:sidebar.item>
+                        <flux:sidebar.item wire:navigate.hover icon="home" href="/hub">Home</flux:sidebar.item>
 
                         @can('viewAny', App\Models\Lead::class)
                             <flux:sidebar.item wire:navigate.hover icon="magnifying-glass-plus" href="/leads">Leads</flux:sidebar.item>
@@ -202,7 +202,7 @@
             <flux:text class="mt-2 mb-6 text-base">Here's what's new today</flux:text>
             <flux:separator variant="subtle" /> --}}
 
-            <div data-page-fade class="opacity-0 transition-opacity duration-[250ms] {{ isset($fullscreenClasses) ? 'h-full min-h-0 flex flex-col' : '' }}">
+            <div data-page-fade class="transition-opacity duration-[250ms] {{ isset($fullscreenClasses) ? 'h-full min-h-0 flex flex-col' : '' }}">
                 {{ $slot }}
             </div>
         </flux:main>

@@ -24,7 +24,7 @@ class DashboardShow extends Component
         $this->showPasskeyPrompt = session()->pull('passkey_prompt', false) && !$hasPasskey;
     }
 
-    #[Title('Dashboard')]
+    #[Title('Hub')]
     public function render(): View
     {
         return view('livewire.dashboard.show');

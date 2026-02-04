@@ -105,7 +105,7 @@ return [
         // Uncomment to view remote production logs (requires connection to production server)
         // 'production' => [
         //     'name' => 'Production',
-        //     'host' => 'https://dashboard.hive.contractors/log-viewer',
+        //     'host' => env('APP_URL', 'https://hub.hive.contractors') . '/log-viewer',
         //     'auth' => [
         //         'token' => env('LOG_VIEWER_PRODUCTION_TOKEN'),
         //     ],

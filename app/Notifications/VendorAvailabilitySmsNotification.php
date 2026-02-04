@@ -126,9 +126,9 @@ class VendorAvailabilitySmsNotification extends Notification implements ShouldQu
     {
         $vendor = $task->vendor;
 
-        // Use DEV_WEBHOOK_URL in dev, dashboard.hive.contractors in prod
+        // Use DEV_WEBHOOK_URL in dev, APP_URL in prod
         $devWebhookUrl = config('app.dev_webhook_url');
-        $baseUrl = $devWebhookUrl ?: 'https://dashboard.hive.contractors';
+        $baseUrl = $devWebhookUrl ?: (string) config('app.url');
 
         if (! $vendor) {
             return $baseUrl . '/v';
