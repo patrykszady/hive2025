@@ -37,6 +37,9 @@ return Application::configure(basePath: dirname(__DIR__))
         // Trust all proxies (e.g. Cloudflare, Tailscale Serve) for proper HTTPS detection
         $middleware->trustProxies(at: '*');
 
+        // Redirect legacy domains to main domain
+        $middleware->prepend(\App\Http\Middleware\RedirectLegacyDomains::class);
+
         // Exclude browser timezone cookies from encryption so PHP can read them
         $middleware->encryptCookies(except: [
             'browser_timezone',
@@ -46,10 +49,12 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->replaceInGroup('web', \Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class, \App\Http\Middleware\VerifyCsrfToken::class);
 
         $middleware->appendToGroup('web', \App\Http\Middleware\NoIndexSubdomains::class);
+        $middleware->appendToGroup('web', \App\Http\Middleware\NoIndexNonPublic::class);
 
         $middleware->alias([
             'vendor.access' => \App\Http\Middleware\VendorAccessControl::class,
             'vendor.own-redirect' => \App\Http\Middleware\RedirectOwnVendorToDashboard::class,
+            'registered' => \App\Http\Middleware\EnsureUserRegistered::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

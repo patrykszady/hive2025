@@ -24,10 +24,10 @@ class PushSubscriptionController extends Controller
 
         PushSubscription::updateOrCreate(
             [
-                'user_id' => $user->id,
                 'endpoint' => $validated['endpoint'],
             ],
             [
+                'user_id' => $user->id,
                 'p256dh' => $validated['keys']['p256dh'],
                 'auth' => $validated['keys']['auth'],
             ]
@@ -48,11 +48,28 @@ class PushSubscriptionController extends Controller
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
-        PushSubscription::where('user_id', $user->id)
-            ->where('endpoint', $validated['endpoint'])
-            ->delete();
+        PushSubscription::where('endpoint', $validated['endpoint'])->delete();
 
         return response()->json(['success' => true]);
+    }
+
+    public function status(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'endpoint' => 'required|string',
+        ]);
+
+        $user = $request->user();
+
+        if (! $user) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $enabled = PushSubscription::where('endpoint', $validated['endpoint'])
+            ->where('user_id', $user->id)
+            ->exists();
+
+        return response()->json(['enabled' => $enabled]);
     }
 
     public function vapidPublicKey(): JsonResponse

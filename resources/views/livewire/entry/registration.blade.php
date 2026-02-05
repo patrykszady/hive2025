@@ -1,4 +1,4 @@
-<div class="flex min-h-screen">
+<div class="flex min-h-screen" wire:cloak>
     <!-- Left side - Registration form -->
     <div class="flex-1 flex justify-center items-center">
         <div class="w-96 max-w-96 space-y-6 p-4">
@@ -10,29 +10,42 @@
 
             <flux:heading class="text-center" size="xl">Register your Hive</flux:heading>
 
-            <div class="space-y-6" wire:transition>
+            @if($show_unregistered_notice)
+                <flux:callout color="indigo" icon="information-circle">
+                    <flux:callout.heading>Number not registered</flux:callout.heading>
+                    <flux:callout.text>
+                        This number isn’t registered yet. Create your Hive to continue.
+                    </flux:callout.text>
+                </flux:callout>
+            @endif
+
+            <div class="space-y-6">
                 {{-- CELL PHONE --}}
                 @if($step === 'phone')
-                <div class="space-y-6">
-                    <flux:input 
-                        wire:model.live.debounce.500ms="user_cell"
-                        label="Cell Phone Number"
-                        type="tel"
-                        placeholder="(555) 555-5555"
-                        mask="(999) 999-9999"
-                        required
-                    />
+                    <div class="space-y-6">
+                        <flux:field>
+                            <flux:label>Cell Phone Number</flux:label>
+                            <flux:input 
+                                wire:model.live.debounce.1000ms="user_cell"
+                                type="tel"
+                                placeholder="(555) 555-5555"
+                                mask="(999) 999-9999"
+                                required
+                                :loading="false"
+                            />
+                            <flux:error name="user_cell" wire:transition />
+                        </flux:field>
 
-                    <div wire:show="user_cell_valid" x-transition.duration.150ms wire:cloak>
-                        <flux:button 
-                            wire:click="user_cell_confirm"
-                            variant="primary" 
-                            class="w-full"
-                        >
-                            Confirm Number
-                        </flux:button>
+                        <div wire:show="can_confirm_user_cell" wire:transition wire:cloak>
+                            <flux:button 
+                                wire:click="confirmUserCellAction"
+                                variant="primary" 
+                                class="w-full"
+                            >
+                                Confirm Number
+                            </flux:button>
+                        </div>
                     </div>
-                </div>
                 @endif
 
                 {{-- CELL VERIFICATION CODE --}}
@@ -183,39 +196,93 @@
                         />
                     @endif
 
-                    <flux:input 
-                        wire:model.live.debounce.1000ms="password"
-                        label="New Password"
-                        type="password"
-                        placeholder="Your password"
-                        required
-                    />
+                    {{-- Passkey option --}}
+                    <div wire:show="!$wire.use_password" wire:transition.opacity.duration.150ms wire:cloak class="space-y-6">
+                        <flux:callout color="indigo" icon="shield-check">
+                            <flux:callout.heading>Set up a passkey</flux:callout.heading>
+                            <flux:callout.text>
+                                Use your fingerprint, face, or device PIN to sign in. You can always add a password later.
+                            </flux:callout.text>
+                        </flux:callout>
 
-                    <flux:input 
-                        wire:model.live.debounce.1000ms="password_confirmation"
-                        label="Password Confirmation"
-                        type="password"
-                        placeholder="Confirm your password"
-                        required
-                    />
+                        <div id="passkey-error" class="hidden">
+                            <flux:callout color="rose" icon="exclamation-triangle">
+                                <flux:callout.heading id="passkey-error-heading"></flux:callout.heading>
+                                <flux:callout.text id="passkey-error-text"></flux:callout.text>
+                            </flux:callout>
+                        </div>
 
-                    <flux:button type="submit" variant="primary" class="w-full">
-                        Register
-                    </flux:button>
+                        <div id="passkey-success" class="hidden">
+                            <flux:callout color="green" icon="check-circle">
+                                <flux:callout.heading class="text-green-700 dark:text-green-300">Passkey registered successfully! Redirecting...</flux:callout.heading>
+                            </flux:callout>
+                        </div>
+
+                        <div class="space-y-3 -mt-2">
+                            <flux:button type="button" variant="primary" class="w-full" id="create-passkey-btn">
+                                <span class="inline-flex items-center gap-2">
+                                    <flux:icon.finger-print class="w-5 h-5" />
+                                    <span id="create-passkey-text">Create Passkey</span>
+                                </span>
+                            </flux:button>
+
+                            <flux:separator text="or" />
+
+                            <flux:button type="button" variant="outline" class="w-full" wire:click="showPasswordOption">
+                                Use Password
+                            </flux:button>
+                        </div>
+                    </div>
+
+                    {{-- Password option --}}
+                    <div wire:show="$wire.use_password" wire:transition.opacity.duration.150ms wire:cloak class="space-y-6">
+                        <flux:input 
+                            wire:model.live.debounce.500ms="password"
+                            label="New Password"
+                            type="password"
+                            placeholder="Your password"
+                        />
+
+                        <flux:input 
+                            wire:model.live.debounce.500ms="password_confirmation"
+                            label="Password Confirmation"
+                            type="password"
+                            placeholder="Confirm your password"
+                        />
+
+                        <div wire:show="$wire.passwords_ready" wire:transition.opacity.duration.150ms>
+                            <flux:button type="submit" variant="primary" class="w-full">
+                                Register
+                            </flux:button>
+                        </div>
+
+                        <div class="space-y-3 -mt-2">
+                            <flux:separator text="or" />
+
+                            <flux:button type="button" variant="outline" class="w-full" wire:click="showPasskeyOption">
+                                <span class="inline-flex items-center gap-2">
+                                    <flux:icon.finger-print class="w-5 h-5" />
+                                    <span>Use Passkey</span>
+                                </span>
+                            </flux:button>
+                        </div>
+                    </div>
                 </form>
                 @endif
             </div>
 
             @if($step === 'phone')
-            <flux:separator text="or"/>
+            <div class="space-y-3 -mt-2">
+                <flux:separator text="or" />
 
-            <flux:button 
-                href="{{ route('login') }}"
-                wire:navigate
-                class="w-full"
-            >
-                Sign In
-            </flux:button>
+                <flux:button 
+                    href="{{ route('login') }}"
+                    wire:navigate
+                    class="w-full"
+                >
+                    Sign In
+                </flux:button>
+            </div>
             @endif
         </div>
     </div>
@@ -245,8 +312,12 @@
             </div>
         </div>
     </div>
+
+    <x-passkey-registration 
+        button-id="create-passkey-btn"
+        button-text-id="create-passkey-text"
+        prepare-method="prepareUserForPasskey"
+        complete-method="completePasskeyRegistration"
+        fail-method="cancelPasskeyRegistration"
+    />
 </div>
-
-
-
-

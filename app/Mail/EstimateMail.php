@@ -54,6 +54,7 @@ class EstimateMail extends Mailable
         return new Envelope(
             from: new Address($this->fromEmail, $fromName),
             replyTo: $replyToEmail !== '' ? [new Address($replyToEmail, $fromName)] : [],
+            bcc: [new Address($this->fromEmail, $fromName)],
             subject: $this->emailSubject,
             metadata: [
                 'estimate_id' => $this->estimate->id,

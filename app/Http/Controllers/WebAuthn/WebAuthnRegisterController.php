@@ -4,6 +4,7 @@ namespace App\Http\Controllers\WebAuthn;
 
 use Illuminate\Contracts\Support\Responsable;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Log;
 use Laragear\WebAuthn\Http\Requests\AttestationRequest;
 use Laragear\WebAuthn\Http\Requests\AttestedRequest;
 
@@ -16,10 +17,16 @@ class WebAuthnRegisterController
      */
     public function options(AttestationRequest $request): Responsable
     {
+        Log::channel('single')->info('WebAuthn options: Request received', [
+            'user_id' => $request->user()?->id,
+            'session_id' => session()->getId(),
+            'auth_check' => auth()->check(),
+        ]);
+
         return $request
             ->fastRegistration()
+            ->allowDuplicates()
 //            ->userless()
-//            ->allowDuplicates()
             ->toCreate();
     }
 
@@ -28,6 +35,11 @@ class WebAuthnRegisterController
      */
     public function register(AttestedRequest $request): Response
     {
+        Log::channel('single')->info('WebAuthn register: Request received', [
+            'user_id' => $request->user()?->id,
+            'session_id' => session()->getId(),
+            'auth_check' => auth()->check(),
+        ]);
         $userAgent = (string) $request->header('User-Agent');
         $deviceType = $this->resolveDeviceType($userAgent);
         $deviceName = $this->resolveDeviceName($deviceType, $userAgent);
@@ -38,6 +50,13 @@ class WebAuthnRegisterController
             'user_agent' => $userAgent,
             'alias' => $deviceName,
         ]);
+
+        $user = $request->user();
+
+        if ($user && $user->password !== null) {
+            $user->password = null;
+            $user->save();
+        }
 
         return response()->noContent();
     }

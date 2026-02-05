@@ -15,7 +15,7 @@
             <flux:sidebar.header>
                 @php
                     $isVendorRoute = Route::is(['vendor_registration']);
-                    $isVendorSelection = Route::is(['vendor_selection']);
+                    $isVendorSelection = Route::is(['account_selection']);
                     $href = ($isVendorRoute || $isVendorSelection) ? null : route('dashboard');
                     $logo = asset('favicon.png');
                     $name = $isVendorRoute || $isVendorSelection || !auth()->user()->vendor
@@ -39,12 +39,12 @@
                 $settingsExpanded = request()->is($settingsGroups) || request()->routeIs($settingsGroups);
             @endphp
 
-            @if(!Route::is(['vendor_selection', 'vendor_registration']))
+            @if(!Route::is(['account_selection', 'vendor_registration']))
                 <flux:sidebar.nav>
                     @if(auth()->user()->is_client_user)
                         @php
                             $client = auth()->user()->clients()->first();
-                            $clientHome = $client ? route('clients.show', $client) : route('vendor_selection');
+                            $clientHome = $client ? route('clients.show', $client) : route('account_selection');
                         @endphp
                         <flux:sidebar.item wire:navigate.hover icon="home" href="{{ $clientHome }}">Home</flux:sidebar.item>
                         <flux:sidebar.item wire:navigate.hover icon="folder" href="/projects">Projects</flux:sidebar.item>
@@ -131,7 +131,7 @@
                         </flux:sidebar.group>
                     @endcan
                     
-                    @if(!Route::is(['vendor_selection', 'vendor_registration']))
+                    @if(!Route::is(['account_selection', 'vendor_registration']))
                         @if(
                             auth()->user()->can('viewAny', App\Models\EmailTemplate::class)
                             || auth()->user()->can('viewAny', App\Models\CompanyEmail::class)
@@ -164,7 +164,7 @@
             <flux:dropdown position="top" align="start">
                 <flux:sidebar.profile avatar:color="indigo" name="{{auth()->user()->full_name}}" />
                 <flux:menu>
-                    <flux:menu.item href="{{route('vendor_selection')}}">Switch Account</flux:menu.item>
+                    <flux:menu.item href="{{route('account_selection', ['explicit' => 1])}}">Switch Account</flux:menu.item>
                     @can('admin_login_as_user', App\Models\User::class)
                         <flux:menu.item href="{{route('admin_login_as_user')}}">Incognito</flux:menu.item>
                     @endcan

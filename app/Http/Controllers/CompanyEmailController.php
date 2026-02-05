@@ -430,12 +430,23 @@ class CompanyEmailController extends Controller
             ? config('nylas.receipts_inbox_folder_id')
             : (config('nylas.hive_receipts_test_folder_id') ?: config('nylas.receipts_inbox_folder_id'));
 
-        $allMessages = $this->nylasService->fetchFolderMessages($grantId, $folder, [
-            'full_fetch' => true,
-            'include_headers' => true,
-        ]);
+        try {
+            $allMessages = $this->nylasService->fetchFolderMessages($grantId, $folder, [
+                'full_fetch' => true,
+                'include_headers' => true,
+            ]);
+        } catch (\Throwable $e) {
+            Log::channel('nylas')->error('Failed to fetch receipt messages from folder', ApiErrorFormatter::format($e, [
+                'grant_id' => $grantId,
+                'folder' => $folder,
+            ]));
+            return;
+        }
 
         foreach($allMessages as $message) {
+            $messageId = $message['id'] ?? null;
+
+            try {
             // Display message structure without rendering HTML body
             $messageDisplay = $message;
             if (isset($messageDisplay['body'])) {
@@ -633,7 +644,16 @@ class CompanyEmailController extends Controller
                         $ocr_path = '_temp_ocr/' . $ocr_filename;
                         Storage::disk('files')->put($ocr_path, $attachmentContent);
                     } else {
-                        // No attachments found
+                        // No attachments found - log and move to error folder
+                        Log::channel('nylas')->warning('Receipt requires PDF attachment but message has none', [
+                            'grant_id' => $grantId,
+                            'company_email_id' => $companyEmail->id,
+                            'message_id' => $messageId,
+                            'receipt_id' => $receipt->id,
+                            'from_email' => $fromEmail,
+                            'to_email' => $toEmail,
+                            'subject' => $subject,
+                        ]);
                         if (!empty($folderMap['Error'])) {
                             $this->nylasService->moveEmailToFolder($messageId, $folderMap['Error'], $grantId, $companyEmail->id);
                         } else {
@@ -661,9 +681,13 @@ class CompanyEmailController extends Controller
                     // Validate image URL before processing
                     if (empty($image_email_url)) {
                         // Log error and skip image processing
-                        Log::error("Empty image URL for receipt", [
+                        Log::channel('nylas')->warning('Empty image URL for receipt - image regex did not match', [
                             'receipt_id' => $receipt->id,
-                            'message_id' => $messageId ?? null
+                            'message_id' => $messageId,
+                            'from_email' => $fromEmail,
+                            'to_email' => $toEmail,
+                            'subject' => $subject,
+                            'receipt_image_regex' => $receipt->options['receipt_image_regex'] ?? null,
                         ]);
                         // Move to error folder or handle appropriately
                         if (!empty($folderMap['Error'])) {
@@ -703,7 +727,7 @@ class CompanyEmailController extends Controller
 
                 //ocr the file
                 $ocr_receipt_extracted = app(\App\Http\Controllers\ReceiptController::class)->azure_receipts($ocr_path, $doc_type, $document_model);
-
+                
                 //pass receipt info to ocr_extract method
                 $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->ocr_extract($ocr_receipt_extracted, null, 'email', $receipt);
 
@@ -1125,6 +1149,13 @@ class CompanyEmailController extends Controller
                     }
                 }
             } else{
+                continue;
+            }
+            } catch (\Throwable $e) {
+                Log::channel('nylas')->error('Failed to process receipt message', ApiErrorFormatter::format($e, [
+                    'grant_id' => $grantId,
+                    'message_id' => $messageId,
+                ]));
                 continue;
             }
         }        

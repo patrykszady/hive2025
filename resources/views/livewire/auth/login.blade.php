@@ -11,8 +11,13 @@
             <flux:heading class="text-center" size="xl">Sign in to your Hive</flux:heading>
 
             @if(session('error'))
-                <flux:callout color="sky" icon="information-circle">
-                    {{ session('error') }}
+                <flux:callout color="indigo" icon="information-circle">
+                    @if(is_array(session('error')))
+                        <flux:callout.heading>{{ session('error')['heading'] }}</flux:callout.heading>
+                        <flux:callout.text>{{ session('error')['text'] }}</flux:callout.text>
+                    @else
+                        <flux:callout.heading>{{ session('error') }}</flux:callout.heading>
+                    @endif
                 </flux:callout>
             @endif
 
@@ -21,30 +26,34 @@
                 @if($step === 'email')
                     <form wire:submit="checkEmail" class="space-y-6">
                         <flux:input 
-                            wire:model="email" 
-                            id="login-email"
-                            label="Email"
-                            type="email"
+                            wire:model.live.debounce.300ms="identifier" 
+                            id="login-identifier"
+                            label="Email or Phone"
+                            type="text"
                             autocomplete="username webauthn"
-                            placeholder="email@example.com"
+                            placeholder="email@example.com or (555) 555-5555"
                             autofocus
                             required
                         />
 
-                        <flux:button type="submit" variant="primary" class="w-full">
-                            Continue
-                        </flux:button>
+                        <div wire:show="can_continue" wire:transition.opacity.duration.150ms wire:cloak>
+                            <flux:button type="submit" variant="primary" class="w-full">
+                                Continue
+                            </flux:button>
+                        </div>
                     </form>
 
-                    <flux:separator text="or"/>
+                    <div class="space-y-3 -mt-2">
+                        <flux:separator text="or" />
 
-                    <flux:button 
-                        href="{{ route('registration') }}"
-                        wire:navigate
-                        class="w-full"
-                    >
-                        Register
-                    </flux:button>
+                        <flux:button 
+                            href="{{ route('registration') }}"
+                            wire:navigate
+                            class="w-full"
+                        >
+                            Register
+                        </flux:button>
+                    </div>
 
                 {{-- Step 2: Credentials (password or passkey) --}}
                 @else
@@ -115,67 +124,89 @@
                                 <flux:switch x-model="remember" label="Remember Me" align="left" />
                             </div>
 
-                            <flux:separator text="or"/>
+                            <div class="space-y-3 -mt-2">
+                                <flux:separator text="or" />
 
-                            <div class="flex gap-2">
-                                <flux:button 
-                                    type="button"
-                                    wire:click="startOneTimeLogin"
-                                    variant="outline"
-                                    class="flex-1"
-                                    icon="envelope" 
-                                    icon:variant="outline"
-                                >
-                                    One-time code
-                                </flux:button>
+                                <div class="flex gap-2">
+                                    <flux:button 
+                                        type="button"
+                                        wire:click="startOneTimeLogin"
+                                        variant="outline"
+                                        class="flex-1"
+                                        icon="envelope" 
+                                        icon:variant="outline"
+                                    >
+                                        One-time code
+                                    </flux:button>
 
-                                <flux:button 
-                                    type="button"
-                                    wire:click="showPasswordLogin"
-                                    variant="outline"
-                                    class="flex-1"
-                                    icon="key" 
-                                    icon:variant="outline"
-                                >
-                                    Password
-                                </flux:button>
+                                    @if($hasPassword)
+                                        <flux:button 
+                                            type="button"
+                                            wire:click="showPasswordLogin"
+                                            variant="outline"
+                                            class="flex-1"
+                                            icon="key" 
+                                            icon:variant="outline"
+                                        >
+                                            Password
+                                        </flux:button>
+                                    @endif
+                                </div>
                             </div>
                         @else
                             {{-- No passkey: show password form --}}
-                            <form wire:submit="login" class="space-y-6">
-                                <flux:field>
-                                    <div class="mb-3 flex justify-between">
-                                        <flux:label>Password</flux:label>
-                                    </div>
-                                    <flux:input 
-                                        wire:model="password" 
-                                        type="password"
-                                        placeholder="Your password"
-                                        autofocus
-                                        required
-                                    />
-                                </flux:field>
+                            @if($hasPassword)
+                                <form wire:submit="login" class="space-y-6">
+                                    <flux:field>
+                                        <div class="mb-3 flex justify-between">
+                                            <flux:label>Password</flux:label>
+                                        </div>
+                                        <flux:input 
+                                            wire:model="password" 
+                                            type="password"
+                                            placeholder="Your password"
+                                            autofocus
+                                            required
+                                        />
+                                    </flux:field>
 
-                                <flux:switch wire:model.live="remember" label="Remember Me" align="left" />
+                                    <flux:switch wire:model.live="remember" label="Remember Me" align="left" />
 
-                                <flux:button type="submit" variant="primary" class="w-full">
-                                    Sign in
-                                </flux:button>
-                            </form>
+                                    <flux:button type="submit" variant="primary" class="w-full">
+                                        Sign in
+                                    </flux:button>
+                                </form>
 
-                            <flux:separator text="or"/>
+                                <div class="space-y-3 -mt-2">
+                                    <flux:separator text="or" />
 
-                            <flux:button 
-                                type="button"
-                                wire:click="startOneTimeLogin"
-                                variant="outline"
-                                class="w-full"
-                            >
-                                <span class="inline-flex items-center justify-center gap-2">
-                                    <flux:icon.envelope class="w-5 h-5" />
-                                    <span>Use one-time code</span>
-                                </span>
-                            </flux:button>
+                                    <flux:button 
+                                        type="button"
+                                        wire:click="startOneTimeLogin"
+                                        variant="outline"
+                                        class="w-full"
+                                    >
+                                        <span class="inline-flex items-center justify-center gap-2">
+                                            <flux:icon.envelope class="w-5 h-5" />
+                                            <span>Use one-time code</span>
+                                        </span>
+                                    </flux:button>
+                                </div>
+                            @else
+                                <div class="space-y-3">
+                                    <flux:button 
+                                        type="button"
+                                        wire:click="startOneTimeLogin"
+                                        variant="outline"
+                                        class="w-full"
+                                    >
+                                        <span class="inline-flex items-center justify-center gap-2">
+                                            <flux:icon.envelope class="w-5 h-5" />
+                                            <span>Use one-time code</span>
+                                        </span>
+                                    </flux:button>
+                                </div>
+                            @endif
                         @endif
                     </div>
                 @endif

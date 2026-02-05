@@ -47,16 +47,18 @@
                         </flux:button>
                     </form>
 
-                    <flux:separator text="or"/>
+                    <div class="space-y-3 -mt-2">
+                        <flux:separator text="or" />
 
-                    <flux:button 
-                        href="{{ route('login') }}"
-                        wire:navigate
-                        variant="outline"
-                        class="w-full"
-                    >
-                        Back to Login
-                    </flux:button>
+                        <flux:button 
+                            href="{{ route('login') }}"
+                            wire:navigate
+                            variant="outline"
+                            class="w-full"
+                        >
+                            Back to Login
+                        </flux:button>
+                    </div>
                 @else
                     <p class="text-sm text-zinc-600 text-center">
                         We sent a 6-digit code to <strong>{{ $email }}</strong>
@@ -102,16 +104,18 @@
                         @endif
                     </div>
 
-                    <flux:separator text="or"/>
+                    <div class="space-y-3 -mt-2">
+                        <flux:separator text="or" />
 
-                    <flux:button 
-                        href="{{ route('login') }}"
-                        wire:navigate
-                        variant="outline"
-                        class="w-full"
-                    >
-                        Back to Login
-                    </flux:button>
+                        <flux:button 
+                            href="{{ route('login') }}"
+                            wire:navigate
+                            variant="outline"
+                            class="w-full"
+                        >
+                            Back to Login
+                        </flux:button>
+                    </div>
                 @endif
             </div>
         </div>

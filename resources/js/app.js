@@ -186,11 +186,14 @@ async function enableUpcomingTaskNotifications() {
 			return { enabled: false, reason: 'vapid-missing' };
 		}
 
-		// Subscribe to push
-		const subscription = await registration.pushManager.subscribe({
-			userVisibleOnly: true,
-			applicationServerKey: urlBase64ToUint8Array(publicKey),
-		});
+		// Subscribe to push (reuse existing subscription when present)
+		let subscription = await registration.pushManager.getSubscription();
+		if (!subscription) {
+			subscription = await registration.pushManager.subscribe({
+				userVisibleOnly: true,
+				applicationServerKey: urlBase64ToUint8Array(publicKey),
+			});
+		}
 
 		// Send subscription to server
 		const subscribeResponse = await fetch('/push/subscribe', {
@@ -215,6 +218,92 @@ async function enableUpcomingTaskNotifications() {
 	return { enabled: true };
 }
 
+async function getUpcomingTaskNotificationStatus() {
+	if (!isNotificationSupported()) {
+		return { supported: false, enabled: false, permission: 'default' };
+	}
+
+	const permission = Notification.permission;
+
+	if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+		return { supported: true, enabled: false, permission };
+	}
+
+	try {
+		const registration = await navigator.serviceWorker.getRegistration();
+		if (!registration) {
+			return { supported: true, enabled: false, permission };
+		}
+
+		const subscription = await registration.pushManager.getSubscription();
+		if (!subscription) {
+			return { supported: true, enabled: false, permission };
+		}
+
+		const statusResponse = await fetch('/push/status', {
+			method: 'POST',
+			credentials: 'same-origin',
+			headers: {
+				'Content-Type': 'application/json',
+				'Accept': 'application/json',
+				'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+			},
+			body: JSON.stringify({ endpoint: subscription.endpoint }),
+		});
+
+		if (!statusResponse.ok) {
+			return { supported: true, enabled: false, permission };
+		}
+
+		const data = await statusResponse.json();
+
+		return { supported: true, enabled: Boolean(data?.enabled), permission };
+	} catch (err) {
+		console.error('Push subscription status failed:', err);
+		return { supported: true, enabled: false, permission, reason: 'error' };
+	}
+}
+
+async function disableUpcomingTaskNotifications() {
+	if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+		return { disabled: false, reason: 'push-unsupported' };
+	}
+
+	try {
+		const registration = await navigator.serviceWorker.getRegistration();
+		if (!registration) {
+			return { disabled: false, reason: 'no-registration' };
+		}
+
+		const subscription = await registration.pushManager.getSubscription();
+		if (!subscription) {
+			return { disabled: true };
+		}
+
+		const unsubscribeResponse = await fetch('/push/unsubscribe', {
+			method: 'POST',
+			credentials: 'same-origin',
+			headers: {
+				'Content-Type': 'application/json',
+				'Accept': 'application/json',
+				'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+			},
+			body: JSON.stringify({ endpoint: subscription.endpoint }),
+		});
+
+		if (!unsubscribeResponse.ok) {
+			return { disabled: false, reason: 'unsubscribe-failed' };
+		}
+
+		await subscription.unsubscribe();
+
+		return { disabled: true };
+	} catch (err) {
+		console.error('Push unsubscribe failed:', err);
+		return { disabled: false, reason: 'error' };
+	}
+}
+
 function urlBase64ToUint8Array(base64String) {
 	const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
 	const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -228,4 +317,6 @@ function urlBase64ToUint8Array(base64String) {
 
 window.HiveTaskNotifications = {
 	enable: enableUpcomingTaskNotifications,
+	status: getUpcomingTaskNotificationStatus,
+	disable: disableUpcomingTaskNotifications,
 };

@@ -135,15 +135,15 @@ Schedule::command('schedule:send-sms vendor today')
   ->withoutOverlapping()
   ->onOneServer();
 
-//Plaid/Transaction tasks
-// Disabled - using ITEM webhooks (ERROR, PENDING_EXPIRATION, USER_PERMISSION_REVOKED) instead
-// Schedule::call(function () {
-//     app(\App\Http\Controllers\TransactionController::class)->plaid_item_status();
-// })->hourly()
-//   ->name('plaid-item-status')
-//   ->environments(['production'])
-//   ->withoutOverlapping()
-//   ->onOneServer();
+// Plaid/Transaction tasks
+// Fallback status check in case webhook delivery fails or is delayed
+Schedule::call(function () {
+    app(\App\Http\Controllers\TransactionController::class)->plaid_item_status();
+})->hourly()
+  ->name('plaid-item-status')
+  ->environments(['production'])
+  ->withoutOverlapping()
+  ->onOneServer();
 
 // Daily fallback for Plaid transaction sync (in case webhooks miss updates)
 // Schedule::command('plaid:sync-transactions --all')

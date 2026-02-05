@@ -37,6 +37,39 @@ class VendorSelection extends Component
         if ($firstClient) {
             $this->client_id = $firstClient->id;
         }
+        
+        // Auto-skip if user has only one account and didn't explicitly navigate here
+        if (!request()->has('explicit')) {
+            $this->autoSelectSingleAccount();
+        }
+    }
+    
+    /**
+     * Auto-select and redirect if user has only one account.
+     */
+    protected function autoSelectSingleAccount(): void
+    {
+        $vendorCount = $this->vendors->count();
+        $clientCount = $this->clients->count();
+        
+        // Client-only user with single client
+        if ($this->user->is_client_user && $clientCount === 1 && $vendorCount === 0) {
+            $this->redirect(route('clients.show', $this->clients->first()), navigate: true);
+            return;
+        }
+        
+        // Vendor user with single vendor
+        if (!$this->user->is_client_user && $vendorCount === 1 && $clientCount === 0) {
+            $vendor = $this->vendors->first();
+            $this->user->update(['primary_vendor_id' => $vendor->id]);
+            
+            if (isset($vendor->registration['registered'])) {
+                $this->redirect(route('dashboard'), navigate: true);
+            } else {
+                $this->redirect(route('vendor_registration', $vendor->id), navigate: true);
+            }
+            return;
+        }
     }
 
     #[Computed]

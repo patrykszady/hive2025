@@ -51,8 +51,8 @@ class VendorAccessControl
                 return $next($request);
             }
             
-            // Let them use vendor_selection to pick a client
-            if ($routeName === 'vendor_selection') {
+            // Let them use account_selection to pick a client
+            if ($routeName === 'account_selection') {
                 return $next($request);
             }
             
@@ -68,7 +68,7 @@ class VendorAccessControl
             if (!$user->vendor || 
                 $vendorParam->id != $user->vendor->id || 
                 $this->isRegistrationComplete($user->vendor)) {
-                return redirect(route('vendor_selection'));
+                return redirect(route('account_selection'));
             }
             
             // Allow access to registration page
@@ -78,7 +78,7 @@ class VendorAccessControl
         // Handle regular routes
         if (!$user->vendor?->id) {
             // No primary vendor selected
-            return redirect(route('vendor_selection'));
+            return redirect(route('account_selection'));
         }
         
         // User has primary vendor, check if registered

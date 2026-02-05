@@ -73,45 +73,35 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 use Laragear\WebAuthn\Http\Routes as WebAuthnRoutes;
 use App\Livewire\Auth\PasskeySetup;
+use Illuminate\Support\Facades\Log;
 
 Route::get('robots.txt', function () {
-    $noIndexHosts = array_filter(array_map('trim', explode(',', (string) config('app.noindex_hosts', ''))));
-    $disallowAll = in_array(request()->getHost(), $noIndexHosts, true);
+    $content = "User-agent: *\nDisallow: /\nAllow: /welcome\nAllow: /welcome/\n";
 
-    $content = $disallowAll
-        ? "User-agent: *\nDisallow: /\n"
-        : "User-agent: *\nDisallow:\n";
-
-    $response = response($content, 200, ['Content-Type' => 'text/plain']);
-
-    if ($disallowAll) {
-        $response->headers->set('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
-    }
-
-    return $response;
+    return response($content, 200, ['Content-Type' => 'text/plain']);
 })->name('robots');
 
-$publicRoutes = function () {
-    Route::middleware('guest')->group(function () {
-        Route::get('/', function () {
-            return view('welcome');
-        })->name('welcome');
-    });
-
-    // Legal pages (public, no auth required)
-    Route::prefix('legal')->name('legal.')->group(function () {
-        Route::view('privacy', 'legal.privacy-policy')->name('privacy');
-        Route::view('terms', 'legal.terms-of-service')->name('terms');
-    });
-};
+// Passkey debug logging endpoint (temporary for debugging)
+Route::post('api/passkey-debug-log', function () {
+    $data = request()->all();
+    Log::channel('single')->info('PasskeyJS: ' . ($data['message'] ?? 'No message'), [
+        'level' => $data['level'] ?? 'info',
+        'data' => $data['data'] ?? [],
+        'timestamp' => $data['timestamp'] ?? null,
+        'url' => $data['url'] ?? null,
+    ]);
+    return response()->json(['ok' => true]);
+})->withoutMiddleware([\App\Http\Middleware\VerifyCsrfToken::class]);
 
 $hubRoutes = function () {
 
-//if guests go to '/', if logged in go to dashboard (or to /vendor_selection if not set and User has multiple)
+//if guests go to '/', if logged in go to dashboard (or to /account/selection if not set and User has multiple)
 Route::middleware('guest')->group(function () {
     Route::get('/', function () {
-        return view('welcome');
-    })->name('welcome');
+        return redirect()->route('welcome');
+    })->name('home');
+
+    Route::view('welcome', 'welcome')->name('welcome');
 
     Route::get('login', Login::class)->name('login');
     Route::get('register', Register::class)->name('register');
@@ -123,10 +113,14 @@ Route::middleware('guest')->group(function () {
 });
 
 // Legal pages (public, no auth required)
-Route::prefix('legal')->name('legal.')->group(function () {
+Route::prefix('welcome/legal')->name('legal.')->group(function () {
     Route::view('privacy', 'legal.privacy-policy')->name('privacy');
     Route::view('terms', 'legal.terms-of-service')->name('terms');
 });
+
+Route::permanentRedirect('legal', 'welcome/legal');
+Route::permanentRedirect('legal/privacy', 'welcome/legal/privacy');
+Route::permanentRedirect('legal/terms', 'welcome/legal/terms');
 
 // Passkey setup page (requires auth)
 Route::middleware('auth')->group(function () {
@@ -159,8 +153,10 @@ Route::middleware('auth')->group(function () {
         session()->regenerateToken();
         return redirect('/');
     })->name('logout');
+});
 
-    Route::get('/vendor_selection', VendorSelection::class)->name('vendor_selection');
+Route::middleware(['auth', 'registered'])->group(function () {
+    Route::get('/account/selection', VendorSelection::class)->name('account_selection');
 });
 
 if(env('APP_ENV') === 'local') {
@@ -222,7 +218,7 @@ Route::post('webhooks/mailtrap/{token}', [MailtrapWebhookController::class, 'han
 // Email tracking pixel (no auth required - loaded by email clients)
 Route::get('t/o', [EmailTrackingController::class, 'trackOpen'])->name('email.track.open');
 
-Route::middleware(['auth', 'vendor.access'])->group(function () {
+Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
     // Registration route
     Route::get('vendor/registration/{vendor}', VendorRegistration::class)
         ->name('vendor_registration');
@@ -239,6 +235,8 @@ Route::middleware(['auth', 'vendor.access'])->group(function () {
         ->name('push.vapid-public-key');
     Route::post('/push/subscribe', [PushSubscriptionController::class, 'store'])
         ->name('push.subscribe');
+    Route::post('/push/status', [PushSubscriptionController::class, 'status'])
+        ->name('push.status');
     Route::post('/push/unsubscribe', [PushSubscriptionController::class, 'destroy'])
         ->name('push.unsubscribe');
 
@@ -347,11 +345,4 @@ Route::middleware(['auth', 'vendor.access'])->group(function () {
 
 };
 
-$useDomainRouting = (bool) config('app.domain_routing');
-
-if ($useDomainRouting) {
-    Route::domain(config('app.public_host'))->group($publicRoutes);
-    Route::domain(config('app.hub_host'))->group($hubRoutes);
-} else {
-    $hubRoutes();
-}
+$hubRoutes();

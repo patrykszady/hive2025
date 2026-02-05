@@ -77,17 +77,27 @@ class TransactionController extends Controller
             $accessToken = $bank->plaid_access_token;
             $result = $this->plaidService->getItem($accessToken);
 
-            if (isset($result['item']['error'])) {
+            if (($result['error'] ?? false) === true) {
+                $error = ['error' => $result];
+            } elseif (!empty($result['item']['error'])) {
                 $error = ['error' => $result['item']['error']];
             } else {
-                $last_failed_update = Carbon::parse($result['status']['transactions']['last_failed_update']);
-                $last_successful_update = Carbon::parse($result['status']['transactions']['last_successful_update']);
+                $transactionsStatus = $result['status']['transactions'] ?? [];
+                $lastFailedUpdate = $transactionsStatus['last_failed_update'] ?? null;
+                $lastSuccessfulUpdate = $transactionsStatus['last_successful_update'] ?? null;
 
-                $difference = $last_failed_update->diff($last_successful_update);
-                $difference = ['before' => $difference->invert, 'diff_in_days' => $difference->days];
+                if ($lastFailedUpdate && $lastSuccessfulUpdate) {
+                    $lastFailed = Carbon::parse($lastFailedUpdate);
+                    $lastSuccessful = Carbon::parse($lastSuccessfulUpdate);
 
-                if ($difference['before'] === 1 && $difference['diff_in_days'] > 3) {
-                    $error = ['error' => ['error_type' => 'ITEM_ERROR', 'error_code' => 'NO_TRANSACTIONS', 'error_message' => 'No New Transactions in over 3 days. Please UPDATE BANK.']];
+                    $difference = $lastFailed->diff($lastSuccessful);
+                    $difference = ['before' => $difference->invert, 'diff_in_days' => $difference->days];
+
+                    if ($difference['before'] === 1 && $difference['diff_in_days'] > 3) {
+                        $error = ['error' => ['error_type' => 'ITEM_ERROR', 'error_code' => 'NO_TRANSACTIONS', 'error_message' => 'No New Transactions in over 3 days. Please UPDATE BANK.']];
+                    } else {
+                        $error = ['error' => false];
+                    }
                 } else {
                     $error = ['error' => false];
                 }

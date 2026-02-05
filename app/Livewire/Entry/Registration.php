@@ -6,6 +6,7 @@ use App\Mail\EmailVerificationCode;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -22,6 +23,8 @@ class Registration extends Component
 
     #[Validate]
     public $user_cell = null;
+
+    public bool $can_confirm_user_cell = false;
 
     #[Validate]
     public $cell_verification_code = '';
@@ -41,6 +44,10 @@ class Registration extends Component
 
     public $password_confirmation = null;
 
+    public bool $passwords_ready = false;
+
+    public bool $use_password = false;
+
     public $validate_number = false;
 
     public $validate_email = false;
@@ -51,7 +58,9 @@ class Registration extends Component
 
     public $email_code_sent_at = null;
 
-    public $user_cell_valid = false;
+    public ?string $confirmed_user_cell = null;
+
+    public bool $show_unregistered_notice = false;
 
     public function canResendPhone(): bool
     {
@@ -96,6 +105,18 @@ class Registration extends Component
         return $this->user && $this->user->exists && !empty($this->user->email);
     }
 
+    public function passwordsReady(): bool
+    {
+        return $this->isPasswordsReady();
+    }
+
+    protected function isPasswordsReady(): bool
+    {
+        return $this->password && $this->password_confirmation
+            && strlen((string) $this->password) >= 8
+            && $this->password === $this->password_confirmation;
+    }
+
     public function rules()
     {
         return [
@@ -127,15 +148,28 @@ class Registration extends Component
         
         // Get step from query parameter or default to 'phone'
         $this->step = request()->query('step', 'phone');
+
+        $prefillCell = session()->pull('registration_prefill_cell') ?? request()->query('cell');
+        $this->show_unregistered_notice = (session()->pull('registration_notice') === 'unregistered')
+            || request()->query('notice') === 'unregistered';
         
         // Clear phone state if returning to phone step
         if ($this->step === 'phone') {
             session()->forget('registration_state');
             $this->user_cell = null;
-            $this->user_cell_valid = false;
+            $this->confirmed_user_cell = null;
+            $this->can_confirm_user_cell = false;
             $this->phone_verification = '';
             $this->validate_number = false;
             $this->phone_code_sent_at = null;
+
+            if ($prefillCell) {
+                $digits = preg_replace('/\D/', '', (string) $prefillCell);
+                if (strlen($digits) === 10) {
+                    $this->user_cell = sprintf('(%s) %s-%s', substr($digits, 0, 3), substr($digits, 3, 3), substr($digits, 6));
+                    $this->can_confirm_user_cell = $this->isUserCellValid();
+                }
+            }
         } else {
             // Load persisted state from session for other steps
             $this->loadStateFromSession();
@@ -153,39 +187,66 @@ class Registration extends Component
 
     public function updated($field)
     {
-        if (in_array($field, ['password', 'password_confirmation'])) {
+        if (in_array($field, ['password', 'password_confirmation'], true)) {
+            if (! $this->use_password) {
+                return;
+            }
             $this->validateOnly('password');
             $this->validateOnly('password_confirmation');
+            $this->passwords_ready = $this->isPasswordsReady();
         }
 
-        if ($field === 'user_cell') {
-            // Only validate if user has typed enough characters (at least 10 digits)
-            $rawPhone = preg_replace('/[^0-9]/', '', $this->user_cell);
-            
-            // If they've typed something substantial but incomplete, show error
-            if (!empty($rawPhone) && strlen($rawPhone) < 10) {
-                $this->user_cell_valid = false;
-                $this->addError('user_cell', 'Phone number must be 10 digits.');
-            } elseif (strlen($rawPhone) >= 10) {
-                // Full number entered, validate format
-                try {
-                    $this->validateOnly('user_cell');
-                    $this->user_cell_valid = true;
-                } catch (\Illuminate\Validation\ValidationException $e) {
-                    $this->user_cell_valid = false;
-                    throw $e;
-                }
-            } else {
-                // Empty or just started typing, clear errors
-                $this->resetErrorBag('user_cell');
-                $this->user_cell_valid = false;
-            }
-        } else {
-            $this->validateOnly($field);
-        }
+        $this->validateOnly($field);
     }
 
-    public function user_cell_confirm()
+    public function updatedUserCell(): void
+    {
+        if ($this->step !== 'phone') {
+            return;
+        }
+
+        $rawPhone = preg_replace('/[^0-9]/', '', (string) $this->user_cell);
+
+        if ($rawPhone === '') {
+            $this->resetErrorBag('user_cell');
+            $this->can_confirm_user_cell = false;
+            return;
+        }
+
+        if (strlen($rawPhone) < 10) {
+            $this->addError('user_cell', 'Phone number must be 10 digits.');
+            $this->can_confirm_user_cell = false;
+            return;
+        }
+
+        $this->resetErrorBag('user_cell');
+        $this->validateOnly('user_cell');
+        $this->can_confirm_user_cell = $this->isUserCellValid();
+    }
+
+    protected function isUserCellValid(): bool
+    {
+        if ($this->step !== 'phone') {
+            return false;
+        }
+
+        if (! $this->user_cell) {
+            return false;
+        }
+
+        if (! preg_match('/^\(\d{3}\) \d{3}-\d{4}$/', (string) $this->user_cell)) {
+            return false;
+        }
+
+        return ! $this->getErrorBag()->has('user_cell');
+    }
+
+    public function confirmUserCellAction(): void
+    {
+        $this->confirmUserCell();
+    }
+
+    protected function confirmUserCell(): void
     {
         $this->validateOnly('user_cell');
         
@@ -203,8 +264,12 @@ class Registration extends Component
         }
 
         if (isset($this->user->registration['registered'])) {
-            session()->flash('error', 'Your number is already registered. Please Login or recover your account instead.');
-            return $this->redirect(route('login'), navigate: true);
+            session()->flash('error', [
+                'heading' => 'Your number is already registered.',
+                'text' => 'Please Login or recover your account instead.',
+            ]);
+            $this->redirect(route('login'), navigate: true);
+            return;
         } else {
             if (! isset($this->user->registration['cell_verified'])) {
                 //generate random 6 digit code
@@ -226,12 +291,14 @@ class Registration extends Component
 
                     $this->validate_number = true;
                     $this->phone_code_sent_at = now()->timestamp;
-                    $this->updateRegistrationStep('phone_confirmed');
+                    $this->updateRegistrationStep('phone_code_sent');
                     $this->saveStateToSession();
-                    return $this->redirect(route('registration', ['step' => 'verify-phone']), navigate: true);
+                    $this->redirect(route('registration', ['step' => 'verify-phone']), navigate: true);
+                    return;
                 } catch (\Exception $e) {
                     $this->user_cell = null;
                     $this->user = User::make();
+                    $this->confirmed_user_cell = null;
                     $this->addError('user_cell', 'Invalid Phone Number.');
                 }
             } else {
@@ -239,7 +306,8 @@ class Registration extends Component
                 $this->validate_number = false;
                 $this->show_email = true;
                 $this->saveStateToSession();
-                return $this->redirect(route('registration', ['step' => 'email']), navigate: true);
+                $this->redirect(route('registration', ['step' => 'email']), navigate: true);
+                return;
             }
         }
     }
@@ -310,7 +378,7 @@ class Registration extends Component
 
         $this->validate_email = true;
         $this->email_code_sent_at = now()->timestamp;
-        $this->updateRegistrationStep('email_confirmed');
+        $this->updateRegistrationStep('email_code_sent');
         $this->saveStateToSession();
         
         return $this->redirect(route('registration', ['step' => 'verify-email']), navigate: true);
@@ -360,6 +428,16 @@ class Registration extends Component
 
     public function register_user()
     {
+        if (! $this->use_password) {
+            $this->addError('password', 'Select the password option to set a password.');
+            return;
+        }
+
+        $this->validate([
+            'password' => 'required|min:6',
+            'password_confirmation' => 'required|same:password',
+        ]);
+
         if (! isset($this->user->id)) {
             $this->user->cell_phone = $this->user_cell;
             $this->user->email = $this->user->email;
@@ -372,15 +450,102 @@ class Registration extends Component
             'remember_token' => Str::random(60),
         ])->save();
 
-        // Mark registration as complete
-        $this->updateRegistrationStep('registered', true);
+        // Mark registration as complete (clears intermediate steps)
+        $this->markAsRegistered();
 
         Auth::login($this->user);
         
         // Clear session state after successful registration
         session()->forget('registration_state');
 
-        return $this->redirect(route('vendor_selection'), navigate: true);
+        return $this->redirect(route('account_selection'), navigate: true);
+    }
+
+    public function prepareUserForPasskey(): bool
+    {
+        Log::channel('single')->info('prepareUserForPasskey: Starting', [
+            'user_id' => $this->user?->id,
+            'session_id' => session()->getId(),
+        ]);
+
+        $this->validate([
+            'user.first_name' => 'required|min:2',
+            'user.last_name' => 'required|min:2',
+        ]);
+
+        if (! isset($this->user->id)) {
+            $this->user->cell_phone = $this->user_cell;
+            $this->user->email = $this->user->email;
+        }
+
+        $this->user->save();
+        Log::channel('single')->info('prepareUserForPasskey: User saved', ['user_id' => $this->user->id]);
+
+        // Log in the user so WebAuthn can register the passkey
+        // Note: User is not marked as "registered" until passkey succeeds
+        // IMPORTANT: Auth::login() regenerates the session, which changes the session ID.
+        // However, since this response hasn't been sent yet, JavaScript will use the
+        // old session cookie for WebAuthn requests (causing 403 Forbidden).
+        // Solution: Manually set the user in session WITHOUT regenerating the session ID.
+        // We'll regenerate the session after successful passkey registration.
+        session()->put(Auth::guard()->getName(), $this->user->getAuthIdentifier());
+        Auth::setUser($this->user);
+        Log::channel('single')->info('prepareUserForPasskey: User logged in (session NOT regenerated)', [
+            'user_id' => $this->user->id,
+            'session_id' => session()->getId(),
+            'auth_check' => Auth::check(),
+        ]);
+        
+        // Save state so we can complete registration
+        $this->saveStateToSession();
+        Log::channel('single')->info('prepareUserForPasskey: State saved, returning true');
+        
+        return true;
+    }
+
+    public function cancelPasskeyRegistration(): void
+    {
+        // Log out the user since passkey registration failed/was cancelled
+        Auth::logout();
+        
+        // Keep session state so they can try again
+    }
+
+    public function completePasskeyRegistration()
+    {
+        // Mark registration as complete (clears intermediate steps)
+        $this->markAsRegistered();
+        
+        // Now that passkey is successfully registered, regenerate session for security
+        // This prevents session fixation attacks
+        session()->regenerate();
+        
+        session()->forget('registration_state');
+
+        return $this->redirect(route('account_selection'), navigate: true);
+    }
+
+    public function register_with_passkey()
+    {
+        // Deprecated - passkey registration now happens inline
+        // Keeping for backwards compatibility
+        $this->prepareUserForPasskey();
+        $this->markAsRegistered();
+        session()->forget('registration_state');
+
+        return $this->redirect(route('passkey.setup'), navigate: true);
+    }
+
+    public function showPasswordOption(): void
+    {
+        $this->use_password = true;
+        $this->saveStateToSession();
+    }
+
+    public function showPasskeyOption(): void
+    {
+        $this->use_password = false;
+        $this->saveStateToSession();
     }
 
     protected function updateRegistrationStep(string $step, bool $value = true): void
@@ -398,6 +563,19 @@ class Registration extends Component
         }
     }
 
+    /**
+     * Mark user as fully registered, clearing all intermediate steps.
+     */
+    protected function markAsRegistered(): void
+    {
+        // Clear all intermediate steps and just set registered
+        $this->user->registration = ['registered' => true];
+        
+        if ($this->user->exists) {
+            $this->user->save();
+        }
+    }
+
     protected function saveStateToSession(): void
     {
         $userData = $this->user->toArray();
@@ -410,13 +588,16 @@ class Registration extends Component
             'user' => $userData,
             'user_id' => $this->user->id ?? null,
             'user_cell' => $this->user_cell,
-            'user_cell_valid' => $this->user_cell_valid,
+            'confirmed_user_cell' => $this->confirmed_user_cell,
+            'can_confirm_user_cell' => $this->can_confirm_user_cell,
             'phone_verification' => $this->phone_verification,
             'email_verification' => $this->email_verification,
             'validate_number' => $this->validate_number,
             'validate_email' => $this->validate_email,
             'show_email' => $this->show_email,
             'show_name' => $this->show_name,
+            'use_password' => $this->use_password,
+            'passwords_ready' => $this->passwords_ready,
             'phone_code_sent_at' => $this->phone_code_sent_at,
             'email_code_sent_at' => $this->email_code_sent_at,
         ]]);
@@ -432,6 +613,14 @@ class Registration extends Component
                 $existingUser = User::find($state['user_id']);
                 if ($existingUser) {
                     $this->user = $existingUser;
+                    
+                    // Check if email is already verified in user's registration state
+                    $registration = $existingUser->registration ?? [];
+                    if (!empty($registration['email_verified'])) {
+                        $this->show_email = true;
+                        $this->show_name = true;
+                        $this->validate_email = false;
+                    }
                 } else {
                     // Fallback to creating from array if user not found
                     $this->user = User::make($state['user']);
@@ -441,15 +630,26 @@ class Registration extends Component
             }
             
             $this->user_cell = $state['user_cell'] ?? null;
-            $this->user_cell_valid = $state['user_cell_valid'] ?? false;
+            $this->confirmed_user_cell = $state['confirmed_user_cell'] ?? null;
+            $this->can_confirm_user_cell = $state['can_confirm_user_cell'] ?? $this->isUserCellValid();
             $this->phone_verification = $state['phone_verification'] ?? '';
             $this->email_verification = $state['email_verification'] ?? '';
             $this->validate_number = $state['validate_number'] ?? false;
             $this->validate_email = $state['validate_email'] ?? false;
             $this->show_email = $state['show_email'] ?? false;
             $this->show_name = $state['show_name'] ?? false;
+            $this->use_password = $state['use_password'] ?? false;
+            $this->passwords_ready = $state['passwords_ready'] ?? $this->isPasswordsReady();
             $this->phone_code_sent_at = $state['phone_code_sent_at'] ?? null;
             $this->email_code_sent_at = $state['email_code_sent_at'] ?? null;
+            
+            // If user's registration shows email_verified, update local state
+            if ($this->user->exists) {
+                $registration = $this->user->registration ?? [];
+                if (!empty($registration['email_verified'])) {
+                    $this->show_name = true;
+                }
+            }
         }
     }
 
@@ -461,6 +661,18 @@ class Registration extends Component
         if (!in_array($this->step, $allowedSteps)) {
             $this->redirect(route('registration', ['step' => 'phone']), navigate: true);
             return;
+        }
+        
+        // Check if email is already verified - skip email/verify-email steps
+        if ($this->user->exists) {
+            $registration = $this->user->registration ?? [];
+            if (!empty($registration['email_verified'])) {
+                if (in_array($this->step, ['email', 'verify-email'])) {
+                    $this->show_name = true;
+                    $this->redirect(route('registration', ['step' => 'complete']), navigate: true);
+                    return;
+                }
+            }
         }
         
         // Step progression rules

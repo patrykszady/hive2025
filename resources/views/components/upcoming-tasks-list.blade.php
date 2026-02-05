@@ -18,16 +18,53 @@
         </div>
         @auth
             <div
-                x-data="{ supported: false, permission: 'default' }"
-                x-init="supported = 'Notification' in window; permission = supported ? Notification.permission : 'default'"
+                x-data="{ supported: false, permission: 'default', enabled: false }"
+                x-init="
+                    supported = 'Notification' in window;
+                    permission = supported ? Notification.permission : 'default';
+                    if (supported && window.HiveTaskNotifications?.status) {
+                        window.HiveTaskNotifications.status().then((result) => {
+                            if (!result) return;
+                            supported = result.supported ?? supported;
+                            permission = result.permission ?? permission;
+                            enabled = Boolean(result.enabled);
+                        });
+                    }
+                "
                 class="flex items-center gap-2"
                 x-cloak
             >
+                <flux:button.group
+                    x-show="supported && enabled"
+                    x-cloak
+                >
+                    <flux:button
+                        size="sm"
+                        variant="primary"
+                        class="bg-green-600 hover:bg-green-700 text-white"
+                        type="button"
+                        disabled
+                    >
+                        <span class="inline-flex items-center gap-2">
+                            <flux:icon.check class="w-4 h-4" />
+                            <span>Notifications</span>
+                        </span>
+                    </flux:button>
+                    <flux:button
+                        size="sm"
+                        variant="outline"
+                        class="px-2"
+                        type="button"
+                        x-on:click.prevent="window.HiveTaskNotifications?.disable()?.then((result) => { if (result?.disabled) { enabled = false; } })"
+                    >
+                        <flux:icon.x-mark class="w-4 h-4" />
+                    </flux:button>
+                </flux:button.group>
                 <flux:button
                     size="sm"
                     variant="primary"
-                    x-show="supported && permission !== 'granted'"
-                    x-on:click.prevent="window.HiveTaskNotifications?.enable()?.then((result) => { if (result?.enabled) { permission = 'granted'; } })"
+                    x-show="supported && !enabled"
+                    x-on:click.prevent="window.HiveTaskNotifications?.enable()?.then((result) => { if (result?.enabled) { enabled = true; permission = 'granted'; } })"
                 >
                     Enable notifications
                 </flux:button>

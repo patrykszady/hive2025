@@ -9,33 +9,76 @@ use Livewire\Component;
 
 class Login extends Component
 {
+    public string $identifier = '';
     public string $email = '';
     public string $password = '';
     public bool $remember = false;
+    public bool $can_continue = false;
     
     // Step management: 'email' -> 'credentials'
     public string $step = 'email';
     public bool $hasPasskey = false;
+    public bool $hasPassword = false;
 
     public function mount(): void
     {
         if (session('error')) {
             $this->email = '';
+            $this->identifier = '';
+            $this->can_continue = false;
         }
+    }
+
+    public function updatedIdentifier(): void
+    {
+        $this->can_continue = $this->isIdentifierValid($this->identifier);
     }
 
     public function checkEmail(): void
     {
-        $this->validate(['email' => 'required|email']);
+        $this->validate(['identifier' => 'required|string']);
 
-        $user = User::where('email', $this->email)->first();
+        $identifier = trim($this->identifier);
 
-        if ($user) {
-            $this->hasPasskey = $user->webAuthnCredentials()->whereNull('disabled_at')->exists();
-        } else {
-            $this->hasPasskey = false;
+        // Check if it's a valid email or phone format
+        $isEmail = filter_var($identifier, FILTER_VALIDATE_EMAIL);
+        $digits = preg_replace('/\D/', '', $identifier);
+        $isPhone = strlen($digits) === 10;
+
+        if (! $isEmail && ! $isPhone) {
+            // Determine which format they're likely trying to enter
+            if (str_contains($identifier, '@')) {
+                $this->addError('identifier', 'Please enter a valid email address.');
+            } elseif (strlen($digits) > 0) {
+                $this->addError('identifier', 'Please enter a valid 10-digit phone number.');
+            } else {
+                $this->addError('identifier', 'Please enter a valid email or phone number.');
+            }
+            return;
         }
 
+        $user = $this->resolveUserFromIdentifier($this->identifier);
+
+        if (! $user) {
+            if ($isEmail) {
+                $this->addError('identifier', 'No account found with this email address.');
+            } else {
+                $this->addError('identifier', 'No account found with this phone number.');
+            }
+            return;
+        }
+
+        if (!($user->registration['registered'] ?? false)) {
+            $cell = $user->cell_phone ?: $this->identifier;
+            session()->flash('registration_notice', 'unregistered');
+            session()->flash('registration_prefill_cell', $cell);
+            $this->redirect(route('registration', ['step' => 'phone']), navigate: true);
+            return;
+        }
+
+        $this->email = (string) $user->email;
+        $this->hasPasskey = $user->webAuthnCredentials()->whereNull('disabled_at')->exists();
+        $this->hasPassword = filled($user->password);
         $this->step = 'credentials';
     }
 
@@ -44,15 +87,20 @@ class Login extends Component
         $this->step = 'email';
         $this->password = '';
         $this->hasPasskey = false;
+        $this->hasPassword = false;
         $this->resetErrorBag();
     }
 
     public function login(): void
     {
         $this->validate([
-            'email' => 'required|email',
             'password' => 'required',
         ]);
+
+        if ($this->email === '') {
+            $this->addError('identifier', __('auth.failed'));
+            return;
+        }
 
         $remember = (bool) $this->remember;
 
@@ -83,13 +131,21 @@ class Login extends Component
             return;
         }
 
-        $this->addError('email', __('auth.failed'));
+        $this->addError('identifier', __('auth.failed'));
     }
 
     public function startOneTimeLogin(): void
     {
-        $this->validate(['email' => 'required|email']);
+        $this->validate(['identifier' => 'required|string']);
 
+        $user = $this->resolveUserFromIdentifier($this->identifier);
+
+        if (! $user) {
+            $this->addError('identifier', __('auth.failed'));
+            return;
+        }
+
+        $this->email = (string) $user->email;
         session()->put('one_time_login_email', $this->email);
         session()->put('one_time_login_force_send', true);
 
@@ -99,6 +155,46 @@ class Login extends Component
     public function showPasswordLogin(): void
     {
         $this->hasPasskey = false;
+    }
+
+    protected function resolveUserFromIdentifier(string $identifier): ?User
+    {
+        $identifier = trim($identifier);
+
+        if (filter_var($identifier, FILTER_VALIDATE_EMAIL)) {
+            return User::where('email', $identifier)->first();
+        }
+
+        $digits = preg_replace('/\D/', '', $identifier);
+
+        if (strlen($digits) !== 10) {
+            return null;
+        }
+
+        $formatted = sprintf('(%s) %s-%s', substr($digits, 0, 3), substr($digits, 3, 3), substr($digits, 6));
+
+        return User::query()
+            ->where('cell_phone', $identifier)
+            ->orWhere('cell_phone', $digits)
+            ->orWhere('cell_phone', $formatted)
+            ->first();
+    }
+
+    protected function isIdentifierValid(string $identifier): bool
+    {
+        $identifier = trim($identifier);
+
+        if ($identifier === '') {
+            return false;
+        }
+
+        if (filter_var($identifier, FILTER_VALIDATE_EMAIL)) {
+            return true;
+        }
+
+        $digits = preg_replace('/\D/', '', $identifier);
+
+        return strlen($digits) === 10;
     }
 
     #[Title('Login')]

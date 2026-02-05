@@ -65,13 +65,4 @@ return [
     */
 
     'long_name' => env('LONG_APP_NAME', 'Hive Contractors'),
-
-    'domain_routing' => env('DOMAIN_ROUTING', false),
-
-    'public_host' => env('PUBLIC_HOST', 'hive.contractors'),
-
-    'hub_host' => env('HUB_HOST', 'hub.hive.contractors'),
-
-
-    // ... rest of config
 ];

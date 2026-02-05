@@ -144,6 +144,16 @@ input[type="number"] {
 /* Hide Livewire components with wire:cloak until Livewire initializes */
 [wire\:cloak] { display: none !important; }
 
+/* Disable automatic Flux input loading spinners (wire:model.live) */
+[data-flux-input] [wire\:loading][wire\:target] {
+  display: none !important;
+}
+
+/* Prevent extra padding when auto-loading is hidden */
+[data-flux-input] input[wire\:target] {
+  padding-inline-end: 0.75rem !important;
+}
+
 /* Global Flux editor styling - single-spaced paragraphs and dynamic height */
 [data-flux-editor] .tiptap p {
     margin-top: 0 !important;

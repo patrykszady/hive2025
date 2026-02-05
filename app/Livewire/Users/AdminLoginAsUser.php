@@ -33,7 +33,7 @@ class AdminLoginAsUser extends Component
         $user = User::findOrFail($this->user_id);
         Auth::login($user);
 
-        return redirect(route('vendor_selection'));
+        return redirect(route('account_selection'));
     }
 
     public function render()
