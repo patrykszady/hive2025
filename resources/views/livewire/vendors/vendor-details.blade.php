@@ -5,6 +5,9 @@
     :expanded="$expanded ?? true"
     :nonLivewire="$nonLivewire ?? false"
     >
+    @php
+        $disableCloak = true;
+    @endphp
     @unless($nonLivewire ?? false)
         <x-slot:header_buttons>
             @if($vendor->id != auth()->user()->vendor->id && $vendor->business_type != 'Retail')
@@ -45,20 +48,20 @@
             </div>
         @endif
 
-        <x-details.row title="Name" :content="$vendor->business_name" :no-cloak="$nonLivewire ?? false" />
+        <x-details.row title="Name" :content="$vendor->business_name" :no-cloak="$disableCloak" />
         @unless(in_array('type', $hide ?? []))
-            <x-details.row title="Type" :content="$vendor->business_type" :no-cloak="$nonLivewire ?? false" />
+            <x-details.row title="Type" :content="$vendor->business_type" :no-cloak="$disableCloak" />
         @endunless
 
         @unless($vendor->business_type == 'Retail')
             @if($vendor->full_address)
-                <x-details.row title="Address" :content="$vendor->full_address" :href="$vendor->getAddressMapURI()" :copyable="!($nonLivewire ?? false)" :no-cloak="$nonLivewire ?? false" />
+                <x-details.row title="Address" :content="$vendor->full_address" :href="$vendor->getAddressMapURI()" :copyable="!($nonLivewire ?? false)" :no-cloak="$disableCloak" />
             @endif
             @if($vendor->business_phone)
-                <x-details.row title="Phone" :content="$vendor->business_phone" :copyable="!($nonLivewire ?? false)" :no-cloak="$nonLivewire ?? false" />
+                <x-details.row title="Phone" :content="$vendor->business_phone" :copyable="!($nonLivewire ?? false)" :no-cloak="$disableCloak" />
             @endif
             @if($vendor->business_email)
-                <x-details.row title="Email" :content="$vendor->business_email" :copyable="!($nonLivewire ?? false)" :no-cloak="$nonLivewire ?? false" />
+                <x-details.row title="Email" :content="$vendor->business_email" :copyable="!($nonLivewire ?? false)" :no-cloak="$disableCloak" />
             @endif
         @endunless
     </x-slot:details>

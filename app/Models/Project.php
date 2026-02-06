@@ -17,6 +17,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\HasOneThrough;
+use Illuminate\Support\Facades\Auth;
+use Laravel\Scout\Builder as ScoutBuilder;
 use Laravel\Scout\Searchable;
 
 class Project extends Model
@@ -146,27 +148,116 @@ class Project extends Model
             $latestStatusDate = $latestStatus->start_date?->timestamp ?? 0;
         }
         
-        // Get client_id through the project_vendor relationship
-        $clientId = null;
-        if ($this->relationLoaded('client')) {
-            $clientId = $this->client?->id;
-        } else {
-            $clientId = $this->client()->value('clients.id');
-        }
+        $client = $this->relationLoaded('client')
+            ? $this->client
+            : $this->client()->with('users:id,first_name,last_name')->first();
+
+        $clientUsers = $client
+            ? ($client->relationLoaded('users') ? $client->users : $client->users()->select('first_name', 'last_name')->get())
+            : collect();
+
+        $clientId = $client?->id;
+        $clientBusinessName = $client?->business_name;
+        $clientFirstNames = $client?->first_names;
+        $clientLastNames = $client?->last_names;
+        $clientName = $client?->name;
+        $clientUserFirstNames = $clientUsers->pluck('first_name')->filter()->values()->all();
+        $clientUserLastNames = $clientUsers->pluck('last_name')->filter()->values()->all();
+        $clientUserFullNames = $clientUsers
+            ->map(fn ($user) => trim((string) ($user->first_name ?? '').' '.(string) ($user->last_name ?? '')))
+            ->filter()
+            ->values()
+            ->all();
+        $clientSearch = trim(implode(' ', array_filter(array_merge(
+            [$clientName, $clientBusinessName, $clientFirstNames, $clientLastNames],
+            $clientUserFullNames,
+            $clientUserFirstNames,
+            $clientUserLastNames
+        ))));
+
+        $vendorBusinessName = $this->relationLoaded('createdByVendor')
+            ? $this->createdByVendor?->business_name
+            : $this->createdByVendor()->value('business_name');
 
         return [
-            'id' => (string) $this->id,
+            'id' => (int) $this->id,
             'project_name' => $this->project_name,
             'address' => $this->address,
             'city' => $this->city,
             'state' => $this->state,
             'zip_code' => $this->zip_code,
-            'client_id' => $clientId,
+            'client_id' => $clientId ? (int) $clientId : null,
+            'client_business_name' => $clientBusinessName,
+            'client_first_names' => $clientFirstNames,
+            'client_last_names' => $clientLastNames,
+            'client_name' => $clientName,
+            'client_search' => $clientSearch,
+            'client_user_first_names' => $clientUserFirstNames,
+            'client_user_last_names' => $clientUserLastNames,
+            'client_user_full_names' => $clientUserFullNames,
             'belongs_to_vendor_id' => (int) $this->belongs_to_vendor_id,
+            'vendor_business_name' => $vendorBusinessName,
             'latest_status_code' => $latestStatusCode,
             'latest_status_date' => $latestStatusDate,
             'created_at' => $this->created_at?->timestamp ?? 0,
         ];
+    }
+
+    protected function makeAllSearchableUsing(Builder $query): Builder
+    {
+        return $query->with([
+            'client.users:id,first_name,last_name',
+            'createdByVendor:id,business_name',
+            'latestStatus:project_status.id,project_status.project_id,project_status.status_code,project_status.start_date',
+        ]);
+    }
+
+    /**
+     * Create a search builder that respects user access permissions.
+     */
+    public static function scopedSearch(
+        string $query = '',
+        array $filterConditions = [],
+        string $sortBy = 'latest_status_date',
+        string $sortDirection = 'desc',
+        ?User $user = null
+    ): ScoutBuilder {
+        $user ??= Auth::user();
+
+        if (! $user) {
+            throw new \RuntimeException('Project::scopedSearch() requires an authenticated user.');
+        }
+
+        $filters = [
+            '__soft_deleted = 0',
+        ];
+
+        $belongsToVendorId = (int) $user->vendor->id;
+        $filters[] = 'belongs_to_vendor_id = '.$belongsToVendorId;
+
+        if ($user->vendor_role === 'Member' && isset($user->vendor_pivot->start_date)) {
+            $projectsStartDate = \Carbon\Carbon::parse($user->vendor_pivot->start_date)
+                ->subMonths(6)
+                ->startOfDay()
+                ->timestamp;
+            $filters[] = 'created_at > '.$projectsStartDate;
+        }
+
+        foreach ($filterConditions as $condition) {
+            if (is_string($condition) && $condition !== '') {
+                $filters[] = $condition;
+            }
+        }
+
+        $filterString = implode(' AND ', $filters);
+
+        return self::search($query, function ($meilisearch, $searchQuery, $options) use ($filterString, $sortBy, $sortDirection) {
+            $options['filter'] = $filterString;
+            $options['sort'] = ["{$sortBy}:{$sortDirection}"];
+            $options['matchingStrategy'] = 'all';
+
+            return $meilisearch->search($searchQuery, $options);
+        });
     }
 
     public function distributions(): BelongsToMany

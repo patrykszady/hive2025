@@ -2,13 +2,7 @@
     <div class="grid max-w-3xl grid-cols-1 gap-2 mx-auto mt-2 sm:px-6 lg:max-w-7xl lg:grid-cols-5">
         {{-- PROGRESS TIMELINE --}}
         <div class="space-y-4 lg:col-start-1 lg:col-span-2">
-            <flux:card class="sticky top-5 space-y-4">
-                <div>
-                    <flux:heading size="lg">Hive Registration for {{$user->vendor->business_name}}</flux:heading>
-                    <flux:subheading>Registration Progress</flux:subheading>
-                </div>
-
-                <flux:separator variant="subtle" />
+            <x-island-card heading="Hive Registration for {{$user->vendor->business_name}}" subheading="Registration Progress" :separator="true" class="sticky top-5">
 
                 {{-- TIMELINE --}}
                 <div class="flow-root">
@@ -36,7 +30,7 @@
                         @endforeach
                     </ul>
                 </div>
-            </flux:card>
+            </x-island-card>
         </div>
         
         {{-- REGISTRATION CONTENT --}}
@@ -115,16 +109,15 @@
 
     @if($registrationSubmitted)
         <div class="mx-auto mt-4 max-w-md">
-            <flux:card class="space-y-3" wire:poll.250ms="refreshMatchingStatus">
-                <div class="flex items-center justify-between gap-3">
-                    <flux:heading size="lg">Finalizing</flux:heading>
+            <x-island-card heading="Finalizing" wire:poll.250ms="refreshMatchingStatus">
+                <x-slot:badge>
                     <flux:badge
                         inset="top bottom"
                         color="{{ $matchingStatus === 'completed' ? 'green' : ($matchingStatus === 'failed' ? 'red' : ($matchingStatus === 'processing' ? 'amber' : 'blue')) }}"
                     >
                         {{ $matchingStatus ?? 'queued' }}
                     </flux:badge>
-                </div>
+                </x-slot:badge>
 
                 @if($matchingStatus === 'failed')
                     <flux:text>
@@ -139,7 +132,7 @@
                         We're matching your existing checks, clients, projects, and payments.
                     </flux:text>
                 @endif
-            </flux:card>
+            </x-island-card>
         </div>
     @endif
 </div>

@@ -1,26 +1,22 @@
-<div class="max-w-3xl">
+<div class="max-w-3xl" wire:transition>
     @if($view === NULL)
-        <flux:card class="space-y-2 mb-4">
-            <div class="flex justify-between">
-                <flux:heading size="lg">Filters</flux:heading>
-            </div>
-        </flux:card>
+        <x-island-card heading="Filters" class="mb-4">
+        </x-island-card>
     @endif
 
-    <flux:card class="space-y-2">
-        <div class="flex justify-between">
-            <flux:heading size="lg">Estimates</flux:heading>
-            @if($view !== 'estimates.index')
-                @can('create', [App\Models\Estimate::class, $project])
-                    <flux:button
-                        href="{{route('estimates.create', $project->id)}}"
-                        size="sm"
-                        >
-                        Add Estimate
-                    </flux:button>
-                @endcan
-            @endif
-        </div>
+    <x-island-card heading="Estimates">
+        <x-slot:actions>
+        @if($view !== 'estimates.index')
+            @can('create', [App\Models\Estimate::class, $project])
+                <flux:button
+                    href="{{route('estimates.create', $project->id)}}"
+                    size="sm"
+                    >
+                    Add Estimate
+                </flux:button>
+            @endcan
+        @endif
+        </x-slot:actions>
 
         <div class="space-y-2">
             <flux:table :paginate="$this->estimates->hasPages() ? $this->estimates : null">
@@ -68,20 +64,22 @@
                                             {{$estimate->status}}
                                         </flux:badge>
 
-                                        <flux:dropdown position="bottom" align="start">
-                                            <flux:button
-                                                variant="ghost"
-                                                size="xs"
-                                                icon="cog-6-tooth"
-                                                class="!p-1"
-                                                aria-label="Estimate actions"
-                                            />
+                                        @unless(auth()->user()->is_client_user)
+                                            <flux:dropdown position="bottom" align="start">
+                                                <flux:button
+                                                    variant="ghost"
+                                                    size="xs"
+                                                    icon="cog-6-tooth"
+                                                    class="!p-1"
+                                                    aria-label="Estimate actions"
+                                                />
 
-                                            <flux:menu>
-                                                <flux:menu.item icon="arrow-path" wire:click="activateEstimate({{ $estimate->id }})">Restore</flux:menu.item>
-                                                <flux:menu.item icon="trash" wire:click="removeEstimate({{ $estimate->id }})" variant="danger">Delete</flux:menu.item>
-                                            </flux:menu>
-                                        </flux:dropdown>
+                                                <flux:menu>
+                                                    <flux:menu.item icon="arrow-path" wire:click="activateEstimate({{ $estimate->id }})">Restore</flux:menu.item>
+                                                    <flux:menu.item icon="trash" wire:click="removeEstimate({{ $estimate->id }})" variant="danger">Delete</flux:menu.item>
+                                                </flux:menu>
+                                            </flux:dropdown>
+                                        @endunless
                                     </div>
                                 </flux:table.cell>
                             @endif
@@ -102,5 +100,5 @@
                 </flux:table.rows>
             </flux:table>
         </div>
-    </flux:card>
+    </x-island-card>
 </div>

@@ -1,11 +1,6 @@
 <div class="max-w-5xl">
     @if($view === NULL)
-        <flux:card class="space-y-2 mb-4">
-            <div>
-                <flux:heading size="lg">Lead Filters</flux:heading>
-            </div>
-
-            <flux:separator variant="subtle" />
+        <x-island-card heading="Lead Filters" :separator="true" class="mb-4">
 
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 {{-- <flux:input wire:model.debounce.500ms.live="amount" label="Amount" icon="magnifying-glass" placeholder="123.45" />
@@ -19,19 +14,15 @@
                     @endforeach
                 </flux:select> --}}
             </div>
-        </flux:card>
+        </x-island-card>
     @endif
 
-    <flux:card class="space-y-2">
-        <div class="flex justify-between">
-            <flux:heading size="lg">Leads</flux:heading>
+    <x-island-card heading="Leads" :separator="true">
+        <x-slot:actions>
             @can('create', App\Models\Project::class)
-                {{-- , { client_id: '{{$view === NULL ? $client_id : $client->id}}' } --}}
                 <flux:button wire:click="$dispatchTo('leads.lead-create', 'addLead')">Add Lead</flux:button>
             @endcan
-        </div>
-
-        <flux:separator variant="subtle" />
+        </x-slot:actions>
 
         <div class="space-y-2">
             <flux:table :paginate="$this->leads->hasPages() ? $this->leads : null">
@@ -109,6 +100,6 @@
                 </flux:table.rows>
             </flux:table>
         </div>
-    </flux:card>
+    </x-island-card>
     <livewire:leads.lead-create />
 </div>

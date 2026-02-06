@@ -1,16 +1,13 @@
-<div class="max-w-3xl space-y-2">
+<div class="max-w-3xl space-y-2" wire:transition>
     @if($view === NULL)
-        <flux:card>
-            <div class="flex justify-between">
-                <flux:heading size="lg">Filters</flux:heading>
+        <x-island-card heading="Filters" :separator="true">
+            <x-slot:actions>
                 @can('create', App\Models\Expense::class)
                     @if($amount && $view == NULL)
                         <flux:button wire:click="$dispatchTo('expenses.expense-create', 'newExpense', { amount: {{$amount}}})">Add New Expense</flux:button>
                     @endif
                 @endcan
-            </div>
-
-            <flux:separator variant="subtle" />
+            </x-slot:actions>
 
             <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
                 <flux:input wire:model.live.debounce.300ms="amount" label="Amount" icon="magnifying-glass" placeholder="Search Amount" />
@@ -53,12 +50,12 @@
                     <flux:select.option value="Missing Info"><flux:badge size="md" inset="top bottom" color="amber">Missing Info</flux:badge></flux:select.option>
                 </flux:select>
             </div>
-        </flux:card>
+        </x-island-card>
     @endif
 
     {{-- Hide expenses card on project page when there are no expenses --}}
     @if($view !== 'projects.show' || $this->expenses->isNotEmpty())
-    <flux:card class="overflow-hidden" x-data="{
+    <x-island-card heading="Expenses" class="overflow-hidden" x-data="{
         init() {
             window.addEventListener('remove-expense-row', (event) => {
                 const expenseId = event.detail.id;
@@ -79,11 +76,7 @@
         }
     }">
         <div class="space-y-4">
-            <div>
-                <flux:heading size="lg">Expenses</flux:heading>
-            </div>
-
-            <div class="-mx-6 -mb-6 overflow-x-hidden">
+            <div class="-mx-5 -mb-2 overflow-x-hidden">
                 <flux:table
                     wire:loading.class="opacity-50 text-opacity-50"
                     class="table-fixed w-full [:where(&)]:p-0 [:where(&)]:space-y-0 [&_th]:!px-4 [&_td]:!px-3 [&_th:first-child]:!ps-6 [&_th:last-child]:!pe-6 [&_td:first-child]:!ps-6 [&_td:last-child]:!pe-6"
@@ -205,11 +198,11 @@
                 </div>
             </div>
         </div>
-    </flux:card>
+    </x-island-card>
     @endif
 
     @if($view === NULL && auth()->user()->can('create', App\Models\Expense::class))
-        <flux:card wire:init="loadTransactions" x-data="{
+        <x-island-card heading="Transactions" wire:init="loadTransactions" x-data="{
             init() {
                 window.addEventListener('remove-transaction-row', (event) => {
                     const transactionId = event.detail.id;
@@ -222,9 +215,6 @@
                 });
             }
         }">
-            <div>
-                <flux:heading size="lg">Transactions</flux:heading>
-            </div>
 
             <div>
                 @if($this->transactionsReady)
@@ -278,7 +268,7 @@
                     <div class="p-4 text-sm text-zinc-500">Loading transactions…</div>
                 @endif
             </div>
-        </flux:card>
+        </x-island-card>
     @endif
 
     <livewire:expenses.expense-create />

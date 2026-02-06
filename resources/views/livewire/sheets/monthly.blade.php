@@ -1,14 +1,4 @@
-<flux:card>
-    <div class="flex justify-between">
-        <flux:heading size="lg">Payments & Expenses</flux:heading>
-        {{-- <flux:button
-            wire:navigate.hover
-            href="{{route('timesheets.index')}}"
-            size="sm"
-            >
-            Confirm Timesheets
-        </flux:button> --}}
-    </div>
+<x-island-card heading="Payments & Expenses">
     {{-- <flux:subheading><i>Pick Date to add or edit Daily Hours for {{auth()->user()->first_name}}</i></flux:subheading> --}}
 
     <flux:separator variant="subtle" />
@@ -55,4 +45,4 @@
             </flux:chart.legend>
         </div>
     </flux:chart>
-</flux:card>
+</x-island-card>

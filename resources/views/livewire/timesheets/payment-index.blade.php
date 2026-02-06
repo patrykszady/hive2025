@@ -1,7 +1,5 @@
 <div class="max-w-md space-y-4">
-    <flux:card class="space-y-2">
-        <div class="flex justify-between">
-            <flux:heading size="lg">Pay Team Members</flux:heading>
+    <x-island-card heading="Pay Team Members">
 
             {{-- <div>
                 <flux:button variant="primary" disabled>
@@ -32,5 +30,5 @@
                 </a>
             @endforeach
         </div>
-    </flux:card>
+    </x-island-card>
 </div>

@@ -1,8 +1,7 @@
 <div class="{{$view == NULL ? 'w-full px-4 sm:px-6 lg:max-w-xl lg:px-8 pb-5 mb-1 space-y-6' : ''}}">
     {{-- COMPANY EMAILS --}}
-    <flux:card>
-        <div class="flex justify-between">
-            <flux:heading size="lg">Email Accounts</flux:heading>
+    <x-island-card heading="Email Accounts" subheading="Email accounts you use to recieve digital receipts from vendors." :separator="true">
+        <x-slot:actions>
             <flux:button
                 x-on:click="window.openNylasPopup('{{route('company-email.login')}}')"
                 size="sm"
@@ -10,9 +9,7 @@
                 >
                 Add Email Account
             </flux:button>
-        </div>
-        <flux:subheading>Email accounts you use to recieve digital receipts from vendors.</flux:subheading>
-        <flux:separator variant="subtle" />
+        </x-slot:actions>
 
         {{-- DETAILS --}}
         {{-- 03-13-2025 should be a flux table without header row --}}
@@ -38,7 +35,7 @@
                 @endif --}}
             {{-- @endcan --}}
         </x-lists.details_list>
-    </flux:card>
+    </x-island-card>
 
     @if(request()->routeIs('company_emails.index'))
         <livewire:receipt-accounts.receipt-accounts-index />

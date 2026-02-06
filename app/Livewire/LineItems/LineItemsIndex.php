@@ -6,6 +6,7 @@ use App\Models\LineItem;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
 
@@ -14,12 +15,9 @@ class LineItemsIndex extends Component
     use AuthorizesRequests, WithPagination;
 
     // public $view;
+    #[Url(except: '')]
     public $search = '';
     //public $category = '';
-
-    protected $queryString = [
-        'search' => ['except' => ''],
-    ];
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 

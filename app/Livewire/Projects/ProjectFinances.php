@@ -47,4 +47,9 @@ class ProjectFinances extends Component
     {
         return view('livewire.projects.project-finances');
     }
+
+    public function placeholder()
+    {
+        return view('livewire.projects.project-finances-placeholder');
+    }
 }

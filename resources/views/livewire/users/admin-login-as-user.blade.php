@@ -1,7 +1,5 @@
 <div class="max-w-lg">
-    <flux:card class="space-y-4">
-        <div class="flex justify-between">
-            <flux:heading>{{$view_text['card_title']}}</flux:heading>
+    <x-island-card :heading="$view_text['card_title']" class="space-y-4">
         </div>
 
         <flux:separator variant="subtle" />
@@ -34,5 +32,5 @@
                 </flux:button>
             </div>
         </form>
-    </flux:card>
+    </x-island-card>
 </div>

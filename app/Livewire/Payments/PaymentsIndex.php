@@ -75,4 +75,9 @@ class PaymentsIndex extends Component
         $this->authorize('viewAny', Payment::class);
         return view('livewire.payments.index');
     }
+
+    public function placeholder()
+    {
+        return view('livewire.payments.payments-index-placeholder');
+    }
 }

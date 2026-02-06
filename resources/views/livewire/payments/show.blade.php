@@ -22,9 +22,7 @@
 
             {{-- PAYMENT TRANSACTION --}}
             @if($payment->transaction)
-                <flux:card class="space-y-2">
-                    <flux:heading size="lg" class="mb-0">Payment Transaction</flux:heading>
-                    <flux:separator variant="subtle" />
+            <x-island-card heading="Payment Transaction" :separator="true">
 
                     <div class="space-y-6">
                         <flux:table>
@@ -52,21 +50,18 @@
                             </flux:table.rows>
                         </flux:table>
                     </div>
-                </flux:card>
+            </x-island-card>
             @endif
         </div>
 
         <div class="col-span-4 space-y-4 lg:col-span-2 lg:col-start-3">
             {{-- CHECKS DEPOSITED --}}
-            <flux:card class="space-y-2">
-                <div class="flex justify-between">
-                    <flux:heading size="lg">Checks Deposited with this payment</flux:heading>
+            <x-island-card heading="Checks Deposited with this payment" :separator="true">
+                <x-slot:actions>
                     <flux:button>
                         {{ money($payment->payments->sum('amount')) }}
                     </flux:button>
-                </div>
-
-                <flux:separator variant="subtle"/>
+                </x-slot:actions>
 
                 @foreach($payment->grouped_transaction_payments as $group)
                     <flux:card>
@@ -111,7 +106,7 @@
                         </flux:table>
                     </flux:card>
                 @endforeach
-            </flux:card>
+            </x-island-card>
         </div>    
     </div>
     <livewire:payments.payment-create />

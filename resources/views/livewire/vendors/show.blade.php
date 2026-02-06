@@ -35,7 +35,7 @@
                 {{-- INSURANCE --}}
                 @can('update', $vendor)
                     @if(in_array($vendor->business_type, ["Sub", "DBA"]))
-                        <livewire:vendor-docs.vendor-docs-card :vendor="$vendor" :view="true" />
+                        <livewire:vendor-docs.vendor-docs-card :vendor="$vendor" :view="true" lazy />
                     @endif 
                     {{-- <livewire:vendors.vendor-finances :vendor="$vendor" /> --}}
                 @endcan

@@ -1,11 +1,6 @@
 <div class="max-w-3xl">
     @if($view === NULL)
-        <flux:card class="space-y-2 mb-4">
-            <div>
-                <flux:heading size="lg">Check Filters</flux:heading>
-            </div>
-
-            <flux:separator variant="subtle" />
+        <x-island-card heading="Check Filters" :separator="true" class="mb-4">
 
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <flux:input wire:model.debounce.500ms.live="amount" label="Amount" icon="magnifying-glass" placeholder="123.45" />
@@ -19,14 +14,10 @@
                     @endforeach
                 </flux:select>
             </div>
-        </flux:card>
+        </x-island-card>
     @endif
 
-    <flux:card class="space-y-2">
-        <div>
-            <flux:heading size="lg">Checks</flux:heading>
-        </div>
-        <flux:separator variant="subtle" />
+    <x-island-card heading="Checks" :separator="true">
 
         <div class="space-y-4">
             <flux:table>
@@ -73,5 +64,5 @@
                 </div>
             @endif
         </div>
-    </flux:card>
+    </x-island-card>
 </div>

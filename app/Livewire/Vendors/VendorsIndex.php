@@ -6,6 +6,7 @@ use App\Models\Vendor;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
 
@@ -13,19 +14,16 @@ class VendorsIndex extends Component
 {
     use AuthorizesRequests, WithPagination;
 
+    #[Url(except: '')]
     public $business_name = '';
 
+    #[Url(except: '')]
     public $vendor_type = 'Sub';
 
     public $view;
 
     public $sortBy = 'ytd_expense_sum';
     public $sortDirection = 'desc';
-
-    protected $queryString = [
-        'business_name' => ['except' => ''],
-        'vendor_type' => ['except' => ''],
-    ];
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 

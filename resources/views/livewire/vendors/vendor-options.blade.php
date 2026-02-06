@@ -1,11 +1,5 @@
 <div class="space-y-6">
-    <flux:card>
-        <div class="flex justify-between items-center">
-            <flux:heading size="lg">Options</flux:heading>
-        </div>
-        <flux:subheading>Configure your company settings</flux:subheading>
-        
-        <flux:separator class="my-4" />
+    <x-island-card heading="Options" subheading="Configure your company settings" :separator="true">
 
         <form wire:submit="save" class="space-y-6">
             {{-- Timezone --}}
@@ -129,5 +123,5 @@
                 </flux:button>
             </div>
         </form>
-    </flux:card>
+    </x-island-card>
 </div>

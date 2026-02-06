@@ -1,7 +1,5 @@
 <div class="max-w-3xl">
-    <flux:card class="space-y-6">
-        <flux:heading size="lg">Select Account</flux:heading>
-        <flux:subheading>{{$user->first_name}}, select one of your accounts to access your dashboard.</flux:subheading>
+    <x-island-card heading="Select Account" subheading="{{$user->first_name}}, select one of your accounts to access your dashboard." class="space-y-6">
         
         @if($this->clients->count() > 0)
             {{-- Client Selection for client-only users --}}
@@ -81,16 +79,12 @@
                 <flux:callout.text>You don't have any accounts associated with your profile yet.</flux:callout.text>
             </flux:callout>
         @endif
-    </flux:card>
+    </x-island-card>
 
     @if(!$user->is_client_user)
         <flux:separator text="+" class="my-8"/>
       
-        <flux:card class="space-y-6">
-            <flux:heading size="lg">Create a Hive</flux:heading>
-            <flux:subheading>
-                Contact us to get started for free. <br> Cell: 224-999-3880 Email: patryk@hive.contractors
-            </flux:subheading>
-        </flux:card>
+        <x-island-card heading="Create a Hive" subheading="Contact us to get started for free. Cell: 224-999-3880 Email: patryk@hive.contractors" class="space-y-6">
+        </x-island-card>
     @endif
 </div>

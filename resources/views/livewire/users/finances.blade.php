@@ -1,11 +1,5 @@
 <div class="space-y-6">
-    <flux:card>
-        {{-- HEADING --}}
-        <div class="flex justify-between">
-            <flux:heading size="lg" class="mb-0">User Finances</flux:heading>
-        </div>
-
-        <flux:separator variant="subtle" />
+    <x-island-card heading="User Finances" :separator="true">
 
         {{-- DETAILS: multi-year (2020..current year) --}}
         @php($colspan = count($years) + 1)
@@ -214,5 +208,5 @@
             </flux:table.rows>
         </flux:table>
         </div>
-    </flux:card>
+    </x-island-card>
 </div>

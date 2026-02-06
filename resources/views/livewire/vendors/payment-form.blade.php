@@ -13,14 +13,26 @@
     <form wire:submit="{{$view_text['form_submit']}}">
         <div class="grid max-w-xl grid-cols-4 gap-4 xl:relative lg:max-w-5xl sm:px-6">
             <div class="col-span-4 space-y-4 lg:col-span-2 lg:sticky lg:top-4 lg:self-start">
-                <flux:card>
-                    <flux:heading size="lg">{{$vendor->name}} Payment</flux:heading>
-                    <flux:subheading><i>Choose Projects to add for {{$vendor->name}} in this Payment</i></flux:subheading>
-                    <flux:separator variant="subtle" />
-                    <x-cards.body :class="'space-y-2 my-2'">
-                        {{-- FORM --}}
-                        @include('livewire.checks._payment_form')
-                    </x-cards.body>
+                <x-island-card heading="{{$vendor->name}} Payment" subheading="Choose Projects to add for {{$vendor->name}} in this Payment" :separator="true">
+                    @island(defer: true)
+                        @placeholder
+                            <div class="space-y-2 my-2">
+                                @foreach(['Date', 'Paid By', 'Bank'] as $label)
+                                    <div class="py-1 grid grid-cols-3 gap-4">
+                                        <dt class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ $label }}</dt>
+                                        <dd class="col-start-2 col-span-2">
+                                            <flux:skeleton class="h-9 w-full rounded-md" animate="shimmer" />
+                                        </dd>
+                                    </div>
+                                @endforeach
+                            </div>
+                        @endplaceholder
+
+                        <x-cards.body :class="'space-y-2 my-2'">
+                            {{-- FORM --}}
+                            @include('livewire.checks._payment_form')
+                        </x-cards.body>
+                    @endisland
 
                     <flux:separator variant="subtle" />
 
@@ -30,15 +42,13 @@
                     </div>
 
                     <flux:error name="check_total_min" />
-                </flux:card>
+                </x-island-card>
 
                 {{-- INSURANCE --}}
-                <livewire:vendor-docs.vendor-docs-card :vendor="$vendor" :view="true" lazy />
+                <livewire:vendor-docs.vendor-docs-card :vendor="$vendor" :view="true" lazy wire:key="insurance-{{ $vendor->id }}" />
 
                 {{-- SELECT PROJECT --}}
-                <flux:card>
-                    <flux:heading size="lg">Choose Payment Projects</flux:heading>
-
+                <x-island-card heading="Choose Payment Projects">
                     <flux:input.group>
                         <x-forms.project-select 
                             :projects="$this->availableProjects" 
@@ -50,24 +60,18 @@
                     </flux:input.group>
 
                     <flux:error name="project_id" />
-                </flux:card>
+                </x-island-card>
             </div>
             <div class="col-span-4 space-y-2 lg:col-span-2">
                 {{-- PAYMENT PROJECTS --}}
                 @foreach(collect($projects)->where('show', true)->sortBy('order') as $project_id => $project)
-                    <flux:card class="space-y-2" wire:key="{{$project_id}}">
-                        <div class="flex justify-between">
-                            <div>
-                                <flux:heading size="lg"><a href="{{route('projects.show', $project['id'])}}" target="_blank">{{ $project['address'] }}</a></flux:heading>
-                                <flux:subheading>{{ $project['project_name']}}</flux:subheading>
-                            </div>
+                    <x-island-card :heading="$project['address']" :href="route('projects.show', $project['id'])" :subheading="$project['project_name']" :separator="true" class="space-y-2" wire:key="{{$project_id}}" wire:transition>
+                        <x-slot:actions>
                             <flux:button.group>
                                 <flux:button size="sm" wire:click="$dispatchTo('bids.bid-create', 'addBids', { vendor: {{$vendor->id}}, project: {{$project['id']}}, context: 'payment' })">Edit Bids</flux:button>
                                 <flux:button size="sm" wire:click="removeProject({{$project_id}})">Remove</flux:button>
                             </flux:button.group>
-                        </div>
-
-                        <flux:separator variant="subtle" />
+                        </x-slot:actions>
 
                         {{-- VENDOR BIDS --}}
                         <x-forms.one_line label="Total Bids">
@@ -111,7 +115,7 @@
                                 <flux:error name="projects.{{$project_id}}.balance" />
                             </flux:input.group>
                         </x-forms.one_line>
-                    </flux:card>
+                    </x-island-card>
                 @endforeach
 
                 <livewire:bids.bid-create />

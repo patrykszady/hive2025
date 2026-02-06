@@ -2,11 +2,70 @@
 
 # Unified startup script for all four Laravel apps
 # GSC (8003), Breck (8002), Hive2025 (8000), Test (8005)
+#
+# Run once from ANY terminal (VS Code or CMD). Both share the same server.
+# Re-running shows status of already-running services instead of duplicating.
 
 cd "$(dirname "$0")"
 
 LOG_DIR="storage/logs/dev"
+LOCK_FILE="/tmp/hive-dev-server.lock"
 mkdir -p "$LOG_DIR"
+
+# ── Flags ────────────────────────────────────────────────────────────────────
+FORCE=false
+STATUS_ONLY=false
+for arg in "$@"; do
+  case "$arg" in
+    --force|-f)  FORCE=true ;;
+    --status|-s) STATUS_ONLY=true ;;
+  esac
+done
+
+# ── Status helper ────────────────────────────────────────────────────────────
+show_status() {
+  echo ""
+  echo "Services status:"
+  for PORT_LABEL in "8000:Hive2025" "8002:Breck" "8003:GSC" "8005:Test" "5173:Vite"; do
+    PORT="${PORT_LABEL%%:*}"
+    LABEL="${PORT_LABEL##*:}"
+    if lsof -Pi :"$PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
+      echo "  ✅ $LABEL (port $PORT) — running"
+    else
+      echo "  ⬚  $LABEL (port $PORT) — not running"
+    fi
+  done
+  pgrep -x meilisearch >/dev/null 2>&1 && echo "  ✅ Meilisearch — running" || echo "  ⬚  Meilisearch — not running"
+  pgrep -f "artisan horizon" >/dev/null 2>&1 && echo "  ✅ Horizon — running" || echo "  ⬚  Horizon — not running"
+  pgrep -f "cloudflared tunnel" >/dev/null 2>&1 && echo "  ✅ Cloudflare tunnel — running" || echo "  ⬚  Cloudflare tunnel — not running"
+  echo ""
+}
+
+if [ "$STATUS_ONLY" = true ]; then
+  show_status
+  exit 0
+fi
+
+# ── Lock file: prevent duplicate full startups ──────────────────────────────
+# The lock file stores the PID of the main Laravel server.
+# If that process is still alive, we consider the dev env running.
+if [ "$FORCE" = false ] && [ -f "$LOCK_FILE" ]; then
+  # Check if the main Hive server (port 8000) is actually running
+  if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1; then
+    echo "════════════════════════════════════════════════════════════════"
+    echo "ℹ️  Dev environment already running"
+    echo "════════════════════════════════════════════════════════════════"
+    show_status
+    echo "To force restart: ./start-dev.sh --force"
+    exit 0
+  else
+    # Stale lock file (services not actually running), remove it
+    rm -f "$LOCK_FILE"
+  fi
+fi
+
+# Remove stale lock on force restart
+[ "$FORCE" = true ] && rm -f "$LOCK_FILE"
 
 echo "🚀 Starting all Laravel applications..."
 echo ""
@@ -186,6 +245,9 @@ else
     echo "❌ Laravel server failed → check logs: $LOG_DIR/serve.log"
   fi
 fi
+
+# Write lock file now that the main server is up
+echo "$SERVE_PID" > "$LOCK_FILE"
 
 # Vite dev server
 if lsof -Pi :5173 -sTCP:LISTEN -t >/dev/null 2>&1; then

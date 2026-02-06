@@ -1,27 +1,20 @@
 <div class="max-w-lg">
-    <flux:card class="space-y-2">
-        <div class="flex justify-between">
-            <div>
-                <flux:heading size="lg">
-                    <a href="{{route('banks.show', $bank->id)}}">
-                        {{$bank->name}}
-                    </a>
-                    <flux:badge inset="top bottom" color="{{$bank->error == FALSE ? 'green' : 'red'}}">{{$bank->error == FALSE ? 'Connected' : 'Error'}}</flux:badge>
-                </flux:heading>
+    <x-island-card :heading="$bank->name" :href="route('banks.show', $bank->id)">
+        <x-slot:badge>
+            <flux:badge inset="top bottom" color="{{$bank->error == FALSE ? 'green' : 'red'}}">{{$bank->error == FALSE ? 'Connected' : 'Error'}}</flux:badge>
+        </x-slot:badge>
+        <x-slot:actions>
+            @if(!Route::is('banks.index'))
+                <flux:button wire:navigate.hover wire:click="plaid_link_token_update" size="sm">Update Bank Account</flux:button>
+            @endif
+            <div class="text-xs"><i>{{$bank->updated_at->diffForHumans()}}</i></div>
+        </x-slot:actions>
 
-                @if($bank->error)
-                    <flux:subheading class="text-red-800!">
-                        {{$bank->error['error_code']}}
-                    </flux:subheading>
-                @endif
-            </div>
-            <div>
-                @if(!Route::is('banks.index'))
-                    <flux:button wire:navigate.hover wire:click="plaid_link_token_update" size="sm">Update Bank Account</flux:button>
-                @endif
-                <div class="text-xs"><i>{{$bank->updated_at->diffForHumans()}}</i></div>
-            </div>
-        </div>
+        @if($bank->error)
+            <flux:subheading class="text-red-800!">
+                {{$bank->error['error_code']}}
+            </flux:subheading>
+        @endif
 
         @foreach($accounts as $bank_account_number => $bank_account_types)
             @foreach($bank_account_types as $bank_account_type => $bank_account_data)
@@ -61,6 +54,6 @@
                 </flux:card>
             @endforeach
         @endforeach
-    </flux:card>
+    </x-island-card>
 </div>
 

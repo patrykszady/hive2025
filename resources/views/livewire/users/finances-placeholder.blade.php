@@ -1,13 +1,11 @@
 <div class="space-y-6 select-none" aria-busy="true" aria-live="polite">
-    <flux:card>
-        <div class="flex justify-between items-center">
-            <div class="h-6 w-40 rounded bg-zinc-200 dark:bg-zinc-700 animate-pulse"></div>
+    <x-island-card :separator="true">
+        <x-slot:actions>
             <div class="flex gap-2">
                 <div class="h-6 w-6 rounded-full bg-zinc-200 dark:bg-zinc-700 animate-pulse"></div>
                 <div class="h-6 w-6 rounded-full bg-zinc-200 dark:bg-zinc-700 animate-pulse"></div>
             </div>
-        </div>
-        <flux:separator variant="subtle" />
+        </x-slot:actions>
 
         @php($cols = 8) {{-- Placeholder assumes up to 8 year columns; real content will replace. --}}
         @php($rows = [
@@ -47,5 +45,5 @@
                 </flux:table.rows>
             </flux:table>
         </div>
-    </flux:card>
+    </x-island-card>
 </div>

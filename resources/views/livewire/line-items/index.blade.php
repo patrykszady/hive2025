@@ -1,11 +1,8 @@
 <div class="max-w-3xl">
-    <flux:card class="space-y-2">
-        <div class="flex justify-between">
-            <flux:heading size="lg">Line Items</flux:heading>
+    <x-island-card heading="Line Items" :separator="true">
+        <x-slot:actions>
             <flux:button wire:click="$dispatchTo('line-items.line-item-create', 'addItem')">Create Line Item</flux:button>
-        </div>
-
-        <flux:separator variant="subtle" class="my-2" />
+        </x-slot:actions>
 
         <div class="space-y-2">
             <flux:table :paginate="$this->line_items->hasPages() ? $this->line_items : null">
@@ -38,7 +35,7 @@
                 </flux:table.rows>
             </flux:table>
         </div>
-    </flux:card>
+    </x-island-card>
 
     {{-- NEW LINE ITEM MODAL --}}
     <livewire:line-items.line-item-create />

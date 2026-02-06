@@ -15,8 +15,8 @@
     $isRight = $align === 'right' || $attributes->get('right-align', false);
     $indentClass = ((int)($attributes->get('indent-level', $indent)) > 0) ? 'pl-' . ((int)($attributes->get('indent-level', $indent)) * 4) : '';
     $shouldTruncate = !$attributes->has('no-truncate') && $truncate;
-    // Allow opting out of cloaking via prop or attribute
-    $useCloak = !$noCloak && !$attributes->has('no-cloak');
+    // Only cloak when explicitly requested to avoid load-time flashes.
+    $useCloak = $attributes->has('cloak') && !$noCloak && !$attributes->has('no-cloak');
 @endphp
 <div
     class="details-row relative flex flex-col sm:grid sm:grid-cols-4 gap-1 items-start py-2 sm:py-3 [&:not(:last-child)]:border-b [&:not(:last-child)]:border-zinc-800/15 dark:[&:not(:last-child)]:border-white/20"
@@ -101,7 +101,7 @@
             <div x-show="!copied">
                 <flux:button size="xs" icon="clipboard-document" icon:variant="outline" tooltip="Copy {{ $title }}" x-on:click="copyText()" />
             </div>
-            <div x-show="copied">
+            <div x-show="copied" x-cloak>
                 <flux:button size="xs" icon="check" variant="primary" color="green" disabled />
             </div>
         </div>

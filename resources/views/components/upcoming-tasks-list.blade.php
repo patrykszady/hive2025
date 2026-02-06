@@ -10,67 +10,75 @@
     'emptyMessage' => 'No upcoming tasks for this project.',
 ])
 
-<flux:card>
-    <div class="flex items-center justify-between mb-4">
-        <div class="flex items-center gap-2">
-            <flux:heading size="lg">{{ $title }}</flux:heading>
-            <flux:badge size="sm" color="zinc">{{ $taskCount }}</flux:badge>
-        </div>
+<x-island-card heading="{{ $title }}">
+    <x-slot:badge>
+        <flux:badge size="sm" color="zinc">{{ $taskCount }}</flux:badge>
+    </x-slot:badge>
+    <x-slot:actions>
         @auth
             <div
-                x-data="{ supported: false, permission: 'default', enabled: false }"
+                x-data="{ supported: false, permission: 'default', enabled: false, ready: false }"
                 x-init="
                     supported = 'Notification' in window;
                     permission = supported ? Notification.permission : 'default';
+                    const finalize = () => { ready = true; };
                     if (supported && window.HiveTaskNotifications?.status) {
                         window.HiveTaskNotifications.status().then((result) => {
                             if (!result) return;
                             supported = result.supported ?? supported;
                             permission = result.permission ?? permission;
                             enabled = Boolean(result.enabled);
-                        });
+                        }).finally(finalize);
+                    } else {
+                        finalize();
                     }
                 "
                 class="flex items-center gap-2"
-                x-cloak
             >
-                <flux:button.group
-                    x-show="supported && enabled"
-                    x-cloak
-                >
+                <flux:skeleton
+                    x-show="!ready"
+                    class="h-8 w-44 rounded-md"
+                    animate="shimmer"
+                />
+                <div class="flex items-center gap-2" x-show="ready" x-cloak>
+                    <flux:button.group
+                        x-show="supported && enabled"
+                        x-cloak
+                    >
+                        <flux:button
+                            size="sm"
+                            variant="primary"
+                            class="bg-green-600 hover:bg-green-700 text-white"
+                            type="button"
+                            disabled
+                        >
+                            <span class="inline-flex items-center gap-2">
+                                <flux:icon.check class="w-4 h-4" />
+                                <span>Notifications</span>
+                            </span>
+                        </flux:button>
+                        <flux:button
+                            size="sm"
+                            variant="outline"
+                            class="px-2"
+                            type="button"
+                            x-on:click.prevent="window.HiveTaskNotifications?.disable()?.then((result) => { if (result?.disabled) { enabled = false; } })"
+                        >
+                            <flux:icon.x-mark class="w-4 h-4" />
+                        </flux:button>
+                    </flux:button.group>
                     <flux:button
                         size="sm"
                         variant="primary"
-                        class="bg-green-600 hover:bg-green-700 text-white"
-                        type="button"
-                        disabled
+                        x-show="supported && !enabled"
+                        x-on:click.prevent="window.HiveTaskNotifications?.enable()?.then((result) => { if (result?.enabled) { enabled = true; permission = 'granted'; } })"
                     >
-                        <span class="inline-flex items-center gap-2">
-                            <flux:icon.check class="w-4 h-4" />
-                            <span>Notifications</span>
-                        </span>
+                        Enable notifications
                     </flux:button>
-                    <flux:button
-                        size="sm"
-                        variant="outline"
-                        class="px-2"
-                        type="button"
-                        x-on:click.prevent="window.HiveTaskNotifications?.disable()?.then((result) => { if (result?.disabled) { enabled = false; } })"
-                    >
-                        <flux:icon.x-mark class="w-4 h-4" />
-                    </flux:button>
-                </flux:button.group>
-                <flux:button
-                    size="sm"
-                    variant="primary"
-                    x-show="supported && !enabled"
-                    x-on:click.prevent="window.HiveTaskNotifications?.enable()?.then((result) => { if (result?.enabled) { enabled = true; permission = 'granted'; } })"
-                >
-                    Enable notifications
-                </flux:button>
+                </div>
             </div>
         @endauth
-    </div>
+    </x-slot:actions>
 
     @if($groupedTasks->isEmpty())
         <flux:text class="text-zinc-500">{{ $emptyMessage }}</flux:text>
@@ -161,14 +169,13 @@
             @endif
         </div>
     @endif
-</flux:card>
+</x-island-card>
 
 @if($unscheduledTasks && $unscheduledTasks->isNotEmpty())
-    <flux:card class="mt-4">
-        <div class="flex items-center justify-between mb-4">
-            <flux:heading size="lg">Unscheduled Tasks</flux:heading>
+    <x-island-card heading="Unscheduled Tasks" class="mt-4">
+        <x-slot:badge>
             <flux:badge color="zinc" size="sm">{{ $unscheduledTasks->count() }}</flux:badge>
-        </div>
+        </x-slot:badge>
         <div class="space-y-2">
             @foreach($unscheduledTasks as $task)
                 @php
@@ -233,5 +240,5 @@
                 @endif
             @endforeach
         </div>
-    </flux:card>
+    </x-island-card>
 @endif

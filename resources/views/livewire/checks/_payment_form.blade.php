@@ -27,6 +27,7 @@
 @endunless
 
 {{-- BANK AND CHECK DETAILS --}}
+{{-- When paid_by is empty (default), this section is visible. x-cloak removed to prevent layout jump. --}}
 <div x-show="!$wire.form.paid_by || {{ $showWhenPaidBy ? 'true' : 'false' }}" x-transition>
     <div class="space-y-4">
         @if($hideBasicFields)
@@ -46,7 +47,7 @@
             </flux:select>
             <flux:error name="bank_account_id" />
 
-            <div x-show="$wire.bank_account_id" x-transition class="space-y-4">
+            <div x-show="$wire.bank_account_id" x-transition x-cloak class="space-y-4">
                 {{-- Payment Type with direct flux components --}}
                 <flux:select 
                     wire:model.live="check_type" 
@@ -61,7 +62,7 @@
                 <flux:error name="check_type" />
 
                 {{-- Check Number with direct flux components --}}
-                <div x-data="{ check_type: @entangle('check_type') }" x-show="check_type == 'Check'" x-transition>
+                <div x-data="{ check_type: @entangle('check_type') }" x-show="check_type == 'Check'" x-transition x-cloak>
                     <flux:input 
                         wire:model.live="check_number" 
                         label="Check Number"
@@ -93,7 +94,7 @@
                 <flux:error name="bank_account_id" />
             </x-forms.one_line>
 
-            <div x-show="$wire.bank_account_id" x-transition class="mt-2 space-y-2">
+            <div x-show="$wire.bank_account_id" x-transition x-cloak class="mt-2 space-y-2">
                 <x-forms.one_line label="Payment Type">
                     <flux:select wire:model.live="check_type" placeholder="Choose payment type..." :disabled="$disableChecks">
                         <flux:select.option value="Check">Check</flux:select.option>
@@ -103,7 +104,7 @@
                     <flux:error name="check_type" />
                 </x-forms.one_line>
 
-                <div x-data="{ check_type: @entangle('check_type') }" x-show="check_type == 'Check'" x-transition>
+                <div x-data="{ check_type: @entangle('check_type') }" x-show="check_type == 'Check'" x-transition x-cloak>
                     <x-forms.one_line label="Check Number">
                         <flux:input wire:model.live="check_number" type="number" inputmode="numeric" step="1" :disabled="$disableChecks" :readonly="$disableChecks" />
                         <flux:error name="check_number" />
@@ -120,7 +121,7 @@
 </div>
 
 {{-- INVOICE --}}
-<div x-show="$wire.form.paid_by" x-transition>
+<div x-show="$wire.form.paid_by" x-transition x-cloak>
     @if($hideBasicFields)
         {{-- Direct flux components for Reference/Invoice --}}
         <flux:input 

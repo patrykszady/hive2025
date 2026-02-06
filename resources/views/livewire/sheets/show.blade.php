@@ -1,16 +1,12 @@
 <div class="max-w-xl space-y-2 sm:px-6">
     {{-- HEADER SECTION --}}
-    <flux:card>
-        <div class="flex justify-between items-center">
-            <div>
-                <flux:heading size="lg" class="mb-0">Sheets</flux:heading>
-                <flux:subheading class="text-zinc-500">{{ date('m/d/Y', strtotime($start_date)) }} to {{ date('m/d/Y', strtotime($end_date)) }}</flux:subheading>
-            </div>
-            <flux:button wire:click="export_csv">
+    <x-island-card heading="Sheets" subheading="{{ date('m/d/Y', strtotime($start_date)) }} to {{ date('m/d/Y', strtotime($end_date)) }}">
+        <x-slot:actions>
+            <flux:button size="sm" wire:click="export_csv">
                 Export CSV
             </flux:button>
-        </div>
-    </flux:card>
+        </x-slot:actions>
+    </x-island-card>
     
     {{-- REVENUE SUMMARY --}}
     <x-details.card title="Revenue" :canEdit="true">

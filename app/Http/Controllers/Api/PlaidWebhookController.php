@@ -129,6 +129,12 @@ class PlaidWebhookController extends Controller
                 'bank_id' => $bank->id,
                 'bank_name' => $bank->name,
             ]),
+
+            // Plaid acknowledges webhook URL updates
+            'WEBHOOK_UPDATE_ACKNOWLEDGED' => Log::channel('plaid_adds')->info('Plaid webhook update acknowledged', [
+                'bank_id' => $bank->id,
+                'bank_name' => $bank->name,
+            ]),
             
             default => Log::channel('plaid_skips')->info('Unhandled ITEM webhook code', [
                 'webhook_code' => $webhookCode,

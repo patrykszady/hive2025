@@ -52,6 +52,7 @@
     <x-slot name="footer">
        <div
             x-show="$wire.start_date && $wire.end_date && $wire.type && ($wire.selected_bank_ids?.length > 0)"
+            x-cloak
             x-transition.opacity.duration.200ms
             >
             <flux:button type="submit" form="audit-form" variant="primary">Run Audit</flux:button>

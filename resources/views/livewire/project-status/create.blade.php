@@ -1,4 +1,4 @@
-<div>
+<div wire:transition>
     {{-- PROJECT LIFESPAN / STATUS --}}
     <flux:card class="space-y-6">
         <flux:accordion transition>

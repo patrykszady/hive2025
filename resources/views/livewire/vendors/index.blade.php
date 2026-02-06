@@ -1,13 +1,10 @@
 <div class="max-w-2xl">
-    <flux:card class="space-y-2">
-        <div class="flex justify-between">
-            <flux:heading size="lg">Filters</flux:heading>
+    <x-island-card heading="Filters" :separator="true">
+        <x-slot:actions>
             @can('create', App\Models\Vendor::class)
-                <flux:button wire:click="$dispatchTo('vendors.vendor-create', 'newVendor')">Add New Vendor</flux:button>
+                <flux:button size="sm" wire:click="$dispatchTo('vendors.vendor-create', 'newVendor')">Add New Vendor</flux:button>
             @endcan
-        </div>
-
-        <flux:separator variant="subtle" />
+        </x-slot:actions>
 
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <flux:input wire:model.live="business_name" label="Vendor Name" icon="magnifying-glass" placeholder="Search Vendors" />
@@ -20,12 +17,9 @@
                 <flux:select.option value="DBA">DBA</flux:select.option>
             </flux:select>
         </div>
-    </flux:card>
+    </x-island-card>
 
-    <flux:card class="mt-4 space-y-2">
-        <div>
-            <flux:heading size="lg">Vendors</flux:heading>
-        </div>
+    <x-island-card heading="Vendors" class="mt-4">
 
         <div class="space-y-2">
             <flux:table :paginate="$this->vendors->hasPages() ? $this->vendors : null">
@@ -87,5 +81,5 @@
                 <livewire:vendors.vendor-create />
             @endcan
         </div>
-    </flux:card>
+    </x-island-card>
 </div>

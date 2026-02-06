@@ -111,10 +111,7 @@
         <div class="col-span-4 space-y-2 lg:col-span-2">
             {{-- ASSOCIATED EXPENSES --}}
             @if(!is_null($expense->associated_expenses))
-                <flux:card class="space-y-2">
-                    <flux:heading size="lg" class="mb-0">Linked Expenses</flux:heading>
-                    <flux:subheading>Associated Expenses are expenses that are linked to this Expense. For example, a debit from one account and a credit to another. Or a purchase and return expenses that belong together.</flux:subheading>
-                    <flux:separator variant="subtle" />
+                <x-island-card heading="Linked Expenses" :separator="true" subheading="Associated Expenses are expenses that are linked to this Expense. For example, a debit from one account and a credit to another. Or a purchase and return expenses that belong together.">
 
                     <div class="space-y-6">
                         <flux:table>
@@ -141,7 +138,7 @@
                             </flux:table.rows>
                         </flux:table>
                     </div>
-                </flux:card>
+                </x-island-card>
             @endif
 
             {{-- SPLITS --}}

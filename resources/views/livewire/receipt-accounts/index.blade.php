@@ -1,9 +1,4 @@
-<flux:card class="{{$view == NULL ? 'w-full px-4 sm:px-6 lg:max-w-xl lg:px-8 pb-5 mb-1' : ''}}">
-    <div class="mb-4">
-        <flux:heading size="lg">Receipt/Transaction Vendor/Distribution Match</flux:heading>
-        <flux:subheading>Vendors you are able to automatically receive Receipts for are below.</flux:subheading>
-        <flux:subheading>Create automatic receipt and transaction matches.</flux:subheading>
-    </div>
+<x-island-card heading="Receipt/Transaction Vendor/Distribution Match" subheading="Vendors you are able to automatically receive Receipts for are below. Create automatic receipt and transaction matches." class="{{$view == NULL ? 'w-full px-4 sm:px-6 lg:max-w-xl lg:px-8 pb-5 mb-1' : ''}}">
 
     <flux:separator text="New Vendor Match" variant="subtle" />
 
@@ -52,4 +47,4 @@
     </flux:table>
 
     <livewire:receipt-accounts.receipt-account-vendor-create :distributions="$distributions"/>
-</flux:card>
+</x-island-card>

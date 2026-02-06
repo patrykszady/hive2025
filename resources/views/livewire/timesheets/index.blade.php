@@ -1,9 +1,8 @@
 <div class="max-w-3xl">
-    <flux:card class="space-y-2 mb-4">
-        <div class="flex justify-between">
-            <flux:heading size="lg">Confirm Weekly Timesheets</flux:heading>
+    <x-island-card heading="Confirm Weekly Timesheets" class="mb-4">
+        <x-slot:actions>
             <flux:button href="{{route('hours.create')}}">Add Hours</flux:button>
-        </div>
+        </x-slot:actions>
 
         <div class="space-y-2">
             <flux:table>
@@ -40,13 +39,9 @@
                 </flux:table.rows>
             </flux:table>
         </div>
-    </flux:card>
+    </x-island-card>
 
-    <flux:card class="space-y-2">
-        <div class="flex justify-between">
-            <flux:heading size="lg">Confirmed Timesheets</flux:heading>
-            {{-- <flux:button href="{{route('hours.create')}}">Add Hours</flux:button> --}}
-        </div>
+    <x-island-card heading="Confirmed Timesheets">
 
         <div class="space-y-2">
 
@@ -84,5 +79,5 @@
                 </flux:table.rows>
             </flux:table>
         </div>
-    </flux:card>
+    </x-island-card>
 </div>

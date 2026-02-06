@@ -10,6 +10,7 @@ use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Lazy;
 use Livewire\Attributes\Title;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
 
@@ -22,14 +23,19 @@ class ChecksIndex extends Component
 
     public $vendors = [];
 
+    #[Url(except: '')]
     public $bank = '';
 
+    #[Url(except: '')]
     public $check_number = '';
 
+    #[Url(except: '')]
     public $amount = '';
 
+    #[Url(except: '')]
     public $check_type = '';
 
+    #[Url(except: '')]
     public $vendor = '';
 
     public $view = null;
@@ -41,14 +47,6 @@ class ChecksIndex extends Component
     public $sortBy = 'date';
 
     public $sortDirection = 'desc';
-
-    protected $queryString = [
-        'bank' => ['except' => ''],
-        'check_number' => ['except' => ''],
-        'check_type' => ['except' => ''],
-        'vendor' => ['except' => ''],
-        'amount' => ['except' => ''],
-    ];
 
     public function updating($field)
     {

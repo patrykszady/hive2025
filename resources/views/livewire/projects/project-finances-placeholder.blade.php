@@ -1,0 +1,55 @@
+<x-island-card heading="Project Finances" wire:transition>
+    <x-slot:actions>
+        <flux:skeleton class="h-8 w-20 rounded-md" animate="shimmer" />
+    </x-slot:actions>
+
+    <flux:separator variant="subtle" />
+
+    <flux:table>
+        <flux:table.rows>
+            <flux:skeleton.group animate="shimmer">
+                {{-- Regular rows --}}
+                @foreach (['Estimate', 'Change Order', 'Reimbursements'] as $label)
+                    <flux:table.row>
+                        <flux:table.cell>{{ $label }}</flux:table.cell>
+                        <flux:table.cell align="end"><flux:skeleton.line class="w-20 ml-auto" /></flux:table.cell>
+                    </flux:table.row>
+                @endforeach
+
+                {{-- Strong row: TOTAL PROJECT --}}
+                <flux:table.row>
+                    <flux:table.cell variant="strong">TOTAL PROJECT</flux:table.cell>
+                    <flux:table.cell variant="strong" align="end"><flux:skeleton.line class="w-24 ml-auto" /></flux:table.cell>
+                </flux:table.row>
+
+                {{-- Cost rows --}}
+                @foreach (['Expenses', 'Timesheets'] as $label)
+                    <flux:table.row>
+                        <flux:table.cell>{{ $label }}</flux:table.cell>
+                        <flux:table.cell align="end"><flux:skeleton.line class="w-20 ml-auto" /></flux:table.cell>
+                    </flux:table.row>
+                @endforeach
+
+                {{-- Strong row: TOTAL COST --}}
+                <flux:table.row>
+                    <flux:table.cell variant="strong">TOTAL COST</flux:table.cell>
+                    <flux:table.cell variant="strong" align="end"><flux:skeleton.line class="w-24 ml-auto" /></flux:table.cell>
+                </flux:table.row>
+
+                {{-- Bottom rows --}}
+                <flux:table.row>
+                    <flux:table.cell>Payments</flux:table.cell>
+                    <flux:table.cell align="end"><flux:skeleton.line class="w-20 ml-auto" /></flux:table.cell>
+                </flux:table.row>
+                <flux:table.row>
+                    <flux:table.cell variant="strong">Profit</flux:table.cell>
+                    <flux:table.cell variant="strong" align="end"><flux:skeleton.line class="w-20 ml-auto" /></flux:table.cell>
+                </flux:table.row>
+                <flux:table.row>
+                    <flux:table.cell>Balance</flux:table.cell>
+                    <flux:table.cell align="end"><flux:skeleton.line class="w-20 ml-auto" /></flux:table.cell>
+                </flux:table.row>
+            </flux:skeleton.group>
+        </flux:table.rows>
+    </flux:table>
+</x-island-card>

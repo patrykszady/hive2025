@@ -18,34 +18,18 @@
     }
 @endphp
 
-<flux:card class="!px-5 py-2">
-    {{-- HEADER - Always outside the accordion --}}
-    <div class="flex justify-between items-center min-h-[2.25rem] gap-4">
-        <div class="flex items-center gap-2 min-h-[2.25rem] min-w-0 flex-1">
-            <flux:heading size="lg" class="mb-0 truncate">
-                @if($title_href)
-                    <flux:link href="{{ $title_href }}" external variant="ghost" :accent="false" class="hover:underline">{{ html_entity_decode((string) $title, ENT_QUOTES, 'UTF-8') }}</flux:link>
-                @else
-                    {{ html_entity_decode((string) $title, ENT_QUOTES, 'UTF-8') }}
-                @endif
-            </flux:heading>
-            {{-- Optional extras next to the title (e.g., badges) --}}
+<flux:card class="!px-5 !py-2">
+    {{-- HEADER - Uses shared island-card.header component --}}
+    <x-island-card.header :heading="html_entity_decode((string) $title, ENT_QUOTES, 'UTF-8')" :href="$title_href" :subheading="$subheading">
+        <x-slot:badge>
             {{ $title_extras ?? '' }}
-        </div>
-        <div class="flex items-center min-h-[2.25rem] flex-shrink-0 relative z-10">
-            {{-- Show buttons if canEdit is null or true --}}
+        </x-slot:badge>
+        <x-slot:actions>
             @if($canEdit === null || $canEdit)
                 {{ $header_buttons ?? '' }}
             @endif
-        </div>
-    </div>
-
-    {{-- SUBHEADING --}}
-    @if($subheading)
-        <flux:subheading>
-            {{ $subheading }}
-        </flux:subheading>
-    @endif
+        </x-slot:actions>
+    </x-island-card.header>
     
     @if(isset($details))
         {{-- Separator always shown when we have details --}}

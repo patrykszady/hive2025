@@ -4,25 +4,132 @@ namespace App\Models;
 
 use App\Scopes\ClientScope;
 use App\Scopes\VendorScope;
-
 use App\Traits\HasAddress;
-
+use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Auth;
+use Laravel\Scout\Builder as ScoutBuilder;
+use Laravel\Scout\Searchable;
 
 class Client extends Model
 {
-    use HasFactory, HasAddress;
+    use HasFactory, HasAddress, Searchable;
 
     protected $fillable = ['business_name', 'address', 'address_2', 'city', 'state', 'zip_code', 'home_phone', 'source', 'created_at', 'updated_at'];
 
     protected static function booted()
     {
         static::addGlobalScope(new ClientScope);
+    }
+
+    public function searchableAs(): string
+    {
+        return app()->environment('local') ? 'clients_index_dev' : 'clients_index';
+    }
+
+    public function toSearchableArray(): array
+    {
+        $users = $this->relationLoaded('users')
+            ? $this->users
+            : $this->users()->select('first_name', 'last_name')->get();
+
+        $vendors = $this->relationLoaded('vendors')
+            ? $this->vendors
+            : $this->vendors()->select('vendors.id', 'vendors.business_name')->get();
+
+        $clientUserFirstNames = $users->pluck('first_name')->filter()->values()->all();
+        $clientUserLastNames = $users->pluck('last_name')->filter()->values()->all();
+        $clientUserFullNames = $users
+            ->map(fn ($user) => trim((string) ($user->first_name ?? '').' '.(string) ($user->last_name ?? '')))
+            ->filter()
+            ->values()
+            ->all();
+
+        $vendorIds = $vendors->pluck('id')->map(fn ($id) => (int) $id)->values()->all();
+        $vendorBusinessNames = $vendors->pluck('business_name')->filter()->values()->all();
+
+        $clientSearch = trim(implode(' ', array_filter(array_merge(
+            [$this->name, $this->business_name, $this->first_names, $this->last_names],
+            $clientUserFullNames,
+            $clientUserFirstNames,
+            $clientUserLastNames
+        ))));
+
+        $fullAddress = trim(implode(' ', array_filter([
+            $this->address ?? '',
+            $this->address_2 ?? '',
+            $this->city ?? '',
+            $this->state ?? '',
+            $this->zip_code ?? '',
+        ])));
+
+        return [
+            'id' => (int) $this->id,
+            'business_name' => $this->business_name,
+            'name' => $this->name,
+            'first_names' => $this->first_names,
+            'last_names' => $this->last_names,
+            'address' => $this->address,
+            'city' => $this->city,
+            'state' => $this->state,
+            'zip_code' => $this->zip_code,
+            'full_address' => $fullAddress,
+            'client_search' => $clientSearch,
+            'client_user_first_names' => $clientUserFirstNames,
+            'client_user_last_names' => $clientUserLastNames,
+            'client_user_full_names' => $clientUserFullNames,
+            'vendor_ids' => $vendorIds,
+            'vendor_business_names' => $vendorBusinessNames,
+            'created_at' => $this->created_at?->timestamp ?? 0,
+        ];
+    }
+
+    protected function makeAllSearchableUsing(Builder $query): Builder
+    {
+        return $query->with([
+            'users:id,first_name,last_name',
+            'vendors:id,business_name',
+        ]);
+    }
+
+    public static function scopedSearch(
+        string $query = '',
+        array $filterConditions = [],
+        string $sortBy = 'created_at',
+        string $sortDirection = 'desc',
+        ?User $user = null
+    ): ScoutBuilder {
+        $user ??= Auth::user();
+
+        if (! $user) {
+            throw new \RuntimeException('Client::scopedSearch() requires an authenticated user.');
+        }
+
+        $filters = [
+            'vendor_ids = '.((int) $user->vendor->id),
+        ];
+
+        foreach ($filterConditions as $condition) {
+            if (is_string($condition) && $condition !== '') {
+                $filters[] = $condition;
+            }
+        }
+
+        $filterString = implode(' AND ', $filters);
+
+        return self::search($query, function ($meilisearch, $searchQuery, $options) use ($filterString, $sortBy, $sortDirection) {
+            $options['filter'] = $filterString;
+            $options['sort'] = ["{$sortBy}:{$sortDirection}"];
+            $options['matchingStrategy'] = 'all';
+
+            return $meilisearch->search($searchQuery, $options);
+        });
     }
 
     public function projects(): HasMany

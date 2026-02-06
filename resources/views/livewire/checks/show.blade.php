@@ -39,10 +39,7 @@
         <div class="col-span-5 space-y-2 lg:col-span-3">
             {{-- USER TIMESHEETS --}}
             @if(!$weekly_timesheets->isEmpty())
-                <flux:card class="space-y-2">
-                    <div>
-                        <flux:heading size="lg"><b>{{$check->user->first_name}}</b>'s Timesheets</flux:heading>
-                    </div>
+                <x-island-card heading="{{ $check->user->first_name }}'s Timesheets">
 
                     @foreach($weekly_timesheets->groupBy('date') as $weekly_project_timesheets)
                         <flux:card>
@@ -76,20 +73,17 @@
                             </flux:table>
                         </flux:card>
                     @endforeach
-                </flux:card>
+                </x-island-card>
             @endif
 
             {{-- THIS CHECK USER PAID EMPLOYEE TIMESHEETS --}}
             @if(!$employee_weekly_timesheets->isEmpty())
-                <flux:card class="space-y-2">
-                    <div class="flex justify-between">
-                        <flux:heading size="lg">Employee Paid Timesheets</flux:heading>
+                <x-island-card heading="Employee Paid Timesheets" :separator="true">
+                    <x-slot:actions>
                         <flux:button>
                             {{money($employee_weekly_timesheets->flatten(2)->sum('amount'))}}
                         </flux:button>
-                    </div>
-
-                    <flux:separator variant="subtle"/>
+                    </x-slot:actions>
 
                     @foreach($employee_weekly_timesheets as $user_id => $employee_timesheet_weeks)
                         <div>
@@ -137,7 +131,7 @@
                             <flux:separator />
                         @endif
                     @endforeach
-                </flux:card>
+                </x-island-card>
             @endif
 
             {{-- THIS CHECK VENDOR PAID EXPENSES --}}
@@ -171,13 +165,12 @@
 
             {{-- THIS CHECK USER PAID EXPENSES --}}
             @if($user_paid_expenses->isNotEmpty())
-                <flux:card class="space-y-2">
-                    <div class="flex justify-between">
-                        <flux:heading size="lg">Paid Expenses</flux:heading>
+                <x-island-card heading="Paid Expenses">
+                    <x-slot:actions>
                         <flux:button disabled>
                             {{ money($user_paid_expenses->sum('amount')) }}
                         </flux:button>
-                    </div>
+                    </x-slot:actions>
 
                     <div class="space-y-2">
                         <flux:table>
@@ -202,18 +195,17 @@
                             </flux:table.rows>
                         </flux:table>
                     </div>
-                </flux:card>
+                </x-island-card>
             @endif
 
             {{-- THIS CHECK DISTRIBUTIONS --}}
             @if($user_distributions->isNotEmpty())
-                <flux:card class="space-y-2">
-                    <div class="flex justify-between">
-                        <flux:heading size="lg">Paid Distrbutions</flux:heading>
+                <x-island-card heading="Paid Distributions">
+                    <x-slot:actions>
                         <flux:button disabled>
                             {{ money($user_distributions->sum('amount')) }}
                         </flux:button>
-                    </div>
+                    </x-slot:actions>
 
                     <div class="space-y-2">
                         <flux:table>
@@ -236,18 +228,17 @@
                             </flux:table.rows>
                         </flux:table>
                     </div>
-                </flux:card>
+                </x-island-card>
             @endif
 
             {{-- THIS CHECK USER PAID REIMBURESEMENT RECEIPTS FROM ANOTHER EMPLOYEE --}}
             @if($user_paid_by_reimbursements->isNotEmpty())
-                <flux:card class="space-y-2">
-                    <div class="flex justify-between">
-                        <flux:heading size="lg">Paid Off Other User Reimbursements</flux:heading>
+                <x-island-card heading="Paid Off Other User Reimbursements">
+                    <x-slot:actions>
                         <flux:button disabled>
                             {{ '-' .  money($user_paid_by_reimbursements->sum('amount')) }}
                         </flux:button>
-                    </div>
+                    </x-slot:actions>
 
                     <div class="space-y-2">
                         <flux:table>
@@ -272,18 +263,17 @@
                             </flux:table.rows>
                         </flux:table>
                     </div>
-                </flux:card>
+                </x-island-card>
             @endif
 
             {{-- USER REIMBURESEMENT (USER OWNS VENDOR) EXPENSES --}}
             @if($user_reimbursement_expenses->isNotEmpty())
-                <flux:card>
-                    <div class="flex justify-between">
-                        <flux:heading size="lg">{{$check->user->first_name}}</b> Paid back these Expenses</flux:heading>
+                <x-island-card heading="{{ $check->user->first_name }} Paid back these Expenses">
+                    <x-slot:actions>
                         <flux:button disabled>
                             -{{ money($user_reimbursement_expenses->sum('amount')) }}
                         </flux:button>
-                    </div>
+                    </x-slot:actions>
 
                     <flux:table>
                         <flux:table.columns>
@@ -312,7 +302,7 @@
                             @endforeach
                         </flux:table.rows>
                     </flux:table>
-                </flux:card>
+                </x-island-card>
             @endif
         </div>
     </div>

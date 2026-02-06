@@ -1,8 +1,6 @@
 {{-- PROJECT FINANCIALS --}}
-<flux:card class="space-y-2">
-    {{-- HEADING --}}
-    <div class="flex justify-between">
-        <flux:heading size="lg" class="mb-0">Project Finances</flux:heading>
+<x-island-card heading="Project Finances" wire:transition>
+    <x-slot:actions>
         @can('create', App\Models\Bid::class)
             @php
                 $userBids = $project->bids()->vendorBids(auth()->user()->vendor->id)->with('estimate_sections')->get();
@@ -19,7 +17,7 @@
                 </flux:button>
             @endif
         @endcan
-    </div>
+    </x-slot:actions>
 
     <livewire:bids.bid-create />
 
@@ -84,6 +82,6 @@
             </flux:table.row>
         </flux:table.rows>
     </flux:table>
-</flux:card>
+</x-island-card>
 
 

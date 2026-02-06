@@ -222,4 +222,9 @@ class StatusCreate extends Component
     {
         return view('livewire.project-status.create');
     }
+
+    public function placeholder()
+    {
+        return view('livewire.project-status.status-create-placeholder');
+    }
 }

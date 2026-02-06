@@ -12,6 +12,7 @@ use App\Models\Timesheet;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 use OpenSpout\Common\Entity\Style\Border;
 use OpenSpout\Common\Entity\Style\BorderPart;
@@ -24,17 +25,17 @@ class SheetShow extends Component
 {
     use AuthorizesRequests;
 
+    #[Url(except: '')]
     public $start_date = null;
-    public $end_date = null;
-    public $bank_account_ids = [];
-    public $cash = 'include';
 
-    protected $queryString = [
-        'start_date' => ['except' => ''],
-        'end_date' => ['except' => ''],
-        'bank_account_ids' => ['except' => ''],
-        'cash' => ['except' => ''],
-    ];
+    #[Url(except: '')]
+    public $end_date = null;
+
+    #[Url(except: [])]
+    public $bank_account_ids = [];
+
+    #[Url(except: '')]
+    public $cash = 'include';
 
     #[Computed]
     public function transactions_no_associations()

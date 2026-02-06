@@ -6,6 +6,7 @@ use App\Models\Lead;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
 
@@ -13,6 +14,7 @@ class LeadsIndex extends Component
 {
     use AuthorizesRequests, WithPagination;
 
+    #[Url(except: '')]
     public $origin = '';
 
     public $view = null;
@@ -20,10 +22,6 @@ class LeadsIndex extends Component
     public $sortBy = 'date';
 
     public $sortDirection = 'desc';
-
-    protected $queryString = [
-        'origin' => ['except' => ''],
-    ];
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 

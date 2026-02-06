@@ -15,6 +15,7 @@ use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Cache;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
 
@@ -22,9 +23,16 @@ class ExpenseIndex extends Component
 {
     use AuthorizesRequests, WithPagination;
 
+    #[Url(except: '')]
     public $amount = '';
+
+    #[Url(except: null)]
     public $expense_vendor = null;
+
+    #[Url(except: null)]
     public $project_id = null;
+
+    #[Url(except: [])]
     public $expense_statuses = [];
     public $check = '';
     public $bank_plaid_ins_id = '';
@@ -40,13 +48,6 @@ class ExpenseIndex extends Component
     public bool $transactionsReady = false;
 
     protected $listeners = ['refreshComponent' => '$refresh', 'transaction-used' => 'removeTransaction'];
-
-    protected $queryString = [
-        'amount' => ['except' => ''],
-        'expense_vendor' => ['except' => ''],
-        'project_id' => ['except' => ''],
-        'expense_statuses' => ['except' => []],
-    ];
 
     public function updating()
     {
@@ -505,5 +506,10 @@ class ExpenseIndex extends Component
     {        
         $this->authorize('viewAny', Expense::class);
         return view('livewire.expenses.index');
+    }
+
+    public function placeholder()
+    {
+        return view('livewire.expenses.expense-index-placeholder');
     }
 }

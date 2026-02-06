@@ -8,6 +8,7 @@ use Carbon\Carbon;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Lazy;
 use Livewire\Attributes\Title;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
 
@@ -16,11 +17,8 @@ class TimesheetsIndex extends Component
 {
     use AuthorizesRequests, WithPagination;
 
+    #[Url(except: '')]
     public $amount = '';
-
-    protected $queryString = [
-        'amount' => ['except' => ''],
-    ];
 
     #[Title('Timesheets')]
     public function render()

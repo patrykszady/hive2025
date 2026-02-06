@@ -1,11 +1,8 @@
 <div class="max-w-4xl">
-    <flux:card class="space-y-2">
-        <div class="flex justify-between items-center">
-            <flux:heading size="lg">Templates</flux:heading>
-            <flux:button wire:click="createTemplate" icon="plus">New Template</flux:button>
-        </div>
-
-        <flux:separator variant="subtle" />
+    <x-island-card heading="Templates" :separator="true">
+        <x-slot:actions>
+            <flux:button size="sm" wire:click="createTemplate" icon="plus">New Template</flux:button>
+        </x-slot:actions>
 
         {{-- Type Tabs (Email vs Contract) --}}
         <flux:tabs wire:model.live="type">
@@ -59,7 +56,7 @@
                 @endforelse
             </flux:table.rows>
         </flux:table>
-    </flux:card>
+    </x-island-card>
 
     {{-- Modal for Create/Edit --}}
     <flux:modal name="template-form" class="min-w-[600px] max-w-4xl w-full">

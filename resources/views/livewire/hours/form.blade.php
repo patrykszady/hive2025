@@ -8,9 +8,8 @@
 	<div class="grid max-w-xl grid-cols-4 gap-4 xl:relative lg:max-w-5xl sm:px-6">
 		{{-- FLOAT CALENDAR --}}
 		<div class="col-span-4 space-y-4 lg:col-span-2 lg:h-32">
-            <flux:card>
-                <div class="flex justify-between">
-                    <flux:heading size="lg">Daily Hours for {{auth()->user()->first_name}}</flux:heading>
+            <x-island-card heading="Daily Hours for {{auth()->user()->first_name}}" subheading="Pick Date to add or edit Daily Hours for {{auth()->user()->first_name}}" :separator="true">
+                <x-slot:actions>
                     <flux:button
                         wire:navigate.hover
                         href="{{route('timesheets.index')}}"
@@ -18,10 +17,7 @@
                         >
                         Confirm Timesheets
                     </flux:button>
-                </div>
-                <flux:subheading><i>Pick Date to add or edit Daily Hours for {{auth()->user()->first_name}}</i></flux:subheading>
-
-                <flux:separator variant="subtle" />
+                </x-slot:actions>
                 <div>
                     <flux:calendar
                         wire:model.live="selected_date"
@@ -43,16 +39,13 @@
                 </div>
 
                 <flux:error name="check_total_min" />
-            </flux:card>
+            </x-island-card>
 		</div>
 
         <div class="col-span-4 space-y-2 lg:col-span-2">
             <div class="space-y-2">
             @if($selected_date)
-                <flux:card class="space-y-2">
-                    <flux:heading size="lg">Project Hours</flux:heading>
-                    <flux:subheading><i>Add hours worked for each project on {{ $selected_date->format('M jS, Y') }}</i></flux:subheading>
-                    <flux:separator variant="subtle" />
+                <x-island-card heading="Project Hours" subheading="Add hours worked for each project on {{ $selected_date->format('M jS, Y') }}" :separator="true">
 
                 {{-- PROJECT HOUR AMOUNT --}}
                 @foreach ($projects as $index => $project)
@@ -105,10 +98,9 @@
                         <flux:separator variant="subtle" />
                     @endif
                 @endforeach
-                </flux:card>
+                </x-island-card>
 
-            <flux:card>
-                <flux:heading size="lg">Different Project</flux:heading>
+            <x-island-card heading="Different Project">
                 <flux:input.group>
                     <flux:select wire:model.live="new_project_id" variant="listbox" searchable placeholder="Choose project...">
                         <x-slot name="search">
@@ -122,7 +114,7 @@
 
                     <flux:button variant="primary" wire:click="add_project" icon="plus-circle" wire:loading.attr="disabled" wire:target="add_project">Add</flux:button>
                 </flux:input.group>
-            </flux:card>
+            </x-island-card>
             </div>
             @endif
             </div>

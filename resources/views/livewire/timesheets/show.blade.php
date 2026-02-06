@@ -18,9 +18,8 @@
         </x-lists.details_card>
 
         {{-- WEEKLY GROUPED --}}
-        <flux:card class="space-y-2">
-            <div class="flex justify-between">
-                <flux:heading size="lg">Week of <b>{{$timesheet->date->format('m/d/Y')}}</b></flux:heading>
+        <x-island-card heading="Week of {{ $timesheet->date->format('m/d/Y') }}" :separator="true">
+            <x-slot:actions>
                 @if($not_paid)
                     <flux:button
                         wire:click="revert"
@@ -31,11 +30,7 @@
                         Revert Timesheet
                     </flux:button>
                 @endif
-            </div>
-            <div>
-
-            </div>
-            <flux:separator variant="subtle" />
+            </x-slot:actions>
 
             <div class="space-y-2">
                 <flux:table>
@@ -112,7 +107,7 @@
                     </flux:table.rows>
                 </flux:table>
             </div>
-        </flux:card>
+        </x-island-card>
     </div>
 
     <div class="col-span-4 space-y-2 lg:col-span-2 lg:col-start-3 overflow-y-auto">

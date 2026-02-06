@@ -1,6 +1,8 @@
 <?php
 
+use App\Models\Client;
 use App\Models\Expense;
+use App\Models\Project;
 use App\Models\Transaction;
 use App\Models\Vendor;
 
@@ -171,6 +173,34 @@ return [
                 'filterableAttributes'=> ['business_type', 'business_name'],
                 'sortableAttributes' => ['business_name', 'ytd_expense_sum', 'created_at'],
                 'searchableAttributes' => ['business_name'],
+                'typoTolerance' => ['enabled' => true],
+            ],
+
+            Client::class => [
+                'filterableAttributes'=> ['vendor_ids'],
+                'sortableAttributes' => ['created_at', 'name', 'business_name'],
+                'searchableAttributes' => [
+                    'name', 'business_name', 'first_names', 'last_names',
+                    'address', 'city', 'state', 'zip_code', 'full_address',
+                    'client_search',
+                    'client_user_first_names', 'client_user_last_names', 'client_user_full_names',
+                    'vendor_business_names'
+                ],
+                'typoTolerance' => ['enabled' => true],
+            ],
+
+            Project::class => [
+                'filterableAttributes'=> [
+                    'client_id', 'belongs_to_vendor_id', 'latest_status_code', '__soft_deleted'
+                ],
+                'sortableAttributes' => ['latest_status_date', 'created_at', 'project_name'],
+                'searchableAttributes' => [
+                    'project_name', 'address', 'city', 'state', 'zip_code',
+                    'client_name', 'client_business_name', 'client_first_names', 'client_last_names',
+                    'client_search',
+                    'client_user_first_names', 'client_user_last_names', 'client_user_full_names',
+                    'vendor_business_name'
+                ],
                 'typoTolerance' => ['enabled' => true],
             ],
         ],

@@ -10,9 +10,7 @@
     $finances = $project->finances;
 @endphp
 
-<flux:card class="space-y-2">
-    <flux:heading size="lg" class="mb-0">{{ $title }}</flux:heading>
-    <flux:separator variant="subtle" />
+<x-island-card heading="{{ $title }}" :separator="true">
     <flux:table>
         <flux:table.rows>
             <flux:table.row>
@@ -55,4 +53,4 @@
             </flux:table.row>
         </flux:table.rows>
     </flux:table>
-</flux:card>
+</x-island-card>

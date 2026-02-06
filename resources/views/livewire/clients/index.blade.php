@@ -1,42 +1,11 @@
 <div class="max-w-4xl space-y-2">
-    <flux:card>
-        <div class="flex justify-between">
-            <flux:heading size="lg">Client Filters</flux:heading>
-            @can('create', App\Models\Client::class)
-                <flux:button wire:click="$dispatchTo('users.user-create', 'newMember', { model: 'client', model_id: 'NEW' })" icon="plus">New Client</flux:button>
-            @endcan
-        </div>
-
-        <flux:separator variant="subtle" />
-
+    <x-island-card heading="Client Filters" :separator="true">
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <flux:input wire:model.live.debounce.500ms="client_name_search" label="Client or Address" icon="magnifying-glass" placeholder="Search by name or address" />
         </div>
-    </flux:card>
+    </x-island-card>
 
-    <flux:card wire:loading.class="opacity-50 pointer-events-none">
-        <flux:heading size="lg">Clients</flux:heading>
-
-        <div>
-            <flux:table :paginate="$this->clients->hasPages() ? $this->clients : null" wire:loading.class="opacity-50 text-opacity-50">
-                <flux:table.columns>
-                    <flux:table.column>Name</flux:table.column>
-                    <flux:table.column>Address</flux:table.column>
-                    <flux:table.column sortable :sorted="$sortBy === 'created_at'" :direction="$sortDirection" wire:click="sort('created_at')">Created</flux:table.column>
-                </flux:table.columns>
-
-                <flux:table.rows>
-                    @foreach ($this->clients as $client)
-                        <flux:table.row :key="$client->id">
-                            <flux:table.cell variant="strong"><a wire:navigate.hover href="{{route('clients.show', $client->id)}}">{{$client->name}}</a></flux:table.cell>
-                            <flux:table.cell>{{$client->one_line_address}}</flux:table.cell>
-                            <flux:table.cell>{{$client->created_at->format('m/d/Y')}}</flux:table.cell>
-                        </flux:table.row>
-                    @endforeach
-                </flux:table.rows>
-            </flux:table>
-        </div>
-    </flux:card>
+    <livewire:clients.clients-table :client-name-search="$client_name_search" lazy />
 
     <livewire:users.user-create />
     <livewire:clients.client-create />

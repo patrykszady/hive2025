@@ -1,6 +1,5 @@
-<flux:card>
-    <div class="flex justify-between">
-        <flux:heading size="lg">Distributions</flux:heading>
+<x-island-card heading="Distributions" subheading="Assign receipt emails to team members or office accounts.">
+    <x-slot:actions>
         <flux:button
             size="sm"
             icon="plus"
@@ -8,11 +7,9 @@
             >
             Add New
         </flux:button>
-    </div>
+    </x-slot:actions>
 
     <livewire:distributions.distribution-create />
-
-    <flux:subheading class="m-0">Assign receipt emails to team members or office accounts.</flux:subheading>
 
     <div class="space-y-2">
         <flux:table>
@@ -45,4 +42,4 @@
             </flux:table.rows>
         </flux:table>
     </div>
-</flux:card>
+</x-island-card>

@@ -1,6 +1,5 @@
-<flux:card class="space-y-2 !py-4">
-    <div class="flex justify-between">
-        <flux:heading size="lg">{{$view_text['card_title']}}</flux:heading>
+<x-island-card :heading="$view_text['card_title']" :separator="true">
+    <x-slot:actions>
         @unless($nonLivewire ?? false)
             @if($view === 'vendors.show' || $view === 'vendor_registration')
                 @can('create_team_member', [App\Models\User::class, $vendor->id])
@@ -12,9 +11,7 @@
                 @endcan
             @endif
         @endunless
-    </div>
-
-    <flux:separator variant="subtle" />
+    </x-slot:actions>
 
     <flux:table class="{{ ($nonLivewire ?? false) ? 'whitespace-normal' : '' }}">
         <flux:table.columns>
@@ -101,4 +98,4 @@
             </div>
         @endunless
     </div>
-</flux:card>
+</x-island-card>

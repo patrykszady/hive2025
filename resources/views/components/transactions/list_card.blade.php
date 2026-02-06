@@ -15,9 +15,7 @@
     });
 @endphp
 
-<flux:card class="space-y-2">
-    <flux:heading size="lg" class="mb-0">{{ $title }}</flux:heading>
-    <flux:separator variant="subtle" />
+<x-island-card heading="{{ $title }}" :separator="true">
 
     <div class="space-y-6">
         <flux:table>
@@ -63,4 +61,4 @@
 
         {{ $slot ?? '' }}
     </div>
-</flux:card>
+</x-island-card>

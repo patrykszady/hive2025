@@ -1,20 +1,17 @@
-<div class="max-w-4xl">
-    <flux:card class="space-y-2">
-        <div class="flex justify-between">
-            <flux:heading size="lg">Payments</flux:heading>
-            @if($view !== 'estimate.pdf')
-                <div>
-                    @can('create', App\Models\Payment::class)
-                        @if($view === 'projects.show' && $project->finances['balance'] > 0)
-                            <flux:button size="sm" wire:click="$dispatchTo('payments.payment-create', 'addProject', { client: {{$project->client->id}}})">Create Payment</flux:button>
-                        @elseif($view !== 'projects.show' && $this->hasClientsWithProjects)
-                            <flux:button size="sm" wire:click="$dispatchTo('payments.payment-create', 'addProject')">Add Payment</flux:button>
-                        @endif
-                        <livewire:payments.payment-create />
-                    @endcan
-                </div>
-            @endif
-        </div>
+<div class="max-w-4xl" wire:transition>
+    <x-island-card heading="Payments">
+        <x-slot:actions>
+        @if($view !== 'estimate.pdf')
+            @can('create', App\Models\Payment::class)
+                @if($view === 'projects.show' && $project->finances['balance'] > 0)
+                    <flux:button size="sm" wire:click="$dispatchTo('payments.payment-create', 'addProject', { client: {{$project->client->id}}})">Create Payment</flux:button>
+                @elseif($view !== 'projects.show' && $this->hasClientsWithProjects)
+                    <flux:button size="sm" wire:click="$dispatchTo('payments.payment-create', 'addProject')">Add Payment</flux:button>
+                @endif
+                <livewire:payments.payment-create />
+            @endcan
+        @endif
+        </x-slot:actions>
 
         <div class="space-y-2">
             <flux:table :paginate="$view !== 'estimate.pdf' && $this->payments->hasPages() ? $this->payments : null">
@@ -87,5 +84,5 @@
                 </flux:table.rows>
             </flux:table>
         </div>
-    </flux:card>
+    </x-island-card>
 </div>

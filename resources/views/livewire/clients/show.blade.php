@@ -20,6 +20,7 @@
                     <x-details.row 
                         title="Name" 
                         :content="$client->name"
+                        :noCloak="true"
                     />
 
                     {{-- Client Address with Link --}}
@@ -28,6 +29,7 @@
                         :content="$client->full_address" 
                         :href="$client->getAddressMapURI()"
                         :copyable="true"
+                        :noCloak="true"
                     />
 
                     {{-- Client Phone --}}
@@ -36,6 +38,7 @@
                             title="Phone" 
                             :content="$client->home_phone"
                             :copyable="true"
+                            :noCloak="true"
                         />
                     @endif
                 </x-slot:details>
@@ -50,6 +53,11 @@
         {{-- CLIENT PROJECT --}}
         <div class="col-span-4 lg:col-span-3">
             <livewire:projects.projects-index :client="$client" :view="'clients.index'" />
+        </div>
+
+        {{-- CLIENT PROJECT TASKS --}}
+        <div class="col-span-4 lg:col-span-3">
+            <livewire:clients.upcoming-client-tasks :client="$client" lazy />
         </div>
     </div>
     <livewire:clients.client-create />

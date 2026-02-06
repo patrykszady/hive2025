@@ -1,8 +1,5 @@
-<flux:card>
-    <div class="flex justify-between items-center">
-        <flux:heading size="lg">
-            Projects <b>{{ $type }}</b> Distributions
-        </flux:heading>
+<x-island-card heading="Projects {{ $type }} Distributions">
+    <x-slot:actions>
         @if ($type === 'Without' && $projects->count() > 0)
             <flux:button
                 size="sm"
@@ -12,7 +9,7 @@
                 Assign All Projects
             </flux:button>
         @endif
-    </div>
+    </x-slot:actions>
 
     <div class="space-y-2">
         <flux:table :paginate="$projects->hasPages() ? $projects : null" wire:loading.class="opacity-50 text-opacity-50">
@@ -47,4 +44,4 @@
             </flux:table.rows>
         </flux:table>
     </div>
-</flux:card>
+</x-island-card>

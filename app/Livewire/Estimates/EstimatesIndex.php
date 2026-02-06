@@ -94,4 +94,9 @@ class EstimatesIndex extends Component
         $this->authorize('viewAny', Estimate::class);
         return view('livewire.estimates.index');
     }
+
+    public function placeholder()
+    {
+        return view('livewire.estimates.estimates-index-placeholder');
+    }
 }

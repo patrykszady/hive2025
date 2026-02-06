@@ -1,12 +1,6 @@
 <x-form-modal name="accept_estimate_modal" title="Settings">
     <form id="accept_estimate_modal_form" wire:submit="save" class="space-y-4">
-        <flux:card>
-            {{-- HEADING --}}
-            <div class="flex justify-between">
-                <flux:heading size="lg">Estimate Sections</flux:heading>
-            </div>
-            {{-- Select which Bid each Section belongs to. --}}
-            <flux:subheading>Choose Bid for each Section.</flux:subheading>
+        <x-island-card heading="Estimate Sections" subheading="Choose Bid for each Section.">
 
             <flux:table class="p-0! m-0!">
                 <flux:table.columns>
@@ -42,16 +36,12 @@
                     @endforeach
                 </flux:table.rows>
             </flux:table>
-        </flux:card>
+        </x-island-card>
 
-        <flux:card>
-            {{-- HEADING --}}
-            <div class="flex justify-between">
-                <flux:heading size="lg">Payment Schedule</flux:heading>
+        <x-island-card heading="Payment Schedule" subheading="List Estimate progressive Payments">
+            <x-slot:actions>
                 <span>{{ money($this->sections->where('bid_index', 0)->sum('total')) }}</span>
-            </div>
-            {{-- List your project progressive payments for the Original Bid of this Estimate. --}}
-            <flux:subheading>List Estimate progressive Payments</flux:subheading>
+            </x-slot:actions>
             <flux:table class="p-0! m-0!">
                 <flux:table.columns>
                     <flux:table.column>Payment</flux:table.column>
@@ -98,20 +88,15 @@
                 <flux:button wire:click="addPayment">Add Payment</flux:button>
                 <span>Remaining {{ money($this->payments_remaining) }}</span>
             </div>
-        </flux:card>
+        </x-island-card>
 
-        <flux:card>
-            {{-- HEADING --}}
-            <div class="flex justify-between">
-                <flux:heading size="lg">Estimate Duration</flux:heading>
-            </div>
-            <flux:subheading>Start and End date to include in contract.</flux:subheading>
+        <x-island-card heading="Estimate Duration" subheading="Start and End date to include in contract.">
 
             <div class="grid grid-cols-2 gap-4">
                 <flux:input wire:model.live="start_date" label="Start Date" type="date" />
                 <flux:input wire:model.live="end_date" label="End Date" type="date" />
             </div>
-        </flux:card>
+        </x-island-card>
     </form>
 
     <x-slot name="footer">

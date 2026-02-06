@@ -262,4 +262,9 @@ class UpcomingTasks extends Component
     {
         return view('livewire.projects.upcoming-tasks');
     }
+
+    public function placeholder()
+    {
+        return view('livewire.projects.upcoming-tasks-placeholder');
+    }
 }
