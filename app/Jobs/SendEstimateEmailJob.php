@@ -199,6 +199,7 @@ class SendEstimateEmailJob implements ShouldQueue
 
             Mail::mailer($mailer)
                 ->to($sanitizedRecipients)
+                ->bcc($this->fromEmail)
                 ->send($mailable);
 
         } catch (Throwable $exception) {

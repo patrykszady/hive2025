@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Models\NotificationSetting;
 use App\Models\Project;
 use App\Models\SmsLog;
 use App\Models\Task;
@@ -145,6 +146,23 @@ class SendScheduleSms extends Command
             }
 
             foreach ($clientUsers as $user) {
+                // Check user-level notification preferences
+                $settings = $user->notificationSetting;
+                if (! $settings) {
+                    $this->line("  ⏭ Project #{$project->id} → {$user->first_name}: No notification settings.");
+                    $skippedCount++;
+
+                    continue;
+                }
+
+                $settingKey = $type === 'today' ? 'morning_sms' : 'evening_sms';
+                if (! $settings->{$settingKey}) {
+                    $this->line("  ⏭ Project #{$project->id} → {$user->first_name}: {$settingKey} disabled.");
+                    $skippedCount++;
+
+                    continue;
+                }
+
                 if (SmsLog::wasAlreadySent(SmsLog::CHANNEL_CLIENT, $type, $user->id, $targetDateStr, $project->id)) {
                     $this->line("  ⏭ Project #{$project->id} → {$user->first_name}: Already sent.");
                     $skippedCount++;
@@ -178,6 +196,11 @@ class SendScheduleSms extends Command
 
     private function sendVendorNotifications(string $type, bool $dryRun): int
     {
+        // Vendor scheduled SMS notifications are currently disabled
+        $this->info('Vendor SMS notifications are currently disabled.');
+
+        return Command::SUCCESS;
+
         $scheduleSmsService = app(ScheduleSmsService::class);
 
         $timezone = 'America/Chicago';
@@ -316,6 +339,13 @@ class SendScheduleSms extends Command
             try {
                 $tomorrowStr = $tomorrow->format('Y-m-d');
                 if (SmsLog::wasAlreadySent(SmsLog::CHANNEL_TEAM, SmsLog::TYPE_REMINDER, $user->id, $tomorrowStr)) {
+                    continue;
+                }
+
+                // Check user-level notification preferences for evening SMS digest
+                $settings = $user->notificationSetting;
+                if (! $settings || ! $settings->evening_sms) {
+                    $this->info("  ⏭ Skipping {$user->first_name}: evening SMS disabled or no settings");
                     continue;
                 }
 

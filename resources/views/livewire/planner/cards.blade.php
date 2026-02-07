@@ -264,10 +264,15 @@
             </flux:button>
         </div>
 
-        {{-- Main scrollable area --}}
+        {{-- Main scrollable area - x-cloak hides via CSS before Alpine loads, x-show + transition reveals after opacity classes are applied --}}
         <div
             x-ref="scrollContainer"
             @scroll.passive="onScroll($event)"
+            x-cloak
+            x-show="ready"
+            x-transition:enter="transition-opacity duration-150"
+            x-transition:enter-start="opacity-0"
+            x-transition:enter-end="opacity-100"
             class="flex-1 min-h-0 overflow-x-scroll overflow-y-auto"
         >
             @php
@@ -424,7 +429,7 @@
                             class="w-full [&>div]:w-full [&>div]:min-w-0 [&>div]:flex-1"
                             x-bind:class="getOpacityClass({{ $isWeekend ? 'true' : 'false' }}, {{ $hasTasks ? 'true' : 'false' }}, {{ $hasUndatedTasks ? 'true' : 'false' }}, {{ $dayIndex }})"
                         >
-                            <flux:kanban.column class="!w-full !max-w-full bg-white dark:bg-zinc-900 rounded-lg shadow-sm">
+                            <flux:kanban.column class="!w-full !max-w-full bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700">
                                             <flux:kanban.column.header
                                                 class="min-w-0 w-full [&>div:first-child>div:first-child]:!min-w-0 [&>div:first-child>div:first-child]:!flex-1 [&>div:first-child>div:first-child]:truncate [&>div:first-child>div:last-child]:!shrink-0 [&_[data-flux-subheading]]:!min-w-0 [&_[data-flux-subheading]]:truncate"
                                             >
@@ -505,114 +510,12 @@
                                                 @endif
 
                                                 @foreach ($projectColumn->cards as $task)
-                                                    <flux:kanban.card
-                                                        as="button"
-                                                        class="min-w-0 w-full"
-                                                        wire:key="task-{{ $task->id }}-{{ $dayData->day->format('Y-m-d') }}-{{ $projectColumn->id }}"
-                                                        wire:click="editTask({{ $task->id }}, '{{ $dayData->day->format('Y-m-d') }}', {{ $projectColumn->id }})"
-                                                        wire:target="editTask({{ $task->id }}, '{{ $dayData->day->format('Y-m-d') }}', {{ $projectColumn->id }})"
-                                                        wire:loading.attr="disabled"
-                                                        wire:loading.class="opacity-60 cursor-wait"
-                                                    >
-                                                        @php
-                                                            $taskUsers = $task->users;
-                                                            $taskVendor = $task->vendor;
-                                                            $taskTypeTextClasses = data_get($task->type_ui, 'text');
-
-                                                            // Get selected dates from options
-                                                            $selectedDates = $task->options->dates ?? [];
-                                                            $totalDays = count($selectedDates);
-
-                                                            // Find which day number this is
-                                                            $currentDay = 0;
-                                                            $dayFormat = $dayData->day->format('Y-m-d');
-                                                            if (!empty($selectedDates)) {
-                                                                sort($selectedDates);
-                                                                $currentDay = array_search($dayFormat, $selectedDates);
-                                                                if ($currentDay !== false) {
-                                                                    $currentDay++; // Convert from 0-indexed to 1-indexed
-                                                                }
-                                                            }
-
-                                                            $showDayCounter = $totalDays > 1 && $currentDay > 0;
-
-                                                            $arrivalTimeLabel = null;
-                                                            $dayTimeSettings = data_get($task->options, "time_settings.$dayFormat");
-                                                            $dayUsesTime = (bool) data_get($dayTimeSettings, 'use_time', false);
-                                                            $dayStartTime = (string) data_get($dayTimeSettings, 'start_time', '');
-
-                                                            if ($dayUsesTime && $dayStartTime !== '') {
-                                                                try {
-                                                                    $arrivalTimeLabel = \Carbon\Carbon::createFromFormat('H:i', $dayStartTime)->format('g:i A');
-                                                                } catch (\Exception $e) {
-                                                                    $arrivalTimeLabel = null;
-                                                                }
-                                                            }
-                                                        @endphp
-
-                                                        <div class="flex items-start justify-between gap-2 min-w-0">
-                                                            <div class="flex items-center gap-2 min-w-0">
-                                                                <flux:heading size="sm" class="min-w-0 truncate {{ $taskTypeTextClasses }}">
-                                                                    {{ $task->title }}
-                                                                </flux:heading>
-                                                                @if ($arrivalTimeLabel)
-                                                                    <span class="shrink-0 text-xs text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
-                                                                        {{ $arrivalTimeLabel }}
-                                                                    </span>
-                                                                @endif
-                                                            </div>
-                                                            @if($showDayCounter)
-                                                                <span class="text-xs text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
-                                                                    {{ $currentDay }}/{{ $totalDays }}
-                                                                </span>
-                                                            @endif
-                                                        </div>
-
-                                                        @if($taskUsers->count() > 0 || $taskVendor)
-                                                            <div class="flex items-center gap-2 mt-2 min-w-0">
-                                                                @if($taskUsers->count() > 0)
-                                                                    <flux:avatar.group>
-                                                                        @foreach($taskUsers->take(3) as $user)
-                                                                            <flux:avatar
-                                                                                circle
-                                                                                size="xs"
-                                                                                name="{{ $user->full_name }}"
-                                                                                color="auto"
-                                                                                color:seed="{{ $user->id }}"
-                                                                                title="{{ $user->full_name }}"
-                                                                            />
-                                                                        @endforeach
-                                                                        @if($taskUsers->count() > 3)
-                                                                            <flux:avatar circle size="xs">{{ $taskUsers->count() - 3 }}+</flux:avatar>
-                                                                        @endif
-                                                                    </flux:avatar.group>
-                                                                @endif
-
-                                                                @if($taskVendor)
-                                                                    <flux:avatar
-                                                                        circle
-                                                                        size="xs"
-                                                                        name="{{ $taskVendor->name }}"
-                                                                        color="auto"
-                                                                        color:seed="{{ $taskVendor->id }}"
-                                                                        title="{{ $taskVendor->name }}"
-                                                                    />
-                                                                    <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">{{ $taskVendor->name }}</span>
-                                                                    
-                                                                    @if($task->vendor_status)
-                                                                        @php $statusUi = $task->vendor_status_ui; @endphp
-                                                                        <flux:badge 
-                                                                            size="sm" 
-                                                                            :color="$statusUi['flux'] ?? 'zinc'"
-                                                                            :icon="$statusUi['icon'] ?? null"
-                                                                        >
-                                                                            {{ $statusUi['label'] ?? ucfirst($task->vendor_status) }}
-                                                                        </flux:badge>
-                                                                    @endif
-                                                                @endif
-                                                            </div>
-                                                        @endif
-                                                    </flux:kanban.card>
+                                                    <livewire:planner.planner-task-card
+                                                        :task-id="$task->id"
+                                                        :day-format="$dayData->day->format('Y-m-d')"
+                                                        :project-id="$projectColumn->id"
+                                                        :key="'task-card-' . $task->id . '-' . $dayData->day->format('Y-m-d') . '-' . $projectColumn->id"
+                                                    />
                                                 @endforeach
                                             </flux:kanban.column.cards>
                                         </flux:kanban.column>
@@ -719,6 +622,7 @@ Alpine.data('plannerScroll', () => ({
     firstVisibleDayIndex: 0,
     atLeftEdge: true,
     atRightEdge: false,
+    ready: false,
     pendingScroll: null,
     isAnimating: false,
     
@@ -735,6 +639,7 @@ Alpine.data('plannerScroll', () => ({
             this.updateFirstVisible();
             this.updateEdgeState();
             this.setupAxisLocking();
+            this.ready = true;
         });
         
         // Listen for scroll events from Livewire

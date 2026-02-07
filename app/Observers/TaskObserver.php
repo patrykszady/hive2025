@@ -3,8 +3,7 @@
 namespace App\Observers;
 
 use App\Jobs\SendBatchVendorAvailabilitySms;
-use App\Jobs\SendClientScheduleChangeSms;
-use App\Jobs\SendTeamScheduleChangeSms;
+use App\Jobs\SendRealtimeTaskNotification;
 use App\Models\Project;
 use App\Models\Task;
 use App\Models\Vendor;
@@ -19,11 +18,8 @@ class TaskObserver
      */
     public function created(Task $task): void
     {
-        // Notify clients if new task is for today
-        $this->queueClientNotificationIfNeeded($task);
-
-        // Queue team SMS if task includes today and has users assigned
-        $this->queueTeamNotificationIfNeeded($task);
+        // Queue realtime notifications (client + team) if task includes today
+        $this->queueNotificationIfNeeded($task);
 
         // Queue vendor availability SMS if vendor is assigned
         $this->queueVendorNotificationIfNeeded($task);
@@ -47,20 +43,12 @@ class TaskObserver
      */
     public function updated(Task $task): void
     {
-        // Notify clients if task for today was changed
-        $this->queueClientNotificationIfNeeded($task);
-
         // Get the original (before update) and current (after update) values
         $originalUserIds = $task->getOriginal('user_ids') ?? [];
         $newUserIds = $task->user_ids ?? [];
 
-        $originalStartDate = $task->getOriginal('start_date');
-        $originalEndDate = $task->getOriginal('end_date');
-        $newStartDate = $task->start_date;
-        $newEndDate = $task->end_date;
-        
-        // Queue team SMS if users or dates changed and task includes today
-        $this->queueTeamNotificationIfNeeded($task, $originalUserIds, $newUserIds);
+        // Queue realtime notifications (client + team) if task includes today
+        $this->queueNotificationIfNeeded($task, $originalUserIds, $newUserIds);
 
         // Queue vendor availability SMS if vendor was just assigned, dates changed,
         // or vendor is assigned but status was never set (legacy tasks)
@@ -139,11 +127,8 @@ class TaskObserver
      */
     public function deleted(Task $task): void
     {
-        // Notify clients if a task for today was deleted
-        $this->queueClientNotificationIfNeeded($task);
-
-        // Queue team SMS for affected users
-        $this->queueTeamNotificationIfNeeded($task, $task->user_ids ?? [], []);
+        // Queue realtime notifications for affected users
+        $this->queueNotificationIfNeeded($task, $task->user_ids ?? [], []);
     }
 
     /**
@@ -151,8 +136,8 @@ class TaskObserver
      */
     public function restored(Task $task): void
     {
-        // Queue team SMS for restored task users
-        $this->queueTeamNotificationIfNeeded($task);
+        // Queue realtime notifications for restored task users
+        $this->queueNotificationIfNeeded($task);
     }
 
     /**
@@ -160,8 +145,8 @@ class TaskObserver
      */
     public function forceDeleted(Task $task): void
     {
-        // Queue team SMS for affected users
-        $this->queueTeamNotificationIfNeeded($task, $task->user_ids ?? [], []);
+        // Queue realtime notifications for affected users
+        $this->queueNotificationIfNeeded($task, $task->user_ids ?? [], []);
     }
 
     /**
@@ -234,84 +219,15 @@ class TaskObserver
     }
 
     /**
-     * Queue client schedule change notification if task is for today.
-     * Uses ShouldBeUnique job with 15-minute delay to consolidate rapid changes.
-     */
-    protected function queueClientNotificationIfNeeded(Task $task): void
-    {
-        $today = Carbon::today();
-
-        // Check if task includes today (using options->dates if available)
-        $todayStr = $today->format('Y-m-d');
-        $selectedDates = (array) data_get($task->options, 'dates', []);
-
-        $taskIncludesToday = false;
-
-        if (! empty($selectedDates)) {
-            $taskIncludesToday = in_array($todayStr, $selectedDates);
-        } elseif ($task->start_date && $task->end_date) {
-            $taskIncludesToday = Carbon::parse($task->start_date)->lte($today)
-                && Carbon::parse($task->end_date)->gte($today);
-        }
-
-        if (! $taskIncludesToday) {
-            return;
-        }
-
-        // Only dispatch from authenticated dashboard changes
-        if (! auth()->check()) {
-            return;
-        }
-
-        if (! $this->smsEnabledForTask($task, 'client')) {
-            return;
-        }
-
-        $smsService = app(SmsScheduleService::class);
-        $vendorTimezone = $this->getOwningVendor($task)?->timezone;
-        $sendAt = $smsService->isWithinBusinessHours($vendorTimezone)
-            ? now()->addMinutes(15)
-            : $smsService->getNextBusinessHoursStart($vendorTimezone);
-
-        $log = Log::channel('client_sms');
-        $log->info("TaskObserver: Queueing client schedule change notification", [
-            'task_id' => $task->id,
-            'project_id' => $task->project_id,
-            'changed_by_user_id' => auth()->id(),
-            'scheduled_for' => $sendAt->toDateTimeString(),
-        ]);
-
-        // Dispatch with 15-minute delay - ShouldBeUnique consolidates multiple changes
-        SendClientScheduleChangeSms::dispatch($task->project_id)
-            ->delay($sendAt);
-    }
-
-    /**
-     * Queue team schedule change notification if task is for today.
+     * Queue unified realtime notifications (client + team, all channels).
      * Uses ShouldBeUnique job with 15-minute delay to consolidate rapid changes.
      *
-     * @param Task $task The task that changed
-     * @param array $originalUserIds Users assigned before the change (for updates/deletes)
-     * @param array $newUserIds Users assigned after the change (for updates/creates)
+     * @param  array  $originalUserIds  Users assigned before the change (for updates/deletes)
+     * @param  array  $newUserIds  Users assigned after the change (for updates/creates)
      */
-    protected function queueTeamNotificationIfNeeded(Task $task, array $originalUserIds = [], array $newUserIds = []): void
+    protected function queueNotificationIfNeeded(Task $task, array $originalUserIds = [], array $newUserIds = []): void
     {
-        $today = Carbon::today();
-
-        // Check if task includes today (using options->dates if available)
-        $todayStr = $today->format('Y-m-d');
-        $selectedDates = (array) data_get($task->options, 'dates', []);
-
-        $taskIncludesToday = false;
-
-        if (! empty($selectedDates)) {
-            $taskIncludesToday = in_array($todayStr, $selectedDates);
-        } elseif ($task->start_date && $task->end_date) {
-            $taskIncludesToday = Carbon::parse($task->start_date)->lte($today)
-                && Carbon::parse($task->end_date)->gte($today);
-        }
-
-        if (! $taskIncludesToday) {
+        if (! $this->taskIncludesToday($task)) {
             return;
         }
 
@@ -320,19 +236,16 @@ class TaskObserver
             return;
         }
 
-        if (! $this->smsEnabledForTask($task, 'team')) {
+        // Skip if notifications are entirely disabled for this task's vendor
+        if (! $this->smsEnabledForTask($task, 'client') && ! $this->smsEnabledForTask($task, 'team')) {
             return;
         }
 
-        // Determine affected users - use provided arrays or fall back to task's current users
+        // Determine affected user IDs
         if (empty($originalUserIds) && empty($newUserIds)) {
             $affectedUserIds = $task->user_ids ?? [];
         } else {
-            $affectedUserIds = array_unique(array_merge($originalUserIds, $newUserIds));
-        }
-
-        if (empty($affectedUserIds)) {
-            return;
+            $affectedUserIds = array_values(array_unique(array_merge($originalUserIds, $newUserIds)));
         }
 
         $smsService = app(SmsScheduleService::class);
@@ -341,19 +254,37 @@ class TaskObserver
             ? now()->addMinutes(15)
             : $smsService->getNextBusinessHoursStart($vendorTimezone);
 
-        $log = Log::channel('team_sms');
-        $log->info("TaskObserver: Queueing team schedule change notifications", [
+        Log::channel('notification')->info('TaskObserver: Queueing realtime task notification', [
             'task_id' => $task->id,
+            'project_id' => $task->project_id,
             'affected_user_ids' => $affectedUserIds,
             'changed_by_user_id' => auth()->id(),
             'scheduled_for' => $sendAt->toDateTimeString(),
         ]);
 
-        // Dispatch a job for each affected user - ShouldBeUnique consolidates by user_id
-        foreach ($affectedUserIds as $userId) {
-            SendTeamScheduleChangeSms::dispatch($userId)
-                ->delay($sendAt);
+        SendRealtimeTaskNotification::dispatch($task->project_id, $affectedUserIds)
+            ->delay($sendAt);
+    }
+
+    /**
+     * Check if a task includes today based on options->dates or date range.
+     */
+    protected function taskIncludesToday(Task $task): bool
+    {
+        $today = Carbon::today();
+        $todayStr = $today->format('Y-m-d');
+        $selectedDates = (array) data_get($task->options, 'dates', []);
+
+        if (! empty($selectedDates)) {
+            return in_array($todayStr, $selectedDates);
         }
+
+        if ($task->start_date && $task->end_date) {
+            return Carbon::parse($task->start_date)->lte($today)
+                && Carbon::parse($task->end_date)->gte($today);
+        }
+
+        return false;
     }
 
     private function smsEnabledForTask(Task $task, string $type): bool

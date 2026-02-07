@@ -10,6 +10,13 @@
             @endif --}}
         </div>
 
+        {{-- NOTIFICATION SETTINGS --}}
+        @if(auth()->id() === $user->id)
+            <div class="col-span-4 space-y-4 lg:col-span-2">
+                <livewire:users.user-notification-settings :user="$user" wire:key="user-notif-settings-{{ $user->id }}" />
+            </div>
+        @endif
+
         {{-- USER FINANCES --}}
         @can('update', $user)
             @if($user->isEmployed())

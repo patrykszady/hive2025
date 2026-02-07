@@ -41,7 +41,11 @@ class EstimateShow extends Component
 
     public $trashedLineItems = [];
 
-    protected $listeners = ['refreshComponent' => 'estimate_refresh'];
+    public string $sortBy = 'order';
+
+    public string $sortDirection = 'asc';
+
+    protected $listeners = ['refreshComponent' => 'handleExternalRefresh'];
 
     protected function rules()
     {
@@ -98,6 +102,16 @@ class EstimateShow extends Component
             ->toArray();
     }
 
+    /**
+     * Handle refresh dispatched from child components (e.g. line-item-create).
+     * These always involve data changes, so refresh financials too.
+     */
+    public function handleExternalRefresh(): void
+    {
+        $this->estimate_refresh();
+        $this->refreshFinancialIslands();
+    }
+
     public function estimate_refresh()
     {
         // Refresh the estimate model and eager load relationships
@@ -149,9 +163,6 @@ class EstimateShow extends Component
 
         // Get trashed line items for restore functionality
         $this->loadTrashedLineItems();
-            
-        // Notify EstimateAccept component to refresh its data
-        $this->dispatch('refreshComponent')->to('estimates.estimate-accept');
     }
 
     public function lineItemRestore(int $lineItemId): void
@@ -183,7 +194,7 @@ class EstimateShow extends Component
         }
 
         $this->estimate_refresh();
-        $this->dispatch('refresh')->to('projects.project-finances');
+        $this->refreshFinancialIslands();
 
         Flux::toast(
             duration: 5000,
@@ -221,6 +232,7 @@ class EstimateShow extends Component
     {
         $this->create_new_section();
         $this->estimate_refresh();
+        $this->refreshFinancialIslands();
 
         Flux::toast(
             duration: 5000,
@@ -276,7 +288,7 @@ class EstimateShow extends Component
         }
 
         $this->estimate_refresh();
-        $this->dispatch('refresh')->to('projects.project-finances');
+        $this->refreshFinancialIslands();
 
         Flux::toast(
             duration: 5000,
@@ -314,7 +326,7 @@ class EstimateShow extends Component
         }
 
         $this->estimate_refresh();
-        $this->dispatch('refresh')->to('projects.project-finances');
+        $this->refreshFinancialIslands();
 
         Flux::toast(
             duration: 10000,
@@ -452,6 +464,7 @@ class EstimateShow extends Component
         }
 
         $this->estimate_refresh();
+        $this->refreshFinancialIslands();
 
         Flux::toast(
             duration: 10000,
@@ -483,18 +496,29 @@ class EstimateShow extends Component
         ]);
     }
 
-    public function sort_sections($key, $position)
+    public function sort_sections($item, $position): void
     {
-        $section = EstimateSection::findOrFail($key);
+        $section = EstimateSection::findOrFail($item);
         $section->move($position);
         $this->estimate_refresh();
     }
 
-    public function sort_line_item($key, $position)
+    public function sort_line_item($item, $position): void
     {
-        $line_item = EstimateLineItem::findOrFail($key);
+        $line_item = EstimateLineItem::findOrFail($item);
         $line_item->move($position);
         $this->estimate_refresh();
+    }
+
+    /**
+     * Refresh financial islands and related components after data changes.
+     * Only call this when financial data actually changes (add/remove/restore),
+     * NOT on sort operations which only change order.
+     */
+    protected function refreshFinancialIslands(): void
+    {
+        $this->dispatch('refreshComponent')->to('estimates.estimate-accept');
+        $this->dispatch('refresh')->to('projects.project-finances');
     }
 
     public function export_csv()
@@ -556,6 +580,16 @@ class EstimateShow extends Component
         ]);
 
         //2024-12-25 disappearing toast when the above downloads
+    }
+
+    public function sort(string $column): void
+    {
+        if ($this->sortBy === $column) {
+            $this->sortDirection = $this->sortDirection === 'asc' ? 'desc' : 'asc';
+        } else {
+            $this->sortBy = $column;
+            $this->sortDirection = 'asc';
+        }
     }
 
     #[Title('Estimate')]

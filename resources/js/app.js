@@ -257,10 +257,113 @@ async function getUpcomingTaskNotificationStatus() {
 
 		const data = await statusResponse.json();
 
-		return { supported: true, enabled: Boolean(data?.enabled), permission };
+		return {
+			supported: true,
+			enabled: Boolean(data?.enabled),
+			permission,
+			preferences: data?.preferences || null,
+		};
 	} catch (err) {
 		console.error('Push subscription status failed:', err);
 		return { supported: true, enabled: false, permission, reason: 'error' };
+	}
+}
+
+async function updateUpcomingTaskNotificationPreferences(preferences) {
+	if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+		return { updated: false, reason: 'push-unsupported' };
+	}
+
+	const wantsAny = Boolean(
+		preferences?.realtime_enabled
+		|| preferences?.morning_enabled
+		|| preferences?.evening_enabled
+	);
+
+	try {
+		const registration = await navigator.serviceWorker.getRegistration();
+		if (!registration) {
+			return { updated: false, reason: 'no-registration' };
+		}
+
+		let subscription = await registration.pushManager.getSubscription();
+		if (!subscription) {
+			if (!wantsAny) {
+				return { updated: true, reason: 'no-subscription' };
+			}
+
+			const enabled = await enableUpcomingTaskNotifications();
+			if (!enabled?.enabled) {
+				return { updated: false, reason: 'subscribe-failed' };
+			}
+
+			subscription = await registration.pushManager.getSubscription();
+			if (!subscription) {
+				return { updated: false, reason: 'no-subscription' };
+			}
+		}
+
+		const response = await fetch('/push/preferences', {
+			method: 'POST',
+			credentials: 'same-origin',
+			headers: {
+				'Content-Type': 'application/json',
+				'Accept': 'application/json',
+				'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+			},
+			body: JSON.stringify({
+				endpoint: subscription.endpoint,
+				preferences,
+			}),
+		});
+
+		if (!response.ok) {
+			return { updated: false, reason: 'preferences-failed' };
+		}
+
+		return { updated: true };
+	} catch (err) {
+		console.error('Push preferences update failed:', err);
+		return { updated: false, reason: 'error' };
+	}
+}
+
+async function getCurrentPushEndpoint() {
+	if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+		return null;
+	}
+
+	const registration = await navigator.serviceWorker.getRegistration();
+	if (!registration) {
+		return null;
+	}
+
+	const subscription = await registration.pushManager.getSubscription();
+	return subscription ? subscription.endpoint : null;
+}
+
+async function listUpcomingTaskNotificationSubscriptions() {
+	try {
+		const endpoint = await getCurrentPushEndpoint();
+		const url = new URL('/push/subscriptions', window.location.origin);
+		if (endpoint) {
+			url.searchParams.set('endpoint', endpoint);
+		}
+
+		const response = await fetch(url.toString(), {
+			credentials: 'same-origin',
+			headers: { 'Accept': 'application/json' },
+		});
+
+		if (!response.ok) {
+			return { success: false, subscriptions: [] };
+		}
+
+		const data = await response.json();
+		return { success: true, subscriptions: data?.subscriptions || [] };
+	} catch (err) {
+		console.error('Push subscriptions fetch failed:', err);
+		return { success: false, subscriptions: [] };
 	}
 }
 
@@ -319,4 +422,6 @@ window.HiveTaskNotifications = {
 	enable: enableUpcomingTaskNotifications,
 	status: getUpcomingTaskNotificationStatus,
 	disable: disableUpcomingTaskNotifications,
+	updatePreferences: updateUpcomingTaskNotificationPreferences,
+	listSubscriptions: listUpcomingTaskNotificationSubscriptions,
 };

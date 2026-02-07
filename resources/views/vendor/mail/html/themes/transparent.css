@@ -35,7 +35,7 @@ blockquote {
 }
 
 a {
-    color: #3869d4;
+    color: #4f46e5;
 }
 
 a img {
@@ -265,7 +265,7 @@ img {
     }
 
     a {
-        color: #93c5fd !important;
+        color: #a5b4fc !important;
     }
 }
 
@@ -292,11 +292,11 @@ img {
 
 .button-blue,
 .button-primary {
-    background-color: #2563eb;
-    border-bottom: 12px solid #2563eb;
-    border-left: 20px solid #2563eb;
-    border-right: 20px solid #2563eb;
-    border-top: 12px solid #2563eb;
+    background-color: #4f46e5;
+    border-bottom: 12px solid #4f46e5;
+    border-left: 20px solid #4f46e5;
+    border-right: 20px solid #4f46e5;
+    border-top: 12px solid #4f46e5;
 }
 
 .button-green,

@@ -12,6 +12,11 @@ class PushSubscription extends Model
         'endpoint',
         'p256dh',
         'auth',
+        'realtime_enabled',
+        'morning_enabled',
+        'evening_enabled',
+        'user_agent',
+        'last_seen_at',
     ];
 
     public function user(): BelongsTo

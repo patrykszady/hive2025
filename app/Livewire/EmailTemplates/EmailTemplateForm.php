@@ -136,6 +136,8 @@ class EmailTemplateForm extends Component
             'project_address_1',
             'estimate_total',
             'vendor_name',
+            'sender_first_name',
+            'sender_last_name',
         ];
     }
 

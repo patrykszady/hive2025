@@ -16,67 +16,15 @@
     </x-slot:badge>
     <x-slot:actions>
         @auth
-            <div
-                x-data="{ supported: false, permission: 'default', enabled: false, ready: false }"
-                x-init="
-                    supported = 'Notification' in window;
-                    permission = supported ? Notification.permission : 'default';
-                    const finalize = () => { ready = true; };
-                    if (supported && window.HiveTaskNotifications?.status) {
-                        window.HiveTaskNotifications.status().then((result) => {
-                            if (!result) return;
-                            supported = result.supported ?? supported;
-                            permission = result.permission ?? permission;
-                            enabled = Boolean(result.enabled);
-                        }).finally(finalize);
-                    } else {
-                        finalize();
-                    }
-                "
-                class="flex items-center gap-2"
+            <flux:button
+                size="sm"
+                variant="filled"
+                :href="route('users.show', auth()->id())"
+                icon="bell"
+                class="!bg-indigo-500 hover:!bg-indigo-600 !text-white"
             >
-                <flux:skeleton
-                    x-show="!ready"
-                    class="h-8 w-44 rounded-md"
-                    animate="shimmer"
-                />
-                <div class="flex items-center gap-2" x-show="ready" x-cloak>
-                    <flux:button.group
-                        x-show="supported && enabled"
-                        x-cloak
-                    >
-                        <flux:button
-                            size="sm"
-                            variant="primary"
-                            class="bg-green-600 hover:bg-green-700 text-white"
-                            type="button"
-                            disabled
-                        >
-                            <span class="inline-flex items-center gap-2">
-                                <flux:icon.check class="w-4 h-4" />
-                                <span>Notifications</span>
-                            </span>
-                        </flux:button>
-                        <flux:button
-                            size="sm"
-                            variant="outline"
-                            class="px-2"
-                            type="button"
-                            x-on:click.prevent="window.HiveTaskNotifications?.disable()?.then((result) => { if (result?.disabled) { enabled = false; } })"
-                        >
-                            <flux:icon.x-mark class="w-4 h-4" />
-                        </flux:button>
-                    </flux:button.group>
-                    <flux:button
-                        size="sm"
-                        variant="primary"
-                        x-show="supported && !enabled"
-                        x-on:click.prevent="window.HiveTaskNotifications?.enable()?.then((result) => { if (result?.enabled) { enabled = true; permission = 'granted'; } })"
-                    >
-                        Enable notifications
-                    </flux:button>
-                </div>
-            </div>
+                Notifications
+            </flux:button>
         @endauth
     </x-slot:actions>
 
@@ -94,7 +42,6 @@
                 {{-- Alpine-based rendering - uses browser's local timezone for Today/Tomorrow --}}
                 <div 
                     class="space-y-2"
-                    x-cloak
                     x-data="{
                         date: '{{ $date }}',
                         isWeekend: {{ $isWeekend ? 'true' : 'false' }},
@@ -127,9 +74,13 @@
                             }
                             
                             // Calculate text color class
-                            this.textColorClass = (this.isPast || this.isWeekend) 
-                                ? 'text-zinc-400 dark:text-zinc-500' 
-                                : 'text-zinc-700 dark:text-zinc-300';
+                            if (this.badge === 'today') {
+                                this.textColorClass = 'text-indigo-600 dark:text-indigo-400';
+                            } else if (this.isPast || this.isWeekend) {
+                                this.textColorClass = 'text-zinc-400 dark:text-zinc-500';
+                            } else {
+                                this.textColorClass = 'text-zinc-700 dark:text-zinc-300';
+                            }
                         }
                     }"
                     :class="opacityClass"
@@ -140,11 +91,14 @@
                             {{ $carbonDate->format('D, M j, Y') }}
                         </flux:heading>
                         <template x-if="badge === 'today'">
-                            <flux:badge color="green" size="sm">Today</flux:badge>
+                            <flux:badge color="indigo" size="sm">Today</flux:badge>
                         </template>
                         <template x-if="badge === 'tomorrow'">
-                            <flux:badge color="sky" size="sm">Tomorrow</flux:badge>
+                            <flux:badge color="zinc" size="sm">Tomorrow</flux:badge>
                         </template>
+                        @if($tasks->isEmpty())
+                            <flux:badge color="zinc" size="sm">No Tasks</flux:badge>
+                        @endif
                     </div>
                     
                     @include('components.upcoming-tasks-list-tasks', [

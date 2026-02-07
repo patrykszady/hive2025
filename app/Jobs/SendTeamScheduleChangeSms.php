@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\NotificationSetting;
 use App\Models\SmsLog;
 use App\Models\Task;
 use App\Models\User;
@@ -56,6 +57,29 @@ class SendTeamScheduleChangeSms implements ShouldQueue, ShouldBeUnique
         if (! $user->cell_phone) {
             $log->info("SendTeamScheduleChangeSms: User has no cell phone", ['user_id' => $this->userId]);
             return;
+        }
+
+        // Check user-level notification preferences
+        $settings = $user->notificationSetting;
+        if (! $settings || ! $settings->realtime_sms) {
+            $log->info("SendTeamScheduleChangeSms: User has SMS realtime disabled or no settings", ['user_id' => $this->userId]);
+            return;
+        }
+
+        // Check user's preferred realtime time window
+        if ($settings && $settings->realtime_start && $settings->realtime_end) {
+            $vendorTimezone = $user->vendor?->timezone ?? config('sms.business_hours.timezone', 'America/Chicago');
+            $now = Carbon::now($vendorTimezone);
+            $start = Carbon::parse($settings->realtime_start, $vendorTimezone);
+            $end = Carbon::parse($settings->realtime_end, $vendorTimezone);
+
+            if ($now->lt($start) || $now->gt($end)) {
+                $log->info("SendTeamScheduleChangeSms: Outside user's realtime window", [
+                    'user_id' => $this->userId,
+                    'window' => "{$settings->realtime_start}-{$settings->realtime_end}",
+                ]);
+                return;
+            }
         }
 
         $today = $smsService->getToday();

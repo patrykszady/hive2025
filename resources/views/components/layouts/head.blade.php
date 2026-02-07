@@ -8,6 +8,40 @@
         }
     </script>
 
+    {{-- Prevent sidebar flash before Flux JS boots.
+         :not(:defined) targets the <ui-sidebar> custom element before its JS class is registered.
+         Once Flux JS loads and calls customElements.define(), these rules automatically stop matching. --}}
+    <script>
+        try {
+            if (JSON.parse(localStorage.getItem('flux-sidebar-collapsed-desktop')) === true
+                && window.matchMedia('(min-width: 1024px)').matches
+            ) {
+                document.documentElement.setAttribute('data-sidebar-collapsed', '');
+            }
+        } catch (e) {}
+    </script>
+    <style>
+        /* Desktop: hide sidebar content (keep frame for layout stability) */
+        ui-sidebar:not(:defined) {
+            visibility: hidden;
+        }
+        /* Mobile: fully hide (no space taken) */
+        @media (max-width: 1023px) {
+            ui-sidebar:not(:defined) {
+                display: none;
+            }
+        }
+        /* Desktop collapsed: constrain to collapsed width */
+        @media (min-width: 1024px) {
+            html[data-sidebar-collapsed] ui-sidebar:not(:defined) {
+                width: 3.5rem;
+                min-width: 3.5rem;
+                max-width: 3.5rem;
+                overflow: clip;
+            }
+        }
+    </style>
+
     @if(env('APP_ENV') == 'production')
         <!-- Google tag (gtag.js) -->
         <script async src="https://www.googletagmanager.com/gtag/js?id={{env('GOOGLE_ANALYTICS_GTAG')}}"></script>

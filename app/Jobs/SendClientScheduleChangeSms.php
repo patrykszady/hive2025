@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\NotificationSetting;
 use App\Models\Project;
 use App\Models\SmsLog;
 use App\Models\Task;
@@ -113,6 +114,17 @@ class SendClientScheduleChangeSms implements ShouldQueue, ShouldBeUnique
         $throttleMinutes = $smsService->getThrottleMinutes();
 
         foreach ($clientUsers as $user) {
+            // Check user-level notification preferences
+            $settings = $user->notificationSetting;
+            if (! $settings || ! $settings->realtime_sms) {
+                $log->info("SendClientScheduleChangeSms: Client user has realtime SMS disabled or no settings", [
+                    'project_id' => $this->projectId,
+                    'user_id' => $user->id,
+                ]);
+
+                continue;
+            }
+
             // Check throttle - don't send if recently notified
             if (SmsLog::wasRecentlyNotified(SmsLog::CHANNEL_CLIENT, $user->id, $throttleMinutes, $this->projectId)) {
                 $log->info("SendClientScheduleChangeSms: Throttled, recently notified", [

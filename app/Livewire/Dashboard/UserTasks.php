@@ -22,15 +22,16 @@ class UserTasks extends Component
     public function groupedTasks(): Collection
     {
         $userId = (string) auth()->id();
-        $today = Carbon::today();
+        $today = browser_today();
+        $cutoff = $today->copy()->subDay();
 
         $tasks = Task::whereJsonContains('user_ids', $userId)
-            ->where(function ($query) use ($today) {
-                $query->whereDate('end_date', '>=', $today);
+            ->where(function ($query) use ($cutoff) {
+                $query->whereDate('end_date', '>=', $cutoff);
             })
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
-            ->with(['project.client', 'vendor'])
+            ->with(['project.client', 'project.latestStatus', 'vendor'])
             ->orderBy('start_date')
             ->orderBy('end_date')
             ->limit(20)
@@ -65,7 +66,7 @@ class UserTasks extends Component
 
             if (! empty($selectedDates)) {
                 foreach ($selectedDates as $dateStr) {
-                    if ($dateStr >= $today->format('Y-m-d')) {
+                    if ($dateStr >= $cutoff->format('Y-m-d')) {
                         if (! $grouped->has($dateStr)) {
                             $grouped[$dateStr] = collect();
                         }
@@ -75,7 +76,7 @@ class UserTasks extends Component
             } else {
                 // Fallback to start_date
                 $dateStr = $task->start_date->format('Y-m-d');
-                if ($dateStr >= $today->format('Y-m-d')) {
+                if ($dateStr >= $cutoff->format('Y-m-d')) {
                     if (! $grouped->has($dateStr)) {
                         $grouped[$dateStr] = collect();
                     }
@@ -83,6 +84,32 @@ class UserTasks extends Component
                 }
             }
         }
+
+        $grouped = $grouped->sortKeys();
+
+        // Sort tasks within each day: tasks with start_time first (earliest to latest), then tasks without
+        $grouped = $grouped->map(function ($tasks, $dateStr) {
+            return $tasks->sortBy(function ($task) use ($dateStr) {
+                $startTime = (string) data_get($task->options, "time_settings.$dateStr.start_time", '');
+                $usesTime = (bool) data_get($task->options, "time_settings.$dateStr.use_time", false);
+                $hasTime = $usesTime && $startTime !== '';
+
+                // Tasks with time sort first (0), then by time string; tasks without time sort last (1)
+                return $hasTime ? '0_' . $startTime : '1';
+            })->values();
+        });
+
+        // Ensure 5 consecutive days starting from today (browser timezone)
+        for ($i = 0; $i < 5; $i++) {
+            $dateStr = $today->copy()->addDays($i)->format('Y-m-d');
+            if (! $grouped->has($dateStr)) {
+                $grouped[$dateStr] = collect();
+            }
+        }
+
+        // Keep only the 5-day window (today through 4 days from now)
+        $windowEnd = $today->copy()->addDays(4)->format('Y-m-d');
+        $grouped = $grouped->filter(fn ($tasks, $date) => $date >= $today->format('Y-m-d') && $date <= $windowEnd);
 
         return $grouped->sortKeys();
     }
@@ -94,10 +121,10 @@ class UserTasks extends Component
     public function taskCount(): int
     {
         $userId = (string) auth()->id();
-        $today = Carbon::today();
+        $cutoff = Carbon::today()->subDay();
 
         return Task::whereJsonContains('user_ids', $userId)
-            ->whereDate('end_date', '>=', $today)
+            ->whereDate('end_date', '>=', $cutoff)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
             ->count();
@@ -106,5 +133,10 @@ class UserTasks extends Component
     public function render()
     {
         return view('livewire.dashboard.user-tasks');
+    }
+
+    public function placeholder(): \Illuminate\Contracts\View\View
+    {
+        return view('livewire.dashboard.user-tasks-placeholder');
     }
 }

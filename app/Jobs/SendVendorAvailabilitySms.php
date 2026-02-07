@@ -41,6 +41,10 @@ class SendVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
      */
     public function handle(SmsScheduleService $smsService): void
     {
+        // Vendor availability SMS notifications are currently disabled
+        Log::info("SendVendorAvailabilitySms: Vendor notifications are currently disabled, skipping task {$this->taskId}");
+        return;
+
         $task = Task::with(['vendor', 'project', 'owner'])->find($this->taskId);
 
         if (!$task) {

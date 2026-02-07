@@ -135,7 +135,7 @@
                     @endif
 
                     {{-- USERS --}}
-                    <flux:select wire:model.blur="form.user_ids" multiple label="Team Members" variant="listbox" placeholder="Assign team members...">
+                    <flux:select wire:model="form.user_ids" multiple label="Team Members" variant="listbox" placeholder="Assign team members...">
                         @foreach($this->employees as $employee)
                             <flux:select.option wire:key="{{$employee->id}}" value="{{$employee->id}}">
                                 <div class="flex items-center gap-2 whitespace-nowrap">

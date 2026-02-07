@@ -73,6 +73,14 @@ class EstimateEmail extends Component
                 $this->body = $this->replacePlaceholders($template->body, $this->estimate);
             }
         }
+
+        if ($field === 'from' && $this->selectedTemplateId && $this->estimate) {
+            $template = EmailTemplate::find($this->selectedTemplateId);
+            if ($template) {
+                $this->subject = $this->replacePlaceholders($template->subject, $this->estimate);
+                $this->body = $this->replacePlaceholders($template->body, $this->estimate);
+            }
+        }
     }
 
     public function openModal(Estimate $estimate)
@@ -135,6 +143,13 @@ class EstimateEmail extends Component
         $estimateTotal = '$' . number_format($estimate->amount ?? 0, 2);
         $vendorName = $estimate->vendor->name ?? 'our team';
 
+        // Resolve sender name from the selected 'from' email
+        $senderUser = $this->adminUsers
+            ? collect($this->adminUsers)->firstWhere('email', $this->from)
+            : null;
+        $senderFirstName = $senderUser?->first_name ?? (auth()->user()?->first_name ?? '');
+        $senderLastName = $senderUser?->last_name ?? (auth()->user()?->last_name ?? '');
+
         return str_replace(
             [
                 '{{client_name}}', 
@@ -143,7 +158,9 @@ class EstimateEmail extends Component
                 '{{project_name}}', 
                 '{{project_address_1}}', 
                 '{{estimate_total}}', 
-                '{{vendor_name}}'
+                '{{vendor_name}}',
+                '{{sender_first_name}}',
+                '{{sender_last_name}}',
             ],
             [
                 $clientName, 
@@ -152,7 +169,9 @@ class EstimateEmail extends Component
                 $projectName, 
                 $projectAddress, 
                 $estimateTotal, 
-                $vendorName
+                $vendorName,
+                $senderFirstName,
+                $senderLastName,
             ],
             $text
         );

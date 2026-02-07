@@ -1,5 +1,4 @@
 @props([
-	'hideFooter' => false,
 	'showHeaderBrand' => false,
 ])
 
@@ -20,11 +19,9 @@
 </x-mail::subcopy>
 </x-slot:subcopy>
 @endisset
-@if (empty($hideFooter))
 <x-slot:footer>
 <x-mail::footer>
-© {{ date('Y') }}
+<a href="{{ config('app.url') }}" style="color: #b0adc5; text-decoration: none;">Hive Contractors</a> &copy; 2026{{ date('Y') > 2026 ? '–' . date('Y') : '' }}
 </x-mail::footer>
 </x-slot:footer>
-@endif
 </x-mail::layout>

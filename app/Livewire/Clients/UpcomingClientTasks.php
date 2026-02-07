@@ -79,7 +79,7 @@ class UpcomingClientTasks extends Component
             ->whereNotNull('end_date')
             ->whereDate('start_date', '<=', $endOfWeekStr)
             ->whereDate('end_date', '>=', $startOfWeekStr)
-            ->with(['vendor', 'project.client'])
+            ->with(['vendor', 'project.client', 'project.latestStatus'])
             ->orderBy('start_date')
             ->orderBy('end_date')
             ->get();
@@ -241,7 +241,7 @@ class UpcomingClientTasks extends Component
         return Task::query()
             ->whereIn('project_id', $projectIds)
             ->whereNull('start_date')
-            ->with(['vendor', 'project.client'])
+            ->with(['vendor', 'project.client', 'project.latestStatus'])
             ->orderBy('created_at')
             ->get();
     }

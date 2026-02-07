@@ -1,4 +1,4 @@
-<x-mail::message :hide-footer="true" :show-header-brand="true">
+<x-mail::message :show-header-brand="true">
 @php
 	$baseUrl = rtrim((string) config('app.url'), '/');
 	$requestingVendorUrl = $baseUrl . '/vendors/' . $requesting_vendor->id;

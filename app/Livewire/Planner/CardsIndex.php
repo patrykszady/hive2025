@@ -285,6 +285,15 @@ class CardsIndex extends Component
                     }
                 })->values();
 
+                // Sort tasks by start_time: tasks with time first (earliest to latest), then tasks without
+                $dayTasks = $dayTasks->sortBy(function ($task) use ($dayFormat) {
+                    $startTime = (string) data_get($task->options, "time_settings.$dayFormat.start_time", '');
+                    $usesTime = (bool) data_get($task->options, "time_settings.$dayFormat.use_time", false);
+                    $hasTime = $usesTime && $startTime !== '';
+
+                    return $hasTime ? '0_' . $startTime : '1';
+                })->values();
+
                 // Calculate next/last task info for this project relative to this specific day
                 $taskGapInfo = null;
                 if ($dayTasks->isEmpty()) {
@@ -369,6 +378,15 @@ class CardsIndex extends Component
 
                     // Task has no dates and no start_date - it's an undated task, don't show in day cells
                     return false;
+                })->values();
+
+                // Sort tasks by start_time: tasks with time first (earliest to latest), then tasks without
+                $dayTasks = $dayTasks->sortBy(function ($task) use ($dayFormat) {
+                    $startTime = (string) data_get($task->options, "time_settings.$dayFormat.start_time", '');
+                    $usesTime = (bool) data_get($task->options, "time_settings.$dayFormat.use_time", false);
+                    $hasTime = $usesTime && $startTime !== '';
+
+                    return $hasTime ? '0_' . $startTime : '1';
                 })->values();
 
                 // Calculate next/last task info for this project on this day

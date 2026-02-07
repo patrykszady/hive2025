@@ -237,6 +237,10 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
         ->name('push.subscribe');
     Route::post('/push/status', [PushSubscriptionController::class, 'status'])
         ->name('push.status');
+    Route::get('/push/subscriptions', [PushSubscriptionController::class, 'index'])
+        ->name('push.subscriptions');
+    Route::post('/push/preferences', [PushSubscriptionController::class, 'preferences'])
+        ->name('push.preferences');
     Route::post('/push/unsubscribe', [PushSubscriptionController::class, 'destroy'])
         ->name('push.unsubscribe');
 

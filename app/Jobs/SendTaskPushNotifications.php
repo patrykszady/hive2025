@@ -44,10 +44,18 @@ class SendTaskPushNotifications implements ShouldQueue
 
         $subscriptions = PushSubscription::with('user')->get();
 
+        $preferenceColumn = $this->notificationType === 'tomorrow'
+            ? 'evening_enabled'
+            : 'morning_enabled';
+
         foreach ($subscriptions as $pushSubscription) {
             $user = $pushSubscription->user;
 
             if (! $user) {
+                continue;
+            }
+
+            if (! $pushSubscription->{$preferenceColumn}) {
                 continue;
             }
 

@@ -62,15 +62,6 @@ class UpcomingTasks extends Component
     }
 
     /**
-     * Get the start of week (Monday) date string (Y-m-d) for the view.
-     */
-    #[Computed]
-    public function startOfWeekDate(): string
-    {
-        return $this->getToday()->startOfWeek(Carbon::MONDAY)->format('Y-m-d');
-    }
-
-    /**
      * Get tasks grouped by date, with multi-day tasks appearing on each day
      * 
      * @return Collection<string, Collection<int, Task>>
@@ -78,23 +69,19 @@ class UpcomingTasks extends Component
     #[Computed]
     public function groupedTasks(): Collection
     {
-        $today = $this->getToday();
+        $today = browser_today();
+        $cutoff = $today->copy()->subDay();
+        $windowEnd = $today->copy()->addDays(4);
 
-        // Show tasks for the *current week* (Mon-Sun), including earlier days.
-        // This keeps the weekly view useful mid-week (e.g. a task on Tuesday still shows on Wednesday).
-        $todayCarbon = Carbon::parse($today);
-        $startOfWeek = $todayCarbon->copy()->startOfWeek(Carbon::MONDAY);
-        $endOfWeek = $todayCarbon->copy()->endOfWeek(Carbon::SUNDAY);
-
-        $startOfWeekStr = $startOfWeek->format('Y-m-d');
-        $endOfWeekStr = $endOfWeek->format('Y-m-d');
+        $cutoffStr = $cutoff->format('Y-m-d');
+        $windowEndStr = $windowEnd->format('Y-m-d');
 
         $tasks = Task::query()
             ->where('project_id', $this->project->id)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
-            ->whereDate('start_date', '<=', $endOfWeekStr)
-            ->whereDate('end_date', '>=', $startOfWeekStr)
+            ->whereDate('start_date', '<=', $windowEndStr)
+            ->whereDate('end_date', '>=', $cutoffStr)
             ->with('vendor')
             ->orderBy('start_date')
             ->orderBy('end_date')
@@ -121,73 +108,93 @@ class UpcomingTasks extends Component
             $task->setRelation('users', $assignedUsers);
         }
 
-        // Build grouped tasks with all days in range (including empty days)
+        // Group tasks by their selected dates
         $grouped = collect();
 
-        $startDate = $startOfWeek->copy();
-        $endDate = $endOfWeek->copy();
+        $todayStr = $today->format('Y-m-d');
 
-        // Create all days in the range (Monday through Sunday)
-        $currentDate = $startDate->copy();
-        while ($currentDate->lte($endDate)) {
-            $grouped[$currentDate->format('Y-m-d')] = collect();
-            $currentDate->addDay();
-        }
-
-        // Add tasks to their specifically selected dates (only within the week)
         foreach ($tasks as $task) {
             $selectedDates = (array) data_get($task->options, 'dates', []);
-            
+
             if (! empty($selectedDates)) {
                 foreach ($selectedDates as $dateStr) {
-                    if ($dateStr >= $startOfWeekStr && $dateStr <= $endOfWeekStr && $grouped->has($dateStr)) {
+                    if ($dateStr >= $cutoffStr && $dateStr <= $windowEndStr) {
+                        if (! $grouped->has($dateStr)) {
+                            $grouped[$dateStr] = collect();
+                        }
                         $grouped[$dateStr]->push($task);
                     }
                 }
             } else {
                 // Fallback: single-day task using start_date
                 $dateStr = $task->start_date->format('Y-m-d');
-                if ($dateStr >= $startOfWeekStr && $dateStr <= $endOfWeekStr && $grouped->has($dateStr)) {
+                if ($dateStr >= $cutoffStr && $dateStr <= $windowEndStr) {
+                    if (! $grouped->has($dateStr)) {
+                        $grouped[$dateStr] = collect();
+                    }
                     $grouped[$dateStr]->push($task);
                 }
             }
         }
 
-        // Sort by date
+        $grouped = $grouped->sortKeys();
+
+        // Sort tasks within each day: tasks with start_time first (earliest to latest), then tasks without
+        $grouped = $grouped->map(function ($tasks, $dateStr) {
+            return $tasks->sortBy(function ($task) use ($dateStr) {
+                $startTime = (string) data_get($task->options, "time_settings.$dateStr.start_time", '');
+                $usesTime = (bool) data_get($task->options, "time_settings.$dateStr.use_time", false);
+                $hasTime = $usesTime && $startTime !== '';
+
+                return $hasTime ? '0_' . $startTime : '1';
+            })->values();
+        });
+
+        // Ensure 5 consecutive days starting from today
+        for ($i = 0; $i < 5; $i++) {
+            $dateStr = $today->copy()->addDays($i)->format('Y-m-d');
+            if (! $grouped->has($dateStr)) {
+                $grouped[$dateStr] = collect();
+            }
+        }
+
+        // Keep only the 5-day window (today through 4 days from now)
+        $grouped = $grouped->filter(fn ($tasks, $date) => $date >= $todayStr && $date <= $windowEndStr);
+
         return $grouped->sortKeys();
     }
 
     /**
-     * Get info about the next task after the displayed week
+     * Get info about the next task after the displayed window
      */
     #[Computed]
     public function nextTaskInfo(): ?object
     {
-        $today = $this->getToday();
-        $weekEnd = $today->copy()->endOfWeek(Carbon::SUNDAY);
-        $weekEndStr = $weekEnd->format('Y-m-d');
+        $today = browser_today();
+        $windowEnd = $today->copy()->addDays(4);
+        $windowEndStr = $windowEnd->format('Y-m-d');
 
-        // Get all tasks for this project
+        // Get all tasks for this project beyond the displayed window
         $tasks = Task::query()
             ->where('project_id', $this->project->id)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
-            ->whereDate('start_date', '>', $weekEndStr)
+            ->whereDate('start_date', '>', $windowEndStr)
             ->get();
 
-        // Collect all task dates beyond the displayed week
+        // Collect all task dates beyond the displayed window
         $futureDates = collect();
         foreach ($tasks as $task) {
             $selectedDates = (array) data_get($task->options, 'dates', []);
             if (! empty($selectedDates)) {
                 foreach ($selectedDates as $dateStr) {
-                    if ($dateStr > $weekEndStr) {
+                    if ($dateStr > $windowEndStr) {
                         $futureDates->push($dateStr);
                     }
                 }
             } else {
                 $taskStartStr = $task->start_date->format('Y-m-d');
-                if ($taskStartStr > $weekEndStr) {
+                if ($taskStartStr > $windowEndStr) {
                     $futureDates->push($taskStartStr);
                 }
             }
@@ -201,9 +208,9 @@ class UpcomingTasks extends Component
         $nextDateStr = $futureDates->sort()->first();
         $nextDate = Carbon::parse($nextDateStr, $this->getProjectTimezone())->startOfDay();
         
-        // Calculate weekdays from the day after Sunday to the next task date (inclusive)
+        // Calculate weekdays from the day after window end to the next task date (inclusive)
         $daysUntil = 0;
-        $current = $weekEnd->copy()->addDay()->startOfDay(); // Start from Monday after Sunday
+        $current = $windowEnd->copy()->addDay()->startOfDay();
         while ($current->lte($nextDate)) {
             if (! $current->isWeekend()) {
                 $daysUntil++;
@@ -228,17 +235,16 @@ class UpcomingTasks extends Component
     #[Computed]
     public function taskCount(): int
     {
-        $today = $this->getToday();
-
-        $startOfWeek = $today->copy()->startOfWeek(Carbon::MONDAY)->format('Y-m-d');
-        $endOfWeek = $today->copy()->endOfWeek(Carbon::SUNDAY)->format('Y-m-d');
+        $today = browser_today();
+        $cutoff = $today->copy()->subDay();
+        $windowEnd = $today->copy()->addDays(4);
 
         return Task::query()
             ->where('project_id', $this->project->id)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
-            ->whereDate('start_date', '<=', $endOfWeek)
-            ->whereDate('end_date', '>=', $startOfWeek)
+            ->whereDate('start_date', '<=', $windowEnd)
+            ->whereDate('end_date', '>=', $cutoff)
             ->count();
     }
 
