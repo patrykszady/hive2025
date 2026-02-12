@@ -72,6 +72,18 @@ class SmsConversation extends Component
 
         $thread = SmsGroupThread::findOrFail($this->threadId);
 
+        if ($thread->hasPendingOptIn()) {
+            Flux::toast(
+                variant: 'warning',
+                heading: 'Awaiting START Replies',
+                text: 'Each recipient must reply START before sending project messages.',
+                duration: 5000,
+                position: 'top right'
+            );
+
+            return;
+        }
+
         $text = trim($this->newMessage);
         $messageWithSig = $text ? $text . "\n" . SmsNewThread::getSignature() : SmsNewThread::getSignature();
 

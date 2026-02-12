@@ -16,6 +16,8 @@ class SmsGroupThread extends Model
         'client_id',
         'telnyx_message_id',
         'last_activity_at',
+        'opt_in_prompt_sent_at',
+        'welcome_sent_at',
     ];
 
     protected function casts(): array
@@ -23,6 +25,8 @@ class SmsGroupThread extends Model
         return [
             'participants' => 'array',
             'last_activity_at' => 'datetime',
+            'opt_in_prompt_sent_at' => 'datetime',
+            'welcome_sent_at' => 'datetime',
         ];
     }
 
@@ -52,6 +56,31 @@ class SmsGroupThread extends Model
     public function reads(): HasMany
     {
         return $this->hasMany(SmsThreadRead::class, 'thread_id');
+    }
+
+    public function threadParticipants(): HasMany
+    {
+        return $this->hasMany(SmsThreadParticipant::class, 'thread_id');
+    }
+
+    public function hasPendingOptIn(): bool
+    {
+        return $this->opt_in_prompt_sent_at !== null && $this->welcome_sent_at === null;
+    }
+
+    public function allParticipantsOptedIn(): bool
+    {
+        $participantCount = $this->threadParticipants()->count();
+
+        if ($participantCount === 0) {
+            return false;
+        }
+
+        $optedInCount = $this->threadParticipants()
+            ->whereNotNull('opted_in_at')
+            ->count();
+
+        return $participantCount === $optedInCount;
     }
 
     public static function unreadCountForUser(int $userId): int

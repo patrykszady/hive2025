@@ -5,9 +5,12 @@ namespace App\Services;
 use App\Events\SmsMessageReceived;
 use App\Models\SmsGroupThread;
 use App\Models\SmsMessage;
+use App\Models\SmsThreadParticipant;
 
 class GroupSmsService
 {
+    public const START_CONSENT_TEXT = 'Reply START to activate communication with GS Construction. Msg & data rates may apply. Message frequency varies. Reply STOP to opt out, HELP for help.';
+
     protected string $from;
 
     public function __construct()
@@ -54,17 +57,127 @@ class GroupSmsService
      */
     public function sendNewGroup(array $phoneNumbers, string $text, ?int $projectId = null, ?int $clientId = null, ?int $sentByUserId = null): SmsGroupThread
     {
+        $normalizedPhoneNumbers = collect($phoneNumbers)
+            ->map(fn (string $phone): string => self::formatE164($phone))
+            ->unique()
+            ->values()
+            ->all();
+
         $thread = SmsGroupThread::create([
             'from_number' => $this->from,
-            'participants' => $phoneNumbers,
+            'participants' => $normalizedPhoneNumbers,
             'project_id' => $projectId,
             'client_id' => $clientId,
             'last_activity_at' => now(),
         ]);
 
-        $this->sendToThread($thread, $text, [], $sentByUserId);
+        foreach ($normalizedPhoneNumbers as $phoneNumber) {
+            SmsThreadParticipant::create([
+                'thread_id' => $thread->id,
+                'phone_number' => $phoneNumber,
+            ]);
+        }
+
+        $this->sendToThread($thread, $this->buildConsentMessage($thread), [], $sentByUserId);
+        $thread->update(['opt_in_prompt_sent_at' => now()]);
 
         return $thread;
+    }
+
+    public function markParticipantOptedInAndSendWelcomeIfReady(SmsGroupThread $thread, string $phoneNumber, ?int $sentByUserId = null): bool
+    {
+        $normalizedPhone = self::formatE164($phoneNumber);
+
+        $participant = $thread->threadParticipants()
+            ->where('phone_number', $normalizedPhone)
+            ->first();
+
+        if (! $participant) {
+            return false;
+        }
+
+        if ($participant->opted_in_at === null) {
+            $participant->update(['opted_in_at' => now()]);
+        }
+
+        if ($thread->welcome_sent_at !== null || ! $thread->allParticipantsOptedIn()) {
+            return false;
+        }
+
+        $this->sendToThread($thread, $this->buildWelcomeMessage($thread), [], $sentByUserId);
+        $thread->update(['welcome_sent_at' => now()]);
+
+        return true;
+    }
+
+    public static function isStartKeyword(string $text): bool
+    {
+        return preg_match('/\bSTART\b/i', trim($text)) === 1;
+    }
+
+    private function buildWelcomeMessage(SmsGroupThread $thread): string
+    {
+        return $this->buildGreeting($thread) . "\n"
+            . "GS Construction welcomes you to our project msg thread. "
+            . "Msgs will be tagged with \"-PS\" for Patryk's replies, \"-GS\" for Grzegorz's, and our automated \"GS Crew\" replies by \"-GSC\". "
+            . "Save this number as \"GS Construction\" in your contacts list.";
+    }
+
+    private function buildConsentMessage(SmsGroupThread $thread): string
+    {
+        return $this->buildGreeting($thread) . "\n" . self::START_CONSENT_TEXT;
+    }
+
+    private function buildGreeting(SmsGroupThread $thread): string
+    {
+        $recipientNames = $this->resolveRecipientNames($thread);
+
+        if ($recipientNames === '') {
+            return 'Hi there,';
+        }
+
+        return "Hi {$recipientNames},";
+    }
+
+    private function resolveRecipientNames(SmsGroupThread $thread): string
+    {
+        $thread->loadMissing('client.users');
+
+        $participants = collect($thread->participants ?? [])
+            ->map(fn (string $phone): string => self::formatE164($phone));
+
+        $names = collect();
+
+        $client = $thread->client;
+        if (! $client) {
+            return '';
+        }
+
+        $homePhone = $client->getRawOriginal('home_phone');
+        if (is_string($homePhone) && $homePhone !== '') {
+            $homePhoneE164 = self::formatE164($homePhone);
+            if ($participants->contains($homePhoneE164)) {
+                $names->push($client->name);
+            }
+        }
+
+        foreach ($client->users as $user) {
+            $cellPhone = $user->getRawOriginal('cell_phone');
+            if (! is_string($cellPhone) || $cellPhone === '') {
+                continue;
+            }
+
+            $cellPhoneE164 = self::formatE164($cellPhone);
+            if (! $participants->contains($cellPhoneE164)) {
+                continue;
+            }
+
+            if (is_string($user->first_name) && $user->first_name !== '') {
+                $names->push($user->first_name);
+            }
+        }
+
+        return $names->filter()->unique()->implode(' & ');
     }
 
     /**

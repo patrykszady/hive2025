@@ -9,6 +9,7 @@ use App\Models\CallLog;
 use App\Models\SmsGroupThread;
 use App\Models\SmsLog;
 use App\Models\SmsMessage;
+use App\Services\GroupSmsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
@@ -16,6 +17,10 @@ use Illuminate\Support\Facades\Log;
 
 class TelnyxWebhookController extends Controller
 {
+    public function __construct(protected GroupSmsService $groupSmsService)
+    {
+    }
+
     /**
      * Handle incoming Telnyx messaging webhooks.
      */
@@ -506,6 +511,15 @@ class TelnyxWebhookController extends Controller
             'type' => $data['type'] ?? null,
         ]);
 
+        $normalizedText = strtoupper(trim($text));
+        if (in_array($normalizedText, ['START', 'STOP', 'HELP'], true)) {
+            Log::channel('telnyx')->info('Inbound compliance keyword received (provider/carrier may auto-respond)', [
+                'keyword' => $normalizedText,
+                'from' => $from,
+                'to' => $to,
+            ]);
+        }
+
         // Find the group thread this message belongs to
         $thread = null;
         if ($from && $to) {
@@ -531,6 +545,16 @@ class TelnyxWebhookController extends Controller
         }
 
         if ($thread) {
+            if (GroupSmsService::isStartKeyword($text)) {
+                $welcomeSent = $this->groupSmsService->markParticipantOptedInAndSendWelcomeIfReady($thread, $from);
+
+                Log::channel('telnyx')->info('Inbound START processed', [
+                    'thread_id' => $thread->id,
+                    'from' => $from,
+                    'welcome_sent' => $welcomeSent,
+                ]);
+            }
+
             $thread->update(['last_activity_at' => now()]);
 
             \App\Events\SmsMessageReceived::dispatch($thread->id);

@@ -57,15 +57,11 @@ class SmsNewThread extends Component
             ->unique()
             ->implode(' & ');
 
-        if (empty($firstNames)) {
+        if ($firstNames === '') {
             $firstNames = $client->name;
         }
 
-        $vendor = auth()->user()?->vendor;
-        $vendorName = $vendor?->short_name ?? 'Our company';
-        $vendorEmail = $vendor?->business_email ?? '';
-
-        $this->message = "Hi {$firstNames},\n{$vendorName} welcomes you to our project msg thread. Msgs will be tagged with \"-PS\" for Patryk's replies, \"-GS\" for Grzegorz's, and our automated \"GS Crew\" replies by \"-GSC\". crew@gs.construction will be the best centralized mailbox to reach us via email going forward. Our signatures will be clearly marked as to who's responding. Please add this phone number to your contact list as \"GS Construction\". Let's get this project started!";
+        $this->message = "Hi {$firstNames},\n" . GroupSmsService::START_CONSENT_TEXT;
     }
 
     #[Computed]
@@ -167,14 +163,12 @@ class SmsNewThread extends Component
             return;
         }
 
-        $messageWithSig = $this->message . "\n" . self::getSignature();
-
-        $thread = $smsService->sendNewGroup($phones, $messageWithSig, null, $this->clientId, auth()->id());
+        $thread = $smsService->sendNewGroup($phones, $this->message, null, $this->clientId, auth()->id());
 
         $this->showModal = false;
         $this->dispatch('threadCreated', threadId: $thread->id);
 
-        \Flux::toast('Message sent!');
+        \Flux::toast('Consent request sent. Welcome message will be sent after all recipients reply START.');
     }
 
     /**

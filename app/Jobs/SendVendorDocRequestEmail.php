@@ -78,6 +78,6 @@ class SendVendorDocRequestEmail implements ShouldQueue
             return null;
         }
 
-        return $normalizedEmail;
+        return strtolower($normalizedEmail);
     }
 }
