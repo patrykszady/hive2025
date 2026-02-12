@@ -56,7 +56,7 @@ class ClientScheduleSmsNotification extends Notification implements ShouldQueue
     /**
      * Get the SMS message content.
      */
-    public function toTwilio(object $notifiable): string
+    public function toTelnyx(object $notifiable): string
     {
         $project = $this->project;
         $owner = $project->createdByVendor;

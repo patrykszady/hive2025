@@ -51,6 +51,7 @@ use App\Livewire\Projects\ProjectShow;
 use App\Livewire\Projects\ProjectsIndex;
 use App\Livewire\Sheets\SheetShow;
 use App\Livewire\Sheets\SheetsIndex;
+use App\Livewire\Sms\SmsIndex;
 use App\Livewire\Timesheets\TimesheetCreate;
 use App\Livewire\Timesheets\TimesheetPaymentCreate;
 use App\Livewire\Timesheets\TimesheetPaymentIndex;
@@ -121,6 +122,10 @@ Route::prefix('welcome/legal')->name('legal.')->group(function () {
 Route::permanentRedirect('legal', 'welcome/legal');
 Route::permanentRedirect('legal/privacy', 'welcome/legal/privacy');
 Route::permanentRedirect('legal/terms', 'welcome/legal/terms');
+
+// Short URLs for SMS
+Route::permanentRedirect('p', 'welcome/legal/privacy');
+Route::permanentRedirect('t', 'welcome/legal/terms');
 
 // Passkey setup page (requires auth)
 Route::middleware('auth')->group(function () {
@@ -212,6 +217,9 @@ Route::post('webhooks/plaid', [PlaidWebhookController::class, 'handle'])->name('
 // Telnyx webhooks (SMS delivery status, inbound messages)
 Route::post('webhooks/telnyx/messaging', [TelnyxWebhookController::class, 'handle'])->name('webhooks.telnyx.messaging');
 
+// Telnyx voice webhooks (call control - incoming calls, transfers, hangups)
+Route::post('webhooks/telnyx/voice', [TelnyxWebhookController::class, 'handleVoice'])->name('webhooks.telnyx.voice');
+
 // Mailtrap webhooks (no auth required - token is validated in the URL)
 Route::post('webhooks/mailtrap/{token}', [MailtrapWebhookController::class, 'handle'])->name('webhooks.mailtrap');
 
@@ -301,6 +309,11 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
     //CLIENTS
     Route::get('/clients', ClientsIndex::class)->name('clients.index');
     Route::get('/clients/{client}', ClientsShow::class)->name('clients.show');
+
+    //MESSAGES
+    Route::get('/messages', SmsIndex::class)
+        ->middleware('admin.access')
+        ->name('sms.index');
 
     //LINE ITEMS
     Route::get('/line_items', LineItemsIndex::class)->name('line_items.index');

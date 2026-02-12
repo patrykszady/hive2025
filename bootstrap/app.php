@@ -13,7 +13,7 @@ return Application::configure(basePath: dirname(__DIR__))
         web: __DIR__.'/../routes/web.php',
         // api: __DIR__.'/../routes/api.php',
         commands: __DIR__.'/../routes/console.php',
-        // channels: __DIR__.'/../routes/channels.php',
+        channels: __DIR__.'/../routes/channels.php',
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
@@ -52,6 +52,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->appendToGroup('web', \App\Http\Middleware\NoIndexNonPublic::class);
 
         $middleware->alias([
+            'admin.access' => \App\Http\Middleware\AdminAccess::class,
             'vendor.access' => \App\Http\Middleware\VendorAccessControl::class,
             'vendor.own-redirect' => \App\Http\Middleware\RedirectOwnVendorToDashboard::class,
             'registered' => \App\Http\Middleware\EnsureUserRegistered::class,

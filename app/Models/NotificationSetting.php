@@ -11,6 +11,7 @@ class NotificationSetting extends Model
         'user_id',
         'realtime_email',
         'realtime_sms',
+        'sms_inbound_browser',
         'realtime_start',
         'realtime_end',
         'morning_email',
@@ -24,6 +25,7 @@ class NotificationSetting extends Model
         return [
             'realtime_email' => 'boolean',
             'realtime_sms' => 'boolean',
+            'sms_inbound_browser' => 'boolean',
             'morning_email' => 'boolean',
             'morning_sms' => 'boolean',
             'evening_email' => 'boolean',

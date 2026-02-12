@@ -1,0 +1,234 @@
+<?php
+
+namespace App\Livewire\Sms;
+
+use App\Livewire\Sms\SmsNewThread;
+use App\Models\CallLog;
+use App\Models\SmsGroupThread;
+use App\Models\SmsMessage;
+use App\Models\SmsThreadRead;
+use App\Services\GroupSmsService;
+use Flux;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
+use Livewire\Component;
+use Livewire\WithFileUploads;
+
+class SmsConversation extends Component
+{
+    use WithFileUploads;
+
+    public ?int $threadId = null;
+
+    public string $newMessage = '';
+
+    public $attachment;
+
+    protected ?int $lastMarkedMessageId = null;
+
+    public function mount(): void
+    {
+        $this->markThreadAsRead();
+    }
+
+    /** @return array<string, string> */
+    public function getListeners(): array
+    {
+        $listeners = [];
+
+        if ($this->threadId) {
+            $listeners["echo-private:sms.thread.{$this->threadId},SmsMessageReceived"] = '$refresh';
+        }
+
+        return $listeners;
+    }
+
+    public function updatedAttachment(): void
+    {
+        $this->validate([
+            'attachment' => 'nullable|file|mimes:jpg,jpeg,png,gif,webp|max:5120',
+        ]);
+    }
+
+    public function removeAttachment(): void
+    {
+        $this->attachment = null;
+    }
+
+    public function updatedThreadId(): void
+    {
+        $this->markThreadAsRead();
+    }
+
+    public function sendMessage(GroupSmsService $smsService): void
+    {
+        $this->validate([
+            'newMessage' => 'required_without:attachment|nullable|string|max:1600',
+            'attachment' => 'nullable|file|mimes:jpg,jpeg,png,gif,webp|max:5120',
+            'threadId' => 'required|exists:sms_group_threads,id',
+        ]);
+
+        $thread = SmsGroupThread::findOrFail($this->threadId);
+
+        $text = trim($this->newMessage);
+        $messageWithSig = $text ? $text . "\n" . SmsNewThread::getSignature() : SmsNewThread::getSignature();
+
+        $mediaUrls = [];
+        if ($this->attachment) {
+            $path = $this->attachment->store('sms-attachments', 'public');
+            // Use public-facing URL so Telnyx can fetch the media
+            $publicBase = config('services.telnyx.public_url', config('app.url'));
+            $mediaUrls[] = rtrim($publicBase, '/') . '/storage/' . $path;
+        }
+
+        $smsService->sendToThread($thread, $messageWithSig, $mediaUrls, auth()->id());
+
+        $this->newMessage = '';
+        $this->attachment = null;
+
+        $this->dispatch('messageSent');
+    }
+
+    #[Computed]
+    public function thread(): ?SmsGroupThread
+    {
+        if (! $this->threadId) {
+            return null;
+        }
+
+        return SmsGroupThread::with(['project', 'client.users'])->find($this->threadId);
+    }
+
+    /**
+     * Initiate a click-to-call: dials the logged-in user first, then bridges to the target.
+     */
+    public function initiateCall(string $targetPhone): void
+    {
+        $user = auth()->user();
+        $userPhone = $user->routeNotificationForTelnyx();
+
+        if (! $userPhone) {
+            Flux::toast(variant: 'danger', heading: 'No Phone', text: 'You don\'t have a cell phone on file.', duration: 5000, position: 'top right');
+            return;
+        }
+
+        $apiKey = config('services.telnyx.api_key');
+        $connectionId = config('services.telnyx.connection_id');
+        $from = config('services.telnyx.from');
+
+        if (! $apiKey || ! $connectionId) {
+            Flux::toast(variant: 'danger', heading: 'Not Configured', text: 'Voice calling is not configured.', duration: 5000, position: 'top right');
+            return;
+        }
+
+        // Create a call log for this outbound call
+        $callLog = CallLog::create([
+            'direction' => 'outgoing',
+            'from_number' => $from,
+            'to_number' => $targetPhone,
+            'status' => CallLog::STATUS_INITIATED,
+            'user_id' => $user->id,
+            'metadata' => [
+                'type' => 'click_to_call',
+                'target_phone' => $targetPhone,
+                'user_phone' => $userPhone,
+            ],
+        ]);
+
+        try {
+            // Step 1: Call the logged-in user's cell phone first
+            $response = Http::withToken($apiKey)
+                ->post('https://api.telnyx.com/v2/calls', [
+                    'connection_id' => $connectionId,
+                    'to' => $userPhone,
+                    'from' => $from,
+                    'timeout_secs' => (int) config('services.telnyx.voice_timeout', 30),
+                    'client_state' => base64_encode(json_encode([
+                        'action' => 'click_to_call',
+                        'target_phone' => $targetPhone,
+                        'call_log_id' => $callLog->id,
+                    ])),
+                    'webhook_url' => rtrim(config('services.telnyx.public_url', config('app.url')), '/') . '/webhooks/telnyx/voice',
+                ]);
+
+            if ($response->successful()) {
+                $data = $response->json('data');
+                $callLog->update([
+                    'call_control_id' => $data['call_control_id'] ?? null,
+                    'call_session_id' => $data['call_session_id'] ?? null,
+                    'call_leg_id' => $data['call_leg_id'] ?? null,
+                ]);
+
+                Log::channel('telnyx')->info('Click-to-call initiated', [
+                    'call_log_id' => $callLog->id,
+                    'user_phone' => $userPhone,
+                    'target_phone' => $targetPhone,
+                    'call_control_id' => $data['call_control_id'] ?? null,
+                ]);
+
+                Flux::toast(variant: 'success', heading: 'Calling', text: 'Your phone will ring shortly...', duration: 8000, position: 'top right');
+            } else {
+                $callLog->update(['status' => CallLog::STATUS_FAILED]);
+                Log::channel('telnyx')->error('Click-to-call API failed', [
+                    'status' => $response->status(),
+                    'error' => $response->json(),
+                ]);
+                Flux::toast(variant: 'danger', heading: 'Call Failed', text: 'Could not initiate the call.', duration: 5000, position: 'top right');
+            }
+        } catch (\Exception $e) {
+            $callLog->update(['status' => CallLog::STATUS_FAILED]);
+            Log::channel('telnyx')->error('Click-to-call exception', ['error' => $e->getMessage()]);
+            Flux::toast(variant: 'danger', heading: 'Call Failed', text: 'Could not initiate the call.', duration: 5000, position: 'top right');
+        }
+    }
+
+    #[Computed]
+    public function smsMessages()
+    {
+        if (! $this->threadId) {
+            return collect();
+        }
+
+        return SmsMessage::where('thread_id', $this->threadId)
+            ->with('sentByUser:id,first_name,last_name')
+            ->orderBy('created_at', 'asc')
+            ->get();
+    }
+
+    public function render()
+    {
+        $this->markThreadAsRead();
+
+        return view('livewire.sms.conversation');
+    }
+
+    protected function markThreadAsRead(): void
+    {
+        if (! $this->threadId || ! auth()->id()) {
+            return;
+        }
+
+        $latestMessageId = SmsMessage::where('thread_id', $this->threadId)->max('id');
+
+        if (! $latestMessageId || $latestMessageId === $this->lastMarkedMessageId) {
+            return;
+        }
+
+        SmsThreadRead::updateOrCreate(
+            [
+                'thread_id' => $this->threadId,
+                'user_id' => auth()->id(),
+            ],
+            [
+                'last_read_message_id' => $latestMessageId,
+            ]
+        );
+
+        $this->lastMarkedMessageId = $latestMessageId;
+
+        $this->dispatch('threadRead')->to(SmsIndex::class);
+        $this->dispatch('sms-thread-read');
+    }
+}

@@ -26,6 +26,7 @@
         "laravel/framework": "^12.00",
         "laravel/horizon": "^5.30",
         "laravel/nightwatch": "^1.7",
+        "laravel/reverb": "^1.7",
         "laravel/sanctum": "^4.0",
         "laravel/scout": "^10.11",
         "laravel/tinker": "^2.9",
@@ -53,7 +54,6 @@
         "symfony/http-client": "*",
         "symfony/mailgun-mailer": "^7.0",
         "symfony/panther": "^2.1",
-        "twilio/sdk": "^6.44",
         "vlucas/phpdotenv": "^5.5",
         "zoon/puphpeteer": "^2.2"
     },

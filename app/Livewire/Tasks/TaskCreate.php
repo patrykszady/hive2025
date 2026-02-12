@@ -12,6 +12,7 @@ use App\Livewire\Planner\CardsIndex;
 use App\Livewire\Planner\PlannerTaskCard;
 use App\Livewire\Projects\UpcomingTasks;
 use App\Livewire\Dashboard\UserTasks;
+use App\Livewire\Clients\UpcomingClientTasks;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Flux;
@@ -294,6 +295,7 @@ class TaskCreate extends Component
         $this->dispatch('refreshComponent')->to(PlannerTaskCard::class);
         $this->dispatch('refreshComponent')->to(UpcomingTasks::class);
         $this->dispatch('refreshComponent')->to(UserTasks::class);
+        $this->dispatch('refreshComponent')->to(UpcomingClientTasks::class);
     }
 
     /**

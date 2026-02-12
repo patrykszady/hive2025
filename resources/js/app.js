@@ -1,5 +1,19 @@
 import './plaid-link';
 import './timezone';
+import Echo from 'laravel-echo';
+import Pusher from 'pusher-js';
+
+window.Pusher = Pusher;
+
+window.Echo = new Echo({
+    broadcaster: 'reverb',
+    key: import.meta.env.VITE_REVERB_APP_KEY,
+    wsHost: import.meta.env.VITE_REVERB_HOST,
+    wsPort: import.meta.env.VITE_REVERB_PORT ?? 80,
+    wssPort: import.meta.env.VITE_REVERB_PORT ?? 443,
+    forceTLS: (import.meta.env.VITE_REVERB_SCHEME ?? 'https') === 'https',
+    enabledTransports: ['ws', 'wss'],
+});
 
 const FADE_CLASS = 'opacity-0';
 
@@ -152,6 +166,22 @@ function isNotificationSupported() {
 	return typeof window !== 'undefined' && 'Notification' in window;
 }
 
+function getSupportedPushContentEncoding() {
+	if (typeof PushManager === 'undefined') {
+		return 'aes128gcm';
+	}
+
+	const encodings = Array.isArray(PushManager.supportedContentEncodings)
+		? PushManager.supportedContentEncodings
+		: [];
+
+	if (encodings.length > 0) {
+		return encodings[0];
+	}
+
+	return 'aes128gcm';
+}
+
 async function enableUpcomingTaskNotifications() {
 	if (!isNotificationSupported()) {
 		return { enabled: false, reason: 'unsupported' };
@@ -204,7 +234,10 @@ async function enableUpcomingTaskNotifications() {
 				'Accept': 'application/json',
 				'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
 			},
-			body: JSON.stringify(subscription.toJSON()),
+			body: JSON.stringify({
+				...subscription.toJSON(),
+				contentEncoding: getSupportedPushContentEncoding(),
+			}),
 		});
 
 		if (!subscribeResponse.ok) {

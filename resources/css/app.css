@@ -41,6 +41,14 @@
     scroll-padding-top: 80px;
   }
 
+  .sms-messages {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+  }
+  .dark .sms-messages {
+    scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+  }
+
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;

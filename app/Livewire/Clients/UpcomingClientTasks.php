@@ -60,12 +60,12 @@ class UpcomingClientTasks extends Component
     #[Computed]
     public function groupedTasks(): Collection
     {
-        $today = $this->getToday();
-        $startOfWeek = $today->copy()->startOfWeek(Carbon::MONDAY);
-        $endOfWeek = $today->copy()->endOfWeek(Carbon::SUNDAY);
+        $today = browser_today();
+        $cutoff = $today->copy()->subDay();
+        $windowEnd = $today->copy()->addDays(6);
 
-        $startOfWeekStr = $startOfWeek->format('Y-m-d');
-        $endOfWeekStr = $endOfWeek->format('Y-m-d');
+        $cutoffStr = $cutoff->format('Y-m-d');
+        $windowEndStr = $windowEnd->format('Y-m-d');
 
         $projectIds = $this->getProjectIds();
 
@@ -77,8 +77,8 @@ class UpcomingClientTasks extends Component
             ->whereIn('project_id', $projectIds)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
-            ->whereDate('start_date', '<=', $endOfWeekStr)
-            ->whereDate('end_date', '>=', $startOfWeekStr)
+            ->whereDate('start_date', '<=', $windowEndStr)
+            ->whereDate('end_date', '>=', $cutoffStr)
             ->with(['vendor', 'project.client', 'project.latestStatus'])
             ->orderBy('start_date')
             ->orderBy('end_date')
@@ -106,28 +106,54 @@ class UpcomingClientTasks extends Component
 
         $grouped = collect();
 
-        $currentDate = $startOfWeek->copy();
-        while ($currentDate->lte($endOfWeek)) {
-            $grouped[$currentDate->format('Y-m-d')] = collect();
-            $currentDate->addDay();
-        }
+        $todayStr = $today->format('Y-m-d');
 
         foreach ($tasks as $task) {
             $selectedDates = (array) data_get($task->options, 'dates', []);
 
             if (! empty($selectedDates)) {
                 foreach ($selectedDates as $dateStr) {
-                    if ($dateStr >= $startOfWeekStr && $dateStr <= $endOfWeekStr && $grouped->has($dateStr)) {
+                    if ($dateStr >= $cutoffStr && $dateStr <= $windowEndStr) {
+                        if (! $grouped->has($dateStr)) {
+                            $grouped[$dateStr] = collect();
+                        }
                         $grouped[$dateStr]->push($task);
                     }
                 }
             } else {
                 $dateStr = $task->start_date->format('Y-m-d');
-                if ($dateStr >= $startOfWeekStr && $dateStr <= $endOfWeekStr && $grouped->has($dateStr)) {
+                if ($dateStr >= $cutoffStr && $dateStr <= $windowEndStr) {
+                    if (! $grouped->has($dateStr)) {
+                        $grouped[$dateStr] = collect();
+                    }
                     $grouped[$dateStr]->push($task);
                 }
             }
         }
+
+        $grouped = $grouped->sortKeys();
+
+        $grouped = $grouped->map(function ($tasks, $dateStr) {
+            return $tasks->sortBy(function ($task) use ($dateStr) {
+                $startTime = (string) data_get($task->options, "time_settings.$dateStr.start_time", '');
+                $usesTime = (bool) data_get($task->options, "time_settings.$dateStr.use_time", false);
+                $hasTime = $usesTime && $startTime !== '';
+
+                return $hasTime ? '0_' . $startTime : '1';
+            })->values();
+        });
+
+        // Ensure 8 consecutive days starting from yesterday (browser timezone)
+        for ($i = -1; $i < 7; $i++) {
+            $dateStr = $today->copy()->addDays($i)->format('Y-m-d');
+            if (! $grouped->has($dateStr)) {
+                $grouped[$dateStr] = collect();
+            }
+        }
+
+        // Keep only the 8-day window (yesterday through 6 days from now)
+        $windowStartStr = $today->copy()->subDay()->format('Y-m-d');
+        $grouped = $grouped->filter(fn ($tasks, $date) => $date >= $windowStartStr && $date <= $windowEndStr);
 
         return $grouped->sortKeys();
     }
@@ -138,9 +164,9 @@ class UpcomingClientTasks extends Component
     #[Computed]
     public function nextTaskInfo(): ?object
     {
-        $today = $this->getToday();
-        $weekEnd = $today->copy()->endOfWeek(Carbon::SUNDAY);
-        $weekEndStr = $weekEnd->format('Y-m-d');
+        $today = browser_today();
+        $windowEnd = $today->copy()->addDays(6);
+        $windowEndStr = $windowEnd->format('Y-m-d');
 
         $projectIds = $this->getProjectIds();
 
@@ -152,7 +178,7 @@ class UpcomingClientTasks extends Component
             ->whereIn('project_id', $projectIds)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
-            ->whereDate('start_date', '>', $weekEndStr)
+            ->whereDate('start_date', '>', $windowEndStr)
             ->get();
 
         $futureDates = collect();
@@ -180,7 +206,7 @@ class UpcomingClientTasks extends Component
         $nextDate = Carbon::parse($nextDateStr, (string) config('app.timezone'))->startOfDay();
 
         $daysUntil = 0;
-        $current = $weekEnd->copy()->addDay()->startOfDay();
+        $current = $windowEnd->copy()->addDay()->startOfDay();
         while ($current->lte($nextDate)) {
             if (! $current->isWeekend()) {
                 $daysUntil++;
@@ -205,9 +231,9 @@ class UpcomingClientTasks extends Component
     #[Computed]
     public function taskCount(): int
     {
-        $today = $this->getToday();
-        $startOfWeek = $today->copy()->startOfWeek(Carbon::MONDAY)->format('Y-m-d');
-        $endOfWeek = $today->copy()->endOfWeek(Carbon::SUNDAY)->format('Y-m-d');
+        $today = browser_today();
+        $startOfWindow = $today->format('Y-m-d');
+        $endOfWindow = $today->copy()->addDays(6)->format('Y-m-d');
 
         $projectIds = $this->getProjectIds();
 
@@ -219,8 +245,8 @@ class UpcomingClientTasks extends Component
             ->whereIn('project_id', $projectIds)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
-            ->whereDate('start_date', '<=', $endOfWeek)
-            ->whereDate('end_date', '>=', $startOfWeek)
+            ->whereDate('start_date', '<=', $endOfWindow)
+            ->whereDate('end_date', '>=', $startOfWindow)
             ->count();
     }
 

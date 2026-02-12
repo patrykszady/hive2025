@@ -1,5 +1,8 @@
 <?php
 
+$applicationUrl = rtrim((string) env('APP_URL', ''), '/');
+$applicationHost = parse_url($applicationUrl, PHP_URL_HOST) ?: null;
+
 return [
 
     /*
@@ -15,7 +18,7 @@ return [
 
     'relying_party' => [
         'name' => env('WEBAUTHN_NAME', config('app.name')),
-        'id' => env('WEBAUTHN_ID'),
+        'id' => env('WEBAUTHN_ID', $applicationHost),
     ],
 
     /*
@@ -30,7 +33,7 @@ return [
     | For multiple origins, separate them using comma, like `foo,bar`.
     */
 
-    'origins' => env('WEBAUTHN_ORIGINS'),
+    'origins' => env('WEBAUTHN_ORIGINS', $applicationUrl ?: null),
 
     /*
     |--------------------------------------------------------------------------

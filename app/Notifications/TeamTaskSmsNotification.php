@@ -57,7 +57,7 @@ class TeamTaskSmsNotification extends Notification implements ShouldQueue
     /**
      * Get the SMS message content.
      */
-    public function toTwilio($notifiable)
+    public function toTelnyx($notifiable)
     {
         return $this->type === 'reminder' 
             ? $this->buildReminderMessage($notifiable)

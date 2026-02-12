@@ -194,7 +194,7 @@ class SendClientScheduleChangeSms implements ShouldQueue, ShouldBeUnique
                 $tasks
             );
 
-            // Use the user directly - it has routeNotificationForTwilio() method
+            // Use the user directly - it has routeNotificationForTelnyx() method
             $channel = app(SmsChannel::get());
             $channel->send($user, $notification);
 

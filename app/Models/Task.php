@@ -151,6 +151,14 @@ class Task extends Model
             'bg_strong' => 'bg-orange-600',
             'hover_bg_strong' => 'hover:bg-orange-600',
         ],
+        'Reminder' => [
+            'flux' => 'rose',
+            'text' => 'text-rose-600 dark:text-rose-400',
+            'border' => 'border-rose-500',
+            'bg' => 'bg-rose-500',
+            'bg_strong' => 'bg-rose-600',
+            'hover_bg_strong' => 'hover:bg-rose-600',
+        ],
     ];
 
     /**

@@ -10,13 +10,7 @@
 
             <flux:heading class="text-center" size="xl">Set Up a Passkey</flux:heading>
 
-            <flux:callout color="indigo" icon="shield-check">
-                <flux:callout.heading>Sign in without a password</flux:callout.heading>
-                <flux:callout.text>
-                    Passkeys let you sign in quickly and securely using your fingerprint, face, or device PIN. 
-                    They're more secure than passwords and can't be phished.
-                </flux:callout.text>
-            </flux:callout>
+            <x-passkey-benefits-callout />
 
             <div id="passkey-error" class="hidden">
                 <flux:callout color="rose" icon="exclamation-triangle">
@@ -50,19 +44,7 @@
         </div>
     </div>
 
-    <!-- Right side - Decorative (optional, matches login page) -->
-    <div class="hidden lg:flex flex-1 items-center justify-center bg-zinc-100 dark:bg-zinc-800/50">
-        <div class="max-w-md p-8 text-center">
-            <flux:icon.shield-check class="w-24 h-24 mx-auto text-indigo-500 mb-6" />
-            <h2 class="text-2xl font-bold text-zinc-800 dark:text-zinc-200 mb-4">
-                Passwordless Authentication
-            </h2>
-            <p class="text-zinc-600 dark:text-zinc-400">
-                Passkeys use biometrics or your device's secure element to authenticate you. 
-                They're resistant to phishing and eliminate the need to remember passwords.
-            </p>
-        </div>
-    </div>
+    <x-passkey-right-panel />
 </div>
 
 <x-passkey-registration 

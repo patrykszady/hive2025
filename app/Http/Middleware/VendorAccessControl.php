@@ -18,6 +18,10 @@ class VendorAccessControl
         
         // Client-only users: allow access to client routes, forbid elsewhere
         if ($user->is_client_user) {
+            if (session()->get('is_admin_login_as') && $routeName === 'users.show') {
+                return $next($request);
+            }
+
             if ($routeName === 'dashboard') {
                 $client = $user->primary_client;
 
@@ -50,6 +54,18 @@ class VendorAccessControl
             if (str_starts_with($routeName, 'client.schedule.')) {
                 return $next($request);
             }
+
+            if (str_starts_with($routeName, 'push.')) {
+                return $next($request);
+            }
+
+            if ($routeName === 'users.show') {
+                $routeUser = $request->route('user');
+
+                if ($routeUser && (int) $routeUser->id === (int) $user->id) {
+                    return $next($request);
+                }
+            }
             
             // Let them use account_selection to pick a client
             if ($routeName === 'account_selection') {
@@ -58,6 +74,10 @@ class VendorAccessControl
             
             // Forbid access to all other routes
             abort(403);
+        }
+
+        if (session()->get('is_admin_login_as')) {
+            return $next($request);
         }
         
         // Special handling for vendor registration route

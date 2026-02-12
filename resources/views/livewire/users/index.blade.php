@@ -17,7 +17,7 @@
         <flux:table.columns>
             <flux:table.column>Name</flux:table.column>
             <flux:table.column>Phone</flux:table.column>
-            <flux:table.column class="w-1/2">Email</flux:table.column>
+            <flux:table.column>Email</flux:table.column>
             @if($view === 'vendors.show' || $view === 'vendor_registration')
                 <flux:table.column>Role</flux:table.column>
             @endif
@@ -41,9 +41,10 @@
                         </flux:table.cell>
                     @elseif($view === 'clients.show' && auth()->user()->can('update_client_member', $user))
                         <flux:table.cell
-                            wire:click="$dispatchTo('users.user-create', 'editClientMember', { user: {{$user->id}} })"
+                            wire:navigate.hover
+                            href="{{route('users.show', $user->id)}}"
                             variant="strong"
-                            class="cursor-pointer hover:text-indigo-600"
+                            class="cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400"
                             >
                             {{ $user->full_name }}
                         </flux:table.cell>
@@ -61,9 +62,46 @@
                             {{ $user->full_name }}
                         </flux:table.cell>
                     @endif
-                    <flux:table.cell>{{ $user->cell_phone ? preg_replace('/^(\d{3})(\d{3})(\d{4})$/', '($1) $2-$3', $user->cell_phone) : '' }}</flux:table.cell>
-                    <flux:table.cell class="whitespace-normal break-words">
-                        <span class="whitespace-normal break-words">{{ $user->email }}</span>
+                    <flux:table.cell>
+                        @if($user->cell_phone)
+                            @php $formattedPhone = preg_replace('/^(\d{3})(\d{3})(\d{4})$/', '($1) $2-$3', $user->cell_phone); @endphp
+                            <div class="flex items-center gap-1 min-w-0" x-data="{
+                                copied: false,
+                                copyText() {
+                                    navigator.clipboard.writeText('{{ $user->cell_phone }}')
+                                        .then(() => { this.copied = true; setTimeout(() => { this.copied = false }, 1500); })
+                                        .catch(() => { $flux.toast({ text: 'Failed to copy phone to clipboard.', variant: 'danger', timeout: 2000, position: 'top right' }); });
+                                }
+                            }">
+                                <span class="truncate text-sm" title="{{ $formattedPhone }}">{{ $formattedPhone }}</span>
+                                <div x-show="!copied" class="shrink-0">
+                                    <flux:button size="xs" icon="clipboard-document" icon:variant="outline" tooltip="Copy Phone" x-on:click.stop="copyText()" />
+                                </div>
+                                <div x-show="copied" x-cloak class="shrink-0">
+                                    <flux:button size="xs" icon="check" variant="primary" color="green" disabled />
+                                </div>
+                            </div>
+                        @endif
+                    </flux:table.cell>
+                    <flux:table.cell>
+                        @if($user->email)
+                            <div class="flex items-center gap-1 min-w-0" x-data="{
+                                copied: false,
+                                copyText() {
+                                    navigator.clipboard.writeText('{{ addslashes($user->email) }}')
+                                        .then(() => { this.copied = true; setTimeout(() => { this.copied = false }, 1500); })
+                                        .catch(() => { $flux.toast({ text: 'Failed to copy email to clipboard.', variant: 'danger', timeout: 2000, position: 'top right' }); });
+                                }
+                            }">
+                                <span class="truncate text-sm" title="{{ $user->email }}">{{ $user->email }}</span>
+                                <div x-show="!copied" class="shrink-0">
+                                    <flux:button size="xs" icon="clipboard-document" icon:variant="outline" tooltip="Copy Email" x-on:click.stop="copyText()" />
+                                </div>
+                                <div x-show="copied" x-cloak class="shrink-0">
+                                    <flux:button size="xs" icon="check" variant="primary" color="green" disabled />
+                                </div>
+                            </div>
+                        @endif
                     </flux:table.cell>
                     @if($view === 'vendors.show' || $view === 'vendor_registration')
                         {{-- Show role only for vendor users --}}

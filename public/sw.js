@@ -11,30 +11,51 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('push', (event) => {
-    if (!event.data) {
-        return;
-    }
+    console.log('[SW] Push event received', event);
 
-    let payload;
-    try {
-        payload = event.data.json();
-    } catch (e) {
-        payload = { title: 'Notification', body: event.data.text() };
-    }
+    event.waitUntil((async () => {
+        let payload = {
+            title: 'New Notification',
+            body: 'You have a new alert.',
+            tag: 'generic-notification',
+            data: { url: '/messages' },
+            requireInteraction: false,
+        };
 
-    const title = payload.title || 'Task Reminder';
-    const options = {
-        body: payload.body || '',
-        icon: payload.icon || '/images/logo-192.png',
-        badge: payload.badge || '/images/logo-72.png',
-        tag: payload.tag || 'task-notification',
-        data: payload.data || {},
-        requireInteraction: payload.requireInteraction || false,
-    };
+        if (!event.data) {
+            console.warn('[SW] Push event has no data; showing fallback notification');
+        } else {
+            try {
+                payload = event.data.json();
+                console.log('[SW] Parsed payload', payload);
+            } catch (error) {
+                console.warn('[SW] Failed to parse JSON, using text fallback', error);
+                payload = {
+                    title: 'Notification',
+                    body: event.data.text() || 'You have a new alert.',
+                    tag: 'text-fallback-notification',
+                    data: { url: '/messages' },
+                    requireInteraction: false,
+                };
+            }
+        }
 
-    event.waitUntil(
-        self.registration.showNotification(title, options)
-    );
+        const title = payload.title || 'Notification';
+        const options = {
+            body: payload.body || '',
+            icon: payload.icon || '/images/logo-192.png',
+            badge: payload.badge || '/images/logo-72.png',
+            tag: payload.tag || 'task-notification',
+            data: payload.data || {},
+            requireInteraction: payload.requireInteraction || false,
+        };
+
+        try {
+            await self.registration.showNotification(title, options);
+        } catch (error) {
+            console.error('[SW] showNotification failed', error);
+        }
+    })());
 });
 
 self.addEventListener('notificationclick', (event) => {

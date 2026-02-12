@@ -27,6 +27,11 @@ class EnsureUserRegistered
             return $next($request);
         }
 
+        // Skip registration check for admin "login as" (incognito) sessions
+        if (session()->get('is_admin_login_as')) {
+            return $next($request);
+        }
+
         // Check if user has completed registration
         $isRegistered = $user->registration['registered'] ?? false;
 

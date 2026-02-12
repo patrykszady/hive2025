@@ -11,8 +11,7 @@ return [
     ],
 
     'sms' => [
-        // Supported: 'twilio', 'telnyx'
-        'provider' => env('SMS_PROVIDER', 'telnyx'),
+        'provider' => 'telnyx',
     ],
 
     'telnyx' => [
@@ -20,6 +19,10 @@ return [
         'messaging_profile_id' => env('TELNYX_MESSAGING_PROFILE_ID'),
         'from' => env('TELNYX_FROM'),
         'dev_to' => env('TELNYX_DEV_TO'),
+        'connection_id' => env('TELNYX_CONNECTION_ID'),
+        'voice_forward_to' => env('TELNYX_VOICE_FORWARD_TO'),
+        'voice_timeout' => env('TELNYX_VOICE_TIMEOUT', 30),
+        'public_url' => env('TELNYX_PUBLIC_URL'),
     ],
 
     'mailtrap-sdk' => [
@@ -33,18 +36,12 @@ return [
         'secret' => env('MAILGUN_SECRET'),
     ],
 
-    'twilio' => [
-        'sid' => env('TWILIO_SID'),
-        'token' => env('TWILIO_TOKEN'),
-        'from' => env('TWILIO_FROM'), // Your Twilio phone number
-        'dev_to' => env('TWILIO_DEV_TO', '+12249993880'),
-    ],
-
     'two_captcha' => [
         'api_key' => env('TWOCAPTCHA_API_KEY'),
     ],
 
     'vapid' => [
+        'subject' => env('VAPID_SUBJECT', env('APP_URL', 'http://localhost')),
         'public_key' => env('VAPID_PUBLIC_KEY'),
         'private_key' => env('VAPID_PRIVATE_KEY'),
     ],

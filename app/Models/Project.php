@@ -232,15 +232,17 @@ class Project extends Model
             '__soft_deleted = 0',
         ];
 
-        $belongsToVendorId = (int) $user->vendor->id;
-        $filters[] = 'belongs_to_vendor_id = '.$belongsToVendorId;
+        if ($user->vendor) {
+            $belongsToVendorId = (int) $user->vendor->id;
+            $filters[] = 'belongs_to_vendor_id = '.$belongsToVendorId;
 
-        if ($user->vendor_role === 'Member' && isset($user->vendor_pivot->start_date)) {
-            $projectsStartDate = \Carbon\Carbon::parse($user->vendor_pivot->start_date)
-                ->subMonths(6)
-                ->startOfDay()
-                ->timestamp;
-            $filters[] = 'created_at > '.$projectsStartDate;
+            if ($user->vendor_role === 'Member' && isset($user->vendor_pivot->start_date)) {
+                $projectsStartDate = \Carbon\Carbon::parse($user->vendor_pivot->start_date)
+                    ->subMonths(6)
+                    ->startOfDay()
+                    ->timestamp;
+                $filters[] = 'created_at > '.$projectsStartDate;
+            }
         }
 
         foreach ($filterConditions as $condition) {

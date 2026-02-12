@@ -16,21 +16,19 @@ class UserNotificationSettings extends Component
 
     public User $user;
 
-    // Realtime channel toggles
-    public bool $realtime_email = true;
-    public bool $realtime_sms = false;
+    // Channel toggles (master on/off per delivery method)
+    public bool $channel_email = true;
+    public bool $channel_sms = false;
+    public bool $sms_inbound_browser = false;
 
-    // Realtime window
+    // Time window
     public string $realtime_start = '07:00';
     public string $realtime_end = '18:00';
 
-    // Morning digest per channel
-    public bool $morning_email = false;
-    public bool $morning_sms = false;
-
-    // Evening digest per channel
-    public bool $evening_email = false;
-    public bool $evening_sms = false;
+    // Type toggles (what gets sent)
+    public bool $type_realtime = true;
+    public bool $type_morning = false;
+    public bool $type_evening = false;
 
     public function mount(User $user): void
     {
@@ -41,14 +39,21 @@ class UserNotificationSettings extends Component
         $setting = $this->user->notificationSetting;
 
         if ($setting) {
-            $this->realtime_email = $setting->realtime_email;
-            $this->realtime_sms = $setting->realtime_sms;
+            // Channel is on if any type uses it
+            $this->channel_email = $setting->realtime_email || $setting->morning_email || $setting->evening_email;
+            $this->channel_sms = $setting->realtime_sms || $setting->morning_sms || $setting->evening_sms;
+
             $this->realtime_start = $setting->realtime_start ?? '07:00';
             $this->realtime_end = $setting->realtime_end ?? '18:00';
-            $this->morning_email = $setting->morning_email;
-            $this->morning_sms = $setting->morning_sms;
-            $this->evening_email = $setting->evening_email;
-            $this->evening_sms = $setting->evening_sms;
+
+            // Type is on if any channel uses it
+            $this->type_realtime = $setting->realtime_email || $setting->realtime_sms;
+            $this->type_morning = $setting->morning_email || $setting->morning_sms;
+            $this->type_evening = $setting->evening_email || $setting->evening_sms;
+
+            if ($this->user->vendor_role === 'Admin') {
+                $this->sms_inbound_browser = (bool) $setting->sms_inbound_browser;
+            }
         }
     }
 
@@ -67,14 +72,14 @@ class UserNotificationSettings extends Component
     protected function rules(): array
     {
         return [
-            'realtime_email' => 'boolean',
-            'realtime_sms' => 'boolean',
+            'channel_email' => 'boolean',
+            'channel_sms' => 'boolean',
+            'sms_inbound_browser' => 'boolean',
             'realtime_start' => 'required|date_format:H:i',
             'realtime_end' => 'required|date_format:H:i|after:realtime_start',
-            'morning_email' => 'boolean',
-            'morning_sms' => 'boolean',
-            'evening_email' => 'boolean',
-            'evening_sms' => 'boolean',
+            'type_realtime' => 'boolean',
+            'type_morning' => 'boolean',
+            'type_evening' => 'boolean',
         ];
     }
 
@@ -87,14 +92,15 @@ class UserNotificationSettings extends Component
         $this->user->notificationSetting()->updateOrCreate(
             ['user_id' => $this->user->id],
             [
-                'realtime_email' => $this->realtime_email,
-                'realtime_sms' => $this->realtime_sms,
+                'realtime_email' => $this->channel_email && $this->type_realtime,
+                'realtime_sms' => $this->channel_sms && $this->type_realtime,
+                'sms_inbound_browser' => $this->user->vendor_role === 'Admin' && $this->sms_inbound_browser,
                 'realtime_start' => $this->realtime_start,
                 'realtime_end' => $this->realtime_end,
-                'morning_email' => $this->morning_email,
-                'morning_sms' => $this->morning_sms,
-                'evening_email' => $this->evening_email,
-                'evening_sms' => $this->evening_sms,
+                'morning_email' => $this->channel_email && $this->type_morning,
+                'morning_sms' => $this->channel_sms && $this->type_morning,
+                'evening_email' => $this->channel_email && $this->type_evening,
+                'evening_sms' => $this->channel_sms && $this->type_evening,
             ]
         );
 

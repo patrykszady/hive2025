@@ -8,9 +8,9 @@
                 </a>
             </div>
 
-            <flux:heading class="text-center" size="xl">Register your Hive</flux:heading>
+            <flux:heading class="text-center" size="xl">Register for Hive</flux:heading>
 
-            @if($show_unregistered_notice)
+            @if($show_unregistered_notice && $step !== 'phone')
                 <flux:callout color="indigo" icon="information-circle">
                     <flux:callout.heading>Number not registered</flux:callout.heading>
                     <flux:callout.text>
@@ -93,7 +93,7 @@
                         <flux:field>
                             <flux:label>Email Address</flux:label>
                             <flux:input 
-                                value="{{ $user->email }}"
+                                value="{{ $this->maskedEmail() }}"
                                 type="email"
                                 disabled
                             />
@@ -198,12 +198,7 @@
 
                     {{-- Passkey option --}}
                     <div wire:show="!$wire.use_password" wire:transition.opacity.duration.150ms wire:cloak class="space-y-6">
-                        <flux:callout color="indigo" icon="shield-check">
-                            <flux:callout.heading>Set up a passkey</flux:callout.heading>
-                            <flux:callout.text>
-                                Use your fingerprint, face, or device PIN to sign in. You can always add a password later.
-                            </flux:callout.text>
-                        </flux:callout>
+                        <x-passkey-benefits-callout />
 
                         <div id="passkey-error" class="hidden">
                             <flux:callout color="rose" icon="exclamation-triangle">
@@ -287,31 +282,11 @@
         </div>
     </div>
 
-    <!-- Right side - Testimonial -->
-    <div class="flex-1 p-4 max-lg:hidden">
-        <div class="text-white relative rounded-lg h-full w-full bg-indigo-900 flex flex-col items-start justify-end p-16">
-            <div class="flex gap-2 mb-4">
-                <flux:icon.star variant="solid" />
-                <flux:icon.star variant="solid" />
-                <flux:icon.star variant="solid" />
-                <flux:icon.star variant="solid" />
-                <flux:icon.star variant="solid" />
-            </div>
-
-            <div class="mb-6 italic font-base text-3xl xl:text-4xl">
-                "Registering my Hive was quick and easy. Now I have complete control over my projects and subcontractors."
-            </div>
-
-            <div class="flex gap-4">
-                <flux:avatar src="{{ asset('favicon.png') }}" size="xl" />
-
-                <div class="flex flex-col justify-center font-medium">
-                    <div class="text-lg">Sarah Johnson</div>
-                    <div class="text-zinc-300">Project Manager</div>
-                </div>
-            </div>
-        </div>
-    </div>
+    @if($step === 'complete')
+        <x-passkey-right-panel />
+    @else
+        <x-hive-right-panel />
+    @endif
 
     <x-passkey-registration 
         button-id="create-passkey-btn"

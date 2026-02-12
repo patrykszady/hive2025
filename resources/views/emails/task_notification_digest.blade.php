@@ -5,6 +5,7 @@ $typeColors = [
 'Task' => '#4f46e5',
 'Milestone' => '#6366f1',
 'Meet' => '#ea580c',
+'Reminder' => '#e11d48',
 ];
 $vendorStatusLabels = [
 'requested' => ['label' => 'Requested', 'color' => '#ca8a04'],

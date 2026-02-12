@@ -65,6 +65,7 @@
                         <flux:radio value="Task"><span class="{{ data_get($this->taskTypeTextClasses, 'Task') }}">Task</span></flux:radio>
                         <flux:radio value="Milestone"><span class="{{ data_get($this->taskTypeTextClasses, 'Milestone') }}">Milestone</span></flux:radio>
                         <flux:radio value="Meet"><span class="{{ data_get($this->taskTypeTextClasses, 'Meet') }}">Meet</span></flux:radio>
+                        <flux:radio value="Reminder"><span class="{{ data_get($this->taskTypeTextClasses, 'Reminder') }}">Reminder</span></flux:radio>
                     </flux:radio.group>
 
                     {{-- TITLE --}}

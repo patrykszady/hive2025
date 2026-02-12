@@ -9,12 +9,12 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Validate;
 use Livewire\Component;
-use Twilio\Rest\Client;
 
 //PROGRESSIVE FORM
 class Registration extends Component
@@ -103,6 +103,36 @@ class Registration extends Component
     public function hasExistingEmail(): bool
     {
         return $this->user && $this->user->exists && !empty($this->user->email);
+    }
+
+    public function maskedEmail(): ?string
+    {
+        if (! $this->hasExistingEmail()) {
+            return null;
+        }
+
+        $email = (string) $this->user->email;
+        $parts = explode('@', $email, 2);
+        $local = $parts[0] ?? '';
+        $domain = $parts[1] ?? '';
+
+        if ($local === '') {
+            return $email;
+        }
+
+        $localLength = strlen($local);
+
+        if ($localLength <= 2) {
+            $maskedLocal = substr($local, 0, 1) . '*';
+        } elseif ($localLength === 3) {
+            $maskedLocal = substr($local, 0, 2) . '*';
+        } else {
+            $maskedLocal = substr($local, 0, 2)
+                . str_repeat('*', $localLength - 3)
+                . substr($local, -1);
+        }
+
+        return $maskedLocal . ($domain ? '@' . $domain : '');
     }
 
     public function passwordsReady(): bool
@@ -275,18 +305,10 @@ class Registration extends Component
                 //generate random 6 digit code
                 $this->phone_verification = mt_rand(100000, 999999);
 
-                //send Twillo verification code
-                $sid = env('TWILIO_SID');
-                $token = env('TWILIO_TOKEN');
-                $twilio = new Client($sid, $token);
-
                 try {
-                    $twilio->messages->create(
-                        $this->user->cell_phone,
-                        [
-                            'from' => env('TWILIO_FROM'),
-                            'body' => $this->phone_verification.' is your Hive Contractors text verification code.',
-                        ]
+                    $this->sendVerificationSms(
+                        $this->formatPhoneForSms($this->user?->cell_phone),
+                        $this->phone_verification . ' is your Hive Contractors text verification code.'
                     );
 
                     $this->validate_number = true;
@@ -346,18 +368,10 @@ class Registration extends Component
         // Generate new 6 digit code
         $this->phone_verification = mt_rand(100000, 999999);
 
-        // Send Twilio verification code
-        $sid = env('TWILIO_SID');
-        $token = env('TWILIO_TOKEN');
-        $twilio = new Client($sid, $token);
-
         try {
-            $twilio->messages->create(
-                $this->user->cell_phone ?? $this->user_cell,
-                [
-                    'from' => env('TWILIO_FROM'),
-                    'body' => $this->phone_verification.' is your Hive Contractors text verification code.',
-                ]
+            $this->sendVerificationSms(
+                $this->formatPhoneForSms($this->user?->cell_phone ?? $this->user_cell),
+                $this->phone_verification . ' is your Hive Contractors text verification code.'
             );
 
             $this->phone_code_sent_at = now()->timestamp;
@@ -366,6 +380,58 @@ class Registration extends Component
         } catch (\Exception $e) {
             $this->addError('user_cell', 'Failed to resend code. Please try again.');
         }
+    }
+
+    private function sendVerificationSms(?string $phone, string $message): void
+    {
+        $apiKey = config('services.telnyx.api_key');
+        $from = config('services.telnyx.from');
+        $messagingProfileId = config('services.telnyx.messaging_profile_id');
+
+        if (! $phone || ! $apiKey || ! $from) {
+            throw new \RuntimeException('Telnyx SMS configuration is missing.');
+        }
+
+        $payload = [
+            'from' => $from,
+            'to' => $phone,
+            'text' => $message,
+        ];
+
+        if ($messagingProfileId) {
+            $payload['messaging_profile_id'] = $messagingProfileId;
+        }
+
+        $response = Http::withToken($apiKey)
+            ->post('https://api.telnyx.com/v2/messages', $payload);
+
+        if ($response->failed()) {
+            Log::error('Telnyx SMS verification failed', [
+                'status' => $response->status(),
+                'response' => $response->body(),
+                'to' => $phone,
+            ]);
+            throw new \RuntimeException('Telnyx SMS failed: ' . $response->body());
+        }
+    }
+
+    private function formatPhoneForSms(?string $phone): ?string
+    {
+        if (! $phone) {
+            return null;
+        }
+
+        $digits = preg_replace('/[^0-9]/', '', $phone);
+
+        if ($digits === '') {
+            return null;
+        }
+
+        if (strlen($digits) === 10) {
+            return '+1' . $digits;
+        }
+
+        return str_starts_with($digits, '1') ? '+' . $digits : '+' . $digits;
     }
 
     public function user_email()

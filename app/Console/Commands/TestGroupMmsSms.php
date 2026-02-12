@@ -142,7 +142,7 @@ class TestGroupMmsSms extends Command
         );
 
         // Get the message content
-        $message = $notification->toTwilio($project);
+        $message = $notification->toTelnyx($project);
 
         $this->newLine();
         $this->info('Message content:');

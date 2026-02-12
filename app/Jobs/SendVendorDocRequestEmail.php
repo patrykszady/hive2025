@@ -9,6 +9,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Log;
 
 class SendVendorDocRequestEmail implements ShouldQueue
 {
@@ -38,8 +39,45 @@ class SendVendorDocRequestEmail implements ShouldQueue
      */
     public function handle(): void
     {
-        Mail::to($this->agent_email)
-            ->cc([$this->vendor->business_email, $this->requesting_vendor->business_email])
+        $agentEmail = $this->sanitizeEmail($this->agent_email);
+        $vendorEmail = $this->sanitizeEmail($this->vendor->business_email);
+        $requestingVendorEmail = $this->sanitizeEmail($this->requesting_vendor->business_email);
+
+        $primaryRecipient = $agentEmail ?? $vendorEmail ?? $requestingVendorEmail;
+
+        if ($primaryRecipient === null) {
+            Log::warning('SendVendorDocRequestEmail has no deliverable recipients', [
+                'vendor_id' => $this->vendor->id,
+                'requesting_vendor_id' => $this->requesting_vendor->id,
+            ]);
+
+            return;
+        }
+
+        $ccRecipients = collect([$vendorEmail, $requestingVendorEmail])
+            ->filter()
+            ->reject(fn (string $email): bool => $email === $primaryRecipient)
+            ->unique()
+            ->values()
+            ->all();
+
+        Mail::to($primaryRecipient)
+            ->cc($ccRecipients)
             ->send(new RequestInsurance($this->agent_expired_docs, $this->vendor, $this->requesting_vendor));
+    }
+
+    private function sanitizeEmail(?string $email): ?string
+    {
+        if (! is_string($email)) {
+            return null;
+        }
+
+        $normalizedEmail = trim($email);
+
+        if ($normalizedEmail === '' || filter_var($normalizedEmail, FILTER_VALIDATE_EMAIL) === false) {
+            return null;
+        }
+
+        return $normalizedEmail;
     }
 }

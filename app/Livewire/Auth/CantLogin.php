@@ -5,11 +5,12 @@ namespace App\Livewire\Auth;
 use App\Mail\EmailVerificationCode;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Title;
 use Livewire\Component;
-use Twilio\Rest\Client;
 
 class CantLogin extends Component
 {
@@ -128,17 +129,41 @@ class CantLogin extends Component
     private function sendSMSVerification()
     {
         try {
-            $sid = env('TWILIO_SID');
-            $token = env('TWILIO_TOKEN');
-            $twilio = new Client($sid, $token);
+            $apiKey = config('services.telnyx.api_key');
+            $from = config('services.telnyx.from');
+            $messagingProfileId = config('services.telnyx.messaging_profile_id');
 
-            $twilio->messages->create(
-                $this->user->cell_phone,
-                [
-                    'from' => env('TWILIO_FROM'),
-                    'body' => $this->generated_code . ' is your Hive password reset code.',
-                ]
-            );
+            if (! $apiKey || ! $from) {
+                throw new \RuntimeException('Telnyx SMS configuration is missing.');
+            }
+
+            $to = $this->user?->routeNotificationForTelnyx();
+
+            if (! $to) {
+                throw new \RuntimeException('Recipient phone number is missing.');
+            }
+
+            $payload = [
+                'from' => $from,
+                'to' => $to,
+                'text' => $this->generated_code . ' is your Hive password reset code.',
+            ];
+
+            if ($messagingProfileId) {
+                $payload['messaging_profile_id'] = $messagingProfileId;
+            }
+
+            $response = Http::withToken($apiKey)
+                ->post('https://api.telnyx.com/v2/messages', $payload);
+
+            if ($response->failed()) {
+                Log::error('Telnyx password reset SMS failed', [
+                    'status' => $response->status(),
+                    'response' => $response->body(),
+                    'to' => $to,
+                ]);
+                throw new \RuntimeException('Telnyx SMS failed: ' . $response->body());
+            }
         } catch (\Exception $e) {
             $this->addError('identifier', 'Failed to send SMS. Please try email instead.');
         }

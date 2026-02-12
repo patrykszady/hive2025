@@ -61,4 +61,5 @@
         </div>
     </div>
     <livewire:clients.client-create />
+    <livewire:tasks.task-create />
 </div>

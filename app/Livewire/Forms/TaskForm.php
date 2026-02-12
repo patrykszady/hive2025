@@ -32,7 +32,7 @@ class TaskForm extends Form
     #[Validate('nullable|array')]
     public $user_ids = null;
 
-    #[Validate('required|in:Task,Milestone,Meet')]
+    #[Validate('required|in:Task,Milestone,Meet,Reminder')]
     public $type = 'Task';
 
     #[Validate('nullable')]

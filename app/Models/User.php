@@ -320,13 +320,19 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
 
     public function isEmployed(): bool
     {
+        $currentUser = auth()->user();
+
+        if (! $currentUser?->vendor) {
+            return false;
+        }
+
         return $this->vendors()
-            ->where('vendors.id', auth()->user()->vendor->id)
+            ->where('vendors.id', $currentUser->vendor->id)
             ->wherePivot('is_employed', 1)
             ->exists();
     }
 
-    public function routeNotificationForTwilio()
+    public function routeNotificationForTelnyx()
     {
         if (!$this->cell_phone) {
             return null;
@@ -350,9 +356,15 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
     {
         return Attribute::make(
             get: function () {
+                $currentUser = auth()->user();
+
+                if (! $currentUser?->vendor) {
+                    return null;
+                }
+
                 // Get user's relationship with the current vendor context
                 $userVendorPivot = $this->vendors()
-                    ->where('vendors.id', auth()->user()->vendor->id)
+                    ->where('vendors.id', $currentUser->vendor->id)
                     ->first();
                 
                 // Return null if no pivot found or no via_vendor_id

@@ -47,7 +47,7 @@ class VendorAvailabilitySmsNotification extends Notification implements ShouldQu
     /**
      * Get the SMS message content.
      */
-    public function toTwilio(object $notifiable): string
+    public function toTelnyx(object $notifiable): string
     {
         // Handle both single task and collection of tasks
         if ($this->tasks instanceof Task) {

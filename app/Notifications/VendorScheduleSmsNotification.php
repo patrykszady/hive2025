@@ -42,7 +42,7 @@ class VendorScheduleSmsNotification extends Notification implements ShouldQueue
         return [SmsChannel::get()];
     }
 
-    public function toTwilio(object $notifiable): string
+    public function toTelnyx(object $notifiable): string
     {
         $header = $this->type === 'today' ? 'TODAY' : 'TOMORROW';
         $vendorName = $this->vendor->short_name ?? $this->vendor->name ?? 'Hi';

@@ -5,13 +5,11 @@ namespace App\Jobs;
 use App\Models\PushSubscription;
 use App\Models\Task;
 use App\Models\User;
+use App\Services\WebPushService;
 use Carbon\Carbon;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Log;
-use Minishlink\WebPush\Subscription;
-use Minishlink\WebPush\WebPush;
 
 class SendTaskPushNotifications implements ShouldQueue
 {
@@ -21,27 +19,8 @@ class SendTaskPushNotifications implements ShouldQueue
         public string $notificationType = 'today'
     ) {}
 
-    public function handle(): void
+    public function handle(WebPushService $webPush): void
     {
-        $vapidPublicKey = config('services.vapid.public_key');
-        $vapidPrivateKey = config('services.vapid.private_key');
-
-        if (! $vapidPublicKey || ! $vapidPrivateKey) {
-            Log::warning('VAPID keys not configured, skipping push notifications');
-
-            return;
-        }
-
-        $auth = [
-            'VAPID' => [
-                'subject' => config('app.url'),
-                'publicKey' => $vapidPublicKey,
-                'privateKey' => $vapidPrivateKey,
-            ],
-        ];
-
-        $webPush = new WebPush($auth);
-
         $subscriptions = PushSubscription::with('user')->get();
 
         $preferenceColumn = $this->notificationType === 'tomorrow'
@@ -65,31 +44,10 @@ class SendTaskPushNotifications implements ShouldQueue
                 continue;
             }
 
-            $subscription = Subscription::create([
-                'endpoint' => $pushSubscription->endpoint,
-                'keys' => [
-                    'p256dh' => $pushSubscription->p256dh,
-                    'auth' => $pushSubscription->auth,
-                ],
-            ]);
-
-            $webPush->queueNotification($subscription, json_encode($payload));
-        }
-
-        foreach ($webPush->flush() as $report) {
-            if (! $report->isSuccess()) {
-                $endpoint = $report->getRequest()->getUri()->__toString();
-
-                // Remove expired subscriptions
-                if ($report->isSubscriptionExpired()) {
-                    PushSubscription::where('endpoint', $endpoint)->delete();
-                }
-
-                Log::debug('Push notification failed', [
-                    'endpoint' => $endpoint,
-                    'reason' => $report->getReason(),
-                ]);
-            }
+            $webPush->sendToSubscriptions(
+                collect([$pushSubscription]),
+                $payload,
+            );
         }
     }
 

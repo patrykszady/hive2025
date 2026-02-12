@@ -71,7 +71,7 @@ class UpcomingTasks extends Component
     {
         $today = browser_today();
         $cutoff = $today->copy()->subDay();
-        $windowEnd = $today->copy()->addDays(4);
+        $windowEnd = $today->copy()->addDays(6);
 
         $cutoffStr = $cutoff->format('Y-m-d');
         $windowEndStr = $windowEnd->format('Y-m-d');
@@ -150,16 +150,17 @@ class UpcomingTasks extends Component
             })->values();
         });
 
-        // Ensure 5 consecutive days starting from today
-        for ($i = 0; $i < 5; $i++) {
+        // Ensure 8 consecutive days starting from yesterday (browser timezone)
+        for ($i = -1; $i < 7; $i++) {
             $dateStr = $today->copy()->addDays($i)->format('Y-m-d');
             if (! $grouped->has($dateStr)) {
                 $grouped[$dateStr] = collect();
             }
         }
 
-        // Keep only the 5-day window (today through 4 days from now)
-        $grouped = $grouped->filter(fn ($tasks, $date) => $date >= $todayStr && $date <= $windowEndStr);
+        // Keep only the 8-day window (yesterday through 6 days from now)
+        $windowStartStr = $today->copy()->subDay()->format('Y-m-d');
+        $grouped = $grouped->filter(fn ($tasks, $date) => $date >= $windowStartStr && $date <= $windowEndStr);
 
         return $grouped->sortKeys();
     }
@@ -171,7 +172,7 @@ class UpcomingTasks extends Component
     public function nextTaskInfo(): ?object
     {
         $today = browser_today();
-        $windowEnd = $today->copy()->addDays(4);
+        $windowEnd = $today->copy()->addDays(6);
         $windowEndStr = $windowEnd->format('Y-m-d');
 
         // Get all tasks for this project beyond the displayed window

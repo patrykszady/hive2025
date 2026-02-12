@@ -128,10 +128,10 @@ class Vendor extends Model
     }
 
     /**
-     * Route notifications for the Twilio channel.
-     * Returns the business_phone formatted for Twilio.
+     * Route notifications for the Telnyx channel.
+     * Returns the business_phone formatted for Telnyx.
      */
-    public function routeNotificationForTwilio(): ?string
+    public function routeNotificationForTelnyx(): ?string
     {
         if (! $this->business_phone) {
             return null;

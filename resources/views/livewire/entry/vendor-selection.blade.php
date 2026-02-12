@@ -1,5 +1,5 @@
-<div class="max-w-3xl">
-    <x-island-card heading="Select Account" subheading="{{$user->first_name}}, select one of your accounts to access your dashboard." class="space-y-6">
+<div class="max-w-3xl" wire:cloak>
+    <x-island-card heading="Select Account" subheading="{{$user->first_name}}, select one of your accounts to access your hub." class="space-y-6">
         
         @if($this->clients->count() > 0)
             {{-- Client Selection for client-only users --}}
@@ -24,7 +24,7 @@
             <div x-show="$wire.client_id" x-transition x-cloak>
                 <div class="flex justify-end">
                     <flux:button variant="primary" wire:click="save">
-                        Continue to Dashboard
+                        Continue to Hub
                     </flux:button>
                 </div>
             </div>

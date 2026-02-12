@@ -31,10 +31,12 @@
         </div>
 
         <div class="space-y-6 col-span-3 lg:col-start-4 lg:col-span-3">
-            {{-- VENDOR DETAILS --}}
-            <livewire:vendors.vendor-details :vendor="$user->vendor" :expanded="false" />
-            {{-- VENDOR TEAM MEMBERS --}}
-            <livewire:users.users-index :vendor="$user->vendor" :view="'vendors.show'"/>
+            @if($user->vendor)
+                {{-- VENDOR DETAILS --}}
+                <livewire:vendors.vendor-details :vendor="$user->vendor" :expanded="false" />
+                {{-- VENDOR TEAM MEMBERS --}}
+                <livewire:users.users-index :vendor="$user->vendor" :view="'vendors.show'"/>
+            @endif
         </div>
 
         {{-- GRAPH --}}

@@ -3,7 +3,6 @@
 uses(Tests\TestCase::class);
 
 use App\Channels\TelnyxChannel;
-use App\Channels\TwilioChannel;
 use App\Models\Project;
 use App\Models\Task;
 use App\Models\Vendor;
@@ -36,13 +35,5 @@ it('routes SMS notifications via configured provider', function () {
 });
 
 it('uses Telnyx channel by default', function () {
-    config(['services.sms.provider' => 'telnyx']);
-    
     expect(SmsChannel::get())->toBe(TelnyxChannel::class);
-});
-
-it('can switch to Twilio channel', function () {
-    config(['services.sms.provider' => 'twilio']);
-    
-    expect(SmsChannel::get())->toBe(TwilioChannel::class);
 });

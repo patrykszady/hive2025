@@ -29,8 +29,7 @@ class TelnyxChannel
      */
     public function send($notifiable, Notification $notification)
     {
-        $phone = $notifiable->routeNotificationFor('twilio') 
-            ?? $notifiable->routeNotificationFor('telnyx');
+        $phone = $notifiable->routeNotificationFor('telnyx');
             
         $isVendorSms = $notification instanceof VendorAvailabilitySmsNotification
             || $notification instanceof VendorScheduleSmsNotification;
@@ -80,10 +79,7 @@ class TelnyxChannel
             return;
         }
 
-        // Get message - support both toTelnyx and toTwilio methods
-        $message = method_exists($notification, 'toTelnyx') 
-            ? $notification->toTelnyx($notifiable) 
-            : $notification->toTwilio($notifiable);
+        $message = $notification->toTelnyx($notifiable);
 
         if (is_string($logChannel)) {
             Log::channel($logChannel)->debug('SMS message content', [

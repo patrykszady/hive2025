@@ -99,17 +99,18 @@ class UserTasks extends Component
             })->values();
         });
 
-        // Ensure 5 consecutive days starting from today (browser timezone)
-        for ($i = 0; $i < 5; $i++) {
+        // Ensure 8 consecutive days starting from yesterday (browser timezone)
+        for ($i = -1; $i < 7; $i++) {
             $dateStr = $today->copy()->addDays($i)->format('Y-m-d');
             if (! $grouped->has($dateStr)) {
                 $grouped[$dateStr] = collect();
             }
         }
 
-        // Keep only the 5-day window (today through 4 days from now)
-        $windowEnd = $today->copy()->addDays(4)->format('Y-m-d');
-        $grouped = $grouped->filter(fn ($tasks, $date) => $date >= $today->format('Y-m-d') && $date <= $windowEnd);
+        // Keep only the 8-day window (yesterday through 6 days from now)
+        $windowStart = $today->copy()->subDay()->format('Y-m-d');
+        $windowEnd = $today->copy()->addDays(6)->format('Y-m-d');
+        $grouped = $grouped->filter(fn ($tasks, $date) => $date >= $windowStart && $date <= $windowEnd);
 
         return $grouped->sortKeys();
     }
@@ -121,10 +122,13 @@ class UserTasks extends Component
     public function taskCount(): int
     {
         $userId = (string) auth()->id();
-        $cutoff = Carbon::today()->subDay();
+        $today = browser_today();
+        $cutoff = $today->copy()->subDay();
+        $windowEnd = $today->copy()->addDays(6)->format('Y-m-d');
 
         return Task::whereJsonContains('user_ids', $userId)
             ->whereDate('end_date', '>=', $cutoff)
+            ->whereDate('start_date', '<=', $windowEnd)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
             ->count();

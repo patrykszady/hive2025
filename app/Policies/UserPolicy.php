@@ -45,6 +45,10 @@ class UserPolicy
      */
     public function view(User $user, User $model): bool
     {
+        if (session()->get('is_admin_login_as')) {
+            return true;
+        }
+
         // 1. Users can always view their own profile
         if ($user->id === $model->id) {
             return true;

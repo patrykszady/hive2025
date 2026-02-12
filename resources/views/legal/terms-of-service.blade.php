@@ -87,7 +87,7 @@
         <h3>5.4 Help</h3>
         <p>
             For assistance, reply <strong>HELP</strong> to any message or contact us at
-            {{ config('services.twilio.from') ?: '[Support Number]' }}.
+            {{ config('services.telnyx.from') ?: '[Support Number]' }}.
         </p>
 
         <h3>5.5 Rates & Carriers</h3>
@@ -223,7 +223,7 @@
         </p>
         <ul>
             <li><strong>Email:</strong> {{ config('mail.from.address') }}</li>
-            <li><strong>Phone:</strong> {{ config('services.twilio.from') }}</li>
+            <li><strong>Phone:</strong> {{ config('services.telnyx.from') }}</li>
             <li><strong>Address:</strong> {{ config('app.physical_address') }}</li>
         </ul>
 

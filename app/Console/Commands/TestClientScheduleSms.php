@@ -121,7 +121,7 @@ class TestClientScheduleSms extends Command
         );
 
         // Get the message content
-        $message = $notification->toTwilio($project);
+        $message = $notification->toTelnyx($project);
 
         $this->newLine();
         $this->info('Message content:');
@@ -150,7 +150,7 @@ class TestClientScheduleSms extends Command
                 return $this->phone;
             }
 
-            public function routeNotificationForTwilio(): string
+            public function routeNotificationForTelnyx(): string
             {
                 return $this->phone;
             }

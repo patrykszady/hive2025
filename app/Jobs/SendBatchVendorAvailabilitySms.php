@@ -168,7 +168,7 @@ class SendBatchVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
                     'vendor_name' => $vendor->name,
                     'admin_user_id' => $adminUser->id,
                     'admin_user_name' => $adminUser->name,
-                    'phone' => $adminUser->routeNotificationForTwilio(),
+                    'phone' => $adminUser->routeNotificationForTelnyx(),
                     'task_count' => $tasks->count(),
                     'task_ids' => $tasks->pluck('id')->toArray(),
                 ]);
@@ -179,7 +179,7 @@ class SendBatchVendorAvailabilitySms implements ShouldQueue, ShouldBeUnique
                     'vendor_name' => $vendor->name,
                     'admin_user_id' => $adminUser->id,
                     'admin_user_name' => $adminUser->name,
-                    'phone' => $adminUser->routeNotificationForTwilio(),
+                    'phone' => $adminUser->routeNotificationForTelnyx(),
                     'error' => $e->getMessage(),
                     'trace' => $e->getTraceAsString(),
                 ]);

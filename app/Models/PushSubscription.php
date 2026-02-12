@@ -12,6 +12,7 @@ class PushSubscription extends Model
         'endpoint',
         'p256dh',
         'auth',
+        'content_encoding',
         'realtime_enabled',
         'morning_enabled',
         'evening_enabled',
