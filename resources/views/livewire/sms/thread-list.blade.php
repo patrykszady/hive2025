@@ -3,6 +3,7 @@
         <button
             wire:key="thread-{{ $thread->id }}"
             wire:click="select({{ $thread->id }})"
+            x-on:click="window.dispatchEvent(new CustomEvent('sms-thread-loading'))"
             class="w-full text-left px-3 py-2.5 rounded-lg transition-colors {{ $selectedThreadId === $thread->id ? 'bg-zinc-200 dark:bg-zinc-700' : 'hover:bg-zinc-100 dark:hover:bg-zinc-800' }}"
         >
             <div class="flex items-center justify-between gap-2">
@@ -18,22 +19,16 @@
                         @endif
                     </p>
 
-                    {{-- Recipient names --}}
-                    <p class="text-xs text-zinc-500 dark:text-zinc-400">
-                        @if ($thread->client && $thread->client->users->isNotEmpty())
-                            {{ $thread->client->users->map(fn ($u) => $u->first_name)->implode(', ') }}
-                        @else
-                            {{ count($thread->participants) }} {{ Str::plural('recipient', count($thread->participants)) }}
-                        @endif
-                    </p>
-
                     {{-- Latest message preview --}}
-                    @if ($thread->messages->first())
+                    @if ($thread->latestMessage)
+                        @php
+                            $previewText = preg_replace('/\s*-(PS|GS|GSC)\s*$/', '', trim((string) $thread->latestMessage->text));
+                        @endphp
                         <p class="text-xs text-zinc-400 dark:text-zinc-500 truncate mt-0.5">
-                            @if ($thread->messages->first()->isOutbound())
+                            @if ($thread->latestMessage->isOutbound())
                                 <span class="text-zinc-500 dark:text-zinc-400">You:</span>
                             @endif
-                            {{ Str::limit($thread->messages->first()->text, 50) }}
+                            {{ Str::limit($previewText, 50) }}
                         </p>
                     @endif
                 </div>

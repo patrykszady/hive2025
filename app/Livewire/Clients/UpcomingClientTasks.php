@@ -277,6 +277,19 @@ class UpcomingClientTasks extends Component
         return view('livewire.clients.upcoming-client-tasks');
     }
 
+    /**
+     * Count distinct projects that have tasks in the displayed window.
+     */
+    #[Computed]
+    public function distinctProjectCount(): int
+    {
+        return $this->groupedTasks
+            ->flatten(1)
+            ->pluck('project_id')
+            ->unique()
+            ->count();
+    }
+
     public function placeholder()
     {
         return view('livewire.clients.upcoming-client-tasks-placeholder');

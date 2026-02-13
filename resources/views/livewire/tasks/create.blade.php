@@ -191,8 +191,8 @@
                                                 {{ \Carbon\Carbon::parse($date)->format('D, M j') }}
                                             </flux:subheading>
                                             <flux:switch 
-                                                :checked="($form->time_settings[$date]['use_time'] ?? false)"
-                                                wire:click="toggleArrivalTime('{{ $date }}')"
+                                                wire:model.live="form.time_settings.{{ $date }}.use_time"
+                                                x-on:change="$wire.copyTimesToDate('{{ $date }}')"
                                                 size="sm"
                                             />
                                         </div>
@@ -202,7 +202,7 @@
                                                 <flux:time-picker
                                                     wire:model.live="form.time_settings['{{ $date }}'].start_time"
                                                     wire:change="updateEndTime('{{ $date }}')"
-                                                    interval="60"
+                                                    interval="30"
                                                     min="06:00"
                                                     max="23:00"
                                                     open-to="08:00"
@@ -211,7 +211,7 @@
                                                 <flux:time-picker
                                                     wire:model.live="form.time_settings['{{ $date }}'].end_time"
                                                     wire:change="applyTimeToAllDates('{{ $date }}')"
-                                                    interval="60"
+                                                    interval="30"
                                                     min="06:00"
                                                     max="23:00"
                                                     open-to="10:00"

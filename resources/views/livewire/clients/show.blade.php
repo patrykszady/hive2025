@@ -5,15 +5,18 @@
             <x-details.card 
                 :title="$client->name"
                 :canEdit="auth()->user()->can('update', $client)"
+                :expanded="!auth()->user()->is_client_user"
             >
-                <x-slot:header_buttons>
-                    <flux:button
-                        wire:click="$dispatchTo('clients.client-create', 'editClient', { client: {{$client->id}}})"
-                        size="sm"
-                    >
-                        Edit Client
-                    </flux:button>
-                </x-slot:header_buttons>
+                @if(!auth()->user()->is_client_user)
+                    <x-slot:header_buttons>
+                        <flux:button
+                            wire:click="$dispatchTo('clients.client-create', 'editClient', { client: {{$client->id}}})"
+                            size="sm"
+                        >
+                            Edit Client
+                        </flux:button>
+                    </x-slot:header_buttons>
+                @endif
                 
                 <x-slot:details>
                     {{-- Client Name --}}
@@ -60,6 +63,8 @@
             <livewire:clients.upcoming-client-tasks :client="$client" lazy />
         </div>
     </div>
-    <livewire:clients.client-create />
-    <livewire:tasks.task-create />
+    @if(!auth()->user()->is_client_user)
+        <livewire:clients.client-create />
+        <livewire:tasks.task-create />
+    @endif
 </div>

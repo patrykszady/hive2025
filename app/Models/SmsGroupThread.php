@@ -100,6 +100,33 @@ class SmsGroupThread extends Model
     }
 
     /**
+     * Count unread messages for a user, scoped to specific client IDs.
+     *
+     * @param  array<int>  $clientIds
+     */
+    public static function unreadCountForUserInClients(int $userId, array $clientIds): int
+    {
+        if (empty($clientIds)) {
+            return 0;
+        }
+
+        return SmsMessage::query()
+            ->join('sms_group_threads', 'sms_group_threads.id', '=', 'sms_messages.thread_id')
+            ->leftJoin('sms_thread_reads as thread_reads', function ($join) use ($userId) {
+                $join->on('thread_reads.thread_id', '=', 'sms_messages.thread_id')
+                    ->where('thread_reads.user_id', '=', $userId);
+            })
+            ->whereNotNull('sms_messages.thread_id')
+            ->whereIn('sms_group_threads.client_id', $clientIds)
+            ->where('sms_messages.direction', SmsMessage::DIRECTION_INBOUND)
+            ->where(function ($query) {
+                $query->whereNull('thread_reads.last_read_message_id')
+                    ->orWhereColumn('sms_messages.id', '>', 'thread_reads.last_read_message_id');
+            })
+            ->count('sms_messages.id');
+    }
+
+    /**
      * Get a display-friendly label for participants.
      *
      * @return string

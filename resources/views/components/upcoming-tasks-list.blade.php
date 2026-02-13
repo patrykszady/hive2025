@@ -6,6 +6,7 @@
     'clickable' => true,
     'unscheduledTasks' => null,
     'showProjectInfo' => false,
+    'showVendorInfo' => true,
     'title' => 'Upcoming Tasks',
     'emptyMessage' => 'No upcoming tasks for this project.',
 ])
@@ -16,15 +17,17 @@
     </x-slot:badge>
     <x-slot:actions>
         @auth
-            <flux:button
-                size="sm"
-                variant="filled"
-                :href="route('users.show', auth()->id())"
-                icon="bell"
-                class="!bg-indigo-500 hover:!bg-indigo-600 !text-white"
-            >
-                Notifications
-            </flux:button>
+            @if(!auth()->user()->is_client_user)
+                <flux:button
+                    size="sm"
+                    variant="filled"
+                    :href="route('users.show', auth()->id())"
+                    icon="bell"
+                    class="!bg-indigo-500 hover:!bg-indigo-600 !text-white"
+                >
+                    Notifications
+                </flux:button>
+            @endif
         @endauth
     </x-slot:actions>
 
@@ -71,9 +74,11 @@
                                                         name="{{ $taskVendor->name }}"
                                                         color="auto"
                                                         color:seed="{{ $taskVendor->id }}"
-                                                        title="{{ $taskVendor->name }}"
+                                                        :title="($showVendorInfo ?? true) ? $taskVendor->name : null"
                                                     />
-                                                    <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">{{ $taskVendor->name }}</span>
+                                                    @if($showVendorInfo ?? true)
+                                                        <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">{{ $taskVendor->name }}</span>
+                                                    @endif
                                                 </div>
                                             @endif
                                         </flux:kanban.card>
@@ -97,9 +102,11 @@
                                                         name="{{ $taskVendor->name }}"
                                                         color="auto"
                                                         color:seed="{{ $taskVendor->id }}"
-                                                        title="{{ $taskVendor->name }}"
+                                                        :title="($showVendorInfo ?? true) ? $taskVendor->name : null"
                                                     />
-                                                    <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">{{ $taskVendor->name }}</span>
+                                                    @if($showVendorInfo ?? true)
+                                                        <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">{{ $taskVendor->name }}</span>
+                                                    @endif
                                                 </div>
                                             @endif
                                         </flux:kanban.card>
@@ -194,6 +201,7 @@
                         'showAvatars' => $showAvatars,
                         'clickable' => $clickable,
                         'showProjectInfo' => $showProjectInfo,
+                        'showVendorInfo' => $showVendorInfo,
                     ])
                 </div>
             @endforeach

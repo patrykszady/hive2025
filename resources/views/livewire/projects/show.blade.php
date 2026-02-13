@@ -6,6 +6,7 @@
                 :title="$project->short_address . ' | ' . $project->project_name"
                 :subheading="$project->client->name"
                 :canEdit="auth()->user()->can('update', $project)"
+                :expanded="false"
                 >
                 <x-slot:header_buttons>
                     <flux:button
@@ -107,18 +108,8 @@
 
                 {{-- PROJECT LIFESPAN --}}
                 <livewire:project-status.status-create :project="$project" lazy />
-            </div>
 
-            @can('update', $project)
-                @if($project->expenses()->exists())
-                    <div class="col-span-4 space-y-4 lg:col-span-2">
-                        <livewire:expenses.expense-index :project_id="$project->id" :view="'projects.show'" lazy />
-                    </div>
-                @endif
-            @endcan
-
-            @can('update', $project)
-                <div class="col-span-4 space-y-4 lg:col-span-2 lg:col-start-3">
+                @can('update', $project)
                     @if(in_array($this->project->latestStatus->title, ['Active', 'Complete', 'Service Call', 'VIEW ONLY']))
                         {{-- PROJECT PAYMENTS --}}
                         <livewire:payments.payments-index :project="$project" :view="'projects.show'" lazy />
@@ -129,11 +120,9 @@
                         {{-- PROJECT DISTRIBUTIONS --}}
                         <livewire:projects.project-distributions :project="$project" lazy />
                     @endif
-                </div>
-            @endcan
-            @cannot('update', $project)
-                {{-- CLIENT USER: Payments & Simplified Finances --}}
-                <div class="col-span-4 space-y-4 lg:col-span-2 lg:col-start-3">
+                @endcan
+
+                @cannot('update', $project)
                     @if(in_array($this->project->latestStatus->title, ['Active', 'Complete', 'Service Call', 'VIEW ONLY']))
                         {{-- CLIENT PAYMENTS (read-only) --}}
                         <livewire:payments.payments-index :project="$project" :view="'estimate.pdf'" lazy />
@@ -144,8 +133,17 @@
                             :showReimbursementDownload="true"
                         />
                     @endif
-                </div>
-            @endcannot
+                @endcannot
+            </div>
+
+            @can('update', $project)
+                @if($project->expenses()->exists())
+                    <div class="col-span-4 space-y-4 lg:col-span-2">
+                        <livewire:expenses.expense-index :project_id="$project->id" :view="'projects.show'" lazy />
+                    </div>
+                @endif
+            @endcan
+
 		@endcan
     </div>
 

@@ -8,10 +8,10 @@
             } elseif ($this->thread->project) {
                 $headerTitle = $this->thread->project->address;
             }
-            $mobileBackButtonPositionClass = 'lg:hidden fixed top-4 left-16 z-30';
+            $mobileBackButtonPositionClass = 'lg:hidden absolute -top-2 left-10 z-10';
             $mobileTitleOffsetClass = 'mt-8 lg:mt-0';
         @endphp
-        <div class="border-b border-zinc-200 dark:border-zinc-700 px-4 pt-0 pb-2 lg:py-2">
+        <div class="relative border-b border-zinc-200 dark:border-zinc-700 px-4 pt-0 pb-2 lg:py-2">
             {{-- Back nav (mobile only) --}}
             <div class="{{ $mobileBackButtonPositionClass }}">
                 <flux:button
@@ -41,7 +41,7 @@
                 @endif
             </div>
 
-            @if ($this->thread->client && $this->thread->client->users->isNotEmpty())
+            @if (! $isClientUser && $this->thread->client && $this->thread->client->users->isNotEmpty())
                 <div class="flex flex-wrap gap-x-4 gap-y-0.5 mt-1">
                     @foreach ($this->thread->client->users as $user)
                         <div class="flex items-center gap-1.5">
@@ -162,6 +162,11 @@
 
         {{-- Compose --}}
         <div class="shrink-0 px-1 pb-1">
+            @if ($isClientUser)
+                <div class="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50 px-4 py-3 text-sm text-zinc-500 dark:text-zinc-400 text-center">
+                    Homeowners are not able to message here yet. Please message us on your phone messaging app.
+                </div>
+            @else
             <form wire:submit="sendMessage">
                 <flux:composer
                     wire:model="newMessage"
@@ -207,6 +212,7 @@
                 <flux:avatar size="xs" color="indigo" name="{{ auth()->user()->full_name }}" circle />
                 <span class="text-xs text-zinc-500 dark:text-zinc-400">{{ auth()->user()->full_name }}</span>
             </div>
+            @endif
         </div>
     @else
         {{-- No thread selected --}}

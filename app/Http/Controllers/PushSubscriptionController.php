@@ -18,6 +18,7 @@ class PushSubscriptionController extends Controller
             'preferences.realtime_enabled' => 'nullable|boolean',
             'preferences.morning_enabled' => 'nullable|boolean',
             'preferences.evening_enabled' => 'nullable|boolean',
+            'preferences.sms_inbound_enabled' => 'nullable|boolean',
         ]);
 
         $user = $request->user();
@@ -31,6 +32,7 @@ class PushSubscriptionController extends Controller
             'realtime_enabled' => true,
             'morning_enabled' => true,
             'evening_enabled' => true,
+            'sms_inbound_enabled' => false,
         ];
 
         $preferenceValues = array_merge(
@@ -50,6 +52,7 @@ class PushSubscriptionController extends Controller
                 'realtime_enabled' => (bool) $preferenceValues['realtime_enabled'],
                 'morning_enabled' => (bool) $preferenceValues['morning_enabled'],
                 'evening_enabled' => (bool) $preferenceValues['evening_enabled'],
+                'sms_inbound_enabled' => (bool) $preferenceValues['sms_inbound_enabled'],
                 'user_agent' => $request->userAgent(),
                 'last_seen_at' => now(),
             ]
@@ -105,6 +108,7 @@ class PushSubscriptionController extends Controller
                 'realtime_enabled' => (bool) $subscription->realtime_enabled,
                 'morning_enabled' => (bool) $subscription->morning_enabled,
                 'evening_enabled' => (bool) $subscription->evening_enabled,
+                'sms_inbound_enabled' => (bool) $subscription->sms_inbound_enabled,
             ],
         ]);
     }
@@ -137,6 +141,7 @@ class PushSubscriptionController extends Controller
                         'realtime_enabled' => (bool) $subscription->realtime_enabled,
                         'morning_enabled' => (bool) $subscription->morning_enabled,
                         'evening_enabled' => (bool) $subscription->evening_enabled,
+                        'sms_inbound_enabled' => (bool) $subscription->sms_inbound_enabled,
                     ],
                 ];
             })
@@ -151,9 +156,10 @@ class PushSubscriptionController extends Controller
     {
         $validated = $request->validate([
             'endpoint' => 'required|string',
-            'preferences.realtime_enabled' => 'required|boolean',
-            'preferences.morning_enabled' => 'required|boolean',
-            'preferences.evening_enabled' => 'required|boolean',
+            'preferences.realtime_enabled' => 'sometimes|boolean',
+            'preferences.morning_enabled' => 'sometimes|boolean',
+            'preferences.evening_enabled' => 'sometimes|boolean',
+            'preferences.sms_inbound_enabled' => 'sometimes|boolean',
         ]);
 
         $user = $request->user();
@@ -170,11 +176,31 @@ class PushSubscriptionController extends Controller
             return response()->json(['error' => 'Subscription not found'], 404);
         }
 
-        $subscription->update([
-            'realtime_enabled' => (bool) $validated['preferences']['realtime_enabled'],
-            'morning_enabled' => (bool) $validated['preferences']['morning_enabled'],
-            'evening_enabled' => (bool) $validated['preferences']['evening_enabled'],
-        ]);
+        $providedPreferences = (array) ($validated['preferences'] ?? []);
+
+        $updates = [];
+
+        if (array_key_exists('realtime_enabled', $providedPreferences)) {
+            $updates['realtime_enabled'] = (bool) $providedPreferences['realtime_enabled'];
+        }
+
+        if (array_key_exists('morning_enabled', $providedPreferences)) {
+            $updates['morning_enabled'] = (bool) $providedPreferences['morning_enabled'];
+        }
+
+        if (array_key_exists('evening_enabled', $providedPreferences)) {
+            $updates['evening_enabled'] = (bool) $providedPreferences['evening_enabled'];
+        }
+
+        if (array_key_exists('sms_inbound_enabled', $providedPreferences)) {
+            $updates['sms_inbound_enabled'] = (bool) $providedPreferences['sms_inbound_enabled'];
+        }
+
+        if ($updates === []) {
+            return response()->json(['error' => 'No preferences provided'], 422);
+        }
+
+        $subscription->update($updates);
 
         return response()->json(['success' => true]);
     }

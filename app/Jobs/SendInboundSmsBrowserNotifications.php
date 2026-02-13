@@ -2,8 +2,8 @@
 
 namespace App\Jobs;
 
+use App\Models\PushSubscription;
 use App\Models\SmsMessage;
-use App\Models\User;
 use App\Services\WebPushService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -30,20 +30,18 @@ class SendInboundSmsBrowserNotifications implements ShouldQueue
             return;
         }
 
-        $enabledUserIds = User::query()
-            ->whereHas('notificationSetting', function ($query) {
-                $query->where('sms_inbound_browser', true);
-            })
-            ->pluck('id');
+        $enabledSubscriptions = PushSubscription::query()
+            ->where('sms_inbound_enabled', true)
+            ->get();
 
-        if ($enabledUserIds->isEmpty()) {
+        if ($enabledSubscriptions->isEmpty()) {
             return;
         }
 
         $fromLabel = $this->resolveSenderDisplayName($message);
         $body = trim($message->text ?: 'New message received');
 
-        $webPush->sendToUsers($enabledUserIds, [
+        $webPush->sendToSubscriptions($enabledSubscriptions, [
             'title' => "New Text from {$fromLabel}",
             'body' => mb_substr($body, 0, 180),
             'tag' => "sms-thread-{$message->thread_id}-message-{$message->id}",

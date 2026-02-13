@@ -55,6 +55,11 @@ class VendorAccessControl
                 return $next($request);
             }
 
+            // Allow client users to access messages (read-only)
+            if ($routeName === 'sms.index') {
+                return $next($request);
+            }
+
             if (str_starts_with($routeName, 'push.')) {
                 return $next($request);
             }

@@ -119,13 +119,13 @@ Route::prefix('welcome/legal')->name('legal.')->group(function () {
     Route::view('terms', 'legal.terms-of-service')->name('terms');
 });
 
-Route::permanentRedirect('legal', 'welcome/legal');
-Route::permanentRedirect('legal/privacy', 'welcome/legal/privacy');
-Route::permanentRedirect('legal/terms', 'welcome/legal/terms');
+Route::permanentRedirect('legal', '/welcome/legal');
+Route::permanentRedirect('legal/privacy', '/welcome/legal/privacy');
+Route::permanentRedirect('legal/terms', '/welcome/legal/terms');
 
 // Short URLs for SMS
-Route::permanentRedirect('p', 'welcome/legal/privacy');
-Route::permanentRedirect('t', 'welcome/legal/terms');
+Route::permanentRedirect('p', '/welcome/legal/privacy');
+Route::permanentRedirect('t', '/welcome/legal/terms');
 
 // Passkey setup page (requires auth)
 Route::middleware('auth')->group(function () {
@@ -312,7 +312,6 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
 
     //MESSAGES
     Route::get('/messages', SmsIndex::class)
-        ->middleware('admin.access')
         ->name('sms.index');
 
     //LINE ITEMS

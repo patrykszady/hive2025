@@ -16,9 +16,17 @@ class SmsSidebarBadge extends Component
 
     public function render()
     {
-        $count = auth()->check()
-            ? SmsGroupThread::unreadCountForUser(auth()->id())
-            : 0;
+        $user = auth()->user();
+        $count = 0;
+
+        if ($user) {
+            if ($user->is_client_user) {
+                $clientIds = $user->clients()->pluck('clients.id')->toArray();
+                $count = SmsGroupThread::unreadCountForUserInClients($user->id, $clientIds);
+            } else {
+                $count = SmsGroupThread::unreadCountForUser($user->id);
+            }
+        }
 
         return view('livewire.sms.sms-sidebar-badge', [
             'count' => $count,

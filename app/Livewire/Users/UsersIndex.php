@@ -14,6 +14,9 @@ class UsersIndex extends Component
 
     public $view = false;
 
+    public bool $accordion = false;
+    public bool $accordionExpanded = true;
+
     protected $listeners = ['refreshComponent' => 'loadUsers'];
     
     public $view_text = [
@@ -21,9 +24,15 @@ class UsersIndex extends Component
         'button_text' => 'Add User',
     ];
 
-    public function mount()
+    public function mount(): void
     {
         $this->loadUsers();
+
+        // Both vendor and client member cards use an accordion
+        if (in_array($this->view, ['vendors.show', 'clients.show'])) {
+            $this->accordion = true;
+            $this->accordionExpanded = ! auth()->user()->is_client_user;
+        }
     }
     
     public function loadUsers()

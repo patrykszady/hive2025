@@ -32,15 +32,17 @@
                                     </flux:tooltip>
                                 @endif
                             </flux:heading>
-                            <x-slot name="actions">
-                                <flux:button
-                                    variant="subtle"
-                                    icon="plus"
-                                    size="sm"
-                                    class="shrink-0"
-                                    wire:click="$dispatchTo('tasks.task-create', 'addTask', { project_id: {{ $projectId }}, date: '{{ $date }}' })"
-                                />
-                            </x-slot>
+                            @if($clickable)
+                                <x-slot name="actions">
+                                    <flux:button
+                                        variant="subtle"
+                                        icon="plus"
+                                        size="sm"
+                                        class="shrink-0"
+                                        wire:click="$dispatchTo('tasks.task-create', 'addTask', { project_id: {{ $projectId }}, date: '{{ $date }}' })"
+                                    />
+                                </x-slot>
+                            @endif
                             @if($project?->client || $project?->project_name)
                                 <x-slot name="subheading">
                                     <span class="block min-w-0 truncate">
@@ -51,79 +53,7 @@
                         </flux:kanban.column.header>
                         <flux:kanban.column.cards>
                             @foreach($projectTasks as $task)
-                                @php
-                                    $typeUi = $task->type_ui ?? [];
-                                    $taskTypeTextClasses = data_get($typeUi, 'text', '');
-                                    $taskUsers = $task->users ?? collect();
-                                    $taskVendor = $task->vendor ?? null;
-
-                                    $selectedDates = data_get($task->options, 'dates', []);
-                                    $totalDays = count($selectedDates);
-                                    $currentDay = 0;
-                                    $showDayCounter = false;
-
-                                    if (!empty($selectedDates)) {
-                                        sort($selectedDates);
-                                        $currentDay = array_search($date, $selectedDates);
-                                        if ($currentDay !== false) {
-                                            $currentDay++;
-                                        }
-                                        $showDayCounter = $totalDays > 1 && $currentDay > 0;
-                                    }
-
-                                    $arrivalTimeLabel = null;
-                                    $dayFormat = $carbonDate->format('Y-m-d');
-                                    $dayTimeSettings = data_get($task->options, "time_settings.$dayFormat");
-                                    $dayUsesTime = (bool) data_get($dayTimeSettings, 'use_time', false);
-                                    $dayStartTime = (string) data_get($dayTimeSettings, 'start_time', '');
-                                    if ($dayUsesTime && $dayStartTime !== '') {
-                                        try {
-                                            $arrivalTimeLabel = \Carbon\Carbon::createFromFormat('H:i', $dayStartTime)->format('g:i A');
-                                        } catch (\Exception $e) {
-                                            $arrivalTimeLabel = null;
-                                        }
-                                    }
-                                @endphp
-
-                                @if($clickable)
-                                    <flux:kanban.card
-                                        as="button"
-                                        class="min-w-0 w-full"
-                                        wire:key="upcoming-task-{{ $task->id }}-{{ $date }}"
-                                        wire:click="$dispatchTo('tasks.task-create', 'editTask', { task: {{ $task->id }} })"
-                                    >
-                                        @include('components.upcoming-tasks-list-card-content', [
-                                            'task' => $task,
-                                            'taskTypeTextClasses' => $taskTypeTextClasses,
-                                            'arrivalTimeLabel' => $arrivalTimeLabel,
-                                            'showDayCounter' => $showDayCounter,
-                                            'currentDay' => $currentDay,
-                                            'totalDays' => $totalDays,
-                                            'showAvatars' => $showAvatars,
-                                            'taskUsers' => $taskUsers,
-                                            'taskVendor' => $taskVendor,
-                                            'showProjectInfo' => false,
-                                        ])
-                                    </flux:kanban.card>
-                                @else
-                                    <flux:kanban.card
-                                        class="min-w-0 w-full transition hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:shadow-sm hover:border-zinc-300 dark:hover:border-zinc-600"
-                                        wire:key="upcoming-task-{{ $task->id }}-{{ $date }}"
-                                    >
-                                        @include('components.upcoming-tasks-list-card-content', [
-                                            'task' => $task,
-                                            'taskTypeTextClasses' => $taskTypeTextClasses,
-                                            'arrivalTimeLabel' => $arrivalTimeLabel,
-                                            'showDayCounter' => $showDayCounter,
-                                            'currentDay' => $currentDay,
-                                            'totalDays' => $totalDays,
-                                            'showAvatars' => $showAvatars,
-                                            'taskUsers' => $taskUsers,
-                                            'taskVendor' => $taskVendor,
-                                            'showProjectInfo' => false,
-                                        ])
-                                    </flux:kanban.card>
-                                @endif
+                                <x-task-card :task="$task" :date="$date" :clickable="$clickable" :show-avatars="$showAvatars" :show-vendor-info="$showVendorInfo ?? true" />
                             @endforeach
                         </flux:kanban.column.cards>
                     </flux:kanban.column>
@@ -133,81 +63,7 @@
     @else
     <div class="space-y-2 pl-0">
         @foreach($tasks as $task)
-            @php
-                $typeUi = $task->type_ui ?? [];
-                $taskTypeTextClasses = data_get($typeUi, 'text', '');
-                $taskUsers = $task->users ?? collect();
-                $taskVendor = $task->vendor ?? null;
-                
-                // Calculate day counter for multi-day tasks
-                $selectedDates = data_get($task->options, 'dates', []);
-                $totalDays = count($selectedDates);
-                $currentDay = 0;
-                $showDayCounter = false;
-                
-                if (!empty($selectedDates)) {
-                    sort($selectedDates);
-                    $currentDay = array_search($date, $selectedDates);
-                    if ($currentDay !== false) {
-                        $currentDay++;
-                    }
-                    $showDayCounter = $totalDays > 1 && $currentDay > 0;
-                }
-                
-                // Arrival time
-                $arrivalTimeLabel = null;
-                $dayFormat = $carbonDate->format('Y-m-d');
-                $dayTimeSettings = data_get($task->options, "time_settings.$dayFormat");
-                $dayUsesTime = (bool) data_get($dayTimeSettings, 'use_time', false);
-                $dayStartTime = (string) data_get($dayTimeSettings, 'start_time', '');
-                if ($dayUsesTime && $dayStartTime !== '') {
-                    try {
-                        $arrivalTimeLabel = \Carbon\Carbon::createFromFormat('H:i', $dayStartTime)->format('g:i A');
-                    } catch (\Exception $e) {
-                        $arrivalTimeLabel = null;
-                    }
-                }
-            @endphp
-            
-            @if($clickable)
-                <flux:kanban.card
-                    as="button"
-                    class="min-w-0 w-full"
-                    wire:key="upcoming-task-{{ $task->id }}-{{ $date }}"
-                    wire:click="$dispatchTo('tasks.task-create', 'editTask', { task: {{ $task->id }} })"
-                >
-                    @include('components.upcoming-tasks-list-card-content', [
-                        'task' => $task,
-                        'taskTypeTextClasses' => $taskTypeTextClasses,
-                        'arrivalTimeLabel' => $arrivalTimeLabel,
-                        'showDayCounter' => $showDayCounter,
-                        'currentDay' => $currentDay,
-                        'totalDays' => $totalDays,
-                        'showAvatars' => $showAvatars,
-                        'taskUsers' => $taskUsers,
-                        'taskVendor' => $taskVendor,
-                        'showProjectInfo' => false,
-                    ])
-                </flux:kanban.card>
-            @else
-                <flux:kanban.card
-                    class="min-w-0 w-full transition hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:shadow-sm hover:border-zinc-300 dark:hover:border-zinc-600"
-                    wire:key="upcoming-task-{{ $task->id }}-{{ $date }}"
-                >
-                    @include('components.upcoming-tasks-list-card-content', [
-                        'task' => $task,
-                        'taskTypeTextClasses' => $taskTypeTextClasses,
-                        'arrivalTimeLabel' => $arrivalTimeLabel,
-                        'showDayCounter' => $showDayCounter,
-                        'currentDay' => $currentDay,
-                        'totalDays' => $totalDays,
-                        'showAvatars' => $showAvatars,
-                        'taskUsers' => $taskUsers,
-                        'taskVendor' => $taskVendor,
-                        'showProjectInfo' => false,
-                    ])
-                </flux:kanban.card>
-            @endif
+            <x-task-card :task="$task" :date="$date" :clickable="$clickable" :show-avatars="$showAvatars" :show-vendor-info="$showVendorInfo ?? true" />
         @endforeach
     </div>
     @endif

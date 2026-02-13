@@ -48,6 +48,12 @@
                         @endphp
                         <flux:sidebar.item wire:navigate.hover icon="home" href="{{ $clientHome }}">Home</flux:sidebar.item>
                         <flux:sidebar.item wire:navigate.hover icon="folder" href="/projects">Projects</flux:sidebar.item>
+                        <flux:sidebar.item wire:navigate.hover icon="chat-bubble-left-right" href="{{ route('sms.index') }}">
+                            <span class="inline-flex items-center gap-2">
+                                <span>Messages</span>
+                                <livewire:sms.sms-sidebar-badge />
+                            </span>
+                        </flux:sidebar.item>
                     @else
                         {{-- SYSTEM ERRORS --}}
 

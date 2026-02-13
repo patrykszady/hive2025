@@ -19,6 +19,9 @@ class SmsThreadList extends Component
     #[Reactive]
     public ?int $selectedThreadId = null;
 
+    #[Reactive]
+    public bool $isClientUser = false;
+
     public function updating($field): void
     {
         $this->resetPage();
@@ -29,13 +32,14 @@ class SmsThreadList extends Component
     {
         return SmsGroupThread::query()
             ->with([
-                'project',
-                'client.users',
-                'messages' => fn ($query) => $query->latest()->limit(1),
-                'reads' => fn ($query) => $query
-                    ->where('user_id', auth()->id())
-                    ->select('id', 'thread_id', 'user_id', 'last_read_message_id'),
+                'project:id,address',
+                'client',
+                'latestMessage',
             ])
+            ->when($this->isClientUser, function ($query) {
+                $clientIds = auth()->user()->clients()->pluck('clients.id');
+                $query->whereIn('client_id', $clientIds);
+            })
             ->when(trim($this->search), function ($query, $search) {
                 $query->where(function ($q) use ($search) {
                     $q->whereJsonContains('participants', $search)
@@ -53,7 +57,7 @@ class SmsThreadList extends Component
         $threadCollection = $this->threads->getCollection();
 
         $latestInboundByThread = $threadCollection
-            ->mapWithKeys(fn ($thread) => [$thread->id => $thread->messages->first()])
+            ->mapWithKeys(fn ($thread) => [$thread->id => $thread->latestMessage])
             ->filter(fn ($message) => $message && $message->isInbound());
 
         if ($latestInboundByThread->isEmpty()) {

@@ -16,6 +16,7 @@ class PushSubscription extends Model
         'realtime_enabled',
         'morning_enabled',
         'evening_enabled',
+        'sms_inbound_enabled',
         'user_agent',
         'last_seen_at',
     ];

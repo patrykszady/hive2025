@@ -38,14 +38,16 @@
                 <flux:table.cell>
                     <div class="flex items-center justify-between gap-2">
                         <span>Reimbursements</span>
-                        <flux:button
-                            icon="arrow-down-on-square"
-                            size="xs"
-                            variant="ghost"
-                            class="shrink-0 !p-0"
-                            wire:click="print_reimbursements"
-                            tooltip="Download"
-                        />
+                        @if((float) ($finances['reimbursments'] ?? 0) > 0)
+                            <flux:button
+                                icon="arrow-down-on-square"
+                                size="xs"
+                                variant="ghost"
+                                class="shrink-0 !p-0"
+                                wire:click="print_reimbursements"
+                                tooltip="Download"
+                            />
+                        @endif
                     </div>
                 </flux:table.cell>
                 <flux:table.cell>{{money($finances['reimbursments'])}}</flux:table.cell>

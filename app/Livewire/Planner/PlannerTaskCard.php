@@ -82,25 +82,7 @@ class PlannerTaskCard extends Component
     #[Computed]
     public function arrivalTimeLabel(): ?string
     {
-        $task = $this->task;
-
-        if (! $task) {
-            return null;
-        }
-
-        $dayTimeSettings = data_get($task->options, "time_settings.{$this->dayFormat}");
-        $dayUsesTime = (bool) data_get($dayTimeSettings, 'use_time', false);
-        $dayStartTime = (string) data_get($dayTimeSettings, 'start_time', '');
-
-        if (! $dayUsesTime || $dayStartTime === '') {
-            return null;
-        }
-
-        try {
-            return Carbon::createFromFormat('H:i', $dayStartTime)->format('g:i A');
-        } catch (\Exception) {
-            return null;
-        }
+        return $this->task?->getArrivalTimeLabel($this->dayFormat);
     }
 
     // ─── Actions ─────────────────────────────────────────────

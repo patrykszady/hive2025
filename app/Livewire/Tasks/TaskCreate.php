@@ -146,6 +146,38 @@ class TaskCreate extends Component
         $this->form->time_settings = [];
     }
 
+    /**
+     * Copy times from the first date that has them to the given date.
+     * Called via x-on:change when use_time toggle fires.
+     */
+    public function copyTimesToDate(string $targetDate): void
+    {
+        // Only act when use_time is ON for this date
+        if (! ($this->form->time_settings[$targetDate]['use_time'] ?? false)) {
+            return;
+        }
+
+        // Already has times set — nothing to copy
+        if (! empty($this->form->time_settings[$targetDate]['start_time'])) {
+            return;
+        }
+
+        // Find the first other date that has times configured
+        foreach ($this->form->dates as $date) {
+            if ($date === $targetDate) {
+                continue;
+            }
+
+            $settings = $this->form->time_settings[$date] ?? [];
+
+            if (! empty($settings['start_time'])) {
+                $this->form->time_settings[$targetDate]['start_time'] = $settings['start_time'];
+                $this->form->time_settings[$targetDate]['end_time'] = $settings['end_time'] ?? null;
+                break;
+            }
+        }
+    }
+
     public function toggleArrivalTime(string $date): void
     {
         $current = data_get($this->form->time_settings, "$date.use_time", false);

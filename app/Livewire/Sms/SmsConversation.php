@@ -26,6 +26,8 @@ class SmsConversation extends Component
 
     public $attachment;
 
+    public bool $isClientUser = false;
+
     protected ?int $lastMarkedMessageId = null;
 
     public function mount(): void
@@ -39,10 +41,15 @@ class SmsConversation extends Component
         $listeners = [];
 
         if ($this->threadId) {
-            $listeners["echo-private:sms.thread.{$this->threadId},SmsMessageReceived"] = '$refresh';
+            $listeners["echo-private:sms.thread.{$this->threadId},SmsMessageReceived"] = 'handleIncomingMessage';
         }
 
         return $listeners;
+    }
+
+    public function handleIncomingMessage(): void
+    {
+        $this->markThreadAsRead();
     }
 
     public function updatedAttachment(): void
@@ -64,6 +71,10 @@ class SmsConversation extends Component
 
     public function sendMessage(GroupSmsService $smsService): void
     {
+        if ($this->isClientUser) {
+            abort(403, 'Client users cannot send messages.');
+        }
+
         $this->validate([
             'newMessage' => 'required_without:attachment|nullable|string|max:1600',
             'attachment' => 'nullable|file|mimes:jpg,jpeg,png,gif,webp|max:5120',
@@ -110,7 +121,11 @@ class SmsConversation extends Component
             return null;
         }
 
-        return SmsGroupThread::with(['project', 'client.users'])->find($this->threadId);
+        return SmsGroupThread::with([
+            'project:id,address',
+            'client',
+            'client.users:id,first_name,last_name,cell_phone',
+        ])->find($this->threadId);
     }
 
     /**
@@ -204,6 +219,7 @@ class SmsConversation extends Component
         }
 
         return SmsMessage::where('thread_id', $this->threadId)
+            ->select(['id', 'thread_id', 'direction', 'from_number', 'text', 'media_urls', 'created_at', 'sent_by_user_id'])
             ->with('sentByUser:id,first_name,last_name')
             ->orderBy('created_at', 'asc')
             ->get();
@@ -211,9 +227,12 @@ class SmsConversation extends Component
 
     public function render()
     {
-        $this->markThreadAsRead();
-
         return view('livewire.sms.conversation');
+    }
+
+    public function placeholder()
+    {
+        return view('livewire.sms.conversation_placeholder');
     }
 
     protected function markThreadAsRead(): void

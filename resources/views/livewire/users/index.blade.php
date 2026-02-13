@@ -13,7 +13,18 @@
         @endunless
     </x-slot:actions>
 
-    <flux:table class="{{ ($nonLivewire ?? false) ? 'whitespace-normal' : '' }}">
+        @if($accordion)
+            <flux:accordion transition>
+                <flux:accordion.item :expanded="$accordionExpanded">
+                    <flux:accordion.heading>
+                        <div class="flex justify-between items-center">
+                            <div class="font-medium text-gray-700 dark:text-gray-300">Details</div>
+                        </div>
+                    </flux:accordion.heading>
+                    <flux:accordion.content>
+        @endif
+
+        <flux:table class="{{ ($nonLivewire ?? false) ? 'whitespace-normal' : '' }}">
         <flux:table.columns>
             <flux:table.column>Name</flux:table.column>
             <flux:table.column>Phone</flux:table.column>
@@ -136,4 +147,10 @@
             </div>
         @endunless
     </div>
+
+    @if($accordion)
+                </flux:accordion.content>
+            </flux:accordion.item>
+        </flux:accordion>
+    @endif
 </x-island-card>

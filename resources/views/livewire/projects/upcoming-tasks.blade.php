@@ -1,3 +1,4 @@
+@php $isClientUser = auth()->user()->is_client_user; @endphp
 <div wire:transition>
     <x-upcoming-tasks-list
         :grouped-tasks="$this->groupedTasks"
@@ -5,7 +6,8 @@
         :task-count="$this->taskCount"
         :unscheduled-tasks="$this->unscheduledTasks"
         :show-avatars="true"
-        :clickable="true"
+        :clickable="!$isClientUser"
+        :show-vendor-info="!$isClientUser"
     />
 </div>
 

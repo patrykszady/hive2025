@@ -311,6 +311,7 @@ async function updateUpcomingTaskNotificationPreferences(preferences) {
 		preferences?.realtime_enabled
 		|| preferences?.morning_enabled
 		|| preferences?.evening_enabled
+		|| preferences?.sms_inbound_enabled
 	);
 
 	try {

@@ -25,18 +25,11 @@
                         </div>
                         <flux:switch x-model="prefs.browser_enabled" x-on:change="handleBrowserMasterToggle()" />
                     </div>
-                    <div class="rounded-md border border-zinc-200 dark:border-zinc-700 px-3 py-2 text-xs text-zinc-600 dark:text-zinc-300" x-show="browserSupported && subscriptions.length > 0" x-cloak>
-                        <div class="flex items-center gap-2">
-                            <span class="font-medium text-zinc-800 dark:text-zinc-100">This browser:</span>
-                            <span x-text="currentBrowserStatus"></span>
-                        </div>
-                        <template x-if="otherBrowserStatuses.length">
-                            <div class="mt-1">
-                                <span class="font-medium text-zinc-800 dark:text-zinc-100">Other browsers:</span>
-                                <span x-text="otherBrowserStatuses.join(', ')"></span>
-                            </div>
-                        </template>
-                    </div>
+                    @include('livewire.users.partials.browser-status-panel', [
+                        'showWhen' => 'browserSupported && subscriptions.length > 0',
+                        'currentStatus' => 'currentBrowserStatus',
+                        'otherStatuses' => 'otherBrowserStatuses',
+                    ])
                 </div>
                 <div class="flex items-center justify-between gap-4">
                     <div>
@@ -46,15 +39,22 @@
                     <flux:switch wire:model.live="channel_sms" />
                 </div>
                 @if($user->vendor_role === 'Admin')
-                    <div class="flex items-center justify-between gap-4">
-                        <div>
-                            <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">New Text Alerts (Browser)</div>
-                            <div class="text-xs text-zinc-500">Show browser notifications when inbound SMS/MMS messages arrive.</div>
-                            <template x-if="smsInboundError">
-                                <div class="text-xs text-red-500 mt-0.5" x-text="smsInboundError"></div>
-                            </template>
+                    <div class="flex flex-col gap-2">
+                        <div class="flex items-center justify-between gap-4">
+                            <div>
+                                <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">New Text Alerts (Browser)</div>
+                                <div class="text-xs text-zinc-500">Show browser notifications when inbound SMS/MMS messages arrive.</div>
+                                <template x-if="smsInboundError">
+                                    <div class="text-xs text-red-500 mt-0.5" x-text="smsInboundError"></div>
+                                </template>
+                            </div>
+                            <flux:switch x-model="prefs.sms_inbound_browser" x-on:change="handleSmsInboundBrowserToggle()" />
                         </div>
-                        <flux:switch x-model="$wire.sms_inbound_browser" x-on:change="handleSmsInboundBrowserToggle()" />
+                        @include('livewire.users.partials.browser-status-panel', [
+                            'showWhen' => 'browserSupported && subscriptions.length > 0',
+                            'currentStatus' => 'currentSmsInboundBrowserStatus',
+                            'otherStatuses' => 'otherSmsInboundBrowserStatuses',
+                        ])
                     </div>
                 @endif
             </div>
@@ -125,6 +125,7 @@ Alpine.data('notificationSettingsManager', () => ({
     subscriptions: [],
     prefs: {
         browser_enabled: false,
+        sms_inbound_browser: false,
     },
 
     async init() {
@@ -148,6 +149,8 @@ Alpine.data('notificationSettingsManager', () => ({
                 status.preferences.morning_enabled ||
                 status.preferences.evening_enabled
             );
+
+            this.prefs.sms_inbound_browser = Boolean(status.preferences.sms_inbound_enabled);
         }
     },
 
@@ -175,20 +178,42 @@ Alpine.data('notificationSettingsManager', () => ({
             .map((s) => `${s.label} (${s.enabled ? 'On' : 'Off'})`);
     },
 
+    get currentSmsInboundBrowserStatus() {
+        const current = this.subscriptions.find((s) => s.is_current);
+        if (!current) {
+            return 'Not registered';
+        }
+
+        const enabled = Boolean(current?.preferences?.sms_inbound_enabled);
+
+        return `${current.label} (${enabled ? 'On' : 'Off'})`;
+    },
+
+    get otherSmsInboundBrowserStatuses() {
+        return this.subscriptions
+            .filter((s) => !s.is_current)
+            .map((s) => {
+                const enabled = Boolean(s?.preferences?.sms_inbound_enabled);
+
+                return `${s.label} (${enabled ? 'On' : 'Off'})`;
+            });
+    },
+
     async handleBrowserMasterToggle() {
-        const previous = { ...this.prefs };
+        const enabled = this.prefs.browser_enabled;
+        const previous = !enabled;
         this.browserError = null;
 
         if (!this.browserSupported) {
             this.browserError = 'This browser does not support push notifications.';
-            this.prefs = previous;
+            this.prefs.browser_enabled = previous;
             return;
         }
 
-        if (this.prefs.browser_enabled) {
+        if (enabled) {
             const granted = await this.ensurePushPermission('browser');
             if (!granted) {
-                this.prefs = previous;
+                this.prefs.browser_enabled = previous;
                 return;
             }
 
@@ -196,14 +221,13 @@ Alpine.data('notificationSettingsManager', () => ({
                 const result = await window.HiveTaskNotifications.enable();
                 if (!result?.enabled) {
                     this.browserError = 'Failed to register push subscription. Please try again.';
-                    this.prefs = previous;
+                    this.prefs.browser_enabled = previous;
                     return;
                 }
             }
         }
 
         // Set all browser prefs to the master toggle value
-        const enabled = this.prefs.browser_enabled;
         if (window.HiveTaskNotifications?.updatePreferences) {
             const update = await window.HiveTaskNotifications.updatePreferences({
                 realtime_enabled: enabled,
@@ -213,14 +237,14 @@ Alpine.data('notificationSettingsManager', () => ({
 
             if (!update?.updated) {
                 this.browserError = 'Failed to save browser preferences.';
-                this.prefs = previous;
+                this.prefs.browser_enabled = previous;
                 return;
             }
         }
 
         if (!enabled) {
             // Only fully remove push subscription if SMS inbound browser is also off
-            if (!$wire.sms_inbound_browser) {
+            if (!this.prefs.sms_inbound_browser) {
                 if (window.HiveTaskNotifications?.disable) {
                     await window.HiveTaskNotifications.disable();
                 }
@@ -240,19 +264,21 @@ Alpine.data('notificationSettingsManager', () => ({
     },
 
     async handleSmsInboundBrowserToggle() {
+        const enabled = this.prefs.sms_inbound_browser;
+        const previous = !enabled;
         this.smsInboundError = null;
 
-        if ($wire.sms_inbound_browser) {
+        if (enabled) {
             // Turning ON — ensure push subscription exists
             if (!this.browserSupported) {
                 this.smsInboundError = 'This browser does not support push notifications.';
-                $wire.sms_inbound_browser = false;
+                this.prefs.sms_inbound_browser = previous;
                 return;
             }
 
             const granted = await this.ensurePushPermission('sms');
             if (!granted) {
-                $wire.sms_inbound_browser = false;
+                this.prefs.sms_inbound_browser = previous;
                 return;
             }
 
@@ -260,25 +286,47 @@ Alpine.data('notificationSettingsManager', () => ({
                 const result = await window.HiveTaskNotifications.enable();
                 if (!result?.enabled) {
                     this.smsInboundError = 'Failed to register push subscription. Please try again.';
-                    $wire.sms_inbound_browser = false;
+                    this.prefs.sms_inbound_browser = previous;
+                    return;
+                }
+            }
+
+            if (window.HiveTaskNotifications?.updatePreferences) {
+                const update = await window.HiveTaskNotifications.updatePreferences({
+                    sms_inbound_enabled: true,
+                });
+
+                if (!update?.updated) {
+                    this.smsInboundError = 'Failed to save browser preferences.';
+                    this.prefs.sms_inbound_browser = previous;
                     return;
                 }
             }
 
             await this.loadSubscriptions();
-            // Explicitly save after async work completes
-            await $wire.save();
-        } else {
-            // Turning OFF — only remove push subscription if Browser toggle is also off
-            if (!this.prefs.browser_enabled) {
-                if (window.HiveTaskNotifications?.disable) {
-                    await window.HiveTaskNotifications.disable();
-                }
-                await this.loadSubscriptions();
-            }
-            // Explicitly save the OFF state
-            await $wire.save();
+            return;
         }
+
+        if (window.HiveTaskNotifications?.updatePreferences) {
+            const update = await window.HiveTaskNotifications.updatePreferences({
+                sms_inbound_enabled: false,
+            });
+
+            if (!update?.updated) {
+                this.smsInboundError = 'Failed to save browser preferences.';
+                this.prefs.sms_inbound_browser = previous;
+                return;
+            }
+        }
+
+        // Turning OFF — only remove push subscription if Browser toggle is also off
+        if (!this.prefs.browser_enabled) {
+            if (window.HiveTaskNotifications?.disable) {
+                await window.HiveTaskNotifications.disable();
+            }
+        }
+
+        await this.loadSubscriptions();
     },
 
     /**

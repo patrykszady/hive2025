@@ -15,6 +15,8 @@ class SmsIndex extends Component
     #[Url(except: null)]
     public ?int $threadId = null;
 
+    public bool $isClientUser = false;
+
     protected $listeners = [
         'threadCreated' => 'selectThread',
         'threadSelected' => 'selectThread',
@@ -22,14 +24,83 @@ class SmsIndex extends Component
         'threadRead' => '$refresh',
     ];
 
+    public function mount(): void
+    {
+        $user = auth()->user();
+        $this->isClientUser = (bool) $user->is_client_user;
+
+        // Client users must have a client with a thread; non-admin non-client users cannot access
+        if (! $this->isClientUser && $user->vendor_role !== 'Admin') {
+            abort(403);
+        }
+    }
+
     public function selectThread(int|null $threadId): void
     {
+        // Client users may only view threads belonging to their client
+        if ($this->isClientUser && $threadId !== null) {
+            $clientIds = auth()->user()->clients()->pluck('clients.id');
+            $allowed = SmsGroupThread::where('id', $threadId)
+                ->whereIn('client_id', $clientIds)
+                ->exists();
+
+            if (! $allowed) {
+                return;
+            }
+        }
+
         $this->threadId = $threadId;
     }
 
     public function clearThread(): void
     {
         $this->threadId = null;
+    }
+
+    public function autoSelectLatestDesktopThread(): void
+    {
+        if ($this->threadId !== null) {
+            return;
+        }
+
+        $latestThreadId = $this->latestAccessibleThreadId();
+
+        if ($latestThreadId !== null) {
+            $this->selectThread($latestThreadId);
+        }
+    }
+
+    public function autoSelectSingleThreadIfOnlyOne(): void
+    {
+        if ($this->threadId !== null) {
+            return;
+        }
+
+        $threadIds = $this->accessibleThreadsQuery()
+            ->orderByDesc('last_activity_at')
+            ->limit(2)
+            ->pluck('id');
+
+        if ($threadIds->count() === 1) {
+            $this->selectThread((int) $threadIds->first());
+        }
+    }
+
+    protected function latestAccessibleThreadId(): ?int
+    {
+        return $this->accessibleThreadsQuery()
+            ->orderByDesc('last_activity_at')
+            ->value('id');
+    }
+
+    protected function accessibleThreadsQuery()
+    {
+        return SmsGroupThread::query()
+            ->when($this->isClientUser, function ($query) {
+                $clientIds = auth()->user()->clients()->pluck('clients.id');
+
+                $query->whereIn('client_id', $clientIds);
+            });
     }
 
     #[Title('Messages')]

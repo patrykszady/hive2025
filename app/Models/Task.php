@@ -71,6 +71,39 @@ class Task extends Model
         return $dateStr;
     }
 
+    /**
+     * Get a formatted arrival time label for a specific date.
+     *
+     * Returns a range ("8:30 PM - 9 PM") when start and end differ,
+     * or a single time ("8 AM") when they're the same.
+     * Minutes are omitted when on the hour.
+     */
+    public function getArrivalTimeLabel(string $date): ?string
+    {
+        $dayTimeSettings = data_get($this->options, "time_settings.$date");
+        $dayUsesTime = (bool) data_get($dayTimeSettings, 'use_time', false);
+        $dayStartTime = (string) data_get($dayTimeSettings, 'start_time', '');
+        $dayEndTime = (string) data_get($dayTimeSettings, 'end_time', '');
+
+        if (! $dayUsesTime || $dayStartTime === '') {
+            return null;
+        }
+
+        try {
+            $formatTime = static fn(string $t): string => (($c = Carbon::createFromFormat('H:i', $t)) && $c->minute === 0)
+                ? $c->format('g A')
+                : $c->format('g:i A');
+
+            $startLabel = $formatTime($dayStartTime);
+
+            return ($dayEndTime !== '' && $dayEndTime !== $dayStartTime)
+                ? $startLabel . ' - ' . $formatTime($dayEndTime)
+                : $startLabel;
+        } catch (\Exception) {
+            return null;
+        }
+    }
+
     public const VENDOR_STATUS_REQUESTED = 'requested';
     public const VENDOR_STATUS_CONFIRMED = 'confirmed';
     public const VENDOR_STATUS_REJECTED = 'rejected';

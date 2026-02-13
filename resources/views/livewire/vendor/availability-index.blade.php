@@ -256,7 +256,7 @@
                                     <flux:time-picker
                                         wire:model.live="proposedTimeSettings.{{ $date }}.start_time"
                                         wire:change="updateEndTime('{{ $date }}')"
-                                        interval="60"
+                                        interval="30"
                                         min="06:00"
                                         max="23:00"
                                         open-to="08:00"
@@ -264,7 +264,7 @@
                                     />
                                     <flux:time-picker
                                         wire:model.live="proposedTimeSettings.{{ $date }}.end_time"
-                                        interval="60"
+                                        interval="30"
                                         min="06:00"
                                         max="23:00"
                                         open-to="10:00"

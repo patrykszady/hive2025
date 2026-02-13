@@ -1,5 +1,42 @@
+@php
+    // Derive defaults from $task + $date if not explicitly passed
+    $typeUi = $task->type_ui ?? [];
+    $taskTypeTextClasses = $taskTypeTextClasses ?? data_get($typeUi, 'text', '');
+    $taskUsers = $taskUsers ?? ($task->users ?? collect());
+    $taskVendor = $taskVendor ?? ($task->vendor ?? null);
+    $showAvatars = $showAvatars ?? true;
+    $showProjectInfo = $showProjectInfo ?? false;
+    $showVendorInfo = $showVendorInfo ?? true;
+
+    // Arrival time — use model method if not pre-computed
+    if (! isset($arrivalTimeLabel)) {
+        $dayFormat = isset($date)
+            ? ($date instanceof \Carbon\Carbon ? $date->format('Y-m-d') : $date)
+            : null;
+        $arrivalTimeLabel = $dayFormat ? $task->getArrivalTimeLabel($dayFormat) : null;
+    }
+
+    // Day counter — compute from task options if not pre-set
+    if (! isset($showDayCounter)) {
+        $selectedDates = data_get($task->options, 'dates', []);
+        $totalDays = count($selectedDates);
+        $currentDay = 0;
+        $showDayCounter = false;
+
+        if (isset($date) && ! empty($selectedDates)) {
+            $dayFormat = $date instanceof \Carbon\Carbon ? $date->format('Y-m-d') : $date;
+            sort($selectedDates);
+            $currentDay = array_search($dayFormat, $selectedDates);
+            if ($currentDay !== false) {
+                $currentDay++;
+            }
+            $showDayCounter = $totalDays > 1 && $currentDay > 0;
+        }
+    }
+@endphp
+
 <div class="flex items-start justify-between gap-2 min-w-0">
-    <div class="flex items-center gap-2 min-w-0">
+    <div class="flex items-baseline gap-2 min-w-0">
         <flux:heading size="sm" class="min-w-0 truncate {{ $taskTypeTextClasses }}">
             {{ $task->title }}
         </flux:heading>
@@ -60,19 +97,21 @@
                 name="{{ $taskVendor->name }}"
                 color="auto"
                 color:seed="{{ $taskVendor->id }}"
-                title="{{ $taskVendor->name }}"
+                :title="($showVendorInfo ?? true) ? $taskVendor->name : null"
             />
-            <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">{{ $taskVendor->name }}</span>
-            
-            @if($task->vendor_status)
-                @php $statusUi = $task->vendor_status_ui; @endphp
-                <flux:badge 
-                    size="sm" 
-                    :color="$statusUi['flux'] ?? 'zinc'"
-                    :icon="$statusUi['icon'] ?? null"
-                >
-                    {{ $statusUi['label'] ?? ucfirst($task->vendor_status) }}
-                </flux:badge>
+            @if($showVendorInfo ?? true)
+                <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">{{ $taskVendor->name }}</span>
+
+                @if($task->vendor_status)
+                    @php $statusUi = $task->vendor_status_ui; @endphp
+                    <flux:badge
+                        size="sm"
+                        :color="$statusUi['flux'] ?? 'zinc'"
+                        :icon="$statusUi['icon'] ?? null"
+                    >
+                        {{ $statusUi['label'] ?? ucfirst($task->vendor_status) }}
+                    </flux:badge>
+                @endif
             @endif
         @endif
     </div>
