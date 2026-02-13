@@ -83,10 +83,10 @@
     <link rel="icon" type="image/png" sizes="192x192" href="{{ asset('favicons/icon-192x192.png') }}">
 
     {{-- Apple touch icons (iPhone, iPad, iPad Pro) --}}
-    <link rel="apple-touch-icon" sizes="180x180" href="{{ asset('apple-touch-icon.png') }}">
-    <link rel="apple-touch-icon" sizes="152x152" href="{{ asset('favicons/icon-152x152.png') }}">
-    <link rel="apple-touch-icon" sizes="167x167" href="{{ asset('favicons/icon-167x167.png') }}">
-    <link rel="apple-touch-icon-precomposed" sizes="180x180" href="{{ asset('apple-touch-icon.png') }}">
+    <link rel="apple-touch-icon" sizes="180x180" href="{{ asset('favicons/apple-touch-icon-180x180.png') }}">
+    <link rel="apple-touch-icon" sizes="152x152" href="{{ asset('favicons/apple-touch-icon-152x152.png') }}">
+    <link rel="apple-touch-icon" sizes="167x167" href="{{ asset('favicons/apple-touch-icon-167x167.png') }}">
+    <link rel="apple-touch-icon-precomposed" sizes="180x180" href="{{ asset('favicons/apple-touch-icon-180x180.png') }}">
 
     {{-- Windows tile --}}
     <meta name="msapplication-TileImage" content="{{ asset('favicons/icon-150x150.png') }}">
