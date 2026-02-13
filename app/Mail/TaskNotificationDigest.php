@@ -3,6 +3,7 @@
 namespace App\Mail;
 
 use App\Models\User;
+use App\Models\Project;
 use App\Models\Task;
 use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
@@ -54,9 +55,11 @@ class TaskNotificationDigest extends Mailable
 
         $userNow = Carbon::now($this->userTimezone());
 
+        // Zero-width non-joiner between date parts to prevent Outlook auto-linking
+        $zwnj = "\u{200C}";
         $this->headline = match ($this->type) {
-            'morning' => "Today's Tasks " . $userNow->format('m/d/y'),
-            'evening' => "Tomorrow's Tasks " . $userNow->copy()->addDay()->format('m/d/y'),
+            'morning' => "Today's Tasks " . $userNow->format('m') . $zwnj . '/' . $userNow->format('d') . $zwnj . '/' . $userNow->format('y'),
+            'evening' => "Tomorrow's Tasks " . $userNow->copy()->addDay()->format('m') . $zwnj . '/' . $userNow->copy()->addDay()->format('d') . $zwnj . '/' . $userNow->copy()->addDay()->format('y'),
             'update'  => 'Schedule Updated',
             default   => 'Task Notification',
         };
@@ -141,10 +144,8 @@ class TaskNotificationDigest extends Mailable
             $grouped[$d->format('Y-m-d')] = collect();
         }
 
-        // Fetch tasks that fall within the 7-day window
-        $tasks = Task::query()
+        $tasksQuery = Task::query()
             ->with(['project.client', 'project.latestStatus', 'vendor'])
-            ->whereJsonContains('user_ids', (string) $this->user->id)
             ->where(function ($q) use ($startDate, $endDate) {
                 $q->whereBetween('start_date', [$startDate, $endDate])
                   ->orWhereBetween('end_date', [$startDate, $endDate])
@@ -152,7 +153,32 @@ class TaskNotificationDigest extends Mailable
                       $q2->where('start_date', '<=', $startDate)
                          ->where('end_date', '>=', $endDate);
                   });
-            })
+            });
+
+        if ($this->isClientUser) {
+            $clientIds = $this->user->clients()
+                ->withoutGlobalScopes()
+                ->pluck('clients.id');
+
+            if ($clientIds->isEmpty()) {
+                return $grouped;
+            }
+
+            $projectIds = Project::query()
+                ->withoutGlobalScopes()
+                ->whereIn('client_id', $clientIds)
+                ->pluck('id');
+
+            if ($projectIds->isEmpty()) {
+                return $grouped;
+            }
+
+            $tasksQuery->whereIn('project_id', $projectIds);
+        } else {
+            $tasksQuery->whereJsonContains('user_ids', (string) $this->user->id);
+        }
+
+        $tasks = $tasksQuery
             ->orderBy('start_date')
             ->get();
 

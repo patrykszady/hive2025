@@ -4,9 +4,13 @@
 <title>{{ config('app.name') }}</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-<meta name="color-scheme" content="light">
-<meta name="supported-color-schemes" content="light">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
 <style>
+:root {
+color-scheme: light dark;
+}
+
 @media only screen and (max-width: 600px) {
 .inner-body {
 width: 100% !important;
@@ -20,6 +24,55 @@ width: 100% !important;
 @media only screen and (max-width: 500px) {
 .button {
 width: 100% !important;
+}
+}
+
+@media (prefers-color-scheme: dark) {
+/* Project cards */
+.project-card {
+border-color: #52525b !important;
+}
+.project-title,
+.project-title a {
+color: #e2e8f0 !important;
+}
+.project-subtitle {
+color: #94a3b8 !important;
+}
+
+/* Task cards */
+.task-card {
+border-color: #52525b !important;
+}
+.task-time,
+.task-day-counter {
+color: #94a3b8 !important;
+}
+.vendor-name {
+color: #94a3b8 !important;
+}
+
+/* Date headers */
+.date-header {
+color: #cbd5e1 !important;
+}
+.date-header-today {
+color: #818cf8 !important;
+}
+.badge-today {
+background-color: #312e81 !important;
+color: #a5b4fc !important;
+}
+.badge-tomorrow {
+background-color: #27272a !important;
+color: #a1a1aa !important;
+}
+.badge-no-tasks {
+background-color: #27272a !important;
+color: #71717a !important;
+}
+.subtitle-text {
+color: #94a3b8 !important;
 }
 }
 </style>

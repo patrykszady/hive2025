@@ -74,9 +74,25 @@
     <meta name="apple-mobile-web-app-title" content="{{ config('app.name') }}">
 
     <title>{{ isset($title) ? $title . ' | ' . env('APP_NAME') : env('APP_NAME')}}</title>
-    <link rel="icon" type="image/png" href="{{ asset('favicon.png') }}">
+    {{-- Favicon: ICO for legacy browsers, SVG for modern, PNG fallback --}}
+    <link rel="icon" href="{{ asset('favicon.ico') }}" sizes="48x48">
+    <link rel="icon" href="{{ asset('favicon.svg') }}" type="image/svg+xml">
+    <link rel="icon" type="image/png" sizes="16x16" href="{{ asset('favicons/icon-16x16.png') }}">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('favicons/icon-32x32.png') }}">
+    <link rel="icon" type="image/png" sizes="96x96" href="{{ asset('favicons/icon-96x96.png') }}">
+    <link rel="icon" type="image/png" sizes="192x192" href="{{ asset('favicons/icon-192x192.png') }}">
+
+    {{-- Apple touch icons (iPhone, iPad, iPad Pro) --}}
     <link rel="apple-touch-icon" sizes="180x180" href="{{ asset('apple-touch-icon.png') }}">
-    <link rel="apple-touch-icon-precomposed" href="{{ asset('apple-touch-icon.png') }}">
+    <link rel="apple-touch-icon" sizes="152x152" href="{{ asset('favicons/icon-152x152.png') }}">
+    <link rel="apple-touch-icon" sizes="167x167" href="{{ asset('favicons/icon-167x167.png') }}">
+    <link rel="apple-touch-icon-precomposed" sizes="180x180" href="{{ asset('apple-touch-icon.png') }}">
+
+    {{-- Windows tile --}}
+    <meta name="msapplication-TileImage" content="{{ asset('favicons/icon-150x150.png') }}">
+    <meta name="msapplication-TileColor" content="#2b3990">
+    <meta name="msapplication-square310x310logo" content="{{ asset('favicons/icon-310x310.png') }}">
+
     <link rel="manifest" href="{{ asset('site.webmanifest') }}">
 
     <!-- Fonts -->

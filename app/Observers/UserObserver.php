@@ -15,6 +15,17 @@ class UserObserver
     }
 
     /**
+     * Handle the User "created" event.
+     * Create default notification settings for every new user.
+     */
+    public function created(User $user): void
+    {
+        $user->notificationSetting()->create([
+            'realtime_sms' => true,
+        ]);
+    }
+
+    /**
      * Handle the User "updated" event.
      * Update Nylas contacts when user information changes
      */

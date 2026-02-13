@@ -153,7 +153,7 @@
                                     <flux:input.group>
                                         <flux:input
                                             x-ref="nameInput"
-                                            wire:model.defer="sections.{{$index}}.name"
+                                            wire:model="sections.{{$index}}.name"
                                             x-on:keydown.enter="$wire.sectionUpdate({{$index}}); editing = false"
                                             x-on:keydown.escape="editing = false"
                                             type="text"

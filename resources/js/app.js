@@ -80,15 +80,27 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Livewire navigate: hide during navigation, show after
+// Skip fade entirely for login <-> registration transitions
+const guestAuthPaths = ['/login', '/registration'];
+
 document.addEventListener('livewire:navigating', () => {
+	const from = window.location.pathname;
+	const toLink = document.activeElement?.closest('a[wire\\:navigate]')
+		|| document.activeElement?.closest('[wire\\:navigate]');
+	const to = toLink?.getAttribute('href')
+		? new URL(toLink.getAttribute('href'), window.location.origin).pathname
+		: null;
+
+	if (guestAuthPaths.includes(from) && guestAuthPaths.includes(to)) {
+		// No fade at all — Livewire morphs in-place, @persist keeps logo stable
+		return;
+	}
+
 	setPageFadeHidden(true);
 });
 
 document.addEventListener('livewire:navigated', () => {
-	// Small delay to ensure DOM is ready, then fade in
-	setTimeout(() => {
-		setPageFadeHidden(false);
-	}, 50);
+	setPageFadeHidden(false);
 
 	// Handle hash scrolling after navigation
 	const hash = window.location.hash;

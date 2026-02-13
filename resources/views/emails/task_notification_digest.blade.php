@@ -7,16 +7,10 @@ $typeColors = [
 'Meet' => '#ea580c',
 'Reminder' => '#e11d48',
 ];
-$vendorStatusLabels = [
-'requested' => ['label' => 'Requested', 'color' => '#ca8a04'],
-'confirmed' => ['label' => 'Confirmed', 'color' => '#16a34a'],
-'rejected'  => ['label' => 'Rejected',  'color' => '#dc2626'],
-'proposed'  => ['label' => 'Proposed',  'color' => '#4f46e5'],
-];
 @endphp
 <div style="text-align: center;">
 <h1 class="title" style="text-align: center;">{{ $headline }}</h1>
-<p class="text" style="margin-top: 6px; text-align: center; color: #71717a;">Hi {{ $user->first_name }}, here's your schedule.</p>
+<p class="text subtitle-text" style="margin-top: 6px; text-align: center; color: #71717a;">Hi {{ $user->first_name }}, here's your schedule.</p>
 </div>
 <div style="height: 16px; line-height: 16px;">&nbsp;</div>
 @foreach($groupedTasks as $date => $tasks)
@@ -31,14 +25,14 @@ $dimDay = ($isWeekend && $tasks->isEmpty()) || ($isPast && $tasks->isEmpty());
 $dateColor = $isToday ? '#4f46e5' : ($dimDay ? '#a1a1aa' : '#3f3f46');
 @endphp
 <div style="margin-bottom: 4px; margin-top: 20px;{{ $dimDay ? ' opacity: 0.5;' : '' }}">
-<span style="font-weight: 600; font-size: 14px; color: {{ $dateColor }};">{{ $carbonDate->format('D, M j, Y') }}</span>
+<span class="{{ $isToday ? 'date-header-today' : 'date-header' }}" style="font-weight: 600; font-size: 14px; color: {{ $dateColor }}; text-decoration: none;">{{ $carbonDate->format('D') }},&zwnj; {{ $carbonDate->format('M') }}&zwnj; {{ $carbonDate->format('j') }},&zwnj; {{ $carbonDate->format('Y') }}</span>
 @if($isToday)
-<span style="display: inline-block; margin-left: 8px; padding: 2px 8px; font-size: 11px; font-weight: 600; color: #3730a3; background-color: #e0e7ff; border-radius: 9999px;">Today</span>
+<span class="badge-today" style="display: inline-block; margin-left: 8px; padding: 2px 8px; font-size: 11px; font-weight: 600; color: #3730a3; background-color: #e0e7ff; border-radius: 9999px;">Today</span>
 @elseif($isTomorrow)
-<span style="display: inline-block; margin-left: 8px; padding: 2px 8px; font-size: 11px; font-weight: 600; color: #52525b; background-color: #f4f4f5; border-radius: 9999px;">Tomorrow</span>
+<span class="badge-tomorrow" style="display: inline-block; margin-left: 8px; padding: 2px 8px; font-size: 11px; font-weight: 600; color: #52525b; background-color: #f4f4f5; border-radius: 9999px;">Tomorrow</span>
 @endif
 @if($tasks->isEmpty())
-<span style="display: inline-block; margin-left: 8px; padding: 2px 10px; font-size: 12px; font-weight: 500; color: #a1a1aa; background-color: #f4f4f5; border-radius: 9999px;">No Tasks</span>
+<span class="badge-no-tasks" style="display: inline-block; margin-left: 8px; padding: 2px 10px; font-size: 12px; font-weight: 500; color: #a1a1aa; background-color: #f4f4f5; border-radius: 9999px;">No Tasks</span>
 @endif
 </div>
 @if($tasks->isEmpty())
@@ -63,13 +57,13 @@ if ($latestStatus) {
 @else
 {{-- Team/Vendor: Project card wrapper --}}
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 8px; margin-bottom: 4px;">
-<tr><td style="border: 1px solid #e4e4e7; border-radius: 10px; background-color: #ffffff; padding: 0; overflow: hidden;">
+<tr><td class="project-card" style="border: 1px solid #d4d4d8; border-radius: 10px; padding: 0; overflow: hidden;">
 {{-- Project header --}}
 <table width="100%" cellpadding="0" cellspacing="0" border="0">
 <tr><td style="padding: 10px 14px 6px 14px;">
-<span style="font-weight: 600; font-size: 14px; color: #18181b;">@if($projectUrl)<a href="{{ $projectUrl }}" style="color: #18181b; text-decoration: none;">{{ $project->short_address ?? 'No project' }}</a>@else No project @endif</span>{!! $statusDot !!}
+<span class="project-title" style="font-weight: 600; font-size: 14px; color: #18181b;">@if($projectUrl)<a href="{{ $projectUrl }}" class="project-title" style="color: #18181b; text-decoration: none;">{{ $project->short_address ?? 'No project' }}</a>@else No project @endif</span>{!! $statusDot !!}
 @if($project?->client || $project?->project_name)
-<div style="font-size: 12px; color: #71717a; margin-top: 2px;">{{ $project?->client?->last_names }}{{ $project?->client?->last_names && $project?->project_name ? ' | ' : '' }}{{ $project?->project_name }}</div>
+<div class="project-subtitle" style="font-size: 12px; color: #71717a; margin-top: 2px;">{{ $project?->client?->last_names }}{{ $project?->client?->last_names && $project?->project_name ? ' | ' : '' }}{{ $project?->project_name }}</div>
 @endif
 </td></tr>
 </table>
@@ -91,22 +85,16 @@ if (!empty($selectedDates)) {
     if ($currentDay !== false) { $currentDay++; }
     $showDayCounter = $totalDays > 1 && $currentDay > 0;
 }
-$arrivalTimeLabel = null;
 $dayFormat = $carbonDate->format('Y-m-d');
-$dayTimeSettings = data_get($task->options, "time_settings.$dayFormat");
-$dayUsesTime = (bool) data_get($dayTimeSettings, 'use_time', false);
-$dayStartTime = (string) data_get($dayTimeSettings, 'start_time', '');
-if ($dayUsesTime && $dayStartTime !== '') {
-    try { $arrivalTimeLabel = \Carbon\Carbon::createFromFormat('H:i', $dayStartTime)->format('g:i A'); } catch (\Exception $e) {}
-}
+$arrivalTimeLabel = $task->getArrivalTimeLabel($dayFormat);
 $taskUsers = $task->users ?? collect();
 @endphp
 <tr><td style="padding: 3px 0;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding: 8px 12px; border: 1px solid #e4e4e7; border-radius: 8px; background-color: #fafafa;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td class="task-card" style="padding: 8px 12px; border: 1px solid #d4d4d8; border-radius: 8px;">
 {{-- Task title row --}}
 <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-<td style="font-size: 14px; font-weight: 600;"><a href="{{ $baseUrl }}/projects/{{ $task->project_id }}?task={{ $task->id }}" style="color: {{ $titleColor }}; text-decoration: none;">{{ $task->title }}</a>@if($arrivalTimeLabel) <span style="font-weight: 400; font-size: 12px; color: #71717a; margin-left: 8px;">{{ $arrivalTimeLabel }}</span>@endif</td>
-@if($showDayCounter)<td style="text-align: right; font-size: 12px; color: #71717a; white-space: nowrap;">{{ $currentDay }}/{{ $totalDays }}</td>@endif
+<td style="font-size: 14px; font-weight: 600;"><a href="{{ $baseUrl }}/projects/{{ $task->project_id }}?task={{ $task->id }}" style="color: {{ $titleColor }}; text-decoration: none;">{{ $task->title }}</a>@if($arrivalTimeLabel) <span class="task-time" style="font-weight: 400; font-size: 12px; color: #71717a; margin-left: 8px;">{{ $arrivalTimeLabel }}</span>@endif</td>
+@if($showDayCounter)<td class="task-day-counter" style="text-align: right; font-size: 12px; color: #71717a; white-space: nowrap;">{{ $currentDay }}/{{ $totalDays }}</td>@endif
 </tr></table>
 {{-- Avatars & vendor --}}
 @if($taskUsers->count() > 0 || $taskVendor)
@@ -123,7 +111,13 @@ $textColor = $fluxTextColors[$colorIndex];
 <td style="padding-right: 2px;"><div style="width: 24px; height: 24px; border-radius: 50%; background-color: {{ $bgColor }}; color: {{ $textColor }}; font-size: 10px; font-weight: 600; line-height: 24px; text-align: center;">{{ $initials }}</div></td>
 @endforeach
 @if($taskVendor)
-<td style="padding-left: 4px; font-size: 12px; color: #52525b;">{{ $taskVendor->name }}@if($task->vendor_status && isset($vendorStatusLabels[$task->vendor_status]))@php $vs = $vendorStatusLabels[$task->vendor_status]; @endphp <span style="margin-left: 6px; padding: 1px 6px; font-size: 11px; font-weight: 500; color: {{ $vs['color'] }}; border: 1px solid {{ $vs['color'] }}; border-radius: 9999px;">{{ $vs['label'] }}</span>@endif</td>
+@php
+$vendorInitials = collect(explode(' ', $taskVendor->name ?? 'Vendor'))->map(fn($w) => mb_strtoupper(mb_substr($w, 0, 1)))->take(2)->join('');
+@endphp
+<td style="padding-left: 4px;"><div style="width: 24px; height: 24px; border-radius: 50%; background-color: #dcfce7; color: #166534; font-size: 10px; font-weight: 600; line-height: 24px; text-align: center;">{{ $vendorInitials }}</div></td>
+@if(!$isClientUser)
+<td class="vendor-name" style="padding-left: 6px; font-size: 12px; color: #52525b;">{{ $taskVendor->name }}</td>
+@endif
 @endif
 </tr></table>
 @endif

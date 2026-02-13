@@ -62,6 +62,8 @@ class Registration extends Component
 
     public bool $show_unregistered_notice = false;
 
+
+
     public function canResendPhone(): bool
     {
         if (!$this->phone_code_sent_at) {
@@ -182,7 +184,7 @@ class Registration extends Component
         $prefillCell = session()->pull('registration_prefill_cell') ?? request()->query('cell');
         $this->show_unregistered_notice = (session()->pull('registration_notice') === 'unregistered')
             || request()->query('notice') === 'unregistered';
-        
+
         // Clear phone state if returning to phone step
         if ($this->step === 'phone') {
             session()->forget('registration_state');

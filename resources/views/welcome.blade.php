@@ -11,14 +11,14 @@
         <div class="flex items-center gap-2 flex-1">
             <flux:brand 
                 href="{{ route('welcome') }}" 
-                logo="{{ asset('favicon.png') }}" 
+                logo="{{ asset('favicon.svg') }}" 
                 name="Hive Contractors" 
                 class="dark:hidden" 
                 x-on:click.prevent="if (window.smoothScrollTo) { window.smoothScrollTo(0, 800); history.pushState(null, '', '/'); }"
             />
             <flux:brand 
                 href="{{ route('welcome') }}" 
-                logo="{{ asset('favicon.png') }}" 
+                logo="{{ asset('favicon.svg') }}" 
                 name="Hive Contractors" 
                 class="hidden! dark:flex" 
                 x-on:click.prevent="if (window.smoothScrollTo) { window.smoothScrollTo(0, 800); history.pushState(null, '', '/'); }"
@@ -79,7 +79,7 @@
         <div class="px-6 pt-10 pb-24 mx-auto max-w-7xl sm:pb-32 lg:flex lg:px-8 lg:py-40">
             <div class="max-w-2xl mx-auto lg:mx-0 lg:max-w-xl lg:shrink-0 lg:pt-8">
                 <a href="{{route('registration')}}" wire:navigate.hover>
-                    <img class="h-36" src="{{ asset('favicon.png') }}" alt="{{env('APP_NAME')}}">
+                    <img class="h-36" src="{{ asset('favicon.svg') }}" alt="{{env('APP_NAME')}}">
                 </a>
                 <div class="mt-24 sm:mt-32 lg:mt-16">
                     <a href="{{route('registration')}}" class="inline-flex space-x-6" wire:navigate.hover>
@@ -385,7 +385,7 @@
             <div class="grid gap-12 lg:grid-cols-3">
                 <div class="space-y-6">
                     <div class="flex items-center gap-3">
-                        <img src="{{ asset('favicon.png') }}" alt="Hive Contractors" class="h-9" />
+                        <img src="{{ asset('favicon.svg') }}" alt="Hive Contractors" class="h-9" />
                         <a href="{{ route('welcome') }}" class="text-base font-semibold text-gray-900 hover:text-gray-700 dark:text-white dark:hover:text-gray-300" wire:navigate.hover>Hive Contractors</a>
                     </div>
                     <p class="text-sm/6 text-balance text-gray-600 dark:text-gray-400 font-normal">

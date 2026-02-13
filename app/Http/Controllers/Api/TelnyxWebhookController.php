@@ -526,6 +526,23 @@ class TelnyxWebhookController extends Controller
             $thread = SmsGroupThread::findByParticipant($to, $from);
         }
 
+        // Prevent duplicate messages from repeated webhook deliveries
+        $providerId = $data['id'] ?? null;
+        $existingMessage = $providerId
+            ? SmsMessage::where('provider_message_id', $providerId)
+                ->where('direction', SmsMessage::DIRECTION_INBOUND)
+                ->first()
+            : null;
+
+        if ($existingMessage) {
+            Log::channel('telnyx')->info('Duplicate inbound SMS webhook detected - skipping', [
+                'provider_message_id' => $providerId,
+                'from' => $from,
+                'to' => $to,
+            ]);
+            return response()->json(['status' => 'ok']);
+        }
+
         // Store the inbound message
         $message = SmsMessage::create([
             'thread_id' => $thread?->id,

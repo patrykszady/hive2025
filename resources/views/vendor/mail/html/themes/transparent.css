@@ -267,6 +267,67 @@ img {
     a {
         color: #a5b4fc !important;
     }
+
+    /* ── Digest email: project cards ── */
+    .project-card {
+        background-color: #1e1e2e !important;
+        border-color: #334155 !important;
+    }
+
+    .project-title,
+    .project-title a {
+        color: #e2e8f0 !important;
+    }
+
+    .project-subtitle {
+        color: #94a3b8 !important;
+    }
+
+    /* ── Digest email: task cards ── */
+    .task-card {
+        background-color: #27273a !important;
+        border-color: #334155 !important;
+    }
+
+    .task-time {
+        color: #94a3b8 !important;
+    }
+
+    .task-day-counter {
+        color: #94a3b8 !important;
+    }
+
+    .vendor-name {
+        color: #94a3b8 !important;
+    }
+
+    /* ── Digest email: date headers ── */
+    .date-header {
+        color: #cbd5e1 !important;
+    }
+
+    .date-header-today {
+        color: #818cf8 !important;
+    }
+
+    .badge-today {
+        background-color: #312e81 !important;
+        color: #a5b4fc !important;
+    }
+
+    .badge-tomorrow {
+        background-color: #27272a !important;
+        color: #a1a1aa !important;
+    }
+
+    .badge-no-tasks {
+        background-color: #27272a !important;
+        color: #71717a !important;
+    }
+
+    .subtitle-text {
+        color: #94a3b8 !important;
+    }
 }
 
 /* Buttons */

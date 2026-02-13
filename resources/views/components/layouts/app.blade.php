@@ -17,7 +17,7 @@
                     $isVendorRoute = Route::is(['vendor_registration']);
                     $isVendorSelection = Route::is(['account_selection']);
                     $href = ($isVendorRoute || $isVendorSelection) ? null : route('dashboard');
-                    $logo = asset('favicon.png');
+                    $logo = asset('favicon.svg');
                     $name = $isVendorRoute || $isVendorSelection || !auth()->user()->vendor
                         ? config('app.name')
                         : auth()->user()->vendor->shortName;

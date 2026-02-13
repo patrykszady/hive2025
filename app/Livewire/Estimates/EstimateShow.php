@@ -3,6 +3,7 @@
 namespace App\Livewire\Estimates;
 
 use App\Livewire\Projects\ProjectFinances;
+use App\Mail\WelcomeClient;
 
 use App\Models\Estimate;
 use App\Models\EstimateLineItem;
@@ -15,6 +16,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 use Flux;
 
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Response;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -389,6 +391,47 @@ class EstimateShow extends Component
 
         $section->bid_id = $bid->id;
         $section->save();
+    }
+
+    public function sendInvite(): void
+    {
+        $this->authorize('update', $this->estimate);
+
+        $client = $this->estimate->client;
+        $vendorId = $this->estimate->belongs_to_vendor_id;
+        $users = $client?->users ?? collect();
+
+        if ($users->isEmpty()) {
+            Flux::toast(
+                duration: 5000,
+                position: 'top right',
+                variant: 'warning',
+                heading: 'No Client Users',
+                text: 'This estimate\'s client has no users to invite.',
+            );
+
+            return;
+        }
+
+        $sent = 0;
+        foreach ($users as $user) {
+            if (! $user->email) {
+                continue;
+            }
+
+            Mail::mailer('mailtrap-sdk')->to($user->email)->send(
+                new WelcomeClient($vendorId, $user->first_name ?? '')
+            );
+            $sent++;
+        }
+
+        Flux::toast(
+            duration: 5000,
+            position: 'top right',
+            variant: 'success',
+            heading: 'Invites Sent',
+            text: "Sent {$sent} invite" . ($sent !== 1 ? 's' : '') . '.',
+        );
     }
 
     public function disableEstimate()

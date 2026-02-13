@@ -2,11 +2,13 @@
     <!-- Left side - Login form -->
     <div class="flex-1 flex justify-center items-center">
         <div class="w-96 max-w-96 space-y-6 p-4">
+            @persist('auth-logo')
             <div class="flex justify-center opacity-90">
                 <a href="{{ route('welcome') }}" wire:navigate class="group">
-                    <img class="w-auto h-24 mx-auto" src="{{ asset('favicon.png') }}" alt="{{ config('app.name') }}">
+                    <img class="w-auto h-24 mx-auto" src="{{ asset('favicon.svg') }}" alt="{{ config('app.name') }}">
                 </a>
             </div>
+            @endpersist
 
             <flux:heading class="text-center" size="xl">Sign in to your Hive</flux:heading>
 
@@ -214,32 +216,27 @@
         </div>
     </div>
 
-    <!-- Right side - Testimonial -->
+    <!-- Right side -->
     <div class="flex-1 p-4 max-lg:hidden">
         <div class="text-white relative rounded-lg h-full w-full bg-indigo-900 flex flex-col items-start justify-end p-16">
-            <div class="flex gap-2 mb-4">
-                <flux:icon.star variant="solid" />
-                <flux:icon.star variant="solid" />
-                <flux:icon.star variant="solid" />
-                <flux:icon.star variant="solid" />
-                <flux:icon.star variant="solid" />
-            </div>
-
-            <div class="mb-6 italic font-base text-3xl xl:text-4xl">
-                "Hive has transformed how we organize our projects and collaborate with our subcontractors."
-            </div>
-
-            <div class="flex gap-4">
-                <flux:avatar src="{{ asset('favicon.png') }}" size="xl" />
-
-                <div class="flex flex-col justify-center font-medium">
-                    <div class="text-lg">Grzegorz Szady</div>
-                    <div class="text-zinc-300">Boss</div>
+            <div class="mb-6">
+                <div class="flex gap-4 mb-6">
+                    <flux:icon.home variant="outline" class="size-16 text-indigo-300" />
+                    <flux:icon.wrench-screwdriver variant="outline" class="size-16 text-indigo-300" />
+                    <flux:icon.calendar-days variant="outline" class="size-16 text-indigo-300" />
+                </div>
+                <div class="text-lg text-indigo-100 leading-relaxed">
+                    Pick up right where you left off. Your projects, your schedules, your updates — all here, ready to go.
+                </div>
+                <div class="text-lg text-indigo-100 leading-relaxed mt-4">
+                    <strong class="text-white">Schedules, finances, estimates, updates</strong> — everything's in one place so you can hit the ground running.
+                </div>
+                <div class="text-lg text-indigo-100 leading-relaxed mt-4">
+                    Welcome back — let's keep building.
                 </div>
             </div>
         </div>
     </div>
-</div>
 
 @assets
 <script src="https://cdn.jsdelivr.net/npm/@laragear/webpass@2/dist/webpass.js"></script>
