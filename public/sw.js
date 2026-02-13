@@ -43,8 +43,8 @@ self.addEventListener('push', (event) => {
         const title = payload.title || 'Notification';
         const options = {
             body: payload.body || '',
-            icon: payload.icon || '/images/logo-192.png',
-            badge: payload.badge || '/images/logo-72.png',
+            icon: payload.icon || '/favicons/icon-192x192.png',
+            badge: payload.badge || '/favicons/icon-96x96.png',
             tag: payload.tag || 'task-notification',
             data: payload.data || {},
             requireInteraction: payload.requireInteraction || false,
@@ -54,6 +54,19 @@ self.addEventListener('push', (event) => {
             await self.registration.showNotification(title, options);
         } catch (error) {
             console.error('[SW] showNotification failed', error);
+
+            const fallbackOptions = {
+                body: options.body,
+                tag: options.tag,
+                data: options.data,
+                requireInteraction: options.requireInteraction,
+            };
+
+            try {
+                await self.registration.showNotification(title, fallbackOptions);
+            } catch (fallbackError) {
+                console.error('[SW] showNotification fallback failed', fallbackError);
+            }
         }
     })());
 });

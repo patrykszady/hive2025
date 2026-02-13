@@ -13,9 +13,9 @@
         @endunless
     </x-slot:actions>
 
-        @if($accordion)
+        @if($accordion ?? false)
             <flux:accordion transition>
-                <flux:accordion.item :expanded="$accordionExpanded">
+                <flux:accordion.item :expanded="$accordionExpanded ?? true">
                     <flux:accordion.heading>
                         <div class="flex justify-between items-center">
                             <div class="font-medium text-gray-700 dark:text-gray-300">Details</div>
@@ -148,7 +148,7 @@
         @endunless
     </div>
 
-    @if($accordion)
+    @if($accordion ?? false)
                 </flux:accordion.content>
             </flux:accordion.item>
         </flux:accordion>

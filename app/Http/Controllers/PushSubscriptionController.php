@@ -40,6 +40,8 @@ class PushSubscriptionController extends Controller
             array_intersect_key($preferences, $defaultPreferences)
         );
 
+        $contentEncoding = $validated['contentEncoding'] ?? $this->defaultContentEncodingForEndpoint($validated['endpoint']);
+
         PushSubscription::updateOrCreate(
             [
                 'endpoint' => $validated['endpoint'],
@@ -48,7 +50,7 @@ class PushSubscriptionController extends Controller
                 'user_id' => $user->id,
                 'p256dh' => $validated['keys']['p256dh'],
                 'auth' => $validated['keys']['auth'],
-                'content_encoding' => $validated['contentEncoding'] ?? 'aes128gcm',
+                'content_encoding' => $contentEncoding,
                 'realtime_enabled' => (bool) $preferenceValues['realtime_enabled'],
                 'morning_enabled' => (bool) $preferenceValues['morning_enabled'],
                 'evening_enabled' => (bool) $preferenceValues['evening_enabled'],
@@ -238,5 +240,14 @@ class PushSubscriptionController extends Controller
         return response()->json([
             'publicKey' => config('services.vapid.public_key'),
         ]);
+    }
+
+    protected function defaultContentEncodingForEndpoint(string $endpoint): string
+    {
+        if (str_contains($endpoint, 'notify.windows.com')) {
+            return 'aesgcm';
+        }
+
+        return 'aes128gcm';
     }
 }

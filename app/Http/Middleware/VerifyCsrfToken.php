@@ -16,5 +16,6 @@ class VerifyCsrfToken extends Middleware
         'webhooks/mailtrap/*',
         'webhooks/telnyx/*',
         'webauthn/*',
+        'push/*',
     ];
 }
