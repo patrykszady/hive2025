@@ -510,4 +510,71 @@ class Project extends Model
             }
         );
     }
+
+    /**
+     * Get the calculated financial data for the project, explicitly scoped to a specific vendor.
+     * Use this instead of the `finances` accessor when there may be no authenticated user
+     * (e.g. queue jobs, PDF generation), to avoid global scope issues.
+     *
+     * @return array<string, float|int>
+     */
+    public function financesForVendor(int $vendorId): array
+    {
+        $expenses_sum = Expense::query()
+            ->withoutGlobalScopes()
+            ->where('project_id', $this->id)
+            ->where('reimbursment', 'Client')
+            ->sum('amount');
+
+        $splits_sum = ExpenseSplits::query()
+            ->withoutGlobalScopes()
+            ->where('project_id', $this->id)
+            ->where('reimbursment', 'Client')
+            ->sum('amount');
+
+        $finances = [];
+
+        $bid_estimate_total = (float) Bid::withoutGlobalScopes()
+            ->where('project_id', $this->id)
+            ->where('vendor_id', $vendorId)
+            ->where('type', 1)
+            ->sum('amount');
+
+        if ($bid_estimate_total == 0) {
+            $unfinalized_estimate_total = Estimate::withoutGlobalScopes()
+                ->where('project_id', $this->id)
+                ->where('belongs_to_vendor_id', $vendorId)
+                ->with('estimate_sections')
+                ->get()
+                ->flatMap(fn ($estimate) => $estimate->estimate_sections)
+                ->sum('total');
+            $finances['estimate'] = (float) $unfinalized_estimate_total;
+        } else {
+            $finances['estimate'] = $bid_estimate_total;
+        }
+
+        $finances['change_orders'] = (float) Bid::withoutGlobalScopes()
+            ->where('project_id', $this->id)
+            ->where('vendor_id', $vendorId)
+            ->where('type', '!=', 1)
+            ->sum('amount');
+        $finances['total_bid'] = $finances['estimate'] + $finances['change_orders'];
+        $finances['reimbursments'] = $splits_sum + $expenses_sum;
+        $finances['total_project'] = round($finances['reimbursments'] + $finances['estimate'] + $finances['change_orders'], 2);
+        $finances['expenses'] = (float) Expense::withoutGlobalScopes()->where('project_id', $this->id)->sum('amount')
+            + (float) ExpenseSplits::withoutGlobalScopes()->where('project_id', $this->id)->sum('amount');
+        $finances['timesheets'] = (float) $this->timesheets()->sum('amount');
+        $finances['total_cost'] = $finances['timesheets'] + $finances['expenses'];
+        $finances['payments'] = round(
+            (float) Payment::withoutGlobalScopes()
+                ->where('project_id', $this->id)
+                ->where('belongs_to_vendor_id', $vendorId)
+                ->sum('amount'),
+            2
+        );
+        $finances['profit'] = $finances['payments'] - $finances['total_cost'];
+        $finances['balance'] = $finances['total_project'] - $finances['payments'];
+
+        return $finances;
+    }
 }

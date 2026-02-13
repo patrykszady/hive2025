@@ -64,7 +64,9 @@ class EstimateDocumentGenerator
         $vendorLogoDataUrl = static::vendorLogoDataUrl($vendor);
 
         $projectStatusTitle = $project?->latestStatus?->title;
-        $projectFinances = $project?->finances ?? [];
+        $projectFinances = $project
+            ? $project->financesForVendor($vendor->id)
+            : [];
         
         $clientName = $client?->name ?? 'Unknown Client';
         $projectName = $project?->project_name ?? 'Unknown Project';

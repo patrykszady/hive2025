@@ -1,5 +1,6 @@
 @props([
     'project',
+    'finances' => null,
     'title' => 'Project Finances',
     'showReimbursementDownload' => false,
     'reimbursementDownloadAction' => 'print_reimbursements',
@@ -7,7 +8,7 @@
 ])
 
 @php
-    $finances = $project->finances;
+    $finances = $finances ?? $project->finances;
 @endphp
 
 <x-island-card heading="{{ $title }}" :separator="true">

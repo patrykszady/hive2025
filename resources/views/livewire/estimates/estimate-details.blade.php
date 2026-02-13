@@ -46,7 +46,7 @@
         <x-details.row 
             title="Client" 
             :content="$client->name ?? $estimate->client->name"
-            :href="route('clients.show', $client->id ?? $estimate->client->id)"
+            :href="($nonLivewire ?? false) ? null : route('clients.show', $client->id ?? $estimate->client->id)"
             :no-cloak="$nonLivewire ?? false"
             :navigate="!($nonLivewire ?? false)"
         />
@@ -54,7 +54,7 @@
         <x-details.row 
             title="Project Name" 
             :content="$project->project_name ?? $estimate->project->project_name"
-            :href="route('projects.show', $project->id ?? $estimate->project->id)"
+            :href="($nonLivewire ?? false) ? null : route('projects.show', $project->id ?? $estimate->project->id)"
             :no-cloak="$nonLivewire ?? false"
             :navigate="!($nonLivewire ?? false)"
         />

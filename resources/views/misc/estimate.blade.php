@@ -222,7 +222,7 @@
                         {{-- PROJECT FINANCES --}}
                         <div class="col-span-2">
                             @if($projectStatusTitle && in_array($projectStatusTitle, ['Active', 'Complete', 'Service Call']))
-                                <x-client-finances :project="$project" :title="$type . ' Finances'" />
+                                <x-client-finances :project="$project" :finances="$projectFinances" :title="$type . ' Finances'" />
                             @endif
                         </div>
                     </div>

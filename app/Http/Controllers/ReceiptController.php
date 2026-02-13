@@ -615,31 +615,48 @@ class ReceiptController extends Controller
         //get OCR result
         //&pages=[1]d
         $uri = env('AZURE_DI_ENDPOINT').'/documentintelligence/documentModels/'.$document_model.'/analyzeResults/'.$operation_location_id.'?api-version='.$azure_api_version.'" -H "Ocp-Apim-Subscription-Key: '.$azure_api_key.'"';
-        $result = exec('curl -v -X GET "https://'.$uri);
-        $result = json_decode($result, true);
 
-        //2024-12-25 ..if $result is error...LOG and inform user
-        if (!is_array($result) || !isset($result['status'])) {
-            Log::channel('vendor_docs')->error('Azure API returned invalid response', [
-                'operation_location_id' => $operation_location_id,
-                'raw_result' => $result,
-            ]);
-            throw new \Exception('Azure Document Intelligence API returned invalid response');
-        }
+        // Allow Azure time to register the analysis before first poll
+        sleep(2);
 
-        //wait but go as soon as done.
-        while ($result['status'] == 'running' || $result['status'] == 'notStarted') {
-            sleep(1);
+        //wait but go as soon as done. Retry up to 60 times (~ 60 seconds).
+        $maxRetries = 60;
+        $retries = 0;
+        $result = null;
+
+        while ($retries < $maxRetries) {
             $result = exec('curl -v -X GET "https://'.$uri);
             $result = json_decode($result, true);
-            
-            if (!is_array($result) || !isset($result['status'])) {
-                Log::channel('vendor_docs')->error('Azure API polling returned invalid response', [
+
+            // If the result is valid and analysis is complete (succeeded/failed), break out
+            if (is_array($result) && isset($result['status']) && !in_array($result['status'], ['running', 'notStarted'])) {
+                break;
+            }
+
+            // If the result is valid but still processing, just wait and retry
+            if (is_array($result) && isset($result['status'])) {
+                $retries++;
+                sleep(1);
+                continue;
+            }
+
+            // Invalid response (e.g. NotFound "Analyze result does not exist") — retry with backoff
+            $retries++;
+            if ($retries >= $maxRetries) {
+                Log::channel('vendor_docs')->error('Azure API returned invalid response after max retries', [
                     'operation_location_id' => $operation_location_id,
                     'raw_result' => $result,
+                    'retries' => $retries,
                 ]);
-                throw new \Exception('Azure Document Intelligence API polling failed');
+                throw new \Exception('Azure Document Intelligence API returned invalid response');
             }
+
+            Log::channel('vendor_docs')->info('Azure API result not ready yet, retrying', [
+                'operation_location_id' => $operation_location_id,
+                'retry' => $retries,
+                'raw_result' => $result,
+            ]);
+            sleep(2);
         }
 
         return $result;
