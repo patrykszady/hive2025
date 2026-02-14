@@ -8,8 +8,13 @@ use App\Models\Vendor;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Number;
 use Illuminate\Support\Str;
+use OpenSpout\Common\Entity\Style\Border;
+use OpenSpout\Common\Entity\Style\BorderPart;
+use OpenSpout\Common\Entity\Style\Color;
+use OpenSpout\Common\Entity\Style\Style;
 use RuntimeException;
 use Spatie\Browsershot\Browsershot;
+use Spatie\SimpleExcel\SimpleExcelWriter;
 
 class EstimateDocumentGenerator
 {
@@ -101,7 +106,22 @@ class EstimateDocumentGenerator
 
         $view = view('misc.estimate', compact('estimate', 'vendor', 'client', 'clientContacts', 'project', 'sections', 'payments', 'title', 'estimate_total', 'estimate_total_words', 'type', 'reimbursements', 'contractBody', 'vendorLogoDataUrl', 'projectStatusTitle', 'projectFinances'))->render();
 
-        $browsershot = Browsershot::html($view)
+        // Browsershot's setHtml() has aggressive SSRF protection that rejects HTML
+        // containing file://, 127.x, localhost, etc. In queue-worker context (Horizon),
+        // Livewire/Flux may inject script/link tags referencing APP_URL which triggers
+        // these checks. Writing to a temp file and using htmlFromFilePath() bypasses
+        // setHtml() entirely — Chrome loads the file directly. We still sanitize
+        // unnecessary localhost resources to avoid Chrome trying to fetch them.
+        $view = static::sanitizeHtmlForPdf($view);
+
+        $tempHtmlPath = storage_path('app/temp/' . Str::uuid() . '.html');
+        if (! is_dir(dirname($tempHtmlPath))) {
+            mkdir(dirname($tempHtmlPath), 0755, true);
+        }
+        file_put_contents($tempHtmlPath, $view);
+
+        try {
+        $browsershot = Browsershot::htmlFromFilePath($tempHtmlPath)
             ->newHeadless()
             ->timeout(180)
             ->waitUntilNetworkIdle()
@@ -156,6 +176,13 @@ class EstimateDocumentGenerator
 
         $binary = $browsershot->pdf();
 
+        } finally {
+            // Clean up the temp HTML file
+            if (file_exists($tempHtmlPath)) {
+                @unlink($tempHtmlPath);
+            }
+        }
+
         $result = [
             'binary' => $binary,
             'filename' => $title . '.pdf',
@@ -171,6 +198,96 @@ class EstimateDocumentGenerator
         }
 
         return $result;
+    }
+
+    /**
+     * Generate an estimate XLSX spreadsheet.
+     *
+     * @return array{binary:string, filename:string, title:string}
+     */
+    public static function generateXlsx(Estimate $estimate): array
+    {
+        $estimate = Estimate::withoutGlobalScopes()
+            ->with([
+                'estimate_sections.estimate_line_items',
+                'vendor' => fn ($query) => $query->withoutGlobalScopes(),
+                'project' => fn ($query) => $query
+                    ->withoutGlobalScopes()
+                    ->with([
+                        'client' => fn ($clientQuery) => $clientQuery->withoutGlobalScopes(),
+                    ]),
+            ])
+            ->find($estimate->getKey());
+
+        if (! $estimate || ! $estimate->vendor) {
+            throw new RuntimeException('Estimate vendor data unavailable for XLSX generation.');
+        }
+
+        $client = $estimate->project?->client ?? $estimate->client;
+        $clientName = $client?->name ?? 'Unknown Client';
+        $projectName = $estimate->project?->project_name ?? 'Unknown Project';
+        $filename = $clientName . ' - Estimate - ' . $projectName . ' - ' . $estimate->number . '.xlsx';
+
+        $tempPath = storage_path('app/temp/' . Str::uuid() . '.xlsx');
+
+        $border = new Border(
+            new BorderPart(Border::BOTTOM, Color::BLACK, Border::WIDTH_THICK, Border::STYLE_SOLID)
+        );
+
+        $writer = SimpleExcelWriter::create($tempPath)
+            ->addHeader([
+                '',
+                'title',
+                'category',
+                'sub_category',
+                'quantity',
+                'unit',
+                'cost',
+                'total',
+            ]);
+
+        $writer->addRow([]);
+
+        foreach ($estimate->estimate_sections as $index => $section) {
+            $writer->addRow([
+                'title' => $section->name,
+                '' => '',
+                'category' => null,
+                'sub_category' => null,
+                'quantity' => null,
+                'unit' => null,
+                'cost' => null,
+                'total' => $section->total,
+            ], (new Style)->setFontBold()->setBorder($border));
+
+            foreach ($section->estimate_line_items as $lineItem) {
+                $hideUnitFields = $lineItem->unit_type === 'no_unit';
+
+                $writer->addRow([
+                    '' => ($index + 1) . '.' . (($lineItem->order ?? 0) + 1),
+                    'title' => $lineItem->name,
+                    'category' => $lineItem->category,
+                    'sub_category' => $lineItem->sub_category,
+                    'quantity' => $hideUnitFields ? null : $lineItem->quantity,
+                    'unit' => $hideUnitFields ? null : $lineItem->unit_type,
+                    'cost' => $hideUnitFields ? null : $lineItem->cost,
+                    'total' => $lineItem->total,
+                ]);
+            }
+
+            $writer->addRow([]);
+        }
+
+        $writer->close();
+
+        $binary = file_get_contents($tempPath);
+        @unlink($tempPath);
+
+        return [
+            'binary' => $binary,
+            'filename' => $filename,
+            'title' => $clientName . ' - Estimate - ' . $projectName . ' - ' . $estimate->number,
+        ];
     }
 
     protected static function vendorLogoDataUrl(Vendor $vendor): ?string
@@ -194,6 +311,30 @@ class EstimateDocumentGenerator
         $mime = mime_content_type($logoAbsolutePath) ?: 'image/png';
 
         return 'data:' . $mime . ';base64,' . base64_encode((string) file_get_contents($logoAbsolutePath));
+    }
+
+    /**
+     * Sanitize rendered HTML so Browsershot's SSRF protection doesn't reject it.
+     *
+     * Removes <script> and <link> tags pointing to localhost/127.x addresses
+     * (injected by Livewire/Flux in queue-worker context), and neutralizes any
+     * remaining localhost URL references.
+     */
+    protected static function sanitizeHtmlForPdf(string $html): string
+    {
+        // Remove <script> tags with localhost/127.x src attributes
+        $html = preg_replace('#<script[^>]*src=["\'][^"\']*(?:127\.0\.0\.\d|localhost)[^"\']*["\'][^>]*>.*?</script>#is', '', $html);
+
+        // Remove <link> tags with localhost/127.x href attributes
+        $html = preg_replace('#<link[^>]*href=["\'][^"\']*(?:127\.0\.0\.\d|localhost)[^"\']*["\'][^>]*/?>#is', '', $html);
+
+        // Neutralize any remaining //127.x or //localhost references that would
+        // trigger Browsershot's regex check. Replace the protocol-relative prefix
+        // with a harmless placeholder so the URL becomes inert.
+        $html = preg_replace('#(//)\s*(127\.\d)#i', '//removed-local-ref-$2', $html);
+        $html = preg_replace('#(//)\s*(localhost)#i', '//removed-local-ref', $html);
+
+        return $html;
     }
 
     /**

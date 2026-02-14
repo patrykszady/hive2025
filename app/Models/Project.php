@@ -521,13 +521,13 @@ class Project extends Model
     public function financesForVendor(int $vendorId): array
     {
         $expenses_sum = Expense::query()
-            ->withoutGlobalScopes()
+            ->withoutGlobalScope(\App\Scopes\ExpenseScope::class)
             ->where('project_id', $this->id)
             ->where('reimbursment', 'Client')
             ->sum('amount');
 
         $splits_sum = ExpenseSplits::query()
-            ->withoutGlobalScopes()
+            ->withoutGlobalScope(\App\Scopes\ExpenseSplitsScope::class)
             ->where('project_id', $this->id)
             ->where('reimbursment', 'Client')
             ->sum('amount');
@@ -561,8 +561,8 @@ class Project extends Model
         $finances['total_bid'] = $finances['estimate'] + $finances['change_orders'];
         $finances['reimbursments'] = $splits_sum + $expenses_sum;
         $finances['total_project'] = round($finances['reimbursments'] + $finances['estimate'] + $finances['change_orders'], 2);
-        $finances['expenses'] = (float) Expense::withoutGlobalScopes()->where('project_id', $this->id)->sum('amount')
-            + (float) ExpenseSplits::withoutGlobalScopes()->where('project_id', $this->id)->sum('amount');
+        $finances['expenses'] = (float) Expense::query()->withoutGlobalScope(\App\Scopes\ExpenseScope::class)->where('project_id', $this->id)->sum('amount')
+            + (float) ExpenseSplits::query()->withoutGlobalScope(\App\Scopes\ExpenseSplitsScope::class)->where('project_id', $this->id)->sum('amount');
         $finances['timesheets'] = (float) $this->timesheets()->sum('amount');
         $finances['total_cost'] = $finances['timesheets'] + $finances['expenses'];
         $finances['payments'] = round(

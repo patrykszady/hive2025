@@ -32,16 +32,34 @@
                         ])
 
                         {{-- CONTACT DETAILS --}}
-                        @include('livewire.users.index', [
-                            'users' => $clientContacts,
-                            'client' => $client,
-                            'view' => 'clients.show',
-                            'view_text' => [
-                                'card_title' => 'Contact Details',
-                                'button_text' => 'Add Contact',
-                            ],
-                            'nonLivewire' => true,
-                        ])
+                        @if($clientContacts->isNotEmpty())
+                            <flux:card class="space-y-2 !px-5 !py-2">
+                                <flux:heading size="lg" class="mb-0 truncate">Contact Details</flux:heading>
+                                <flux:separator variant="subtle" />
+
+                                <flux:table class="whitespace-normal">
+                                    <flux:table.columns>
+                                        <flux:table.column>Name</flux:table.column>
+                                        <flux:table.column>Phone</flux:table.column>
+                                        <flux:table.column>Email</flux:table.column>
+                                    </flux:table.columns>
+
+                                    <flux:table.rows>
+                                        @foreach($clientContacts as $contact)
+                                            <flux:table.row>
+                                                <flux:table.cell variant="strong">{{ $contact->full_name }}</flux:table.cell>
+                                                <flux:table.cell>
+                                                    @if($contact->cell_phone)
+                                                        {{ preg_replace('/^(\d{3})(\d{3})(\d{4})$/', '($1) $2-$3', $contact->cell_phone) }}
+                                                    @endif
+                                                </flux:table.cell>
+                                                <flux:table.cell>{{ $contact->email }}</flux:table.cell>
+                                            </flux:table.row>
+                                        @endforeach
+                                    </flux:table.rows>
+                                </flux:table>
+                            </flux:card>
+                        @endif
                     </div>
                 </div>
 

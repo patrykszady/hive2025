@@ -182,12 +182,12 @@ class Client extends Model
                             } else {
                                 // Multiple people with same last name - combine first names
                                 $firstNames = $lastNameGroup->pluck('first_name')->toArray();
-                                $nameGroups[] = implode(' & ', $firstNames) . ' ' . $lastName;
+                                $nameGroups[] = $this->oxfordJoin($firstNames) . ' ' . $lastName;
                             }
                         }
                         
-                        // Join all name groups with " & "
-                        return implode(' & ', $nameGroups);
+                        // Join all name groups
+                        return $this->oxfordJoin($nameGroups);
                     }
                 } else {
                     // Extract first part before ',' if available
@@ -222,9 +222,9 @@ class Client extends Model
                     return $users->first()->first_name;
                 }
 
-                // Multiple users - combine first names with &
+                // Multiple users - combine first names with Oxford comma
                 $firstNames = $users->pluck('first_name')->toArray();
-                return implode(' & ', $firstNames);
+                return $this->oxfordJoin($firstNames);
             }
         );
     }
@@ -249,9 +249,9 @@ class Client extends Model
                     return 'No Name';
                 }
 
-                // Get unique last names and join with &
+                // Get unique last names and join with Oxford comma
                 $lastNames = $users->pluck('last_name')->unique()->toArray();
-                return implode(' & ', $lastNames);
+                return $this->oxfordJoin($lastNames);
             }
         );
     }
@@ -292,6 +292,26 @@ class Client extends Model
                 return ucwords(strtolower($value));
             }
         );
+    }
+
+    /**
+     * Join an array of strings with commas and "&" (Oxford comma for 3+).
+     *
+     * 1 item:  "Carrie"
+     * 2 items: "Carrie & Debra"
+     * 3 items: "Carrie, Debra, & Alan"
+     */
+    private function oxfordJoin(array $items): string
+    {
+        $count = count($items);
+
+        if ($count <= 2) {
+            return implode(' & ', $items);
+        }
+
+        $last = array_pop($items);
+
+        return implode(', ', $items) . ', & ' . $last;
     }
 
     /**

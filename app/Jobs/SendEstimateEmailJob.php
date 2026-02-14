@@ -34,6 +34,7 @@ class SendEstimateEmailJob implements ShouldQueue
         protected string $body,
         protected bool $includeEstimatePdf,
         protected bool $includeReimbursementsPdf,
+        protected bool $includeEstimateXlsx = false,
         protected ?string $emailTemplateName = null,
         protected ?string $senderIp = null,
     ) {
@@ -114,12 +115,25 @@ class SendEstimateEmailJob implements ShouldQueue
                     ]);
                 }
             }
+
+            if ($this->includeEstimateXlsx) {
+                $xlsxDocument = EstimateDocumentGenerator::generateXlsx($estimate);
+                if ($xlsxDocument && isset($xlsxDocument['binary'], $xlsxDocument['filename'])) {
+                    $tempPath = $tempDir . '/' . $xlsxDocument['filename'];
+                    file_put_contents($tempPath, $xlsxDocument['binary']);
+                    $attachmentPaths[] = $tempPath;
+                    $tempFiles[] = $tempPath;
+                }
+            }
         } catch (Throwable $exception) {
             Log::error('SendEstimateEmailJob attachment generation failed', [
                 'estimate_id' => $this->estimateId,
                 'error' => $exception->getMessage(),
             ]);
-            return;
+
+            // Continue sending the email without attachments rather than aborting
+            $attachmentPaths = [];
+            $tempFiles = [];
         }
 
         $sanitizedRecipients = collect($this->recipients)
@@ -199,7 +213,6 @@ class SendEstimateEmailJob implements ShouldQueue
 
             Mail::mailer($mailer)
                 ->to($sanitizedRecipients)
-                ->bcc($this->fromEmail)
                 ->send($mailable);
 
         } catch (Throwable $exception) {

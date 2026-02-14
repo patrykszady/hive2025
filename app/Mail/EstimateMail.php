@@ -51,17 +51,24 @@ class EstimateMail extends Mailable
 
         $replyToEmail = (string) ($this->replyToEmail ?? '');
 
+        $metadata = array_filter([
+            'estimate_id' => (string) $this->estimate->id,
+            'project_id' => $this->estimate->project_id !== null ? (string) $this->estimate->project_id : null,
+            'email_type' => 'estimate',
+            'email_template_name' => $this->emailTemplateName,
+        ], fn ($value) => $value !== null);
+
+        // In local/dev, skip the self-BCC so alwaysTo correctly routes everything to the dev inbox.
+        $bcc = app()->environment('local', 'development', 'testing')
+            ? []
+            : [new Address($this->fromEmail, $fromName)];
+
         return new Envelope(
             from: new Address($this->fromEmail, $fromName),
             replyTo: $replyToEmail !== '' ? [new Address($replyToEmail, $fromName)] : [],
-            bcc: [new Address($this->fromEmail, $fromName)],
+            bcc: $bcc,
             subject: $this->emailSubject,
-            metadata: [
-                'estimate_id' => $this->estimate->id,
-                'project_id' => $this->estimate->project_id,
-                'email_type' => 'estimate',
-                'email_template_name' => $this->emailTemplateName,
-            ],
+            metadata: $metadata,
         );
     }
 

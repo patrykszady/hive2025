@@ -35,9 +35,15 @@ class EstimateEmail extends Component
 
     public bool $include_estimate_pdf = true;
 
+    public bool $include_estimate_xlsx = false;
+
     public bool $include_reimbursements_pdf = false;
 
     public bool $hasReimbursements = false;
+
+    public string $newRecipientEmail = '';
+
+    public array $availableContacts = [];
 
     public ?string $project_status = null;
 
@@ -54,6 +60,7 @@ class EstimateEmail extends Component
             'subject' => 'required|string|max:255',
             'body' => 'required|string',
             'include_estimate_pdf' => 'boolean',
+            'include_estimate_xlsx' => 'boolean',
             'include_reimbursements_pdf' => 'boolean',
             'project_status' => 'nullable|integer',
             'project_status_date' => 'nullable|date',
@@ -102,6 +109,30 @@ class EstimateEmail extends Component
             ->wherePivot('role_id', 1)
             ->get(['users.id', 'first_name', 'last_name', 'email']);
 
+        // Build available contacts list (client users + vendor admin users)
+        $clientUsers = $this->estimate->client->users
+            ->map(fn ($user) => [
+                'email' => $user->email,
+                'name' => trim($user->first_name . ' ' . ($user->last_name ?? '')),
+                'group' => 'Client',
+            ])
+            ->filter(fn ($contact) => ! empty($contact['email']))
+            ->values();
+
+        $vendorUsers = $this->adminUsers
+            ->map(fn ($user) => [
+                'email' => $user->email,
+                'name' => trim($user->first_name . ' ' . ($user->last_name ?? '')),
+                'group' => 'Team',
+            ])
+            ->filter(fn ($contact) => ! empty($contact['email']))
+            ->values();
+
+        $this->availableContacts = $clientUsers->merge($vendorUsers)
+            ->unique('email')
+            ->values()
+            ->all();
+
         // Get vendor's company emails (Nylas connected emails)
         $this->availableFromEmails = CompanyEmail::where('vendor_id', $this->estimate->vendor->id)
             ->whereNotNull('grant_id')
@@ -124,7 +155,9 @@ class EstimateEmail extends Component
 
         $reimbursementsTotal = $this->estimate->project->finances['reimbursments'] ?? 0;
         $this->hasReimbursements = $reimbursementsTotal > 0;
+        $this->include_estimate_xlsx = false;
         $this->include_reimbursements_pdf = $this->hasReimbursements;
+        $this->newRecipientEmail = '';
         $this->project_status = null;
         $this->project_status_date = today()->format('Y-m-d');
 
@@ -175,6 +208,43 @@ class EstimateEmail extends Component
             ],
             $text
         );
+    }
+
+    public function addRecipient(): void
+    {
+        $email = trim($this->newRecipientEmail);
+
+        if ($email === '') {
+            return;
+        }
+
+        if (! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $this->addError('newRecipientEmail', 'Please enter a valid email address.');
+            return;
+        }
+
+        if (in_array($email, $this->to, true)) {
+            $this->addError('newRecipientEmail', 'This email is already added.');
+            return;
+        }
+
+        $this->to[] = $email;
+        $this->newRecipientEmail = '';
+        $this->resetErrorBag('newRecipientEmail');
+    }
+
+    public function removeRecipient(string $email): void
+    {
+        $this->to = array_values(array_filter($this->to, fn ($e) => $e !== $email));
+    }
+
+    public function toggleContact(string $email): void
+    {
+        if (in_array($email, $this->to, true)) {
+            $this->removeRecipient($email);
+        } else {
+            $this->to[] = $email;
+        }
     }
 
     public function send()
@@ -252,6 +322,7 @@ class EstimateEmail extends Component
             body: $this->body,
             includeEstimatePdf: $this->include_estimate_pdf,
             includeReimbursementsPdf: $this->include_reimbursements_pdf,
+            includeEstimateXlsx: $this->include_estimate_xlsx,
             emailTemplateName: $templateName,
             senderIp: request()->ip(),
         );
@@ -274,13 +345,17 @@ class EstimateEmail extends Component
             'subject',
             'body',
             'include_estimate_pdf',
+            'include_estimate_xlsx',
             'include_reimbursements_pdf',
             'hasReimbursements',
             'project_status',
             'project_status_date',
             'estimate',
+            'newRecipientEmail',
+            'availableContacts',
         ]);
         $this->include_estimate_pdf = true;
+        $this->include_estimate_xlsx = false;
         $this->include_reimbursements_pdf = false;
         $this->to = [];
         $this->from = '';

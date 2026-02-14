@@ -130,6 +130,16 @@ class AzureDocumentService
             }
 
             if ($doc_type === 'pdf') {
+                // Validate the file starts with a PDF header before attempting FPDI parsing
+                $header = file_get_contents($full_file_path, false, null, 0, 5);
+                if ($header !== '%PDF-') {
+                    Log::warning('File is not a valid PDF (missing %PDF- header), using default model', [
+                        'file_path' => $file_path,
+                    ]);
+
+                    return $document_model;
+                }
+
                 $pdf = new Fpdi();
                 $pdf->setSourceFile($full_file_path);
                 $pageId = $pdf->importPage(1);

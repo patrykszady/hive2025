@@ -595,6 +595,24 @@ class CompanyEmailController extends Controller
                     }
                 }
 
+                // Strip HTML tags and convert to readable text with line breaks
+                // Useful when substr() extraction breaks HTML table structure
+                if (!empty($receipt->options['strip_html'])) {
+                    // Convert block-level elements to newlines
+                    $receipt_html_main = preg_replace('/<br\s*\/?>/i', "\n", $receipt_html_main);
+                    $receipt_html_main = preg_replace('/<\/(?:td|tr|p|div|li|h[1-6])>/i', "\n", $receipt_html_main);
+                    // Strip all remaining HTML tags
+                    $receipt_html_main = strip_tags($receipt_html_main);
+                    // Decode HTML entities
+                    $receipt_html_main = html_entity_decode($receipt_html_main, ENT_QUOTES, 'UTF-8');
+                    // Collapse multiple blank lines into max two newlines, trim each line
+                    $lines = array_map('trim', explode("\n", $receipt_html_main));
+                    $lines = array_filter($lines, fn ($line) => $line !== '');
+                    $receipt_html_main = implode("\n", $lines);
+                    // Force text mode so the Blade template uses <pre> wrapper
+                    $bodyType = 'text';
+                }
+
                 //PREVIEWS HTML RECEIPT
                 // print_r($receipt_html_main);
                 // dd();
@@ -1026,7 +1044,7 @@ class CompanyEmailController extends Controller
                     })->first();
 
                     //ATTACHMENTS
-                    $this->saveExpenseReceipt($duplicate_expense->id, $ocr_receipt_data, $ocr_filename, $message);
+                    $this->saveExpenseReceipt($duplicate_expense->id, $ocr_receipt_data, $ocr_filename, !empty($receipt->options['html_to_pdf']) ? null : $message);
 
                     //add po and add invoice from ocr
                     // $duplicate_expense->invoice = $invoice;
@@ -1056,7 +1074,7 @@ class CompanyEmailController extends Controller
 
                     if ($existingExpenseWithDuplicate) {
                         // Found a duplicate - attach receipt to existing expense and move to Duplicate folder
-                        $this->saveExpenseReceipt($existingExpenseWithDuplicate->id, $ocr_receipt_data, $ocr_filename, $message);
+                        $this->saveExpenseReceipt($existingExpenseWithDuplicate->id, $ocr_receipt_data, $ocr_filename, !empty($receipt->options['html_to_pdf']) ? null : $message);
                         
                         if (!empty($folderMap['Duplicate'])) {
                             $this->nylasService->moveEmailToFolder($messageId, $folderMap['Duplicate'], $grantId, $companyEmail->id);
@@ -1102,7 +1120,7 @@ class CompanyEmailController extends Controller
                             $expense->save();
 
                             //ATTACHMENTS
-                            $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, $message);
+                            $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, !empty($receipt->options['html_to_pdf']) ? null : $message);
 
                             // Transfer transactions and checks from partial expenses using shared method
                             $this->consolidatePartialExpenses($expense, $partialExpenses);
@@ -1133,7 +1151,7 @@ class CompanyEmailController extends Controller
                             $expense->save();
 
                             //ATTACHMENTS
-                            $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, $message);
+                            $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, !empty($receipt->options['html_to_pdf']) ? null : $message);
 
                             // Move to Saved folder
                             if (!empty($folderMap['Saved'])) {
@@ -1156,6 +1174,27 @@ class CompanyEmailController extends Controller
                     'grant_id' => $grantId,
                     'message_id' => $messageId,
                 ]));
+
+                // Move failed message to error folder so it doesn't retry every cycle
+                try {
+                    $errorFolder = $folderMap['Error']
+                        ?? config('nylas.hive_receipts_error_folder_id');
+                    if ($errorFolder && $messageId) {
+                        $this->nylasService->moveEmailToFolder(
+                            $messageId,
+                            $errorFolder,
+                            $grantId,
+                            $companyEmail->id ?? null
+                        );
+                    }
+                } catch (\Throwable $moveEx) {
+                    Log::channel('nylas')->warning('Failed to move errored receipt message to error folder', [
+                        'grant_id' => $grantId,
+                        'message_id' => $messageId,
+                        'move_error' => $moveEx->getMessage(),
+                    ]);
+                }
+
                 continue;
             }
         }        
@@ -1523,75 +1562,120 @@ class CompanyEmailController extends Controller
                     });
                 }
 
-                // Process all non-inline attachments
+                // Filter to only document attachments (PDF, JPG, PNG) worth processing.
+                // Pre-download and check each attachment so we know if any are real documents
+                // before deleting the already-created HTML-to-PDF receipt.
+                $documentAttachments = [];
                 if (!empty($nonInlineAttachments)) {
-                    // First clean up existing temp file if passed in
-                    if ($ocr_filename) {
-                        $sourcePath = '_temp_ocr/' . $ocr_filename;
-                        Storage::disk('files')->delete($sourcePath);
-                    }
-                    
-                    // Track all processed attachments for this expense
-                    $processedFiles = [];
-                    
                     foreach ($nonInlineAttachments as $attachmentIndex => $attachment) {
-                        // Generate unique filename for this attachment
-                        $currentFilename = date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '-' . $attachmentIndex . '.pdf';
-                        $ocr_path = '_temp_ocr/' . $currentFilename;
-                        
-                        // Download attachment
                         $attachmentContent = $this->nylasService->downloadAttachment(
-                            $attachment['id'], 
-                            $message['grant_id'], 
+                            $attachment['id'],
+                            $message['grant_id'],
                             $message['id']
                         );
-                        
+
+                        $detectedType = $this->detectFileType($attachmentContent, $attachment['filename'] ?? null, $attachment['content_type'] ?? null);
+
+                        // Skip unsupported file types (MIME artifacts like ATT00001, text/plain parts, etc.)
+                        if (!in_array($detectedType, ['pdf', 'jpg', 'jpeg', 'png'])) {
+                            Log::channel('nylas')->info('Skipping non-document attachment in saveExpenseReceipt', [
+                                'expense_id' => $expense_id,
+                                'attachment_filename' => $attachment['filename'] ?? 'unknown',
+                                'detected_type' => $detectedType,
+                                'content_type' => $attachment['content_type'] ?? 'unknown',
+                                'size' => strlen($attachmentContent),
+                            ]);
+                            continue;
+                        }
+
+                        // Skip tiny images (likely logos/icons, not receipt documents)
+                        if (in_array($detectedType, ['jpg', 'jpeg', 'png']) && strlen($attachmentContent) < 15000) {
+                            Log::channel('nylas')->info('Skipping small image attachment (likely logo/icon)', [
+                                'expense_id' => $expense_id,
+                                'attachment_filename' => $attachment['filename'] ?? 'unknown',
+                                'detected_type' => $detectedType,
+                                'size' => strlen($attachmentContent),
+                            ]);
+                            continue;
+                        }
+
+                        $documentAttachments[] = [
+                            'index' => $attachmentIndex,
+                            'attachment' => $attachment,
+                            'content' => $attachmentContent,
+                            'doc_type' => $detectedType,
+                        ];
+                    }
+                }
+
+                // Only process document attachments if we found real ones.
+                // Otherwise fall through to the single-file path which uses the
+                // already-created HTML-to-PDF receipt (e.g. Erie Insurance).
+                if (!empty($documentAttachments)) {
+                    $processedFiles = [];
+
+                    foreach ($documentAttachments as $docAttachment) {
+                        $attachmentIndex = $docAttachment['index'];
+                        $doc_type = $docAttachment['doc_type'];
+                        $attachmentContent = $docAttachment['content'];
+
+                        // Generate unique filename with correct extension
+                        $currentFilename = date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '-' . $attachmentIndex . '.' . $doc_type;
+                        $ocr_path = '_temp_ocr/' . $currentFilename;
+
                         Storage::disk('files')->put($ocr_path, $attachmentContent);
-                        
-                        // Determine doc type (defaulting to PDF)
-                        $doc_type = 'pdf';
-                        
+
                         // Get document model based on width (like in auto receipts)
                         $document_model = $this->azureDocumentService->getDocumentModel($ocr_path, $doc_type);
-                        
+
                         // OCR the file
                         $ocr_receipt_extracted = app(\App\Http\Controllers\ReceiptController::class)
                             ->azure_receipts($ocr_path, $doc_type, $document_model);
-                        
+
                         // Process OCR results
                         $current_ocr_data = app(\App\Http\Controllers\ReceiptController::class)
                             ->ocr_extract($ocr_receipt_extracted, null, 'email');
-                        
-                        // Save this attachment as an expense receipt
-                        $targetFilename = $expense_id . '-' . $currentFilename;
-                        $destinationPath = 'receipts/' . $targetFilename;
-                        
-                        // Determine receipt content and items for duplicate checking
-                        $receipt_html = ($attachmentIndex === array_key_first($nonInlineAttachments) && isset($ocr_receipt_data['content'])) 
-                            ? $ocr_receipt_data['content'] 
-                            : $current_ocr_data['content'];
-                        $receipt_items = ($attachmentIndex === array_key_first($nonInlineAttachments) && isset($ocr_receipt_data['content'])) 
-                            ? ($ocr_receipt_data['fields'] ?? $current_ocr_data['fields']) 
-                            : $current_ocr_data['fields'];
-                        
-                        // Check for duplicate receipts based on content and invoice number
-                        $isDuplicate = $skipDuplicateCheck ? false : $this->isDuplicateReceipt($expense_id, $receipt_html, $receipt_items);
-                        
-                        if ($isDuplicate) {
-                            // Skip saving this duplicate receipt and clean up temp file
+
+                        // If OCR extraction failed (e.g. Azure couldn't parse the file), skip this attachment
+                        if (isset($current_ocr_data['error']) && $current_ocr_data['error'] === true) {
+                            Log::channel('nylas')->warning('OCR extraction failed for attachment, skipping', [
+                                'expense_id' => $expense_id,
+                                'attachment_filename' => $docAttachment['attachment']['filename'] ?? 'unknown',
+                                'doc_type' => $doc_type,
+                            ]);
                             Storage::disk('files')->delete($ocr_path);
                             continue;
                         }
-                        
+
+                        // Save this attachment as an expense receipt
+                        $targetFilename = $expense_id . '-' . $currentFilename;
+                        $destinationPath = 'receipts/' . $targetFilename;
+
+                        // Determine receipt content and items for duplicate checking
+                        $receipt_html = ($attachmentIndex === array_key_first($nonInlineAttachments) && isset($ocr_receipt_data['content']))
+                            ? $ocr_receipt_data['content']
+                            : ($current_ocr_data['content'] ?? '');
+                        $receipt_items = ($attachmentIndex === array_key_first($nonInlineAttachments) && isset($ocr_receipt_data['content']))
+                            ? ($ocr_receipt_data['fields'] ?? $current_ocr_data['fields'] ?? [])
+                            : ($current_ocr_data['fields'] ?? []);
+
+                        // Check for duplicate receipts based on content and invoice number
+                        $isDuplicate = $skipDuplicateCheck ? false : $this->isDuplicateReceipt($expense_id, $receipt_html, $receipt_items);
+
+                        if ($isDuplicate) {
+                            Storage::disk('files')->delete($ocr_path);
+                            continue;
+                        }
+
                         // Create receipt record in database
                         $expense_receipt = new ExpenseReceipts;
                         $expense_receipt->expense_id = $expense_id;
                         $expense_receipt->receipt_filename = $targetFilename;
                         $expense_receipt->receipt_html = $receipt_html;
                         $expense_receipt->receipt_items = $receipt_items;
-                        
+
                         $expense_receipt->save();
-                        
+
                         // Move the file to permanent storage
                         if (Storage::disk('files')->move($ocr_path, $destinationPath)) {
                             // Success case
@@ -1600,13 +1684,26 @@ class CompanyEmailController extends Controller
                                 Storage::disk('files')->delete($ocr_path);
                             }
                         }
-                        
-                        // Track processed files
+
                         $processedFiles[] = $targetFilename;
                     }
-                    
-                    // Return early since we've processed all attachments
-                    return $processedFiles;
+
+                    // If at least one attachment was successfully processed, clean up
+                    // the original Browsershot PDF and return. Otherwise fall through
+                    // to the single-file path so the HTML-to-PDF receipt is used.
+                    if (!empty($processedFiles)) {
+                        if ($ocr_filename) {
+                            $sourcePath = '_temp_ocr/' . $ocr_filename;
+                            Storage::disk('files')->delete($sourcePath);
+                        }
+
+                        return $processedFiles;
+                    }
+
+                    Log::channel('nylas')->info('All document attachments failed OCR, falling back to HTML-to-PDF receipt', [
+                        'expense_id' => $expense_id,
+                        'attempted_attachments' => count($documentAttachments),
+                    ]);
                 }
             }
         }
@@ -1616,8 +1713,11 @@ class CompanyEmailController extends Controller
         $sourcePath = '_temp_ocr/' . $ocr_filename;
         $destinationPath = 'receipts/' . $filename;
 
+        $receiptContent = $ocr_receipt_data['content'] ?? '';
+        $receiptFields = $ocr_receipt_data['fields'] ?? [];
+
         // Check for duplicate receipts based on content and invoice number
-        $isDuplicate = $skipDuplicateCheck ? false : $this->isDuplicateReceipt($expense_id, $ocr_receipt_data['content'], $ocr_receipt_data['fields']);
+        $isDuplicate = $skipDuplicateCheck ? false : $this->isDuplicateReceipt($expense_id, $receiptContent, $receiptFields);
         
         if ($isDuplicate) {
             // Skip saving this duplicate receipt and clean up temp file
@@ -1629,8 +1729,8 @@ class CompanyEmailController extends Controller
         $expense_receipt = new ExpenseReceipts;
         $expense_receipt->expense_id = $expense_id;
         $expense_receipt->receipt_filename = $filename;
-        $expense_receipt->receipt_html = $ocr_receipt_data['content'];
-        $expense_receipt->receipt_items = $ocr_receipt_data['fields'];
+        $expense_receipt->receipt_html = $receiptContent;
+        $expense_receipt->receipt_items = $receiptFields;
         $expense_receipt->save();
 
         // Perform the move operation with fallback to copy-delete
@@ -2560,5 +2660,53 @@ class CompanyEmailController extends Controller
         }
 
         return collect();
+    }
+
+    /**
+     * Detect the actual file type from content magic bytes, falling back to
+     * the attachment filename extension or content_type header.
+     */
+    protected function detectFileType(string $content, ?string $filename = null, ?string $contentType = null): string
+    {
+        $header = substr($content, 0, 8);
+
+        // Check magic bytes
+        if (str_starts_with($header, '%PDF-')) {
+            return 'pdf';
+        }
+
+        if (str_starts_with($header, "\x89PNG")) {
+            return 'png';
+        }
+
+        if (str_starts_with($header, "\xFF\xD8\xFF")) {
+            return 'jpg';
+        }
+
+        // Fallback: infer from filename extension
+        if ($filename) {
+            $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+            if (in_array($ext, ['pdf', 'png', 'jpg', 'jpeg'])) {
+                return $ext;
+            }
+        }
+
+        // Fallback: infer from content_type
+        if ($contentType) {
+            $map = [
+                'application/pdf' => 'pdf',
+                'image/png' => 'png',
+                'image/jpeg' => 'jpg',
+                'image/jpg' => 'jpg',
+            ];
+
+            foreach ($map as $mime => $type) {
+                if (str_contains(strtolower($contentType), $mime)) {
+                    return $type;
+                }
+            }
+        }
+
+        return 'unknown';
     }
 }

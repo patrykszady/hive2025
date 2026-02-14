@@ -573,8 +573,38 @@ class ReceiptController extends Controller
     }
 
 
-    public function azure_docs_api($file_location, $document_model, $doc_type)
+    public function azure_docs_api($file_location, $document_model, $doc_type, string $logChannel = 'vendor_docs')
     {
+        $file = Storage::disk('files')->get($file_location);
+
+        if (empty($file)) {
+            Log::channel($logChannel)->error('Azure DI: File is empty or could not be read', [
+                'file_location' => $file_location,
+                'document_model' => $document_model,
+            ]);
+            throw new \Exception('Azure Document Intelligence: file is empty or unreadable');
+        }
+
+        // Auto-detect actual file type from magic bytes and correct the doc_type if mismatched
+        $header = substr($file, 0, 8);
+        $detectedType = null;
+        if (str_starts_with($header, '%PDF-')) {
+            $detectedType = 'pdf';
+        } elseif (str_starts_with($header, "\x89PNG")) {
+            $detectedType = 'png';
+        } elseif (str_starts_with($header, "\xFF\xD8\xFF")) {
+            $detectedType = 'jpg';
+        }
+
+        if ($detectedType && strtolower($doc_type) !== $detectedType && !($detectedType === 'jpg' && strtolower($doc_type) === 'jpeg')) {
+            Log::channel($logChannel)->warning('Azure DI: File content type mismatch, correcting', [
+                'file_location' => $file_location,
+                'declared_type' => $doc_type,
+                'detected_type' => $detectedType,
+            ]);
+            $doc_type = $detectedType;
+        }
+
         if (in_array(strtolower($doc_type), ['jpg', 'jpeg'])) {
             $doc_content_type = 'Content-Type: image/jpeg';
         } elseif (strtolower($doc_type) == 'pdf') {
@@ -583,16 +613,12 @@ class ReceiptController extends Controller
             $doc_content_type = 'Content-Type: image/png';
         }
 
-        $file = Storage::disk('files')->get($file_location);
-
         //start OCR
         $ch = curl_init();
 
         $azure_api_key = env('AZURE_DI_API_KEY');
         $azure_api_version = env('AZURE_DI_VERSION');
 
-        //,JobName
-        // .'&features=queryFields&queryFields=PurchaseOrder'
         curl_setopt($ch, CURLOPT_URL, 'https://'.env('AZURE_DI_ENDPOINT').'/documentintelligence/documentModels/'.$document_model.':analyze?api-version='.$azure_api_version);
         curl_setopt($ch, CURLOPT_POSTFIELDS, $file);
         curl_setopt($ch, CURLOPT_POST, true);
@@ -605,15 +631,51 @@ class ReceiptController extends Controller
         ]);
 
         $location_result = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
         curl_close($ch);
 
-        $re = '/(\d|\D){8}-(\d|\D){4}-(\d|\D){4}-(\d|\D){4}-(\d|\D){12}/m';
-        $str = $location_result;
-        preg_match($re, $str, $matches, PREG_OFFSET_CAPTURE, 0);
-        $operation_location_id = $matches[0][0];
+        // Validate curl execution succeeded
+        if ($location_result === false) {
+            Log::channel($logChannel)->error('Azure DI: curl POST failed', [
+                'file_location' => $file_location,
+                'document_model' => $document_model,
+                'curl_error' => $curlError,
+            ]);
+            throw new \Exception('Azure Document Intelligence: POST request failed - ' . $curlError);
+        }
+
+        // Validate HTTP 202 Accepted (Azure DI returns 202 when analysis is accepted)
+        if ($httpCode !== 202) {
+            // Separate headers and body to log the error response
+            $headerSize = strpos($location_result, "\r\n\r\n");
+            $responseBody = $headerSize !== false ? substr($location_result, $headerSize + 4) : '';
+            Log::channel($logChannel)->error('Azure DI: POST returned unexpected HTTP status', [
+                'file_location' => $file_location,
+                'document_model' => $document_model,
+                'http_code' => $httpCode,
+                'response_body' => substr($responseBody, 0, 2000),
+                'file_size' => strlen($file),
+            ]);
+            throw new \Exception("Azure Document Intelligence: POST returned HTTP {$httpCode} instead of 202");
+        }
+
+        // Extract operation ID from the Operation-Location header
+        $operation_location_id = null;
+        if (preg_match('/Operation-Location:.*?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i', $location_result, $matches)) {
+            $operation_location_id = $matches[1];
+        }
+
+        if (empty($operation_location_id)) {
+            Log::channel($logChannel)->error('Azure DI: Could not extract operation ID from POST response headers', [
+                'file_location' => $file_location,
+                'document_model' => $document_model,
+                'response_headers' => substr($location_result, 0, 2000),
+            ]);
+            throw new \Exception('Azure Document Intelligence: missing Operation-Location in POST response');
+        }
 
         //get OCR result
-        //&pages=[1]d
         $uri = env('AZURE_DI_ENDPOINT').'/documentintelligence/documentModels/'.$document_model.'/analyzeResults/'.$operation_location_id.'?api-version='.$azure_api_version.'" -H "Ocp-Apim-Subscription-Key: '.$azure_api_key.'"';
 
         // Allow Azure time to register the analysis before first poll
@@ -643,7 +705,7 @@ class ReceiptController extends Controller
             // Invalid response (e.g. NotFound "Analyze result does not exist") — retry with backoff
             $retries++;
             if ($retries >= $maxRetries) {
-                Log::channel('vendor_docs')->error('Azure API returned invalid response after max retries', [
+                Log::channel($logChannel)->error('Azure API returned invalid response after max retries', [
                     'operation_location_id' => $operation_location_id,
                     'raw_result' => $result,
                     'retries' => $retries,
@@ -651,7 +713,7 @@ class ReceiptController extends Controller
                 throw new \Exception('Azure Document Intelligence API returned invalid response');
             }
 
-            Log::channel('vendor_docs')->info('Azure API result not ready yet, retrying', [
+            Log::channel($logChannel)->info('Azure API result not ready yet, retrying', [
                 'operation_location_id' => $operation_location_id,
                 'retry' => $retries,
                 'raw_result' => $result,
@@ -665,7 +727,7 @@ class ReceiptController extends Controller
     //send receipt location, document_model_type
     public function azure_receipts($ocr_path, $doc_type, $document_model)
     {
-        $result = $this->azure_docs_api($ocr_path, $document_model, $doc_type);
+        $result = $this->azure_docs_api($ocr_path, $document_model, $doc_type, 'nylas');
 
         $all_fields = [];
         foreach ($result['analyzeResult']['documents'] as $document) {
