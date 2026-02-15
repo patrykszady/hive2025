@@ -3,6 +3,11 @@ import './timezone';
 import Echo from 'laravel-echo';
 import Pusher from 'pusher-js';
 
+// Register/update service worker on every page load to replace stale versions
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
 window.Pusher = Pusher;
 
 window.Echo = new Echo({

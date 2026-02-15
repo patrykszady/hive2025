@@ -574,7 +574,14 @@ class TelnyxWebhookController extends Controller
 
             $thread->update(['last_activity_at' => now()]);
 
-            \App\Events\SmsMessageReceived::dispatch($thread->id);
+            try {
+                \App\Events\SmsMessageReceived::dispatch($thread->id);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('SMS broadcast failed', [
+                    'thread_id' => $thread->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         } else {
             Log::channel('telnyx')->info('No group thread found for inbound message', [
                 'from' => $from,

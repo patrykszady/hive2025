@@ -1,4 +1,4 @@
-<div class="space-y-1 overflow-y-auto max-h-[calc(100vh-16rem)]" wire:poll.15s>
+<div class="space-y-1 overflow-y-auto max-h-[calc(100vh-16rem)]">
     @forelse ($this->threads as $thread)
         <button
             wire:key="thread-{{ $thread->id }}"
@@ -15,7 +15,7 @@
                         @elseif ($thread->project)
                             {{ $thread->project->address }}
                         @else
-                            {{ collect($thread->participants)->map(fn ($p) => substr($p, -4))->implode(', ') }}
+                            {{ collect($thread->participants)->map(fn ($p) => $this->resolvePhoneDisplay($p))->implode(', ') }}
                         @endif
                     </p>
 
@@ -40,7 +40,7 @@
                     </p>
                     @if (in_array($thread->id, $this->unreadThreadIds, true))
                         <div class="mt-1 flex justify-end">
-                            <span class="inline-block w-2 h-2 bg-blue-500 rounded-full"></span>
+                            <span class="inline-block w-2 h-2 bg-indigo-500 rounded-full"></span>
                         </div>
                     @endif
                 </div>
@@ -59,3 +59,5 @@
         </div>
     @endif
 </div>
+
+

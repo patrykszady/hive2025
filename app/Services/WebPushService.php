@@ -118,19 +118,28 @@ class WebPushService
     protected function flushAndCleanup(WebPush $webPush, string $logChannel): void
     {
         foreach ($webPush->flush() as $report) {
+            $endpoint = $report->getRequest()->getUri()->__toString();
+
             if ($report->isSuccess()) {
+                Log::channel($logChannel)->debug('Push notification delivered', [
+                    'endpoint' => mb_substr($endpoint, 0, 80) . '…',
+                ]);
+
                 continue;
             }
 
-            $endpoint = $report->getRequest()->getUri()->__toString();
-
             if ($report->isSubscriptionExpired()) {
                 PushSubscription::where('endpoint', $endpoint)->delete();
+                Log::channel($logChannel)->info('Expired push subscription removed', [
+                    'endpoint' => mb_substr($endpoint, 0, 80) . '…',
+                ]);
             }
 
-            Log::channel($logChannel)->debug('Push notification failed', [
-                'endpoint' => $endpoint,
+            Log::channel($logChannel)->warning('Push notification failed', [
+                'endpoint' => mb_substr($endpoint, 0, 80) . '…',
                 'reason' => $report->getReason(),
+                'expired' => $report->isSubscriptionExpired(),
+                'status' => $report->getResponse()?->getStatusCode(),
             ]);
         }
     }

@@ -83,7 +83,14 @@ class SendGroupMms implements ShouldQueue
 
         // Broadcast update so conversation refreshes with the final status
         if ($message->thread_id) {
-            SmsMessageReceived::dispatch($message->thread_id);
+            try {
+                SmsMessageReceived::dispatch($message->thread_id);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('SMS broadcast failed', [
+                    'thread_id' => $message->thread_id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
     }
 

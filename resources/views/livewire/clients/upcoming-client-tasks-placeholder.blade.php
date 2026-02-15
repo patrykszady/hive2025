@@ -1,6 +1,6 @@
 <div>
     <x-upcoming-tasks-list-skeleton
-        title="Upcoming Project Tasks"
+        title="My Tasks Upcoming"
         :show-project-info="true"
         actions-width="w-44"
         wire:transition

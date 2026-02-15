@@ -48,7 +48,7 @@
                         @endphp
                         <flux:sidebar.item wire:navigate.hover icon="home" href="{{ $clientHome }}">Home</flux:sidebar.item>
                         <flux:sidebar.item wire:navigate.hover icon="folder" href="/projects">Projects</flux:sidebar.item>
-                        <flux:sidebar.item wire:navigate.hover icon="chat-bubble-left-right" href="{{ route('sms.index') }}">
+                        <flux:sidebar.item wire:navigate.hover icon="chat-bubble-left-right" href="{{ route('sms.index') }}" class="[&_[data-content]]:!overflow-visible">
                             <span class="inline-flex items-center gap-2">
                                 <span>Messages</span>
                                 <livewire:sms.sms-sidebar-badge />
@@ -69,7 +69,7 @@
                         <flux:sidebar.item wire:navigate.hover icon="home" href="/hub">Home</flux:sidebar.item>
 
                         @if (auth()->user()?->vendor_role === 'Admin')
-                            <flux:sidebar.item wire:navigate.hover icon="chat-bubble-left-right" href="{{ route('sms.index') }}">
+                            <flux:sidebar.item wire:navigate.hover icon="chat-bubble-left-right" href="{{ route('sms.index') }}" class="[&_[data-content]]:!overflow-visible">
                                 <span class="inline-flex items-center gap-2">
                                     <span>Messages</span>
                                     <livewire:sms.sms-sidebar-badge />

@@ -37,6 +37,7 @@ show_status() {
   done
   pgrep -x meilisearch >/dev/null 2>&1 && echo "  ✅ Meilisearch — running" || echo "  ⬚  Meilisearch — not running"
   pgrep -f "artisan horizon" >/dev/null 2>&1 && echo "  ✅ Horizon — running" || echo "  ⬚  Horizon — not running"
+  pgrep -f "artisan reverb:start" >/dev/null 2>&1 && echo "  ✅ Reverb — running" || echo "  ⬚  Reverb — not running"
   pgrep -f "cloudflared tunnel" >/dev/null 2>&1 && echo "  ✅ Cloudflare tunnel — running" || echo "  ⬚  Cloudflare tunnel — not running"
   echo ""
 }
@@ -230,6 +231,22 @@ else
   echo "❌ Horizon failed → check logs: $LOG_DIR/horizon.log"
 fi
 
+# Reverb (WebSocket server for real-time broadcasting)
+if pgrep -f "artisan reverb:start" >/dev/null 2>&1; then
+  REVERB_PID=$(pgrep -f "artisan reverb:start" | head -n 1)
+  echo "✅ Reverb already running (pid: $REVERB_PID)"
+else
+  echo "🔄 Starting Laravel Reverb..."
+  nohup php artisan reverb:start --no-interaction >"$LOG_DIR/reverb.log" 2>&1 &
+  REVERB_PID=$!
+  sleep 1
+  if ps -p "$REVERB_PID" >/dev/null 2>&1; then
+    echo "✅ Reverb started (pid: $REVERB_PID) on port 8080"
+  else
+    echo "❌ Reverb failed → check logs: $LOG_DIR/reverb.log"
+  fi
+fi
+
 # Laravel dev server
 if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1; then
   SERVE_PID=$(lsof -Pi :8000 -sTCP:LISTEN -t)
@@ -250,12 +267,21 @@ fi
 echo "$SERVE_PID" > "$LOCK_FILE"
 
 # Vite dev server
+if [ -f public/hot ]; then
+  HOT_URL=$(cat public/hot 2>/dev/null | tr -d '\r')
+  HOT_PORT=$(echo "$HOT_URL" | sed -nE 's#^https?://[^:]+:([0-9]+).*$#\1#p')
+  if [ -n "$HOT_PORT" ] && ! lsof -Pi :"$HOT_PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
+    echo "ℹ️  Removing stale Vite hot file ($HOT_URL)"
+    rm -f public/hot
+  fi
+fi
+
 if lsof -Pi :5173 -sTCP:LISTEN -t >/dev/null 2>&1; then
   VITE_PID=$(lsof -Pi :5173 -sTCP:LISTEN -t)
   echo "✅ Vite already running (pid: $VITE_PID)"
 else
   echo "🔄 Starting Vite (npm run dev)..."
-  nohup npm run dev -- --host 0.0.0.0 --port 5173 >"$LOG_DIR/vite.log" 2>&1 &
+  nohup npm run dev -- --host 0.0.0.0 --port 5173 --strictPort >"$LOG_DIR/vite.log" 2>&1 &
   VITE_PID=$!
   sleep 0.7
   if ps -p "$VITE_PID" >/dev/null 2>&1; then

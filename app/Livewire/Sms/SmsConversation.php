@@ -7,6 +7,8 @@ use App\Models\CallLog;
 use App\Models\SmsGroupThread;
 use App\Models\SmsMessage;
 use App\Models\SmsThreadRead;
+use App\Models\User;
+use App\Models\Vendor;
 use App\Services\GroupSmsService;
 use Flux;
 use Illuminate\Support\Facades\Http;
@@ -50,6 +52,7 @@ class SmsConversation extends Component
     public function handleIncomingMessage(): void
     {
         $this->markThreadAsRead();
+        $this->dispatch('sms-new-message-received');
     }
 
     public function updatedAttachment(): void
@@ -233,6 +236,47 @@ class SmsConversation extends Component
     public function placeholder()
     {
         return view('livewire.sms.conversation_placeholder');
+    }
+
+    /**
+     * Resolve a display name for an E.164 phone number.
+     */
+    public function resolvePhoneDisplay(string $e164): string
+    {
+        $digits = preg_replace('/[^0-9]/', '', $e164);
+
+        $normalized = $digits;
+        if (strlen($normalized) === 11 && str_starts_with($normalized, '1')) {
+            $normalized = substr($normalized, 1);
+        }
+
+        $last10 = strlen($digits) > 10 ? substr($digits, -10) : $digits;
+
+        $user = User::where('cell_phone', $normalized)
+            ->orWhere('cell_phone', '1' . $normalized)
+            ->orWhere('cell_phone', $digits)
+            ->orWhere('cell_phone', $last10)
+            ->first();
+
+        if ($user && trim($user->first_name . ' ' . $user->last_name) !== '') {
+            return trim($user->first_name . ' ' . $user->last_name);
+        }
+
+        $vendor = Vendor::where('business_phone', $normalized)
+            ->orWhere('business_phone', $last10)
+            ->orWhere('business_phone', $digits)
+            ->first();
+
+        if ($vendor && $vendor->short_name) {
+            return $vendor->short_name;
+        }
+
+        $display10 = strlen($normalized) === 10 ? $normalized : $last10;
+        if (strlen($display10) === 10) {
+            return '(' . substr($display10, 0, 3) . ') ' . substr($display10, 3, 3) . '-' . substr($display10, 6);
+        }
+
+        return $e164;
     }
 
     protected function markThreadAsRead(): void

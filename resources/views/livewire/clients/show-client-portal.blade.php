@@ -39,7 +39,7 @@
                     </div>
                     <div>
                         <flux:text class="text-2xl font-semibold">{{ $this->upcomingTasks->count() }}</flux:text>
-                        <flux:text class="text-sm text-zinc-500">Upcoming Tasks</flux:text>
+                        <flux:text class="text-sm text-zinc-500">My Tasks Upcoming</flux:text>
                     </div>
                 </div>
             </flux:card>

@@ -1,5 +1,6 @@
 /**
  * Service Worker for Web Push Notifications
+ * Version: 2026-02-15-v2
  */
 
 self.addEventListener('install', (event) => {
@@ -74,20 +75,19 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
     event.notification.close();
 
-    const url = event.notification.data?.url || '/dashboard';
+    const path = event.notification.data?.url || '/dashboard';
+    const targetUrl = new URL(path, self.location.origin).href;
 
     event.waitUntil(
         clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+            // Try to focus an existing tab and navigate it
             for (const client of clientList) {
-                if (client.url.includes(self.location.origin) && 'focus' in client) {
-                    client.focus();
-                    if (url) {
-                        client.navigate(url);
-                    }
-                    return;
+                if (client.url.startsWith(self.location.origin) && 'focus' in client) {
+                    return client.focus().then((focused) => focused.navigate(targetUrl));
                 }
             }
-            return clients.openWindow(url);
+            // No existing tab — open a new one
+            return clients.openWindow(targetUrl);
         })
     );
 });

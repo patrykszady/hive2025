@@ -7,8 +7,8 @@
     'unscheduledTasks' => null,
     'showProjectInfo' => false,
     'showVendorInfo' => true,
-    'title' => 'Upcoming Tasks',
-    'emptyMessage' => 'No upcoming tasks for this project.',
+    'title' => 'My Tasks Upcoming',
+    'emptyMessage' => 'No tasks upcoming for this project.',
 ])
 
 <x-island-card heading="{{ $title }}">

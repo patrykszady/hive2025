@@ -3,13 +3,20 @@
 namespace App\Livewire\Sms;
 
 use App\Models\SmsGroupThread;
-use Livewire\Attributes\On;
 use Livewire\Component;
 
 class SmsSidebarBadge extends Component
 {
-    #[On('sms-thread-read')]
-    #[On('sms-message-received')]
+    /** @return array<string, string> */
+    public function getListeners(): array
+    {
+        return [
+            'echo-private:sms.notifications,SmsMessageReceived' => 'refreshBadge',
+            'sms-thread-read' => 'refreshBadge',
+            'sms-message-received' => 'refreshBadge',
+        ];
+    }
+
     public function refreshBadge(): void
     {
     }

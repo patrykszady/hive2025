@@ -5,7 +5,7 @@
         :show-avatars="true"
         :clickable="true"
         :show-project-info="true"
-        title="My Upcoming Tasks"
-        empty-message="No upcoming tasks assigned to you."
+        title="My Tasks Upcoming"
+        empty-message="No tasks upcoming assigned to you."
     />
 </div>

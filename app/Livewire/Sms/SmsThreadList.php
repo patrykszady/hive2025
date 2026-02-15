@@ -4,6 +4,9 @@ namespace App\Livewire\Sms;
 
 use App\Models\SmsGroupThread;
 use App\Models\SmsThreadRead;
+use App\Models\User;
+use App\Models\Vendor;
+use App\Services\GroupSmsService;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Reactive;
 use Livewire\Component;
@@ -21,6 +24,21 @@ class SmsThreadList extends Component
 
     #[Reactive]
     public bool $isClientUser = false;
+
+    /** @return array<string, string> */
+    public function getListeners(): array
+    {
+        return [
+            'echo-private:sms.notifications,SmsMessageReceived' => 'handleNewMessage',
+            'sms-thread-read' => '$refresh',
+        ];
+    }
+
+    public function handleNewMessage(): void
+    {
+        // Inject JS directly into the Livewire response to trigger tab flash / sound
+        $this->js("window.dispatchEvent(new CustomEvent('sms-incoming'))");
+    }
 
     public function updating($field): void
     {
@@ -82,6 +100,53 @@ class SmsThreadList extends Component
     public function select(int $threadId): void
     {
         $this->dispatch('threadSelected', threadId: $threadId)->to(SmsIndex::class);
+    }
+
+    /**
+     * Resolve a display name for an E.164 phone number.
+     * Returns user name, or formatted 10-digit number as fallback.
+     */
+    public function resolvePhoneDisplay(string $e164): string
+    {
+        $digits = preg_replace('/[^0-9]/', '', $e164);
+
+        // Normalize: strip leading 1 for 11-digit US numbers
+        $normalized = $digits;
+        if (strlen($normalized) === 11 && str_starts_with($normalized, '1')) {
+            $normalized = substr($normalized, 1);
+        }
+
+        // Also extract last 10 digits as fallback (handles non-standard E.164)
+        $last10 = strlen($digits) > 10 ? substr($digits, -10) : $digits;
+
+        // Search users by cell_phone (stored as raw digits)
+        $user = User::where('cell_phone', $normalized)
+            ->orWhere('cell_phone', '1' . $normalized)
+            ->orWhere('cell_phone', $digits)
+            ->orWhere('cell_phone', $last10)
+            ->first();
+
+        if ($user && trim($user->first_name . ' ' . $user->last_name) !== '') {
+            return trim($user->first_name . ' ' . $user->last_name);
+        }
+
+        // Search vendors by business_phone
+        $vendor = Vendor::where('business_phone', $normalized)
+            ->orWhere('business_phone', $last10)
+            ->orWhere('business_phone', $digits)
+            ->first();
+
+        if ($vendor && $vendor->short_name) {
+            return $vendor->short_name;
+        }
+
+        // Format as (XXX) XXX-XXXX using best 10-digit version
+        $display10 = strlen($normalized) === 10 ? $normalized : $last10;
+        if (strlen($display10) === 10) {
+            return '(' . substr($display10, 0, 3) . ') ' . substr($display10, 3, 3) . '-' . substr($display10, 6);
+        }
+
+        return $e164;
     }
 
     public function render()

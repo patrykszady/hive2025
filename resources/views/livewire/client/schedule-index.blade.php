@@ -24,7 +24,7 @@
                 <div class="w-16 h-16 mx-auto mb-4 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center">
                     <flux:icon.check class="size-8 text-green-600 dark:text-green-400" />
                 </div>
-                <flux:text class="text-zinc-600 dark:text-zinc-400">No upcoming tasks scheduled.</flux:text>
+                <flux:text class="text-zinc-600 dark:text-zinc-400">No tasks upcoming.</flux:text>
             </flux:card>
         @else
             <x-upcoming-tasks-list

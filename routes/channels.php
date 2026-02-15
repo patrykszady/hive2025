@@ -11,3 +11,7 @@ Broadcast::channel('sms.thread.{threadId}', function ($user, $threadId) {
     // Any authenticated non-client user can listen to SMS threads
     return ! $user->is_client_user;
 });
+
+Broadcast::channel('sms.notifications', function ($user) {
+    return (bool) $user;
+});

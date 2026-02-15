@@ -20,6 +20,7 @@ class SmsMessageReceived implements ShouldBroadcastNow
     {
         return [
             new PrivateChannel("sms.thread.{$this->threadId}"),
+            new PrivateChannel('sms.notifications'),
         ];
     }
 }

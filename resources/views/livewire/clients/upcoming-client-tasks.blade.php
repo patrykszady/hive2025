@@ -12,7 +12,7 @@
         :clickable="!$isClientUser"
         :show-project-info="$showProjectInfo"
         :show-vendor-info="!$isClientUser"
-        title="Upcoming Project Tasks"
-        empty-message="No upcoming tasks for this client."
+        title="My Tasks Upcoming"
+        empty-message="No tasks upcoming for this client."
     />
 </div>

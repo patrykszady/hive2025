@@ -7,26 +7,18 @@
                 $headerTitle = $this->thread->client->name;
             } elseif ($this->thread->project) {
                 $headerTitle = $this->thread->project->address;
+            } else {
+                $participants = $this->thread->participants ?? [];
+                if (count($participants) > 0) {
+                    $headerTitle = collect($participants)
+                        ->map(fn ($p) => $this->resolvePhoneDisplay($p))
+                        ->implode(', ');
+                }
             }
-            $mobileBackButtonPositionClass = 'lg:hidden absolute -top-2 left-10 z-10';
-            $mobileTitleOffsetClass = 'mt-8 lg:mt-0';
         @endphp
-        <div class="relative border-b border-zinc-200 dark:border-zinc-700 px-4 pt-0 pb-2 lg:py-2">
-            {{-- Back nav (mobile only) --}}
-            <div class="{{ $mobileBackButtonPositionClass }}">
-                <flux:button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    square
-                    icon="arrow-left"
-                    wire:click="$dispatch('threadSelected', { threadId: null })"
-                    aria-label="Back to conversations"
-                />
-            </div>
-
-            {{-- Title + project link --}}
-            <div class="flex items-center gap-2 {{ $mobileTitleOffsetClass }}">
+        <div class="border-b border-zinc-200 dark:border-zinc-700 px-4 py-2">
+            {{-- Title row --}}
+            <div class="flex items-center gap-2">
                 @if ($this->thread->client)
                     <flux:heading size="lg" class="mb-0 truncate flex-1">
                         <a href="{{ route('clients.show', $this->thread->client_id) }}" wire:navigate.hover class="hover:underline">{{ $headerTitle }}</a>
@@ -118,7 +110,7 @@
                     }
                 @endphp
                 <div wire:key="msg-{{ $msg->id }}" class="flex {{ $msg->isOutbound() ? 'justify-end' : 'justify-start' }}">
-                    <div class="max-w-[75%] {{ $msg->isOutbound() ? 'order-last' : '' }}">
+                    <div class="max-w-[85%] lg:max-w-[75%] {{ $msg->isOutbound() ? 'order-last' : '' }}">
                         @if ($msg->isInbound())
                             <p class="text-[10px] text-zinc-400 dark:text-zinc-500 mb-0.5 px-1">
                                 {{ $phoneNameMap[$msg->from_number] ?? $msg->from_number }}

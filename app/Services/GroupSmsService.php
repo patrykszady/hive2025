@@ -45,7 +45,15 @@ class GroupSmsService
         $thread->update(['last_activity_at' => now()]);
 
         // Broadcast immediately so the sender sees the message in the UI
-        SmsMessageReceived::dispatch($thread->id);
+        // Wrapped in try-catch so message sending never fails if Reverb is down
+        try {
+            SmsMessageReceived::dispatch($thread->id);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('SMS broadcast failed (Reverb may be down)', [
+                'thread_id' => $thread->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
 
         return $message;
     }

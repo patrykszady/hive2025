@@ -30,6 +30,7 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\ServiceProvider;
 use Opcodes\LogViewer\Facades\LogViewer;
 
@@ -74,6 +75,14 @@ class AppServiceProvider extends ServiceProvider
 
         if (! app()->runningInConsole() && request()->isSecure()) {
             URL::forceScheme('https');
+        }
+
+        // When accessed via the Cloudflare tunnel, the browser cannot reach the
+        // local Vite dev server. Point Vite to a non-existent hot file so it
+        // falls back to the compiled manifest in public/build instead.
+        if (! app()->runningInConsole()
+            && request()->getHost() === 'dev.hive.contractors') {
+            Vite::useHotFile(storage_path('app/.hot-disabled'));
         }
         /**
          * Paginate a standard Laravel Collection.
