@@ -1,4 +1,4 @@
-<flux:card class="flex-1 min-h-0 flex flex-col !p-0">
+<div class="flex-1 min-h-0 flex flex-col">
     <div class="border-b border-zinc-200 dark:border-zinc-700 px-4 py-3">
         <div class="h-4 w-36 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse"></div>
     </div>
@@ -46,6 +46,16 @@
     </div>
 
     <div class="shrink-0 px-3 pb-3">
-        <div class="h-16 bg-zinc-100 dark:bg-zinc-800 rounded-lg animate-pulse"></div>
+        <div class="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50 animate-pulse">
+            {{-- Fake textarea --}}
+            <div class="px-4 pt-3 pb-2">
+                <div class="h-3 w-32 rounded bg-zinc-200 dark:bg-zinc-700"></div>
+            </div>
+            {{-- Fake action bar --}}
+            <div class="flex items-center justify-between px-3 pb-2">
+                <div class="size-7 rounded bg-zinc-200 dark:bg-zinc-700"></div>
+                <div class="size-7 rounded-full bg-zinc-200 dark:bg-zinc-700"></div>
+            </div>
+        </div>
     </div>
-</flux:card>
+</div>

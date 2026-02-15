@@ -119,11 +119,26 @@ class WebPushService
     {
         foreach ($webPush->flush() as $report) {
             $endpoint = $report->getRequest()->getUri()->__toString();
+            $response = $report->getResponse();
+            $statusCode = $response?->getStatusCode();
+            $isWns = str_contains($endpoint, 'notify.windows.com');
 
             if ($report->isSuccess()) {
-                Log::channel($logChannel)->debug('Push notification delivered', [
+                $logData = [
                     'endpoint' => mb_substr($endpoint, 0, 80) . '…',
-                ]);
+                    'status' => $statusCode,
+                ];
+
+                // Log WNS-specific response headers for debugging
+                if ($isWns && $response) {
+                    $logData['wns_status'] = $response->getHeaderLine('X-WNS-Status');
+                    $logData['wns_msg_id'] = $response->getHeaderLine('X-WNS-Msg-ID');
+                    $logData['wns_debug'] = $response->getHeaderLine('X-WNS-Debug-Trace');
+                    $logData['content_encoding'] = $report->getRequest()->getHeaderLine('Content-Encoding');
+                    $logData['response_body'] = (string) $response->getBody();
+                }
+
+                Log::channel($logChannel)->debug('Push notification delivered', $logData);
 
                 continue;
             }

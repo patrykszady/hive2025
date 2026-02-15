@@ -18,7 +18,18 @@
         @endphp
         <div class="border-b border-zinc-200 dark:border-zinc-700 px-4 py-2">
             {{-- Title row --}}
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-1.5" style="padding-left: 2rem" x-bind:style="window.innerWidth >= 1024 ? 'padding-left: 0' : 'padding-left: 2rem'">
+                {{-- Mobile back button --}}
+                <flux:button
+                    type="button"
+                    variant="subtle"
+                    size="sm"
+                    square
+                    icon="arrow-left"
+                    class="lg:hidden shrink-0"
+                    wire:click="$parent.set('threadId', null)"
+                    aria-label="Back to conversations"
+                />
                 @if ($this->thread->client)
                     <flux:heading size="lg" class="mb-0 truncate flex-1">
                         <a href="{{ route('clients.show', $this->thread->client_id) }}" wire:navigate.hover class="hover:underline">{{ $headerTitle }}</a>
@@ -33,60 +44,97 @@
                 @endif
             </div>
 
-            @if (! $isClientUser && $this->thread->client && $this->thread->client->users->isNotEmpty())
-                <div class="flex flex-wrap gap-x-4 gap-y-0.5 mt-1">
-                    @foreach ($this->thread->client->users as $user)
-                        <div class="flex items-center gap-1.5">
-                            <span class="text-xs font-medium text-zinc-600 dark:text-zinc-300">{{ $user->first_name }}</span>
-                            @if ($user->getRawOriginal('cell_phone'))
-                                @php
-                                    $raw = $user->getRawOriginal('cell_phone');
-                                    $digits = preg_replace('/[^0-9]/', '', $raw);
-                                    if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
-                                        $digits = substr($digits, 1);
-                                    }
-                                    $display = strlen($digits) === 10
-                                        ? '(' . substr($digits, 0, 3) . ') ' . substr($digits, 3, 3) . '-' . substr($digits, 6)
-                                        : $raw;
-                                    $e164 = $user->routeNotificationForTelnyx();
-                                @endphp
+            @if (! $isClientUser)
+                @php
+                    $callableContacts = collect();
+
+                    if ($this->thread->client && $this->thread->client->users->isNotEmpty()) {
+                        foreach ($this->thread->client->users as $user) {
+                            $raw = $user->getRawOriginal('cell_phone');
+                            if (! $raw) continue;
+                            $digits = preg_replace('/[^0-9]/', '', $raw);
+                            if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+                                $digits = substr($digits, 1);
+                            }
+                            $display = strlen($digits) === 10
+                                ? '(' . substr($digits, 0, 3) . ') ' . substr($digits, 3, 3) . '-' . substr($digits, 6)
+                                : $raw;
+                            $callableContacts->push([
+                                'name' => $user->first_name,
+                                'e164' => $user->routeNotificationForTelnyx(),
+                                'display' => $display,
+                            ]);
+                        }
+                    } else {
+                        $participants = $this->thread->participants ?? [];
+                        foreach ($participants as $phone) {
+                            $name = $this->resolvePhoneDisplay($phone);
+                            $digits = preg_replace('/[^0-9]/', '', $phone);
+                            if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+                                $d10 = substr($digits, 1);
+                            } else {
+                                $d10 = $digits;
+                            }
+                            $displayPhone = strlen($d10) === 10
+                                ? '(' . substr($d10, 0, 3) . ') ' . substr($d10, 3, 3) . '-' . substr($d10, 6)
+                                : $phone;
+                            $callableContacts->push([
+                                'name' => $name !== $displayPhone ? $name : null,
+                                'e164' => $phone,
+                                'display' => $displayPhone,
+                            ]);
+                        }
+                    }
+                @endphp
+
+                @if ($callableContacts->isNotEmpty())
+                    <div class="flex flex-wrap gap-x-4 gap-y-0.5 mt-1">
+                        @foreach ($callableContacts as $contact)
+                            <div class="flex items-center gap-1.5">
+                                @if ($contact['name'] && $contact['name'] !== $headerTitle)
+                                    <span class="text-xs font-medium text-zinc-600 dark:text-zinc-300">{{ $contact['name'] }}</span>
+                                @endif
                                 <button
                                     type="button"
-                                    wire:click="initiateCall('{{ $e164 }}')"
+                                    wire:click="initiateCall('{{ $contact['e164'] }}')"
                                     wire:loading.attr="disabled"
                                     wire:target="initiateCall"
                                     class="inline-flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer disabled:opacity-50"
-                                    title="Call {{ $user->first_name }} via your phone"
+                                    title="Call {{ $contact['name'] ?? $contact['display'] }} via your phone"
                                 >
                                     <flux:icon name="phone" class="size-3" />
-                                    {{ $display }}
+                                    {{ $contact['display'] }}
                                 </button>
-                            @endif
-                        </div>
-                    @endforeach
-                </div>
+                            </div>
+                        @endforeach
+                    </div>
+                @endif
             @endif
         </div>
 
         {{-- Messages --}}
         @php
-            // Build phone-to-name lookup from client users
-            $phoneNameMap = collect();
+            // Build phone-to-name lookup — start with client user first names,
+            // then merge the component's resolvePhoneDisplay map as fallback.
+            $clientPhoneNames = collect();
             if ($this->thread->client) {
                 foreach ($this->thread->client->users as $user) {
                     $telnyx = $user->routeNotificationForTelnyx();
                     if ($telnyx) {
-                        $phoneNameMap[$telnyx] = $user->first_name;
+                        $clientPhoneNames[$telnyx] = $user->first_name;
                     }
                 }
                 $rawHome = $this->thread->client->getRawOriginal('home_phone');
                 if ($rawHome) {
                     $formatted = \App\Services\GroupSmsService::formatE164($rawHome);
-                    if (! $phoneNameMap->has($formatted)) {
-                        $phoneNameMap[$formatted] = $this->thread->client->name;
+                    if (! $clientPhoneNames->has($formatted)) {
+                        $clientPhoneNames[$formatted] = $this->thread->client->name;
                     }
                 }
             }
+            // $phoneNameMap comes from render() via resolvePhoneDisplay — covers vendors/users.
+            // Client first-name entries take precedence.
+            $phoneNameMap = array_merge($phoneNameMap, $clientPhoneNames->all());
 
             $tz = browser_timezone();
             $now = now($tz);
@@ -94,8 +142,10 @@
             $yesterdayDate = $now->copy()->subDay()->toDateString();
         @endphp
 
+        <div class="relative flex-1 min-h-0">
+            <div class="sms-fade-overlay top"></div>
         <div
-            class="sms-messages flex-1 min-h-0 overflow-y-auto flex flex-col-reverse gap-3 px-2 py-4"
+            class="sms-messages h-full overflow-y-auto flex flex-col-reverse gap-3 px-2 pt-6 pb-6"
         >
             @forelse ($this->smsMessages->reverse() as $msg)
                 @php
@@ -150,6 +200,8 @@
                     <p class="text-sm text-zinc-400 dark:text-zinc-500">No messages yet. Send the first one!</p>
                 </div>
             @endforelse
+        </div>
+            <div class="sms-fade-overlay bottom"></div>
         </div>
 
         {{-- Compose --}}

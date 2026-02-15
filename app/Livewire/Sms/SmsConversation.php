@@ -230,7 +230,15 @@ class SmsConversation extends Component
 
     public function render()
     {
-        return view('livewire.sms.conversation');
+        $phoneNameMap = $this->smsMessages
+            ->where('direction', 'inbound')
+            ->pluck('from_number')
+            ->unique()
+            ->filter()
+            ->mapWithKeys(fn (string $number) => [$number => $this->resolvePhoneDisplay($number)])
+            ->all();
+
+        return view('livewire.sms.conversation', compact('phoneNameMap'));
     }
 
     public function placeholder()

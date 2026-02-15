@@ -1,5 +1,5 @@
 <div
-    class="flex lg:gap-4 flex-1 min-h-0 py-3 lg:p-8 {{ $threadId ? 'px-0' : 'px-2' }} lg:!px-8"
+    class="flex lg:gap-4 flex-1 min-h-0 lg:p-8 {{ $threadId ? 'px-2 pt-2 pb-3' : 'px-5 pt-4 pb-3' }} lg:!px-8 lg:!pt-8"
     x-data="{
         initialized: false,
         showConversationSkeleton: false,
@@ -98,7 +98,7 @@
     "
 >
     {{-- Thread List - Hidden on mobile when thread is selected --}}
-    <div class="w-full lg:w-80 shrink-0 min-w-0 max-w-lg mx-auto lg:mx-0 lg:max-w-none {{ $threadId ? 'hidden lg:block' : '' }}">
+    <div class="w-full lg:w-80 shrink-0 min-w-0 max-w-md mx-auto lg:mx-0 lg:max-w-none {{ $threadId ? 'hidden lg:block' : '' }}">
         <x-island-card heading="Conversations">
             @if (! $isClientUser)
                 <x-slot:actions>
@@ -117,22 +117,7 @@
     </div>
 
     {{-- Conversation - Hidden on mobile when no thread selected --}}
-    <div class="flex-1 min-w-0 flex flex-col min-h-0 max-w-full {{ !$threadId ? 'hidden lg:block' : '' }}">
-        {{-- Mobile back button - fixed next to sidebar toggle --}}
-        @if ($threadId)
-            <div class="lg:hidden fixed top-0 left-12 z-[60] pointer-events-auto py-1.5">
-                <flux:button
-                    type="button"
-                    variant="subtle"
-                    size="sm"
-                    square
-                    icon="arrow-left"
-                    class="bg-white/60 dark:bg-zinc-900/50 backdrop-blur-[2px] border border-zinc-200/60 dark:border-zinc-700/60 shadow-sm rounded-lg"
-                    wire:click="$set('threadId', null)"
-                    aria-label="Back to conversations"
-                />
-            </div>
-        @endif
+    <div class="flex-1 min-w-0 flex flex-col min-h-0 max-w-md mx-auto lg:mx-0 lg:max-w-none {{ !$threadId ? 'hidden lg:block' : '' }}">
         <div x-show="showConversationSkeleton" class="flex-1 min-h-0">
             @include('livewire.sms.conversation_placeholder')
         </div>

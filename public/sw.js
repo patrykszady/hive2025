@@ -1,18 +1,21 @@
 /**
  * Service Worker for Web Push Notifications
- * Version: 2026-02-15-v2
+ * Version: 2026-02-15-v3
  */
 
 self.addEventListener('install', (event) => {
+    console.log('[SW] Installing v3');
     self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
+    console.log('[SW] Activating v3');
     event.waitUntil(clients.claim());
 });
 
 self.addEventListener('push', (event) => {
     console.log('[SW] Push event received', event);
+    console.log('[SW] Push event data present:', !!event.data);
 
     event.waitUntil((async () => {
         let payload = {

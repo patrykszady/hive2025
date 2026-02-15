@@ -6,7 +6,7 @@
             <form wire:submit="send" class="space-y-4">
                 {{-- Client (optional) --}}
                 <flux:field>
-                    <flux:select label="Client (optional)" wire:model.live="clientId" variant="listbox" searchable placeholder="Choose client or leave blank...">
+                    <flux:select label="Client (optional)" wire:model.live="clientId" variant="listbox" searchable clearable placeholder="Choose client or leave blank...">
                         <x-slot name="search">
                             <flux:select.search placeholder="Search..." />
                         </x-slot>
@@ -41,6 +41,7 @@
                             <flux:input
                                 wire:model="newNumber"
                                 wire:keydown.enter.prevent="addNumber"
+                                mask="(999) 999-9999"
                                 placeholder="(555) 123-4567"
                                 icon="phone"
                             />

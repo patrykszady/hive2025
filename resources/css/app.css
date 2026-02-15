@@ -49,6 +49,29 @@
     scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
   }
 
+  .sms-fade-overlay {
+    pointer-events: none;
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 1.25rem;
+    z-index: 10;
+  }
+  .sms-fade-overlay.top {
+    top: 0;
+    background: linear-gradient(to bottom, rgb(244 244 245 / 0.92) 0%, rgb(244 244 245 / 0) 100%);
+  }
+  .sms-fade-overlay.bottom {
+    bottom: 0;
+    background: linear-gradient(to top, rgb(244 244 245 / 0.92) 0%, rgb(244 244 245 / 0) 100%);
+  }
+  .dark .sms-fade-overlay.top {
+    background: linear-gradient(to bottom, rgb(39 39 42 / 0.92) 0%, rgb(39 39 42 / 0) 100%);
+  }
+  .dark .sms-fade-overlay.bottom {
+    background: linear-gradient(to top, rgb(39 39 42 / 0.92) 0%, rgb(39 39 42 / 0) 100%);
+  }
+
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;
@@ -155,6 +178,15 @@ input[type="number"] {
 /* Disable automatic Flux input loading spinners (wire:model.live) */
 [data-flux-input] [wire\:loading][wire\:target] {
   display: none !important;
+}
+
+/* Stronger modal backdrop on mobile for better focus */
+@media (max-width: 1023px) {
+    [data-flux-modal] > dialog::backdrop {
+        background-color: rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+    }
 }
 
 /* Prevent extra padding when auto-loading is hidden */
