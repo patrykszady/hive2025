@@ -9,6 +9,8 @@ use App\Models\CallLog;
 use App\Models\SmsGroupThread;
 use App\Models\SmsLog;
 use App\Models\SmsMessage;
+use App\Models\User;
+use App\Models\Vendor;
 use App\Services\GroupSmsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -68,6 +70,9 @@ class TelnyxWebhookController extends Controller
             'call.answered' => $this->handleCallAnswered($data),
             'call.hangup' => $this->handleCallHangup($data),
             'call.bridged' => $this->handleCallBridged($data),
+            'call.speak.ended' => $this->handleCallSpeakEnded($data),
+            'call.speak.started' => $this->handleCallSpeakStarted($data),
+            'call.gather.ended' => $this->handleCallGatherEnded($data),
             'call.recording.saved' => $this->handleCallRecordingSaved($data),
             'call.machine.detection.ended' => $this->handleAmdEnded($data),
             default => $this->handleUnknownVoiceEvent($eventType, $data),
@@ -79,8 +84,8 @@ class TelnyxWebhookController extends Controller
     // =========================================================================
 
     /**
-     * Handle call.initiated - answer incoming calls and transfer to forwarding number(s).
-     * Also handles the first leg of outbound click-to-call.
+     * Handle call.initiated - answer incoming calls.
+     * Flow: answer → play TTS welcome (if known caller) → dial admins → bridge first to answer.
      */
     protected function handleCallInitiated(array $data): JsonResponse
     {
@@ -88,10 +93,9 @@ class TelnyxWebhookController extends Controller
         $direction = $payload['direction'] ?? null;
         $callControlId = $payload['call_control_id'] ?? null;
 
-        // For outbound click-to-call, the direction is "outgoing" and we already
-        // created the CallLog in the Livewire component. Just log and let it ring.
+        // For outbound calls (click-to-call or admin ring legs), just log and return.
         if ($direction === 'outgoing') {
-            Log::channel('telnyx')->info('Outbound call initiated (click-to-call leg)', [
+            Log::channel('telnyx')->info('Outbound call initiated', [
                 'call_control_id' => $callControlId,
                 'to' => $payload['to'] ?? null,
             ]);
@@ -122,12 +126,19 @@ class TelnyxWebhookController extends Controller
             'from_number' => $payload['from'] ?? 'unknown',
             'to_number' => $payload['to'] ?? config('services.telnyx.from'),
             'status' => CallLog::STATUS_INITIATED,
+            'metadata' => [
+                'admin_call_control_ids' => [],
+                'bridged_admin_call_control_id' => null,
+            ],
         ]);
 
         // Try to match caller to a user
         $user = $callLog->lookUpCaller();
         if ($user) {
-            $callLog->update(['user_id' => $user->id]);
+            $callLog->update([
+                'user_id' => $user->id,
+                'caller_name' => $user->full_name,
+            ]);
         }
 
         Log::channel('telnyx')->info('Incoming call - answering', [
@@ -135,14 +146,17 @@ class TelnyxWebhookController extends Controller
             'from' => $payload['from'] ?? null,
             'to' => $payload['to'] ?? null,
             'caller_user_id' => $user?->id,
+            'caller_name' => $user?->full_name,
         ]);
 
-        // Answer the call, then we'll transfer on call.answered
+        // Answer the call — on call.answered we'll play TTS or ring admins
         $this->sendCallCommand($callControlId, 'answer', [
             'client_state' => base64_encode(json_encode([
-                'action' => 'transfer_after_answer',
+                'action' => 'welcome_or_ring',
                 'call_log_id' => $callLog->id,
                 'original_caller' => $payload['from'] ?? null,
+                'caller_name' => $user?->first_name,
+                'caller_user_id' => $user?->id,
             ])),
         ]);
 
@@ -150,8 +164,12 @@ class TelnyxWebhookController extends Controller
     }
 
     /**
-     * Handle call.answered - once answered, transfer to the forwarding number(s)
-     * or bridge to the click-to-call target.
+     * Handle call.answered - route based on client_state action.
+     *
+     * Actions:
+     *  - welcome_or_ring: Our answer of an incoming call → play TTS or ring admins
+     *  - click_to_call: User answered their phone → bridge to target
+     *  - admin_ring: Admin answered → bridge with incoming caller
      */
     protected function handleCallAnswered(array $data): JsonResponse
     {
@@ -168,107 +186,283 @@ class TelnyxWebhookController extends Controller
 
         // ── Click-to-call: user answered their phone → now bridge to target ──
         if ($action === 'click_to_call') {
-            $callLogId = $clientState['call_log_id'] ?? null;
-            $targetPhone = $clientState['target_phone'] ?? null;
-            $callLog = $callLogId ? CallLog::find($callLogId) : null;
-
-            $callLog?->update([
-                'status' => CallLog::STATUS_ANSWERED,
-                'answered_at' => now(),
-            ]);
-
-            if (! $targetPhone) {
-                Log::channel('telnyx')->error('Click-to-call: no target phone in client_state');
-                $this->sendCallCommand($callControlId, 'hangup');
-                $callLog?->update(['status' => CallLog::STATUS_FAILED, 'hangup_cause' => 'no_target_phone']);
-                return response()->json(['status' => 'ok']);
-            }
-
-            Log::channel('telnyx')->info('Click-to-call: user answered, bridging to target', [
-                'call_control_id' => $callControlId,
-                'target_phone' => $targetPhone,
-                'call_log_id' => $callLogId,
-            ]);
-
-            // Transfer (bridge) to the target number
-            $this->sendCallCommand($callControlId, 'transfer', [
-                'to' => $targetPhone,
-                'from' => config('services.telnyx.from'),
-                'timeout_secs' => (int) config('services.telnyx.voice_timeout', 30),
-                'client_state' => base64_encode(json_encode([
-                    'action' => 'click_to_call_bridged',
-                    'call_log_id' => $callLogId,
-                ])),
-            ]);
-
-            $callLog?->update([
-                'status' => CallLog::STATUS_TRANSFERRED,
-                'forwarded_to' => $targetPhone,
-            ]);
-
-            return response()->json(['status' => 'ok']);
+            return $this->handleClickToCallAnswered($callControlId, $clientState);
         }
 
-        if ($action !== 'transfer_after_answer') {
-            // This is a different leg (e.g. the transfer destination answering)
-            return response()->json(['status' => 'ok']);
+        // ── Welcome or Ring: incoming call answered by us → TTS or ring admins ──
+        if ($action === 'welcome_or_ring') {
+            return $this->handleIncomingAnswered($callControlId, $clientState);
         }
 
+        // ── Admin Ring: an admin answered → bridge with the incoming caller ──
+        if ($action === 'admin_ring') {
+            return $this->handleAdminRingAnswered($callControlId, $clientState);
+        }
+
+        // Other legs (e.g. transfer destinations) — do nothing
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Handle click-to-call user answering their phone — bridge to target.
+     */
+    protected function handleClickToCallAnswered(string $callControlId, array $clientState): JsonResponse
+    {
         $callLogId = $clientState['call_log_id'] ?? null;
+        $targetPhone = $clientState['target_phone'] ?? null;
         $callLog = $callLogId ? CallLog::find($callLogId) : null;
 
-        if ($callLog) {
-            $callLog->update([
-                'status' => CallLog::STATUS_ANSWERED,
-                'answered_at' => now(),
-            ]);
-        }
+        $callLog?->update([
+            'status' => CallLog::STATUS_ANSWERED,
+            'answered_at' => now(),
+        ]);
 
-        // Get forwarding destination(s)
-        $forwardTo = $this->getForwardingDestination();
-
-        if (!$forwardTo) {
-            Log::channel('telnyx')->error('No forwarding destination configured - hanging up');
+        if (! $targetPhone) {
+            Log::channel('telnyx')->error('Click-to-call: no target phone in client_state');
             $this->sendCallCommand($callControlId, 'hangup');
-            $callLog?->update(['status' => CallLog::STATUS_FAILED, 'hangup_cause' => 'no_forward_destination']);
+            $callLog?->update(['status' => CallLog::STATUS_FAILED, 'hangup_cause' => 'no_target_phone']);
             return response()->json(['status' => 'ok']);
         }
 
-        Log::channel('telnyx')->info('Transferring call', [
+        Log::channel('telnyx')->info('Click-to-call: user answered, bridging to target', [
             'call_control_id' => $callControlId,
-            'forward_to' => $forwardTo,
+            'target_phone' => $targetPhone,
+            'call_log_id' => $callLogId,
         ]);
 
-        // Transfer the call — show the original caller's number as caller ID
-        $originalCaller = $clientState['original_caller'] ?? config('services.telnyx.from');
-
+        // Transfer (bridge) to the target number
         $this->sendCallCommand($callControlId, 'transfer', [
-            'to' => $forwardTo,
-            'from' => $originalCaller,
+            'to' => $targetPhone,
+            'from' => config('services.telnyx.from'),
             'timeout_secs' => (int) config('services.telnyx.voice_timeout', 30),
             'client_state' => base64_encode(json_encode([
-                'action' => 'transferred',
-                'call_log_id' => $callLog?->id,
+                'action' => 'click_to_call_bridged',
+                'call_log_id' => $callLogId,
             ])),
         ]);
 
         $callLog?->update([
             'status' => CallLog::STATUS_TRANSFERRED,
-            'forwarded_to' => $forwardTo,
+            'forwarded_to' => $targetPhone,
         ]);
 
         return response()->json(['status' => 'ok']);
     }
 
     /**
-     * Handle call.hangup - call ended.
+     * Handle incoming call answered by us — play TTS welcome or ring admins.
+     * After TTS (or immediately), the caller joins a conference so all admins can join too.
+     */
+    protected function handleIncomingAnswered(string $callControlId, array $clientState): JsonResponse
+    {
+        $callLogId = $clientState['call_log_id'] ?? null;
+        $callerName = $clientState['caller_name'] ?? null;
+        $callerUserId = $clientState['caller_user_id'] ?? null;
+        $originalCaller = $clientState['original_caller'] ?? null;
+        $callLog = $callLogId ? CallLog::find($callLogId) : null;
+
+        $callLog?->update([
+            'status' => CallLog::STATUS_ANSWERED,
+            'answered_at' => now(),
+        ]);
+
+        // Generate a unique conference name for this call
+        $conferenceName = "call-{$callLogId}";
+
+        // Get vendor options for phone system settings
+        // TODO: Multi-vendor support — look up vendor by connection_id
+        $vendor = Vendor::find(1);
+        $vendorOptions = $vendor ? (array) $vendor->options : [];
+
+        // Build welcome TTS payload
+        $shortName = data_get($vendorOptions, 'short_name') ?: ($vendor?->business_name ?? 'our team');
+        $greeting = $this->buildTimeGreeting();
+        $welcomeTemplate = data_get($vendorOptions, 'welcome_message')
+            ?: "{greeting} {name}! Thanks for calling {company}. One moment while we connect you.";
+        $ttsPayload = str_replace(
+            ['{name}', '{company}', '{greeting}'],
+            [$callerName ?? '', $shortName, $greeting],
+            $welcomeTemplate
+        );
+        // Clean up extra spaces/punctuation from empty {name}
+        $ttsPayload = preg_replace('/\s+/', ' ', trim($ttsPayload));
+        $ttsPayload = preg_replace('/\s+([!.?,])/', '$1', $ttsPayload);
+
+        Log::channel('telnyx')->info('Playing welcome TTS and ringing admins simultaneously', [
+            'call_control_id' => $callControlId,
+            'tts' => $ttsPayload,
+            'conference_name' => $conferenceName,
+        ]);
+
+        // Play TTS to the caller — when it finishes, caller joins the conference
+        $this->sendCallCommand($callControlId, 'speak', [
+            'payload' => $ttsPayload,
+            'voice' => 'Telnyx.NaturalHD.astra',
+            'language' => 'en-US',
+            'payload_type' => 'text',
+            'voice_settings' => [
+                'type' => 'telnyx',
+            ],
+            'client_state' => base64_encode(json_encode([
+                'action' => 'welcome_done_join_conference',
+                'call_log_id' => $callLogId,
+                'original_caller' => $originalCaller,
+                'conference_name' => $conferenceName,
+            ])),
+        ]);
+
+        // Dial admins at the same time — they join conference when they answer
+        $this->dialAdmins($callControlId, $callLogId, $originalCaller, $conferenceName);
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Join the incoming caller to a named conference.
+     * The caller's leg ends the conference when they hang up.
+     */
+    protected function joinCallerToConference(string $callControlId, string $conferenceName, ?int $callLogId): void
+    {
+        Log::channel('telnyx')->info('Joining caller to conference', [
+            'call_control_id' => $callControlId,
+            'conference_name' => $conferenceName,
+        ]);
+
+        $this->sendCallCommand($callControlId, 'conference', [
+            'name' => $conferenceName,
+            'beep_enabled' => 'never',
+            'end_conference_on_exit' => true,
+            'start_conference_on_create' => true,
+            'client_state' => base64_encode(json_encode([
+                'action' => 'in_conference',
+                'call_log_id' => $callLogId,
+                'conference_name' => $conferenceName,
+            ])),
+        ]);
+    }
+
+    /**
+     * Handle an admin answering the simultaneous ring — join the conference.
+     * Multiple admins can join the same conference for a true multi-party call.
+     */
+    protected function handleAdminRingAnswered(string $callControlId, array $clientState): JsonResponse
+    {
+        $callLogId = $clientState['call_log_id'] ?? null;
+        $conferenceName = $clientState['conference_name'] ?? null;
+        $adminUserId = $clientState['admin_user_id'] ?? null;
+        $callLog = $callLogId ? CallLog::find($callLogId) : null;
+
+        if (! $callLog || ! $conferenceName) {
+            Log::channel('telnyx')->error('Admin ring answered but missing call log or conference name', [
+                'call_control_id' => $callControlId,
+                'call_log_id' => $callLogId,
+            ]);
+            $this->sendCallCommand($callControlId, 'hangup');
+            return response()->json(['status' => 'ok']);
+        }
+
+        $adminUser = $adminUserId ? User::find($adminUserId) : null;
+
+        Log::channel('telnyx')->info('Admin answered — playing connect message then joining conference', [
+            'admin_call_control_id' => $callControlId,
+            'conference_name' => $conferenceName,
+            'admin_user_id' => $adminUserId,
+            'admin_name' => $adminUser?->full_name,
+        ]);
+
+        // Track that at least one admin joined
+        $metadata = $callLog->metadata ?? [];
+        $joinedAdmins = $metadata['joined_admin_ids'] ?? [];
+        $joinedAdmins[] = $adminUserId;
+        $metadata['joined_admin_ids'] = array_unique($joinedAdmins);
+
+        $callLog->update([
+            'status' => CallLog::STATUS_TRANSFERRED,
+            'forwarded_to' => $adminUser?->cell_phone,
+            'metadata' => $metadata,
+        ]);
+
+        // Play a brief TTS to the admin using customizable template, then join conference
+        $callerName = $callLog->caller_name ?: 'a caller';
+        $adminFirstName = $adminUser?->first_name ?: '';
+        $vendor = Vendor::find(1);
+        $shortName = data_get($vendor?->options ?? [], 'short_name') ?: ($vendor?->business_name ?? 'our team');
+        $connectTemplate = data_get($vendor?->options ?? [], 'admin_connect_message')
+            ?: "{greeting}! We're connecting you to {name}.";
+        $connectPayload = str_replace(
+            ['{name}', '{company}', '{greeting}'],
+            [$callerName, $shortName, $this->buildTimeGreeting()],
+            $connectTemplate
+        );
+        $connectPayload = preg_replace('/\s+/', ' ', trim($connectPayload));
+        $connectPayload = preg_replace('/\s+([!.?,])/', '$1', $connectPayload);
+        // Prepend admin's first name if available
+        if ($adminFirstName) {
+            $connectPayload = "{$adminFirstName}, {$connectPayload}";
+        }
+        $this->sendCallCommand($callControlId, 'speak', [
+            'payload' => $connectPayload,
+            'voice' => 'Telnyx.NaturalHD.astra',
+            'language' => 'en-US',
+            'payload_type' => 'text',
+            'voice_settings' => ['type' => 'telnyx'],
+            'client_state' => base64_encode(json_encode([
+                'action' => 'admin_connect_message_done',
+                'call_log_id' => $callLogId,
+                'admin_user_id' => $adminUserId,
+                'conference_name' => $conferenceName,
+            ])),
+        ]);
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Handle call.hangup - call ended. Also triggers voicemail if all admin rings failed.
      */
     protected function handleCallHangup(array $data): JsonResponse
     {
         $payload = $data['payload'] ?? [];
         $callControlId = $payload['call_control_id'] ?? null;
         $hangupCause = $payload['hangup_cause'] ?? null;
+        $clientStateRaw = $payload['client_state'] ?? null;
 
+        $clientState = $clientStateRaw
+            ? json_decode(base64_decode($clientStateRaw), true)
+            : null;
+
+        $action = $clientState['action'] ?? null;
+
+        // ── Admin ring leg hung up (timeout/no answer) ──
+        if ($action === 'admin_ring') {
+            return $this->handleAdminRingHangup($callControlId, $clientState, $hangupCause);
+        }
+
+        // ── Voicemail recording done (caller hung up after record_start) ──
+        if ($action === 'voicemail_recording') {
+            $callLogId = $clientState['call_log_id'] ?? null;
+            $callLog = $callLogId ? CallLog::find($callLogId) : null;
+
+            if ($callLog) {
+                $callLog->update([
+                    'status' => CallLog::STATUS_VOICEMAIL,
+                    'hangup_cause' => $hangupCause,
+                    'ended_at' => now(),
+                    'duration_seconds' => $callLog->answered_at
+                        ? now()->diffInSeconds($callLog->answered_at)
+                        : null,
+                ]);
+            }
+
+            Log::channel('telnyx')->info('Voicemail call ended', [
+                'call_control_id' => $callControlId,
+                'call_log_id' => $callLogId,
+            ]);
+
+            return response()->json(['status' => 'ok']);
+        }
+
+        // ── Standard hangup — update CallLog for the incoming call ──
         $callLog = CallLog::findByCallControlId($callControlId);
 
         if ($callLog) {
@@ -285,6 +479,11 @@ class TelnyxWebhookController extends Controller
                 default => CallLog::STATUS_COMPLETED,
             };
 
+            // Don't overwrite voicemail status
+            if ($callLog->status === CallLog::STATUS_VOICEMAIL) {
+                $status = CallLog::STATUS_VOICEMAIL;
+            }
+
             $callLog->update([
                 'status' => $status,
                 'hangup_cause' => $hangupCause,
@@ -298,6 +497,64 @@ class TelnyxWebhookController extends Controller
                 'hangup_cause' => $hangupCause,
                 'duration' => $duration,
             ]);
+        }
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Handle an admin ring leg hanging up (timeout or rejection).
+     * If all admin legs failed and none joined the conference, trigger voicemail.
+     */
+    protected function handleAdminRingHangup(string $callControlId, array $clientState, ?string $hangupCause): JsonResponse
+    {
+        $callLogId = $clientState['call_log_id'] ?? null;
+        $incomingCallControlId = $clientState['incoming_call_control_id'] ?? null;
+        $callLog = $callLogId ? CallLog::find($callLogId) : null;
+
+        Log::channel('telnyx')->info('Admin ring leg hung up', [
+            'admin_call_control_id' => $callControlId,
+            'hangup_cause' => $hangupCause,
+            'call_log_id' => $callLogId,
+        ]);
+
+        if (! $callLog || ! $incomingCallControlId) {
+            return response()->json(['status' => 'ok']);
+        }
+
+        $metadata = $callLog->metadata ?? [];
+
+        // If at least one admin already joined the conference, this is just another leg timing out — ignore
+        if (! empty($metadata['joined_admin_ids'])) {
+            return response()->json(['status' => 'ok']);
+        }
+
+        // Remove this admin from the pending list
+        $adminCallControlIds = $metadata['admin_call_control_ids'] ?? [];
+        $metadata['admin_call_control_ids'] = array_values(
+            array_filter($adminCallControlIds, fn ($id) => $id !== $callControlId)
+        );
+        $callLog->update(['metadata' => $metadata]);
+
+        // If all admin legs have ended and none joined → trigger voicemail (or defer if TTS still playing)
+        if (empty($metadata['admin_call_control_ids'])) {
+            $ttsComplete = $metadata['tts_complete'] ?? false;
+
+            if ($ttsComplete) {
+                Log::channel('telnyx')->info('All admin legs failed — triggering voicemail', [
+                    'incoming_call_control_id' => $incomingCallControlId,
+                    'call_log_id' => $callLogId,
+                ]);
+                $this->triggerVoicemail($incomingCallControlId, $callLogId);
+            } else {
+                // TTS still playing — set flag so voicemail triggers when TTS finishes
+                Log::channel('telnyx')->info('All admin legs failed but TTS still playing — deferring voicemail', [
+                    'incoming_call_control_id' => $incomingCallControlId,
+                    'call_log_id' => $callLogId,
+                ]);
+                $metadata['all_admins_failed'] = true;
+                $callLog->update(['metadata' => $metadata]);
+            }
         }
 
         return response()->json(['status' => 'ok']);
@@ -319,6 +576,143 @@ class TelnyxWebhookController extends Controller
     }
 
     /**
+     * Handle call.speak.started - TTS started playing.
+     */
+    protected function handleCallSpeakStarted(array $data): JsonResponse
+    {
+        $payload = $data['payload'] ?? [];
+
+        Log::channel('telnyx')->info('TTS speak started', [
+            'call_control_id' => $payload['call_control_id'] ?? null,
+        ]);
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Handle call.speak.ended - TTS finished playing.
+     * If action is 'ring_admins_after_speak', now dial the admins.
+     */
+    protected function handleCallSpeakEnded(array $data): JsonResponse
+    {
+        $payload = $data['payload'] ?? [];
+        $callControlId = $payload['call_control_id'] ?? null;
+        $clientStateRaw = $payload['client_state'] ?? null;
+
+        $clientState = $clientStateRaw
+            ? json_decode(base64_decode($clientStateRaw), true)
+            : null;
+
+        $action = $clientState['action'] ?? null;
+
+        if ($action === 'welcome_done_join_conference') {
+            $callLogId = $clientState['call_log_id'] ?? null;
+            $originalCaller = $clientState['original_caller'] ?? null;
+            $conferenceName = $clientState['conference_name'] ?? null;
+            $callLog = $callLogId ? CallLog::find($callLogId) : null;
+
+            // Mark TTS as complete so admin hangup handler knows
+            if ($callLog) {
+                $metadata = $callLog->metadata ?? [];
+                $metadata['tts_complete'] = true;
+                $callLog->update(['metadata' => $metadata]);
+            }
+
+            // Refresh metadata to check if all admin legs already failed during TTS
+            $metadata = $callLog ? ($callLog->fresh()->metadata ?? []) : [];
+            $allAdminsFailed = ($metadata['all_admins_failed'] ?? false);
+
+            if ($allAdminsFailed) {
+                Log::channel('telnyx')->info('TTS completed but all admins already failed — triggering voicemail', [
+                    'call_control_id' => $callControlId,
+                    'call_log_id' => $callLogId,
+                ]);
+                $this->triggerVoicemail($callControlId, $callLogId);
+            } else {
+                Log::channel('telnyx')->info('TTS completed — joining caller to conference', [
+                    'call_control_id' => $callControlId,
+                    'call_log_id' => $callLogId,
+                    'conference_name' => $conferenceName,
+                ]);
+
+                if ($conferenceName) {
+                    $this->joinCallerToConference($callControlId, $conferenceName, $callLogId);
+                }
+            }
+        } elseif ($action === 'voicemail_prompt_done') {
+            // Voicemail prompt finished → start recording
+            $callLogId = $clientState['call_log_id'] ?? null;
+
+            Log::channel('telnyx')->info('Voicemail prompt done — starting recording', [
+                'call_control_id' => $callControlId,
+            ]);
+
+            $this->sendCallCommand($callControlId, 'record_start', [
+                'format' => 'mp3',
+                'channels' => 'single',
+                'play_beep' => true,
+                'max_length' => 120, // 2 minutes max
+                'timeout_secs' => 5,  // Stop after 5s silence
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'voicemail_recording',
+                    'call_log_id' => $callLogId,
+                ])),
+            ]);
+        } elseif ($action === 'ivr_retry_connect') {
+            // Press 1: brief message done → re-dial admins
+            $callLogId = $clientState['call_log_id'] ?? null;
+            $originalCaller = $clientState['original_caller'] ?? null;
+            $conferenceName = "call-{$callLogId}-retry-" . time();
+
+            Log::channel('telnyx')->info('IVR retry — joining conference and ringing admins', [
+                'call_control_id' => $callControlId,
+                'call_log_id' => $callLogId,
+                'conference_name' => $conferenceName,
+            ]);
+
+            $this->joinCallerToConference($callControlId, $conferenceName, $callLogId);
+            $this->dialAdmins($callControlId, $callLogId, $originalCaller, $conferenceName);
+        } elseif ($action === 'ivr_sms_confirmation') {
+            // Press 2: SMS confirmation message done → hang up
+            $callLogId = $clientState['call_log_id'] ?? null;
+
+            Log::channel('telnyx')->info('IVR SMS confirmation done — hanging up', [
+                'call_control_id' => $callControlId,
+                'call_log_id' => $callLogId,
+            ]);
+
+            $this->sendCallCommand($callControlId, 'hangup');
+        } elseif ($action === 'admin_connect_message_done') {
+            // Admin heard "We're connecting you to {name}" → join the conference
+            $callLogId = $clientState['call_log_id'] ?? null;
+            $adminUserId = $clientState['admin_user_id'] ?? null;
+            $conferenceName = $clientState['conference_name'] ?? null;
+
+            Log::channel('telnyx')->info('Admin connect message done — joining conference', [
+                'call_control_id' => $callControlId,
+                'conference_name' => $conferenceName,
+                'admin_user_id' => $adminUserId,
+            ]);
+
+            if ($conferenceName) {
+                $this->sendCallCommand($callControlId, 'conference', [
+                    'name' => $conferenceName,
+                    'beep_enabled' => 'never',
+                    'end_conference_on_exit' => false,
+                    'start_conference_on_create' => false,
+                    'client_state' => base64_encode(json_encode([
+                        'action' => 'admin_in_conference',
+                        'call_log_id' => $callLogId,
+                        'admin_user_id' => $adminUserId,
+                    ])),
+                ]);
+            }
+        }
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
      * Handle call.recording.saved - recording ready.
      */
     protected function handleCallRecordingSaved(array $data): JsonResponse
@@ -326,18 +720,33 @@ class TelnyxWebhookController extends Controller
         $payload = $data['payload'] ?? [];
         $callControlId = $payload['call_control_id'] ?? null;
         $recordingUrls = $payload['recording_urls'] ?? [];
+        $clientStateRaw = $payload['client_state'] ?? null;
 
-        $callLog = CallLog::findByCallControlId($callControlId);
+        $clientState = $clientStateRaw
+            ? json_decode(base64_decode($clientStateRaw), true)
+            : null;
 
-        if ($callLog && !empty($recordingUrls)) {
+        $callLogId = $clientState['call_log_id'] ?? null;
+        $callLog = $callLogId
+            ? CallLog::find($callLogId)
+            : CallLog::findByCallControlId($callControlId);
+
+        $recordingUrl = $recordingUrls['mp3'] ?? $recordingUrls['wav'] ?? null;
+
+        if ($callLog && $recordingUrl) {
+            $isVoicemail = ($clientState['action'] ?? null) === 'voicemail_recording';
+
             $callLog->update([
-                'recording_url' => $recordingUrls['mp3'] ?? $recordingUrls['wav'] ?? null,
+                'recording_url' => $recordingUrl,
+                'has_voicemail' => $isVoicemail,
+                'status' => $isVoicemail ? CallLog::STATUS_VOICEMAIL : $callLog->status,
             ]);
         }
 
         Log::channel('telnyx')->info('Call recording saved', [
             'call_control_id' => $callControlId,
             'recording_urls' => $recordingUrls,
+            'is_voicemail' => ($clientState['action'] ?? null) === 'voicemail_recording',
         ]);
 
         return response()->json(['status' => 'ok']);
@@ -375,7 +784,594 @@ class TelnyxWebhookController extends Controller
     // =========================================================================
 
     /**
-     * Get the forwarding destination phone number.
+     * Build a time-of-day greeting (Good morning / afternoon / evening).
+     */
+    protected function buildTimeGreeting(): string
+    {
+        // Use vendor timezone if set, otherwise default to America/New_York
+        $vendor = Vendor::find(1);
+        $tz = $vendor?->timezone ?? 'America/New_York';
+        $hour = now($tz)->hour;
+
+        return match (true) {
+            $hour < 12 => 'Good morning',
+            $hour < 17 => 'Good afternoon',
+            default => 'Good evening',
+        };
+    }
+
+    /**
+     * Dial all selected admin call recipients simultaneously.
+     * Each admin gets their own outbound call leg with the conference name in client_state.
+     */
+    protected function dialAdmins(string $incomingCallControlId, ?int $callLogId, ?string $originalCaller, ?string $conferenceName = null): void
+    {
+        $callLog = $callLogId ? CallLog::find($callLogId) : null;
+
+        // Get call recipients from vendor options
+        // TODO: Multi-vendor support — look up vendor by connection_id
+        $vendor = Vendor::find(1);
+        $vendorOptions = $vendor ? (array) $vendor->options : [];
+        $recipientUserIds = (array) data_get($vendorOptions, 'call_recipients', []);
+
+        // Fall back to config if no recipients configured
+        if (empty($recipientUserIds)) {
+            $fallback = $this->getForwardingDestination();
+            if ($fallback) {
+                Log::channel('telnyx')->info('No call recipients configured, using config fallback', [
+                    'forward_to' => $fallback,
+                ]);
+                $this->sendCallCommand($incomingCallControlId, 'transfer', [
+                    'to' => $fallback,
+                    'from' => $originalCaller ?? config('services.telnyx.from'),
+                    'timeout_secs' => (int) config('services.telnyx.voice_timeout', 30),
+                    'client_state' => base64_encode(json_encode([
+                        'action' => 'transferred',
+                        'call_log_id' => $callLogId,
+                    ])),
+                ]);
+                $callLog?->update(['forwarded_to' => $fallback]);
+            } else {
+                Log::channel('telnyx')->error('No call recipients and no forwarding destination — triggering voicemail');
+                $this->triggerVoicemail($incomingCallControlId, $callLogId);
+            }
+            return;
+        }
+
+        // Get admin users with their phone numbers
+        $adminUsers = User::whereIn('id', $recipientUserIds)
+            ->whereNotNull('cell_phone')
+            ->where('cell_phone', '!=', '')
+            ->get();
+
+        if ($adminUsers->isEmpty()) {
+            Log::channel('telnyx')->error('No valid admin users found for call recipients — triggering voicemail');
+            $this->triggerVoicemail($incomingCallControlId, $callLogId);
+            return;
+        }
+
+        $apiKey = config('services.telnyx.api_key');
+        $connectionId = config('services.telnyx.connection_id');
+        $telnyxFrom = config('services.telnyx.from');
+        $timeout = (int) config('services.telnyx.voice_timeout', 30);
+        $adminCallControlIds = [];
+
+        foreach ($adminUsers as $adminUser) {
+            $phone = $adminUser->cell_phone;
+
+            // Ensure phone is in E.164 format
+            if (! str_starts_with($phone, '+')) {
+                $digits = preg_replace('/\D/', '', $phone);
+                if (strlen($digits) === 10) {
+                    $phone = '+1' . $digits;
+                } elseif (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+                    $phone = '+' . $digits;
+                }
+            }
+
+            try {
+                $response = Http::withToken($apiKey)
+                    ->post('https://api.telnyx.com/v2/calls', [
+                        'connection_id' => $connectionId,
+                        'to' => $phone,
+                        'from' => $originalCaller ?? $telnyxFrom,
+                        'from_display_name' => $callLog?->caller_name ?? 'Incoming Call',
+                        'timeout_secs' => $timeout,
+                        'client_state' => base64_encode(json_encode([
+                            'action' => 'admin_ring',
+                            'call_log_id' => $callLogId,
+                            'incoming_call_control_id' => $incomingCallControlId,
+                            'conference_name' => $conferenceName,
+                            'admin_user_id' => $adminUser->id,
+                        ])),
+                    ]);
+
+                if ($response->successful()) {
+                    $data = $response->json('data') ?? [];
+                    $adminCcId = $data['call_control_id'] ?? null;
+                    if ($adminCcId) {
+                        $adminCallControlIds[] = $adminCcId;
+                    }
+
+                    Log::channel('telnyx')->info('Dialed admin', [
+                        'admin_user_id' => $adminUser->id,
+                        'admin_name' => $adminUser->full_name,
+                        'phone' => $phone,
+                        'admin_call_control_id' => $adminCcId,
+                    ]);
+                } else {
+                    Log::channel('telnyx')->error('Failed to dial admin', [
+                        'admin_user_id' => $adminUser->id,
+                        'phone' => $phone,
+                        'error' => $response->json(),
+                    ]);
+                }
+            } catch (\Exception $e) {
+                Log::channel('telnyx')->error('Exception dialing admin', [
+                    'admin_user_id' => $adminUser->id,
+                    'phone' => $phone,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        // Store admin call control IDs and conference name in the call log metadata
+        if ($callLog) {
+            $metadata = $callLog->metadata ?? [];
+            $metadata['admin_call_control_ids'] = $adminCallControlIds;
+            if ($conferenceName) {
+                $metadata['conference_name'] = $conferenceName;
+            }
+            $callLog->update(['metadata' => $metadata]);
+        }
+
+        // If no admins were successfully dialed, trigger voicemail
+        if (empty($adminCallControlIds)) {
+            Log::channel('telnyx')->error('Failed to dial any admins — triggering voicemail');
+            $this->triggerVoicemail($incomingCallControlId, $callLogId);
+        }
+    }
+
+    /**
+     * Trigger voicemail IVR: play interactive menu with DTMF options.
+     * Press 1 = re-dial, Press 2 = send text, Stay on line = voicemail.
+     */
+    protected function triggerVoicemail(string $callControlId, ?int $callLogId): void
+    {
+        // Check if voicemail is enabled
+        $vendor = Vendor::find(1);
+        $voicemailEnabled = (bool) data_get($vendor?->options ?? [], 'voicemail_enabled', true);
+
+        if (! $voicemailEnabled) {
+            Log::channel('telnyx')->info('Voicemail disabled — hanging up', [
+                'call_control_id' => $callControlId,
+            ]);
+            $this->sendCallCommand($callControlId, 'hangup');
+
+            if ($callLogId) {
+                CallLog::where('id', $callLogId)->update([
+                    'status' => CallLog::STATUS_MISSED,
+                    'ended_at' => now(),
+                ]);
+            }
+            return;
+        }
+
+        $shortName = data_get($vendor?->options ?? [], 'short_name') ?: ($vendor?->business_name ?? 'us');
+
+        // Get caller name from call log for personalization
+        $callLog = $callLogId ? CallLog::find($callLogId) : null;
+        $callerName = null;
+        $isKnownCaller = false;
+        if ($callLog?->user_id) {
+            $callerUser = User::find($callLog->user_id);
+            $callerName = $callerUser?->first_name;
+            $isKnownCaller = true;
+        }
+
+        // Known callers get full IVR (press 1 re-dial + press 2 SMS), unknown get press 2 + voicemail only
+        if ($isKnownCaller) {
+            $ivrTemplate = data_get($vendor?->options ?? [], 'voicemail_message')
+                ?: "{company} is not available right now. {name}, if this is an emergency, press 1 to re-dial {company}. Press 2 to send a text on your behalf so {company} knows to call you back ASAP. Stay on the line to leave a voicemail.";
+            $validDigits = '12';
+        } else {
+            $ivrTemplate = data_get($vendor?->options ?? [], 'voicemail_message_unknown')
+                ?: "{company} is not available right now. Press 2 to send a text on your behalf so {company} knows to call you back ASAP. Stay on the line to leave a voicemail.";
+            $validDigits = '2';
+        }
+
+        $ivrPrompt = str_replace(
+            ['{name}', '{company}', '{greeting}'],
+            [$callerName ?? '', $shortName, $this->buildTimeGreeting()],
+            $ivrTemplate
+        );
+        // Clean up extra spaces/punctuation from empty {name}
+        $ivrPrompt = preg_replace('/\s+/', ' ', trim($ivrPrompt));
+        $ivrPrompt = preg_replace('/\s+([!.?,])/', '$1', $ivrPrompt);
+
+        Log::channel('telnyx')->info('Playing voicemail IVR menu', [
+            'call_control_id' => $callControlId,
+            'call_log_id' => $callLogId,
+            'ivr_prompt' => $ivrPrompt,
+            'is_known_caller' => $isKnownCaller,
+        ]);
+
+        $this->sendCallCommand($callControlId, 'gather_using_speak', [
+            'payload' => $ivrPrompt,
+            'voice' => 'Telnyx.NaturalHD.astra',
+            'language' => 'en-US',
+            'payload_type' => 'text',
+            'voice_settings' => [
+                'type' => 'telnyx',
+            ],
+            'valid_digits' => $validDigits,
+            'minimum_digits' => 1,
+            'maximum_digits' => 1,
+            'timeout_millis' => 15000,
+            'maximum_tries' => 1,
+            'client_state' => base64_encode(json_encode([
+                'action' => 'voicemail_ivr_menu',
+                'call_log_id' => $callLogId,
+                'original_caller' => $callLog?->from_number,
+                'is_known_caller' => $isKnownCaller,
+            ])),
+        ]);
+    }
+
+    /**
+     * Handle call.gather.ended — IVR menu DTMF result.
+     * Digit 1 = re-dial admins, Digit 2 = send SMS, No digit = voicemail recording.
+     */
+    protected function handleCallGatherEnded(array $data): JsonResponse
+    {
+        $payload = $data['payload'] ?? [];
+        $callControlId = $payload['call_control_id'] ?? null;
+        $digits = $payload['digits'] ?? '';
+        $clientStateRaw = $payload['client_state'] ?? null;
+
+        $clientState = $clientStateRaw
+            ? json_decode(base64_decode($clientStateRaw), true)
+            : null;
+
+        $action = $clientState['action'] ?? null;
+
+        if ($action !== 'voicemail_ivr_menu') {
+            return response()->json(['status' => 'ok']);
+        }
+
+        $callLogId = $clientState['call_log_id'] ?? null;
+        $originalCaller = $clientState['original_caller'] ?? null;
+
+        // Resolve caller name for placeholder substitution
+        $callLog = $callLogId ? CallLog::find($callLogId) : null;
+        $callerName = null;
+        if ($callLog?->user_id) {
+            $callerUser = User::find($callLog->user_id);
+            $callerName = $callerUser?->first_name;
+        }
+
+        Log::channel('telnyx')->info('IVR gather ended', [
+            'call_control_id' => $callControlId,
+            'digits' => $digits,
+            'call_log_id' => $callLogId,
+        ]);
+
+        $isKnownCaller = $clientState['is_known_caller'] ?? false;
+
+        if ($digits === '1' && $isKnownCaller) {
+            // ── Press 1: Re-dial (known callers only) ──
+            Log::channel('telnyx')->info('IVR: caller pressed 1 — re-dialing', [
+                'call_control_id' => $callControlId,
+            ]);
+
+            // Send emergency contact numbers to the caller via SMS
+            $this->sendEmergencyContactsSms($originalCaller);
+
+            $vendor = Vendor::find(1);
+            $shortName = data_get($vendor?->options ?? [], 'short_name') ?: ($vendor?->business_name ?? 'the team');
+            $press1Template = data_get($vendor?->options ?? [], 'ivr_press1_message')
+                ?: "{name}, no problem! Let me try connecting you again. I also texted you emergency numbers in case you cannot get through again.";
+            $press1Payload = str_replace(
+                ['{name}', '{company}', '{greeting}'],
+                [$callerName ?? '', $shortName, $this->buildTimeGreeting()],
+                $press1Template
+            );
+            $press1Payload = preg_replace('/\s+/', ' ', trim($press1Payload));
+            $press1Payload = preg_replace('/\s+([!.?,])/', '$1', $press1Payload);
+
+            $this->sendCallCommand($callControlId, 'speak', [
+                'payload' => $press1Payload,
+                'voice' => 'Telnyx.NaturalHD.astra',
+                'language' => 'en-US',
+                'payload_type' => 'text',
+                'voice_settings' => ['type' => 'telnyx'],
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'ivr_retry_connect',
+                    'call_log_id' => $callLogId,
+                    'original_caller' => $originalCaller,
+                ])),
+            ]);
+        } elseif ($digits === '2') {
+            // ── Press 2: Send SMS on caller's behalf ──
+            Log::channel('telnyx')->info('IVR: caller pressed 2 — sending SMS', [
+                'call_control_id' => $callControlId,
+                'caller_number' => $originalCaller,
+            ]);
+
+            $this->sendCallbackSms($callLogId, $originalCaller);
+
+            $vendor = Vendor::find(1);
+            $shortName = data_get($vendor?->options ?? [], 'short_name') ?: ($vendor?->business_name ?? 'the team');
+            $press2Template = data_get($vendor?->options ?? [], 'ivr_press2_message')
+                ?: "Got it! We've sent a message to {company} letting them know you called. They should be reaching out to you shortly. Take care!";
+            $press2Payload = str_replace(
+                ['{name}', '{company}', '{greeting}'],
+                [$callerName ?? '', $shortName, $this->buildTimeGreeting()],
+                $press2Template
+            );
+            $press2Payload = preg_replace('/\s+/', ' ', trim($press2Payload));
+            $press2Payload = preg_replace('/\s+([!.?,])/', '$1', $press2Payload);
+
+            $this->sendCallCommand($callControlId, 'speak', [
+                'payload' => $press2Payload,
+                'voice' => 'Telnyx.NaturalHD.astra',
+                'language' => 'en-US',
+                'payload_type' => 'text',
+                'voice_settings' => ['type' => 'telnyx'],
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'ivr_sms_confirmation',
+                    'call_log_id' => $callLogId,
+                ])),
+            ]);
+
+            // Update call log status
+            if ($callLogId) {
+                CallLog::where('id', $callLogId)->update([
+                    'status' => CallLog::STATUS_MISSED,
+                    'metadata->ivr_action' => 'sms_callback',
+                ]);
+            }
+        } else {
+            // ── No digit / timeout: play voicemail greeting then record ──
+            Log::channel('telnyx')->info('IVR: no digit pressed — playing voicemail greeting', [
+                'call_control_id' => $callControlId,
+            ]);
+
+            $vendor = Vendor::find(1);
+            $shortName = data_get($vendor?->options ?? [], 'short_name') ?: ($vendor?->business_name ?? 'us');
+
+            // Look up caller name
+            $callerName = null;
+            $callLog = $callLogId ? CallLog::find($callLogId) : null;
+            if ($callLog?->user_id) {
+                $callerUser = User::find($callLog->user_id);
+                $callerName = $callerUser?->first_name;
+            }
+
+            $greetingTemplate = data_get($vendor?->options ?? [], 'voicemail_greeting')
+                ?: "{name}, you've reached {company}. We can't get to the phone right now, but leave us a message after the beep and we'll get back to you shortly.";
+            $greetingPayload = str_replace(
+                ['{name}', '{company}', '{greeting}'],
+                [$callerName ?? '', $shortName, $this->buildTimeGreeting()],
+                $greetingTemplate
+            );
+            $greetingPayload = preg_replace('/\s+/', ' ', trim($greetingPayload));
+            $greetingPayload = preg_replace('/\s+([!.?,])/', '$1', $greetingPayload);
+
+            $this->sendCallCommand($callControlId, 'speak', [
+                'payload' => $greetingPayload,
+                'voice' => 'Telnyx.NaturalHD.astra',
+                'language' => 'en-US',
+                'payload_type' => 'text',
+                'voice_settings' => ['type' => 'telnyx'],
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'voicemail_prompt_done',
+                    'call_log_id' => $callLogId,
+                ])),
+            ]);
+        }
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Send emergency contact numbers to the caller via SMS (IVR Press 1).
+     * Texts the caller a list of enabled call recipient names and phone numbers.
+     */
+    protected function sendEmergencyContactsSms(?string $callerNumber): void
+    {
+        if (! $callerNumber) {
+            return;
+        }
+
+        $vendor = Vendor::find(1);
+        $vendorOptions = $vendor ? (array) $vendor->options : [];
+        $recipientUserIds = (array) data_get($vendorOptions, 'call_recipients', []);
+
+        if (empty($recipientUserIds)) {
+            Log::channel('telnyx')->warning('Cannot send emergency contacts SMS — no call recipients configured');
+            return;
+        }
+
+        $adminUsers = User::whereIn('id', $recipientUserIds)
+            ->whereNotNull('cell_phone')
+            ->where('cell_phone', '!=', '')
+            ->get();
+
+        if ($adminUsers->isEmpty()) {
+            return;
+        }
+
+        // Build the contact list
+        $contactLines = $adminUsers->map(function ($user) {
+            $phone = $user->cell_phone;
+            $digits = preg_replace('/\D/', '', $phone);
+
+            // Format as (XXX) XXX-XXXX for readability
+            if (strlen($digits) === 10) {
+                $formatted = sprintf('(%s) %s-%s', substr($digits, 0, 3), substr($digits, 3, 3), substr($digits, 6));
+            } elseif (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+                $formatted = sprintf('(%s) %s-%s', substr($digits, 1, 3), substr($digits, 4, 3), substr($digits, 7));
+            } else {
+                $formatted = $phone;
+            }
+
+            return $user->first_name . ' ' . $formatted;
+        })->join("\n");
+
+        $shortName = data_get($vendorOptions, 'short_name') ?: ($vendor?->business_name ?? 'our team');
+        $smsText = "EMERGENCY NUMBERS for {$shortName}:\n{$contactLines}";
+
+        $apiKey = config('services.telnyx.api_key');
+        $from = config('services.telnyx.from');
+        $messagingProfileId = config('services.telnyx.messaging_profile_id');
+
+        if (! $apiKey || ! $from) {
+            Log::channel('telnyx')->error('Cannot send emergency contacts SMS — Telnyx SMS not configured');
+            return;
+        }
+
+        // Ensure caller number is E.164
+        $toPhone = $callerNumber;
+        if (! str_starts_with($toPhone, '+')) {
+            $digits = preg_replace('/\D/', '', $toPhone);
+            if (strlen($digits) === 10) {
+                $toPhone = '+1' . $digits;
+            } elseif (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+                $toPhone = '+' . $digits;
+            }
+        }
+
+        try {
+            $payload = [
+                'from' => $from,
+                'to' => $toPhone,
+                'text' => $smsText,
+            ];
+
+            if ($messagingProfileId) {
+                $payload['messaging_profile_id'] = $messagingProfileId;
+            }
+
+            $response = Http::withToken($apiKey)
+                ->post('https://api.telnyx.com/v2/messages', $payload);
+
+            if ($response->successful()) {
+                Log::channel('telnyx')->info('Emergency contacts SMS sent to caller', [
+                    'caller_number' => $toPhone,
+                    'contacts_count' => $adminUsers->count(),
+                ]);
+            } else {
+                Log::channel('telnyx')->error('Failed to send emergency contacts SMS', [
+                    'caller_number' => $toPhone,
+                    'error' => $response->json(),
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::channel('telnyx')->error('Exception sending emergency contacts SMS', [
+                'caller_number' => $toPhone,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Send SMS to admin call recipients on behalf of the caller (IVR Press 2).
+     */
+    protected function sendCallbackSms(?int $callLogId, ?string $callerNumber): void
+    {
+        $vendor = Vendor::find(1);
+        $vendorOptions = $vendor ? (array) $vendor->options : [];
+        $recipientUserIds = (array) data_get($vendorOptions, 'call_recipients', []);
+
+        if (empty($recipientUserIds) || ! $callerNumber) {
+            Log::channel('telnyx')->warning('Cannot send callback SMS — no recipients or caller number', [
+                'call_log_id' => $callLogId,
+                'caller_number' => $callerNumber,
+            ]);
+            return;
+        }
+
+        // Look up caller name from call log
+        $callLog = $callLogId ? CallLog::find($callLogId) : null;
+        $callerName = null;
+        if ($callLog?->user_id) {
+            $callerUser = User::find($callLog->user_id);
+            $callerName = $callerUser?->full_name;
+        }
+
+        $callerDisplay = $callerName
+            ? "{$callerName} ({$callerNumber})"
+            : $callerNumber;
+
+        $smsText = "Missed call from {$callerDisplay}. They requested a callback via the phone menu. Please call them back ASAP.";
+
+        $apiKey = config('services.telnyx.api_key');
+        $from = config('services.telnyx.from');
+        $messagingProfileId = config('services.telnyx.messaging_profile_id');
+
+        if (! $apiKey || ! $from) {
+            Log::channel('telnyx')->error('Cannot send callback SMS — Telnyx SMS not configured');
+            return;
+        }
+
+        $adminUsers = User::whereIn('id', $recipientUserIds)
+            ->whereNotNull('cell_phone')
+            ->where('cell_phone', '!=', '')
+            ->get();
+
+        foreach ($adminUsers as $adminUser) {
+            $phone = $adminUser->cell_phone;
+
+            // Ensure E.164
+            if (! str_starts_with($phone, '+')) {
+                $digits = preg_replace('/\D/', '', $phone);
+                if (strlen($digits) === 10) {
+                    $phone = '+1' . $digits;
+                } elseif (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+                    $phone = '+' . $digits;
+                }
+            }
+
+            try {
+                $payload = [
+                    'from' => $from,
+                    'to' => $phone,
+                    'text' => $smsText,
+                ];
+
+                if ($messagingProfileId) {
+                    $payload['messaging_profile_id'] = $messagingProfileId;
+                }
+
+                $response = Http::withToken($apiKey)
+                    ->post('https://api.telnyx.com/v2/messages', $payload);
+
+                if ($response->successful()) {
+                    Log::channel('telnyx')->info('Callback SMS sent to admin', [
+                        'admin_user_id' => $adminUser->id,
+                        'admin_name' => $adminUser->full_name,
+                        'phone' => $phone,
+                    ]);
+                } else {
+                    Log::channel('telnyx')->error('Failed to send callback SMS', [
+                        'admin_user_id' => $adminUser->id,
+                        'phone' => $phone,
+                        'error' => $response->json(),
+                    ]);
+                }
+            } catch (\Exception $e) {
+                Log::channel('telnyx')->error('Exception sending callback SMS', [
+                    'admin_user_id' => $adminUser->id,
+                    'phone' => $phone,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    /**
+     * Get the forwarding destination phone number (config fallback).
      */
     protected function getForwardingDestination(): ?string
     {

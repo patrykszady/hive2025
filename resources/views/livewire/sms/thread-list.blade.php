@@ -10,7 +10,9 @@
                 <div class="min-w-0 flex-1">
                     {{-- Client name, project address, or phone numbers --}}
                     <p class="text-sm font-medium truncate text-zinc-900 dark:text-zinc-100">
-                        @if ($thread->client)
+                        @if ($isClientUser)
+                            GS Construciton
+                        @elseif ($thread->client)
                             {{ $thread->client->name }}
                         @elseif ($thread->project)
                             {{ $thread->project->address }}
@@ -23,10 +25,20 @@
                     @if ($thread->latestMessage)
                         @php
                             $previewText = preg_replace('/\s*-(PS|GS|GSC)\s*$/', '', trim((string) $thread->latestMessage->text));
+
+                            $previewPrefix = null;
+                            if ($thread->latestMessage->isOutbound()) {
+                                $previewPrefix = $isClientUser
+                                    ? 'GS Construciton:'
+                                    : ($thread->latestMessage->sent_by_user_id ? 'You:' : 'GS Crew:');
+                            } elseif ($thread->latestMessage->isInbound()) {
+                                $sender = $this->resolvePreviewSender($thread->latestMessage->from_number, $thread);
+                                $previewPrefix = $sender ? $sender . ':' : null;
+                            }
                         @endphp
                         <p class="text-xs text-zinc-400 dark:text-zinc-500 truncate mt-0.5">
-                            @if ($thread->latestMessage->isOutbound())
-                                <span class="text-zinc-500 dark:text-zinc-400">You:</span>
+                            @if ($previewPrefix)
+                                <span class="text-zinc-500 dark:text-zinc-400">{{ $previewPrefix }}</span>
                             @endif
                             {{ Str::limit($previewText, 50) }}
                         </p>

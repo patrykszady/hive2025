@@ -6,6 +6,7 @@
 ])
 
 <flux:card {{ $attributes->class('space-y-2 !px-5 !py-2') }}>
+    @if($heading || isset($badge) || isset($actions))
     <x-island-card.header
         :heading="$heading"
         :href="$href"
@@ -19,6 +20,7 @@
             <x-slot:actions>{{ $actions }}</x-slot:actions>
         @endif
     </x-island-card.header>
+    @endif
 
     {{ $slot }}
 </flux:card>

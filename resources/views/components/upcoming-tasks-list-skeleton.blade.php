@@ -1,5 +1,5 @@
 @props([
-    'title' => 'My Tasks Upcoming',
+    'title' => 'Tasks',
     'showProjectInfo' => false,
     'actionsWidth' => 'w-32',
 ])

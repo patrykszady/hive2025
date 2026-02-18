@@ -149,6 +149,48 @@ class SmsThreadList extends Component
         return $e164;
     }
 
+    public function resolvePreviewSender(?string $fromNumber, ?SmsGroupThread $thread = null): ?string
+    {
+        if (! is_string($fromNumber) || $fromNumber === '') {
+            return null;
+        }
+
+        $normalizedFrom = preg_replace('/[^0-9]/', '', $fromNumber);
+        if (strlen($normalizedFrom) === 11 && str_starts_with($normalizedFrom, '1')) {
+            $normalizedFrom = substr($normalizedFrom, 1);
+        }
+
+        if ($thread?->client) {
+            $users = $thread->client->relationLoaded('users')
+                ? $thread->client->users
+                : $thread->client->users()->get();
+
+            foreach ($users as $user) {
+                $cellPhone = preg_replace('/[^0-9]/', '', (string) $user->getRawOriginal('cell_phone'));
+
+                if ($cellPhone === '') {
+                    continue;
+                }
+
+                if (strlen($cellPhone) === 11 && str_starts_with($cellPhone, '1')) {
+                    $cellPhone = substr($cellPhone, 1);
+                }
+
+                if ($cellPhone === $normalizedFrom && is_string($user->first_name) && trim($user->first_name) !== '') {
+                    return trim($user->first_name);
+                }
+            }
+        }
+
+        $display = $this->resolvePhoneDisplay($fromNumber);
+
+        if (preg_match('/^[A-Za-z]/', $display) === 1) {
+            return (string) explode(' ', trim($display))[0];
+        }
+
+        return $display;
+    }
+
     public function render()
     {
         return view('livewire.sms.thread-list');

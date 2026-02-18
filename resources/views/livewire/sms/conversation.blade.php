@@ -165,9 +165,9 @@
                             <p class="text-[10px] text-zinc-400 dark:text-zinc-500 mb-0.5 px-1">
                                 {{ $phoneNameMap[$msg->from_number] ?? $msg->from_number }}
                             </p>
-                        @elseif ($msg->isOutbound() && $msg->sentByUser)
+                        @elseif ($msg->isOutbound())
                             <p class="text-[10px] text-zinc-400 dark:text-zinc-500 mb-0.5 px-1 text-right">
-                                {{ $msg->sentByUser->first_name }}
+                                {{ $msg->sentByUser?->first_name ?? 'GS Crew' }}
                             </p>
                         @endif
 

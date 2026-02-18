@@ -68,6 +68,75 @@
             if ('Notification' in window && Notification.permission === 'default') {
                 Notification.requestPermission();
             }
+        },
+        smsOffline: !navigator.onLine,
+        smsCacheTimer: null,
+        initMessageCache() {
+            window.addEventListener('online', () => { this.smsOffline = false; });
+            window.addEventListener('offline', () => {
+                this.smsOffline = true;
+                this.restoreCachedSms();
+            });
+
+            const scheduleCache = () => {
+                clearTimeout(this.smsCacheTimer);
+                this.smsCacheTimer = setTimeout(() => {
+                    if (!this.smsOffline) this.saveSmsCache();
+                }, 3000);
+            };
+
+            const watchEl = (id) => {
+                const el = document.getElementById(id);
+                if (el) new MutationObserver(scheduleCache).observe(el, { childList: true, subtree: true, characterData: true });
+            };
+            watchEl('sms-threads-live');
+            watchEl('sms-convo-wrap');
+
+            if (!navigator.onLine) {
+                setTimeout(() => this.restoreCachedSms(), 1500);
+            }
+
+            // Suppress Livewire error dialogs when offline
+            if (window.Livewire) {
+                Livewire.hook('request', ({ fail }) => {
+                    fail(({ status, preventDefault }) => {
+                        if (!navigator.onLine || status === 0) preventDefault();
+                    });
+                });
+            }
+        },
+        saveSmsCache() {
+            try {
+                const threadsEl = document.getElementById('sms-threads-live');
+                if (threadsEl && !threadsEl.querySelector('.animate-pulse') && threadsEl.innerHTML.length > 200) {
+                    localStorage.setItem('hive-sms-threads', threadsEl.innerHTML);
+                }
+                const convoWrap = document.getElementById('sms-convo-wrap');
+                if (convoWrap) {
+                    const live = convoWrap.querySelector('[wire\\:id]');
+                    if (live && !live.querySelector('.animate-pulse') && live.innerHTML.length > 200) {
+                        localStorage.setItem('hive-sms-convo', live.outerHTML);
+                    }
+                }
+                localStorage.setItem('hive-sms-cached-at', Date.now().toString());
+            } catch (e) { /* storage full */ }
+        },
+        restoreCachedSms() {
+            try {
+                const ts = parseInt(localStorage.getItem('hive-sms-cached-at') || '0');
+                if (Date.now() - ts > 30 * 86400 * 1000) return;
+
+                const threadsHtml = localStorage.getItem('hive-sms-threads');
+                if (threadsHtml) {
+                    const el = document.getElementById('sms-threads-live');
+                    if (el) el.innerHTML = threadsHtml;
+                }
+                const convoHtml = localStorage.getItem('hive-sms-convo');
+                if (convoHtml) {
+                    const wrap = document.getElementById('sms-convo-wrap');
+                    if (wrap) wrap.innerHTML = convoHtml;
+                }
+            } catch (e) { /* ignore */ }
         }
     }"
     x-on:click.window.once="ensureAudioContext()"
@@ -95,29 +164,57 @@
                 }
             }
         }
+        initMessageCache();
     "
 >
+    {{-- Offline indicator --}}
+    <div x-show="smsOffline" x-cloak class="w-full bg-amber-50 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 text-xs text-center py-1.5 px-3 rounded-lg mb-2 lg:col-span-full">
+        <span class="font-medium">Offline</span> — showing cached messages
+    </div>
+
     {{-- Thread List - Hidden on mobile when thread is selected --}}
-    <div class="w-full lg:w-80 shrink-0 min-w-0 max-w-md mx-auto lg:mx-0 lg:max-w-none {{ $threadId ? 'hidden lg:block' : '' }}">
-        <x-island-card heading="Conversations">
+    <div class="w-full lg:w-80 shrink-0 min-w-0 max-w-md mx-auto lg:mx-0 lg:max-w-none {{ $threadId && $activeTab === 'messages' ? 'hidden lg:block' : '' }}">
+        <x-island-card>
+            {{-- Tabs --}}
             @if (! $isClientUser)
-                <x-slot:actions>
-                    <flux:button size="sm" wire:click="$dispatchTo('sms.sms-new-thread', 'openNewThread')" icon="plus">
-                        New
-                    </flux:button>
-                </x-slot:actions>
+                <div class="flex items-center justify-between">
+                    <flux:tabs wire:model.live="activeTab" variant="segmented" size="sm">
+                        <flux:tab name="messages">Messages</flux:tab>
+                        <flux:tab name="calls">Calls</flux:tab>
+                    </flux:tabs>
+
+                    @if ($activeTab === 'messages')
+                        <flux:button size="sm" wire:click="$dispatchTo('sms.sms-new-thread', 'openNewThread')" icon="plus">
+                            New
+                        </flux:button>
+                    @else
+                        <flux:button size="sm" wire:click="$dispatchTo('sms.call-list', 'openNewCall')" icon="phone">
+                            Call
+                        </flux:button>
+                    @endif
+                </div>
+            @else
+                <div class="flex items-center justify-between mb-3">
+                    <flux:heading size="lg">Conversations</flux:heading>
+                </div>
             @endif
 
-            <div class="mb-2">
-                <flux:input wire:model.live.debounce.500ms="search" icon="magnifying-glass" placeholder="Search messages..." size="sm" />
-            </div>
+            @if ($activeTab === 'messages')
+                <div class="mb-2">
+                    <flux:input wire:model.live.debounce.500ms="search" icon="magnifying-glass" placeholder="Search messages..." size="sm" />
+                </div>
 
-            <livewire:sms.sms-thread-list :search="$search" :selected-thread-id="$threadId" :is-client-user="$isClientUser" lazy />
+                <div id="sms-threads-live">
+                    <livewire:sms.sms-thread-list :search="$search" :selected-thread-id="$threadId" :is-client-user="$isClientUser" lazy />
+                </div>
+            @else
+                <livewire:sms.call-list lazy />
+            @endif
         </x-island-card>
     </div>
 
-    {{-- Conversation - Hidden on mobile when no thread selected --}}
-    <div class="flex-1 min-w-0 flex flex-col min-h-0 max-w-md mx-auto lg:mx-0 lg:max-w-none {{ !$threadId ? 'hidden lg:block' : '' }}">
+    {{-- Conversation - Hidden on mobile when no thread selected, fully hidden on calls tab --}}
+    <div id="sms-convo-wrap" class="flex-1 min-w-0 flex flex-col min-h-0 max-w-md mx-auto lg:mx-0 lg:max-w-none {{ $activeTab === 'calls' ? 'hidden' : (!$threadId ? 'hidden lg:block' : '') }}">
         <div x-show="showConversationSkeleton" class="flex-1 min-h-0">
             @include('livewire.sms.conversation_placeholder')
         </div>

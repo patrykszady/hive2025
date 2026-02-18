@@ -21,14 +21,6 @@ use Illuminate\Support\Facades\Response;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
-use OpenSpout\Common\Entity\Style\Border;
-use OpenSpout\Common\Entity\Style\BorderPart;
-use OpenSpout\Common\Entity\Style\Color;
-use OpenSpout\Common\Entity\Style\Style;
-
-use Illuminate\Support\Number;
-
-use Spatie\SimpleExcel\SimpleExcelWriter;
 use App\Support\EstimateDocumentGenerator;
 
 class EstimateShow extends Component
@@ -566,63 +558,15 @@ class EstimateShow extends Component
 
     public function export_csv()
     {
-        return response()->streamDownload(function () {
-            $border = new Border(
-                new BorderPart(Border::BOTTOM, Color::BLACK, Border::WIDTH_THICK, Border::STYLE_SOLID)
-            );
-            $border_thin = new Border(
-                new BorderPart(Border::BOTTOM, Color::BLACK, Border::WIDTH_THIN, Border::STYLE_SOLID)
-            );
+        $document = EstimateDocumentGenerator::generateXlsx($this->estimate);
 
-            $writer = SimpleExcelWriter::streamDownload($this->estimate->client->name.' - Estimate - '.$this->estimate->project->project_name.' - '.$this->estimate->number.'.xlsx')
-                ->addHeader([
-                    '',
-                    'title',
-                    'category',
-                    'sub_category',
-                    'quantity',
-                    'unit',
-                    'cost',
-                    'total',
-                ]);
+        $this->skipRender();
 
-            $writer->addRow([]);
-
-            foreach ($this->estimate->estimate_sections as $index => $section) {
-                $writer->addRow([
-                    'title' => $section->name,
-                    '',
-                    'category' => null,
-                    'sub_category' => null,
-                    'quantity' => null,
-                    'unit' => null,
-                    'cost' => null,
-                    'total' => $section->total,
-                ], (new Style)->setFontBold()->setBorder($border));
-
-                foreach ($section->estimate_line_items as $line_item) {
-                    $hideUnitFields = $line_item->unit_type === 'no_unit';
-
-                    $writer->addRow([
-                        '' => $index + 1 .'.'.$line_item->order + 1,
-                        'title' => $line_item->name,
-                        'category' => $line_item->category,
-                        'sub_category' => $line_item->sub_category,
-                        'quantity' => $hideUnitFields ? null : $line_item->quantity,
-                        'unit' => $hideUnitFields ? null : $line_item->unit_type,
-                        'cost' => $hideUnitFields ? null : $line_item->cost,
-                        'total' => $line_item->total,
-                    ]);
-                }
-
-                $writer->addRow([]);
-            }
-
-        }, $this->estimate->client->name.' - Estimate - '.$this->estimate->project->project_name.' - '.$this->estimate->number.'.xlsx', [
+        return response()->streamDownload(function () use ($document) {
+            echo $document['binary'];
+        }, $document['filename'], [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         ]);
-
-        //2024-12-25 disappearing toast when the above downloads
     }
 
     public function sort(string $column): void

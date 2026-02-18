@@ -4,6 +4,7 @@ namespace App\Livewire\Auth;
 
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Str;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
@@ -77,7 +78,8 @@ class Login extends Component
         }
 
         $this->email = (string) $user->email;
-        $this->hasPasskey = $user->webAuthnCredentials()->whereNull('disabled_at')->exists();
+        $this->hasPasskey = $user->webAuthnCredentials()->whereNull('disabled_at')->exists()
+            && $this->canUsePasskeysForCurrentRequest();
         $this->hasPassword = filled($user->password);
         $this->step = 'credentials';
     }
@@ -195,6 +197,27 @@ class Login extends Component
         $digits = preg_replace('/\D/', '', $identifier);
 
         return strlen($digits) === 10;
+    }
+
+    protected function canUsePasskeysForCurrentRequest(): bool
+    {
+        $request = request();
+
+        if (! $request->isSecure() && ! $request->isFromTrustedProxy()) {
+            return false;
+        }
+
+        $rpId = trim((string) config('webauthn.id', ''));
+        if ($rpId === '') {
+            return true;
+        }
+
+        $host = trim((string) $request->getHost());
+        if ($host === '') {
+            return false;
+        }
+
+        return $host === $rpId || Str::endsWith($host, '.'.$rpId);
     }
 
     #[Title('Login')]

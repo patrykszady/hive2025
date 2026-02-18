@@ -86,7 +86,8 @@ class GroupSmsService
             ]);
         }
 
-        $this->sendToThread($thread, $this->buildConsentMessage($thread), [], $sentByUserId);
+        // Automated consent message should not be attributed to the triggering user
+        $this->sendToThread($thread, $this->buildConsentMessage($thread), [], null);
         $thread->update(['opt_in_prompt_sent_at' => now()]);
 
         return $thread;
@@ -128,12 +129,14 @@ class GroupSmsService
         return $this->buildGreeting($thread) . "\n"
             . "GS Construction welcomes you to our project msg thread. "
             . "Msgs will be tagged with \"-PS\" for Patryk's replies, \"-GS\" for Grzegorz's, and our automated \"GS Crew\" replies by \"-GSC\". "
-            . "Save this number as \"GS Construction\" in your contacts list.";
+            . "Please save this number as \"GS Construction\" in your contacts list. "
+            . "You can always also text us at this number."
+            . "\n-GSC";
     }
 
     private function buildConsentMessage(SmsGroupThread $thread): string
     {
-        return $this->buildGreeting($thread) . "\n" . self::START_CONSENT_TEXT;
+        return $this->buildGreeting($thread) . "\n" . self::START_CONSENT_TEXT . "\n-GSC";
     }
 
     private function buildGreeting(SmsGroupThread $thread): string

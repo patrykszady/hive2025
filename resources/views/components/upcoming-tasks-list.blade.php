@@ -7,7 +7,7 @@
     'unscheduledTasks' => null,
     'showProjectInfo' => false,
     'showVendorInfo' => true,
-    'title' => 'My Tasks Upcoming',
+    'title' => 'Tasks',
     'emptyMessage' => 'No tasks upcoming for this project.',
 ])
 
@@ -17,17 +17,15 @@
     </x-slot:badge>
     <x-slot:actions>
         @auth
-            @if(!auth()->user()->is_client_user)
-                <flux:button
-                    size="sm"
-                    variant="filled"
-                    :href="route('users.show', auth()->id())"
-                    icon="bell"
-                    class="!bg-indigo-500 hover:!bg-indigo-600 !text-white"
-                >
-                    Notifications
-                </flux:button>
-            @endif
+            <flux:button
+                size="sm"
+                variant="filled"
+                :href="route('users.show', auth()->id())"
+                icon="bell"
+                class="!bg-indigo-500 hover:!bg-indigo-600 !text-white"
+            >
+                Notifications
+            </flux:button>
         @endauth
     </x-slot:actions>
 
@@ -40,8 +38,8 @@
                     <flux:accordion.item>
                         <flux:accordion.heading>
                             <div class="flex items-center gap-2">
-                                Unscheduled Tasks
-                                <flux:badge color="zinc" size="sm">{{ $unscheduledTasks->count() }}</flux:badge>
+                                <span class="text-orange-600 dark:text-orange-400">Unscheduled Tasks</span>
+                                <flux:badge color="amber" size="sm">{{ $unscheduledTasks->count() }}</flux:badge>
                             </div>
                         </flux:accordion.heading>
                         <flux:accordion.content>

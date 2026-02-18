@@ -1,6 +1,7 @@
 @php $isClientUser = auth()->user()->is_client_user; @endphp
 <div wire:transition>
     <x-upcoming-tasks-list
+        title="Tasks"
         :grouped-tasks="$this->groupedTasks"
         :next-task-info="$this->nextTaskInfo"
         :task-count="$this->taskCount"

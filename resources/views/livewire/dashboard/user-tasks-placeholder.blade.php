@@ -1,6 +1,6 @@
 <div>
     <x-upcoming-tasks-list-skeleton
-        title="My Tasks Upcoming"
+        title="Tasks"
         :show-project-info="true"
     />
 </div>

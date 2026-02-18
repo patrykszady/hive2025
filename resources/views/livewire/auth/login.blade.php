@@ -74,8 +74,14 @@
                                     error: null,
                                     loading: false,
                                     init() {
-                                        if (window.Webpass && Webpass.isUnsupported()) {
-                                            this.error = 'Passkeys are not supported on this device.';
+                                        if (!window.isSecureContext) {
+                                            $wire.showPasswordLogin();
+                                            return;
+                                        }
+
+                                        if (!window.Webpass || Webpass.isUnsupported()) {
+                                            $wire.showPasswordLogin();
+                                            return;
                                         }
                                     },
                                     async login() {
@@ -99,7 +105,8 @@
                                                 return;
                                             }
                                             if (error?.name === 'NotAllowedError') {
-                                                this.error = 'Passkey request was cancelled or no matching passkey was found.';
+                                                $wire.showPasswordLogin();
+                                                return;
                                             } else {
                                                 this.error = error?.message || 'Passkey login failed.';
                                             }

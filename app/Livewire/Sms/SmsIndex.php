@@ -15,6 +15,9 @@ class SmsIndex extends Component
     #[Url(except: null)]
     public ?int $threadId = null;
 
+    #[Url(except: 'messages')]
+    public string $activeTab = 'messages';
+
     public bool $isClientUser = false;
 
     protected $listeners = [

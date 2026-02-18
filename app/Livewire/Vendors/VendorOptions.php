@@ -23,6 +23,29 @@ class VendorOptions extends Component
     public bool $sms_client_enabled = true;
     public bool $sms_vendor_enabled = true;
 
+    /** @var array<int> Admin user IDs selected to receive inbound calls */
+    public array $call_recipients = [];
+    public bool $call_welcome_enabled = true;
+    public bool $voicemail_enabled = true;
+    public string $welcome_message = '';
+    public string $voicemail_message = '';
+    public string $voicemail_message_unknown = '';
+    public string $ivr_press1_message = '';
+    public string $ivr_press2_message = '';
+    public string $voicemail_greeting = '';
+    public string $admin_connect_message = '';
+
+    public const DEFAULT_WELCOME = "{greeting} {name}! Thanks for calling {company}. One moment while we connect you.";
+    public const DEFAULT_VOICEMAIL = "{company} is not available right now. {name}, if this is an emergency, press 1 to re-dial {company}. Press 2 to send a text on your behalf so {company} knows to call you back ASAP. Stay on the line to leave a voicemail.";
+    public const DEFAULT_VOICEMAIL_UNKNOWN = "{company} is not available right now. Press 2 to send a text on your behalf so {company} knows to call you back ASAP. Stay on the line to leave a voicemail.";
+    public const DEFAULT_IVR_PRESS1 = "{name}, no problem! Let me try connecting you again. I also texted you emergency numbers in case you cannot get through again.";
+    public const DEFAULT_IVR_PRESS2 = "Got it! We've sent a message to {company} letting them know you called. They should be reaching out to you shortly. Take care!";
+    public const DEFAULT_VOICEMAIL_GREETING = "{greeting} {name}, you've reached {company}. We can't get to the phone right now, but leave us a message after the beep and we'll get back to you shortly.";
+    public const DEFAULT_ADMIN_CONNECT = "{greeting}! We're connecting you to {name}.";
+
+    /** @var \Illuminate\Support\Collection<\App\Models\User> Available admin users with cell phones */
+    public $adminUsersWithPhones;
+
     #[Title('Options')]
 
     public function mount(): void
@@ -37,6 +60,19 @@ class VendorOptions extends Component
         $this->sms_team_enabled = (bool) data_get($this->vendor->options, 'sms_team_enabled', $baseSmsEnabled);
         $this->sms_client_enabled = (bool) data_get($this->vendor->options, 'sms_client_enabled', $baseSmsEnabled);
         $this->sms_vendor_enabled = (bool) data_get($this->vendor->options, 'sms_vendor_enabled', $baseSmsEnabled);
+
+        // Phone system settings
+        $this->call_recipients = (array) data_get($this->vendor->options, 'call_recipients', []);
+        $this->call_welcome_enabled = (bool) data_get($this->vendor->options, 'call_welcome_enabled', true);
+        $this->voicemail_enabled = (bool) data_get($this->vendor->options, 'voicemail_enabled', true);
+        $this->welcome_message = data_get($this->vendor->options, 'welcome_message', '') ?: self::DEFAULT_WELCOME;
+        $this->voicemail_message = data_get($this->vendor->options, 'voicemail_message', '') ?: self::DEFAULT_VOICEMAIL;
+        $this->voicemail_message_unknown = data_get($this->vendor->options, 'voicemail_message_unknown', '') ?: self::DEFAULT_VOICEMAIL_UNKNOWN;
+        $this->ivr_press1_message = data_get($this->vendor->options, 'ivr_press1_message', '') ?: self::DEFAULT_IVR_PRESS1;
+        $this->ivr_press2_message = data_get($this->vendor->options, 'ivr_press2_message', '') ?: self::DEFAULT_IVR_PRESS2;
+        $this->voicemail_greeting = data_get($this->vendor->options, 'voicemail_greeting', '') ?: self::DEFAULT_VOICEMAIL_GREETING;
+        $this->admin_connect_message = data_get($this->vendor->options, 'admin_connect_message', '') ?: self::DEFAULT_ADMIN_CONNECT;
+        $this->adminUsersWithPhones = $this->vendor->getAdminUsersWithCellPhones();
     }
 
     protected function rules(): array
@@ -48,6 +84,17 @@ class VendorOptions extends Component
             'sms_team_enabled' => 'boolean',
             'sms_client_enabled' => 'boolean',
             'sms_vendor_enabled' => 'boolean',
+            'call_recipients' => 'array',
+            'call_recipients.*' => 'integer|exists:users,id',
+            'call_welcome_enabled' => 'boolean',
+            'voicemail_enabled' => 'boolean',
+            'welcome_message' => 'nullable|string|max:500',
+            'voicemail_message' => 'nullable|string|max:500',
+            'voicemail_message_unknown' => 'nullable|string|max:500',
+            'ivr_press1_message' => 'nullable|string|max:500',
+            'ivr_press2_message' => 'nullable|string|max:500',
+            'voicemail_greeting' => 'nullable|string|max:500',
+            'admin_connect_message' => 'nullable|string|max:500',
         ];
     }
 
@@ -66,6 +113,18 @@ class VendorOptions extends Component
         $options['sms_client_enabled'] = $this->sms_client_enabled;
         $options['sms_vendor_enabled'] = $this->sms_vendor_enabled;
         $options['sms_enabled'] = $this->sms_team_enabled && $this->sms_client_enabled && $this->sms_vendor_enabled;
+
+        // Phone system settings
+        $options['call_recipients'] = array_map('intval', $this->call_recipients);
+        $options['call_welcome_enabled'] = $this->call_welcome_enabled;
+        $options['voicemail_enabled'] = $this->voicemail_enabled;
+        $options['welcome_message'] = $this->welcome_message ?: null;
+        $options['voicemail_message'] = $this->voicemail_message ?: null;
+        $options['voicemail_message_unknown'] = $this->voicemail_message_unknown ?: null;
+        $options['ivr_press1_message'] = $this->ivr_press1_message ?: null;
+        $options['ivr_press2_message'] = $this->ivr_press2_message ?: null;
+        $options['voicemail_greeting'] = $this->voicemail_greeting ?: null;
+        $options['admin_connect_message'] = $this->admin_connect_message ?: null;
 
         // Handle logo upload
         if ($this->logo) {
@@ -123,6 +182,66 @@ class VendorOptions extends Component
         }
 
         $this->logo = null;
+    }
+
+    /**
+     * Generate a TTS audio preview via the Telnyx API and return the audio data URL.
+     */
+    public function previewTts(string $type): void
+    {
+        $shortName = $this->short_name ?: ($this->vendor->business_name ?? 'our team');
+
+        $hour = now($this->vendor->timezone ?: 'America/New_York')->hour;
+        $greeting = match (true) {
+            $hour < 12 => 'Good morning',
+            $hour < 17 => 'Good afternoon',
+            default => 'Good evening',
+        };
+
+        $template = match ($type) {
+            'welcome' => $this->welcome_message ?: self::DEFAULT_WELCOME,
+            'voicemail' => $this->voicemail_message ?: self::DEFAULT_VOICEMAIL,
+            'voicemail_unknown' => $this->voicemail_message_unknown ?: self::DEFAULT_VOICEMAIL_UNKNOWN,
+            'ivr_press1' => $this->ivr_press1_message ?: self::DEFAULT_IVR_PRESS1,
+            'ivr_press2' => $this->ivr_press2_message ?: self::DEFAULT_IVR_PRESS2,
+            'voicemail_greeting' => $this->voicemail_greeting ?: self::DEFAULT_VOICEMAIL_GREETING,
+            'admin_connect' => $this->admin_connect_message ?: self::DEFAULT_ADMIN_CONNECT,
+            default => '',
+        };
+
+        $text = str_replace(
+            ['{name}', '{company}', '{greeting}'],
+            ['Katie', $shortName, $greeting],
+            $template
+        );
+
+        // Clean up extra spaces/punctuation from empty placeholders
+        $text = preg_replace('/\s+/', ' ', trim($text));
+        $text = preg_replace('/\s+([!.?,])/', '$1', $text);
+
+        $apiKey = config('services.telnyx.api_key');
+
+        if (! $apiKey) {
+            Flux::toast(variant: 'danger', heading: 'Not Configured', text: 'Telnyx API key is not set.', duration: 3000, position: 'top right');
+            return;
+        }
+
+        try {
+            $response = \Illuminate\Support\Facades\Http::withToken($apiKey)
+                ->post('https://api.telnyx.com/v2/text-to-speech/speech', [
+                    'text' => $text,
+                    'voice' => 'Telnyx.NaturalHD.astra',
+                ]);
+
+            if ($response->successful()) {
+                $audioBase64 = base64_encode($response->body());
+                $this->dispatch('play-tts-preview', audioData: $audioBase64);
+            } else {
+                Flux::toast(variant: 'danger', heading: 'Preview Failed', text: 'Could not generate audio preview.', duration: 3000, position: 'top right');
+            }
+        } catch (\Exception $e) {
+            Flux::toast(variant: 'danger', heading: 'Error', text: 'Failed to generate preview.', duration: 3000, position: 'top right');
+        }
     }
 
     public function render()
