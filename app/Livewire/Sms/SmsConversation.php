@@ -105,7 +105,7 @@ class SmsConversation extends Component
         if ($this->attachment) {
             $path = $this->attachment->store('sms-attachments', 'public');
             // Use public-facing URL so Telnyx can fetch the media
-            $publicBase = config('services.telnyx.public_url', config('app.url'));
+            $publicBase = config('app.url');
             $mediaUrls[] = rtrim($publicBase, '/') . '/storage/' . $path;
         }
 
@@ -180,7 +180,7 @@ class SmsConversation extends Component
                         'target_phone' => $targetPhone,
                         'call_log_id' => $callLog->id,
                     ])),
-                    'webhook_url' => rtrim(config('services.telnyx.public_url', config('app.url')), '/') . '/webhooks/telnyx/voice',
+                    'webhook_url' => rtrim(config('app.url'), '/') . '/webhooks/telnyx/voice',
                 ]);
 
             if ($response->successful()) {

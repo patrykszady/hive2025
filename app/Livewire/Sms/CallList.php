@@ -157,7 +157,7 @@ class CallList extends Component
                         'target_phone' => $phone,
                         'call_log_id' => $callLog->id,
                     ])),
-                    'webhook_url' => rtrim(config('services.telnyx.public_url', config('app.url')), '/') . '/webhooks/telnyx/voice',
+                    'webhook_url' => rtrim(config('app.url'), '/') . '/webhooks/telnyx/voice',
                 ]);
 
             if ($response->successful()) {

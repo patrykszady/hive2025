@@ -1923,12 +1923,14 @@ class TransactionController extends Controller
         //where doesnt have clientpayment
         //1-26-2023 why does 2019/older transactions/client_payments not work?
         $transactions = Transaction::where('transaction_date', '>', '2019-01-01')
-            // ->where('deposit', 1)
             ->whereDoesntHave('payments')
             ->whereNull('expense_id')
-            ->where('amount', 'LIKE', '-%') // Only get negative transactions
+            ->where(function ($q) {
+                // Negative (debit) transactions OR positive deposits (returned checks)
+                $q->where('amount', 'LIKE', '-%')
+                  ->orWhere('deposit', 1);
+            })
             ->orderBy('transaction_date', 'DESC')
-            // ->take(3)
             ->get();
 
         foreach ($transactions as $transaction) {

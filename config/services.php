@@ -22,7 +22,6 @@ return [
         'connection_id' => env('TELNYX_CONNECTION_ID'),
         'voice_forward_to' => env('TELNYX_VOICE_FORWARD_TO'),
         'voice_timeout' => env('TELNYX_VOICE_TIMEOUT', 30),
-        'public_url' => env('TELNYX_PUBLIC_URL'),
     ],
 
     'mailtrap-sdk' => [
