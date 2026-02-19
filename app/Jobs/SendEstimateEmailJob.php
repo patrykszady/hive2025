@@ -37,6 +37,7 @@ class SendEstimateEmailJob implements ShouldQueue
         protected bool $includeEstimateXlsx = false,
         protected ?string $emailTemplateName = null,
         protected ?string $senderIp = null,
+        protected array $additionalAttachmentPaths = [],
     ) {
     }
 
@@ -123,6 +124,14 @@ class SendEstimateEmailJob implements ShouldQueue
                     file_put_contents($tempPath, $xlsxDocument['binary']);
                     $attachmentPaths[] = $tempPath;
                     $tempFiles[] = $tempPath;
+                }
+            }
+
+            // Merge in any user-uploaded additional attachments
+            foreach ($this->additionalAttachmentPaths as $path) {
+                if (file_exists($path)) {
+                    $attachmentPaths[] = $path;
+                    $tempFiles[] = $path;
                 }
             }
         } catch (Throwable $exception) {

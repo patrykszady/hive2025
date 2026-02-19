@@ -89,6 +89,30 @@
             @if($hasReimbursements)
                 <flux:switch wire:model.live="include_reimbursements_pdf" label="Attach Project Reimbursements" />
             @endif
+
+            <flux:file-upload wire:model="additionalAttachments" multiple label="Additional Attachments" :error="$errors->first('additionalAttachments.*')">
+                <flux:file-upload.dropzone
+                    heading="Drop files or click to browse"
+                    text="PDF, DOC, XLS, JPG, PNG up to 10MB each (max 5 files)"
+                    with-progress
+                    inline
+                />
+            </flux:file-upload>
+
+            @if(count($additionalAttachments) > 0)
+                <div class="flex flex-col gap-2">
+                    @foreach($additionalAttachments as $index => $file)
+                        <flux:file-item
+                            :heading="$file->getClientOriginalName()"
+                            :size="$file->getSize()"
+                        >
+                            <x-slot name="actions">
+                                <flux:file-item.remove wire:click="removeAttachment({{ $index }})" aria-label="Remove file: {{ $file->getClientOriginalName() }}" />
+                            </x-slot>
+                        </flux:file-item>
+                    @endforeach
+                </div>
+            @endif
         </div>
 
         <flux:separator variant="subtle" />

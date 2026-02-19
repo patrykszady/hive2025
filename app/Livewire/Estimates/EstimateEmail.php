@@ -10,10 +10,11 @@ use App\Models\ProjectStatus;
 use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Component;
+use Livewire\WithFileUploads;
 
 class EstimateEmail extends Component
 {
-    use AuthorizesRequests;
+    use AuthorizesRequests, WithFileUploads;
 
     public ?Estimate $estimate = null;
 
@@ -45,6 +46,8 @@ class EstimateEmail extends Component
 
     public array $availableContacts = [];
 
+    public array $additionalAttachments = [];
+
     public ?string $project_status = null;
 
     public ?string $project_status_date = null;
@@ -62,6 +65,8 @@ class EstimateEmail extends Component
             'include_estimate_pdf' => 'boolean',
             'include_estimate_xlsx' => 'boolean',
             'include_reimbursements_pdf' => 'boolean',
+            'additionalAttachments' => 'array|max:5',
+            'additionalAttachments.*' => 'file|max:10240',
             'project_status' => 'nullable|integer',
             'project_status_date' => 'nullable|date',
         ];
@@ -158,6 +163,7 @@ class EstimateEmail extends Component
         $this->include_estimate_xlsx = false;
         $this->include_reimbursements_pdf = $this->hasReimbursements;
         $this->newRecipientEmail = '';
+        $this->additionalAttachments = [];
         $this->project_status = null;
         $this->project_status_date = today()->format('Y-m-d');
 
@@ -175,6 +181,7 @@ class EstimateEmail extends Component
         $projectAddress = $estimate->project->address ?? '';
         $estimateTotal = '$' . number_format($estimate->amount ?? 0, 2);
         $vendorName = $estimate->vendor->name ?? 'our team';
+        $shortVendorName = data_get($estimate->vendor->options, 'short_name') ?: $vendorName;
 
         // Resolve sender name from the selected 'from' email
         $senderUser = $this->adminUsers
@@ -192,6 +199,7 @@ class EstimateEmail extends Component
                 '{{project_address_1}}', 
                 '{{estimate_total}}', 
                 '{{vendor_name}}',
+                '{{short_vendor_name}}',
                 '{{sender_first_name}}',
                 '{{sender_last_name}}',
             ],
@@ -203,6 +211,7 @@ class EstimateEmail extends Component
                 $projectAddress, 
                 $estimateTotal, 
                 $vendorName,
+                $shortVendorName,
                 $senderFirstName,
                 $senderLastName,
             ],
@@ -244,6 +253,15 @@ class EstimateEmail extends Component
             $this->removeRecipient($email);
         } else {
             $this->to[] = $email;
+        }
+    }
+
+    public function removeAttachment(int $index): void
+    {
+        if (isset($this->additionalAttachments[$index])) {
+            $this->additionalAttachments[$index]->delete();
+            unset($this->additionalAttachments[$index]);
+            $this->additionalAttachments = array_values($this->additionalAttachments);
         }
     }
 
@@ -312,6 +330,30 @@ class EstimateEmail extends Component
             $templateName = $template?->name;
         }
 
+        // Store uploaded attachments to temp directory so the queued job can access them
+        $additionalAttachmentPaths = [];
+        if (! empty($this->additionalAttachments)) {
+            $tempDir = storage_path('app/temp');
+            if (! is_dir($tempDir)) {
+                mkdir($tempDir, 0755, true);
+            }
+
+            foreach ($this->additionalAttachments as $file) {
+                $originalName = $file->getClientOriginalName();
+                $safeName = preg_replace('/[^\w.\-]/', '_', $originalName);
+                $tempPath = $tempDir . '/' . $safeName;
+
+                // Avoid collisions if two files share the same name
+                if (file_exists($tempPath)) {
+                    $info = pathinfo($safeName);
+                    $tempPath = $tempDir . '/' . ($info['filename'] ?? 'file') . '_' . uniqid() . '.' . ($info['extension'] ?? 'bin');
+                }
+
+                file_put_contents($tempPath, $file->get());
+                $additionalAttachmentPaths[] = $tempPath;
+            }
+        }
+
         SendEstimateEmailJob::dispatch(
             estimateId: $this->estimate->id,
             companyEmailId: $companyEmail->id,
@@ -325,6 +367,7 @@ class EstimateEmail extends Component
             includeEstimateXlsx: $this->include_estimate_xlsx,
             emailTemplateName: $templateName,
             senderIp: request()->ip(),
+            additionalAttachmentPaths: $additionalAttachmentPaths,
         );
 
         $this->modal('estimate_email_modal')->close();
@@ -348,6 +391,7 @@ class EstimateEmail extends Component
             'include_estimate_xlsx',
             'include_reimbursements_pdf',
             'hasReimbursements',
+            'additionalAttachments',
             'project_status',
             'project_status_date',
             'estimate',

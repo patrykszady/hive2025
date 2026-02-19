@@ -1,7 +1,7 @@
 <div class="grid grid-cols-5 gap-4 xl:relative sm:px-6 lg:max-w-7xl" wire:key="estimate-show-{{ $estimate->id }}">
     <div class="col-span-5 space-y-4 lg:col-span-2 lg:h-32">
         {{-- ESTIMATE DETAILS --}}
-        @island(name: 'estimate-details')
+        @island(name: 'estimate-details', always: true)
             @include('livewire.estimates.estimate-details', [
                 'estimate' => $this->estimate,
                 'client' => $this->estimate->client,

@@ -91,6 +91,7 @@ class EstimateDocumentGenerator
                 $contractBody = static::renderContractTemplate($contractTemplate->body, [
                     'today_date' => now()->setTimezone($timezone)->format('m/d/Y'),
                     'vendor_name' => $vendor->business_name ?? 'Unknown Vendor',
+                    'short_vendor_name' => data_get($vendor->options, 'short_name') ?: ($vendor->business_name ?? 'Unknown Vendor'),
                     'client_name' => $client?->name ?? 'Unknown Client',
                     'estimate_number' => $estimate->number,
                     'project_address' => $project?->full_address ?? 'No address on file',

@@ -115,6 +115,7 @@ class EmailTemplateForm extends Component
             return [
                 'today_date',
                 'vendor_name',
+                'short_vendor_name',
                 'client_name',
                 'estimate_number',
                 'project_address',
@@ -136,6 +137,7 @@ class EmailTemplateForm extends Component
             'project_address_1',
             'estimate_total',
             'vendor_name',
+            'short_vendor_name',
             'sender_first_name',
             'sender_last_name',
         ];
