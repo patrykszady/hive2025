@@ -95,6 +95,29 @@ class ClientCreate extends Component
         $this->modal('client_form_modal')->show();
     }
 
+    public function deleteClient(): void
+    {
+        $this->authorize('delete', $this->client);
+
+        // Double-check the client has no associated data
+        if ($this->client->projects()->exists()) {
+            Flux::toast(
+                text: 'This client has projects and cannot be deleted.',
+                variant: 'danger',
+            );
+            return;
+        }
+
+        $this->client->users()->detach();
+        $this->client->vendors()->detach();
+        $this->client->unsearchable();
+        $this->client->delete();
+
+        $this->modal('client_form_modal')->close();
+
+        $this->redirect(route('clients.index'), navigate: true);
+    }
+
     public function edit()
     {
         $client = $this->form->update();

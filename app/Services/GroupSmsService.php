@@ -130,7 +130,7 @@ class GroupSmsService
             . "GS Construction welcomes you to our project msg thread. "
             . "Msgs will be tagged with \"-PS\" for Patryk's replies, \"-GS\" for Grzegorz's, and our automated \"GS Crew\" replies by \"-GSC\". "
             . "Please save this number as \"GS Construction\" in your contacts list. "
-            . "You can always also text us at this number."
+            . "You can always also text or call us at this number."
             . "\n-GSC";
     }
 

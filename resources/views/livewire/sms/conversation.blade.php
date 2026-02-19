@@ -92,14 +92,14 @@
                         @foreach ($callableContacts as $contact)
                             <div class="flex items-center gap-1.5">
                                 @if ($contact['name'] && $contact['name'] !== $headerTitle)
-                                    <span class="text-xs font-medium text-zinc-600 dark:text-zinc-300">{{ $contact['name'] }}</span>
+                                    <span class="text-sm lg:text-xs font-medium text-zinc-600 dark:text-zinc-300">{{ $contact['name'] }}</span>
                                 @endif
                                 <button
                                     type="button"
                                     wire:click="initiateCall('{{ $contact['e164'] }}')"
                                     wire:loading.attr="disabled"
                                     wire:target="initiateCall"
-                                    class="inline-flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer disabled:opacity-50"
+                                    class="inline-flex items-center gap-1 text-sm lg:text-xs text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer disabled:opacity-50"
                                     title="Call {{ $contact['name'] ?? $contact['display'] }} via your phone"
                                 >
                                     <flux:icon name="phone" class="size-3" />
@@ -162,16 +162,16 @@
                 <div wire:key="msg-{{ $msg->id }}" class="flex {{ $msg->isOutbound() ? 'justify-end' : 'justify-start' }}">
                     <div class="max-w-[85%] lg:max-w-[75%] {{ $msg->isOutbound() ? 'order-last' : '' }}">
                         @if ($msg->isInbound())
-                            <p class="text-[10px] text-zinc-400 dark:text-zinc-500 mb-0.5 px-1">
+                            <p class="text-xs lg:text-[10px] text-zinc-400 dark:text-zinc-500 mb-0.5 px-1">
                                 {{ $phoneNameMap[$msg->from_number] ?? $msg->from_number }}
                             </p>
                         @elseif ($msg->isOutbound())
-                            <p class="text-[10px] text-zinc-400 dark:text-zinc-500 mb-0.5 px-1 text-right">
+                            <p class="text-xs lg:text-[10px] text-zinc-400 dark:text-zinc-500 mb-0.5 px-1 text-right">
                                 {{ $msg->sentByUser?->first_name ?? 'GS Crew' }}
                             </p>
                         @endif
 
-                        <div class="rounded-2xl px-3.5 py-2 text-sm {{ $msg->isOutbound()
+                        <div class="rounded-2xl px-3.5 py-2 text-base lg:text-sm {{ $msg->isOutbound()
                             ? 'bg-indigo-600 text-white rounded-br-md'
                             : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 rounded-bl-md' }}">
                             @if ($msg->hasMedia())
@@ -192,7 +192,7 @@
                             @endif
                         </div>
 
-                        <p class="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5 {{ $msg->isOutbound() ? 'text-right' : '' }} px-1">{{ $timeLabel }}</p>
+                        <p class="text-xs lg:text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5 {{ $msg->isOutbound() ? 'text-right' : '' }} px-1">{{ $timeLabel }}</p>
                     </div>
                 </div>
             @empty
@@ -207,7 +207,7 @@
         {{-- Compose --}}
         <div class="shrink-0 px-1 pb-1">
             @if ($isClientUser)
-                <div class="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50 px-4 py-3 text-sm text-zinc-500 dark:text-zinc-400 text-center">
+                <div class="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50 px-4 py-3 text-base lg:text-sm text-zinc-500 dark:text-zinc-400 text-center">
                     Homeowners are not able to message here yet. Please message us on your phone messaging app.
                 </div>
             @else
@@ -263,8 +263,8 @@
         <div class="flex flex-1 items-center justify-center">
             <div class="text-center">
                 <flux:icon name="chat-bubble-left-right" class="mx-auto h-12 w-12 text-zinc-300 dark:text-zinc-600" />
-                <h3 class="mt-3 text-sm font-medium text-zinc-500 dark:text-zinc-400">No conversation selected</h3>
-                <p class="mt-1 text-xs text-zinc-400 dark:text-zinc-500">Select a conversation or start a new one.</p>
+                <h3 class="mt-3 text-base lg:text-sm font-medium text-zinc-500 dark:text-zinc-400">No conversation selected</h3>
+                <p class="mt-1 text-sm lg:text-xs text-zinc-400 dark:text-zinc-500">Select a conversation or start a new one.</p>
             </div>
         </div>
     @endif

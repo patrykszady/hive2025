@@ -69,7 +69,12 @@ class ClientPolicy
      */
     public function delete(User $user, Client $client): bool
     {
-        //
+        if ($user->vendor_role !== 'Admin') {
+            return false;
+        }
+
+        // Only allow deletion of clients with no associated data
+        return $client->projects()->doesntExist();
     }
 
     /**

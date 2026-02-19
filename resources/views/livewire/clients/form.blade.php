@@ -72,6 +72,15 @@
     </form>
 
     <x-slot name="footer">
+        @if ($view_text['form_submit'] === 'edit' && isset($client) && $client->exists && auth()->user()->can('delete', $client))
+            <flux:button
+                wire:click="deleteClient"
+                wire:confirm="Are you sure you want to delete this client? This action cannot be undone."
+                variant="danger"
+            >
+                Delete
+            </flux:button>
+        @endif
         <flux:spacer />
         <flux:button type="submit" form="client_form_modal_form" variant="primary">{{$view_text['button_text']}}</flux:button>
     </x-slot>

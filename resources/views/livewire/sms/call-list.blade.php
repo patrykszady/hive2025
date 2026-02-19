@@ -33,21 +33,21 @@
             {{-- Call details --}}
             <div class="flex-1 min-w-0">
                 <div class="flex items-center justify-between gap-2">
-                    <span class="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
+                    <span class="text-base lg:text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
                         {{ $call->caller_name ?: $this->formatPhone($call->from_number) }}
                     </span>
-                    <span class="text-xs text-zinc-400 whitespace-nowrap">
+                    <span class="text-sm lg:text-xs text-zinc-400 whitespace-nowrap">
                         {{ $call->created_at->diffForHumans(short: true) }}
                     </span>
                 </div>
 
                 <div class="flex items-center gap-2 mt-0.5">
                     @if ($call->caller_name)
-                        <span class="text-xs text-zinc-400">{{ $this->formatPhone($call->from_number) }}</span>
+                        <span class="text-sm lg:text-xs text-zinc-400">{{ $this->formatPhone($call->from_number) }}</span>
                     @endif
 
                     @if ($call->duration_seconds && $call->duration_seconds > 0)
-                        <span class="text-xs text-zinc-400">
+                        <span class="text-sm lg:text-xs text-zinc-400">
                             @if ($call->duration_seconds < 60)
                                 {{ $call->duration_seconds }}s
                             @else
@@ -57,9 +57,9 @@
                     @endif
 
                     @if ($call->status === 'voicemail')
-                        <span class="text-xs text-blue-500 font-medium">Voicemail</span>
+                        <span class="text-sm lg:text-xs text-blue-500 font-medium">Voicemail</span>
                     @elseif ($call->status === 'missed')
-                        <span class="text-xs text-red-400 font-medium">Missed</span>
+                        <span class="text-sm lg:text-xs text-red-400 font-medium">Missed</span>
                     @endif
                 </div>
 
@@ -67,7 +67,7 @@
                 @if ($selectedCallId === $call->id)
                     <div class="mt-2 pt-2 border-t border-zinc-200 dark:border-zinc-600 space-y-2">
                         <div class="flex items-center justify-between">
-                            <div class="text-xs text-zinc-500">
+                            <div class="text-sm lg:text-xs text-zinc-500">
                                 {{ $call->created_at->format('M j, Y g:i A') }}
                                 @if ($call->forwarded_to)
                                     &middot; {{ $this->formatPhone($call->forwarded_to) }}
@@ -83,14 +83,14 @@
 
                         @if ($call->has_voicemail && $call->recording_url)
                             <div class="mt-1">
-                                <div class="text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Voicemail</div>
+                                <div class="text-sm lg:text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Voicemail</div>
                                 <audio controls preload="none" class="w-full h-8">
                                     <source src="{{ $call->recording_url }}" type="audio/mpeg">
                                 </audio>
                             </div>
                         @elseif ($call->recording_url)
                             <div class="mt-1">
-                                <div class="text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Recording</div>
+                                <div class="text-sm lg:text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Recording</div>
                                 <audio controls preload="none" class="w-full h-8">
                                     <source src="{{ $call->recording_url }}" type="audio/mpeg">
                                 </audio>

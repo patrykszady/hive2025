@@ -9,7 +9,7 @@
             <div class="flex items-center justify-between gap-2">
                 <div class="min-w-0 flex-1">
                     {{-- Client name, project address, or phone numbers --}}
-                    <p class="text-sm font-medium truncate text-zinc-900 dark:text-zinc-100">
+                    <p class="text-base lg:text-sm font-medium truncate text-zinc-900 dark:text-zinc-100">
                         @if ($isClientUser)
                             GS Construciton
                         @elseif ($thread->client)
@@ -36,7 +36,7 @@
                                 $previewPrefix = $sender ? $sender . ':' : null;
                             }
                         @endphp
-                        <p class="text-xs text-zinc-400 dark:text-zinc-500 truncate mt-0.5">
+                        <p class="text-sm lg:text-xs text-zinc-400 dark:text-zinc-500 truncate mt-0.5">
                             @if ($previewPrefix)
                                 <span class="text-zinc-500 dark:text-zinc-400">{{ $previewPrefix }}</span>
                             @endif
@@ -47,7 +47,7 @@
 
                 {{-- Timestamp --}}
                 <div class="shrink-0 text-right">
-                    <p class="text-[10px] text-zinc-400 dark:text-zinc-500">
+                    <p class="text-xs lg:text-[10px] text-zinc-400 dark:text-zinc-500">
                         {{ $thread->last_activity_at?->diffForHumans(short: true) ?? $thread->created_at->diffForHumans(short: true) }}
                     </p>
                     @if (in_array($thread->id, $this->unreadThreadIds, true))
