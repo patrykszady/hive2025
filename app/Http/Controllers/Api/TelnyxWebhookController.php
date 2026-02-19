@@ -874,8 +874,8 @@ class TelnyxWebhookController extends Controller
                     ->post('https://api.telnyx.com/v2/calls', [
                         'connection_id' => $connectionId,
                         'to' => $phone,
-                        'from' => $originalCaller ?? $telnyxFrom,
-                        'from_display_name' => $callLog?->caller_name ?? 'Incoming Call',
+                        'from' => $telnyxFrom,
+                        'from_display_name' => $callLog?->caller_name ?: ($originalCaller ?? 'Incoming Call'),
                         'timeout_secs' => $timeout,
                         'client_state' => base64_encode(json_encode([
                             'action' => 'admin_ring',
@@ -1007,7 +1007,7 @@ class TelnyxWebhookController extends Controller
             'valid_digits' => $validDigits,
             'minimum_digits' => 1,
             'maximum_digits' => 1,
-            'timeout_millis' => 15000,
+            'timeout_millis' => 7000,
             'maximum_tries' => 1,
             'client_state' => base64_encode(json_encode([
                 'action' => 'voicemail_ivr_menu',
