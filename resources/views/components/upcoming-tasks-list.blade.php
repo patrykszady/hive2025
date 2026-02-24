@@ -7,6 +7,8 @@
     'unscheduledTasks' => null,
     'showProjectInfo' => false,
     'showVendorInfo' => true,
+    'showNotifications' => true,
+    'publicView' => false,
     'title' => 'Tasks',
     'emptyMessage' => 'No tasks upcoming for this project.',
 ])
@@ -16,17 +18,19 @@
         <flux:badge size="sm" color="zinc">{{ $taskCount }}</flux:badge>
     </x-slot:badge>
     <x-slot:actions>
-        @auth
-            <flux:button
-                size="sm"
-                variant="filled"
-                :href="route('users.show', auth()->id())"
-                icon="bell"
-                class="!bg-indigo-500 hover:!bg-indigo-600 !text-white"
-            >
-                Notifications
-            </flux:button>
-        @endauth
+        @if($showNotifications)
+            @auth
+                <flux:button
+                    size="sm"
+                    variant="filled"
+                    :href="route('users.show', auth()->id())"
+                    icon="bell"
+                    class="!bg-indigo-500 hover:!bg-indigo-600 !text-white"
+                >
+                    Notifications
+                </flux:button>
+            @endauth
+        @endif
     </x-slot:actions>
 
     @if($groupedTasks->isEmpty() && (!$unscheduledTasks || $unscheduledTasks->isEmpty()))
@@ -200,6 +204,7 @@
                         'clickable' => $clickable,
                         'showProjectInfo' => $showProjectInfo,
                         'showVendorInfo' => $showVendorInfo,
+                        'publicView' => $publicView,
                     ])
                 </div>
             @endforeach

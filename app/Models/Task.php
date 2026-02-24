@@ -91,14 +91,28 @@ class Task extends Model
 
         try {
             $formatTime = static fn(string $t): string => (($c = Carbon::createFromFormat('H:i', $t)) && $c->minute === 0)
-                ? $c->format('g A')
-                : $c->format('g:i A');
+                ? $c->format('gA')
+                : $c->format('g:iA');
+
+            $formatTimeShort = static fn(string $t): string => (($c = Carbon::createFromFormat('H:i', $t)) && $c->minute === 0)
+                ? $c->format('g')
+                : $c->format('g:i');
 
             $startLabel = $formatTime($dayStartTime);
 
-            return ($dayEndTime !== '' && $dayEndTime !== $dayStartTime)
-                ? $startLabel . ' - ' . $formatTime($dayEndTime)
-                : $startLabel;
+            if ($dayEndTime !== '' && $dayEndTime !== $dayStartTime) {
+                $startCarbon = Carbon::createFromFormat('H:i', $dayStartTime);
+                $endCarbon = Carbon::createFromFormat('H:i', $dayEndTime);
+
+                // When both times share the same AM/PM, omit it from the start time
+                if ($startCarbon->format('A') === $endCarbon->format('A')) {
+                    return $formatTimeShort($dayStartTime) . '-' . $formatTime($dayEndTime);
+                }
+
+                return $startLabel . '-' . $formatTime($dayEndTime);
+            }
+
+            return $startLabel;
         } catch (\Exception) {
             return null;
         }

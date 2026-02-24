@@ -1,16 +1,40 @@
-<div class="space-y-2">
+<div class="space-y-2 max-h-[calc(100dvh-13rem)] scrollbar-gutter">
     {{-- Filter tabs --}}
-    <div class="mb-3">
-        <flux:tabs wire:model.live="callFilter" variant="segmented" size="sm">
+    <div class="mb-3 flex items-center gap-2 sticky top-0 z-10 bg-white dark:bg-zinc-800">
+        <flux:tabs wire:model.live="callFilter" variant="segmented" size="sm" class="w-full !flex [&>button]:flex-1">
             <flux:tab name="all">All</flux:tab>
             <flux:tab name="missed">Missed</flux:tab>
             <flux:tab name="voicemail">Voicemail</flux:tab>
-            <flux:tab name="completed">Completed</flux:tab>
         </flux:tabs>
     </div>
 
     {{-- Call list --}}
     @forelse ($this->calls as $call)
+        @php
+            $isIncoming = $call->direction === 'incoming';
+            $isOutgoing = $call->direction === 'outgoing';
+
+            // Resolve the "other party" phone to a contact name
+            $otherNumber = $isOutgoing ? $call->to_number : $call->from_number;
+            $resolvedName = $otherNumber ? $this->resolvePhoneDisplay($otherNumber) : null;
+            $formattedOther = $otherNumber ? $this->formatPhone($otherNumber) : null;
+
+            // Use caller_name from the call record if meaningful, otherwise resolved name
+            $displayName = ($call->caller_name && ! in_array($call->caller_name, ['Incoming Call', 'Outgoing Call'], true))
+                ? $call->caller_name
+                : ($resolvedName ?? 'Unknown');
+
+            // Show formatted phone as secondary only when display name differs from it
+            $secondaryNumber = ($formattedOther && $displayName !== $formattedOther)
+                ? $formattedOther
+                : ($isOutgoing && $call->from_number ? $this->resolvePhoneDisplay($call->from_number) : null);
+
+            // Don't show secondary if it matches the display name
+            if ($secondaryNumber === $displayName) {
+                $secondaryNumber = null;
+            }
+        @endphp
+
         <div
             wire:key="call-{{ $call->id }}"
             wire:click="selectCall({{ $call->id }})"
@@ -20,13 +44,17 @@
             {{-- Status icon --}}
             <div class="shrink-0">
                 @if ($call->status === 'voicemail')
-                    <flux:icon.microphone variant="micro" class="size-4 text-blue-500" />
+                    <flux:icon icon="microphone" variant="micro" class="size-4 text-indigo-500" />
                 @elseif ($call->status === 'missed')
-                    <flux:icon.phone-x-mark variant="micro" class="size-4 text-red-400" />
-                @elseif ($call->status === 'completed')
-                    <flux:icon.phone variant="micro" class="size-4 text-green-500" />
+                    <flux:icon icon="phone-x-mark" variant="micro" class="size-4 text-red-500" />
+                @elseif ($call->status === 'failed')
+                    <flux:icon icon="x-circle" variant="micro" class="size-4 text-rose-500" />
+                @elseif ($call->direction === 'outgoing')
+                    <flux:icon icon="phone-arrow-up-right" variant="micro" class="size-4 text-indigo-500" />
+                @elseif ($call->direction === 'incoming')
+                    <flux:icon icon="phone-arrow-down-left" variant="micro" class="size-4 text-green-500" />
                 @else
-                    <flux:icon.phone-arrow-down-left variant="micro" class="size-4 text-zinc-400" />
+                    <flux:icon icon="phone" variant="micro" class="size-4 text-zinc-400" />
                 @endif
             </div>
 
@@ -34,7 +62,7 @@
             <div class="flex-1 min-w-0">
                 <div class="flex items-center justify-between gap-2">
                     <span class="text-base lg:text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
-                        {{ $call->caller_name ?: $this->formatPhone($call->from_number) }}
+                        {{ $displayName }}
                     </span>
                     <span class="text-sm lg:text-xs text-zinc-400 whitespace-nowrap">
                         {{ $call->created_at->diffForHumans(short: true) }}
@@ -42,24 +70,26 @@
                 </div>
 
                 <div class="flex items-center gap-2 mt-0.5">
-                    @if ($call->caller_name)
-                        <span class="text-sm lg:text-xs text-zinc-400">{{ $this->formatPhone($call->from_number) }}</span>
+                    @if ($secondaryNumber)
+                        <span class="text-sm lg:text-xs text-zinc-400">{{ $secondaryNumber }}</span>
                     @endif
 
                     @if ($call->duration_seconds && $call->duration_seconds > 0)
                         <span class="text-sm lg:text-xs text-zinc-400">
                             @if ($call->duration_seconds < 60)
-                                {{ $call->duration_seconds }}s
+                                {{ $call->duration_seconds }} secs
                             @else
-                                {{ floor($call->duration_seconds / 60) }}:{{ str_pad($call->duration_seconds % 60, 2, '0', STR_PAD_LEFT) }}
+                                {{ round($call->duration_seconds / 60) }} mins
                             @endif
                         </span>
                     @endif
 
                     @if ($call->status === 'voicemail')
-                        <span class="text-sm lg:text-xs text-blue-500 font-medium">Voicemail</span>
+                        <span class="text-sm lg:text-xs text-indigo-500 font-medium">Voicemail</span>
                     @elseif ($call->status === 'missed')
                         <span class="text-sm lg:text-xs text-red-400 font-medium">Missed</span>
+                    @elseif ($call->status === 'failed')
+                        <span class="text-sm lg:text-xs text-rose-500 font-medium">Failed</span>
                     @endif
                 </div>
 
@@ -68,7 +98,7 @@
                     <div class="mt-2 pt-2 border-t border-zinc-200 dark:border-zinc-600 space-y-2">
                         <div class="flex items-center justify-between">
                             <div class="text-sm lg:text-xs text-zinc-500">
-                                {{ $call->created_at->format('M j, Y g:i A') }}
+                                {{ $call->created_at->copy()->setTimezone(browser_timezone())->format('M j, Y g:i A') }}
                                 @if ($call->forwarded_to)
                                     &middot; {{ $this->formatPhone($call->forwarded_to) }}
                                 @endif

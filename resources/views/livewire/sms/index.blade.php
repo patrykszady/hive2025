@@ -199,7 +199,7 @@
                 </div>
             @endif
 
-            @if ($activeTab === 'messages')
+            <div class="{{ $activeTab !== 'messages' ? 'hidden' : '' }}">
                 <div class="mb-2">
                     <flux:input wire:model.live.debounce.500ms="search" icon="magnifying-glass" placeholder="Search messages..." size="sm" />
                 </div>
@@ -207,9 +207,11 @@
                 <div id="sms-threads-live">
                     <livewire:sms.sms-thread-list :search="$search" :selected-thread-id="$threadId" :is-client-user="$isClientUser" lazy />
                 </div>
-            @else
+            </div>
+
+            <div class="{{ $activeTab !== 'calls' ? 'hidden' : '' }}">
                 <livewire:sms.call-list lazy />
-            @endif
+            </div>
         </x-island-card>
     </div>
 
@@ -241,5 +243,8 @@
     @if (! $isClientUser)
         {{-- New Thread Modal --}}
         <livewire:sms.sms-new-thread />
+
+        {{-- Send Schedule Modal --}}
+        <livewire:sms.send-schedule-modal />
     @endif
 </div>

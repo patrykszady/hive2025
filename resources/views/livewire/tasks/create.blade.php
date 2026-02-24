@@ -39,9 +39,14 @@
                     type="button"
                     @click="activeTab = 'schedule'"
                     :class="activeTab === 'schedule' ? activeClasses : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
-                    class="py-2 px-1 border-b-2 font-medium text-sm"
+                    class="py-2 px-1 border-b-2 font-medium text-sm flex items-center gap-1.5"
                 >
                     Dates
+                    @if(!empty($form->dates))
+                        <flux:badge size="sm" color="zinc">
+                            {{ count($form->dates) }}
+                        </flux:badge>
+                    @endif
                 </button>
                 @if($view_text['form_submit'] === 'edit' && $form->task)
                     <button
@@ -79,12 +84,12 @@
                     />
 
                     {{-- VENDOR --}}
-                    <flux:label>Vendor</flux:label>
                     <flux:select
                         wire:model.live="form.vendor_id"
                         variant="listbox"
                         searchable
                         clearable
+                        label="Vendor"
                         placeholder="Assign vendor..."
                     >
                         @foreach($this->vendors as $vendor)
@@ -154,38 +159,41 @@
                 <div class="relative">
                     {{-- DATES --}}
                     <flux:field>
-                        <flux:label>Select Days</flux:label>
-                        <flux:dropdown class="w-full" width="trigger">
-                            <flux:button class="w-full justify-between" variant="filled">
-                                @if(empty($form->dates))
-                                    Select dates...
-                                @else
-                                    {{ count($form->dates) }} {{ Str::plural('day', count($form->dates)) }} selected
-                                @endif
-                                <flux:icon.chevron-down variant="micro" />
-                            </flux:button>
-                            
-                            <flux:popover class="p-4">
-                                <flux:calendar
-                                    multiple
-                                    with-today
-                                    size="sm"
-                                    wire:model.live="form.dates"
-                                    :error="$errors->has('form.dates')"
-                                />
-                            </flux:popover>
-                        </flux:dropdown>
+                        <div class="mb-2 flex items-center gap-2">
+                            <flux:label>Select Days</flux:label>
+                            @if(!empty($form->dates))
+                                <flux:badge size="sm" color="zinc">
+                                    {{ count($form->dates) }}
+                                </flux:badge>
+                            @endif
+                        </div>
+                        <div class="rounded-lg border border-zinc-200 p-3 dark:border-zinc-700" x-init="$nextTick(() => { let t = $el.querySelector('ui-calendar-today'); if (t) t.behavior = 'navigate'; })">
+                            <flux:calendar
+                                multiple
+                                with-today
+                                size="sm"
+                                wire:model.live="form.dates"
+                                :error="$errors->has('form.dates')"
+                            />
+                        </div>
                         <flux:error name="form.dates" />
                     </flux:field>
 
                     {{-- TIME SETTINGS --}}
                     @if(!empty($form->dates))
                         <flux:field>
-                            <flux:label>Arrival Time</flux:label>
-                            
-                            <div class="space-y-3 border border-zinc-200 dark:border-zinc-700 rounded-lg p-3">
+                            <div class="flex items-center justify-between">
+                                <flux:label>Arrival Time</flux:label>
+                                <flux:switch
+                                    x-on:change="$wire.toggleAllArrivalTimes($event.target.checked)"
+                                    :checked="collect($form->time_settings)->contains('use_time', true)"
+                                    size="sm"
+                                />
+                            </div>
+
+                            <div class="mt-2 space-y-3 border border-zinc-200 dark:border-zinc-700 rounded-lg p-3">
                                 @foreach($form->dates as $date)
-                                    <div class="border border-zinc-200 dark:border-zinc-700 rounded-lg p-3 space-y-2">
+                                    <div wire:key="arrival-{{ $date }}" class="border border-zinc-200 dark:border-zinc-700 rounded-lg p-3 space-y-2">
                                         <div class="flex items-center justify-between">
                                             <flux:subheading class="text-sm">
                                                 {{ \Carbon\Carbon::parse($date)->format('D, M j') }}

@@ -33,19 +33,19 @@ class SheetMonthly extends Component
             )
             ->orderBy('date', 'DESC') // Sort payments by date descending
             ->get()
-            ->groupBy(fn($payment) => $payment->date->format('M y'));
+            ->groupBy(fn($payment) => $payment->date->format("M 'y"));
 
         $monthly_expenses = Expense::whereBetween('date', [$start_date, $end_date])
             ->orderBy('date', 'DESC')
             ->get()
-            ->groupBy(fn($expense) => $expense->date->format('M y'))
+            ->groupBy(fn($expense) => $expense->date->format("M 'y"))
             ->toBase();
 
         $monthly_timesheets = Timesheet::whereHas('hours', fn($query) =>
             $query->whereBetween('date', [$start_date, $end_date]))
             ->orderBy('date', 'DESC')
             ->get()
-            ->groupBy(fn($timesheet) => $timesheet->date->format('M y'))
+            ->groupBy(fn($timesheet) => $timesheet->date->format("M 'y"))
             ->toBase();
 
         $last_year_payments = Payment::whereBetween('date', [$start_date->copy()->subYear(), $end_date->copy()->subYear()])
@@ -56,10 +56,10 @@ class SheetMonthly extends Component
             )
             ->orderBy('date', 'DESC') // Sort payments by date descending
             ->get()
-            ->groupBy(fn($payment) => $payment->date->copy()->addYear()->format('M y'));
+            ->groupBy(fn($payment) => $payment->date->copy()->addYear()->format("M 'y"));
 
         foreach ($period as $month) {
-            $monthKey = $month->format('M y');
+            $monthKey = $month->format("M 'y");
 
             $this->months[] = [
                 'month_year' => $monthKey,

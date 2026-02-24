@@ -55,7 +55,7 @@ class TelnyxChannel
                 || $notification instanceof ClientScheduleSmsNotification)
         ) {
             $originalPhone = $phone;
-            $phone = config('services.telnyx.dev_to', '+12249993880');
+            $phone = config('services.telnyx.dev_to', '+18474304439');
             
             if (is_string($logChannel)) {
                 Log::channel($logChannel)->info('Dev environment: redirecting SMS', [

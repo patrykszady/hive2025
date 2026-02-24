@@ -1,35 +1,6 @@
 <div class="max-w-3xl" wire:cloak>
     <x-island-card heading="Select Account" subheading="{{$user->first_name}}, select one of your accounts to access your hub." class="space-y-6">
         
-        @if($this->clients->count() > 0)
-            {{-- Client Selection for client-only users --}}
-            <flux:radio.group wire:model.live="client_id" label="Your Client Accounts" variant="cards" class="flex-col" :indicator="false">
-                @foreach($this->clients as $client)
-                    <flux:radio value="{{$client->id}}">
-                        <div class="flex-1">
-                            <div class="flex justify-between items-center">
-                                <flux:heading class="truncate">
-                                    {{ $client->name }}
-                                </flux:heading>
-                                <flux:badge size="sm" color="emerald">Client</flux:badge>
-                            </div>
-                            @if($client->address)
-                                <flux:text size="sm" class="truncate">{{ $client->one_line_address ?? $client->address }}</flux:text>
-                            @endif
-                        </div>
-                    </flux:radio>
-                @endforeach
-            </flux:radio.group>
-            
-            <div x-show="$wire.client_id" x-transition x-cloak>
-                <div class="flex justify-end">
-                    <flux:button variant="primary" wire:click="save">
-                        Continue to Hub
-                    </flux:button>
-                </div>
-            </div>
-        @endif
-        
         @if($this->vendors->count() > 0)
             {{-- Vendor Selection --}}
             <flux:radio.group wire:model.live="vendor_id" label="Your Hive Accounts" variant="cards" class="flex-col" :indicator="false">
@@ -63,11 +34,40 @@
                             @php
                                 $selectedVendor = $this->vendors->find($vendor_id);
                                 $buttonText = isset($selectedVendor->registration['registered']) && $selectedVendor->registration['registered'] == true
-                                    ? 'Login to '
-                                    : 'Register ';
+                                    ? 'Continue to ' . $selectedVendor->short_name . ' Hub'
+                                    : 'Register ' . $selectedVendor->short_name;
                             @endphp
-                            {{ $buttonText . $selectedVendor->name }}
+                            {{ $buttonText }}
                         @endif
+                    </flux:button>
+                </div>
+            </div>
+        @endif
+
+        @if($this->clients->count() > 0)
+            {{-- Client Selection for client-only users --}}
+            <flux:radio.group wire:model.live="client_id" label="Your Client Accounts" variant="cards" class="flex-col" :indicator="false">
+                @foreach($this->clients as $client)
+                    <flux:radio value="{{$client->id}}">
+                        <div class="flex-1">
+                            <div class="flex justify-between items-center">
+                                <flux:heading class="truncate">
+                                    {{ $client->name }}
+                                </flux:heading>
+                                <flux:badge size="sm" color="emerald">Client</flux:badge>
+                            </div>
+                            @if($client->address)
+                                <flux:text size="sm" class="truncate">{{ $client->one_line_address ?? $client->address }}</flux:text>
+                            @endif
+                        </div>
+                    </flux:radio>
+                @endforeach
+            </flux:radio.group>
+
+            <div x-show="$wire.client_id" x-transition x-cloak>
+                <div class="flex justify-end">
+                    <flux:button variant="primary" wire:click="save">
+                        Continue to Hub
                     </flux:button>
                 </div>
             </div>

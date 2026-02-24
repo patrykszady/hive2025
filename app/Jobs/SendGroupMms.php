@@ -59,6 +59,15 @@ class SendGroupMms implements ShouldQueue
         $text = $message->text;
         $mediaUrls = $message->media_urls ?? [];
 
+        // In dev, redirect all outbound SMS to the dev number
+        if (app()->environment(['local', 'development']) && ($devTo = config('services.telnyx.dev_to'))) {
+            Log::channel('telnyx')->info('Dev environment: redirecting group SMS', [
+                'original_participants' => $participants,
+                'redirected_to' => $devTo,
+            ]);
+            $participants = [$devTo];
+        }
+
         try {
             if (count($participants) > 1 || ! empty($mediaUrls)) {
                 $result = $this->sendGroupMms($apiKey, $messagingProfileId, $message->from_number, $participants, $text, $mediaUrls);

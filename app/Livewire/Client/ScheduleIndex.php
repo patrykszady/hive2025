@@ -20,11 +20,20 @@ class ScheduleIndex extends Component
     #[Locked]
     public ?int $projectId = null;
 
+    #[Locked]
+    public ?int $clientId = null;
+
     public bool $valid = false;
     public string $message = '';
 
     public function mount(string $token): void
     {
+        // Logged-in users go straight to the dashboard
+        if (auth()->check()) {
+            $this->redirect(url('/'));
+            return;
+        }
+
         $this->token = $token;
 
         $project = Project::where('schedule_token', $token)->first();
@@ -38,6 +47,22 @@ class ScheduleIndex extends Component
 
         $this->valid = true;
         $this->projectId = $project->id;
+        $this->clientId = $project->client_id;
+    }
+
+    /**
+     * Get all project IDs for this client.
+     *
+     * @return array<int>
+     */
+    #[Computed]
+    public function clientProjectIds(): array
+    {
+        if ($this->clientId) {
+            return Project::where('client_id', $this->clientId)->pluck('id')->all();
+        }
+
+        return $this->projectId ? [$this->projectId] : [];
     }
 
     public function getProject()
@@ -125,7 +150,9 @@ class ScheduleIndex extends Component
     #[Computed]
     public function groupedTasks(): Collection
     {
-        if (! $this->projectId) {
+        $projectIds = $this->clientProjectIds;
+
+        if (empty($projectIds)) {
             return collect();
         }
 
@@ -144,7 +171,7 @@ class ScheduleIndex extends Component
         // Get tasks that have any date within the current week
         // Don't filter by end_date >= today, as tasks earlier in the week should still appear
         $tasks = Task::query()
-            ->where('project_id', $this->projectId)
+            ->whereIn('project_id', $projectIds)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
             ->where(function ($query) use ($startOfWeekStr, $endOfWeekStr) {
@@ -195,7 +222,9 @@ class ScheduleIndex extends Component
     #[Computed]
     public function nextTaskInfo(): ?object
     {
-        if (! $this->projectId) {
+        $projectIds = $this->clientProjectIds;
+
+        if (empty($projectIds)) {
             return null;
         }
 
@@ -205,7 +234,7 @@ class ScheduleIndex extends Component
         $weekEndStr = $weekEnd->format('Y-m-d');
 
         $tasks = Task::query()
-            ->where('project_id', $this->projectId)
+            ->whereIn('project_id', $projectIds)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
             ->whereDate('end_date', '>=', $today)
@@ -264,14 +293,16 @@ class ScheduleIndex extends Component
     #[Computed]
     public function taskCount(): int
     {
-        if (! $this->projectId) {
+        $projectIds = $this->clientProjectIds;
+
+        if (empty($projectIds)) {
             return 0;
         }
 
         $today = $this->getToday();
 
         return Task::query()
-            ->where('project_id', $this->projectId)
+            ->whereIn('project_id', $projectIds)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
             ->whereDate('end_date', '>=', $today)
@@ -284,12 +315,14 @@ class ScheduleIndex extends Component
     #[Computed]
     public function unscheduledTasks(): Collection
     {
-        if (! $this->projectId) {
+        $projectIds = $this->clientProjectIds;
+
+        if (empty($projectIds)) {
             return collect();
         }
 
         return Task::query()
-            ->where('project_id', $this->projectId)
+            ->whereIn('project_id', $projectIds)
             ->whereNull('start_date')
             ->orderBy('created_at')
             ->get();

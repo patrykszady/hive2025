@@ -53,23 +53,30 @@
                     @foreach($payments as $index => $payment)
                         <flux:table.row :key="$index">
                             <flux:table.cell class="text-bold">
-                                Payment {{$index + 1}}
-                                @if($payments->count() > 1)
-                                    <flux:button
-                                        wire:click="removePayment({{$index}})"
-                                        variant="filled"
-                                        size="sm"
-                                        >
-                                        Remove
-                                    </flux:button>
-                                @endif
+                                <div class="flex items-center justify-between gap-2">
+                                    <span>Payment {{$index + 1}}</span>
+
+                                    @if($payments->count() > 1)
+                                        <flux:button
+                                            wire:click="removePayment({{$index}})"
+                                            variant="ghost"
+                                            size="sm"
+                                            icon="x-mark"
+                                            class="shrink-0 text-zinc-400 hover:text-red-500 dark:text-zinc-500 dark:hover:text-red-400"
+                                        />
+                                    @endif
+                                </div>
                             </flux:table.cell>
                             <flux:table.cell>
-                                <flux:input
+                                <flux:autocomplete
                                     size="sm"
                                     wire:model.live="payments.{{$index}}.description"
                                     placeholder="Payment Description {{$index + 1}}"
-                                    />
+                                >
+                                    @foreach($this->availableDescriptions($index) as $desc)
+                                        <flux:autocomplete.item wire:key="payment-desc-{{ $index }}-{{ $loop->index }}">{{ $desc }}</flux:autocomplete.item>
+                                    @endforeach
+                                </flux:autocomplete>
                             </flux:table.cell>
 
                             <flux:table.cell class="text-right">

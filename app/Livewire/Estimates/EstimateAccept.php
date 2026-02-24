@@ -5,6 +5,9 @@ namespace App\Livewire\Estimates;
 use App\Models\Bid;
 use App\Models\Estimate;
 use App\Models\Project;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
+use Livewire\Attributes\Computed;
 use Livewire\Component;
 
 class EstimateAccept extends Component
@@ -173,6 +176,95 @@ class EstimateAccept extends Component
         return $this->payments_outstanding;
     }
 
+    #[Computed]
+    public function uniquePaymentDescriptions(): array
+    {
+        $descriptions = Estimate::withoutGlobalScopes()
+            ->where('belongs_to_vendor_id', $this->estimate->belongs_to_vendor_id)
+            ->whereNotNull('options->payments')
+            ->pluck('options')
+            ->flatMap(fn (array $options) => collect($options['payments'] ?? []))
+            ->pluck('description')
+            ->filter()
+            ->map(fn ($description) => $this->canonicalPaymentDescription((string) $description))
+            ->filter(fn (string $description) => $description !== '');
+
+        $uniqueByNormalizedValue = [];
+
+        foreach ($descriptions as $description) {
+            $normalizedDescription = $this->normalizedPaymentDescription($description);
+
+            if (! array_key_exists($normalizedDescription, $uniqueByNormalizedValue)) {
+                $uniqueByNormalizedValue[$normalizedDescription] = $description;
+            }
+        }
+
+        return collect(array_values($uniqueByNormalizedValue))
+            ->sort(fn (string $a, string $b) => strcasecmp($a, $b))
+            ->values()
+            ->all();
+    }
+
+    public function availableDescriptions(int $index): array
+    {
+        $selectedNormalized = $this->payments
+            ->pluck('description')
+            ->filter()
+            ->map(fn ($description) => $this->normalizedPaymentDescription((string) $description))
+            ->filter(fn (string $description) => $description !== '');
+
+        $currentValue = (string) ($this->payments[$index]['description'] ?? '');
+        $currentValueNormalized = $this->normalizedPaymentDescription($currentValue);
+
+        return collect($this->uniquePaymentDescriptions)
+            ->reject(function (string $description) use ($currentValueNormalized, $selectedNormalized): bool {
+                $normalizedDescription = $this->normalizedPaymentDescription($description);
+
+                return $normalizedDescription !== $currentValueNormalized
+                    && $selectedNormalized->contains($normalizedDescription);
+            })
+            ->values()
+            ->all();
+    }
+
+    protected function canonicalPaymentDescription(string $description): string
+    {
+        $normalized = trim($description);
+        $normalized = preg_replace('/\s*\/\s*/', '/', $normalized) ?? $normalized;
+        $normalized = preg_replace('/\s+/', ' ', $normalized) ?? $normalized;
+
+        return Str::title($normalized);
+    }
+
+    protected function normalizedPaymentDescription(string $description): string
+    {
+        return Str::lower($this->canonicalPaymentDescription($description));
+    }
+
+    protected function hasDuplicatePaymentDescriptions(): bool
+    {
+        $seenDescriptions = [];
+
+        foreach ($this->payments as $index => $payment) {
+            $normalizedDescription = $this->normalizedPaymentDescription((string) ($payment['description'] ?? ''));
+
+            if ($normalizedDescription === '') {
+                continue;
+            }
+
+            if (array_key_exists($normalizedDescription, $seenDescriptions)) {
+                $this->addError("payments.{$seenDescriptions[$normalizedDescription]}.description", 'Payment descriptions must be unique.');
+                $this->addError("payments.{$index}.description", 'Payment descriptions must be unique.');
+
+                return true;
+            }
+
+            $seenDescriptions[$normalizedDescription] = $index;
+        }
+
+        return false;
+    }
+
     //new Payment split
     public function addPayment()
     {
@@ -198,6 +290,23 @@ class EstimateAccept extends Component
         } else {
             $estimate = $this->estimate;
             $estimate_options = $this->estimate->options;
+
+            $this->payments = $this->payments
+                ->map(function (array $payment): array {
+                    $payment['description'] = $this->canonicalPaymentDescription((string) ($payment['description'] ?? ''));
+
+                    return $payment;
+                })
+                ->values();
+
+            if ($this->hasDuplicatePaymentDescriptions()) {
+                $this->dispatch('notify',
+                    type: 'error',
+                    content: 'Payment descriptions must be unique.'
+                );
+
+                return;
+            }
 
             if ($this->payments->where('amount', '!=', '')->sum('amount') != 0) {
                 $estimate_options['payments'] = $this->payments->toArray();

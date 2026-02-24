@@ -222,6 +222,7 @@ class SendEstimateEmailJob implements ShouldQueue
 
             Mail::mailer($mailer)
                 ->to($sanitizedRecipients)
+                ->cc($user->vendor->business_email)
                 ->send($mailable);
 
         } catch (Throwable $exception) {

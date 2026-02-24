@@ -143,6 +143,11 @@ class CantLogin extends Component
                 throw new \RuntimeException('Recipient phone number is missing.');
             }
 
+            // In dev, redirect to dev number
+            if (app()->environment(['local', 'development']) && ($devTo = config('services.telnyx.dev_to'))) {
+                $to = $devTo;
+            }
+
             $payload = [
                 'from' => $from,
                 'to' => $to,

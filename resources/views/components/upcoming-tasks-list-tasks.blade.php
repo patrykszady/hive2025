@@ -6,6 +6,7 @@
         {{-- Group tasks by project, render project header with nested task cards (planner cards style) --}}
         @php
             $tasksByProject = $tasks->groupBy(fn ($task) => $task->project_id ?? 0);
+            $isPublicView = $publicView ?? false;
         @endphp
         <div class="space-y-2 pl-0">
             @foreach($tasksByProject as $projectId => $projectTasks)
@@ -19,13 +20,17 @@
                             class="min-w-0 w-full [&>div:first-child>div:first-child]:!min-w-0 [&>div:first-child>div:first-child]:!flex-1 [&>div:first-child>div:first-child]:truncate [&>div:first-child>div:last-child]:!shrink-0 [&_[data-flux-subheading]]:!min-w-0 [&_[data-flux-subheading]]:truncate"
                         >
                             <flux:heading class="min-w-0 truncate flex items-center gap-2">
-                                <a
-                                    href="{{ $project ? route('projects.show', $project) : '#' }}"
-                                    wire:click.stop
-                                    class="truncate hover:underline underline-offset-2"
-                                >
-                                    {{ $project->short_address ?? 'No project' }}
-                                </a>
+                                @if($isPublicView)
+                                    <span class="truncate">{{ $project->project_name ?? 'Project' }}</span>
+                                @else
+                                    <a
+                                        href="{{ $project ? route('projects.show', $project) : '#' }}"
+                                        wire:click.stop
+                                        class="truncate hover:underline underline-offset-2"
+                                    >
+                                        {{ $project->short_address ?? 'No project' }}
+                                    </a>
+                                @endif
                                 @if($latestStatus)
                                     <flux:tooltip content="{{ $latestStatus->title }}">
                                         <flux:badge :color="$latestStatus->badge_color" size="sm" class="!px-0 !size-2 !min-w-0 rounded-full shrink-0" />
@@ -43,7 +48,7 @@
                                     />
                                 </x-slot>
                             @endif
-                            @if($project?->client || $project?->project_name)
+                            @if(!$isPublicView && ($project?->client || $project?->project_name))
                                 <x-slot name="subheading">
                                     <span class="block min-w-0 truncate">
                                         {{ $project->client?->last_names }}{{ $project->client?->last_names && $project->project_name ? ' | ' : '' }}{{ $project->project_name }}

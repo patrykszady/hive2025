@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\EmailTracking;
 use App\Models\Project;
+use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -15,6 +16,13 @@ use Throwable;
 
 class MailtrapWebhookController extends Controller
 {
+    /**
+     * Cache of vendor team member emails keyed by vendor ID.
+     *
+     * @var array<int, list<string>>
+     */
+    protected array $vendorTeamEmailCache = [];
+
     /**
      * Handle Mailtrap webhook payloads.
      *
@@ -130,6 +138,13 @@ class MailtrapWebhookController extends Controller
             }
 
             if ($this->shouldIgnoreAsSenderOpen($eventType, $recipientEmail, $sent)) {
+                $stats['events_ignored_sender']++;
+                continue;
+            }
+
+            // Ignore opens/clicks from team members of the vendor that sent the email.
+            $sentVendorId = $sent?->belongs_to_vendor_id ? (int) $sent->belongs_to_vendor_id : null;
+            if ($this->shouldIgnoreAsVendorTeamMember($eventType, $recipientEmail, $sentVendorId)) {
                 $stats['events_ignored_sender']++;
                 continue;
             }
@@ -565,6 +580,53 @@ class MailtrapWebhookController extends Controller
         }
 
         return null;
+    }
+
+    /**
+     * Check if the recipient email belongs to a team member (employee) of the given vendor.
+     * Only applies to opened/link_clicked events.
+     */
+    protected function shouldIgnoreAsVendorTeamMember(string $eventType, ?string $recipientEmail, ?int $vendorId): bool
+    {
+        if (! in_array($eventType, ['opened', 'link_clicked'], true)) {
+            return false;
+        }
+
+        if (! is_string($recipientEmail) || trim($recipientEmail) === '' || $vendorId === null) {
+            return false;
+        }
+
+        $recipientEmail = strtolower(trim($recipientEmail));
+
+        $teamEmails = $this->getVendorTeamEmails($vendorId);
+
+        return in_array($recipientEmail, $teamEmails, true);
+    }
+
+    /**
+     * Get all email addresses for a vendor's team members (cached per request).
+     *
+     * @return list<string>
+     */
+    protected function getVendorTeamEmails(int $vendorId): array
+    {
+        if (array_key_exists($vendorId, $this->vendorTeamEmailCache)) {
+            return $this->vendorTeamEmailCache[$vendorId];
+        }
+
+        $emails = User::query()
+            ->whereHas('vendors', fn ($q) => $q->where('vendors.id', $vendorId))
+            ->whereNotNull('email')
+            ->pluck('email')
+            ->map(fn (string $email): string => strtolower(trim($email)))
+            ->filter(fn (string $email): bool => $email !== '')
+            ->unique()
+            ->values()
+            ->all();
+
+        $this->vendorTeamEmailCache[$vendorId] = $emails;
+
+        return $emails;
     }
 
     protected function parseEventAt(mixed $timestamp): ?CarbonImmutable

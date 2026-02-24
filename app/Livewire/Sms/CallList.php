@@ -4,6 +4,8 @@ namespace App\Livewire\Sms;
 
 use App\Models\CallLog;
 use App\Models\User;
+use App\Models\Vendor;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Computed;
@@ -26,6 +28,11 @@ class CallList extends Component
 
     public ?int $selectedUserId = null;
 
+    public function mount(): void
+    {
+        $this->normalizeCallFilter();
+    }
+
     #[On('openNewCall')]
     public function openNewCall(): void
     {
@@ -46,6 +53,7 @@ class CallList extends Component
 
     public function updatedCallFilter(): void
     {
+        $this->normalizeCallFilter();
         $this->resetPage();
         $this->selectedCallId = null;
     }
@@ -69,12 +77,99 @@ class CallList extends Component
     public function calls(): mixed
     {
         return CallLog::query()
-            ->where('direction', 'incoming')
             ->when($this->callFilter === 'missed', fn ($q) => $q->where('status', CallLog::STATUS_MISSED))
             ->when($this->callFilter === 'voicemail', fn ($q) => $q->where('status', CallLog::STATUS_VOICEMAIL))
-            ->when($this->callFilter === 'completed', fn ($q) => $q->where('status', CallLog::STATUS_COMPLETED))
             ->orderByDesc('created_at')
             ->paginate(25);
+    }
+
+    public function generateDemoCalls(): void
+    {
+        $userId = auth()->id();
+
+        $examples = [
+            [
+                'direction' => 'incoming',
+                'from_number' => '+18474304439',
+                'to_number' => '+12249993880',
+                'caller_name' => null,
+                'status' => CallLog::STATUS_COMPLETED,
+                'duration_seconds' => 187,
+                'created_at' => now()->subMinutes(12),
+            ],
+            [
+                'direction' => 'outgoing',
+                'from_number' => '+12249993880',
+                'to_number' => '+13129092818',
+                'caller_name' => null,
+                'status' => CallLog::STATUS_COMPLETED,
+                'duration_seconds' => 73,
+                'created_at' => now()->subMinutes(28),
+            ],
+            [
+                'direction' => 'incoming',
+                'from_number' => '+18472123894',
+                'to_number' => '+12249993880',
+                'caller_name' => null,
+                'status' => CallLog::STATUS_MISSED,
+                'duration_seconds' => 0,
+                'created_at' => now()->subHours(2),
+            ],
+            [
+                'direction' => 'incoming',
+                'from_number' => '+12249993881',
+                'to_number' => '+12249993880',
+                'caller_name' => null,
+                'status' => CallLog::STATUS_VOICEMAIL,
+                'duration_seconds' => 42,
+                'has_voicemail' => true,
+                'created_at' => now()->subHours(7),
+            ],
+            [
+                'direction' => 'outgoing',
+                'from_number' => '+12249993880',
+                'to_number' => '+18474305555',
+                'caller_name' => null,
+                'status' => CallLog::STATUS_FAILED,
+                'duration_seconds' => 0,
+                'created_at' => now()->subDay(),
+            ],
+        ];
+
+        foreach ($examples as $example) {
+            $timestamp = $example['created_at'];
+
+            CallLog::create([
+                'call_id' => (string) Str::uuid(),
+                'direction' => $example['direction'],
+                'from_number' => $example['from_number'],
+                'to_number' => $example['to_number'],
+                'caller_name' => $example['caller_name'],
+                'status' => $example['status'],
+                'duration_seconds' => $example['duration_seconds'],
+                'has_voicemail' => $example['has_voicemail'] ?? false,
+                'user_id' => $userId,
+                'created_at' => $timestamp,
+                'updated_at' => $timestamp,
+            ]);
+        }
+
+        $this->callFilter = 'all';
+        $this->resetPage();
+        $this->selectedCallId = null;
+
+        Flux::toast(
+            variant: 'success',
+            heading: 'Demo calls added',
+            text: 'Added sample incoming, outgoing, missed, voicemail, and failed calls.'
+        );
+    }
+
+    private function normalizeCallFilter(): void
+    {
+        if (! in_array($this->callFilter, ['all', 'missed', 'voicemail'], true)) {
+            $this->callFilter = 'all';
+        }
     }
 
     public function selectCall(int $callId): void
@@ -194,6 +289,42 @@ class CallList extends Component
 
             Flux::toast(variant: 'danger', heading: 'Error', text: 'Something went wrong initiating the call.', duration: 5000, position: 'top right');
         }
+    }
+
+    /**
+     * Resolve a phone number to a contact name (User → Vendor → formatted number).
+     */
+    public function resolvePhoneDisplay(string $e164): string
+    {
+        $digits = preg_replace('/[^0-9]/', '', $e164);
+
+        $normalized = $digits;
+        if (strlen($normalized) === 11 && str_starts_with($normalized, '1')) {
+            $normalized = substr($normalized, 1);
+        }
+
+        $last10 = strlen($digits) > 10 ? substr($digits, -10) : $digits;
+
+        $user = User::where('cell_phone', $normalized)
+            ->orWhere('cell_phone', '1' . $normalized)
+            ->orWhere('cell_phone', $digits)
+            ->orWhere('cell_phone', $last10)
+            ->first();
+
+        if ($user && trim($user->first_name . ' ' . $user->last_name) !== '') {
+            return trim($user->first_name . ' ' . $user->last_name);
+        }
+
+        $vendor = Vendor::where('business_phone', $normalized)
+            ->orWhere('business_phone', $last10)
+            ->orWhere('business_phone', $digits)
+            ->first();
+
+        if ($vendor && $vendor->short_name) {
+            return $vendor->short_name;
+        }
+
+        return $this->formatPhone($e164);
     }
 
     /**

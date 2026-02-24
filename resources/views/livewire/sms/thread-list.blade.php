@@ -1,10 +1,10 @@
-<div class="space-y-1 overflow-y-auto max-h-[calc(100vh-16rem)]">
+<div class="space-y-1 max-h-[calc(100dvh-15rem)] scrollbar-gutter">
     @forelse ($this->threads as $thread)
         <button
             wire:key="thread-{{ $thread->id }}"
             wire:click="select({{ $thread->id }})"
             x-on:click="window.dispatchEvent(new CustomEvent('sms-thread-loading'))"
-            class="w-full text-left px-3 py-2.5 rounded-lg transition-colors {{ $selectedThreadId === $thread->id ? 'bg-zinc-200 dark:bg-zinc-700' : 'hover:bg-zinc-100 dark:hover:bg-zinc-800' }}"
+            class="w-full text-left px-3 py-2.5 rounded-lg transition-colors {{ $selectedThreadId === $thread->id ? 'bg-zinc-100 dark:bg-zinc-700' : 'hover:bg-zinc-50 dark:hover:bg-zinc-800' }}"
         >
             <div class="flex items-center justify-between gap-2">
                 <div class="min-w-0 flex-1">

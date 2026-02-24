@@ -18,7 +18,7 @@
                     $isVendorSelection = Route::is(['account_selection']);
                     $href = ($isVendorRoute || $isVendorSelection) ? null : route('dashboard');
                     $logo = asset('favicon.svg');
-                    $name = $isVendorRoute || $isVendorSelection || !auth()->user()->vendor
+                    $name = $isVendorRoute || $isVendorSelection || !auth()->user()?->vendor
                         ? config('app.name')
                         : auth()->user()->vendor->shortName;
                 @endphp
@@ -41,7 +41,7 @@
 
             @if(!Route::is(['account_selection', 'vendor_registration']))
                 <flux:sidebar.nav>
-                    @if(auth()->user()->is_client_user)
+                    @if(auth()->user()?->is_client_user)
                         @php
                             $client = auth()->user()->clients()->first();
                             $clientHome = $client ? route('clients.show', $client) : route('account_selection');

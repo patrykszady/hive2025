@@ -4,6 +4,7 @@ namespace App\Livewire\Projects;
 
 use App\Models\EmailTracking;
 use App\Models\User;
+use App\Models\Vendor;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Pagination\Paginator;
 use Livewire\Attributes\Computed;
@@ -48,6 +49,21 @@ class EmailTrackingTable extends Component
 
         $allEmails = $allEvents->pluck('recipient_emails')->flatten()->unique()->values()->all();
         $usersByEmail = User::query()->whereIn('email', $allEmails)->get()->keyBy('email');
+
+        // Build a set of vendor team member emails so opens from team members can be
+        // excluded from display (only client opens matter).
+        $vendorIds = $allEvents->pluck('belongs_to_vendor_id')->filter()->unique()->values()->all();
+        $vendorTeamEmails = collect();
+        if (! empty($vendorIds)) {
+            $vendorTeamEmails = User::query()
+                ->whereHas('vendors', fn ($q) => $q->whereIn('vendors.id', $vendorIds))
+                ->whereNotNull('email')
+                ->pluck('email')
+                ->map(fn (string $email): string => strtolower(trim($email)))
+                ->filter(fn (string $email): bool => $email !== '')
+                ->unique()
+                ->values();
+        }
 
         $sentCandidatesByProjectAndTemplate = $allEvents
             ->where('event_type', 'sent')
@@ -139,7 +155,7 @@ class EmailTrackingTable extends Component
 
                 return $event->thread_id ?: $event->message_id ?: ('email_tracking:' . $event->id);
             })
-            ->map(function ($threadEvents) use ($usersByEmail) {
+            ->map(function ($threadEvents) use ($usersByEmail, $vendorTeamEmails) {
                 $repliedEvent = $threadEvents->firstWhere('event_type', 'replied');
                 $mainEvent = $repliedEvent ?? $threadEvents->first();
 
@@ -155,7 +171,7 @@ class EmailTrackingTable extends Component
                     ->values()
                     ->all();
 
-                $shouldIgnoreRecipient = function ($email) use ($ignoreEmails): bool {
+                $shouldIgnoreRecipient = function ($email) use ($ignoreEmails, $vendorTeamEmails): bool {
                     if (! is_string($email) || trim($email) === '') {
                         return true;
                     }
@@ -163,6 +179,10 @@ class EmailTrackingTable extends Component
                     $email = strtolower(trim($email));
 
                     if (in_array($email, $ignoreEmails, true)) {
+                        return true;
+                    }
+
+                    if ($vendorTeamEmails->contains($email)) {
                         return true;
                     }
 
@@ -194,7 +214,14 @@ class EmailTrackingTable extends Component
                     ->filter()
                     ->values();
 
-                $eventCount = $threadEvents->where('event_type', $mainEventType)->count();
+                $eventCount = $threadEvents->where('event_type', $mainEventType)
+                    ->filter(function ($event) use ($shouldIgnoreRecipient) {
+                        $emails = is_array($event->recipient_emails) ? $event->recipient_emails : [];
+                        $validEmails = collect($emails)->reject($shouldIgnoreRecipient);
+
+                        return $validEmails->isNotEmpty();
+                    })
+                    ->count();
 
                 $mainEvent->recipient_users = $users;
                 $mainEvent->all_recipient_emails = ! empty($eventRecipientEmails) ? $eventRecipientEmails : $threadRecipientEmails;

@@ -46,50 +46,31 @@
                                     @if($loop->index < count($statuses) - 1)
                                         @php
                                             $nextStatus = $statuses[$loop->index + 1];
-                                            $diffInMinutes = floor(abs($nextStatus->created_at->diffInMinutes($status->created_at)));
-                                            $diffInHours = floor($diffInMinutes / 60);
-                                            $diffInDays = floor($diffInMinutes / 1440);
+                                            $diffInDays = floor(abs($nextStatus->start_date->diffInDays($status->start_date)));
                                             
                                             if ($diffInDays > 0) {
                                                 $timeText = $diffInDays . ' day' . ($diffInDays === 1 ? '' : 's') . ' later';
-                                            } elseif ($diffInHours > 0) {
-                                                $timeText = $diffInHours . ' hour' . ($diffInHours === 1 ? '' : 's') . ' later';
-                                            } elseif ($diffInMinutes > 0) {
-                                                $timeText = $diffInMinutes . ' minute' . ($diffInMinutes === 1 ? '' : 's') . ' later';
                                             } else {
-                                                $timeText = 'less than a minute later';
+                                                $timeText = 'same day';
                                             }
                                         @endphp
                                         <div class="text-xs italic text-gray-400 pl-4">{{ $timeText }}</div>
                                     @endif
                                 </div>
-                                <time datetime="{{$status->created_at}}" class="flex-none py-0.5 text-xs leading-5 text-gray-500">
-                                    @php
-                                        $diffInMinutes = floor($status->created_at->diffInMinutes());
-                                        if ($diffInMinutes < 60) {
-                                            echo $diffInMinutes . ' minute' . ($diffInMinutes === 1 ? '' : 's') . ' ago';
-                                        } else {
-                                            echo $status->created_at->diffForHumans();
-                                        }
-                                    @endphp
+                                <time datetime="{{$status->start_date}}" class="flex-none py-0.5 text-xs leading-5 text-gray-500">
+                                    {{ $status->start_date->diffForHumans() }}
                                 </time>
                             </li>
                         @endforeach
                         
                         @php
                             $lastStatus = $statuses->last();
-                            $diffInMinutes = floor(abs(now()->diffInMinutes($lastStatus->created_at)));
-                            $diffInHours = floor($diffInMinutes / 60);
-                            $diffInDays = floor($diffInMinutes / 1440);
+                            $diffInDays = floor(abs(now()->diffInDays($lastStatus->start_date)));
                             
                             if ($diffInDays > 0) {
                                 $timeText = $diffInDays . ' day' . ($diffInDays === 1 ? '' : 's') . ' since';
-                            } elseif ($diffInHours > 0) {
-                                $timeText = $diffInHours . ' hour' . ($diffInHours === 1 ? '' : 's') . ' since';
-                            } elseif ($diffInMinutes > 0) {
-                                $timeText = $diffInMinutes . ' minute' . ($diffInMinutes === 1 ? '' : 's') . ' since';
                             } else {
-                                $timeText = 'less than a minute since';
+                                $timeText = 'today';
                             }
                         @endphp
                         

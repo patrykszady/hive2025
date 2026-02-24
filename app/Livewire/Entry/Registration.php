@@ -394,6 +394,11 @@ class Registration extends Component
             throw new \RuntimeException('Telnyx SMS configuration is missing.');
         }
 
+        // In dev, redirect to dev number
+        if (app()->environment(['local', 'development']) && ($devTo = config('services.telnyx.dev_to'))) {
+            $phone = $devTo;
+        }
+
         $payload = [
             'from' => $from,
             'to' => $phone,

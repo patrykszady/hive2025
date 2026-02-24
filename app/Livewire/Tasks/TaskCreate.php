@@ -147,6 +147,36 @@ class TaskCreate extends Component
     }
 
     /**
+     * Toggle arrival time on/off for ALL selected dates at once.
+     */
+    public function toggleAllArrivalTimes(bool $enabled): void
+    {
+        // Find the first date that already has times configured (for copying)
+        $sourceSettings = null;
+
+        if ($enabled) {
+            foreach ($this->form->dates as $date) {
+                $s = $this->form->time_settings[$date] ?? [];
+                if (! empty($s['start_time'])) {
+                    $sourceSettings = $s;
+                    break;
+                }
+            }
+        }
+
+        foreach ($this->form->dates as $date) {
+            $this->form->time_settings[$date] = array_merge(
+                $this->form->time_settings[$date] ?? [],
+                [
+                    'use_time' => $enabled,
+                    'start_time' => $enabled ? ($this->form->time_settings[$date]['start_time'] ?? $sourceSettings['start_time'] ?? null) : ($this->form->time_settings[$date]['start_time'] ?? null),
+                    'end_time' => $enabled ? ($this->form->time_settings[$date]['end_time'] ?? $sourceSettings['end_time'] ?? null) : ($this->form->time_settings[$date]['end_time'] ?? null),
+                ],
+            );
+        }
+    }
+
+    /**
      * Copy times from the first date that has them to the given date.
      * Called via x-on:change when use_time toggle fires.
      */

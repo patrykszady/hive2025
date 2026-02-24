@@ -237,6 +237,9 @@
                     <x-slot name="actionsLeading">
                         <flux:button type="button" size="sm" variant="subtle" icon="paper-clip" x-on:click="$refs.fileInput.click()" />
                         <input x-ref="fileInput" type="file" wire:model="attachment" accept="image/*" class="hidden" />
+                        @if ($this->thread?->client_id)
+                            <flux:button type="button" size="sm" variant="subtle" icon="calendar-days" wire:click="$dispatchTo('sms.send-schedule-modal', 'openScheduleModal', { threadId: {{ $threadId }} })" tooltip="Send schedule" />
+                        @endif
                     </x-slot>
 
                     <x-slot name="actionsTrailing">

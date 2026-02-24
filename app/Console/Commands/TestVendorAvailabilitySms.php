@@ -132,7 +132,7 @@ class TestVendorAvailabilitySms extends Command
         }
 
         $this->newLine();
-        $devTo = config('services.telnyx.dev_to', '+12249993880');
+        $devTo = config('services.telnyx.dev_to', '+18474304439');
         $this->info("Sending SMS to dev number: " . $devTo);
 
         // Send the notification directly (bypasses queue for immediate testing)

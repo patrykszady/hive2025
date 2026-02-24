@@ -1242,6 +1242,12 @@ class TelnyxWebhookController extends Controller
             }
         }
 
+        // In dev, redirect to dev number
+        if (app()->environment(['local', 'development']) && ($devTo = config('services.telnyx.dev_to'))) {
+            Log::channel('telnyx')->info('Dev: redirecting emergency SMS', ['original' => $toPhone, 'redirected_to' => $devTo]);
+            $toPhone = $devTo;
+        }
+
         try {
             $payload = [
                 'from' => $from,
@@ -1331,6 +1337,12 @@ class TelnyxWebhookController extends Controller
                 } elseif (strlen($digits) === 11 && str_starts_with($digits, '1')) {
                     $phone = '+' . $digits;
                 }
+            }
+
+            // In dev, redirect to dev number
+            if (app()->environment(['local', 'development']) && ($devTo = config('services.telnyx.dev_to'))) {
+                Log::channel('telnyx')->info('Dev: redirecting callback SMS', ['original' => $phone, 'redirected_to' => $devTo]);
+                $phone = $devTo;
             }
 
             try {
@@ -1621,6 +1633,12 @@ class TelnyxWebhookController extends Controller
         $mediaUrls = $originalData['media'] ?? [];
 
         foreach ($otherParticipants as $recipient) {
+            // In dev, redirect to dev number
+            if (app()->environment(['local', 'development']) && ($devTo = config('services.telnyx.dev_to'))) {
+                Log::channel('telnyx')->info('Dev: redirecting forwarded SMS', ['original' => $recipient, 'redirected_to' => $devTo]);
+                $recipient = $devTo;
+            }
+
             try {
                 $payload = [
                     'from' => $thread->from_number,

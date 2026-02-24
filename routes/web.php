@@ -16,7 +16,6 @@ use App\Http\Controllers\Api\MailtrapWebhookController;
 use App\Livewire\Auth\CantLogin;
 use App\Livewire\Auth\Login;
 use App\Livewire\Auth\OneTimeCodeLogin;
-use App\Livewire\Auth\Register;
 use App\Livewire\Auth\VerifyResetCode;
 use App\Livewire\Banks\BankIndex;
 use App\Livewire\Banks\BankShow;
@@ -105,7 +104,6 @@ Route::middleware('guest')->group(function () {
     Route::view('welcome', 'welcome')->name('welcome');
 
     Route::get('login', Login::class)->name('login');
-    Route::get('register', Register::class)->name('register');
     Route::get('cant-login', CantLogin::class)->name('cant.login');
     Route::get('one-time-login', OneTimeCodeLogin::class)->name('one-time-login');
     Route::get('verify-reset-code/{token}', VerifyResetCode::class)->name('verify.reset.code');
