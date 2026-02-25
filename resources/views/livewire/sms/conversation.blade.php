@@ -29,7 +29,7 @@
                     class="lg:hidden shrink-0"
                     wire:click="$parent.set('threadId', null)"
                     aria-label="Back to conversations"
-                />
+                ></flux:button>
                 @if ($this->thread->client)
                     <flux:heading size="lg" class="mb-0 truncate flex-1">
                         <a href="{{ route('clients.show', $this->thread->client_id) }}" wire:navigate.hover class="hover:underline">{{ $headerTitle }}</a>
@@ -177,9 +177,13 @@
                             @if ($msg->hasMedia())
                                 <div class="space-y-2 {{ $msg->text ? 'mb-1.5' : '' }}">
                                     @foreach ($msg->media_urls as $url)
-                                        <a href="{{ $url }}" target="_blank">
+                                        <button
+                                            type="button"
+                                            class="block"
+                                            wire:click="openImageLightbox('{{ $url }}')"
+                                        >
                                             <img src="{{ $url }}" alt="MMS attachment" class="max-w-full rounded-lg max-h-64 object-cover" loading="lazy" />
-                                        </a>
+                                        </button>
                                     @endforeach
                                 </div>
                             @endif
@@ -211,7 +215,23 @@
                     Homeowners are not able to message here yet. Please message us on your phone messaging app.
                 </div>
             @else
+            @php
+                $pendingOptIn = $this->thread->hasPendingOptIn();
+            @endphp
             <form wire:submit="sendMessage">
+                @if ($attachment && method_exists($attachment, 'temporaryUrl') && $attachment->getRealPath())
+                    <div class="mb-2 px-1">
+                        <div class="relative inline-block border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden">
+                            <img src="{{ $attachment->temporaryUrl() }}" alt="Attachment preview" class="size-16 object-cover" />
+                            <div class="absolute top-0 right-0 p-0.5">
+                                <button type="button" wire:click="removeAttachment" class="p-0.5 rounded-full bg-zinc-900/50 hover:bg-zinc-900/70 flex justify-center items-center">
+                                    <flux:icon icon="x-mark" variant="micro" class="text-white" />
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                @endif
+
                 <flux:composer
                     wire:model="newMessage"
                     placeholder="Type a message..."
@@ -221,29 +241,16 @@
                     max-rows="6"
                     submit="enter"
                 >
-                    @if ($attachment)
-                        <x-slot name="header">
-                            <div class="relative inline-block border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden">
-                                <img src="{{ $attachment->temporaryUrl() }}" alt="Attachment preview" class="size-16 object-cover" />
-                                <div class="absolute top-0 right-0 p-0.5">
-                                    <button type="button" wire:click="removeAttachment" class="p-0.5 rounded-full bg-zinc-900/50 hover:bg-zinc-900/70 flex justify-center items-center">
-                                        <flux:icon icon="x-mark" variant="micro" class="text-white" />
-                                    </button>
-                                </div>
-                            </div>
-                        </x-slot>
-                    @endif
-
                     <x-slot name="actionsLeading">
-                        <flux:button type="button" size="sm" variant="subtle" icon="paper-clip" x-on:click="$refs.fileInput.click()" />
+                        <flux:button type="button" size="sm" variant="subtle" square icon="paper-clip" x-on:click="$refs.fileInput.click()" aria-label="Attach image"></flux:button>
                         <input x-ref="fileInput" type="file" wire:model="attachment" accept="image/*" class="hidden" />
                         @if ($this->thread?->client_id)
-                            <flux:button type="button" size="sm" variant="subtle" icon="calendar-days" wire:click="$dispatchTo('sms.send-schedule-modal', 'openScheduleModal', { threadId: {{ $threadId }} })" tooltip="Send schedule" />
+                            <flux:button type="button" size="sm" variant="subtle" square icon="calendar-days" wire:click="$dispatchTo('sms.send-schedule-modal', 'openScheduleModal', { threadId: {{ $threadId }} })" tooltip="Send schedule" aria-label="Send schedule"></flux:button>
                         @endif
                     </x-slot>
 
                     <x-slot name="actionsTrailing">
-                        <flux:button type="submit" size="sm" variant="primary" icon="paper-airplane" wire:loading.attr="disabled" />
+                        <flux:button type="submit" size="sm" variant="primary" square icon="paper-airplane" wire:loading.attr="disabled" :disabled="$pendingOptIn" aria-label="Send message"></flux:button>
                     </x-slot>
                 </flux:composer>
             </form>
@@ -255,12 +262,235 @@
                 <p class="text-xs text-red-500 mt-1 px-1">{{ $message }}</p>
             @enderror
 
-            <div class="flex items-center gap-2 px-2 pt-1">
-                <flux:avatar size="xs" color="indigo" name="{{ auth()->user()->full_name }}" circle />
-                <span class="text-xs text-zinc-500 dark:text-zinc-400">{{ auth()->user()->full_name }}</span>
+            <div class="flex items-center justify-between gap-2 px-2 pt-1">
+                <div class="flex items-center gap-2 min-w-0">
+                    <flux:avatar size="xs" color="indigo" name="{{ auth()->user()->full_name }}" circle />
+                    <span class="text-xs text-zinc-500 dark:text-zinc-400 truncate">{{ auth()->user()->full_name }}</span>
+                </div>
+
+                @if ($pendingOptIn)
+                    <div class="ml-auto flex items-center gap-2 whitespace-nowrap">
+                        <flux:icon name="exclamation-triangle" class="size-4 text-amber-500" />
+                        <flux:text class="text-xs text-amber-600 dark:text-amber-400">Awaiting START reply</flux:text>
+
+                        <flux:button
+                            type="button"
+                            size="xs"
+                            variant="primary"
+                            color="amber"
+                            wire:click="resendOptInPrompt"
+                            wire:loading.attr="disabled"
+                            wire:target="resendOptInPrompt"
+                        >
+                            Resend
+                        </flux:button>
+                    </div>
+                @endif
             </div>
             @endif
         </div>
+
+        <style>
+            [data-modal="sms-image-lightbox"]::backdrop {
+                background-color: rgba(0, 0, 0, 0.50);
+                backdrop-filter: blur(4px);
+                -webkit-backdrop-filter: blur(4px);
+            }
+        </style>
+
+        <flux:modal wire:model="showImageLightbox" name="sms-image-lightbox" class="!p-0 !rounded-xl max-w-lg sm:max-w-xl md:max-w-2xl">
+            <div
+                x-data="{
+                    scale: 1,
+                    translateX: 0,
+                    translateY: 0,
+                    isZoomed: false,
+                    minScale: 1,
+                    maxScale: 4,
+                    isPanning: false,
+                    lastX: 0,
+                    lastY: 0,
+                    initialPinchDistance: null,
+                    initialScale: 1,
+                    touchStartX: 0,
+                    touchStartY: 0,
+                    lastTouchX: 0,
+                    lastTouchY: 0,
+
+                    resetZoom() {
+                        this.scale = 1;
+                        this.translateX = 0;
+                        this.translateY = 0;
+                        this.isZoomed = false;
+                    },
+
+                    constrainTranslation() {
+                        if (this.scale <= 1) {
+                            this.translateX = 0;
+                            this.translateY = 0;
+                            return;
+                        }
+                        const container = this.$refs.zoomContainer;
+                        if (!container) return;
+                        const img = container.querySelector('img');
+                        if (!img) return;
+                        const containerRect = container.getBoundingClientRect();
+                        const scaledWidth = img.offsetWidth * this.scale;
+                        const scaledHeight = img.offsetHeight * this.scale;
+                        const maxX = Math.max(0, (scaledWidth - containerRect.width) / 2);
+                        const maxY = Math.max(0, (scaledHeight - containerRect.height) / 2);
+                        this.translateX = Math.max(-maxX, Math.min(maxX, this.translateX));
+                        this.translateY = Math.max(-maxY, Math.min(maxY, this.translateY));
+                    },
+
+                    handleWheel(e) {
+                        e.preventDefault();
+                        const delta = e.deltaY > 0 ? 0.9 : 1.1;
+                        const newScale = Math.max(this.minScale, Math.min(this.maxScale, this.scale * delta));
+                        if (newScale !== this.scale) {
+                            const container = this.$refs.zoomContainer;
+                            if (!container) return;
+                            const rect = container.getBoundingClientRect();
+                            const x = e.clientX - rect.left - rect.width / 2;
+                            const y = e.clientY - rect.top - rect.height / 2;
+                            const scaleFactor = newScale / this.scale;
+                            this.translateX = x - (x - this.translateX) * scaleFactor;
+                            this.translateY = y - (y - this.translateY) * scaleFactor;
+                            this.scale = newScale;
+                            this.isZoomed = this.scale > 1.05;
+                            this.constrainTranslation();
+                        }
+                    },
+
+                    handleDoubleTap(e) {
+                        if (this.isZoomed) {
+                            this.resetZoom();
+                        } else {
+                            const container = this.$refs.zoomContainer;
+                            if (!container) return;
+                            const rect = container.getBoundingClientRect();
+                            const x = e.clientX - rect.left - rect.width / 2;
+                            const y = e.clientY - rect.top - rect.height / 2;
+                            this.scale = 2;
+                            this.translateX = -x;
+                            this.translateY = -y;
+                            this.isZoomed = true;
+                            this.constrainTranslation();
+                        }
+                    },
+
+                    handleMouseDown(e) {
+                        if (!this.isZoomed) return;
+                        e.preventDefault();
+                        this.isPanning = true;
+                        this.lastX = e.clientX;
+                        this.lastY = e.clientY;
+                    },
+
+                    handleMouseMove(e) {
+                        if (!this.isPanning) return;
+                        this.translateX += e.clientX - this.lastX;
+                        this.translateY += e.clientY - this.lastY;
+                        this.constrainTranslation();
+                        this.lastX = e.clientX;
+                        this.lastY = e.clientY;
+                    },
+
+                    handleMouseUp() { this.isPanning = false; },
+
+                    handleTouchStart(e) {
+                        if (e.touches.length === 2) {
+                            this.initialPinchDistance = Math.hypot(
+                                e.touches[0].clientX - e.touches[1].clientX,
+                                e.touches[0].clientY - e.touches[1].clientY
+                            );
+                            this.initialScale = this.scale;
+                        } else if (e.touches.length === 1) {
+                            this.lastTouchX = e.touches[0].clientX;
+                            this.lastTouchY = e.touches[0].clientY;
+                            this.isPanning = this.isZoomed;
+                        }
+                    },
+
+                    handleTouchMove(e) {
+                        if (e.touches.length === 2 && this.initialPinchDistance) {
+                            const distance = Math.hypot(
+                                e.touches[0].clientX - e.touches[1].clientX,
+                                e.touches[0].clientY - e.touches[1].clientY
+                            );
+                            this.scale = Math.max(this.minScale, Math.min(this.maxScale,
+                                this.initialScale * (distance / this.initialPinchDistance)
+                            ));
+                            this.isZoomed = this.scale > 1.05;
+                            this.constrainTranslation();
+                            e.preventDefault();
+                        } else if (e.touches.length === 1 && this.isZoomed && this.isPanning) {
+                            this.translateX += e.touches[0].clientX - this.lastTouchX;
+                            this.translateY += e.touches[0].clientY - this.lastTouchY;
+                            this.constrainTranslation();
+                            this.lastTouchX = e.touches[0].clientX;
+                            this.lastTouchY = e.touches[0].clientY;
+                            e.preventDefault();
+                        }
+                    },
+
+                    handleTouchEnd() {
+                        this.initialPinchDistance = null;
+                        this.isPanning = false;
+                        if (this.scale < 1.05) this.resetZoom();
+                    }
+                }"
+                x-ref="zoomContainer"
+                x-init="$watch('$wire.showImageLightbox', v => { if (!v) resetZoom(); })"
+                :class="isZoomed ? 'cursor-grab active:cursor-grabbing' : ''"
+                @wheel.prevent="handleWheel($event)"
+                @dblclick="handleDoubleTap($event)"
+                @mousedown="handleMouseDown($event)"
+                @mousemove="handleMouseMove($event)"
+                @mouseup="handleMouseUp()"
+                @mouseleave="handleMouseUp()"
+                @touchstart="handleTouchStart($event)"
+                @touchmove="handleTouchMove($event)"
+                @touchend="handleTouchEnd()"
+                class="relative"
+            >
+                {{-- Close button --}}
+                <flux:modal.close>
+                    <button
+                        type="button"
+                        class="absolute right-2 top-2 z-20 rounded-full bg-black/50 p-1.5 text-white/80 hover:bg-black/70 hover:text-white transition"
+                        aria-label="Close image preview"
+                    >
+                        <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                </flux:modal.close>
+
+                {{-- Zoom indicator --}}
+                <div
+                    x-show="isZoomed"
+                    x-transition.opacity
+                    class="absolute top-2 left-1/2 -translate-x-1/2 z-20"
+                >
+                    <div class="bg-black/60 text-white px-2.5 py-1 rounded-full text-xs flex items-center gap-1.5">
+                        <span x-text="Math.round(scale * 100) + '%'"></span>
+                        <button @click.stop="resetZoom()" class="hover:text-zinc-300 transition" title="Reset zoom">
+                            <svg class="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                        </button>
+                    </div>
+                </div>
+
+                {{-- Image --}}
+                <div class="overflow-hidden rounded-xl select-none" :class="isZoomed ? 'touch-none' : ''">
+                    <img
+                        src="{{ $lightboxImageUrl ?? '' }}"
+                        alt="MMS attachment"
+                        class="block max-h-[80vh] w-auto max-w-full object-contain select-none transition-transform duration-100 ease-out"
+                        :style="`transform: scale(${scale}) translate(${translateX / scale}px, ${translateY / scale}px); transform-origin: center center;`"
+                        draggable="false"
+                    />
+                </div>
+            </div>
+        </flux:modal>
     @else
         {{-- No thread selected --}}
         <div class="flex flex-1 items-center justify-center">
@@ -277,12 +507,16 @@
 <script>
     const container = $wire.$el.querySelector('.sms-messages');
     if (container) {
+        // flex-col-reverse: scrollTop 0 = bottom (newest). Ensure we start there.
+        container.scrollTop = 0;
+
         let lastCount = container.children.length;
         new MutationObserver(() => {
             const newCount = container.children.length;
             if (newCount !== lastCount) {
                 lastCount = newCount;
-                container.scrollTop = container.scrollHeight;
+                // With flex-col-reverse, scrollTop 0 = newest messages (bottom)
+                container.scrollTop = 0;
             }
         }).observe(container, { childList: true });
     }

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Jobs\SendInboundSmsBrowserNotifications;
+use App\Jobs\SendIncomingCallBrowserNotifications;
 use App\Jobs\StoreSmsMedia;
 use App\Models\CallLog;
 use App\Models\SmsGroupThread;
@@ -70,6 +71,7 @@ class TelnyxWebhookController extends Controller
             'call.answered' => $this->handleCallAnswered($data),
             'call.hangup' => $this->handleCallHangup($data),
             'call.bridged' => $this->handleCallBridged($data),
+            'call.leave' => $this->handleCallLeave($data),
             'call.speak.ended' => $this->handleCallSpeakEnded($data),
             'call.speak.started' => $this->handleCallSpeakStarted($data),
             'call.gather.ended' => $this->handleCallGatherEnded($data),
@@ -140,6 +142,9 @@ class TelnyxWebhookController extends Controller
                 'caller_name' => $user->full_name,
             ]);
         }
+
+        // Send browser push notification to admins: "{Caller Name} is Calling"
+        SendIncomingCallBrowserNotifications::dispatch($callLog->id);
 
         Log::channel('telnyx')->info('Incoming call - answering', [
             'call_control_id' => $callControlId,
@@ -328,17 +333,24 @@ class TelnyxWebhookController extends Controller
             'conference_name' => $conferenceName,
         ]);
 
-        $this->sendCallCommand($callControlId, 'conference', [
+        $conferenceParams = [
             'name' => $conferenceName,
             'beep_enabled' => 'never',
             'end_conference_on_exit' => true,
-            'start_conference_on_create' => true,
+            'start_conference_on_create' => false,
             'client_state' => base64_encode(json_encode([
                 'action' => 'in_conference',
                 'call_log_id' => $callLogId,
                 'conference_name' => $conferenceName,
             ])),
-        ]);
+        ];
+
+        // Play ringback tone while caller waits for an admin to join
+        $holdAudioUrl = config('services.telnyx.hold_audio_url')
+            ?: rtrim(config('app.url'), '/') . '/audio/ringback.wav';
+        $conferenceParams['hold_audio_url'] = $holdAudioUrl;
+
+        $this->sendCallCommand($callControlId, 'conference', $conferenceParams);
     }
 
     /**
@@ -541,11 +553,17 @@ class TelnyxWebhookController extends Controller
             $ttsComplete = $metadata['tts_complete'] ?? false;
 
             if ($ttsComplete) {
-                Log::channel('telnyx')->info('All admin legs failed — triggering voicemail', [
+                // Caller is in the conference hearing ringback — leave first, then voicemail
+                Log::channel('telnyx')->info('All admin legs failed — leaving conference before voicemail', [
                     'incoming_call_control_id' => $incomingCallControlId,
                     'call_log_id' => $callLogId,
                 ]);
-                $this->triggerVoicemail($incomingCallControlId, $callLogId);
+                $this->sendCallCommand($incomingCallControlId, 'leave', [
+                    'client_state' => base64_encode(json_encode([
+                        'action' => 'leave_for_voicemail',
+                        'call_log_id' => $callLogId,
+                    ])),
+                ]);
             } else {
                 // TTS still playing — set flag so voicemail triggers when TTS finishes
                 Log::channel('telnyx')->info('All admin legs failed but TTS still playing — deferring voicemail', [
@@ -555,6 +573,41 @@ class TelnyxWebhookController extends Controller
                 $metadata['all_admins_failed'] = true;
                 $callLog->update(['metadata' => $metadata]);
             }
+        }
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Handle call.leave - call left a conference.
+     * If action is 'leave_for_voicemail', trigger the IVR voicemail menu.
+     */
+    protected function handleCallLeave(array $data): JsonResponse
+    {
+        $payload = $data['payload'] ?? [];
+        $callControlId = $payload['call_control_id'] ?? null;
+        $clientStateRaw = $payload['client_state'] ?? null;
+
+        $clientState = $clientStateRaw
+            ? json_decode(base64_decode($clientStateRaw), true)
+            : null;
+
+        $action = $clientState['action'] ?? null;
+
+        Log::channel('telnyx')->info('Call left conference', [
+            'call_control_id' => $callControlId,
+            'action' => $action,
+        ]);
+
+        if ($action === 'leave_for_voicemail') {
+            $callLogId = $clientState['call_log_id'] ?? null;
+
+            Log::channel('telnyx')->info('Left conference — triggering voicemail', [
+                'call_control_id' => $callControlId,
+                'call_log_id' => $callLogId,
+            ]);
+
+            $this->triggerVoicemail($callControlId, $callLogId);
         }
 
         return response()->json(['status' => 'ok']);
@@ -699,7 +752,7 @@ class TelnyxWebhookController extends Controller
                     'name' => $conferenceName,
                     'beep_enabled' => 'never',
                     'end_conference_on_exit' => false,
-                    'start_conference_on_create' => false,
+                    'start_conference_on_create' => true,
                     'client_state' => base64_encode(json_encode([
                         'action' => 'admin_in_conference',
                         'call_log_id' => $callLogId,
@@ -874,7 +927,7 @@ class TelnyxWebhookController extends Controller
                     ->post('https://api.telnyx.com/v2/calls', [
                         'connection_id' => $connectionId,
                         'to' => $phone,
-                        'from' => $telnyxFrom,
+                        'from' => $originalCaller ?? $telnyxFrom,
                         'from_display_name' => $callLog?->caller_name ?: ($originalCaller ?? 'Incoming Call'),
                         'timeout_secs' => $timeout,
                         'client_state' => base64_encode(json_encode([
@@ -1532,6 +1585,25 @@ class TelnyxWebhookController extends Controller
         $thread = null;
         if ($from && $to) {
             $thread = SmsGroupThread::findByParticipant($to, $from);
+
+            // In dev, outbound SMS is redirected to TELNYX_DEV_TO so replies come
+            // from that number instead of the real participant. Fall back to the
+            // most-recently-active thread for our Telnyx number when no exact match.
+            if (! $thread && app()->environment(['local', 'development'])) {
+                $devTo = config('services.telnyx.dev_to');
+                if ($devTo && $from === $devTo) {
+                    // The thread from_number may be the current or a previous Telnyx number,
+                    // so just find the most recently active thread overall.
+                    $thread = SmsGroupThread::orderByDesc('last_activity_at')->first();
+
+                    if ($thread) {
+                        Log::channel('telnyx')->info('Dev fallback: matched inbound to most recent thread', [
+                            'thread_id' => $thread->id,
+                            'dev_from' => $from,
+                        ]);
+                    }
+                }
+            }
         }
 
         // Prevent duplicate messages from repeated webhook deliveries

@@ -28,6 +28,10 @@ class SmsConversation extends Component
 
     public $attachment;
 
+    public bool $showImageLightbox = false;
+
+    public ?string $lightboxImageUrl = null;
+
     public bool $isClientUser = false;
 
     protected ?int $lastMarkedMessageId = null;
@@ -67,6 +71,12 @@ class SmsConversation extends Component
         $this->attachment = null;
     }
 
+    public function openImageLightbox(string $url): void
+    {
+        $this->lightboxImageUrl = $url;
+        $this->showImageLightbox = true;
+    }
+
     public function updatedThreadId(): void
     {
         $this->markThreadAsRead();
@@ -104,15 +114,40 @@ class SmsConversation extends Component
         $mediaUrls = [];
         if ($this->attachment) {
             $path = $this->attachment->store('sms-attachments', 'public');
-            // Use public-facing URL so Telnyx can fetch the media
-            $publicBase = config('app.url');
-            $mediaUrls[] = rtrim($publicBase, '/') . '/storage/' . $path;
+            // Use the publicly routable URL so Telnyx can fetch the media.
+            // url() uses the current request host (e.g. dev.hive.contractors via tunnel).
+            $mediaUrls[] = url('storage/' . $path);
         }
 
         $smsService->sendToThread($thread, $messageWithSig, $mediaUrls, auth()->id());
 
         $this->newMessage = '';
         $this->attachment = null;
+
+        $this->dispatch('messageSent');
+    }
+
+    public function resendOptInPrompt(GroupSmsService $smsService): void
+    {
+        if ($this->isClientUser) {
+            abort(403, 'Client users cannot send messages.');
+        }
+
+        if (! $this->threadId) {
+            Flux::toast(variant: 'danger', heading: 'No Thread', text: 'No conversation selected.', duration: 4000, position: 'top right');
+            return;
+        }
+
+        $thread = SmsGroupThread::findOrFail($this->threadId);
+
+        if (! $thread->hasPendingOptIn()) {
+            Flux::toast(variant: 'info', heading: 'Already Opted In', text: 'All recipients have already replied START.', duration: 4000, position: 'top right');
+            return;
+        }
+
+        $smsService->resendConsentPrompt($thread);
+
+        Flux::toast(variant: 'success', heading: 'Prompt Sent', text: 'START opt-in message was resent to this thread.', duration: 4500, position: 'top right');
 
         $this->dispatch('messageSent');
     }

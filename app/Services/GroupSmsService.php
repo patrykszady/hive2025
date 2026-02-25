@@ -119,6 +119,19 @@ class GroupSmsService
         return true;
     }
 
+    public function resendConsentPrompt(SmsGroupThread $thread): bool
+    {
+        if (! $thread->hasPendingOptIn()) {
+            return false;
+        }
+
+        // Automated consent message should not be attributed to a user
+        $this->sendToThread($thread, $this->buildConsentMessage($thread), [], null);
+        $thread->update(['opt_in_prompt_sent_at' => now()]);
+
+        return true;
+    }
+
     public static function isStartKeyword(string $text): bool
     {
         return preg_match('/\bSTART\b/i', trim($text)) === 1;

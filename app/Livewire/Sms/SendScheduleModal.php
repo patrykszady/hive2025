@@ -79,7 +79,7 @@ class SendScheduleModal extends Component
             return collect();
         }
 
-        $today = Carbon::today();
+        $today = Carbon::today(browser_timezone());
         $endDate = $today->copy()->addDays($this->daysAhead - 1);
         $todayStr = $today->format('Y-m-d');
         $endDateStr = $endDate->format('Y-m-d');
@@ -104,7 +104,7 @@ class SendScheduleModal extends Component
     public function groupedUpcomingTasks(): \Illuminate\Support\Collection
     {
         $tasks = $this->upcomingTasks;
-        $today = Carbon::today();
+        $today = Carbon::today(browser_timezone());
         $endDate = $today->copy()->addDays($this->daysAhead - 1);
         $todayStr = $today->format('Y-m-d');
         $endDateStr = $endDate->format('Y-m-d');
@@ -196,7 +196,7 @@ class SendScheduleModal extends Component
         $intro = "Your project upcoming {$taskWord}:";
 
         // Build task lines grouped by day (matching digest format)
-        $today = Carbon::today();
+        $today = Carbon::today(browser_timezone());
         $tomorrow = $today->copy()->addDay();
         $daySections = [];
         foreach ($grouped as $dateStr => $dayTasks) {

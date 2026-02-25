@@ -44,7 +44,7 @@ class EmailVerificationCode extends Mailable
     {
         return new Envelope(
             from: new Address(config('mail.from.address'), config('mail.from.name')),
-            subject: 'Your verification code',
+            subject: $this->verification_code . ' is your verification code',
         );
     }
 
