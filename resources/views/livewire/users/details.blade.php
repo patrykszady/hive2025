@@ -156,26 +156,15 @@
                 button.dataset.passkeyBound = 'true';
 
                 const showError = (message) => {
-                    if (!errorElement) {
-                        return;
-                    }
-
+                    if (!errorElement) return;
                     errorElement.textContent = message;
                     errorElement.classList.remove('hidden');
-
-                    if (successElement) {
-                        successElement.classList.add('hidden');
-                    }
+                    if (successElement) successElement.classList.add('hidden');
                 };
 
                 const showSuccess = () => {
-                    if (errorElement) {
-                        errorElement.classList.add('hidden');
-                    }
-
-                    if (successElement) {
-                        successElement.classList.remove('hidden');
-                    }
+                    if (errorElement) errorElement.classList.add('hidden');
+                    if (successElement) successElement.classList.remove('hidden');
                 };
 
                 if (window.Webpass && Webpass.isUnsupported()) {
@@ -185,13 +174,8 @@
                 }
 
                 button.addEventListener('click', async () => {
-                    if (errorElement) {
-                        errorElement.classList.add('hidden');
-                    }
-
-                    if (successElement) {
-                        successElement.classList.add('hidden');
-                    }
+                    if (errorElement) errorElement.classList.add('hidden');
+                    if (successElement) successElement.classList.add('hidden');
 
                     if (!window.Webpass) {
                         showError('Passkeys are still loading. Try again in a moment.');
@@ -199,25 +183,30 @@
                     }
 
                     try {
-                        console.log('Starting WebAuthn registration...');
-                        const result = await Webpass.attest(
+                        const { success, error } = await Webpass.attest(
                             { path: '/webauthn/register/options', credentials: 'include' },
                             { path: '/webauthn/register', credentials: 'include' }
                         );
-                        console.log('Webpass.attest result:', result);
 
-                        if (result.success) {
+                        if (success) {
                             showSuccess();
-                            // Refresh the page to show the new passkey
                             setTimeout(() => window.location.reload(), 1000);
                             return;
                         }
 
-                        console.error('WebAuthn error:', result.error);
-                        showError(result.error?.message || 'Passkey registration failed.');
+                        if (error?.name === 'NotAllowedError' || error?.name === 'AttestationCancelled') {
+                            showError('Passkey setup was cancelled or not allowed. If a passkey already exists for this device, remove it from your device settings first.');
+                        } else if (error?.name === 'InvalidStateError') {
+                            showError('A passkey already exists for this account on this device.');
+                        } else {
+                            showError(error?.message || 'Passkey registration failed.');
+                        }
                     } catch (exception) {
-                        console.error('WebAuthn exception:', exception);
-                        showError(exception?.message || 'Passkey registration failed.');
+                        if (exception?.name === 'InvalidStateError') {
+                            showError('A passkey already exists for this account on this device.');
+                        } else {
+                            showError(exception?.message || 'Passkey registration failed.');
+                        }
                     }
                 });
             };

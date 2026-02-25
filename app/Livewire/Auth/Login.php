@@ -3,6 +3,7 @@
 namespace App\Livewire\Auth;
 
 use App\Models\User;
+use App\Traits\DetectsDeviceType;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Title;
@@ -10,6 +11,7 @@ use Livewire\Component;
 
 class Login extends Component
 {
+    use DetectsDeviceType;
     public string $identifier = '';
     public string $email = '';
     public string $password = '';
@@ -78,7 +80,10 @@ class Login extends Component
         }
 
         $this->email = (string) $user->email;
-        $this->hasPasskey = $user->webAuthnCredentials()->whereNull('disabled_at')->exists()
+        $this->hasPasskey = $user->webAuthnCredentials()
+                ->whereNull('disabled_at')
+                ->where('device_type', $this->currentDeviceType())
+                ->exists()
             && $this->canUsePasskeysForCurrentRequest();
         $this->hasPassword = filled($user->password);
         $this->step = 'credentials';
@@ -124,11 +129,16 @@ class Login extends Component
                 return;
             }
 
-            if (!$user->webAuthnCredentials()->whereNull('disabled_at')->exists()) {
+            $hasPasskeyForDevice = $user->webAuthnCredentials()
+                ->whereNull('disabled_at')
+                ->where('device_type', $this->currentDeviceType())
+                ->exists();
+
+            if (! $hasPasskeyForDevice) {
                 $this->redirect(route('passkey.setup'), navigate: true);
                 return;
             }
-            
+
             $this->redirectIntended(default: route('dashboard'), navigate: true);
             return;
         }
@@ -207,7 +217,7 @@ class Login extends Component
             return false;
         }
 
-        $rpId = trim((string) config('webauthn.id', ''));
+        $rpId = trim((string) config('webauthn.relying_party.id', ''));
         if ($rpId === '') {
             return true;
         }

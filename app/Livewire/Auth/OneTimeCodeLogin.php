@@ -4,6 +4,7 @@ namespace App\Livewire\Auth;
 
 use App\Mail\EmailVerificationCode;
 use App\Models\User;
+use App\Traits\DetectsDeviceType;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Mail;
@@ -13,6 +14,7 @@ use Livewire\Component;
 
 class OneTimeCodeLogin extends Component
 {
+    use DetectsDeviceType;
     #[Url]
     public string $email = '';
 
@@ -223,7 +225,13 @@ class OneTimeCodeLogin extends Component
         Auth::login($this->user, remember: true);
 
         session()->flash('message', 'Welcome back!');
-        if (!Auth::user()->webAuthnCredentials()->whereNull('disabled_at')->exists()) {
+
+        $hasPasskeyForDevice = Auth::user()->webAuthnCredentials()
+            ->whereNull('disabled_at')
+            ->where('device_type', $this->currentDeviceType())
+            ->exists();
+
+        if (! $hasPasskeyForDevice) {
             $this->redirect(route('passkey.setup'), navigate: true);
             return;
         }

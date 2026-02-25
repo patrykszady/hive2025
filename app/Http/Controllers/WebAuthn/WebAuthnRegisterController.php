@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\WebAuthn;
 
+use App\Traits\DetectsDeviceType;
 use Illuminate\Contracts\Support\Responsable;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Log;
@@ -12,21 +13,15 @@ use function response;
 
 class WebAuthnRegisterController
 {
+    use DetectsDeviceType;
+
     /**
      * Returns a challenge to be verified by the user device.
      */
     public function options(AttestationRequest $request): Responsable
     {
-        Log::channel('single')->info('WebAuthn options: Request received', [
-            'user_id' => $request->user()?->id,
-            'session_id' => session()->getId(),
-            'auth_check' => auth()->check(),
-        ]);
-
         return $request
-            ->fastRegistration()
             ->allowDuplicates()
-//            ->userless()
             ->toCreate();
     }
 
@@ -41,7 +36,7 @@ class WebAuthnRegisterController
             'auth_check' => auth()->check(),
         ]);
         $userAgent = (string) $request->header('User-Agent');
-        $deviceType = $this->resolveDeviceType($userAgent);
+        $deviceType = $this->resolveDeviceTypeFromUserAgent($userAgent);
         $deviceName = $this->resolveDeviceName($deviceType, $userAgent);
 
         $request->save([
@@ -59,37 +54,6 @@ class WebAuthnRegisterController
         }
 
         return response()->noContent();
-    }
-
-    private function resolveDeviceType(string $userAgent): string
-    {
-        $ua = strtolower($userAgent);
-
-        if ($ua === '') {
-            return 'Unknown';
-        }
-
-        if (str_contains($ua, 'iphone') || str_contains($ua, 'ipad') || str_contains($ua, 'ios')) {
-            return 'iOS';
-        }
-
-        if (str_contains($ua, 'android')) {
-            return 'Android';
-        }
-
-        if (str_contains($ua, 'windows')) {
-            return 'Windows';
-        }
-
-        if (str_contains($ua, 'macintosh') || str_contains($ua, 'mac os x')) {
-            return 'macOS';
-        }
-
-        if (str_contains($ua, 'linux')) {
-            return 'Linux';
-        }
-
-        return 'Unknown';
     }
 
     private function resolveDeviceName(string $deviceType, string $userAgent): string

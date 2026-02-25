@@ -3,6 +3,7 @@
 namespace App\Livewire\Users;
 
 use App\Models\User;
+use Flux;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
@@ -40,6 +41,12 @@ class UserDetails extends Component
         }
 
         $credential->disable();
+
+        Flux::toast(
+            text: 'Also remove the passkey from your device settings (e.g. Windows Settings → Accounts → Passkeys).',
+            heading: 'Passkey revoked',
+            variant: 'warning',
+        );
 
         $this->dispatch('refreshComponent');
     }
