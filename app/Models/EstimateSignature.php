@@ -9,8 +9,10 @@ class EstimateSignature extends Model
 {
     protected $fillable = [
         'estimate_id',
+        'user_id',
         'signer_name',
         'signer_email',
+        'signer_phone',
         'signature_data',
         'signature_type',
         'ip_address',
@@ -29,5 +31,10 @@ class EstimateSignature extends Model
     public function estimate(): BelongsTo
     {
         return $this->belongsTo(Estimate::class);
+    }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
     }
 }

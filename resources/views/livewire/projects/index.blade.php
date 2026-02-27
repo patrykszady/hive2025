@@ -5,32 +5,22 @@
 <div class="max-w-3xl space-y-2">
     @if($view === NULL)
         <x-island-card heading="Filters" :separator="true" class="mb-4">
-
-            {{-- Filter inputs: skeleton until Alpine hydrates Flux components --}}
-            <div
-                x-data="{ ready: false }"
-                x-init="$nextTick(() => ready = true)"
-                class="grid grid-cols-1 sm:grid-cols-{{ auth()->user()->is_client_user ? '2' : '3' }} gap-4"
-            >
-                {{-- Labels always visible --}}
-                <flux:field>
-                    <flux:label>Project</flux:label>
-                    <div x-show="!ready" class="h-10 w-full"></div>
-                    <div x-show="ready" x-cloak x-transition.opacity.duration.150ms>
+            <div class="flex flex-col sm:flex-row gap-4">
+                <div class="flex-1 min-w-0">
+                    <flux:field>
+                        <flux:label>Project</flux:label>
                         <flux:input
                             wire:model.live.debounce.400ms="project_name_search"
-                            wire:input.debounce.400ms="$set('project_name_search', $event.target.value)"
                             icon="magnifying-glass"
                             placeholder="Search projects..."
                         />
-                    </div>
-                </flux:field>
+                    </flux:field>
+                </div>
 
                 @if(!auth()->user()->is_client_user)
-                    <flux:field>
-                        <flux:label>Client</flux:label>
-                        <div x-show="!ready" class="h-10 w-full"></div>
-                        <div x-show="ready" x-cloak x-transition.opacity.duration.150ms>
+                    <div class="flex-1 min-w-0">
+                        <flux:field>
+                            <flux:label>Client</flux:label>
                             <flux:select wire:model.live="client_id" variant="listbox" searchable clearable placeholder="All Clients...">
                                 <x-slot name="search">
                                     <flux:select.search placeholder="Search..." />
@@ -39,14 +29,13 @@
                                     <flux:select.option value="{{$client->id}}">{{ $client->name }}</flux:select.option>
                                 @endforeach
                             </flux:select>
-                        </div>
-                    </flux:field>
+                        </flux:field>
+                    </div>
                 @endif
 
-                <flux:field>
-                    <flux:label>Status</flux:label>
-                    <div x-show="!ready" class="h-10 w-full"></div>
-                    <div x-show="ready" x-cloak x-transition.opacity.duration.150ms>
+                <div class="flex-1 min-w-0">
+                    <flux:field>
+                        <flux:label>Status</flux:label>
                         <flux:select variant="listbox" multiple clearable placeholder="Choose status..." wire:model.live="project_status_title">
                             @foreach($projectStatuses as $status)
                                 <flux:select.option :value="$status['code']">
@@ -56,8 +45,8 @@
                                 </flux:select.option>
                             @endforeach
                         </flux:select>
-                    </div>
-                </flux:field>
+                    </flux:field>
+                </div>
             </div>
         </x-island-card>
     @endif

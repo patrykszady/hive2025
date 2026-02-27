@@ -15,8 +15,12 @@
                         
                         <flux:menu.item icon="document-duplicate" wire:click="$dispatchTo('estimates.estimate-duplicate', 'duplicateModal', { estimate: {{$estimate->id}} })">Duplicate Estimate</flux:menu.item>
                         <flux:menu.item icon="envelope" wire:click="$dispatchTo('estimates.estimate-email', 'compose', { estimate: {{$estimate->id}} })">Email Estimate</flux:menu.item>
-                        <flux:menu.item icon="pencil-square" wire:click="copySigningLink">Copy Signing Link</flux:menu.item>
-                        <flux:menu.item icon="paper-airplane" wire:click="sendInvite" wire:loading.attr="disabled" wire:target="sendInvite">Send Invite</flux:menu.item>
+                        @if(!empty($estimate->payments))
+                            <flux:menu.item icon="pencil-square" href="{{ route('estimate.sign', $estimate) }}" navigate>Sign Contract</flux:menu.item>
+                        @endif
+                        @if($estimate->client?->users?->contains(fn ($u) => !($u->registration['registered'] ?? false)))
+                            <flux:menu.item icon="paper-airplane" wire:click="sendInvite" wire:loading.attr="disabled" wire:target="sendInvite">Send Invite</flux:menu.item>
+                        @endif
 
                         <flux:menu.separator />
                     @endcan
@@ -116,8 +120,14 @@
                 title="Signature" 
                 :no-cloak="false"
             >
-                @if($estimate->isSigned())
-                    <flux:badge color="green" size="sm" icon="check">Signed — {{ $estimate->signature->signer_name }}</flux:badge>
+                @if($estimate->isFullySigned())
+                    <flux:badge color="green" size="sm" icon="check">Fully Signed</flux:badge>
+                @elseif($estimate->isSigned())
+                    @if($estimate->isVendorSigned())
+                        <flux:badge color="yellow" size="sm" icon="clock">Awaiting Client Signatures</flux:badge>
+                    @else
+                        <flux:badge color="yellow" size="sm" icon="clock">Vendor Signed — Awaiting Clients</flux:badge>
+                    @endif
                 @elseif(!empty($estimate->payments))
                     <flux:badge color="yellow" size="sm">Awaiting Signature</flux:badge>
                 @else

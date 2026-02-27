@@ -307,6 +307,8 @@
         <flux:modal wire:model="showImageLightbox" name="sms-image-lightbox" class="!p-0 !rounded-xl max-w-lg sm:max-w-xl md:max-w-2xl">
             <div
                 x-data="{
+                    images: @js($this->threadImages),
+                    currentIndex: 0,
                     scale: 1,
                     translateX: 0,
                     translateY: 0,
@@ -322,6 +324,25 @@
                     touchStartY: 0,
                     lastTouchX: 0,
                     lastTouchY: 0,
+                    swipeStartX: null,
+
+                    get currentUrl() { return this.images[this.currentIndex] ?? ''; },
+                    get hasMultiple() { return this.images.length > 1; },
+                    get hasPrev() { return this.currentIndex > 0; },
+                    get hasNext() { return this.currentIndex < this.images.length - 1; },
+
+                    goTo(idx) {
+                        if (idx < 0 || idx >= this.images.length) return;
+                        this.resetZoom();
+                        this.currentIndex = idx;
+                    },
+                    prev() { this.goTo(this.currentIndex - 1); },
+                    next() { this.goTo(this.currentIndex + 1); },
+
+                    syncFromWire(url) {
+                        const idx = this.images.indexOf(url);
+                        if (idx !== -1) this.currentIndex = idx;
+                    },
 
                     resetZoom() {
                         this.scale = 1;
@@ -414,7 +435,11 @@
                         } else if (e.touches.length === 1) {
                             this.lastTouchX = e.touches[0].clientX;
                             this.lastTouchY = e.touches[0].clientY;
-                            this.isPanning = this.isZoomed;
+                            if (this.isZoomed) {
+                                this.isPanning = true;
+                            } else {
+                                this.swipeStartX = e.touches[0].clientX;
+                            }
                         }
                     },
 
@@ -440,14 +465,24 @@
                         }
                     },
 
-                    handleTouchEnd() {
+                    handleTouchEnd(e) {
+                        if (this.swipeStartX !== null && e.changedTouches.length) {
+                            const dx = e.changedTouches[0].clientX - this.swipeStartX;
+                            if (Math.abs(dx) > 50) {
+                                dx > 0 ? this.prev() : this.next();
+                            }
+                            this.swipeStartX = null;
+                        }
                         this.initialPinchDistance = null;
                         this.isPanning = false;
                         if (this.scale < 1.05) this.resetZoom();
                     }
                 }"
                 x-ref="zoomContainer"
-                x-init="$watch('$wire.showImageLightbox', v => { if (!v) resetZoom(); })"
+                x-init="
+                    $watch('$wire.showImageLightbox', v => { if (!v) { resetZoom(); } });
+                    $watch('$wire.lightboxImageUrl', v => { if (v) syncFromWire(v); });
+                "
                 :class="isZoomed ? 'cursor-grab active:cursor-grabbing' : ''"
                 @wheel.prevent="handleWheel($event)"
                 @dblclick="handleDoubleTap($event)"
@@ -457,7 +492,9 @@
                 @mouseleave="handleMouseUp()"
                 @touchstart="handleTouchStart($event)"
                 @touchmove="handleTouchMove($event)"
-                @touchend="handleTouchEnd()"
+                @touchend="handleTouchEnd($event)"
+                @keydown.left.window="$wire.showImageLightbox && !isZoomed && prev()"
+                @keydown.right.window="$wire.showImageLightbox && !isZoomed && next()"
                 class="relative"
             >
                 {{-- Close button --}}
@@ -470,6 +507,41 @@
                         <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
                 </flux:modal.close>
+
+                {{-- Previous button --}}
+                <button
+                    x-show="hasMultiple && hasPrev && !isZoomed"
+                    x-transition.opacity
+                    @click.stop="prev()"
+                    type="button"
+                    class="absolute left-2 top-1/2 -translate-y-1/2 z-20 rounded-full bg-black/50 p-2 text-white/80 hover:bg-black/70 hover:text-white transition"
+                    aria-label="Previous image"
+                >
+                    <svg class="size-5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
+                </button>
+
+                {{-- Next button --}}
+                <button
+                    x-show="hasMultiple && hasNext && !isZoomed"
+                    x-transition.opacity
+                    @click.stop="next()"
+                    type="button"
+                    class="absolute right-2 top-1/2 -translate-y-1/2 z-20 rounded-full bg-black/50 p-2 text-white/80 hover:bg-black/70 hover:text-white transition"
+                    aria-label="Next image"
+                >
+                    <svg class="size-5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
+                </button>
+
+                {{-- Image counter --}}
+                <div
+                    x-show="hasMultiple && !isZoomed"
+                    x-transition.opacity
+                    class="absolute bottom-3 left-1/2 -translate-x-1/2 z-20"
+                >
+                    <div class="bg-black/60 text-white px-2.5 py-1 rounded-full text-xs">
+                        <span x-text="(currentIndex + 1) + ' / ' + images.length"></span>
+                    </div>
+                </div>
 
                 {{-- Zoom indicator --}}
                 <div
@@ -488,7 +560,7 @@
                 {{-- Image --}}
                 <div class="overflow-hidden rounded-xl select-none" :class="isZoomed ? 'touch-none' : ''">
                     <img
-                        src="{{ $lightboxImageUrl ?? '' }}"
+                        :src="currentUrl"
                         alt="MMS attachment"
                         class="block max-h-[80vh] w-auto max-w-full object-contain select-none transition-transform duration-100 ease-out"
                         :style="`transform: scale(${scale}) translate(${translateX / scale}px, ${translateY / scale}px); transform-origin: center center;`"

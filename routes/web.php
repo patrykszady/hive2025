@@ -152,20 +152,21 @@ Route::prefix('client/schedule')->name('client.schedule.')->group(function () {
     Route::get('{token}', ClientScheduleIndex::class)->name('index');
 });
 
-// Public estimate signing route (signed URL - no auth required)
-Route::get('estimate/sign/{estimate}', EstimateSign::class)
-    ->name('estimate.sign')
-    ->middleware('signed');
+// Estimate signing (requires auth — guests are redirected to login)
+Route::middleware(['auth', 'registered'])->group(function () {
+    Route::get('estimate/sign/{estimate}', EstimateSign::class)
+        ->name('estimate.sign');
 
-// Inline PDF preview for the signing page
-Route::get('estimate/sign/{estimate}/pdf', function (Estimate $estimate) {
-    $result = EstimateDocumentGenerator::generate($estimate);
+    // Inline PDF preview for the signing page
+    Route::get('estimate/sign/{estimate}/pdf', function (Estimate $estimate) {
+        $result = EstimateDocumentGenerator::generate($estimate);
 
-    return response($result['binary'])
-        ->header('Content-Type', 'application/pdf')
-        ->header('Content-Disposition', 'inline; filename="' . $result['filename'] . '"')
-        ->header('Cache-Control', 'private, max-age=3600');
-})->name('estimate.sign.pdf')->middleware('signed');
+        return response($result['binary'])
+            ->header('Content-Type', 'application/pdf')
+            ->header('Content-Disposition', 'inline; filename="' . $result['filename'] . '"')
+            ->header('Cache-Control', 'private, max-age=3600');
+    })->name('estimate.sign.pdf');
+});
 
 Route::middleware('auth')->group(function () {
     Route::post('logout', function () {

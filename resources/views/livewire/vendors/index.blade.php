@@ -6,16 +6,20 @@
             @endcan
         </x-slot:actions>
 
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <flux:input wire:model.live="business_name" label="Vendor Name" icon="magnifying-glass" placeholder="Search Vendors" />
+        <div class="flex flex-col sm:flex-row gap-4">
+            <div class="flex-1 min-w-0">
+                <flux:input wire:model.live="business_name" label="Vendor Name" icon="magnifying-glass" placeholder="Search Vendors" />
+            </div>
 
-            <flux:select wire:model.live="vendor_type" label="Business Type" wire:model="vendor_type" placeholder="Choose type...">
-                <flux:select.option value="All">All Vendor Types</flux:select.option>
-                <flux:select.option value="Sub">Subcontractor</flux:select.option>
-                <flux:select.option value="Retail">Retail</flux:select.option>
-                <flux:select.option value="1099">1099/Independent</flux:select.option>
-                <flux:select.option value="DBA">DBA</flux:select.option>
-            </flux:select>
+            <div class="flex-1 min-w-0">
+                <flux:select wire:model.live="vendor_type" label="Business Type" wire:model="vendor_type" placeholder="Choose type...">
+                    <flux:select.option value="All">All Vendor Types</flux:select.option>
+                    <flux:select.option value="Sub">Subcontractor</flux:select.option>
+                    <flux:select.option value="Retail">Retail</flux:select.option>
+                    <flux:select.option value="1099">1099/Independent</flux:select.option>
+                    <flux:select.option value="DBA">DBA</flux:select.option>
+                </flux:select>
+            </div>
         </div>
     </x-island-card>
 

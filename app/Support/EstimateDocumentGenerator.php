@@ -105,7 +105,17 @@ class EstimateDocumentGenerator
             }
         }
 
-        // Load signature data if estimate has been signed
+        // Load all signatures for this estimate
+        $allSignatures = $estimate->signatures()->orderBy('signed_at')->get()->map(function ($sig) use ($timezone) {
+            return [
+                'data' => $sig->signature_data,
+                'name' => $sig->signer_name,
+                'date' => $sig->signed_at?->setTimezone($timezone)->format('m/d/Y g:i A'),
+                'type' => $sig->signature_type,
+            ];
+        });
+
+        // Keep legacy single-signature variables for backward compatibility
         $signatureData = null;
         $signatureName = null;
         $signatureDate = null;
@@ -117,7 +127,7 @@ class EstimateDocumentGenerator
             $signatureDate = $signature->signed_at->setTimezone($timezone)->format('m/d/Y g:i A');
         }
 
-        $view = view('misc.estimate', compact('estimate', 'vendor', 'client', 'clientContacts', 'project', 'sections', 'payments', 'title', 'estimate_total', 'estimate_total_words', 'type', 'reimbursements', 'contractBody', 'vendorLogoDataUrl', 'projectStatusTitle', 'projectFinances', 'signatureData', 'signatureName', 'signatureDate'))->render();
+        $view = view('misc.estimate', compact('estimate', 'vendor', 'client', 'clientContacts', 'project', 'sections', 'payments', 'title', 'estimate_total', 'estimate_total_words', 'type', 'reimbursements', 'contractBody', 'vendorLogoDataUrl', 'projectStatusTitle', 'projectFinances', 'signatureData', 'signatureName', 'signatureDate', 'allSignatures'))->render();
 
         // Browsershot's setHtml() has aggressive SSRF protection that rejects HTML
         // containing file://, 127.x, localhost, etc. In queue-worker context (Horizon),

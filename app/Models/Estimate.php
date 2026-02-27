@@ -59,12 +59,46 @@ class Estimate extends Model
 
     public function signature(): HasOne
     {
-        return $this->hasOne(EstimateSignature::class);
+        return $this->hasOne(EstimateSignature::class)->latest('signed_at');
+    }
+
+    /**
+     * All signatures on this estimate.
+     */
+    public function signatures(): HasMany
+    {
+        return $this->hasMany(EstimateSignature::class);
+    }
+
+    /**
+     * Check if the vendor has signed this estimate.
+     */
+    public function isVendorSigned(): bool
+    {
+        $vendorUserIds = $this->vendor?->users()?->pluck('users.id') ?? collect();
+
+        return $this->signatures()->whereIn('user_id', $vendorUserIds)->exists();
+    }
+
+    /**
+     * Check if the estimate has been fully signed (vendor + all client users).
+     */
+    public function isFullySigned(): bool
+    {
+        if (! $this->isVendorSigned()) {
+            return false;
+        }
+
+        $requiredClientSigners = $this->project?->client?->users?->count() ?? 1;
+        $clientUserIds = $this->project?->client?->users?->pluck('id') ?? collect();
+        $clientSignatures = $this->signatures()->whereIn('user_id', $clientUserIds)->count();
+
+        return $clientSignatures >= $requiredClientSigners;
     }
 
     public function isSigned(): bool
     {
-        return $this->signature()->exists();
+        return $this->signatures()->exists();
     }
 
     // Define the 'status' accessor

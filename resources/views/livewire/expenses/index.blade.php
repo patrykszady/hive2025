@@ -9,46 +9,54 @@
                 @endcan
             </x-slot:actions>
 
-            <div class="grid grid-cols-1 sm:grid-cols-4 items-end gap-4">
-                <flux:input wire:model.live.debounce.300ms="amount" label="Amount" icon="magnifying-glass" placeholder="Search Amount" />
+            <div class="flex flex-col sm:flex-row items-end gap-4">
+                <div class="flex-1 min-w-0 w-full">
+                    <flux:input wire:model.live.debounce.300ms="amount" label="Amount" icon="magnifying-glass" placeholder="Search Amount" />
+                </div>
 
-                <flux:select wire:model.live="expense_vendor" label="Vendor" variant="listbox" searchable placeholder="Choose Vendor...">
-                    <x-slot name="search">
-                        <flux:select.search placeholder="Search..." />
-                    </x-slot>
+                <div class="flex-1 min-w-0 w-full">
+                    <flux:select wire:model.live="expense_vendor" label="Vendor" variant="listbox" searchable placeholder="Choose Vendor...">
+                        <x-slot name="search">
+                            <flux:select.search placeholder="Search..." />
+                        </x-slot>
 
-                    <flux:select.option value="">ALL VENDORS</flux:select.option>
-                    <flux:select.option value="0">NO VENDOR</flux:select.option>
-                    <flux:select.option disabled>---------</flux:select.option>
-                    @foreach ($vendors as $vendor)
-                        <flux:select.option value="{{$vendor->id}}">{{ $vendor->name }}</flux:select.option>
-                    @endforeach
-                </flux:select>
+                        <flux:select.option value="">ALL VENDORS</flux:select.option>
+                        <flux:select.option value="0">NO VENDOR</flux:select.option>
+                        <flux:select.option disabled>---------</flux:select.option>
+                        @foreach ($vendors as $vendor)
+                            <flux:select.option value="{{$vendor->id}}">{{ $vendor->name }}</flux:select.option>
+                        @endforeach
+                    </flux:select>
+                </div>
 
-                <flux:select wire:model.live="project_id" label="Project" variant="listbox" searchable placeholder="Choose Project...">
-                    <x-slot name="search">
-                        <flux:select.search placeholder="Search..." />
-                    </x-slot>
+                <div class="flex-1 min-w-0 w-full">
+                    <flux:select wire:model.live="project_id" label="Project" variant="listbox" searchable placeholder="Choose Project...">
+                        <x-slot name="search">
+                            <flux:select.search placeholder="Search..." />
+                        </x-slot>
 
-                    <flux:select.option value="">ALL PROJECTS</flux:select.option>
-                    <flux:select.option value="NO_PROJECT">NO PROJECT</flux:select.option>
-                    <flux:select.option value="SPLIT">SPLIT</flux:select.option>
-                    <flux:select.option disabled>---------</flux:select.option>                                        
-                    @foreach ($distributions as $distribution)
-                        <flux:select.option value="D:{{$distribution->id}}">{{ $distribution->name }}</flux:select.option>
-                    @endforeach
-                    <flux:select.option disabled>---------</flux:select.option>
-                    @foreach ($projects as $project)
-                        <flux:select.option value="{{$project->id}}"><div>{{ $project->short_address }} <br> <i class="font-normal">{{$project->project_name}}</i></div></flux:select.option>
-                    @endforeach
-                </flux:select>
+                        <flux:select.option value="">ALL PROJECTS</flux:select.option>
+                        <flux:select.option value="NO_PROJECT">NO PROJECT</flux:select.option>
+                        <flux:select.option value="SPLIT">SPLIT</flux:select.option>
+                        <flux:select.option disabled>---------</flux:select.option>                                        
+                        @foreach ($distributions as $distribution)
+                            <flux:select.option value="D:{{$distribution->id}}">{{ $distribution->name }}</flux:select.option>
+                        @endforeach
+                        <flux:select.option disabled>---------</flux:select.option>
+                        @foreach ($projects as $project)
+                            <flux:select.option value="{{$project->id}}"><div>{{ $project->short_address }} <br> <i class="font-normal">{{$project->project_name}}</i></div></flux:select.option>
+                        @endforeach
+                    </flux:select>
+                </div>
 
-                <flux:select variant="listbox" label="Status" multiple placeholder="Choose status..." wire:model.live="expense_statuses">
-                    <flux:select.option value="Complete"><flux:badge size="md" inset="top bottom" color="green">Complete</flux:badge></flux:select.option>
-                    <flux:select.option value="No Transaction"><flux:badge size="md" inset="top bottom" color="yellow">No Transaction</flux:badge></flux:select.option>
-                    <flux:select.option value="No Project"><flux:badge size="md" inset="top bottom" color="red">No Project</flux:badge></flux:select.option>
-                    <flux:select.option value="Missing Info"><flux:badge size="md" inset="top bottom" color="amber">Missing Info</flux:badge></flux:select.option>
-                </flux:select>
+                <div class="flex-1 min-w-0 w-full">
+                    <flux:select variant="listbox" label="Status" multiple placeholder="Choose status..." wire:model.live="expense_statuses">
+                        <flux:select.option value="Complete"><flux:badge size="md" inset="top bottom" color="green">Complete</flux:badge></flux:select.option>
+                        <flux:select.option value="No Transaction"><flux:badge size="md" inset="top bottom" color="yellow">No Transaction</flux:badge></flux:select.option>
+                        <flux:select.option value="No Project"><flux:badge size="md" inset="top bottom" color="red">No Project</flux:badge></flux:select.option>
+                        <flux:select.option value="Missing Info"><flux:badge size="md" inset="top bottom" color="amber">Missing Info</flux:badge></flux:select.option>
+                    </flux:select>
+                </div>
             </div>
         </x-island-card>
     @endif

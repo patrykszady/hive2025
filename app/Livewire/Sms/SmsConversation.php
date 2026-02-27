@@ -77,6 +77,20 @@ class SmsConversation extends Component
         $this->showImageLightbox = true;
     }
 
+    /**
+     * Flat list of all media URLs in this thread for lightbox gallery navigation.
+     *
+     * @return array<int, string>
+     */
+    #[Computed]
+    public function threadImages(): array
+    {
+        return $this->smsMessages
+            ->flatMap(fn (SmsMessage $msg) => $msg->media_urls ?? [])
+            ->values()
+            ->all();
+    }
+
     public function updatedThreadId(): void
     {
         $this->markThreadAsRead();
