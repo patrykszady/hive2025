@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Estimate extends Model
@@ -54,6 +55,16 @@ class Estimate extends Model
     public function vendor(): BelongsTo
     {
         return $this->belongsTo(Vendor::class, 'belongs_to_vendor_id');
+    }
+
+    public function signature(): HasOne
+    {
+        return $this->hasOne(EstimateSignature::class);
+    }
+
+    public function isSigned(): bool
+    {
+        return $this->signature()->exists();
     }
 
     // Define the 'status' accessor

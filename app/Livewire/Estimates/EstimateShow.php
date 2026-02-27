@@ -18,6 +18,7 @@ use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Response;
+use Illuminate\Support\Facades\URL;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
@@ -577,6 +578,40 @@ class EstimateShow extends Component
             $this->sortBy = $column;
             $this->sortDirection = 'asc';
         }
+    }
+
+    /**
+     * Generate a temporary signed URL for the estimate signing page.
+     * Valid for 30 days.
+     */
+    public function getSigningUrl(): string
+    {
+        return URL::temporarySignedRoute(
+            'estimate.sign',
+            now()->addDays(30),
+            ['estimate' => $this->estimate->id]
+        );
+    }
+
+    public function copySigningLink(): void
+    {
+        if (empty($this->estimate->payments)) {
+            Flux::toast(
+                variant: 'warning',
+                heading: 'Not Ready',
+                text: 'Finalize the estimate first (add payments in Settings) before generating a signing link.',
+            );
+
+            return;
+        }
+
+        $this->dispatch('copy-to-clipboard', url: $this->getSigningUrl());
+
+        Flux::toast(
+            variant: 'success',
+            heading: 'Link Copied',
+            text: 'Signing link copied to clipboard. Valid for 30 days.',
+        );
     }
 
     #[Title('Estimate')]

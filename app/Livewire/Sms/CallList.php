@@ -78,7 +78,7 @@ class CallList extends Component
     {
         return CallLog::query()
             ->when($this->callFilter === 'missed', fn ($q) => $q->where('status', CallLog::STATUS_MISSED))
-            ->when($this->callFilter === 'voicemail', fn ($q) => $q->where('status', CallLog::STATUS_VOICEMAIL))
+            ->when($this->callFilter === 'voicemail', fn ($q) => $q->where('has_voicemail', true))
             ->orderByDesc('created_at')
             ->paginate(25);
     }

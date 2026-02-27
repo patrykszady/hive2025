@@ -35,6 +35,9 @@ use App\Livewire\Entry\VendorRegistration;
 use App\Livewire\Entry\VendorSelection;
 use App\Livewire\Estimates\EstimateCreate;
 use App\Livewire\Estimates\EstimateShow;
+use App\Livewire\Estimates\EstimateSign;
+use App\Models\Estimate;
+use App\Support\EstimateDocumentGenerator;
 use App\Livewire\Estimates\EstimatesIndex;
 use App\Livewire\Expenses\ExpenseIndex;
 use App\Livewire\Expenses\ExpenseShow;
@@ -148,6 +151,21 @@ Route::prefix('vendor/availability')->name('vendor.availability.')->group(functi
 Route::prefix('client/schedule')->name('client.schedule.')->group(function () {
     Route::get('{token}', ClientScheduleIndex::class)->name('index');
 });
+
+// Public estimate signing route (signed URL - no auth required)
+Route::get('estimate/sign/{estimate}', EstimateSign::class)
+    ->name('estimate.sign')
+    ->middleware('signed');
+
+// Inline PDF preview for the signing page
+Route::get('estimate/sign/{estimate}/pdf', function (Estimate $estimate) {
+    $result = EstimateDocumentGenerator::generate($estimate);
+
+    return response($result['binary'])
+        ->header('Content-Type', 'application/pdf')
+        ->header('Content-Disposition', 'inline; filename="' . $result['filename'] . '"')
+        ->header('Cache-Control', 'private, max-age=3600');
+})->name('estimate.sign.pdf')->middleware('signed');
 
 Route::middleware('auth')->group(function () {
     Route::post('logout', function () {

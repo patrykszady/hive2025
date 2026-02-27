@@ -15,6 +15,7 @@
                         
                         <flux:menu.item icon="document-duplicate" wire:click="$dispatchTo('estimates.estimate-duplicate', 'duplicateModal', { estimate: {{$estimate->id}} })">Duplicate Estimate</flux:menu.item>
                         <flux:menu.item icon="envelope" wire:click="$dispatchTo('estimates.estimate-email', 'compose', { estimate: {{$estimate->id}} })">Email Estimate</flux:menu.item>
+                        <flux:menu.item icon="pencil-square" wire:click="copySigningLink">Copy Signing Link</flux:menu.item>
                         <flux:menu.item icon="paper-airplane" wire:click="sendInvite" wire:loading.attr="disabled" wire:target="sendInvite">Send Invite</flux:menu.item>
 
                         <flux:menu.separator />
@@ -108,6 +109,21 @@
                 :content="money(($nonLivewire ?? false) ? ($estimateTotal ?? 0) : $this->estimate_total)"
                 :no-cloak="$nonLivewire ?? false"
             />
+        @endunless
+
+        @unless($nonLivewire ?? false)
+            <x-details.row 
+                title="Signature" 
+                :no-cloak="false"
+            >
+                @if($estimate->isSigned())
+                    <flux:badge color="green" size="sm" icon="check">Signed — {{ $estimate->signature->signer_name }}</flux:badge>
+                @elseif(!empty($estimate->payments))
+                    <flux:badge color="yellow" size="sm">Awaiting Signature</flux:badge>
+                @else
+                    <flux:badge color="zinc" size="sm">Not Finalized</flux:badge>
+                @endif
+            </x-details.row>
         @endunless
     </x-slot:details>
 

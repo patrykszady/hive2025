@@ -65,6 +65,34 @@ class SmsMessage extends Model
         return ! empty($this->media_urls);
     }
 
+    /**
+     * Normalise media URLs so legacy absolute URLs become relative paths.
+     * This ensures images display correctly regardless of the current domain.
+     *
+     * @return array<int, string>|null
+     */
+    public function getMediaUrlsAttribute(mixed $value): ?array
+    {
+        $urls = is_string($value) ? json_decode($value, true) : $value;
+
+        if (empty($urls)) {
+            return $urls;
+        }
+
+        return array_map(function (string $url): string {
+            // Convert absolute app URLs to relative paths (e.g. https://hive.contractors/storage/... → /storage/...)
+            if (str_starts_with($url, 'http')) {
+                $parsed = parse_url($url, PHP_URL_PATH);
+
+                if ($parsed && str_starts_with($parsed, '/storage/')) {
+                    return $parsed;
+                }
+            }
+
+            return $url;
+        }, $urls);
+    }
+
     public function thread(): BelongsTo
     {
         return $this->belongsTo(SmsGroupThread::class, 'thread_id');

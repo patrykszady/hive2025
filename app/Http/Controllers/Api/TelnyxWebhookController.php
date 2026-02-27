@@ -5,11 +5,14 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Jobs\SendInboundSmsBrowserNotifications;
 use App\Jobs\SendIncomingCallBrowserNotifications;
+use App\Jobs\StoreCallRecording;
 use App\Jobs\StoreSmsMedia;
 use App\Models\CallLog;
+use App\Models\Client;
 use App\Models\SmsGroupThread;
 use App\Models\SmsLog;
 use App\Models\SmsMessage;
+use App\Models\SmsThreadParticipant;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Services\GroupSmsService;
@@ -457,7 +460,8 @@ class TelnyxWebhookController extends Controller
 
             if ($callLog) {
                 $callLog->update([
-                    'status' => CallLog::STATUS_VOICEMAIL,
+                    'status' => CallLog::STATUS_MISSED,
+                    'has_voicemail' => true,
                     'hangup_cause' => $hangupCause,
                     'ended_at' => now(),
                     'duration_seconds' => $callLog->answered_at
@@ -490,11 +494,6 @@ class TelnyxWebhookController extends Controller
                 !$wasAnswered => CallLog::STATUS_MISSED,
                 default => CallLog::STATUS_COMPLETED,
             };
-
-            // Don't overwrite voicemail status
-            if ($callLog->status === CallLog::STATUS_VOICEMAIL) {
-                $status = CallLog::STATUS_VOICEMAIL;
-            }
 
             $callLog->update([
                 'status' => $status,
@@ -792,8 +791,10 @@ class TelnyxWebhookController extends Controller
             $callLog->update([
                 'recording_url' => $recordingUrl,
                 'has_voicemail' => $isVoicemail,
-                'status' => $isVoicemail ? CallLog::STATUS_VOICEMAIL : $callLog->status,
             ]);
+
+            // Download the recording locally before the Telnyx signed URL expires (~10 min)
+            StoreCallRecording::dispatch($callLog->id);
         }
 
         Log::channel('telnyx')->info('Call recording saved', [
@@ -927,7 +928,7 @@ class TelnyxWebhookController extends Controller
                     ->post('https://api.telnyx.com/v2/calls', [
                         'connection_id' => $connectionId,
                         'to' => $phone,
-                        'from' => $originalCaller ?? $telnyxFrom,
+                        'from' => $telnyxFrom,
                         'from_display_name' => $callLog?->caller_name ?: ($originalCaller ?? 'Incoming Call'),
                         'timeout_secs' => $timeout,
                         'client_state' => base64_encode(json_encode([
@@ -1663,15 +1664,94 @@ class TelnyxWebhookController extends Controller
                 ]);
             }
         } else {
-            Log::channel('telnyx')->info('No group thread found for inbound message', [
-                'from' => $from,
-                'to' => $to,
-            ]);
+            // Auto-create a new thread for this inbound message
+            $thread = $this->createThreadForInboundMessage($from, $to);
+
+            if ($thread) {
+                $message->update(['thread_id' => $thread->id]);
+
+                try {
+                    \App\Events\SmsMessageReceived::dispatch($thread->id);
+                } catch (\Throwable $e) {
+                    Log::warning('SMS broadcast failed', [
+                        'thread_id' => $thread->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
         }
 
         SendInboundSmsBrowserNotifications::dispatch($message->id);
 
         return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Create a new thread for an inbound message from an unknown sender.
+     *
+     * Attempts to match the sender's phone number to a client (via
+     * client home_phone or user cell_phone) so the thread is linked.
+     */
+    protected function createThreadForInboundMessage(string $senderPhone, string $ourNumber): ?SmsGroupThread
+    {
+        $normalizedSender = GroupSmsService::formatE164($senderPhone);
+
+        // Attempt to match to an existing client
+        $clientId = $this->resolveClientIdByPhone($normalizedSender);
+
+        $thread = SmsGroupThread::create([
+            'from_number' => $ourNumber,
+            'participants' => [$normalizedSender],
+            'client_id' => $clientId,
+            'last_activity_at' => now(),
+        ]);
+
+        SmsThreadParticipant::create([
+            'thread_id' => $thread->id,
+            'phone_number' => $normalizedSender,
+        ]);
+
+        Log::channel('telnyx')->info('Auto-created new thread for inbound message', [
+            'thread_id' => $thread->id,
+            'from' => $senderPhone,
+            'to' => $ourNumber,
+            'client_id' => $clientId,
+        ]);
+
+        return $thread;
+    }
+
+    /**
+     * Try to find a client by a phone number (checking client home_phone and user cell_phone).
+     *
+     * Phone numbers are stored as digits only, so we strip the E.164 prefix to compare.
+     */
+    protected function resolveClientIdByPhone(string $e164Phone): ?int
+    {
+        // Strip the leading + and country code for a 10-digit comparison
+        $digits = preg_replace('/[^0-9]/', '', $e164Phone);
+
+        // If 11 digits starting with 1 (US), take last 10
+        if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+            $digits = substr($digits, 1);
+        }
+
+        // Check client home_phone (stored as 10 digits)
+        $client = Client::whereRaw("REPLACE(home_phone, '-', '') = ?", [$digits])->first();
+        if ($client) {
+            return $client->id;
+        }
+
+        // Check user cell_phone (stored as digits) — find client via pivot
+        $user = User::where('cell_phone', $digits)->first();
+        if ($user) {
+            $client = $user->clients()->first();
+            if ($client) {
+                return $client->id;
+            }
+        }
+
+        return null;
     }
 
     /**

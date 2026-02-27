@@ -27,13 +27,22 @@ class CheckObserver
      */
     public function deleted(Check $check): void
     {
-        // Get transaction IDs before bulk update (bulk update bypasses Scout indexing)
+        // Get IDs before bulk updates (bulk updates bypass Scout indexing)
+        $expenseIds = $check->expenses()->pluck('id')->toArray();
         $transactionIds = $check->transactions()->pluck('id')->toArray();
 
-        // $check->expenses()->delete();
-        $check->expenses()->update(['check_id' => null]);
+        // Soft-delete expenses tied to this check so they stop counting toward totals
+        $check->expenses()->delete();
         $check->timesheets()->update(['check_id' => null]);
         $check->transactions()->update(['check_id' => null]);
+
+        // Re-index expenses in Meilisearch after soft-delete
+        if (! empty($expenseIds)) {
+            \App\Models\Expense::withoutGlobalScopes()
+                ->withTrashed()
+                ->whereIn('id', $expenseIds)
+                ->searchable();
+        }
 
         // Re-index transactions in Meilisearch after bulk update
         if (! empty($transactionIds)) {
@@ -48,7 +57,13 @@ class CheckObserver
      */
     public function restored(Check $check): void
     {
-        //
+        // Restore expenses that were soft-deleted when the check was deleted
+        $restoredCount = $check->expenses()->onlyTrashed()->restore();
+
+        // Re-index restored expenses in Meilisearch
+        if ($restoredCount > 0) {
+            $check->expenses()->searchable();
+        }
     }
 
     /**

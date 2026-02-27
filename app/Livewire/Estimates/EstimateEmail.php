@@ -9,6 +9,7 @@ use App\Models\EmailTemplate;
 use App\Models\ProjectStatus;
 use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\Facades\URL;
 use Livewire\Component;
 use Livewire\WithFileUploads;
 
@@ -190,6 +191,13 @@ class EstimateEmail extends Component
         $senderFirstName = $senderUser?->first_name ?? (auth()->user()?->first_name ?? '');
         $senderLastName = $senderUser?->last_name ?? (auth()->user()?->last_name ?? '');
 
+        // Generate a 30-day signed URL for the client to sign the contract
+        $signingLink = URL::temporarySignedRoute(
+            'estimate.sign',
+            now()->addDays(30),
+            ['estimate' => $estimate->id]
+        );
+
         return str_replace(
             [
                 '{{client_name}}', 
@@ -202,6 +210,7 @@ class EstimateEmail extends Component
                 '{{short_vendor_name}}',
                 '{{sender_first_name}}',
                 '{{sender_last_name}}',
+                '{{signing_link}}',
             ],
             [
                 $clientName, 
@@ -214,6 +223,7 @@ class EstimateEmail extends Component
                 $shortVendorName,
                 $senderFirstName,
                 $senderLastName,
+                $signingLink,
             ],
             $text
         );

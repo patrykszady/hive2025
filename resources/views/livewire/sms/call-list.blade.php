@@ -43,7 +43,7 @@
         >
             {{-- Status icon --}}
             <div class="shrink-0">
-                @if ($call->status === 'voicemail')
+                @if ($call->status === 'missed' && $call->has_voicemail)
                     <flux:icon icon="microphone" variant="micro" class="size-4 text-indigo-500" />
                 @elseif ($call->status === 'missed')
                     <flux:icon icon="phone-x-mark" variant="micro" class="size-4 text-red-500" />
@@ -84,7 +84,8 @@
                         </span>
                     @endif
 
-                    @if ($call->status === 'voicemail')
+                    @if ($call->status === 'missed' && $call->has_voicemail)
+                        <span class="text-sm lg:text-xs text-red-400 font-medium">Missed</span>
                         <span class="text-sm lg:text-xs text-indigo-500 font-medium">Voicemail</span>
                     @elseif ($call->status === 'missed')
                         <span class="text-sm lg:text-xs text-red-400 font-medium">Missed</span>

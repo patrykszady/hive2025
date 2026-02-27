@@ -257,6 +257,26 @@
                         @endif
                         {!! $contractBody !!}
                     </div>
+
+                    {{-- Signature Block --}}
+                    @if(isset($signatureData) && $signatureData)
+                        <div style="margin-top: 40px; border-top: 2px solid #e5e7eb; padding-top: 24px;">
+                            <div style="font-weight: bold; font-size: 16px; margin-bottom: 16px;">SIGNATURE</div>
+                            <div style="display: flex; gap: 40px; align-items: flex-end;">
+                                <div>
+                                    <div style="border: 1px solid #d1d5db; border-radius: 8px; padding: 8px; background: #fff; display: inline-block;">
+                                        <img src="{{ $signatureData }}" style="max-width: 400px; height: 120px; object-fit: contain;" />
+                                    </div>
+                                    <div style="margin-top: 8px; border-top: 2px solid #333; padding-top: 4px; width: 400px;">
+                                        <span style="font-weight: 600;">{{ $signatureName }}</span>
+                                    </div>
+                                    <div style="font-size: 12px; color: #6b7280; margin-top: 4px;">
+                                        Signed electronically on {{ $signatureDate }}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    @endif
                 @endif
             </div>
         </flux:main>

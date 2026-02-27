@@ -57,7 +57,10 @@ class SendGroupMms implements ShouldQueue
         $messagingProfileId = config('services.telnyx.messaging_profile_id');
         $participants = $message->to_numbers ?? [];
         $text = $message->text;
-        $mediaUrls = $message->media_urls ?? [];
+        // Convert relative paths to absolute URLs so Telnyx can fetch the media
+        $mediaUrls = collect($message->media_urls ?? [])
+            ->map(fn (string $url): string => str_starts_with($url, '/') ? url($url) : $url)
+            ->all();
 
         // In dev, redirect all outbound SMS to the dev number
         if (app()->environment(['local', 'development']) && ($devTo = config('services.telnyx.dev_to'))) {

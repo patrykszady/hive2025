@@ -1,4 +1,13 @@
-<div class="grid grid-cols-5 gap-4 xl:relative sm:px-6 lg:max-w-7xl" wire:key="estimate-show-{{ $estimate->id }}">
+<div
+    class="grid grid-cols-5 gap-4 xl:relative sm:px-6 lg:max-w-7xl"
+    wire:key="estimate-show-{{ $estimate->id }}"
+    x-data
+    x-on:copy-to-clipboard.window="
+        navigator.clipboard.writeText($event.detail.url).catch(() => {
+            $flux.toast({ text: 'Failed to copy link.', variant: 'danger' });
+        })
+    "
+>
     <div class="col-span-5 space-y-4 lg:col-span-2 lg:h-32">
         {{-- ESTIMATE DETAILS --}}
         @island(name: 'estimate-details', always: true)

@@ -114,9 +114,9 @@ class SmsConversation extends Component
         $mediaUrls = [];
         if ($this->attachment) {
             $path = $this->attachment->store('sms-attachments', 'public');
-            // Use the publicly routable URL so Telnyx can fetch the media.
-            // url() uses the current request host (e.g. dev.hive.contractors via tunnel).
-            $mediaUrls[] = url('storage/' . $path);
+            // Store a relative path so images display correctly regardless of domain.
+            // The SendGroupMms job converts to an absolute URL when calling Telnyx.
+            $mediaUrls[] = '/storage/' . $path;
         }
 
         $smsService->sendToThread($thread, $messageWithSig, $mediaUrls, auth()->id());

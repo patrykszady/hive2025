@@ -105,7 +105,19 @@ class EstimateDocumentGenerator
             }
         }
 
-        $view = view('misc.estimate', compact('estimate', 'vendor', 'client', 'clientContacts', 'project', 'sections', 'payments', 'title', 'estimate_total', 'estimate_total_words', 'type', 'reimbursements', 'contractBody', 'vendorLogoDataUrl', 'projectStatusTitle', 'projectFinances'))->render();
+        // Load signature data if estimate has been signed
+        $signatureData = null;
+        $signatureName = null;
+        $signatureDate = null;
+
+        $signature = $estimate->signature;
+        if ($signature) {
+            $signatureData = $signature->signature_data;
+            $signatureName = $signature->signer_name;
+            $signatureDate = $signature->signed_at->setTimezone($timezone)->format('m/d/Y g:i A');
+        }
+
+        $view = view('misc.estimate', compact('estimate', 'vendor', 'client', 'clientContacts', 'project', 'sections', 'payments', 'title', 'estimate_total', 'estimate_total_words', 'type', 'reimbursements', 'contractBody', 'vendorLogoDataUrl', 'projectStatusTitle', 'projectFinances', 'signatureData', 'signatureName', 'signatureDate'))->render();
 
         // Browsershot's setHtml() has aggressive SSRF protection that rejects HTML
         // containing file://, 127.x, localhost, etc. In queue-worker context (Horizon),
@@ -361,6 +373,11 @@ class EstimateDocumentGenerator
             '<div style="page-break-before: always;"></div>',
             $body
         );
+
+        // Strip manual signature lines (replaced by digital signature)
+        $body = preg_replace('#<p>\s*Signed\s*</p>#i', '', $body);
+        $body = preg_replace('#<p>\s*Owner or Authorized Representative\s*_+.*?</p>#is', '', $body);
+        $body = preg_replace('#<p>\s*Contractor\s*_+.*?</p>#is', '', $body);
 
         // Ensure empty paragraphs have proper spacing (add non-breaking space)
         $body = preg_replace('/<p><\/p>/', '<p>&nbsp;</p>', $body);
