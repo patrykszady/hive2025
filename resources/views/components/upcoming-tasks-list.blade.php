@@ -11,6 +11,7 @@
     'publicView' => false,
     'title' => 'Tasks',
     'emptyMessage' => 'No tasks upcoming for this project.',
+    'projectId' => null,
 ])
 
 <x-island-card heading="{{ $title }}">
@@ -18,19 +19,29 @@
         <flux:badge size="sm" color="zinc">{{ $taskCount }}</flux:badge>
     </x-slot:badge>
     <x-slot:actions>
-        @if($showNotifications)
-            @auth
+        <div class="flex items-center gap-2">
+            @if($projectId && $clickable)
                 <flux:button
                     size="sm"
-                    variant="filled"
-                    :href="route('users.show', auth()->id())"
-                    icon="bell"
-                    class="!bg-indigo-500 hover:!bg-indigo-600 !text-white"
-                >
-                    Notifications
-                </flux:button>
-            @endauth
-        @endif
+                    variant="ghost"
+                    icon="plus"
+                    wire:click="$dispatchTo('tasks.task-create', 'addTask', { project_id: {{ $projectId }} })"
+                />
+            @endif
+            @if($showNotifications)
+                @auth
+                    <flux:button
+                        size="sm"
+                        variant="filled"
+                        :href="route('users.show', auth()->id())"
+                        icon="bell"
+                        class="!bg-indigo-500 hover:!bg-indigo-600 !text-white"
+                    >
+                        Notifications
+                    </flux:button>
+                @endauth
+            @endif
+        </div>
     </x-slot:actions>
 
     @if($groupedTasks->isEmpty() && (!$unscheduledTasks || $unscheduledTasks->isEmpty()))
@@ -42,7 +53,7 @@
                     <flux:accordion.item>
                         <flux:accordion.heading>
                             <div class="flex items-center gap-2">
-                                <span class="text-orange-600 dark:text-orange-400">Unscheduled Tasks</span>
+                                <span class="text-orange-600 dark:text-orange-400">Pending Tasks</span>
                                 <flux:badge color="amber" size="sm">{{ $unscheduledTasks->count() }}</flux:badge>
                             </div>
                         </flux:accordion.heading>

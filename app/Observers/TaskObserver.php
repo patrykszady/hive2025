@@ -4,6 +4,7 @@ namespace App\Observers;
 
 use App\Jobs\SendBatchVendorAvailabilitySms;
 use App\Jobs\SendRealtimeTaskNotification;
+use App\Jobs\SendTaskReminderToClients;
 use App\Models\Project;
 use App\Models\Task;
 use App\Models\Vendor;
@@ -23,6 +24,9 @@ class TaskObserver
 
         // Queue vendor availability SMS if vendor is assigned
         $this->queueVendorNotificationIfNeeded($task);
+
+        // Send task reminder email to unregistered client users
+        SendTaskReminderToClients::dispatch($task->id);
     }
 
     public function creating(Task $task): void

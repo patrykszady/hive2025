@@ -93,7 +93,7 @@
                                                 square
                                             />
 
-                                            <!-- Unscheduled Tasks -->
+                                            <!-- Pending Tasks -->
                                             @if($projectData['unscheduledTasks']->count() > 0)
                                                 @foreach($projectData['unscheduledTasks'] as $unscheduledTask)
                                                     <flux:badge

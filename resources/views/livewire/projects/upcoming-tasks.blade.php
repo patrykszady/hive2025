@@ -9,6 +9,7 @@
         :show-avatars="true"
         :clickable="!$isClientUser"
         :show-vendor-info="!$isClientUser"
+        :project-id="$project->id"
     />
 </div>
 
