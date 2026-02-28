@@ -116,16 +116,11 @@ class Login extends Component
 
             $user = Auth::user();
 
-            // Client-only users go to their client home
+            // Client-only users go to their client home (unless they have an intended URL)
             if ($user->is_client_user) {
                 $client = $user->primary_client;
-
-                if ($client) {
-                    $this->redirect(route('clients.show', $client), navigate: true);
-                    return;
-                }
-
-                $this->redirect(route('clients.index'), navigate: true);
+                $default = $client ? route('clients.show', $client) : route('clients.index');
+                $this->redirectIntended(default: $default, navigate: true);
                 return;
             }
 

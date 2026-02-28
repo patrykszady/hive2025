@@ -37,10 +37,16 @@ class EnsureUserRegistered
 
         if (!$isRegistered) {
             // User is logged in but not fully registered
+            // Preserve the intended URL so we can redirect back after registration
+            $intendedUrl = $request->session()->get('url.intended') ?? $request->fullUrl();
+
             // Log them out and redirect to registration
             Auth::logout();
             $request->session()->invalidate();
             $request->session()->regenerateToken();
+
+            // Restore intended URL after session invalidation
+            $request->session()->put('url.intended', $intendedUrl);
 
             // Store notice for registration page
             session()->flash('registration_notice', 'unregistered');

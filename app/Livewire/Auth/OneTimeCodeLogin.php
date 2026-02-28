@@ -236,7 +236,7 @@ class OneTimeCodeLogin extends Component
             return;
         }
 
-        $this->redirect(route('dashboard'), navigate: true);
+        $this->redirectIntended(default: route('dashboard'), navigate: true);
     }
 
     #[Title('One-Time Code Login')]

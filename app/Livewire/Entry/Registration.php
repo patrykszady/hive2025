@@ -531,7 +531,7 @@ class Registration extends Component
         // Clear session state after successful registration
         session()->forget('registration_state');
 
-        return $this->redirect(route('account_selection'), navigate: true);
+        return $this->redirectIntended(default: route('account_selection'), navigate: true);
     }
 
     public function prepareUserForPasskey(): bool
@@ -595,7 +595,7 @@ class Registration extends Component
         
         session()->forget('registration_state');
 
-        return $this->redirect(route('account_selection'), navigate: true);
+        return $this->redirectIntended(default: route('account_selection'), navigate: true);
     }
 
     public function register_with_passkey()
