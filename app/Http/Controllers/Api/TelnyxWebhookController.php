@@ -298,7 +298,7 @@ class TelnyxWebhookController extends Controller
         $holdAudioUrl = config('services.telnyx.hold_audio_url')
             ?: rtrim(config('app.url'), '/') . '/audio/ringback.wav';
 
-        $this->sendCallCommand($callControlId, 'conference', [
+        $this->joinConference($callControlId, [
             'name' => $conferenceName,
             'beep_enabled' => 'never',
             'end_conference_on_exit' => true,
@@ -619,7 +619,7 @@ class TelnyxWebhookController extends Controller
             ?: rtrim(config('app.url'), '/') . '/audio/ringback.wav';
         $conferenceParams['hold_audio_url'] = $holdAudioUrl;
 
-        $this->sendCallCommand($callControlId, 'conference', $conferenceParams);
+        $this->joinConference($callControlId, $conferenceParams);
     }
 
     /**
@@ -1044,7 +1044,7 @@ class TelnyxWebhookController extends Controller
             ]);
 
             if ($conferenceName) {
-                $this->sendCallCommand($callControlId, 'conference', [
+                $this->joinConference($callControlId, [
                     'name' => $conferenceName,
                     'beep_enabled' => 'never',
                     'end_conference_on_exit' => false,
@@ -1070,7 +1070,7 @@ class TelnyxWebhookController extends Controller
             ]);
 
             if ($conferenceName) {
-                $this->sendCallCommand($callControlId, 'conference', [
+                $this->joinConference($callControlId, [
                     'name' => $conferenceName,
                     'beep_enabled' => 'on_enter',
                     'end_conference_on_exit' => false,
@@ -1103,7 +1103,7 @@ class TelnyxWebhookController extends Controller
             ]);
 
             if ($conferenceName) {
-                $this->sendCallCommand($callControlId, 'conference', [
+                $this->joinConference($callControlId, [
                     'name' => $conferenceName,
                     'beep_enabled' => 'on_enter',
                     'end_conference_on_exit' => false,
@@ -1853,6 +1853,50 @@ class TelnyxWebhookController extends Controller
             }
         } catch (\Exception $e) {
             Log::channel('telnyx')->error("Exception sending call command: {$action}", [
+                'call_control_id' => $callControlId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Join a call to a named conference via POST /v2/conferences.
+     * Telnyx Call Control v2 uses this endpoint (not /v2/calls/{id}/actions/conference)
+     * to both create a new conference and join existing ones by name.
+     */
+    protected function joinConference(string $callControlId, array $params = []): void
+    {
+        $apiKey = config('services.telnyx.api_key');
+
+        if (! $apiKey) {
+            Log::channel('telnyx')->error('Telnyx API key not configured for conference');
+            return;
+        }
+
+        $body = array_merge($params, [
+            'call_control_id' => $callControlId,
+        ]);
+
+        try {
+            $response = Http::withToken($apiKey)
+                ->post('https://api.telnyx.com/v2/conferences', $body);
+
+            if ($response->successful()) {
+                Log::channel('telnyx')->info('Conference joined/created', [
+                    'call_control_id' => $callControlId,
+                    'conference_id' => $response->json('data.id'),
+                    'conference_name' => $params['name'] ?? null,
+                ]);
+            } else {
+                Log::channel('telnyx')->error('Conference join/create failed', [
+                    'call_control_id' => $callControlId,
+                    'conference_name' => $params['name'] ?? null,
+                    'status' => $response->status(),
+                    'error' => $response->json(),
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::channel('telnyx')->error('Conference join/create exception', [
                 'call_control_id' => $callControlId,
                 'error' => $e->getMessage(),
             ]);
