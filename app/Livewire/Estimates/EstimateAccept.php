@@ -51,8 +51,15 @@ class EstimateAccept extends Component
         $this->estimate = $estimate;
         $this->project = $estimate->project;
 
-        // Load required vendor signer IDs from options
+        // Load required vendor signer IDs from options, fall back to vendor defaults
         $this->requiredVendorSignerIds = $estimate->options['required_vendor_signer_ids'] ?? [];
+
+        if (empty($this->requiredVendorSignerIds)) {
+            $vendorDefaults = (array) data_get($estimate->vendor?->options, 'default_contract_signers', []);
+            if (! empty($vendorDefaults)) {
+                $this->requiredVendorSignerIds = $vendorDefaults;
+            }
+        }
 
         $this->bids = $this->project->bids()->vendorBids($this->estimate->vendor->id)->with('estimate_sections')->orderBy('type')->get();
 
@@ -120,7 +127,10 @@ class EstimateAccept extends Component
     #[Computed]
     public function vendorUsers(): \Illuminate\Support\Collection
     {
-        return $this->estimate->vendor?->users ?? collect();
+        return $this->estimate->vendor?->users()
+            ->wherePivot('role_id', 1)
+            ->wherePivot('is_employed', 1)
+            ->get() ?? collect();
     }
 
     public function accept()

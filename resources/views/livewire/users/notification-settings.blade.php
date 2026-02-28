@@ -133,7 +133,7 @@
                     <div class="space-y-4">
                         <flux:text class="text-xs">Realtime updates send during this window. Digests send at start/end times.</flux:text>
 
-                        <div class="grid grid-cols-2 gap-4">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <flux:input
                                 wire:model.live.debounce.500ms="realtime_start"
                                 type="time"

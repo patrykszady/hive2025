@@ -6,18 +6,14 @@
 @endif
 
 <p style="text-align: center; margin: 0 0 14px 0;">
-	<strong>{{ $contractorName }}</strong> has signed Estimate #{{ $estimateNumber }} and it's ready for your signature.
+	<strong>{{ $contractorName }}</strong> has signed Estimate #{{ $estimateNumber }}@if($projectLabel) | {{ $projectLabel }}@endif and it's ready for your signature.
 </p>
 
 <p style="text-align: center; margin: 0 0 20px 0;">
-	Log in or register to review the contract and sign electronically.
+	Log in or register to review the contract and sign electronically. Registering is easy — just confirm your number and email and set a password.
 </p>
 
 <x-mail::button :url="$signingUrl">
 Sign Contract
 </x-mail::button>
-
-<p style="text-align: center; margin: 20px 0 0 0; font-size: 13px; color: #6b7280;">
-	New to Hive? Registering is a simple 3-step process — confirm your phone number, confirm your email, and set a password. The easiest registration ever.
-</p>
 </x-mail::message>

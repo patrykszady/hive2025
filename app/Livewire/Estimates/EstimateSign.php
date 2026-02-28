@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Estimates;
 
+use App\Mail\EstimateFullySigned;
 use App\Mail\EstimateSigningInvite;
 use App\Models\EmailTemplate;
 use App\Models\Estimate;
@@ -18,13 +19,10 @@ use Livewire\Component;
 
 class EstimateSign extends Component
 {
-    // Steps: not-authorized | vendor-must-sign | sign | done
+    // Steps: vendor-must-sign | sign | done
 
     #[Locked]
     public ?int $estimateId = null;
-
-    #[Locked]
-    public bool $valid = false;
 
     #[Locked]
     public ?string $contractHtml = null;
@@ -78,32 +76,30 @@ class EstimateSign extends Component
             ])
             ->find($estimate->id);
 
-        if (! $estimate || ! $estimate->vendor) {
-            $this->valid = false;
+        abort_unless($estimate && $estimate->vendor, 404);
+        abort_unless(! empty($estimate->payments), 404, 'Estimate has not been finalized yet.');
 
-            return;
-        }
+        $authUser = auth()->user();
 
-        if (empty($estimate->payments)) {
-            $this->valid = false;
+        // Determine if user is an admin vendor user or a client user for this estimate
+        $vendorAdminIds = $estimate->vendor->users
+            ->filter(fn ($u) => $u->pivot->role_id == 1 && $u->pivot->is_employed)
+            ->pluck('id');
+        $clientUsers = $estimate->project?->client?->users ?? collect();
+        $isVendorAdmin = $vendorAdminIds->contains($authUser->id);
+        $isClientUser = $clientUsers->contains('id', $authUser->id);
 
-            return;
-        }
+        abort_unless($isVendorAdmin || $isClientUser, 403, 'You are not authorized to view this estimate.');
 
         $this->estimate = $estimate;
-        $this->valid = true;
 
         // Generate contract HTML for inline rendering
         $this->contractHtml = $this->buildContractHtml($estimate);
 
-        $authUser = auth()->user();
-
-        // 1. Check if user is a vendor user for this estimate
-        $vendorUserIds = $estimate->vendor->users->pluck('id');
-        $requiredVendorSignerIds = $estimate->required_vendor_signer_ids;
-
-        if ($vendorUserIds->contains($authUser->id)) {
+        // 1. Vendor admin signer flow
+        if ($isVendorAdmin) {
             $this->isVendorSigner = true;
+            $requiredVendorSignerIds = $estimate->required_vendor_signer_ids;
 
             // Already signed?
             if ($estimate->signatures->contains('user_id', $authUser->id)) {
@@ -119,9 +115,9 @@ class EstimateSign extends Component
                 return;
             }
 
-            // If specific signers are configured, only those users may sign
+            // If specific signers are configured, only those users may sign — others can still view
             if ($requiredVendorSignerIds->isNotEmpty() && ! $requiredVendorSignerIds->contains($authUser->id)) {
-                $this->step = 'not-authorized';
+                $this->step = 'done';
 
                 return;
             }
@@ -142,15 +138,8 @@ class EstimateSign extends Component
             return;
         }
 
-        // 2. Check if user is a client user for this estimate
-        $clientUsers = $estimate->project?->client?->users ?? collect();
+        // 2. Client user flow
         $matchedClient = $clientUsers->firstWhere('id', $authUser->id);
-
-        if (! $matchedClient) {
-            $this->step = 'not-authorized';
-
-            return;
-        }
 
         // Client user — but has vendor signed yet?
         if (! $estimate->isVendorSigned()) {
@@ -312,9 +301,12 @@ class EstimateSign extends Component
             'signed_at' => now(),
         ]);
 
-        // If vendor just signed, email all client users
+        // If vendor just signed AND all required vendor signers are done, email client users
         if ($this->isVendorSigner) {
-            $this->sendSigningInvitesToClients($estimate);
+            $freshEstimate = $estimate->fresh(['vendor.users', 'signatures']);
+            if ($freshEstimate->isVendorSigned()) {
+                $this->sendSigningInvitesToClients($estimate);
+            }
         }
 
         // Refresh estimate
@@ -324,9 +316,10 @@ class EstimateSign extends Component
             'signatures',
         ]);
 
-        // If fully signed, generate and store the signed contract PDF
+        // If fully signed, generate and store the signed contract PDF, then notify everyone
         if ($this->estimate->isFullySigned() && ! $this->estimate->signed_contract_path) {
             $this->generateAndStoreSignedPdf($this->estimate);
+            $this->sendFullySignedNotifications($this->estimate);
         }
 
         $this->step = 'done';
@@ -398,6 +391,38 @@ class EstimateSign extends Component
             Mail::mailer('mailtrap-sdk')->to($user->email)->send(
                 new EstimateSigningInvite($estimate, $user->first_name ?? '')
             );
+        }
+    }
+
+    /**
+     * Send "fully signed" email with attached PDF to all vendor admins and client users.
+     */
+    protected function sendFullySignedNotifications(Estimate $estimate): void
+    {
+        try {
+            $vendor = $estimate->vendor;
+
+            // Send to the vendor's business email
+            if ($vendor?->business_email) {
+                Mail::mailer('mailtrap-sdk')->to($vendor->business_email)->send(
+                    new EstimateFullySigned($estimate, $vendor->short_name ?? '', isClient: false)
+                );
+            }
+
+            // Send to all client users
+            $clientUsers = $estimate->project?->client?->users ?? collect();
+
+            foreach ($clientUsers as $user) {
+                if (! $user->email) {
+                    continue;
+                }
+
+                Mail::mailer('mailtrap-sdk')->to($user->email)->send(
+                    new EstimateFullySigned($estimate, $user->first_name ?? '', isClient: true)
+                );
+            }
+        } catch (\Throwable $e) {
+            report($e);
         }
     }
 

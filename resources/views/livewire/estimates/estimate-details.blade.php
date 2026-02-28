@@ -122,24 +122,27 @@
         @endunless
 
         @unless($nonLivewire ?? false)
-            <x-details.row 
-                title="Signature" 
-                :no-cloak="false"
-            >
-                @if($estimate->isFullySigned())
+            @php
+                $projectStatusCode = $estimate->project?->latestStatus?->status_code;
+                $projectPastContract = $projectStatusCode && $projectStatusCode >= 5;
+            @endphp
+            @if($estimate->isFullySigned())
+                <x-details.row title="Signature" :no-cloak="false">
                     <flux:badge color="green" size="sm" icon="check">Fully Signed</flux:badge>
-                @elseif($estimate->isSigned())
-                    @if($estimate->isVendorSigned())
-                        <flux:badge color="yellow" size="sm" icon="clock">Awaiting Client Signatures</flux:badge>
+                </x-details.row>
+            @elseif(!empty($estimate->payments) && !$projectPastContract)
+                <x-details.row title="Signature" :no-cloak="false">
+                    @if($estimate->isSigned())
+                        @if($estimate->isVendorSigned())
+                            <flux:badge color="yellow" size="sm" icon="clock">Awaiting Client Signatures</flux:badge>
+                        @else
+                            <flux:badge color="yellow" size="sm" icon="clock">Vendor Signed — Awaiting Clients</flux:badge>
+                        @endif
                     @else
-                        <flux:badge color="yellow" size="sm" icon="clock">Vendor Signed — Awaiting Clients</flux:badge>
+                        <flux:badge color="yellow" size="sm">Awaiting Signature</flux:badge>
                     @endif
-                @elseif(!empty($estimate->payments))
-                    <flux:badge color="yellow" size="sm">Awaiting Signature</flux:badge>
-                @else
-                    <flux:badge color="zinc" size="sm">Not Finalized</flux:badge>
-                @endif
-            </x-details.row>
+                </x-details.row>
+            @endif
         @endunless
     </x-slot:details>
 

@@ -25,6 +25,10 @@ class VendorOptions extends Component
 
     /** @var array<int> Admin user IDs selected to receive inbound calls */
     public array $call_recipients = [];
+
+    /** @var array<int> Admin user IDs who must sign contracts by default */
+    public array $default_contract_signers = [];
+
     public bool $call_welcome_enabled = true;
     public bool $voicemail_enabled = true;
     public string $welcome_message = '';
@@ -63,6 +67,7 @@ class VendorOptions extends Component
 
         // Phone system settings
         $this->call_recipients = (array) data_get($this->vendor->options, 'call_recipients', []);
+        $this->default_contract_signers = (array) data_get($this->vendor->options, 'default_contract_signers', []);
         $this->call_welcome_enabled = (bool) data_get($this->vendor->options, 'call_welcome_enabled', true);
         $this->voicemail_enabled = (bool) data_get($this->vendor->options, 'voicemail_enabled', true);
         $this->welcome_message = data_get($this->vendor->options, 'welcome_message', '') ?: self::DEFAULT_WELCOME;
@@ -86,6 +91,8 @@ class VendorOptions extends Component
             'sms_vendor_enabled' => 'boolean',
             'call_recipients' => 'array',
             'call_recipients.*' => 'integer|exists:users,id',
+            'default_contract_signers' => 'array',
+            'default_contract_signers.*' => 'integer|exists:users,id',
             'call_welcome_enabled' => 'boolean',
             'voicemail_enabled' => 'boolean',
             'welcome_message' => 'nullable|string|max:500',
@@ -116,6 +123,7 @@ class VendorOptions extends Component
 
         // Phone system settings
         $options['call_recipients'] = array_map('intval', $this->call_recipients);
+        $options['default_contract_signers'] = array_map('intval', $this->default_contract_signers);
         $options['call_welcome_enabled'] = $this->call_welcome_enabled;
         $options['voicemail_enabled'] = $this->voicemail_enabled;
         $options['welcome_message'] = $this->welcome_message ?: null;

@@ -1,48 +1,82 @@
 <div x-init="window.scrollTo(0, 0)">
-    {{-- Header --}}
-    <div class="max-w-3xl text-center mb-6">
-        <flux:heading size="xl">Contract Signature</flux:heading>
-        @if($valid && $estimate)
-            <flux:subheading class="mt-1">
-                {{ $estimate->vendor?->business_name }} — Estimate #{{ $estimate->number }}
-            </flux:subheading>
-        @endif
-    </div>
+    {{-- Detail Card Header --}}
+    @php
+        $project = $estimate->project;
+        $client = $project?->client;
+        $vendor = $estimate->vendor;
+        $estimateTotal = $estimate->estimate_sections->sum('total');
+    @endphp
+    <flux:card class="max-w-3xl mb-6">
+        <div class="flex items-start justify-between gap-4">
+            <div class="min-w-0 flex-1 space-y-2">
+                {{-- Project Address --}}
+                @if($project?->short_address)
+                    <flux:heading size="lg">{{ $project->short_address }}</flux:heading>
+                @endif
+
+                {{-- Project Name --}}
+                @if($project?->project_name)
+                    <flux:text class="text-zinc-500 dark:text-zinc-400">{{ $project->project_name }}</flux:text>
+                @endif
+
+                {{-- Detail rows --}}
+                <div class="flex flex-wrap gap-x-6 gap-y-1 text-sm text-zinc-600 dark:text-zinc-400">
+                    {{-- Client --}}
+                    @if($client?->name)
+                        <div class="flex items-center gap-1.5">
+                            <flux:icon.user class="size-4 text-zinc-400" />
+                            <span>{{ $client->name }}</span>
+                        </div>
+                    @endif
+
+                    {{-- Estimate Number --}}
+                    <div class="flex items-center gap-1.5">
+                        <flux:icon.document-text class="size-4 text-zinc-400" />
+                        @if($isVendorSigner)
+                            <a href="{{ route('estimates.show', $estimate) }}" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank">
+                                Estimate #{{ $estimate->number }}
+                            </a>
+                        @else
+                            <span>Estimate #{{ $estimate->number }}</span>
+                        @endif
+                    </div>
+
+                    {{-- Total --}}
+                    @if($estimateTotal)
+                        <div class="flex items-center gap-1.5">
+                            <flux:icon.currency-dollar class="size-4 text-zinc-400" />
+                            <span>{{ money($estimateTotal) }}</span>
+                        </div>
+                    @endif
+
+                    {{-- Duration --}}
+                    @if($estimate->start_date || $estimate->end_date)
+                        <div class="flex items-center gap-1.5">
+                            <flux:icon.calendar class="size-4 text-zinc-400" />
+                            <span>
+                                {{ $estimate->start_date?->format('M j, Y') ?? '—' }}
+                                –
+                                {{ $estimate->end_date?->format('M j, Y') ?? '—' }}
+                            </span>
+                        </div>
+                    @endif
+                </div>
+
+                {{-- Vendor --}}
+                <flux:text class="text-xs text-zinc-400 dark:text-zinc-500">{{ $vendor?->business_name }}</flux:text>
+            </div>
+
+            {{-- Preview / Export PDF --}}
+            <div class="shrink-0">
+                <flux:button variant="ghost" size="sm" icon="arrow-down-tray" href="{{ route('estimate.sign.pdf', $estimate) }}" target="_blank" title="Preview / Download PDF">
+                    PDF
+                </flux:button>
+            </div>
+        </div>
+    </flux:card>
 
     <div class="max-w-3xl space-y-4">
-        @if(! $valid)
-            {{-- Invalid / Not Finalized --}}
-            <flux:card class="text-center">
-                <div class="w-16 h-16 mx-auto mb-4 bg-zinc-100 dark:bg-zinc-700 rounded-full flex items-center justify-center">
-                    <flux:icon.exclamation-triangle class="size-8 text-zinc-400" />
-                </div>
-                <flux:heading size="lg">Estimate Not Available</flux:heading>
-                <flux:text class="mt-2 text-zinc-600 dark:text-zinc-400">
-                    This estimate is invalid or has not been finalized yet.
-                </flux:text>
-            </flux:card>
-
-        @elseif($step === 'not-authorized')
-            {{-- Logged in but not a signer --}}
-            <flux:card class="max-w-md mx-auto text-center">
-                <div class="w-14 h-14 mx-auto mb-4 bg-amber-100 dark:bg-amber-900/30 rounded-full flex items-center justify-center">
-                    <flux:icon.exclamation-triangle class="size-7 text-amber-600 dark:text-amber-400" />
-                </div>
-                <flux:heading size="lg">Cannot Sign This Estimate</flux:heading>
-                <flux:text class="mt-2 text-zinc-600 dark:text-zinc-400">
-                    Your account is not listed as a signer on this estimate. Please log in with a different account if you believe this is a mistake.
-                </flux:text>
-                <div class="mt-5">
-                    <form method="POST" action="{{ route('logout') }}">
-                        @csrf
-                        <flux:button type="submit" variant="primary">
-                            Log Out
-                        </flux:button>
-                    </form>
-                </div>
-            </flux:card>
-
-        @elseif($step === 'vendor-must-sign')
+        @if($step === 'vendor-must-sign')
             {{-- Client user, but vendor hasn't signed yet --}}
             <flux:card class="max-w-md mx-auto text-center">
                 <div class="w-14 h-14 mx-auto mb-4 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center">
@@ -329,7 +363,7 @@
         <flux:toast />
     @endpersist
 
-    @if($valid && $step === 'sign')
+    @if($step === 'sign')
         <script src="{{ asset('js/signature_pad.umd.min.js') }}"></script>
 
         @script

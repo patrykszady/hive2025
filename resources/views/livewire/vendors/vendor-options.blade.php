@@ -261,6 +261,27 @@
                 </div>
             </flux:field>
 
+            {{-- Contract Signing --}}
+            <flux:field>
+                <flux:label>Default Contract Signers</flux:label>
+                <flux:description>Select which admin users must sign contracts by default. This can be overridden per estimate.</flux:description>
+
+                <div class="mt-2">
+                    @if ($adminUsersWithPhones->isNotEmpty())
+                        <div class="flex flex-col gap-2">
+                            @foreach ($adminUsersWithPhones as $adminUser)
+                                <label class="flex items-center gap-3 cursor-pointer">
+                                    <flux:checkbox wire:model="default_contract_signers" value="{{ $adminUser->id }}" />
+                                    <span class="text-sm font-medium text-zinc-900 dark:text-zinc-100">{{ $adminUser->full_name }}</span>
+                                </label>
+                            @endforeach
+                        </div>
+                    @else
+                        <div class="text-xs text-zinc-400 italic">No admin users with cell phones found.</div>
+                    @endif
+                </div>
+            </flux:field>
+
             <div class="flex justify-end">
                 <flux:button type="submit" variant="primary" wire:loading.attr="disabled">
                     <span wire:loading.remove wire:target="save">Save Options</span>

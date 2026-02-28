@@ -159,6 +159,20 @@ Route::middleware(['auth', 'registered'])->group(function () {
 
     // Inline PDF preview for the signing page
     Route::get('estimate/sign/{estimate}/pdf', function (Estimate $estimate) {
+        $estimate = Estimate::withoutGlobalScopes()
+            ->with(['vendor.users', 'project.client.users'])
+            ->find($estimate->id);
+
+        abort_unless($estimate && $estimate->vendor, 404);
+
+        $user = auth()->user();
+        $vendorAdminIds = $estimate->vendor->users
+            ->filter(fn ($u) => $u->pivot->role_id == 1 && $u->pivot->is_employed)
+            ->pluck('id');
+        $clientUserIds = $estimate->project?->client?->users?->pluck('id') ?? collect();
+
+        abort_unless($vendorAdminIds->contains($user->id) || $clientUserIds->contains($user->id), 403);
+
         $result = EstimateDocumentGenerator::generate($estimate);
 
         return response($result['binary'])

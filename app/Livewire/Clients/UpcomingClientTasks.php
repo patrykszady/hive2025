@@ -186,13 +186,13 @@ class UpcomingClientTasks extends Component
             $selectedDates = (array) data_get($task->options, 'dates', []);
             if (! empty($selectedDates)) {
                 foreach ($selectedDates as $dateStr) {
-                    if ($dateStr > $weekEndStr) {
+                    if ($dateStr > $windowEndStr) {
                         $futureDates->push($dateStr);
                     }
                 }
             } else {
                 $taskStartStr = $task->start_date->format('Y-m-d');
-                if ($taskStartStr > $weekEndStr) {
+                if ($taskStartStr > $windowEndStr) {
                     $futureDates->push($taskStartStr);
                 }
             }
