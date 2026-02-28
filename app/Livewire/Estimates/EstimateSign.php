@@ -4,6 +4,7 @@ namespace App\Livewire\Estimates;
 
 use App\Mail\EstimateFullySigned;
 use App\Mail\EstimateSigningInvite;
+use App\Models\AppNotification;
 use App\Models\EmailTemplate;
 use App\Models\Estimate;
 use App\Models\EstimateSignature;
@@ -304,8 +305,14 @@ class EstimateSign extends Component
         // If vendor just signed AND all required vendor signers are done, email client users
         if ($this->isVendorSigner) {
             $freshEstimate = $estimate->fresh(['vendor.users', 'signatures']);
+
+            // Notify other vendor admins who still need to sign
+            $this->createSigningNotificationsForVendorAdmins($freshEstimate, $this->matchedUserId);
+
             if ($freshEstimate->isVendorSigned()) {
                 $this->sendSigningInvitesToClients($estimate);
+                // Create in-app notifications for client users to sign
+                $this->createSigningNotificationsForClients($freshEstimate);
             }
         }
 
@@ -423,6 +430,74 @@ class EstimateSign extends Component
             }
         } catch (\Throwable $e) {
             report($e);
+        }
+    }
+
+    /**
+     * Create in-app notifications for other vendor admins who still need to sign.
+     */
+    protected function createSigningNotificationsForVendorAdmins(Estimate $estimate, int $signerUserId): void
+    {
+        $vendorAdmins = $estimate->vendor->users
+            ->filter(fn ($u) => $u->pivot->role_id == 1 && $u->pivot->is_employed)
+            ->where('id', '!=', $signerUserId);
+
+        $signedIds = $estimate->signatures->pluck('user_id')->toArray();
+        $requiredIds = $estimate->required_vendor_signer_ids;
+        $signerName = auth()->user()->first_name ?? 'A team member';
+        $projectName = $estimate->project?->name ?? 'Estimate #' . $estimate->id;
+
+        foreach ($vendorAdmins as $admin) {
+            // Skip if already signed
+            if (in_array($admin->id, $signedIds)) {
+                continue;
+            }
+
+            // If specific signers configured, skip admins who aren't required
+            if ($requiredIds->isNotEmpty() && ! $requiredIds->contains($admin->id)) {
+                continue;
+            }
+
+            AppNotification::create([
+                'user_id' => $admin->id,
+                'type' => 'estimate_signing_required',
+                'title' => 'Contract Ready for Your Signature',
+                'body' => "{$signerName} signed the contract for {$projectName}. Your signature is also required.",
+                'action_url' => route('estimate.sign', $estimate),
+                'data' => [
+                    'estimate_id' => $estimate->id,
+                    'signed_by' => $signerUserId,
+                ],
+            ]);
+        }
+    }
+
+    /**
+     * Create in-app notifications for client users who need to sign.
+     */
+    protected function createSigningNotificationsForClients(Estimate $estimate): void
+    {
+        $clientUsers = $estimate->project?->client?->users ?? collect();
+        $signedIds = $estimate->signatures->pluck('user_id')->toArray();
+        $vendorName = $estimate->vendor?->short_name ?? 'Your contractor';
+        $projectName = $estimate->project?->name ?? 'Estimate #' . $estimate->id;
+
+        foreach ($clientUsers as $user) {
+            // Skip if already signed
+            if (in_array($user->id, $signedIds)) {
+                continue;
+            }
+
+            AppNotification::create([
+                'user_id' => $user->id,
+                'type' => 'estimate_signing_required',
+                'title' => 'Contract Ready for Your Signature',
+                'body' => "{$vendorName} has signed the contract for {$projectName}. Please review and sign.",
+                'action_url' => route('estimate.sign', $estimate),
+                'data' => [
+                    'estimate_id' => $estimate->id,
+                ],
+            ]);
         }
     }
 

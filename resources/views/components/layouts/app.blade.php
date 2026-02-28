@@ -41,6 +41,14 @@
 
             @if(!Route::is(['account_selection', 'vendor_registration']))
                 <flux:sidebar.nav>
+                    {{-- Notifications (both client and non-client users) --}}
+                    <flux:sidebar.item wire:navigate.hover icon="bell" href="{{ route('notifications.index') }}" class="[&_[data-content]]:!overflow-visible">
+                        <span class="inline-flex items-center gap-2">
+                            <span>Notifications</span>
+                            <livewire:notifications.notification-sidebar-badge />
+                        </span>
+                    </flux:sidebar.item>
+
                     @if(auth()->user()?->is_client_user)
                         @php
                             $client = auth()->user()->clients()->first();

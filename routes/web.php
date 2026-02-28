@@ -76,6 +76,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 use Laragear\WebAuthn\Http\Routes as WebAuthnRoutes;
 use App\Livewire\Auth\PasskeySetup;
+use App\Livewire\Notifications\NotificationIndex;
 use Illuminate\Support\Facades\Log;
 
 Route::get('robots.txt', function () {
@@ -194,6 +195,7 @@ Route::middleware('auth')->group(function () {
 
 Route::middleware(['auth', 'registered'])->group(function () {
     Route::get('/account/selection', VendorSelection::class)->name('account_selection');
+    Route::get('/notifications', NotificationIndex::class)->name('notifications.index');
 });
 
 if(env('APP_ENV') === 'local') {
