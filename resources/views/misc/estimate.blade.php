@@ -6,7 +6,7 @@
     {{-- BODY --}}
     <body>
         <flux:main>
-            <div class="break-after-page space-y-4">
+            <div class="space-y-4">
                 <div class="grid grid-cols-5 gap-4 items-start">
                     <div class="col-span-2 space-y-4">
                         {{-- VENDOR DETAILS --}}
@@ -268,7 +268,7 @@
                                         <div style="border: 1px solid #d1d5db; border-radius: 8px; padding: 8px; background: #fff; width: 384px; height: 160px; display: flex; align-items: center; justify-content: center; overflow: hidden;">
                                             @if($sig['type'] === 'type')
                                                 {{-- Render typed signatures as HTML text for crisp, full-name display --}}
-                                                <span style="font-family: 'Brush Script MT', 'Segoe Script', cursive; font-size: 48px; color: #333; white-space: nowrap;">{{ $sig['name'] }}</span>
+                                                <span style="font-family: 'Dancing Script', cursive; font-size: 48px; color: #333; white-space: nowrap;">{{ $sig['name'] }}</span>
                                             @else
                                                 <img src="{{ $sig['data'] }}" style="max-width: 100%; max-height: 100%; object-fit: contain;" />
                                             @endif
