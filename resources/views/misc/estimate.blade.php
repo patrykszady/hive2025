@@ -264,11 +264,11 @@
                             <div style="font-weight: bold; font-size: 16px; margin-bottom: 16px;">SIGNATURES</div>
                             <div style="display: flex; flex-wrap: wrap; gap: 40px;">
                                 @foreach($allSignatures as $sig)
-                                    <div>
-                                        <div style="border: 1px solid #d1d5db; border-radius: 8px; padding: 8px; background: #fff; display: inline-block; max-width: 400px; min-height: 120px; overflow: visible;">
-                                            <img src="{{ $sig['data'] }}" style="max-width: 384px; max-height: 200px; object-fit: contain;" />
+                                    <div style="width: 400px;">
+                                        <div style="border: 1px solid #d1d5db; border-radius: 8px; padding: 8px; background: #fff; width: 384px; height: 160px; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                                            <img src="{{ $sig['data'] }}" style="max-width: 100%; max-height: 100%; object-fit: contain;" />
                                         </div>
-                                        <div style="margin-top: 8px; border-top: 2px solid #333; padding-top: 4px; width: 400px;">
+                                        <div style="margin-top: 8px; border-top: 2px solid #333; padding-top: 4px;">
                                             <span style="font-weight: 600;">{{ $sig['name'] }}</span>
                                             @if(!empty($sig['role']))
                                                 <span style="font-weight: 400; color: #6b7280; margin-left: 8px;">{{ $sig['role'] }}</span>
