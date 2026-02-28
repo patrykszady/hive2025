@@ -106,12 +106,14 @@ class EstimateDocumentGenerator
         }
 
         // Load all signatures for this estimate
-        $allSignatures = $estimate->signatures()->orderBy('signed_at')->get()->map(function ($sig) use ($timezone) {
+        $vendorUserIds = $vendor->users?->pluck('id')->toArray() ?? [];
+        $allSignatures = $estimate->signatures()->orderBy('signed_at')->get()->map(function ($sig) use ($timezone, $vendorUserIds) {
             return [
                 'data' => $sig->signature_data,
                 'name' => $sig->signer_name,
                 'date' => $sig->signed_at?->setTimezone($timezone)->format('m/d/Y g:i A'),
                 'type' => $sig->signature_type,
+                'role' => in_array($sig->user_id, $vendorUserIds) ? 'Contractor' : 'Client',
             ];
         });
 

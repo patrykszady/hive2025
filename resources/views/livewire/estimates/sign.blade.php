@@ -300,6 +300,7 @@
                 <div class="divide-y divide-zinc-200 dark:divide-zinc-700">
                     {{-- Vendor signature statuses --}}
                     @php
+                        $vendorTz = $estimate->vendor?->timezone ?: config('app.timezone');
                         $requiredVendorIds = $estimate->required_vendor_signer_ids;
                         // Show explicitly required signers, or just those who have already signed
                         $vendorSignerIds = $requiredVendorIds->isNotEmpty()
@@ -320,7 +321,7 @@
                                     <flux:text class="text-xs text-zinc-500">{{ $estimate->vendor?->short_name ?? 'Contractor' }}</flux:text>
                                     @if($vendorSig)
                                         <flux:text class="text-xs text-zinc-500">
-                                            Signed {{ $vendorSig->signed_at?->format('M j, Y \a\t g:i A') }}
+                                            Signed {{ $vendorSig->signed_at?->setTimezone($vendorTz)->format('M j, Y \a\t g:i A') }}
                                         </flux:text>
                                     @endif
                                 </div>
@@ -343,7 +344,7 @@
                                 <flux:text class="font-medium">{{ trim($signer->first_name . ' ' . $signer->last_name) }}</flux:text>
                                 @if($sig)
                                     <flux:text class="text-xs text-zinc-500">
-                                        Signed {{ $sig->signed_at?->format('M j, Y \a\t g:i A') }}
+                                        Signed {{ $sig->signed_at?->setTimezone($vendorTz)->format('M j, Y \a\t g:i A') }}
                                     </flux:text>
                                 @endif
                             </div>
