@@ -440,12 +440,18 @@ class TelnyxWebhookController extends Controller
             'call_log_id' => $callLogId,
         ]);
 
-        // If we have the user's call control ID, tell them the target didn't answer
+        // If we have the user's call control ID, tell them the target didn't answer.
+        // Note: Telnyx Call Control v2 has no 'leave' action for calls in conferences.
+        // Instead, speak the failure message directly on the user's call, then hang up.
         if ($userCallControlId) {
-            // Leave the conference first so we can play TTS to the user
-            $this->sendCallCommand($userCallControlId, 'leave', [
+            $this->sendCallCommand($userCallControlId, 'speak', [
+                'payload' => 'The person you called did not answer. Please try again later.',
+                'voice' => 'Telnyx.NaturalHD.astra',
+                'language' => 'en-US',
+                'payload_type' => 'text',
+                'voice_settings' => ['type' => 'telnyx'],
                 'client_state' => base64_encode(json_encode([
-                    'action' => 'click_to_call_target_failed_leave',
+                    'action' => 'click_to_call_failed_tts',
                     'call_log_id' => $callLogId,
                 ])),
             ]);
@@ -828,17 +834,15 @@ class TelnyxWebhookController extends Controller
             $ttsComplete = $metadata['tts_complete'] ?? false;
 
             if ($ttsComplete) {
-                // Caller is in the conference hearing ringback — leave first, then voicemail
-                Log::channel('telnyx')->info('All admin legs failed — leaving conference before voicemail', [
+                // Caller is in the conference hearing ringback — trigger voicemail directly.
+                // Note: Telnyx Call Control v2 has no 'leave' action. We trigger voicemail
+                // on the caller's call while they're still in the conference. The gather/speak
+                // command will take over the call's audio context.
+                Log::channel('telnyx')->info('All admin legs failed — triggering voicemail directly', [
                     'incoming_call_control_id' => $incomingCallControlId,
                     'call_log_id' => $callLogId,
                 ]);
-                $this->sendCallCommand($incomingCallControlId, 'leave', [
-                    'client_state' => base64_encode(json_encode([
-                        'action' => 'leave_for_voicemail',
-                        'call_log_id' => $callLogId,
-                    ])),
-                ]);
+                $this->triggerVoicemail($incomingCallControlId, $callLogId);
             } else {
                 // TTS still playing — set flag so voicemail triggers when TTS finishes
                 Log::channel('telnyx')->info('All admin legs failed but TTS still playing — deferring voicemail', [
