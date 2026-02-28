@@ -363,7 +363,7 @@ class EstimateDocumentGenerator
     /**
      * Replace placeholders in contract template with actual values.
      */
-    protected static function renderContractTemplate(string $body, array $data): string
+    public static function renderContractTemplate(string $body, array $data): string
     {
         foreach ($data as $key => $value) {
             $placeholder = '{{' . $key . '}}';
@@ -399,7 +399,7 @@ class EstimateDocumentGenerator
     /**
      * Render payment schedule HTML for contract template.
      */
-    protected static function renderPaymentSchedule(?array $payments): string
+    public static function renderPaymentSchedule(?array $payments): string
     {
         if (empty($payments)) {
             return '';

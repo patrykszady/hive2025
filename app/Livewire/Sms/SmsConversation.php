@@ -34,6 +34,8 @@ class SmsConversation extends Component
 
     public bool $isClientUser = false;
 
+    public ?int $activeCallLogId = null;
+
     protected ?int $lastMarkedMessageId = null;
 
     public function mount(): void
@@ -223,6 +225,7 @@ class SmsConversation extends Component
                     'connection_id' => $connectionId,
                     'to' => $userPhone,
                     'from' => $from,
+                    'from_display_name' => 'GS Construction',
                     'timeout_secs' => (int) config('services.telnyx.voice_timeout', 30),
                     'client_state' => base64_encode(json_encode([
                         'action' => 'click_to_call',
@@ -247,6 +250,8 @@ class SmsConversation extends Component
                     'call_control_id' => $data['call_control_id'] ?? null,
                 ]);
 
+                $this->activeCallLogId = $callLog->id;
+
                 Flux::toast(variant: 'success', heading: 'Calling', text: 'Your phone will ring shortly...', duration: 8000, position: 'top right');
             } else {
                 $callLog->update(['status' => CallLog::STATUS_FAILED]);
@@ -261,6 +266,176 @@ class SmsConversation extends Component
             Log::channel('telnyx')->error('Click-to-call exception', ['error' => $e->getMessage()]);
             Flux::toast(variant: 'danger', heading: 'Call Failed', text: 'Could not initiate the call.', duration: 5000, position: 'top right');
         }
+    }
+
+    /**
+     * Invite another person to the active conference call.
+     */
+    public function inviteToConference(string $targetPhone): void
+    {
+        if (! $this->activeCallLogId) {
+            Flux::toast(variant: 'warning', heading: 'No Active Call', text: 'You must be on a call to invite someone.', duration: 4000, position: 'top right');
+            return;
+        }
+
+        $callLog = CallLog::find($this->activeCallLogId);
+
+        if (! $callLog) {
+            $this->activeCallLogId = null;
+            Flux::toast(variant: 'warning', heading: 'Call Ended', text: 'The call is no longer active.', duration: 4000, position: 'top right');
+            return;
+        }
+
+        // Check if call is still in a connectable state
+        if (in_array($callLog->status, [CallLog::STATUS_COMPLETED, CallLog::STATUS_FAILED, CallLog::STATUS_MISSED])) {
+            $this->activeCallLogId = null;
+            Flux::toast(variant: 'warning', heading: 'Call Ended', text: 'The call has already ended.', duration: 4000, position: 'top right');
+            return;
+        }
+
+        $conferenceName = $callLog->metadata['conference_name'] ?? "outbound-{$callLog->id}";
+
+        $apiKey = config('services.telnyx.api_key');
+        $connectionId = config('services.telnyx.connection_id');
+        $from = config('services.telnyx.from');
+
+        $callerUser = auth()->user();
+        $callerFirstName = $callerUser?->first_name ?? 'Someone';
+
+        try {
+            $response = Http::withToken($apiKey)
+                ->post('https://api.telnyx.com/v2/calls', [
+                    'connection_id' => $connectionId,
+                    'to' => $targetPhone,
+                    'from' => $from,
+                    'from_display_name' => 'GS Construction',
+                    'timeout_secs' => (int) config('services.telnyx.voice_timeout', 30),
+                    'client_state' => base64_encode(json_encode([
+                        'action' => 'conference_invite',
+                        'call_log_id' => $callLog->id,
+                        'conference_name' => $conferenceName,
+                        'caller_name' => $callerFirstName,
+                    ])),
+                    'webhook_url' => rtrim(config('app.url'), '/') . '/webhooks/telnyx/voice',
+                ]);
+
+            if ($response->successful()) {
+                $data = $response->json('data') ?? [];
+
+                // Track the invited call control ID in metadata
+                $metadata = $callLog->metadata ?? [];
+                $invited = $metadata['invited_call_control_ids'] ?? [];
+                $invited[] = $data['call_control_id'] ?? null;
+                $metadata['invited_call_control_ids'] = array_filter($invited);
+                $callLog->update(['metadata' => $metadata]);
+
+                // Resolve a display name for the toast
+                $inviteName = $this->resolvePhoneDisplay($targetPhone);
+
+                Log::channel('telnyx')->info('Conference invite dialed', [
+                    'call_log_id' => $callLog->id,
+                    'conference_name' => $conferenceName,
+                    'target_phone' => $targetPhone,
+                    'invite_call_control_id' => $data['call_control_id'] ?? null,
+                ]);
+
+                Flux::toast(variant: 'success', heading: 'Inviting', text: "Calling {$inviteName} to join the call...", duration: 6000, position: 'top right');
+            } else {
+                Log::channel('telnyx')->error('Conference invite failed', [
+                    'status' => $response->status(),
+                    'error' => $response->json(),
+                ]);
+                Flux::toast(variant: 'danger', heading: 'Invite Failed', text: 'Could not dial the participant.', duration: 5000, position: 'top right');
+            }
+        } catch (\Exception $e) {
+            Log::channel('telnyx')->error('Conference invite exception', ['error' => $e->getMessage()]);
+            Flux::toast(variant: 'danger', heading: 'Invite Failed', text: 'Something went wrong.', duration: 5000, position: 'top right');
+        }
+    }
+
+    /**
+     * Clear the active call state (user dismisses the call bar).
+     */
+    public function clearActiveCall(): void
+    {
+        $this->activeCallLogId = null;
+    }
+
+    /**
+     * Get contacts that can be invited to the active conference.
+     * Includes vendor admin users + thread client users, excluding anyone already on the call.
+     *
+     * @return \Illuminate\Support\Collection<int, array{name: string, e164: string, display: string, type: string}>
+     */
+    #[Computed]
+    public function conferenceInvitableContacts()
+    {
+        if (! $this->activeCallLogId) {
+            return collect();
+        }
+
+        $callLog = CallLog::find($this->activeCallLogId);
+        $calledNumber = $callLog?->to_number;
+        $userPhone = auth()->user()->routeNotificationForTelnyx();
+
+        $contacts = collect();
+
+        // Add vendor admin users (team members)
+        $vendor = Vendor::find(1);
+        if ($vendor) {
+            $adminUsers = User::whereHas('vendors', fn ($q) => $q->where('vendors.id', $vendor->id))
+                ->whereNotNull('cell_phone')
+                ->where('cell_phone', '!=', '')
+                ->where('id', '!=', auth()->id())
+                ->get();
+
+            foreach ($adminUsers as $admin) {
+                $e164 = $admin->routeNotificationForTelnyx();
+                if (! $e164 || $e164 === $calledNumber) {
+                    continue;
+                }
+                $contacts->push([
+                    'name' => trim($admin->first_name . ' ' . $admin->last_name),
+                    'e164' => $e164,
+                    'display' => $this->formatPhoneForDisplay($e164),
+                    'type' => 'team',
+                ]);
+            }
+        }
+
+        // Add client users from thread
+        if ($this->thread?->client) {
+            foreach ($this->thread->client->users as $clientUser) {
+                $e164 = $clientUser->routeNotificationForTelnyx();
+                if (! $e164 || $e164 === $calledNumber || $e164 === $userPhone) {
+                    continue;
+                }
+                // Skip if already in the team list
+                if ($contacts->contains('e164', $e164)) {
+                    continue;
+                }
+                $contacts->push([
+                    'name' => trim($clientUser->first_name . ' ' . $clientUser->last_name),
+                    'e164' => $e164,
+                    'display' => $this->formatPhoneForDisplay($e164),
+                    'type' => 'client',
+                ]);
+            }
+        }
+
+        return $contacts;
+    }
+
+    protected function formatPhoneForDisplay(string $phone): string
+    {
+        $digits = preg_replace('/[^0-9]/', '', $phone);
+        if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+            $digits = substr($digits, 1);
+        }
+        if (strlen($digits) === 10) {
+            return '(' . substr($digits, 0, 3) . ') ' . substr($digits, 3, 3) . '-' . substr($digits, 6);
+        }
+        return $phone;
     }
 
     #[Computed]

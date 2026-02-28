@@ -15,8 +15,10 @@
                         
                         <flux:menu.item icon="document-duplicate" wire:click="$dispatchTo('estimates.estimate-duplicate', 'duplicateModal', { estimate: {{$estimate->id}} })">Duplicate Estimate</flux:menu.item>
                         <flux:menu.item icon="envelope" wire:click="$dispatchTo('estimates.estimate-email', 'compose', { estimate: {{$estimate->id}} })">Email Estimate</flux:menu.item>
-                        @if(!empty($estimate->payments))
+                        @if(!empty($estimate->payments) && !empty($estimate->options['start_date']) && !empty($estimate->options['end_date']))
                             <flux:menu.item icon="pencil-square" href="{{ route('estimate.sign', $estimate) }}" navigate>Sign Contract</flux:menu.item>
+                        @else
+                            <flux:menu.item icon="pencil-square" wire:click="$dispatchTo('estimates.estimate-accept', 'signSetup')">Sign Contract</flux:menu.item>
                         @endif
                         @if($estimate->client?->users?->contains(fn ($u) => !($u->registration['registered'] ?? false)))
                             <flux:menu.item icon="paper-airplane" wire:click="sendInvite" wire:loading.attr="disabled" wire:target="sendInvite">Send Invite</flux:menu.item>
@@ -30,6 +32,10 @@
                         <flux:menu.item icon="receipt-percent" wire:click="create_pdf('invoice')" wire:loading.attr="disabled" wire:loading.class="opacity-50" wire:target="create_pdf">Export Invoice</flux:menu.item>
                         <flux:menu.item icon="wrench-screwdriver" wire:click="create_pdf('work order')" wire:loading.attr="disabled" wire:loading.class="opacity-50" wire:target="create_pdf">Export Work Order</flux:menu.item>
                         <flux:menu.item icon="table-cells" wire:click="export_csv">Export Excel Estimate</flux:menu.item>
+                        @if($estimate->signed_contract_path)
+                            <flux:menu.separator />
+                            <flux:menu.item icon="document-check" wire:click="downloadSignedContract" wire:loading.attr="disabled" wire:target="downloadSignedContract">Download Signed Contract</flux:menu.item>
+                        @endif
                     </flux:menu.submenu>
 
                     @can('update', $estimate)

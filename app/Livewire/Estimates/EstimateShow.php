@@ -18,6 +18,7 @@ use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Response;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
@@ -530,6 +531,25 @@ class EstimateShow extends Component
         return response()->streamDownload(function () use ($document) {
             echo $document['binary'];
         }, $document['filename'], [
+            'Content-Type' => 'application/pdf',
+        ]);
+    }
+
+    public function downloadSignedContract(): mixed
+    {
+        $path = $this->estimate->signed_contract_path;
+
+        if (! $path || ! Storage::disk('local')->exists($path)) {
+            Flux::toast(text: 'Signed contract not found.', variant: 'danger');
+
+            return null;
+        }
+
+        $this->skipRender();
+
+        $filename = 'Signed Contract - Estimate ' . $this->estimate->number . '.pdf';
+
+        return Storage::disk('local')->download($path, $filename, [
             'Content-Type' => 'application/pdf',
         ]);
     }

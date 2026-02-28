@@ -164,7 +164,8 @@ Route::middleware(['auth', 'registered'])->group(function () {
         return response($result['binary'])
             ->header('Content-Type', 'application/pdf')
             ->header('Content-Disposition', 'inline; filename="' . $result['filename'] . '"')
-            ->header('Cache-Control', 'private, max-age=3600');
+            ->header('Cache-Control', 'no-store, no-cache, must-revalidate')
+            ->header('Pragma', 'no-cache');
     })->name('estimate.sign.pdf');
 });
 

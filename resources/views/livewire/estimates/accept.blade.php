@@ -1,5 +1,11 @@
 <x-form-modal name="accept_estimate_modal" title="Settings">
     <form id="accept_estimate_modal_form" wire:submit="save" class="space-y-4">
+        @if($showSignWarning)
+            <flux:callout variant="warning" icon="exclamation-triangle">
+                <flux:callout.heading>Set up before signing</flux:callout.heading>
+                <flux:callout.text>Configure estimate payments and dates before signing the contract.</flux:callout.text>
+            </flux:callout>
+        @endif
         <x-island-card heading="Estimate Sections" subheading="Choose Bid for each Section.">
 
             <flux:table class="p-0! m-0!">
@@ -100,8 +106,24 @@
         <x-island-card heading="Estimate Duration" subheading="Start and End date to include in contract.">
 
             <div class="grid grid-cols-2 gap-4">
-                <flux:input wire:model.live="start_date" label="Start Date" type="date" />
-                <flux:input wire:model.live="end_date" label="End Date" type="date" />
+                <div class="min-w-0">
+                    <flux:input wire:model.live="start_date" label="Start Date" type="date" />
+                </div>
+                <div class="min-w-0">
+                    <flux:input wire:model.live="end_date" label="End Date" type="date" />
+                </div>
+            </div>
+        </x-island-card>
+
+        <x-island-card heading="Required Signers" subheading="Select which team members must sign this contract.">
+            <div class="space-y-2">
+                @foreach($this->vendorUsers as $vendorUser)
+                    <flux:checkbox
+                        wire:model.live="requiredVendorSignerIds"
+                        value="{{ $vendorUser->id }}"
+                        label="{{ $vendorUser->first_name }} {{ $vendorUser->last_name }} ({{ $vendorUser->getRoleForVendor($estimate->belongs_to_vendor_id) }})"
+                    />
+                @endforeach
             </div>
         </x-island-card>
     </form>

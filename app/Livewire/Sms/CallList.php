@@ -246,6 +246,7 @@ class CallList extends Component
                     'connection_id' => $connectionId,
                     'to' => $userPhone,
                     'from' => $from,
+                    'from_display_name' => 'GS Construction',
                     'timeout_secs' => (int) config('services.telnyx.voice_timeout', 30),
                     'client_state' => base64_encode(json_encode([
                         'action' => 'click_to_call',

@@ -18,7 +18,7 @@ class Estimate extends Model
 {
     use HasFactory, SoftDeletes;
 
-    protected $fillable = ['project_id', 'options', 'belongs_to_vendor_id', 'created_at', 'updated_at'];
+    protected $fillable = ['project_id', 'options', 'belongs_to_vendor_id', 'signed_contract_path', 'created_at', 'updated_at'];
 
     protected function casts(): array
     {
@@ -71,17 +71,44 @@ class Estimate extends Model
     }
 
     /**
-     * Check if the vendor has signed this estimate.
+     * Get the explicitly configured vendor signer IDs for this estimate.
+     * Returns an empty collection when no specific signers are configured.
+     *
+     * @return \Illuminate\Support\Collection<int, int>
      */
-    public function isVendorSigned(): bool
+    public function getRequiredVendorSignerIdsAttribute(): \Illuminate\Support\Collection
     {
-        $vendorUserIds = $this->vendor?->users()?->pluck('users.id') ?? collect();
+        $ids = $this->options['required_vendor_signer_ids'] ?? [];
 
-        return $this->signatures()->whereIn('user_id', $vendorUserIds)->exists();
+        return collect($ids)->map(fn ($id) => (int) $id);
     }
 
     /**
-     * Check if the estimate has been fully signed (vendor + all client users).
+     * Check if the vendor has signed this estimate.
+     *
+     * When specific signers are configured, ALL of them must have signed.
+     * When none are configured, any single vendor user signature suffices.
+     */
+    public function isVendorSigned(): bool
+    {
+        $requiredIds = $this->required_vendor_signer_ids;
+
+        if ($requiredIds->isNotEmpty()) {
+            $signedVendorIds = $this->signatures()
+                ->whereIn('user_id', $requiredIds)
+                ->pluck('user_id');
+
+            return $requiredIds->diff($signedVendorIds)->isEmpty();
+        }
+
+        // Fallback: any vendor user signature counts
+        $allVendorUserIds = $this->vendor?->users()?->pluck('users.id') ?? collect();
+
+        return $this->signatures()->whereIn('user_id', $allVendorUserIds)->exists();
+    }
+
+    /**
+     * Check if the estimate has been fully signed (vendor signers + all client users).
      */
     public function isFullySigned(): bool
     {

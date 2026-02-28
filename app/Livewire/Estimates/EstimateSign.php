@@ -3,11 +3,15 @@
 namespace App\Livewire\Estimates;
 
 use App\Mail\EstimateSigningInvite;
+use App\Models\EmailTemplate;
 use App\Models\Estimate;
 use App\Models\EstimateSignature;
 use App\Models\User;
+use App\Support\EstimateDocumentGenerator;
 use Flux;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Number;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
 use Livewire\Component;
@@ -23,7 +27,7 @@ class EstimateSign extends Component
     public bool $valid = false;
 
     #[Locked]
-    public ?string $pdfUrl = null;
+    public ?string $contractHtml = null;
 
     public ?Estimate $estimate = null;
 
@@ -89,13 +93,15 @@ class EstimateSign extends Component
         $this->estimate = $estimate;
         $this->valid = true;
 
-        // Generate PDF URL (auth-protected, no signature needed)
-        $this->pdfUrl = route('estimate.sign.pdf', ['estimate' => $estimate->id]);
+        // Generate contract HTML for inline rendering
+        $this->contractHtml = $this->buildContractHtml($estimate);
 
         $authUser = auth()->user();
 
         // 1. Check if user is a vendor user for this estimate
         $vendorUserIds = $estimate->vendor->users->pluck('id');
+        $requiredVendorSignerIds = $estimate->required_vendor_signer_ids;
+
         if ($vendorUserIds->contains($authUser->id)) {
             $this->isVendorSigner = true;
 
@@ -108,6 +114,20 @@ class EstimateSign extends Component
 
             // Fully signed? (vendor + all clients)
             if ($estimate->isFullySigned()) {
+                $this->step = 'done';
+
+                return;
+            }
+
+            // If specific signers are configured, only those users may sign
+            if ($requiredVendorSignerIds->isNotEmpty() && ! $requiredVendorSignerIds->contains($authUser->id)) {
+                $this->step = 'not-authorized';
+
+                return;
+            }
+
+            // When no specific signers configured, only one vendor user needs to sign
+            if ($requiredVendorSignerIds->isEmpty() && $estimate->isVendorSigned()) {
                 $this->step = 'done';
 
                 return;
@@ -304,6 +324,11 @@ class EstimateSign extends Component
             'signatures',
         ]);
 
+        // If fully signed, generate and store the signed contract PDF
+        if ($this->estimate->isFullySigned() && ! $this->estimate->signed_contract_path) {
+            $this->generateAndStoreSignedPdf($this->estimate);
+        }
+
         $this->step = 'done';
 
         Flux::toast(
@@ -315,6 +340,48 @@ class EstimateSign extends Component
     // ==============================================================
     // Helpers
     // ==============================================================
+
+    /**
+     * Generate the fully-signed estimate PDF and store it to disk.
+     */
+    protected function generateAndStoreSignedPdf(Estimate $estimate): void
+    {
+        try {
+            $result = EstimateDocumentGenerator::generate($estimate);
+
+            $vendorId = $estimate->belongs_to_vendor_id;
+            $filename = 'signed_contracts/' . $vendorId . '/' . $estimate->id . '_' . now()->timestamp . '.pdf';
+
+            Storage::disk('local')->put($filename, $result['binary']);
+
+            $estimate->update(['signed_contract_path' => $filename]);
+            $this->estimate = $estimate->fresh();
+        } catch (\Throwable $e) {
+            report($e);
+        }
+    }
+
+    /**
+     * Download the stored signed contract PDF.
+     */
+    public function downloadSignedContract(): mixed
+    {
+        $path = $this->estimate->signed_contract_path;
+
+        if (! $path || ! Storage::disk('local')->exists($path)) {
+            Flux::toast(text: 'Signed contract not found.', variant: 'danger');
+
+            return null;
+        }
+
+        $this->skipRender();
+
+        $filename = 'Signed Contract - Estimate ' . $this->estimate->number . '.pdf';
+
+        return Storage::disk('local')->download($path, $filename, [
+            'Content-Type' => 'application/pdf',
+        ]);
+    }
 
     /**
      * Send signing invite emails to all client users on this estimate.
@@ -353,9 +420,51 @@ class EstimateSign extends Component
         return str_starts_with($digits, '+') ? $digits : '+' . $digits;
     }
 
+    /**
+     * Build the contract HTML for inline rendering on the signing page.
+     */
+    protected function buildContractHtml(Estimate $estimate): ?string
+    {
+        $vendor = $estimate->vendor;
+        $project = $estimate->project;
+        $client = $project?->client ?? $estimate->client;
+        $timezone = vendor_timezone();
+
+        $contractTemplate = EmailTemplate::withoutGlobalScopes()
+            ->where('vendor_id', $vendor->id)
+            ->where('type', 'contract')
+            ->first();
+
+        if (! $contractTemplate) {
+            return null;
+        }
+
+        $estimateTotal = $estimate->estimate_sections->sum('total');
+        $estimateTotalWords = ucwords(
+            Number::spell((int) $estimateTotal) . ' dollars and ' .
+            Number::spell((int) (($estimateTotal - (int) $estimateTotal) * 100)) . ' cents'
+        );
+
+        $paymentScheduleHtml = EstimateDocumentGenerator::renderPaymentSchedule($estimate->payments);
+
+        return EstimateDocumentGenerator::renderContractTemplate($contractTemplate->body, [
+            'today_date' => now()->setTimezone($timezone)->format('m/d/Y'),
+            'vendor_name' => $vendor->business_name ?? 'Unknown Vendor',
+            'short_vendor_name' => data_get($vendor->options, 'short_name') ?: ($vendor->business_name ?? 'Unknown Vendor'),
+            'client_name' => $client?->name ?? 'Unknown Client',
+            'estimate_number' => $estimate->number,
+            'project_address' => $project?->full_address ?? 'No address on file',
+            'start_date' => $estimate->start_date?->format('m/d/Y') ?? 'START_DATE_HERE',
+            'end_date' => $estimate->end_date?->format('m/d/Y') ?? 'END_DATE_HERE',
+            'estimate_total' => money($estimateTotal),
+            'estimate_total_words' => $estimateTotalWords,
+            'payment_schedule' => $paymentScheduleHtml,
+            'current_year' => now()->setTimezone($timezone)->format('Y'),
+        ]);
+    }
+
     public function render()
     {
-        return view('livewire.estimates.sign')
-            ->layout('components.layouts.guest');
+        return view('livewire.estimates.sign');
     }
 }

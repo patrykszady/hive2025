@@ -176,7 +176,8 @@ class TelnyxWebhookController extends Controller
      *
      * Actions:
      *  - welcome_or_ring: Our answer of an incoming call → play TTS or ring admins
-     *  - click_to_call: User answered their phone → bridge to target
+     *  - click_to_call: User answered their phone → create conference and dial target
+     *  - click_to_call_target_ring: Target answered → play TTS intro then join conference
      *  - admin_ring: Admin answered → bridge with incoming caller
      */
     protected function handleCallAnswered(array $data): JsonResponse
@@ -192,9 +193,19 @@ class TelnyxWebhookController extends Controller
 
         $action = $clientState['action'] ?? null;
 
-        // ── Click-to-call: user answered their phone → now bridge to target ──
+        // ── Click-to-call: user answered their phone → create conference and dial target ──
         if ($action === 'click_to_call') {
             return $this->handleClickToCallAnswered($callControlId, $clientState);
+        }
+
+        // ── Click-to-call target answered → play TTS intro then join conference ──
+        if ($action === 'click_to_call_target_ring') {
+            return $this->handleClickToCallTargetAnswered($callControlId, $clientState);
+        }
+
+        // ── Conference invite answered → play TTS intro then join conference ──
+        if ($action === 'conference_invite') {
+            return $this->handleConferenceInviteAnswered($callControlId, $clientState);
         }
 
         // ── Welcome or Ring: incoming call answered by us → TTS or ring admins ──
@@ -212,7 +223,9 @@ class TelnyxWebhookController extends Controller
     }
 
     /**
-     * Handle click-to-call user answering their phone — bridge to target.
+     * Handle click-to-call user answering their phone — create conference, then dial target.
+     *
+     * Flow: user answers → joins conference → target is dialed → target hears TTS intro → joins conference.
      */
     protected function handleClickToCallAnswered(string $callControlId, array $clientState): JsonResponse
     {
@@ -232,27 +245,244 @@ class TelnyxWebhookController extends Controller
             return response()->json(['status' => 'ok']);
         }
 
-        Log::channel('telnyx')->info('Click-to-call: user answered, bridging to target', [
+        $conferenceName = "outbound-{$callLogId}";
+
+        // Resolve caller display name from user record
+        $callerUser = $callLog?->user_id ? User::find($callLog->user_id) : null;
+        $callerFirstName = $callerUser?->first_name ?? 'Someone';
+
+        Log::channel('telnyx')->info('Click-to-call: user answered → joining conference and dialing target', [
             'call_control_id' => $callControlId,
             'target_phone' => $targetPhone,
             'call_log_id' => $callLogId,
+            'conference_name' => $conferenceName,
         ]);
 
-        // Transfer (bridge) to the target number
-        $this->sendCallCommand($callControlId, 'transfer', [
-            'to' => $targetPhone,
-            'from' => config('services.telnyx.from'),
-            'timeout_secs' => (int) config('services.telnyx.voice_timeout', 30),
+        // Step 1: Join the user to a conference (they hear ringback while target is dialed)
+        $holdAudioUrl = config('services.telnyx.hold_audio_url')
+            ?: rtrim(config('app.url'), '/') . '/audio/ringback.wav';
+
+        $this->sendCallCommand($callControlId, 'conference', [
+            'name' => $conferenceName,
+            'beep_enabled' => 'never',
+            'end_conference_on_exit' => true,
+            'start_conference_on_create' => false,
+            'hold_audio_url' => $holdAudioUrl,
             'client_state' => base64_encode(json_encode([
-                'action' => 'click_to_call_bridged',
+                'action' => 'click_to_call_in_conference',
                 'call_log_id' => $callLogId,
             ])),
         ]);
 
-        $callLog?->update([
-            'status' => CallLog::STATUS_TRANSFERRED,
-            'forwarded_to' => $targetPhone,
+        // Step 2: Dial the target phone number
+        $apiKey = config('services.telnyx.api_key');
+        $connectionId = config('services.telnyx.connection_id');
+        $from = config('services.telnyx.from');
+
+        try {
+            $response = Http::withToken($apiKey)
+                ->post('https://api.telnyx.com/v2/calls', [
+                    'connection_id' => $connectionId,
+                    'to' => $targetPhone,
+                    'from' => $from,
+                    'from_display_name' => 'GS Construction',
+                    'timeout_secs' => (int) config('services.telnyx.voice_timeout', 30),
+                    'client_state' => base64_encode(json_encode([
+                        'action' => 'click_to_call_target_ring',
+                        'call_log_id' => $callLogId,
+                        'conference_name' => $conferenceName,
+                        'caller_name' => $callerFirstName,
+                        'user_call_control_id' => $callControlId,
+                    ])),
+                    'webhook_url' => rtrim(config('app.url'), '/') . '/webhooks/telnyx/voice',
+                ]);
+
+            if ($response->successful()) {
+                $data = $response->json('data') ?? [];
+                $targetCcId = $data['call_control_id'] ?? null;
+
+                if ($callLog) {
+                    $metadata = $callLog->metadata ?? [];
+                    $metadata['target_call_control_id'] = $targetCcId;
+                    $metadata['conference_name'] = $conferenceName;
+                    $callLog->update([
+                        'forwarded_to' => $targetPhone,
+                        'metadata' => $metadata,
+                    ]);
+                }
+
+                Log::channel('telnyx')->info('Click-to-call: target dialed', [
+                    'target_phone' => $targetPhone,
+                    'target_call_control_id' => $targetCcId,
+                ]);
+            } else {
+                Log::channel('telnyx')->error('Click-to-call: failed to dial target', [
+                    'status' => $response->status(),
+                    'error' => $response->json(),
+                ]);
+                // Hang up the user since we can't reach the target
+                $this->sendCallCommand($callControlId, 'speak', [
+                    'payload' => 'Sorry, we could not connect your call. Please try again.',
+                    'voice' => 'Telnyx.NaturalHD.astra',
+                    'language' => 'en-US',
+                    'payload_type' => 'text',
+                    'voice_settings' => ['type' => 'telnyx'],
+                    'client_state' => base64_encode(json_encode([
+                        'action' => 'click_to_call_failed_tts',
+                        'call_log_id' => $callLogId,
+                    ])),
+                ]);
+                $callLog?->update(['status' => CallLog::STATUS_FAILED]);
+            }
+        } catch (\Exception $e) {
+            Log::channel('telnyx')->error('Click-to-call: exception dialing target', [
+                'error' => $e->getMessage(),
+            ]);
+            $this->sendCallCommand($callControlId, 'hangup');
+            $callLog?->update(['status' => CallLog::STATUS_FAILED]);
+        }
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Handle click-to-call target answering — play TTS intro then join conference.
+     */
+    protected function handleClickToCallTargetAnswered(string $callControlId, array $clientState): JsonResponse
+    {
+        $callLogId = $clientState['call_log_id'] ?? null;
+        $conferenceName = $clientState['conference_name'] ?? null;
+        $callerName = $clientState['caller_name'] ?? 'Someone';
+
+        // Resolve the target's name from the CallLog forwarded_to phone
+        $callLog = $callLogId ? CallLog::find($callLogId) : null;
+        $targetPhone = $callLog?->forwarded_to;
+        $participantName = $this->resolveNameFromPhone($targetPhone) ?? 'Someone';
+
+        $vendor = Vendor::find(1);
+        $shortName = data_get($vendor?->options ?? [], 'short_name') ?: ($vendor?->business_name ?? 'GS Construction');
+
+        $ttsPayload = "{$callerName} from {$shortName} is calling you. He will be on the line shortly.";
+
+        Log::channel('telnyx')->info('Click-to-call: target answered — playing intro TTS', [
+            'call_control_id' => $callControlId,
+            'conference_name' => $conferenceName,
+            'participant_name' => $participantName,
+            'tts' => $ttsPayload,
         ]);
+
+        $this->sendCallCommand($callControlId, 'speak', [
+            'payload' => $ttsPayload,
+            'voice' => 'Telnyx.NaturalHD.astra',
+            'language' => 'en-US',
+            'payload_type' => 'text',
+            'voice_settings' => ['type' => 'telnyx'],
+            'client_state' => base64_encode(json_encode([
+                'action' => 'click_to_call_target_intro_done',
+                'call_log_id' => $callLogId,
+                'conference_name' => $conferenceName,
+                'participant_name' => $participantName,
+            ])),
+        ]);
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Handle click-to-call target not answering (timeout/busy/rejected).
+     * Notify the user in the conference that the target didn't answer, then hang up.
+     */
+    protected function handleClickToCallTargetHangup(string $callControlId, array $clientState, ?string $hangupCause): JsonResponse
+    {
+        $callLogId = $clientState['call_log_id'] ?? null;
+        $userCallControlId = $clientState['user_call_control_id'] ?? null;
+        $callLog = $callLogId ? CallLog::find($callLogId) : null;
+
+        Log::channel('telnyx')->info('Click-to-call: target did not answer', [
+            'call_control_id' => $callControlId,
+            'hangup_cause' => $hangupCause,
+            'call_log_id' => $callLogId,
+        ]);
+
+        // If we have the user's call control ID, tell them the target didn't answer
+        if ($userCallControlId) {
+            // Leave the conference first so we can play TTS to the user
+            $this->sendCallCommand($userCallControlId, 'leave', [
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'click_to_call_target_failed_leave',
+                    'call_log_id' => $callLogId,
+                ])),
+            ]);
+        }
+
+        $callLog?->update([
+            'status' => CallLog::STATUS_MISSED,
+            'hangup_cause' => $hangupCause,
+            'ended_at' => now(),
+        ]);
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Handle conference invite answered — play TTS intro then join existing conference.
+     */
+    protected function handleConferenceInviteAnswered(string $callControlId, array $clientState): JsonResponse
+    {
+        $callLogId = $clientState['call_log_id'] ?? null;
+        $conferenceName = $clientState['conference_name'] ?? null;
+        $callerName = $clientState['caller_name'] ?? 'Someone';
+
+        // Resolve the invited person's name from the webhook call's "to" number
+        // The webhook payload isn't available here, so look up from CallLog invited numbers
+        $callLog = $callLogId ? CallLog::find($callLogId) : null;
+        $participantName = $this->resolveNameFromCallControlId($callControlId, $callLog) ?? 'Someone';
+
+        $vendor = Vendor::find(1);
+        $shortName = data_get($vendor?->options ?? [], 'short_name') ?: ($vendor?->business_name ?? 'GS Construction');
+
+        $ttsPayload = "{$callerName} from {$shortName} has invited you to a call. You will be connected shortly.";
+
+        Log::channel('telnyx')->info('Conference invite: participant answered — playing intro TTS', [
+            'call_control_id' => $callControlId,
+            'conference_name' => $conferenceName,
+            'call_log_id' => $callLogId,
+            'participant_name' => $participantName,
+            'tts' => $ttsPayload,
+        ]);
+
+        $this->sendCallCommand($callControlId, 'speak', [
+            'payload' => $ttsPayload,
+            'voice' => 'Telnyx.NaturalHD.astra',
+            'language' => 'en-US',
+            'payload_type' => 'text',
+            'voice_settings' => ['type' => 'telnyx'],
+            'client_state' => base64_encode(json_encode([
+                'action' => 'conference_invite_intro_done',
+                'call_log_id' => $callLogId,
+                'conference_name' => $conferenceName,
+                'participant_name' => $participantName,
+            ])),
+        ]);
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Handle conference invite not answered (timeout/busy/rejected).
+     * Just log it — the conference continues without the invited participant.
+     */
+    protected function handleConferenceInviteHangup(string $callControlId, array $clientState, ?string $hangupCause): JsonResponse
+    {
+        $callLogId = $clientState['call_log_id'] ?? null;
+
+        Log::channel('telnyx')->info('Conference invite: participant did not answer', [
+            'call_control_id' => $callControlId,
+            'hangup_cause' => $hangupCause,
+            'call_log_id' => $callLogId,
+        ]);
+
+        // No need to tear down the conference — it continues with existing participants
 
         return response()->json(['status' => 'ok']);
     }
@@ -453,6 +683,16 @@ class TelnyxWebhookController extends Controller
             return $this->handleAdminRingHangup($callControlId, $clientState, $hangupCause);
         }
 
+        // ── Click-to-call target didn't answer (timeout/busy/rejected) ──
+        if ($action === 'click_to_call_target_ring') {
+            return $this->handleClickToCallTargetHangup($callControlId, $clientState, $hangupCause);
+        }
+
+        // ── Conference invite didn't answer ──
+        if ($action === 'conference_invite') {
+            return $this->handleConferenceInviteHangup($callControlId, $clientState, $hangupCause);
+        }
+
         // ── Voicemail recording done (caller hung up after record_start) ──
         if ($action === 'voicemail_recording') {
             $callLogId = $clientState['call_log_id'] ?? null;
@@ -609,6 +849,27 @@ class TelnyxWebhookController extends Controller
             $this->triggerVoicemail($callControlId, $callLogId);
         }
 
+        if ($action === 'click_to_call_target_failed_leave') {
+            $callLogId = $clientState['call_log_id'] ?? null;
+
+            Log::channel('telnyx')->info('Click-to-call: left conference after target failed — notifying user', [
+                'call_control_id' => $callControlId,
+                'call_log_id' => $callLogId,
+            ]);
+
+            $this->sendCallCommand($callControlId, 'speak', [
+                'payload' => 'The person you called did not answer. Please try again later.',
+                'voice' => 'Telnyx.NaturalHD.astra',
+                'language' => 'en-US',
+                'payload_type' => 'text',
+                'voice_settings' => ['type' => 'telnyx'],
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'click_to_call_failed_tts',
+                    'call_log_id' => $callLogId,
+                ])),
+            ]);
+        }
+
         return response()->json(['status' => 'ok']);
     }
 
@@ -759,6 +1020,79 @@ class TelnyxWebhookController extends Controller
                     ])),
                 ]);
             }
+        } elseif ($action === 'click_to_call_target_intro_done') {
+            // Target heard the TTS intro → join conference with the user
+            $callLogId = $clientState['call_log_id'] ?? null;
+            $conferenceName = $clientState['conference_name'] ?? null;
+            $participantName = $clientState['participant_name'] ?? null;
+
+            Log::channel('telnyx')->info('Click-to-call: target intro done — joining conference', [
+                'call_control_id' => $callControlId,
+                'conference_name' => $conferenceName,
+                'call_log_id' => $callLogId,
+                'participant_name' => $participantName,
+            ]);
+
+            if ($conferenceName) {
+                $this->sendCallCommand($callControlId, 'conference', [
+                    'name' => $conferenceName,
+                    'beep_enabled' => 'on_enter',
+                    'end_conference_on_exit' => false,
+                    'start_conference_on_create' => true,
+                    'client_state' => base64_encode(json_encode([
+                        'action' => 'click_to_call_target_in_conference',
+                        'call_log_id' => $callLogId,
+                    ])),
+                ]);
+
+                // Announce to existing conference participants
+                if ($participantName && $participantName !== 'Someone') {
+                    $this->announceConferenceJoin($conferenceName, $participantName);
+                }
+            }
+
+            $callLog = $callLogId ? CallLog::find($callLogId) : null;
+            $callLog?->update(['status' => CallLog::STATUS_TRANSFERRED]);
+        } elseif ($action === 'conference_invite_intro_done') {
+            // Invited participant heard the TTS intro → join conference
+            $callLogId = $clientState['call_log_id'] ?? null;
+            $conferenceName = $clientState['conference_name'] ?? null;
+            $participantName = $clientState['participant_name'] ?? null;
+
+            Log::channel('telnyx')->info('Conference invite: intro done — joining conference', [
+                'call_control_id' => $callControlId,
+                'conference_name' => $conferenceName,
+                'call_log_id' => $callLogId,
+                'participant_name' => $participantName,
+            ]);
+
+            if ($conferenceName) {
+                $this->sendCallCommand($callControlId, 'conference', [
+                    'name' => $conferenceName,
+                    'beep_enabled' => 'on_enter',
+                    'end_conference_on_exit' => false,
+                    'start_conference_on_create' => true,
+                    'client_state' => base64_encode(json_encode([
+                        'action' => 'conference_invite_in_conference',
+                        'call_log_id' => $callLogId,
+                    ])),
+                ]);
+
+                // Announce to existing conference participants
+                if ($participantName && $participantName !== 'Someone') {
+                    $this->announceConferenceJoin($conferenceName, $participantName);
+                }
+            }
+        } elseif ($action === 'click_to_call_failed_tts') {
+            // Failed to reach target — TTS error message done → hang up
+            $callLogId = $clientState['call_log_id'] ?? null;
+
+            Log::channel('telnyx')->info('Click-to-call: failure TTS done — hanging up', [
+                'call_control_id' => $callControlId,
+                'call_log_id' => $callLogId,
+            ]);
+
+            $this->sendCallCommand($callControlId, 'hangup');
         }
 
         return response()->json(['status' => 'ok']);
@@ -1487,6 +1821,132 @@ class TelnyxWebhookController extends Controller
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Announce a participant joining a conference via TTS to all existing participants.
+     * Looks up the Telnyx conference by name, then uses the conference speak API.
+     */
+    protected function announceConferenceJoin(string $conferenceName, string $participantName): void
+    {
+        $apiKey = config('services.telnyx.api_key');
+
+        if (! $apiKey) {
+            return;
+        }
+
+        try {
+            // Look up the conference by name to get its ID
+            $listResponse = Http::withToken($apiKey)
+                ->get('https://api.telnyx.com/v2/conferences', [
+                    'filter[name]' => $conferenceName,
+                ]);
+
+            if (! $listResponse->successful()) {
+                Log::channel('telnyx')->warning('Conference join announce: failed to list conferences', [
+                    'conference_name' => $conferenceName,
+                    'status' => $listResponse->status(),
+                ]);
+                return;
+            }
+
+            $conferences = $listResponse->json('data') ?? [];
+            $conference = collect($conferences)->first();
+
+            if (! $conference || ! ($conferenceId = $conference['id'] ?? null)) {
+                Log::channel('telnyx')->warning('Conference join announce: conference not found', [
+                    'conference_name' => $conferenceName,
+                ]);
+                return;
+            }
+
+            // Speak the join announcement to all conference participants
+            $ttsPayload = "{$participantName} has joined the call.";
+
+            $speakResponse = Http::withToken($apiKey)
+                ->post("https://api.telnyx.com/v2/conferences/{$conferenceId}/actions/speak", [
+                    'payload' => $ttsPayload,
+                    'voice' => 'Telnyx.NaturalHD.astra',
+                    'language' => 'en-US',
+                    'payload_type' => 'text',
+                    'voice_settings' => ['type' => 'telnyx'],
+                ]);
+
+            if ($speakResponse->successful()) {
+                Log::channel('telnyx')->info('Conference join announced', [
+                    'conference_id' => $conferenceId,
+                    'conference_name' => $conferenceName,
+                    'participant_name' => $participantName,
+                ]);
+            } else {
+                Log::channel('telnyx')->warning('Conference join announce: speak failed', [
+                    'conference_id' => $conferenceId,
+                    'status' => $speakResponse->status(),
+                    'error' => $speakResponse->json(),
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::channel('telnyx')->error('Conference join announce exception', [
+                'conference_name' => $conferenceName,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Resolve a person's first name from their phone number.
+     */
+    protected function resolveNameFromPhone(?string $phone): ?string
+    {
+        if (! $phone) {
+            return null;
+        }
+
+        $digits = preg_replace('/\D/', '', $phone);
+
+        if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+            $digits = substr($digits, 1);
+        }
+
+        $user = User::where('cell_phone', 'LIKE', "%{$digits}%")->first();
+
+        return $user?->first_name;
+    }
+
+    /**
+     * Resolve a person's first name from a call_control_id by looking up the call via Telnyx API.
+     * Falls back to checking CallLog metadata for invited participants.
+     */
+    protected function resolveNameFromCallControlId(string $callControlId, ?CallLog $callLog): ?string
+    {
+        // Try to get the "to" number from the Telnyx call details
+        $apiKey = config('services.telnyx.api_key');
+
+        if ($apiKey) {
+            try {
+                $response = Http::withToken($apiKey)
+                    ->get("https://api.telnyx.com/v2/calls/{$callControlId}");
+
+                if ($response->successful()) {
+                    $toNumber = $response->json('data.to') ?? null;
+                    if ($toNumber) {
+                        $name = $this->resolveNameFromPhone($toNumber);
+                        if ($name) {
+                            return $name;
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+                // Fall through to metadata lookup
+            }
+        }
+
+        // Fallback: check if we stored the forwarded_to number
+        if ($callLog?->forwarded_to) {
+            return $this->resolveNameFromPhone($callLog->forwarded_to);
+        }
+
+        return null;
     }
 
     /**

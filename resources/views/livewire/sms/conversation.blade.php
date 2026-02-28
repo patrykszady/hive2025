@@ -109,6 +109,68 @@
                         @endforeach
                     </div>
                 @endif
+
+                {{-- Active call bar with "Add to Call" --}}
+                @if ($activeCallLogId)
+                    <div class="relative flex items-center gap-2 mt-1.5 px-2 py-1.5 rounded-lg bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800" x-data="{ showInvite: false }">
+                        <div class="flex items-center gap-1.5 text-green-700 dark:text-green-400">
+                            <span class="relative flex size-2">
+                                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                <span class="relative inline-flex rounded-full size-2 bg-green-500"></span>
+                            </span>
+                            <span class="text-xs font-medium">On Call</span>
+                        </div>
+
+                        <div class="relative ml-auto flex items-center gap-1">
+                            <button
+                                type="button"
+                                @click="showInvite = !showInvite"
+                                class="inline-flex items-center gap-1 text-xs font-medium text-green-700 dark:text-green-400 hover:text-green-800 dark:hover:text-green-300 cursor-pointer"
+                            >
+                                <flux:icon name="user-plus" class="size-3.5" />
+                                Add to Call
+                            </button>
+
+                            <button
+                                type="button"
+                                wire:click="clearActiveCall"
+                                class="inline-flex items-center text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer ml-2"
+                                title="Dismiss"
+                            >
+                                <flux:icon name="x-mark" class="size-3.5" />
+                            </button>
+                        </div>
+
+                        {{-- Invite dropdown --}}
+                        <div
+                            x-show="showInvite"
+                            x-transition
+                            @click.away="showInvite = false"
+                            class="absolute right-0 top-full mt-1 z-50 w-64 rounded-lg bg-white dark:bg-zinc-800 shadow-lg ring-1 ring-zinc-200 dark:ring-zinc-700 py-1"
+                        >
+                            <div class="px-3 py-1.5 text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Add to Call</div>
+                            @forelse ($this->conferenceInvitableContacts as $invite)
+                                <button
+                                    type="button"
+                                    wire:click="inviteToConference('{{ $invite['e164'] }}')"
+                                    wire:loading.attr="disabled"
+                                    wire:target="inviteToConference"
+                                    @click="showInvite = false"
+                                    class="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-zinc-100 dark:hover:bg-zinc-700 cursor-pointer disabled:opacity-50"
+                                >
+                                    <flux:icon name="{{ $invite['type'] === 'team' ? 'briefcase' : 'user' }}" class="size-4 text-zinc-400" />
+                                    <div class="flex-1 min-w-0">
+                                        <div class="truncate font-medium text-zinc-800 dark:text-zinc-200">{{ $invite['name'] }}</div>
+                                        <div class="text-xs text-zinc-500">{{ $invite['display'] }}</div>
+                                    </div>
+                                    <span class="text-xs text-zinc-400">{{ $invite['type'] === 'team' ? 'Team' : 'Client' }}</span>
+                                </button>
+                            @empty
+                                <div class="px-3 py-2 text-xs text-zinc-400">No additional contacts available</div>
+                            @endforelse
+                        </div>
+                    </div>
+                @endif
             @endif
         </div>
 
@@ -171,7 +233,7 @@
                             </p>
                         @endif
 
-                        <div class="rounded-2xl px-3.5 py-2 text-base lg:text-sm {{ $msg->isOutbound()
+                        <div class="rounded-2xl px-3.5 py-2 text-base lg:text-sm break-words {{ $msg->isOutbound()
                             ? 'bg-indigo-600 text-white rounded-br-md'
                             : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 rounded-bl-md' }}">
                             @if ($msg->hasMedia())
@@ -224,7 +286,24 @@
             @php
                 $pendingOptIn = $this->thread->hasPendingOptIn();
             @endphp
-            <form wire:submit="sendMessage">
+            <form wire:submit="sendMessage"
+                x-data="{
+                    draftKey: 'sms-draft-' + {{ $threadId }},
+                    init() {
+                        const saved = localStorage.getItem(this.draftKey);
+                        if (saved) {
+                            $wire.set('newMessage', saved);
+                        }
+                    },
+                    saveDraft(e) {
+                        localStorage.setItem(this.draftKey, e.target.value);
+                    },
+                    clearDraft() {
+                        localStorage.removeItem(this.draftKey);
+                    }
+                }"
+                x-on:submit="clearDraft()"
+            >
                 @if ($attachment && method_exists($attachment, 'temporaryUrl') && $attachment->getRealPath())
                     <div class="mb-2 px-1">
                         <div class="relative inline-block border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden">
@@ -246,6 +325,7 @@
                     rows="2"
                     max-rows="6"
                     submit="enter"
+                    x-on:input="saveDraft($event)"
                 >
                     <x-slot name="actionsLeading">
                         <flux:button type="button" size="sm" variant="subtle" square icon="paper-clip" x-on:click="$refs.fileInput.click()" aria-label="Attach image"></flux:button>

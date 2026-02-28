@@ -16,4 +16,8 @@
 <x-mail::button :url="$signingUrl">
 Sign Contract
 </x-mail::button>
+
+<p style="text-align: center; margin: 20px 0 0 0; font-size: 13px; color: #6b7280;">
+	New to Hive? Registering is a simple 3-step process — confirm your phone number, confirm your email, and set a password. The easiest registration ever.
+</p>
 </x-mail::message>

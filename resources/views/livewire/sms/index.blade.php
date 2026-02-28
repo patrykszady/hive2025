@@ -75,14 +75,13 @@
             window.addEventListener('online', () => { this.smsOffline = false; });
             window.addEventListener('offline', () => {
                 this.smsOffline = true;
-                this.restoreCachedSms();
             });
 
             const scheduleCache = () => {
                 clearTimeout(this.smsCacheTimer);
                 this.smsCacheTimer = setTimeout(() => {
                     if (!this.smsOffline) this.saveSmsCache();
-                }, 3000);
+                }, 2000);
             };
 
             const watchEl = (id) => {
@@ -91,10 +90,7 @@
             };
             watchEl('sms-threads-live');
             watchEl('sms-convo-wrap');
-
-            if (!navigator.onLine) {
-                setTimeout(() => this.restoreCachedSms(), 1500);
-            }
+            watchEl('sms-calls-live');
 
             // Suppress Livewire error dialogs when offline
             if (window.Livewire) {
@@ -118,26 +114,13 @@
                         localStorage.setItem('hive-sms-convo', live.outerHTML);
                     }
                 }
+                const callsEl = document.getElementById('sms-calls-live');
+                if (callsEl && !callsEl.querySelector('.animate-pulse') && callsEl.innerHTML.length > 200) {
+                    localStorage.setItem('hive-sms-calls', callsEl.innerHTML);
+                }
                 localStorage.setItem('hive-sms-cached-at', Date.now().toString());
             } catch (e) { /* storage full */ }
         },
-        restoreCachedSms() {
-            try {
-                const ts = parseInt(localStorage.getItem('hive-sms-cached-at') || '0');
-                if (Date.now() - ts > 30 * 86400 * 1000) return;
-
-                const threadsHtml = localStorage.getItem('hive-sms-threads');
-                if (threadsHtml) {
-                    const el = document.getElementById('sms-threads-live');
-                    if (el) el.innerHTML = threadsHtml;
-                }
-                const convoHtml = localStorage.getItem('hive-sms-convo');
-                if (convoHtml) {
-                    const wrap = document.getElementById('sms-convo-wrap');
-                    if (wrap) wrap.innerHTML = convoHtml;
-                }
-            } catch (e) { /* ignore */ }
-        }
     }"
     x-on:click.window.once="ensureAudioContext()"
     x-on:keydown.window.once="ensureAudioContext()"
@@ -207,10 +190,38 @@
                 <div id="sms-threads-live">
                     <livewire:sms.sms-thread-list :search="$search" :selected-thread-id="$threadId" :is-client-user="$isClientUser" lazy />
                 </div>
+                <script>
+                (function() {
+                    try {
+                        var ts = parseInt(localStorage.getItem('hive-sms-cached-at') || '0');
+                        if (Date.now() - ts > 30 * 86400 * 1000) return;
+                        var cached = localStorage.getItem('hive-sms-threads');
+                        if (cached && cached.length > 200) {
+                            var el = document.getElementById('sms-threads-live');
+                            if (el) el.innerHTML = cached;
+                        }
+                    } catch(e) {}
+                })();
+                </script>
             </div>
 
             <div class="{{ $activeTab !== 'calls' ? 'hidden' : '' }}">
-                <livewire:sms.call-list lazy />
+                <div id="sms-calls-live">
+                    <livewire:sms.call-list lazy />
+                </div>
+                <script>
+                (function() {
+                    try {
+                        var ts = parseInt(localStorage.getItem('hive-sms-cached-at') || '0');
+                        if (Date.now() - ts > 30 * 86400 * 1000) return;
+                        var cached = localStorage.getItem('hive-sms-calls');
+                        if (cached && cached.length > 200) {
+                            var el = document.getElementById('sms-calls-live');
+                            if (el) el.innerHTML = cached;
+                        }
+                    } catch(e) {}
+                })();
+                </script>
             </div>
         </x-island-card>
     </div>
@@ -239,6 +250,19 @@
             <livewire:sms.sms-conversation :thread-id="$threadId" :is-client-user="$isClientUser" :key="'conv-' . $threadId . '-' . ($isClientUser ? 'c' : 'a')" lazy />
         </div>
     </div>
+    <script>
+    (function() {
+        try {
+            var ts = parseInt(localStorage.getItem('hive-sms-cached-at') || '0');
+            if (Date.now() - ts > 30 * 86400 * 1000) return;
+            var cached = localStorage.getItem('hive-sms-convo');
+            if (cached && cached.length > 200) {
+                var wrap = document.getElementById('sms-convo-wrap');
+                if (wrap) wrap.innerHTML = cached;
+            }
+        } catch(e) {}
+    })();
+    </script>
 
     @if (! $isClientUser)
         {{-- New Thread Modal --}}

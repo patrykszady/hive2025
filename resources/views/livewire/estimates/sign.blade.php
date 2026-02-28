@@ -1,17 +1,15 @@
-<div class="min-h-screen bg-zinc-100 dark:bg-zinc-900" x-init="window.scrollTo(0, 0)">
+<div x-init="window.scrollTo(0, 0)">
     {{-- Header --}}
-    <div class="bg-white dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700 px-4 py-6">
-        <div class="max-w-5xl mx-auto text-center">
-            <flux:heading size="xl">Contract Signature</flux:heading>
-            @if($valid && $estimate)
-                <flux:subheading class="mt-1">
-                    {{ $estimate->vendor?->business_name }} — Estimate #{{ $estimate->number }}
-                </flux:subheading>
-            @endif
-        </div>
+    <div class="max-w-3xl text-center mb-6">
+        <flux:heading size="xl">Contract Signature</flux:heading>
+        @if($valid && $estimate)
+            <flux:subheading class="mt-1">
+                {{ $estimate->vendor?->business_name }} — Estimate #{{ $estimate->number }}
+            </flux:subheading>
+        @endif
     </div>
 
-    <div class="max-w-5xl mx-auto px-4 py-6 space-y-6">
+    <div class="max-w-3xl space-y-4">
         @if(! $valid)
             {{-- Invalid / Not Finalized --}}
             <flux:card class="text-center">
@@ -58,18 +56,84 @@
             </flux:card>
 
         @elseif($step === 'sign')
-            {{-- PDF + Signature Pad --}}
-            @if($pdfUrl)
-                <div class="w-full rounded-lg overflow-hidden border border-zinc-300 dark:border-zinc-600 bg-white" style="height: 80vh;">
-                    <iframe
-                        src="{{ $pdfUrl }}"
-                        class="w-full h-full"
-                        style="border: none;"
-                    ></iframe>
-                </div>
+            <div x-data="signaturePad()">
+
+            {{-- Estimate Sections --}}
+            @foreach($estimate->estimate_sections as $sectionIndex => $section)
+                <flux:card>
+                    <div class="flex justify-between mb-2">
+                        <flux:heading size="lg" class="font-extrabold">{{ $section->name }}</flux:heading>
+                    </div>
+
+                    <table class="min-w-full">
+                        <thead class="border-b border-zinc-300 dark:border-zinc-600">
+                            <tr>
+                                <th class="hidden sm:table-cell px-3 py-3 text-right text-sm font-semibold text-zinc-900 dark:text-zinc-100"></th>
+                                <th class="py-3 pl-4 pr-3 text-left text-sm font-semibold text-zinc-900 dark:text-zinc-100 sm:pl-6 sm:w-1/2">Item</th>
+                                <th class="hidden sm:table-cell px-3 py-3 text-right text-sm font-semibold text-zinc-900 dark:text-zinc-100">Qty</th>
+                                <th class="hidden sm:table-cell px-3 py-3 text-right text-sm font-semibold text-zinc-900 dark:text-zinc-100">Unit</th>
+                                <th class="hidden sm:table-cell px-3 py-3 text-right text-sm font-semibold text-zinc-900 dark:text-zinc-100">Cost</th>
+                                <th class="py-3 pl-3 pr-4 text-right text-sm font-semibold text-zinc-900 dark:text-zinc-100 sm:pr-6">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach($section->estimate_line_items->sortBy('order') as $itemIndex => $item)
+                                <tr class="border-b border-zinc-200 dark:border-zinc-700">
+                                    <td class="hidden sm:table-cell px-3 py-4 text-right text-zinc-500 align-top text-sm">{{ $sectionIndex + 1 }}.{{ $itemIndex + 1 }}</td>
+                                    <td class="pl-4 pr-3 py-4 sm:pl-6">
+                                        <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">{{ $item->name }}</div>
+                                        <div class="text-xs font-bold text-indigo-700 dark:text-indigo-400">{{ $item->category }}/{{ $item->sub_category }}</div>
+                                    </td>
+                                    <td class="hidden sm:table-cell px-3 py-4 text-right text-zinc-500 align-top text-sm">{{ $item->unit_type !== 'no_unit' ? $item->quantity : '' }}</td>
+                                    <td class="hidden sm:table-cell px-3 py-4 text-right text-zinc-500 align-top text-sm">{{ $item->unit_type !== 'no_unit' ? $item->unit_type : '' }}</td>
+                                    <td class="hidden sm:table-cell px-3 py-4 text-right text-zinc-500 align-top text-sm">{{ $item->unit_type !== 'no_unit' ? money($item->cost) : '' }}</td>
+                                    <td class="py-4 pl-3 pr-4 text-right text-zinc-800 dark:text-zinc-200 align-top text-sm font-medium sm:pr-6">{{ money($item->total) }}</td>
+                                </tr>
+                                @if($item->desc)
+                                    <tr class="border-b border-zinc-200 dark:border-zinc-700">
+                                        <td class="hidden sm:table-cell"></td>
+                                        <td class="pb-4 pl-4 pr-3 sm:pl-6 text-sm" colspan="5">
+                                            <span class="text-zinc-700 dark:text-zinc-300" style="white-space: pre-line;">{{ $item->desc }}</span>
+                                            @if($item->notes)
+                                                <hr class="my-1 border-zinc-200 dark:border-zinc-600">
+                                                <span class="text-zinc-500 italic" style="white-space: pre-line;">{{ $item->notes }}</span>
+                                            @endif
+                                        </td>
+                                    </tr>
+                                @endif
+                            @endforeach
+                        </tbody>
+                    </table>
+
+                    <div class="flex justify-end pt-3 mt-2 border-t border-zinc-200 dark:border-zinc-700">
+                        <span class="text-sm font-semibold text-zinc-700 dark:text-zinc-300">Section Total: {{ money($section->total) }}</span>
+                    </div>
+
+                    @if($loop->last)
+                        <div class="flex justify-end pt-4 mt-2 border-t-2 border-zinc-300 dark:border-zinc-600">
+                            <flux:heading size="lg">Total: {{ money($estimate->estimate_sections->sum('total')) }}</flux:heading>
+                        </div>
+                    @endif
+                </flux:card>
+            @endforeach
+
+            {{-- Contract Content --}}
+            @if($contractHtml)
+                <flux:card class="prose prose-sm max-w-none dark:prose-invert">
+                    {!! $contractHtml !!}
+                </flux:card>
+                <div x-ref="contractEnd" class="h-1"></div>
             @endif
 
-            <flux:card class="space-y-4" x-data="signaturePad()">
+            {{-- Scroll prompt --}}
+            <div x-show="!hasScrolledContract" x-cloak>
+                <flux:card class="text-center">
+                    <flux:icon.arrow-down class="size-6 mx-auto mb-2 text-zinc-400 animate-bounce" />
+                    <flux:text class="text-zinc-500">Please scroll through the entire contract before signing.</flux:text>
+                </flux:card>
+            </div>
+
+            <flux:card class="space-y-4" x-show="hasScrolledContract" x-transition x-cloak>
                 <div>
                     <flux:heading size="lg">Signature</flux:heading>
                     <flux:badge color="{{ $isVendorSigner ? 'indigo' : 'blue' }}" class="mt-2">
@@ -81,7 +145,11 @@
                 </div>
 
                 <flux:text>
-                    I, the {{ $isVendorSigner ? 'Contractor' : 'Applicant' }}, certify that I have the proper authority to sign this Contract, and that all information provided is complete and accurate to the best of my knowledge.
+                    @if($isVendorSigner)
+                        I, the Contractor, certify that I have the proper authority to sign this Contract, and that all information provided is complete and accurate to the best of my knowledge.
+                    @else
+                        I, the Applicant, acknowledge that I have reviewed this Contract in its entirety and agree to the terms, conditions, and payment schedule outlined within.
+                    @endif
                 </flux:text>
 
                 {{-- Signer Name Input --}}
@@ -158,6 +226,7 @@
                 </div>
                 </div>
             </flux:card>
+            </div>
 
         @elseif($step === 'done')
             {{-- Done --}}
@@ -171,6 +240,13 @@
                     <flux:text class="mt-2 text-zinc-600 dark:text-zinc-400">
                         All required signatures have been collected. Thank you!
                     </flux:text>
+                    @if($estimate->signed_contract_path)
+                        <div class="mt-4">
+                            <flux:button variant="primary" icon="arrow-down-tray" wire:click="downloadSignedContract">
+                                Download Signed Contract
+                            </flux:button>
+                        </div>
+                    @endif
                 @elseif($isVendorSigner)
                     <flux:heading size="lg">Your Signature Has Been Recorded</flux:heading>
                     <flux:text class="mt-2 text-zinc-600 dark:text-zinc-400">
@@ -188,27 +264,40 @@
             <flux:card>
                 <flux:heading size="md" class="mb-4">Signature Status</flux:heading>
                 <div class="divide-y divide-zinc-200 dark:divide-zinc-700">
-                    {{-- Vendor signature status --}}
+                    {{-- Vendor signature statuses --}}
                     @php
-                        $vendorSig = $this->existingSignatures->first(fn ($s) =>
-                            $estimate->vendor?->users?->pluck('id')->contains($s->user_id)
-                        );
+                        $requiredVendorIds = $estimate->required_vendor_signer_ids;
+                        // Show explicitly required signers, or just those who have already signed
+                        $vendorSignerIds = $requiredVendorIds->isNotEmpty()
+                            ? $requiredVendorIds
+                            : $this->existingSignatures
+                                ->filter(fn ($s) => $estimate->vendor?->users?->pluck('id')->contains($s->user_id))
+                                ->pluck('user_id');
                     @endphp
-                    <div class="flex items-center justify-between py-3">
-                        <div>
-                            <flux:text class="font-medium">{{ $estimate->vendor?->short_name ?? 'Contractor' }}</flux:text>
-                            @if($vendorSig)
-                                <flux:text class="text-xs text-zinc-500">
-                                    Signed by {{ $vendorSig->signer_name }} on {{ $vendorSig->signed_at?->format('M j, Y \a\t g:i A') }}
-                                </flux:text>
-                            @endif
-                        </div>
-                        @if($vendorSig)
-                            <flux:badge color="green">Signed</flux:badge>
-                        @else
-                            <flux:badge color="yellow">Pending</flux:badge>
+                    @foreach($vendorSignerIds as $vendorSignerId)
+                        @php
+                            $vendorSignerUser = $estimate->vendor?->users?->firstWhere('id', $vendorSignerId);
+                            $vendorSig = $this->existingSignatures->firstWhere('user_id', $vendorSignerId);
+                        @endphp
+                        @if($vendorSignerUser)
+                            <div class="flex items-center justify-between py-3">
+                                <div>
+                                    <flux:text class="font-medium">{{ trim($vendorSignerUser->first_name . ' ' . $vendorSignerUser->last_name) }}</flux:text>
+                                    <flux:text class="text-xs text-zinc-500">{{ $estimate->vendor?->short_name ?? 'Contractor' }}</flux:text>
+                                    @if($vendorSig)
+                                        <flux:text class="text-xs text-zinc-500">
+                                            Signed {{ $vendorSig->signed_at?->format('M j, Y \a\t g:i A') }}
+                                        </flux:text>
+                                    @endif
+                                </div>
+                                @if($vendorSig)
+                                    <flux:badge color="green">Signed</flux:badge>
+                                @else
+                                    <flux:badge color="yellow">Pending</flux:badge>
+                                @endif
+                            </div>
                         @endif
-                    </div>
+                    @endforeach
 
                     {{-- Client user signature statuses --}}
                     @foreach($this->requiredSigners as $signer)
@@ -250,6 +339,7 @@
                 const CANVAS_HEIGHT = 150;
 
                 return {
+                    hasScrolledContract: false,
                     isTypeMode: $wire.typeSignature || false,
                     typedName: '',
                     typedDate: '',
@@ -266,6 +356,10 @@
                         });
                     },
 
+                    checkContractScroll() {
+                        // No longer used — using IntersectionObserver instead
+                    },
+
                     sizeCanvas(canvas) {
                         const ratio = Math.max(window.devicePixelRatio || 1, 1);
                         const width = canvas.parentElement.clientWidth;
@@ -278,6 +372,23 @@
                     },
 
                     init() {
+                        // Watch for user scrolling past the contract end sentinel
+                        this.$nextTick(() => {
+                            const sentinel = this.$refs.contractEnd;
+                            if (sentinel) {
+                                const observer = new IntersectionObserver((entries) => {
+                                    if (entries[0].isIntersecting) {
+                                        this.hasScrolledContract = true;
+                                        observer.disconnect();
+                                    }
+                                }, { threshold: 1.0 });
+                                observer.observe(sentinel);
+                            } else {
+                                // No contract, allow signing immediately
+                                this.hasScrolledContract = true;
+                            }
+                        });
+
                         // Defer pad creation until name is verified and canvas is visible
                         $wire.$watch('nameVerified', (verified) => {
                             if (verified && !pad) {

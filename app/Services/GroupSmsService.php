@@ -55,6 +55,11 @@ class GroupSmsService
             ]);
         }
 
+        // Notify other vendor users via browser push when a team member replies
+        if ($sentByUserId) {
+            \App\Jobs\SendOutboundSmsBrowserNotifications::dispatch($message->id, $sentByUserId);
+        }
+
         return $message;
     }
 

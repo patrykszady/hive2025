@@ -28,7 +28,12 @@ class EstimateAccept extends Component
 
     public $end_date = null;
 
-    protected $listeners = ['accept', 'addPayment', 'refreshComponent' => 'refreshEstimateData'];
+    public bool $showSignWarning = false;
+
+    /** @var array<int> Selected vendor user IDs who must sign */
+    public array $requiredVendorSignerIds = [];
+
+    protected $listeners = ['accept', 'signSetup', 'addPayment', 'refreshComponent' => 'refreshEstimateData'];
 
     protected function rules()
     {
@@ -45,6 +50,9 @@ class EstimateAccept extends Component
     {
         $this->estimate = $estimate;
         $this->project = $estimate->project;
+
+        // Load required vendor signer IDs from options
+        $this->requiredVendorSignerIds = $estimate->options['required_vendor_signer_ids'] ?? [];
 
         $this->bids = $this->project->bids()->vendorBids($this->estimate->vendor->id)->with('estimate_sections')->orderBy('type')->get();
 
@@ -104,8 +112,26 @@ class EstimateAccept extends Component
         }
     }
 
+    /**
+     * Vendor users available to be selected as required signers.
+     *
+     * @return \Illuminate\Support\Collection<int, \App\Models\User>
+     */
+    #[Computed]
+    public function vendorUsers(): \Illuminate\Support\Collection
+    {
+        return $this->estimate->vendor?->users ?? collect();
+    }
+
     public function accept()
     {
+        $this->showSignWarning = false;
+        $this->modal('accept_estimate_modal')->show();
+    }
+
+    public function signSetup()
+    {
+        $this->showSignWarning = true;
         $this->modal('accept_estimate_modal')->show();
     }
 
@@ -114,6 +140,9 @@ class EstimateAccept extends Component
         // Refresh the estimate model to get fresh data
         $this->estimate = $this->estimate->fresh();
         $this->project = $this->estimate->project;
+
+        // Reload required vendor signer IDs
+        $this->requiredVendorSignerIds = $this->estimate->options['required_vendor_signer_ids'] ?? [];
 
         // Reload bids to include any newly created change orders
         $this->bids = $this->project->bids()->vendorBids($this->estimate->vendor->id)->with('estimate_sections')->orderBy('type')->get();
@@ -314,6 +343,9 @@ class EstimateAccept extends Component
 
             $estimate_options['start_date'] = $this->start_date;
             $estimate_options['end_date'] = $this->end_date;
+
+            // Persist required vendor signer IDs
+            $estimate_options['required_vendor_signer_ids'] = array_map('intval', $this->requiredVendorSignerIds);
 
             $estimate->options = $estimate_options;
             $estimate->save();
