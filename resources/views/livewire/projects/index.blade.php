@@ -3,7 +3,7 @@
 @endphp
 
 <div class="max-w-3xl space-y-2">
-    @if($view === NULL)
+    @if($view === NULL && !auth()->user()->is_client_user)
         <x-island-card heading="Filters" :separator="true" class="mb-4">
             <div class="flex flex-col sm:flex-row gap-4">
                 <div class="flex-1 min-w-0">
@@ -17,21 +17,19 @@
                     </flux:field>
                 </div>
 
-                @if(!auth()->user()->is_client_user)
-                    <div class="flex-1 min-w-0">
-                        <flux:field>
-                            <flux:label>Client</flux:label>
-                            <flux:select wire:model.live="client_id" variant="listbox" searchable clearable placeholder="All Clients...">
-                                <x-slot name="search">
-                                    <flux:select.search placeholder="Search..." />
-                                </x-slot>
-                                @foreach ($clients as $client)
-                                    <flux:select.option value="{{$client->id}}">{{ $client->name }}</flux:select.option>
-                                @endforeach
-                            </flux:select>
-                        </flux:field>
-                    </div>
-                @endif
+                <div class="flex-1 min-w-0">
+                    <flux:field>
+                        <flux:label>Client</flux:label>
+                        <flux:select wire:model.live="client_id" variant="listbox" searchable clearable placeholder="All Clients...">
+                            <x-slot name="search">
+                                <flux:select.search placeholder="Search..." />
+                            </x-slot>
+                            @foreach ($clients as $client)
+                                <flux:select.option value="{{$client->id}}">{{ $client->name }}</flux:select.option>
+                            @endforeach
+                        </flux:select>
+                    </flux:field>
+                </div>
 
                 <div class="flex-1 min-w-0">
                     <flux:field>

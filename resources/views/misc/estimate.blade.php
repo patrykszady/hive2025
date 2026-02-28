@@ -266,7 +266,12 @@
                                 @foreach($allSignatures as $sig)
                                     <div style="width: 400px;">
                                         <div style="border: 1px solid #d1d5db; border-radius: 8px; padding: 8px; background: #fff; width: 384px; height: 160px; display: flex; align-items: center; justify-content: center; overflow: hidden;">
-                                            <img src="{{ $sig['data'] }}" style="max-width: 100%; max-height: 100%; object-fit: contain;" />
+                                            @if($sig['type'] === 'type')
+                                                {{-- Render typed signatures as HTML text for crisp, full-name display --}}
+                                                <span style="font-family: 'Brush Script MT', 'Segoe Script', cursive; font-size: 48px; color: #333; white-space: nowrap;">{{ $sig['name'] }}</span>
+                                            @else
+                                                <img src="{{ $sig['data'] }}" style="max-width: 100%; max-height: 100%; object-fit: contain;" />
+                                            @endif
                                         </div>
                                         <div style="margin-top: 8px; border-top: 2px solid #333; padding-top: 4px;">
                                             <span style="font-weight: 600;">{{ $sig['name'] }}</span>

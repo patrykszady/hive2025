@@ -25,8 +25,10 @@ class EstimateDocumentGenerator
      */
     public static function generate(Estimate $estimate, string $type = 'Estimate', bool $store = false, ?string $timezone = null): array
     {
-        // PDFs should use the vendor's timezone, not browser timezone
-        $timezone = $timezone ?? vendor_timezone();
+        // PDFs should use the vendor's timezone, not browser timezone.
+        // Don't rely on vendor_timezone() which needs an authenticated vendor user;
+        // instead resolve from the estimate's vendor after loading.
+        $resolveTimezone = $timezone;
         
         $estimate = Estimate::withoutGlobalScopes()
             ->with([
@@ -63,6 +65,10 @@ class EstimateDocumentGenerator
         $vendor = $estimate->vendor;
         $client = $project?->client ?? $estimate->client;
         $reimbursements = $estimate->reimbursments;
+
+        // Resolve timezone from the vendor record itself (not auth context)
+        $timezone = $resolveTimezone
+            ?? (is_string($vendor->timezone) && $vendor->timezone !== '' ? $vendor->timezone : (string) config('app.timezone'));
 
         $clientContacts = $client?->users ?? collect();
 
