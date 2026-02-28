@@ -495,7 +495,11 @@ class Project extends Model
                     $finances['estimate'] = $bid_estimate_total;
                 }
                 
-                $finances['change_orders'] = $this->bids()->where('type', '!=', 1)->sum('amount');
+                // Only include the GC's (project owner's) change orders — subcontractor bids are handled separately.
+                $finances['change_orders'] = $this->bids()
+                    ->where('type', '!=', 1)
+                    ->where('vendor_id', $this->belongs_to_vendor_id)
+                    ->sum('amount');
                 $finances['total_bid'] = $finances['estimate'] + $finances['change_orders'];
                 $finances['reimbursments'] = $splits_sum + $expenses_sum;
                 $finances['total_project'] = round($finances['reimbursments'] + $finances['estimate'] + $finances['change_orders'], 2);
