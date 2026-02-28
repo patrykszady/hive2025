@@ -111,6 +111,42 @@ class TelnyxWebhookController extends Controller
             return response()->json(['status' => 'ok']);
         }
 
+        // Ignore loopback legs — when click-to-call dials our own Telnyx number,
+        // Telnyx creates a phantom "incoming" leg (from == our number). Also ignore
+        // any incoming call that originates from our own number to prevent loops.
+        $incomingFrom = $payload['from'] ?? null;
+        $telnyxFrom = config('services.telnyx.from');
+        if ($incomingFrom && $telnyxFrom && $incomingFrom === $telnyxFrom) {
+            Log::channel('telnyx')->info('Ignoring loopback/self-call — "from" is our own number', [
+                'call_control_id' => $callControlId,
+                'from' => $incomingFrom,
+                'to' => $payload['to'] ?? null,
+            ]);
+            $this->sendCallCommand($callControlId, 'hangup');
+            return response()->json(['status' => 'ok']);
+        }
+
+        // Also check for active click-to-call targeting this caller's number — prevents
+        // loopback via carrier forwarding or voicemail callbacks
+        if ($incomingFrom) {
+            $recentClickToCall = CallLog::where('to_number', $incomingFrom)
+                ->where('direction', 'outgoing')
+                ->whereIn('status', [CallLog::STATUS_INITIATED, CallLog::STATUS_ANSWERED, CallLog::STATUS_TRANSFERRED])
+                ->where('created_at', '>=', now()->subMinutes(5))
+                ->whereNotNull('metadata->type')
+                ->where('metadata->type', 'click_to_call')
+                ->exists();
+
+            if ($recentClickToCall) {
+                Log::channel('telnyx')->info('Ignoring incoming call — active click-to-call exists for this number', [
+                    'call_control_id' => $callControlId,
+                    'from' => $incomingFrom,
+                ]);
+                $this->sendCallCommand($callControlId, 'hangup');
+                return response()->json(['status' => 'ok']);
+            }
+        }
+
         // Deduplicate — Telnyx retries the webhook if we don't respond fast enough
         $existing = CallLog::findByCallControlId($callControlId);
         if ($existing) {
