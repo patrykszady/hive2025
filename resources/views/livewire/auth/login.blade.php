@@ -101,7 +101,7 @@
                                                 body: { remember: this.remember ? 'on' : '' },
                                             });
                                             if (success) {
-                                                window.location.href = '{{ route('dashboard') }}';
+                                                window.location.href = '{{ session('url.intended', route('dashboard')) }}';
                                                 return;
                                             }
                                             if (error?.name === 'NotAllowedError') {

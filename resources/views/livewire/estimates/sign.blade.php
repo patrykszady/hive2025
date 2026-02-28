@@ -483,18 +483,34 @@
                             const ctx = canvas.getContext('2d');
                             const ratio = Math.max(window.devicePixelRatio || 1, 1);
 
+                            // Measure text to create a tightly-cropped image
                             ctx.clearRect(0, 0, canvas.width, canvas.height);
                             ctx.save();
                             ctx.scale(ratio, ratio);
-                            ctx.font = '24px "Brush Script MT", "Segoe Script", cursive';
-                            ctx.fillStyle = '#333';
-                            ctx.fillText(this.typedName, 16, 36);
-                            ctx.font = '12px sans-serif';
-                            ctx.fillStyle = '#666';
-                            ctx.fillText(this.typedDate, 16, 54);
+
+                            const nameFont = '48px "Brush Script MT", "Segoe Script", cursive';
+                            const padding = 16;
+
+                            ctx.font = nameFont;
+                            const nameMetrics = ctx.measureText(this.typedName);
+                            const nameWidth = nameMetrics.width;
+
                             ctx.restore();
 
-                            $wire.set('signatureData', canvas.toDataURL('image/png'));
+                            // Create a right-sized canvas for the typed signature
+                            const cropW = Math.ceil(nameWidth + padding * 2);
+                            const cropH = Math.ceil(48 + padding * 2); // name font + padding
+                            const cropCanvas = document.createElement('canvas');
+                            cropCanvas.width = cropW * ratio;
+                            cropCanvas.height = cropH * ratio;
+                            const cropCtx = cropCanvas.getContext('2d');
+                            cropCtx.scale(ratio, ratio);
+
+                            cropCtx.font = nameFont;
+                            cropCtx.fillStyle = '#333';
+                            cropCtx.fillText(this.typedName, padding, padding + 42); // baseline ~42px for 48px font
+
+                            $wire.set('signatureData', cropCanvas.toDataURL('image/png'));
                         } else {
                             if (pad && !pad.isEmpty()) {
                                 $wire.set('signatureData', pad.toDataURL('image/png'));

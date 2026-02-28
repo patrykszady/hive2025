@@ -5,15 +5,25 @@
 <p style="text-align: center; margin: 0 0 10px 0;">Hi {{ $recipientName }},</p>
 @endif
 
+<p style="text-align: center; margin: 0 0 4px 0;">
+	<strong>{{ $contractorName }}</strong> has signed Estimate #{{ $estimateNumber }}
+</p>
+@if($projectAddress || $projectName)
+<p style="text-align: center; margin: 0 0 4px 0;">
+	{{ $projectAddress }}@if($projectAddress && $projectName) | @endif{{ $projectName }}
+</p>
+@endif
 <p style="text-align: center; margin: 0 0 14px 0;">
-	<strong>{{ $contractorName }}</strong> has signed Estimate #{{ $estimateNumber }}@if($projectLabel) | {{ $projectLabel }}@endif and it's ready for your signature.
+	and it's ready for your signature.
 </p>
 
-<p style="text-align: center; margin: 0 0 20px 0;">
-	Log in or register to review the contract and sign electronically. Registering is easy — just confirm your number and email and set a password.
-</p>
+<div style="height: 8px; line-height: 8px;">&nbsp;</div>
 
-<x-mail::button :url="$signingUrl">
-Sign Contract
-</x-mail::button>
+<div style="text-align: center; background-color: #f4f4f5; border-radius: 8px; padding: 20px 24px; margin: 0 auto; max-width: 420px;">
+	<p style="margin: 0 0 12px 0; font-size: 15px; color: #3f3f46; line-height: 1.5;">
+		Log in or register to review and sign. You can also view your estimate, schedule, project updates, and stay connected with {{ $contractorName }}. Registering is easy — just confirm your number, email, and set a password.
+	</p>
+	<div style="height: 8px; line-height: 8px;">&nbsp;</div>
+	<a href="{{ $signingUrl }}" style="display: inline-block; padding: 10px 28px; background-color: #4f46e5; color: #ffffff; font-size: 14px; font-weight: 600; text-decoration: none; border-radius: 6px;">Sign Contract</a>
+</div>
 </x-mail::message>

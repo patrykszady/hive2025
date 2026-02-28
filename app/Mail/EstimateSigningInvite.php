@@ -25,6 +25,10 @@ class EstimateSigningInvite extends Mailable
 
     public string $projectLabel;
 
+    public string $projectAddress;
+
+    public string $projectName;
+
     public string $clientLastNames;
 
     /**
@@ -45,10 +49,9 @@ class EstimateSigningInvite extends Mailable
 
         // Build project label: "Address | Project Name"
         $project = $estimate->project;
-        $projectParts = array_filter([
-            $project?->address,
-            $project?->project_name,
-        ]);
+        $this->projectAddress = $project?->address ?? '';
+        $this->projectName = $project?->project_name ?? '';
+        $projectParts = array_filter([$this->projectAddress, $this->projectName]);
         $this->projectLabel = implode(' | ', $projectParts);
 
         // Client last names for subject line

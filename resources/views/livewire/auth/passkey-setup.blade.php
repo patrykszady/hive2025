@@ -50,5 +50,5 @@
 <x-passkey-registration 
     button-id="register-passkey"
     button-text-id="register-passkey-text"
-    :redirect-url="route('dashboard')"
+    :redirect-url="session('url.intended', route('dashboard'))"
 />
