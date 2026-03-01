@@ -1,18 +1,46 @@
 <div class="max-w-3xl">
     @if($view === NULL)
-        <x-island-card heading="Check Filters" :separator="true" class="mb-4">
+        {{-- Mobile: accordion collapsed by default --}}
+        <flux:card class="!px-5 !py-2 mb-4 sm:hidden">
+            <flux:accordion transition>
+                <flux:accordion.item>
+                    <flux:accordion.heading>
+                        <flux:heading size="lg">Filters</flux:heading>
+                    </flux:accordion.heading>
+                    <flux:accordion.content>
+                        <div class="flex flex-col gap-4">
+                            <flux:input wire:model.debounce.500ms.live="amount" label="Amount" icon="magnifying-glass" placeholder="123.45" />
+                            <flux:input wire:model.debounce.500ms.live="check_number" label="Check Number" icon="magnifying-glass" placeholder="1234" />
+                            <flux:select wire:model.live="bank" label="Bank" placeholder="Select Bank..." variant="listbox" placeholder="Choose Bank...">
+                                <flux:select.option value="">All Banks</flux:select.option>
+                                @foreach ($banks->groupBy('plaid_ins_id') as $bank)
+                                    <flux:select.option value="{{$bank->first()->id}}">{{$bank->first()->name}}</flux:select.option>
+                                @endforeach
+                            </flux:select>
+                        </div>
+                    </flux:accordion.content>
+                </flux:accordion.item>
+            </flux:accordion>
+        </flux:card>
 
-            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                <flux:input wire:model.debounce.500ms.live="amount" label="Amount" icon="magnifying-glass" placeholder="123.45" />
-                <flux:input wire:model.debounce.500ms.live="check_number" label="Check Number" icon="magnifying-glass" placeholder="1234" />
-
-                {{-- 09-28-2024 NEED TYPE AND VENDOR FILTERS --}}
-                <flux:select wire:model.live="bank" label="Bank" placeholder="Select Bank..." variant="listbox" placeholder="Choose Bank...">
-                    <flux:select.option value="">All Banks</flux:select.option>
-                    @foreach ($banks->groupBy('plaid_ins_id') as $bank)
-                        <flux:select.option value="{{$bank->first()->id}}">{{$bank->first()->name}}</flux:select.option>
-                    @endforeach
-                </flux:select>
+        {{-- Desktop: always expanded --}}
+        <x-island-card heading="Filters" :separator="true" class="mb-4 hidden sm:block">
+            <div class="flex flex-row items-end gap-4">
+                <div class="flex-1 min-w-0">
+                    <flux:input wire:model.debounce.500ms.live="amount" label="Amount" icon="magnifying-glass" placeholder="123.45" />
+                </div>
+                <div class="flex-1 min-w-0">
+                    <flux:input wire:model.debounce.500ms.live="check_number" label="Check Number" icon="magnifying-glass" placeholder="1234" />
+                </div>
+                <div class="flex-1 min-w-0">
+                    {{-- 09-28-2024 NEED TYPE AND VENDOR FILTERS --}}
+                    <flux:select wire:model.live="bank" label="Bank" placeholder="Select Bank..." variant="listbox" placeholder="Choose Bank...">
+                        <flux:select.option value="">All Banks</flux:select.option>
+                        @foreach ($banks->groupBy('plaid_ins_id') as $bank)
+                            <flux:select.option value="{{$bank->first()->id}}">{{$bank->first()->name}}</flux:select.option>
+                        @endforeach
+                    </flux:select>
+                </div>
             </div>
         </x-island-card>
     @endif

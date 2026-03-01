@@ -1,4 +1,4 @@
-<div class="space-y-1 max-h-[calc(100dvh-15rem)] scrollbar-gutter">
+<div class="space-y-1 max-h-[calc(100dvh-15rem)] lg:max-h-full lg:h-full scrollbar-gutter">
     @forelse ($this->threads as $thread)
         <button
             wire:key="thread-{{ $thread->id }}"
@@ -24,6 +24,7 @@
                     {{-- Latest message preview --}}
                     @if ($thread->latestMessage)
                         @php
+                            $tapback = $thread->latestMessage->parseTapback();
                             $previewText = preg_replace('/\s*-(PS|GS|GSC)\s*$/', '', trim((string) $thread->latestMessage->text));
 
                             $previewPrefix = null;
@@ -34,6 +35,11 @@
                             } elseif ($thread->latestMessage->isInbound()) {
                                 $sender = $this->resolvePreviewSender($thread->latestMessage->from_number, $thread);
                                 $previewPrefix = $sender ? $sender . ':' : null;
+                            }
+
+                            // For tapback reactions, show clean "Liked" / "Loved" etc. instead of full quoted text
+                            if ($tapback) {
+                                $previewText = ($tapback['emoji'] ? $tapback['emoji'] . ' ' : '') . $tapback['reaction'];
                             }
                         @endphp
                         <p class="text-sm lg:text-xs text-zinc-400 dark:text-zinc-500 truncate mt-0.5">

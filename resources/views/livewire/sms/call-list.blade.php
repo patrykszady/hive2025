@@ -1,4 +1,4 @@
-<div class="space-y-2 max-h-[calc(100dvh-13rem)] scrollbar-gutter">
+<div class="space-y-2 max-h-[calc(100dvh-13rem)] lg:max-h-full lg:h-full scrollbar-gutter">
     {{-- Filter tabs --}}
     <div class="mb-3 flex items-center gap-2 sticky top-0 z-10 bg-white dark:bg-zinc-800">
         <flux:tabs wire:model.live="callFilter" variant="segmented" size="sm" class="w-full !flex [&>button]:flex-1">

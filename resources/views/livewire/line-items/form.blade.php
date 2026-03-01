@@ -55,7 +55,7 @@
                 </div>
             </div>
 
-            <div class="flex flex-col sm:flex-row gap-4">
+            <div class="flex flex-col sm:flex-row items-end gap-4">
                 <div class="flex-1 min-w-0">
                     <flux:select wire:model="form.unit_type" label="Unit Type" placeholder="Choose unit type...">
                         @include('livewire.line-items._unit_type_options')

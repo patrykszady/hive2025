@@ -156,8 +156,8 @@
     </div>
 
     {{-- Thread List - Hidden on mobile when thread is selected --}}
-    <div class="w-full lg:w-80 shrink-0 min-w-0 max-w-md mx-auto lg:mx-0 lg:max-w-none {{ $threadId && $activeTab === 'messages' ? 'hidden lg:block' : '' }}">
-        <x-island-card>
+    <div class="w-full lg:w-80 shrink-0 min-w-0 max-w-md mx-auto lg:mx-0 lg:max-w-none lg:flex lg:flex-col {{ $threadId && $activeTab === 'messages' ? 'hidden lg:block' : '' }}">
+        <x-island-card class="lg:flex lg:flex-col lg:flex-1 lg:min-h-0">
             {{-- Tabs --}}
             @if (! $isClientUser)
                 <div class="flex items-center justify-between">
@@ -182,12 +182,12 @@
                 </div>
             @endif
 
-            <div class="{{ $activeTab !== 'messages' ? 'hidden' : '' }}">
+            <div class="{{ $activeTab === 'messages' ? 'lg:flex lg:flex-col lg:flex-1 lg:min-h-0' : 'hidden' }}">
                 <div class="mb-2">
                     <flux:input wire:model.live.debounce.500ms="search" icon="magnifying-glass" placeholder="Search messages..." size="sm" />
                 </div>
 
-                <div id="sms-threads-live" class="lg:max-h-[calc(100vh-13rem)] lg:min-h-[calc(100vh-13rem)] lg:overflow-y-auto">
+                <div id="sms-threads-live" class="lg:flex-1 lg:min-h-0">
                     <livewire:sms.sms-thread-list :search="$search" :selected-thread-id="$threadId" :is-client-user="$isClientUser" lazy />
                 </div>
                 <script>
@@ -205,8 +205,8 @@
                 </script>
             </div>
 
-            <div class="{{ $activeTab !== 'calls' ? 'hidden' : '' }}">
-                <div id="sms-calls-live" class="lg:max-h-[calc(100vh-13rem)] lg:min-h-[calc(100vh-13rem)] lg:overflow-y-auto">
+            <div class="{{ $activeTab === 'calls' ? 'lg:flex lg:flex-col lg:flex-1 lg:min-h-0' : 'hidden' }}">
+                <div id="sms-calls-live" class="lg:flex-1 lg:min-h-0">
                     <livewire:sms.call-list lazy />
                 </div>
                 <script>

@@ -1,12 +1,34 @@
 <div class="max-w-2xl">
-    <x-island-card heading="Filters" :separator="true">
-        <x-slot:actions>
-            @can('create', App\Models\Vendor::class)
-                <flux:button size="sm" wire:click="$dispatchTo('vendors.vendor-create', 'newVendor')">Add New Vendor</flux:button>
-            @endcan
-        </x-slot:actions>
+    {{-- Mobile: accordion collapsed by default --}}
+    <flux:card class="!px-5 !py-2 sm:hidden">
+        <flux:accordion transition>
+            <flux:accordion.item>
+                <flux:accordion.heading>
+                    <flux:heading size="lg">Filters</flux:heading>
+                </flux:accordion.heading>
+                <flux:accordion.content>
+                    <div class="flex flex-col gap-4">
+                        <div class="min-w-0">
+                            <flux:input wire:model.live="business_name" label="Vendor Name" icon="magnifying-glass" placeholder="Search Vendors" />
+                        </div>
+                        <div class="min-w-0">
+                            <flux:select wire:model.live="vendor_type" label="Business Type" wire:model="vendor_type" placeholder="Choose type...">
+                                <flux:select.option value="All">All Vendor Types</flux:select.option>
+                                <flux:select.option value="Sub">Subcontractor</flux:select.option>
+                                <flux:select.option value="Retail">Retail</flux:select.option>
+                                <flux:select.option value="1099">1099/Independent</flux:select.option>
+                                <flux:select.option value="DBA">DBA</flux:select.option>
+                            </flux:select>
+                        </div>
+                    </div>
+                </flux:accordion.content>
+            </flux:accordion.item>
+        </flux:accordion>
+    </flux:card>
 
-        <div class="flex flex-col sm:flex-row gap-4">
+    {{-- Desktop: always expanded --}}
+    <x-island-card heading="Filters" :separator="true" class="hidden sm:block">
+        <div class="flex flex-col sm:flex-row items-end gap-4">
             <div class="flex-1 min-w-0">
                 <flux:input wire:model.live="business_name" label="Vendor Name" icon="magnifying-glass" placeholder="Search Vendors" />
             </div>
@@ -24,6 +46,11 @@
     </x-island-card>
 
     <x-island-card heading="Vendors" class="mt-4">
+        <x-slot:actions>
+            @can('create', App\Models\Vendor::class)
+                <flux:button size="sm" wire:click="$dispatchTo('vendors.vendor-create', 'newVendor')">Add New Vendor</flux:button>
+            @endcan
+        </x-slot:actions>
 
         <div class="space-y-2">
             <flux:table :paginate="$this->vendors->hasPages() ? $this->vendors : null">

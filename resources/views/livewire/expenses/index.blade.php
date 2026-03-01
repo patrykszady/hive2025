@@ -1,6 +1,69 @@
 <div class="max-w-3xl space-y-2" wire:transition>
     @if($view === NULL)
-        <x-island-card heading="Filters" :separator="true">
+        {{-- Mobile: accordion collapsed by default --}}
+        <flux:card class="!px-5 !py-2 sm:hidden">
+            <flux:accordion transition>
+                <flux:accordion.item>
+                    <flux:accordion.heading>
+                        <flux:heading size="lg">Filters</flux:heading>
+                    </flux:accordion.heading>
+                    <flux:accordion.content>
+                        <div class="flex flex-col gap-4">
+                            <div class="min-w-0 w-full">
+                                <flux:input wire:model.live.debounce.300ms="amount" label="Amount" icon="magnifying-glass" placeholder="Search Amount" />
+                            </div>
+                            <div class="min-w-0 w-full">
+                                <flux:select wire:model.live="expense_vendor" label="Vendor" variant="listbox" searchable placeholder="Choose Vendor...">
+                                    <x-slot name="search">
+                                        <flux:select.search placeholder="Search..." />
+                                    </x-slot>
+                                    <flux:select.option value="">ALL VENDORS</flux:select.option>
+                                    <flux:select.option value="0">NO VENDOR</flux:select.option>
+                                    <flux:select.option disabled>---------</flux:select.option>
+                                    @foreach ($vendors as $vendor)
+                                        <flux:select.option value="{{$vendor->id}}">{{ $vendor->name }}</flux:select.option>
+                                    @endforeach
+                                </flux:select>
+                            </div>
+                            <div class="min-w-0 w-full">
+                                <flux:select wire:model.live="project_id" label="Project" variant="listbox" searchable placeholder="Choose Project...">
+                                    <x-slot name="search">
+                                        <flux:select.search placeholder="Search..." />
+                                    </x-slot>
+                                    <flux:select.option value="">ALL PROJECTS</flux:select.option>
+                                    <flux:select.option value="NO_PROJECT">NO PROJECT</flux:select.option>
+                                    <flux:select.option value="SPLIT">SPLIT</flux:select.option>
+                                    <flux:select.option disabled>---------</flux:select.option>
+                                    @foreach ($distributions as $distribution)
+                                        <flux:select.option value="D:{{$distribution->id}}">{{ $distribution->name }}</flux:select.option>
+                                    @endforeach
+                                    <flux:select.option disabled>---------</flux:select.option>
+                                    @foreach ($projects as $project)
+                                        <flux:select.option value="{{$project->id}}"><div>{{ $project->short_address }} <br> <i class="font-normal">{{$project->project_name}}</i></div></flux:select.option>
+                                    @endforeach
+                                </flux:select>
+                            </div>
+                            <div class="min-w-0 w-full">
+                                <flux:select variant="listbox" label="Status" multiple placeholder="Choose status..." wire:model.live="expense_statuses">
+                                    <flux:select.option value="Complete"><flux:badge size="md" inset="top bottom" color="green">Complete</flux:badge></flux:select.option>
+                                    <flux:select.option value="No Transaction"><flux:badge size="md" inset="top bottom" color="yellow">No Transaction</flux:badge></flux:select.option>
+                                    <flux:select.option value="No Project"><flux:badge size="md" inset="top bottom" color="red">No Project</flux:badge></flux:select.option>
+                                    <flux:select.option value="Missing Info"><flux:badge size="md" inset="top bottom" color="amber">Missing Info</flux:badge></flux:select.option>
+                                </flux:select>
+                            </div>
+                            @can('create', App\Models\Expense::class)
+                                @if($amount && $view == NULL)
+                                    <flux:button wire:click="$dispatchTo('expenses.expense-create', 'newExpense', { amount: {{$amount}}})">Add New Expense</flux:button>
+                                @endif
+                            @endcan
+                        </div>
+                    </flux:accordion.content>
+                </flux:accordion.item>
+            </flux:accordion>
+        </flux:card>
+
+        {{-- Desktop: always expanded --}}
+        <x-island-card heading="Filters" :separator="true" class="hidden sm:block">
             <x-slot:actions>
                 @can('create', App\Models\Expense::class)
                     @if($amount && $view == NULL)
@@ -38,7 +101,7 @@
                         <flux:select.option value="">ALL PROJECTS</flux:select.option>
                         <flux:select.option value="NO_PROJECT">NO PROJECT</flux:select.option>
                         <flux:select.option value="SPLIT">SPLIT</flux:select.option>
-                        <flux:select.option disabled>---------</flux:select.option>                                        
+                        <flux:select.option disabled>---------</flux:select.option>
                         @foreach ($distributions as $distribution)
                             <flux:select.option value="D:{{$distribution->id}}">{{ $distribution->name }}</flux:select.option>
                         @endforeach
