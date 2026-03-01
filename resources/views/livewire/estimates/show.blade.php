@@ -90,11 +90,11 @@
                                     <flux:table>
                                         <flux:table.columns>
                                             <flux:table.column class="w-6"></flux:table.column>
-                                            <flux:table.column class="w-1/3" sortable :sorted="$sortBy === 'name'" :direction="$sortDirection" wire:click="sort('name')">Item</flux:table.column>
-                                            <flux:table.column sortable :sorted="$sortBy === 'quantity'" :direction="$sortDirection" wire:click="sort('quantity')">Quantity</flux:table.column>
-                                            <flux:table.column sortable :sorted="$sortBy === 'unit_type'" :direction="$sortDirection" wire:click="sort('unit_type')">Unit</flux:table.column>
-                                            <flux:table.column sortable :sorted="$sortBy === 'cost'" :direction="$sortDirection" wire:click="sort('cost')">Cost</flux:table.column>
-                                            <flux:table.column sortable :sorted="$sortBy === 'total'" :direction="$sortDirection" wire:click="sort('total')">Total</flux:table.column>
+                                            <flux:table.column class="w-1/3">Item</flux:table.column>
+                                            <flux:table.column>Quantity</flux:table.column>
+                                            <flux:table.column>Unit</flux:table.column>
+                                            <flux:table.column>Cost</flux:table.column>
+                                            <flux:table.column>Total</flux:table.column>
                                         </flux:table.columns>
 
                                         <flux:table.rows>
@@ -194,11 +194,11 @@
                                     <flux:table>
                                         <flux:table.columns>
                                             <flux:table.column class="w-6"></flux:table.column>
-                                            <flux:table.column class="w-1/3" sortable :sorted="$sortBy === 'name'" :direction="$sortDirection" wire:click="sort('name')">Item</flux:table.column>
-                                            <flux:table.column sortable :sorted="$sortBy === 'quantity'" :direction="$sortDirection" wire:click="sort('quantity')">Quantity</flux:table.column>
-                                            <flux:table.column sortable :sorted="$sortBy === 'unit_type'" :direction="$sortDirection" wire:click="sort('unit_type')">Unit</flux:table.column>
-                                            <flux:table.column sortable :sorted="$sortBy === 'cost'" :direction="$sortDirection" wire:click="sort('cost')">Cost</flux:table.column>
-                                            <flux:table.column sortable :sorted="$sortBy === 'total'" :direction="$sortDirection" wire:click="sort('total')">Total</flux:table.column>
+                                            <flux:table.column class="w-1/3">Item</flux:table.column>
+                                            <flux:table.column>Quantity</flux:table.column>
+                                            <flux:table.column>Unit</flux:table.column>
+                                            <flux:table.column>Cost</flux:table.column>
+                                            <flux:table.column>Total</flux:table.column>
                                         </flux:table.columns>
 
                                         <flux:table.rows wire:sort="sort_line_item">

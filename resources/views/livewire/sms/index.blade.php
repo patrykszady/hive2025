@@ -187,7 +187,7 @@
                     <flux:input wire:model.live.debounce.500ms="search" icon="magnifying-glass" placeholder="Search messages..." size="sm" />
                 </div>
 
-                <div id="sms-threads-live">
+                <div id="sms-threads-live" class="lg:max-h-[calc(100vh-13rem)] lg:min-h-[calc(100vh-13rem)] lg:overflow-y-auto">
                     <livewire:sms.sms-thread-list :search="$search" :selected-thread-id="$threadId" :is-client-user="$isClientUser" lazy />
                 </div>
                 <script>
@@ -206,7 +206,7 @@
             </div>
 
             <div class="{{ $activeTab !== 'calls' ? 'hidden' : '' }}">
-                <div id="sms-calls-live">
+                <div id="sms-calls-live" class="lg:max-h-[calc(100vh-13rem)] lg:min-h-[calc(100vh-13rem)] lg:overflow-y-auto">
                     <livewire:sms.call-list lazy />
                 </div>
                 <script>

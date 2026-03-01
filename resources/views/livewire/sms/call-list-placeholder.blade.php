@@ -1,4 +1,4 @@
-<div class="space-y-2">
+<div class="space-y-2 lg:min-h-[calc(100vh-13rem)]">
     {{-- Filter buttons skeleton --}}
     <div class="flex gap-1.5 mb-3">
         @for ($i = 0; $i < 4; $i++)

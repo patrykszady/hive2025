@@ -202,6 +202,42 @@
             $now = now($tz);
             $todayDate = $now->toDateString();
             $yesterdayDate = $now->copy()->subDay()->toDateString();
+
+            // ── Tapback reactions ──
+            // Build a map of message ID → [emoji => [sender_name, ...]]
+            // by matching the quoted text in each tapback to a real message.
+            $allMessages = $this->smsMessages;
+            $tapbackIds = collect();
+            $reactionsMap = []; // keyed by message ID
+
+            foreach ($allMessages as $msg) {
+                $tapback = $msg->parseTapback();
+                if (! $tapback || ! $tapback['emoji']) {
+                    continue;
+                }
+                $tapbackIds->push($msg->id);
+
+                // Find the original message by matching the quoted text snippet
+                // against display_text (strip signature) of other messages in the thread.
+                $quotedNormalized = mb_strtolower(trim($tapback['quoted']));
+                $matched = $allMessages->first(function ($candidate) use ($quotedNormalized, $msg) {
+                    if ($candidate->id === $msg->id) return false;
+                    $candidateText = $candidate->display_text;
+                    if (! $candidateText) return false;
+                    $candidateNormalized = mb_strtolower(trim($candidateText));
+                    // The tapback quote may be truncated, so check if either contains the other
+                    return str_contains($candidateNormalized, $quotedNormalized)
+                        || str_contains($quotedNormalized, $candidateNormalized);
+                });
+
+                if ($matched) {
+                    $senderName = $phoneNameMap[$msg->from_number] ?? substr($msg->from_number, -4);
+                    $reactionsMap[$matched->id][$tapback['emoji']][] = $senderName;
+                }
+            }
+
+            // Filter out tapback messages from the visible list
+            $visibleMessages = $allMessages->reject(fn ($m) => $tapbackIds->contains($m->id));
         @endphp
 
         <div class="relative flex-1 min-h-0">
@@ -209,7 +245,7 @@
         <div
             class="sms-messages h-full overflow-y-auto flex flex-col-reverse gap-3 px-2 pt-6 pb-6"
         >
-            @forelse ($this->smsMessages->reverse() as $msg)
+            @forelse ($visibleMessages->reverse() as $msg)
                 @php
                     $msgLocal = $msg->created_at->copy()->setTimezone($tz);
                     $msgDate = $msgLocal->toDateString();
@@ -220,6 +256,7 @@
                     } else {
                         $timeLabel = $msgLocal->format('M j, g:i A');
                     }
+                    $msgReactions = $reactionsMap[$msg->id] ?? [];
                 @endphp
                 <div wire:key="msg-{{ $msg->id }}" class="flex {{ $msg->isOutbound() ? 'justify-end' : 'justify-start' }}">
                     <div class="max-w-[85%] lg:max-w-[75%] {{ $msg->isOutbound() ? 'order-last' : '' }}">
@@ -233,34 +270,50 @@
                             </p>
                         @endif
 
-                        <div class="rounded-2xl px-3.5 py-2 text-base lg:text-sm break-words {{ $msg->isOutbound()
-                            ? 'bg-indigo-600 text-white rounded-br-md'
-                            : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 rounded-bl-md' }}">
-                            @if ($msg->hasMedia())
-                                <div class="space-y-2 {{ $msg->text ? 'mb-1.5' : '' }}">
-                                    @foreach ($msg->media_urls as $url)
-                                        <button
-                                            type="button"
-                                            class="block"
-                                            wire:click="openImageLightbox('{{ $url }}')"
+                        <div class="relative">
+                            <div class="rounded-2xl px-3.5 py-2 text-base lg:text-sm break-words {{ $msg->isOutbound()
+                                ? 'bg-indigo-600 text-white rounded-br-md'
+                                : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 rounded-bl-md' }}">
+                                @if ($msg->hasMedia())
+                                    <div class="space-y-2 {{ $msg->text ? 'mb-1.5' : '' }}">
+                                        @foreach ($msg->media_urls as $url)
+                                            <button
+                                                type="button"
+                                                class="block"
+                                                wire:click="openImageLightbox('{{ $url }}')"
+                                            >
+                                                <img
+                                                    src="{{ $url }}"
+                                                    alt="MMS attachment"
+                                                    class="max-w-full rounded-lg max-h-64 object-cover"
+                                                    loading="lazy"
+                                                    onerror="this.parentElement.innerHTML='<div class=\'flex items-center gap-1.5 py-2 text-sm opacity-75\'><svg xmlns=\'http://www.w3.org/2000/svg\' class=\'size-4\' viewBox=\'0 0 20 20\' fill=\'currentColor\'><path fill-rule=\'evenodd\' d=\'M1 5.25A2.25 2.25 0 0 1 3.25 3h13.5A2.25 2.25 0 0 1 19 5.25v9.5A2.25 2.25 0 0 1 16.75 17H3.25A2.25 2.25 0 0 1 1 14.75v-9.5Zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 0 0 .75-.75v-2.69l-2.22-2.219a.75.75 0 0 0-1.06 0l-1.91 1.909-4.97-4.969a.75.75 0 0 0-1.06 0L2.5 11.06Zm12.5-2.56a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z\' clip-rule=\'evenodd\'/></svg> Image unavailable</div>'"
+                                                />
+                                            </button>
+                                        @endforeach
+                                    </div>
+                                @endif
+                                @if ($msg->display_text)
+                                    {!! preg_replace(
+                                        '/(https?:\/\/[^\s<]+)/',
+                                        '<a href="$1" target="_blank" class="underline ' . ($msg->isOutbound() ? 'text-indigo-100 hover:text-white' : 'text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300') . '">$1</a>',
+                                        nl2br(e($msg->display_text))
+                                    ) !!}
+                                @endif
+                            </div>
+
+                            {{-- Tapback reactions --}}
+                            @if (! empty($msgReactions))
+                                <div class="flex gap-0.5 {{ $msg->isOutbound() ? 'justify-end -mr-1' : '-ml-1' }} -mt-2 relative z-10">
+                                    @foreach ($msgReactions as $emoji => $senders)
+                                        <span
+                                            class="inline-flex items-center gap-0.5 rounded-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-600 px-1 py-0.5 text-xs shadow-sm"
+                                            title="{{ implode(', ', $senders) }}"
                                         >
-                                            <img
-                                                src="{{ $url }}"
-                                                alt="MMS attachment"
-                                                class="max-w-full rounded-lg max-h-64 object-cover"
-                                                loading="lazy"
-                                                onerror="this.parentElement.innerHTML='<div class=\'flex items-center gap-1.5 py-2 text-sm opacity-75\'><svg xmlns=\'http://www.w3.org/2000/svg\' class=\'size-4\' viewBox=\'0 0 20 20\' fill=\'currentColor\'><path fill-rule=\'evenodd\' d=\'M1 5.25A2.25 2.25 0 0 1 3.25 3h13.5A2.25 2.25 0 0 1 19 5.25v9.5A2.25 2.25 0 0 1 16.75 17H3.25A2.25 2.25 0 0 1 1 14.75v-9.5Zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 0 0 .75-.75v-2.69l-2.22-2.219a.75.75 0 0 0-1.06 0l-1.91 1.909-4.97-4.969a.75.75 0 0 0-1.06 0L2.5 11.06Zm12.5-2.56a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z\' clip-rule=\'evenodd\'/></svg> Image unavailable</div>'"
-                                            />
-                                        </button>
+                                            {{ $emoji }}@if (count($senders) > 1)<span class="text-[10px] text-zinc-500">{{ count($senders) }}</span>@endif
+                                        </span>
                                     @endforeach
                                 </div>
-                            @endif
-                            @if ($msg->display_text)
-                                {!! preg_replace(
-                                    '/(https?:\/\/[^\s<]+)/',
-                                    '<a href="$1" target="_blank" class="underline ' . ($msg->isOutbound() ? 'text-indigo-100 hover:text-white' : 'text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300') . '">$1</a>',
-                                    nl2br(e($msg->display_text))
-                                ) !!}
                             @endif
                         </div>
 

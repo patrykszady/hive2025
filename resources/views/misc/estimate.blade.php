@@ -4,9 +4,9 @@
     @include('components.layouts.pdf-head')
 
     {{-- BODY --}}
-    <body>
-        <flux:main>
-            <div class="space-y-4">
+    <body style="margin: 0; padding: 0;">
+        <flux:main style="padding-bottom: 0; margin-bottom: 0;">
+            <div class="space-y-4" style="margin-bottom: 0; padding-bottom: 0;">
                 <div class="grid grid-cols-5 gap-4 items-start">
                     <div class="col-span-2 space-y-4">
                         {{-- VENDOR DETAILS --}}
@@ -247,7 +247,7 @@
                 @endif
 
                 @if($type == 'Estimate' && !empty($contractBody))
-                    <div style="page-break-before: always;"> </div>
+                    <div style="page-break-before: always;"></div>
 
                     {{-- Dynamic contract template --}}
                     <div class="contract-body">

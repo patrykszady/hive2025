@@ -115,6 +115,81 @@ class SmsMessage extends Model
     }
 
     /**
+     * Known iMessage tapback reaction prefixes and their emoji equivalents.
+     */
+    public const TAPBACK_PATTERNS = [
+        'Liked' => '👍',
+        'Loved' => '❤️',
+        'Disliked' => '👎',
+        'Laughed at' => '😂',
+        'Emphasized' => '‼️',
+        'Questioned' => '❓',
+        // "Removed" variants (un-react)
+        'Removed a like from' => null,
+        'Removed a heart from' => null,
+        'Removed a dislike from' => null,
+        'Removed a laugh from' => null,
+        'Removed an emphasis from' => null,
+        'Removed a question from' => null,
+    ];
+
+    /**
+     * Determine if this message is an iMessage tapback reaction.
+     *
+     * Tapbacks arrive as: Liked "original message text"
+     * The quotes may be standard " or Unicode \u{201c} \u{201d}.
+     */
+    public function isTapback(): bool
+    {
+        return $this->parseTapback() !== null;
+    }
+
+    /**
+     * Parse a tapback reaction message.
+     *
+     * @return array{reaction: string, emoji: string|null, quoted: string}|null
+     */
+    public function parseTapback(): ?array
+    {
+        if (! $this->text) {
+            return null;
+        }
+
+        $text = trim($this->text);
+
+        // Quote patterns: standard ASCII ", Unicode curly "" (U+201C/U+201D),
+        // and their common UTF-8 double-encoding mojibake variants (â€œ / â€ + U+009D).
+        $openQuotes = '[\x{201c}"\x{00e2}]';
+        $closeQuotes = '[\x{201d}"\x{009d}]';
+
+        foreach (self::TAPBACK_PATTERNS as $prefix => $emoji) {
+            $escapedPrefix = preg_quote($prefix, '/');
+
+            // Try matching with flexible quote detection:
+            // 1) Standard/Unicode quotes
+            // 2) Mojibake: â€œ...â€ + optional trailing char
+            if (preg_match('/^' . $escapedPrefix . '\s+[\x{201c}"](.*?)[\x{201d}"]\s*$/su', $text, $matches)) {
+                return [
+                    'reaction' => $prefix,
+                    'emoji' => $emoji,
+                    'quoted' => $matches[1],
+                ];
+            }
+
+            // Mojibake variant: â€œ as open, â€ followed by U+009D (or end of string) as close
+            if (preg_match('/^' . $escapedPrefix . '\s+\x{00e2}\x{20ac}\x{0153}(.*?)(?:\x{00e2}\x{20ac}\x{009d}|\x{00e2}\x{20ac}$)\s*$/su', $text, $matches)) {
+                return [
+                    'reaction' => $prefix,
+                    'emoji' => $emoji,
+                    'quoted' => $matches[1],
+                ];
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Get a display label for the sender (last 4 digits of phone).
      */
     public function getSenderLabelAttribute(): string

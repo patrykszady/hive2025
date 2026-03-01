@@ -1,4 +1,4 @@
-<div class="space-y-1 overflow-y-auto max-h-[calc(100vh-16rem)] px-1">
+<div class="space-y-1 overflow-y-auto lg:max-h-[calc(100vh-13rem)] lg:min-h-[calc(100vh-13rem)] px-1">
     @for ($i = 0; $i < 8; $i++)
         <div class="px-3 py-2.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 animate-pulse">
             <div class="flex items-center justify-between gap-2">

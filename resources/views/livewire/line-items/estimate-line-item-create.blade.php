@@ -32,52 +32,55 @@
                 placeholder=""
             />
 
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {{-- CATEGORY --}}
-                <flux:input wire:model="form.category" label="Category" placeholder="Category" />
-
-                {{-- SUB CATEGORY --}}
-                <flux:input wire:model="form.sub_category" label="Sub Category" />
+            <div class="flex flex-col sm:flex-row gap-4">
+                <div class="flex-1 min-w-0">
+                    <flux:input wire:model="form.category" label="Category" placeholder="Category" />
+                </div>
+                <div class="flex-1 min-w-0">
+                    <flux:input wire:model="form.sub_category" label="Sub Category" />
+                </div>
             </div>
 
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {{-- UNIT TYPE --}}
-                <flux:select wire:model="form.unit_type" label="Unit Type" placeholder="Choose unit type...">
-                    @include('livewire.line-items._unit_type_options')
-                </flux:select>
-
-                {{-- COST --}}
-                <flux:input
-                    wire:model.live.debounce.500ms="form.cost"
-                    label="Amount"
-                    type="number"
-                    inputmode="decimal"
-                    pattern="[0-9]*"
-                    step="0.01"
-                    placeholder="00.00"
-                />
+            <div class="flex flex-col sm:flex-row gap-4">
+                <div class="flex-1 min-w-0">
+                    <flux:select wire:model="form.unit_type" label="Unit Type" placeholder="Choose unit type...">
+                        @include('livewire.line-items._unit_type_options')
+                    </flux:select>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <flux:input
+                        wire:model.live.debounce.500ms="form.cost"
+                        label="Amount"
+                        type="number"
+                        inputmode="decimal"
+                        pattern="[0-9]*"
+                        step="0.01"
+                        placeholder="00.00"
+                    />
+                </div>
             </div>
 
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {{-- QUANTITY --}}
-                <flux:input
-                    wire:model.live.debounce.500ms="form.quantity"
-                    label="Quantity"
-                    type="number"
-                    inputmode="numeric"
-                    step=".1"
-                    min=".1"
-                    placeholder="1"
-                />
-
-                {{-- TOTAL --}}
-                <flux:input
-                    wire:model.live.debounce.500ms="form.total"
-                    label="Total"
-                    disabled
-                    type="number"
-                    inputmode="decimal"
-                />
+            <div class="flex flex-col sm:flex-row gap-4">
+                <div class="flex-1 min-w-0">
+                    <flux:input
+                        wire:model.live.debounce.500ms="form.quantity"
+                        label="Quantity"
+                        type="number"
+                        inputmode="numeric"
+                        step=".1"
+                        min=".1"
+                        placeholder="1"
+                    />
+                </div>
+                <div class="flex-1 min-w-0">
+                    <flux:input
+                        wire:model.live.debounce.500ms="form.total"
+                        label="Total"
+                        disabled
+                        type="number"
+                        inputmode="decimal"
+                    />
+                </div>
             </div>
         </div>
     </form>
