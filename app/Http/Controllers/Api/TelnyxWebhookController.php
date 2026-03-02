@@ -322,7 +322,7 @@ class TelnyxWebhookController extends Controller
                 'action' => 'click_to_call_in_conference',
                 'call_log_id' => $callLogId,
             ])),
-        ]);
+        ], $callLogId);
 
         // Step 2: Dial the target phone number
         $apiKey = config('services.telnyx.api_key');
@@ -622,7 +622,7 @@ class TelnyxWebhookController extends Controller
             ?: rtrim(config('app.url'), '/') . '/audio/ringback.wav';
         $conferenceParams['hold_audio_url'] = $holdAudioUrl;
 
-        $this->joinConference($callControlId, $conferenceParams);
+        $this->joinConference($callControlId, $conferenceParams, $callLogId);
     }
 
     /**
@@ -1034,18 +1034,36 @@ class TelnyxWebhookController extends Controller
 
             $this->sendCallCommand($callControlId, 'hangup');
         } elseif ($action === 'admin_connect_message_done') {
-            // Admin heard "We're connecting you to {name}" → join the conference
+            // Admin heard "We're connecting you to {name}" → join the EXISTING conference
             $callLogId = $clientState['call_log_id'] ?? null;
             $adminUserId = $clientState['admin_user_id'] ?? null;
             $conferenceName = $clientState['conference_name'] ?? null;
+            $conferenceId = $this->getConferenceId($callLogId);
 
             Log::channel('telnyx')->info('Admin connect message done — joining conference', [
                 'call_control_id' => $callControlId,
                 'conference_name' => $conferenceName,
+                'conference_id' => $conferenceId,
                 'admin_user_id' => $adminUserId,
             ]);
 
-            if ($conferenceName) {
+            if ($conferenceId) {
+                $this->addToConference($callControlId, $conferenceId, [
+                    'beep_enabled' => 'never',
+                    'end_conference_on_exit' => false,
+                    'start_conference_on_create' => true,
+                    'client_state' => base64_encode(json_encode([
+                        'action' => 'admin_in_conference',
+                        'call_log_id' => $callLogId,
+                        'admin_user_id' => $adminUserId,
+                    ])),
+                ]);
+            } elseif ($conferenceName) {
+                // Fallback: create new conference if ID not found (shouldn't happen)
+                Log::channel('telnyx')->warning('No conference_id in metadata — falling back to create', [
+                    'call_log_id' => $callLogId,
+                    'conference_name' => $conferenceName,
+                ]);
                 $this->joinConference($callControlId, [
                     'name' => $conferenceName,
                     'beep_enabled' => 'never',
@@ -1056,24 +1074,25 @@ class TelnyxWebhookController extends Controller
                         'call_log_id' => $callLogId,
                         'admin_user_id' => $adminUserId,
                     ])),
-                ]);
+                ], $callLogId);
             }
         } elseif ($action === 'click_to_call_target_intro_done') {
-            // Target heard the TTS intro → join conference with the user
+            // Target heard the TTS intro → join the EXISTING conference with the user
             $callLogId = $clientState['call_log_id'] ?? null;
             $conferenceName = $clientState['conference_name'] ?? null;
             $participantName = $clientState['participant_name'] ?? null;
+            $conferenceId = $this->getConferenceId($callLogId);
 
             Log::channel('telnyx')->info('Click-to-call: target intro done — joining conference', [
                 'call_control_id' => $callControlId,
                 'conference_name' => $conferenceName,
+                'conference_id' => $conferenceId,
                 'call_log_id' => $callLogId,
                 'participant_name' => $participantName,
             ]);
 
-            if ($conferenceName) {
-                $this->joinConference($callControlId, [
-                    'name' => $conferenceName,
+            if ($conferenceId) {
+                $this->addToConference($callControlId, $conferenceId, [
                     'beep_enabled' => 'on_enter',
                     'end_conference_on_exit' => false,
                     'start_conference_on_create' => true,
@@ -1087,26 +1106,43 @@ class TelnyxWebhookController extends Controller
                 if ($participantName && $participantName !== 'Someone') {
                     $this->announceConferenceJoin($conferenceName, $participantName);
                 }
+            } elseif ($conferenceName) {
+                // Fallback: create new conference if ID not found
+                Log::channel('telnyx')->warning('No conference_id in metadata — falling back to create', [
+                    'call_log_id' => $callLogId,
+                    'conference_name' => $conferenceName,
+                ]);
+                $this->joinConference($callControlId, [
+                    'name' => $conferenceName,
+                    'beep_enabled' => 'on_enter',
+                    'end_conference_on_exit' => false,
+                    'start_conference_on_create' => true,
+                    'client_state' => base64_encode(json_encode([
+                        'action' => 'click_to_call_target_in_conference',
+                        'call_log_id' => $callLogId,
+                    ])),
+                ], $callLogId);
             }
 
             $callLog = $callLogId ? CallLog::find($callLogId) : null;
             $callLog?->update(['status' => CallLog::STATUS_TRANSFERRED]);
         } elseif ($action === 'conference_invite_intro_done') {
-            // Invited participant heard the TTS intro → join conference
+            // Invited participant heard the TTS intro → join existing conference
             $callLogId = $clientState['call_log_id'] ?? null;
             $conferenceName = $clientState['conference_name'] ?? null;
             $participantName = $clientState['participant_name'] ?? null;
+            $conferenceId = $this->getConferenceId($callLogId);
 
             Log::channel('telnyx')->info('Conference invite: intro done — joining conference', [
                 'call_control_id' => $callControlId,
                 'conference_name' => $conferenceName,
+                'conference_id' => $conferenceId,
                 'call_log_id' => $callLogId,
                 'participant_name' => $participantName,
             ]);
 
-            if ($conferenceName) {
-                $this->joinConference($callControlId, [
-                    'name' => $conferenceName,
+            if ($conferenceId) {
+                $this->addToConference($callControlId, $conferenceId, [
                     'beep_enabled' => 'on_enter',
                     'end_conference_on_exit' => false,
                     'start_conference_on_create' => true,
@@ -1120,6 +1156,22 @@ class TelnyxWebhookController extends Controller
                 if ($participantName && $participantName !== 'Someone') {
                     $this->announceConferenceJoin($conferenceName, $participantName);
                 }
+            } elseif ($conferenceName) {
+                // Fallback
+                Log::channel('telnyx')->warning('No conference_id in metadata — falling back to create', [
+                    'call_log_id' => $callLogId,
+                    'conference_name' => $conferenceName,
+                ]);
+                $this->joinConference($callControlId, [
+                    'name' => $conferenceName,
+                    'beep_enabled' => 'on_enter',
+                    'end_conference_on_exit' => false,
+                    'start_conference_on_create' => true,
+                    'client_state' => base64_encode(json_encode([
+                        'action' => 'conference_invite_in_conference',
+                        'call_log_id' => $callLogId,
+                    ])),
+                ], $callLogId);
             }
         } elseif ($action === 'click_to_call_failed_tts') {
             // Failed to reach target — TTS error message done → hang up
@@ -1848,21 +1900,88 @@ class TelnyxWebhookController extends Controller
     }
 
     /**
-     * Join a call to a named conference via POST /v2/conferences.
-     * Telnyx Call Control v2 uses this endpoint (not /v2/calls/{id}/actions/conference)
-     * to both create a new conference and join existing ones by name.
+     * Create a new conference via POST /v2/conferences and add the call as the first participant.
+     * Stores the conference_id in CallLog metadata so subsequent participants can join by ID.
+     *
+     * @return string|null The conference ID if created successfully
      */
-    protected function joinConference(string $callControlId, array $params = []): void
+    protected function joinConference(string $callControlId, array $params = [], ?int $callLogId = null): ?string
     {
-        Log::channel('telnyx')->info('joinConference CALLED', [
+        Log::channel('telnyx')->info('joinConference CALLED (create new)', [
             'call_control_id' => $callControlId,
             'conference_name' => $params['name'] ?? null,
+            'call_log_id' => $callLogId,
         ]);
 
         $apiKey = config('services.telnyx.api_key');
 
         if (! $apiKey) {
             Log::channel('telnyx')->error('Telnyx API key not configured for conference');
+            return null;
+        }
+
+        $body = array_merge($params, [
+            'call_control_id' => $callControlId,
+        ]);
+
+        try {
+            $response = Http::withToken($apiKey)
+                ->post('https://api.telnyx.com/v2/conferences', $body);
+
+            if ($response->successful()) {
+                $conferenceId = $response->json('data.id');
+
+                Log::channel('telnyx')->info('Conference created', [
+                    'call_control_id' => $callControlId,
+                    'conference_id' => $conferenceId,
+                    'conference_name' => $params['name'] ?? null,
+                ]);
+
+                // Store the conference_id in CallLog metadata so other legs can join by ID
+                if ($callLogId && $conferenceId) {
+                    $callLog = CallLog::find($callLogId);
+                    if ($callLog) {
+                        $metadata = $callLog->metadata ?? [];
+                        $metadata['conference_id'] = $conferenceId;
+                        $metadata['conference_name'] = $params['name'] ?? null;
+                        $callLog->update(['metadata' => $metadata]);
+                    }
+                }
+
+                return $conferenceId;
+            } else {
+                Log::channel('telnyx')->error('Conference create failed', [
+                    'call_control_id' => $callControlId,
+                    'conference_name' => $params['name'] ?? null,
+                    'status' => $response->status(),
+                    'error' => $response->json(),
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::channel('telnyx')->error('Conference create exception', [
+                'call_control_id' => $callControlId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return null;
+    }
+
+    /**
+     * Add a call to an existing conference via POST /v2/conferences/{id}/actions/join.
+     * This is the correct way to add subsequent participants to an already-created conference.
+     */
+    protected function addToConference(string $callControlId, string $conferenceId, array $params = []): void
+    {
+        Log::channel('telnyx')->info('addToConference CALLED', [
+            'call_control_id' => $callControlId,
+            'conference_id' => $conferenceId,
+        ]);
+
+        $apiKey = config('services.telnyx.api_key');
+
+        if (! $apiKey) {
+            Log::channel('telnyx')->error('Telnyx API key not configured for addToConference');
             return;
         }
 
@@ -1871,34 +1990,42 @@ class TelnyxWebhookController extends Controller
         ]);
 
         try {
-            Log::channel('telnyx')->info('joinConference POSTing to Telnyx API', [
-                'call_control_id' => $callControlId,
-                'conference_name' => $params['name'] ?? null,
-            ]);
-
             $response = Http::withToken($apiKey)
-                ->post('https://api.telnyx.com/v2/conferences', $body);
+                ->post("https://api.telnyx.com/v2/conferences/{$conferenceId}/actions/join", $body);
 
             if ($response->successful()) {
-                Log::channel('telnyx')->info('Conference joined/created', [
+                Log::channel('telnyx')->info('Participant added to conference', [
                     'call_control_id' => $callControlId,
-                    'conference_id' => $response->json('data.id'),
-                    'conference_name' => $params['name'] ?? null,
+                    'conference_id' => $conferenceId,
                 ]);
             } else {
-                Log::channel('telnyx')->error('Conference join/create failed', [
+                Log::channel('telnyx')->error('addToConference failed', [
                     'call_control_id' => $callControlId,
-                    'conference_name' => $params['name'] ?? null,
+                    'conference_id' => $conferenceId,
                     'status' => $response->status(),
                     'error' => $response->json(),
                 ]);
             }
         } catch (\Exception $e) {
-            Log::channel('telnyx')->error('Conference join/create exception', [
+            Log::channel('telnyx')->error('addToConference exception', [
                 'call_control_id' => $callControlId,
+                'conference_id' => $conferenceId,
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Get the conference ID from a CallLog's metadata.
+     */
+    protected function getConferenceId(?int $callLogId): ?string
+    {
+        if (! $callLogId) {
+            return null;
+        }
+
+        $callLog = CallLog::find($callLogId);
+        return $callLog?->metadata['conference_id'] ?? null;
     }
 
     /**
