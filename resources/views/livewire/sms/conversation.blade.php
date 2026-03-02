@@ -423,11 +423,69 @@
                         >
                             Resend
                         </flux:button>
+
+                        <flux:button
+                            type="button"
+                            size="xs"
+                            variant="primary"
+                            wire:click="openOptInModal"
+                        >
+                            Manual Opt-in
+                        </flux:button>
                     </div>
                 @endif
             </div>
             @endif
         </div>
+
+        {{-- Manual Opt-In Modal --}}
+        <flux:modal wire:model="showOptInModal" class="max-w-md space-y-6">
+            <div>
+                <flux:heading size="lg">Manual Opt-In</flux:heading>
+                <flux:text class="mt-1">Manually opt in a participant who confirmed consent outside of SMS (e.g. texted START to a different number, approved on a phone call, emailed with START).</flux:text>
+            </div>
+
+            <form wire:submit="manualOptIn" class="space-y-4">
+                <flux:field>
+                    <flux:label>Participant</flux:label>
+                    @if ($this->pendingParticipants->count() > 0)
+                        <flux:select wire:model="manualOptInParticipantId" placeholder="Select participant...">
+                            @foreach ($this->pendingParticipants as $participant)
+                                <flux:select.option value="{{ $participant->id }}">
+                                    {{ $this->resolvePhoneDisplay($participant->phone_number) }}
+                                    ({{ preg_replace('/.*(\d{3})(\d{3})(\d{4})$/', '($1) $2-$3', preg_replace('/[^0-9]/', '', $participant->phone_number)) }})
+                                </flux:select.option>
+                            @endforeach
+                        </flux:select>
+                    @else
+                        <flux:text class="text-sm text-zinc-500">All participants have already opted in.</flux:text>
+                    @endif
+                    <flux:error name="manualOptInParticipantId" />
+                </flux:field>
+
+                <flux:field>
+                    <flux:label>Reason for manual opt-in</flux:label>
+                    <flux:textarea
+                        wire:model="manualOptInReason"
+                        placeholder="e.g. Texted START to a different number, Approved on a phone call, Emailed with START..."
+                        rows="3"
+                    />
+                    <flux:error name="manualOptInReason" />
+                </flux:field>
+
+                <div class="flex justify-end gap-2">
+                    <flux:button type="button" variant="ghost" wire:click="$set('showOptInModal', false)">Cancel</flux:button>
+                    <flux:button
+                        type="submit"
+                        variant="primary"
+                        wire:loading.attr="disabled"
+                        wire:target="manualOptIn"
+                    >
+                        Confirm Opt-In
+                    </flux:button>
+                </div>
+            </form>
+        </flux:modal>
 
         <style>
             [data-modal="sms-image-lightbox"]::backdrop {

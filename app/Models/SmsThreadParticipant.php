@@ -11,6 +11,8 @@ class SmsThreadParticipant extends Model
         'thread_id',
         'phone_number',
         'opted_in_at',
+        'manual_opt_in_reason',
+        'manual_opt_in_by',
     ];
 
     protected function casts(): array
@@ -18,6 +20,11 @@ class SmsThreadParticipant extends Model
         return [
             'opted_in_at' => 'datetime',
         ];
+    }
+
+    public function manualOptInUser(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'manual_opt_in_by');
     }
 
     public function thread(): BelongsTo

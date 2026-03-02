@@ -133,6 +133,7 @@ class HourCreate extends Component
     public function updated()
     {
         $this->validate();
+        $this->dispatch('hours-count-updated', count: $this->hours_count);
     }
 
     #[Computed]
@@ -148,6 +149,25 @@ class HourCreate extends Component
     public function minDate(): string
     {
         return browser_today()->subMonths(3)->startOfMonth()->format('Y-m-d');
+    }
+
+    #[Computed]
+    public function datesWithHours(): array
+    {
+        $unavailableDates = collect(explode(',', $this->days))->filter()->map(fn ($d) => trim($d))->toArray();
+
+        return Hour::where('user_id', auth()->user()->id)
+            ->where('date', '>=', $this->minDate)
+            ->where('date', '<=', browser_today()->format('Y-m-d'))
+            ->when(!empty($unavailableDates), fn ($q) => $q->whereNotIn('date', $unavailableDates))
+            ->selectRaw('DATE_FORMAT(date, "%Y-%m-%d") as date_key, SUM(hours) as total_hours')
+            ->groupBy('date_key')
+            ->having('total_hours', '>', 0)
+            ->pluck('total_hours', 'date_key')
+            ->mapWithKeys(fn ($hours, $date) => [
+                $date => ['variant' => 'hours']
+            ])
+            ->toArray();
     }
 
     public function selectedDate($date, $day_index = null)
@@ -291,6 +311,9 @@ class HourCreate extends Component
             $this->form->store();
             $this->selectedDate($this->selected_date, $this->day_index);
 
+            unset($this->datesWithHours);
+            $this->dispatch('update-hours-metadata', metadata: $this->datesWithHours);
+
             Flux::toast(
                 duration: 5000,
                 position: 'top right',
@@ -306,6 +329,9 @@ class HourCreate extends Component
     {
         $this->form->update();
         $this->selectedDate($this->selected_date, $this->day_index);
+
+        unset($this->datesWithHours);
+        $this->dispatch('update-hours-metadata', metadata: $this->datesWithHours);
 
         Flux::toast(
             duration: 5000,

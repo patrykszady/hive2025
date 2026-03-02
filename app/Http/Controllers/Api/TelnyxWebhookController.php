@@ -194,7 +194,10 @@ class TelnyxWebhookController extends Controller
         ]);
 
         // Answer the call — on call.answered we'll play TTS or ring admins
+        // send_silence_when_idle keeps RTP flowing during silence so carriers
+        // don't tear down the media path once participants enter the conference.
         $this->sendCallCommand($callControlId, 'answer', [
+            'send_silence_when_idle' => true,
             'client_state' => base64_encode(json_encode([
                 'action' => 'welcome_or_ring',
                 'call_log_id' => $callLog->id,

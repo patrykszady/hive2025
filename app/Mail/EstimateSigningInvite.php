@@ -58,8 +58,16 @@ class EstimateSigningInvite extends Mailable
         $client = $project?->client;
         $this->clientLastNames = $client?->last_names ?? '';
 
-        $this->withSymfonyMessage(function (\Symfony\Component\Mime\Email $message): void {
+        $this->withSymfonyMessage(function (\Symfony\Component\Mime\Email $message) use ($estimate): void {
             $message->getHeaders()->add(new \Mailtrap\EmailHeader\CategoryHeader('estimate_signing_invite'));
+
+            $metadata = [
+                'email_template_name' => 'Signing Invite',
+                'estimate_id' => $estimate->id,
+                'project_id' => $estimate->project_id,
+                'belongs_to_vendor_id' => $estimate->belongs_to_vendor_id,
+            ];
+            $message->getHeaders()->addTextHeader('X-Email-Metadata', json_encode($metadata));
         });
     }
 

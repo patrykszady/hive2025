@@ -6,6 +6,7 @@ use App\Mail\EstimateFullySigned;
 use App\Mail\EstimateSigningInvite;
 use App\Models\AppNotification;
 use App\Models\EmailTemplate;
+use App\Models\EmailTracking;
 use App\Models\Estimate;
 use App\Models\EstimateSignature;
 use App\Models\User;
@@ -209,6 +210,128 @@ class EstimateSign extends Component
 
         return $this->requiredSigners->reject(
             fn (User $user) => in_array($user->id, $signedUserIds)
+        );
+    }
+
+    /**
+     * Email tracking events for signing invite emails on this estimate's project.
+     *
+     * @return \Illuminate\Support\Collection<int, EmailTracking>
+     */
+    #[Computed]
+    public function signingEmailEvents(): mixed
+    {
+        if (! $this->estimate?->project_id) {
+            return collect();
+        }
+
+        $clientEmails = $this->estimate->project?->client?->users
+            ?->pluck('email')
+            ->filter()
+            ->map(fn (string $e) => strtolower(trim($e)))
+            ->values()
+            ->all() ?? [];
+
+        if (empty($clientEmails)) {
+            return collect();
+        }
+
+        return EmailTracking::withoutGlobalScopes()
+            ->where('project_id', $this->estimate->project_id)
+            ->where('email_template_name', 'Signing Invite')
+            ->where(function ($q) use ($clientEmails) {
+                foreach ($clientEmails as $email) {
+                    $q->orWhereJsonContains('recipient_emails', $email);
+                }
+            })
+            ->orderByDesc('event_at')
+            ->limit(20)
+            ->get();
+    }
+
+    /**
+     * Whether the resend button should be shown (>24h since last signing invite sent).
+     */
+    #[Computed]
+    public function canResendSigningEmail(): bool
+    {
+        if (! $this->isVendorSigner) {
+            return false;
+        }
+
+        if (! $this->estimate?->isVendorSigned() || $this->estimate?->isFullySigned()) {
+            return false;
+        }
+
+        $lastSent = $this->signingEmailEvents
+            ->where('event_type', 'sent')
+            ->first();
+
+        if (! $lastSent?->event_at) {
+            // No record of sending — allow resend
+            return true;
+        }
+
+        return $lastSent->event_at->diffInHours(now()) >= 24;
+    }
+
+    /**
+     * Resend signing invite email to unsigned client users.
+     */
+    public function resendSigningInvites(): void
+    {
+        $estimate = Estimate::withoutGlobalScopes()
+            ->with(['signatures', 'project.client.users', 'vendor'])
+            ->find($this->estimateId);
+
+        if (! $estimate || ! $estimate->isVendorSigned()) {
+            Flux::toast(
+                text: 'All vendor admins must sign first.',
+                variant: 'warning',
+            );
+
+            return;
+        }
+
+        if ($estimate->isFullySigned()) {
+            Flux::toast(
+                text: 'This estimate has already been fully signed.',
+                variant: 'warning',
+            );
+
+            return;
+        }
+
+        $clientUsers = $estimate->project?->client?->users ?? collect();
+        $signedUserIds = $estimate->signatures->pluck('user_id')->toArray();
+        $sent = 0;
+
+        foreach ($clientUsers as $user) {
+            if (! $user->email || in_array($user->id, $signedUserIds)) {
+                continue;
+            }
+
+            Mail::mailer('mailtrap-sdk')->to($user->email)->send(
+                new EstimateSigningInvite($estimate, $user->first_name ?? '')
+            );
+            $sent++;
+        }
+
+        if ($sent === 0) {
+            Flux::toast(
+                text: 'All client users have either signed or have no email on file.',
+                variant: 'warning',
+            );
+
+            return;
+        }
+
+        // Clear computed cache so tracking events refresh
+        unset($this->signingEmailEvents, $this->canResendSigningEmail);
+
+        Flux::toast(
+            text: "Resent signing email to {$sent} client user" . ($sent !== 1 ? 's' : '') . '.',
+            variant: 'success',
         );
     }
 

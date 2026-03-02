@@ -36,6 +36,16 @@ class SmsIndex extends Component
         if (! $this->isClientUser && $user->vendor_role !== 'Admin') {
             abort(403);
         }
+
+        // Restore activeTab from session when not explicitly set in URL
+        if (! request()->has('activeTab')) {
+            $this->activeTab = session('sms_active_tab', 'messages');
+        }
+    }
+
+    public function updatedActiveTab(string $value): void
+    {
+        session(['sms_active_tab' => $value]);
     }
 
     public function selectThread(int|null $threadId): void

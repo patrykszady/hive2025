@@ -4,6 +4,14 @@
         [wire\:loading][wire\:target^="decrementHours"] {
             display: none !important;
         }
+        td[data-date-variant='hours'] button {
+            outline: 1px solid oklch(0.585 0.233 277.117 / 0.35);
+            outline-offset: -2px;
+            border-radius: 0.5rem;
+        }
+        td[data-date-variant='hours'][data-selected] button {
+            outline: none;
+        }
     </style>
 	<div class="grid max-w-xl grid-cols-4 gap-4 xl:relative lg:max-w-5xl sm:px-6">
 		{{-- FLOAT CALENDAR --}}
@@ -18,10 +26,22 @@
                         Confirm Timesheets
                     </flux:button>
                 </x-slot:actions>
-                <div>
+                <div
+                    x-data="{ datesWithHours: @js($this->datesWithHours) }"
+                    x-init="$nextTick(() => {
+                        const cal = $el.querySelector('ui-calendar');
+                        if (cal && cal.appendMetadata) cal.appendMetadata(datesWithHours);
+                    })"
+                    @update-hours-metadata.window="
+                        datesWithHours = $event.detail.metadata;
+                        $nextTick(() => {
+                            const cal = $el.querySelector('ui-calendar');
+                            if (cal && cal.resetMetadata) cal.resetMetadata(datesWithHours);
+                        });
+                    "
+                >
                     <flux:calendar
                         wire:model.live="selected_date"
-                        wire:loading.class.delay="opacity-50"
                         min="{{$this->minDate}}"
                         ::max="$store.timezone.today"
                         start-day="1"
@@ -34,7 +54,11 @@
                     @if($this->selected_date)
                         <flux:button class="w-full cursor-default"><b>{{$this->selected_date->format('D M jS, Y')}}</b></flux:button>
                     @endif
-                    <flux:button class="w-full cursor-default">Hours | <b>{{$this->hours_count}}</b></flux:button>
+                    <flux:button
+                        class="w-full cursor-default"
+                        x-data="{ count: @js($this->hours_count) }"
+                        @hours-count-updated.window="count = $event.detail.count"
+                    >Hours | <b x-text="count"></b></flux:button>
                     <flux:button type="submit" variant="primary" class="w-full">{{$view_text['button_text']}}</flux:button>
                 </div>
 
@@ -43,14 +67,14 @@
 		</div>
 
         <div class="col-span-4 space-y-2 lg:col-span-2">
+            @island(name: 'project-hours', always: true)
             <div class="space-y-2">
-            @if($selected_date)
-                <x-island-card heading="Project Hours" subheading="Add hours worked for each project on {{ $selected_date->format('M jS, Y') }}" :separator="true">
+            @if($this->selected_date)
+                <x-island-card heading="Project Hours" subheading="Add hours worked for each project on {{ $this->selected_date->format('M jS, Y') }}" :separator="true">
 
                 {{-- PROJECT HOUR AMOUNT --}}
-                @foreach ($projects as $index => $project)
-                    <flux:field wire:key="project-{{ $project->id }}">
-                        {{-- label_text_color_custom="{{ !empty($day_project_tasks[$index]) ? 'text-indigo-600' : NULL}}" --}}
+                @foreach ($this->projects as $index => $project)
+                    <flux:field wire:key="project-{{ $project->id }}" wire:transition>
                         <div class="grid gap-2 grid-cols-2">
                             <div>
                                 <flux:label><a href="{{route('projects.show', $project->id)}}" target="_blank">{{ $project->short_address }}</a></flux:label>
@@ -85,8 +109,8 @@
                                         square 
                                     />
                                 </flux:button.group>
-                                @if(!empty($day_project_tasks[$index]))
-                                    @foreach($day_project_tasks[$index] as $task)
+                                @if(!empty($this->day_project_tasks[$index]))
+                                    @foreach($this->day_project_tasks[$index] as $task)
                                         <flux:description><i class="text-indigo-600">{{$task['title']}}</i></flux:description>
                                     @endforeach
                                 @endif
@@ -115,9 +139,9 @@
                     <flux:button variant="primary" wire:click="add_project" icon="plus-circle" wire:loading.attr="disabled" wire:target="add_project">Add</flux:button>
                 </flux:input.group>
             </x-island-card>
-            </div>
             @endif
             </div>
+            @endisland
 		</div>
 	</div>
 </form>

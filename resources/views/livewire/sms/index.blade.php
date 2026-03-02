@@ -106,6 +106,8 @@
                 const threadsEl = document.getElementById('sms-threads-live');
                 if (threadsEl && !threadsEl.querySelector('.animate-pulse') && threadsEl.innerHTML.length > 200) {
                     localStorage.setItem('hive-sms-threads', threadsEl.innerHTML);
+                    const scrollable = threadsEl.querySelector('.scrollbar-gutter') || threadsEl;
+                    localStorage.setItem('hive-sms-threads-scroll', scrollable.scrollTop);
                 }
                 const convoWrap = document.getElementById('sms-convo-wrap');
                 if (convoWrap) {
@@ -117,7 +119,10 @@
                 const callsEl = document.getElementById('sms-calls-live');
                 if (callsEl && !callsEl.querySelector('.animate-pulse') && callsEl.innerHTML.length > 200) {
                     localStorage.setItem('hive-sms-calls', callsEl.innerHTML);
+                    const scrollable = callsEl.querySelector('.scrollbar-gutter') || callsEl;
+                    localStorage.setItem('hive-sms-calls-scroll', scrollable.scrollTop);
                 }
+                localStorage.setItem('hive-sms-active-tab', $wire.activeTab || 'messages');
                 localStorage.setItem('hive-sms-cached-at', Date.now().toString());
             } catch (e) { /* storage full */ }
         },
@@ -156,7 +161,7 @@
     </div>
 
     {{-- Thread List - Hidden on mobile when thread is selected --}}
-    <div class="w-full lg:w-80 shrink-0 min-w-0 max-w-md mx-auto lg:mx-0 lg:max-w-none lg:flex lg:flex-col {{ $threadId && $activeTab === 'messages' ? 'hidden lg:block' : '' }}">
+    <div class="w-full lg:w-80 shrink-0 min-w-0 max-w-md mx-auto lg:mx-0 lg:max-w-none lg:flex lg:flex-col {{ $threadId && $activeTab === 'messages' ? 'hidden lg:flex' : '' }}">
         <x-island-card class="lg:flex lg:flex-col lg:flex-1 lg:min-h-0">
             {{-- Tabs --}}
             @if (! $isClientUser)
@@ -198,7 +203,14 @@
                         var cached = localStorage.getItem('hive-sms-threads');
                         if (cached && cached.length > 200) {
                             var el = document.getElementById('sms-threads-live');
-                            if (el) el.innerHTML = cached;
+                            if (el) {
+                                el.innerHTML = cached;
+                                var scroll = parseInt(localStorage.getItem('hive-sms-threads-scroll') || '0');
+                                if (scroll > 0) {
+                                    var scrollable = el.querySelector('.scrollbar-gutter') || el;
+                                    scrollable.scrollTop = scroll;
+                                }
+                            }
                         }
                     } catch(e) {}
                 })();
@@ -217,7 +229,14 @@
                         var cached = localStorage.getItem('hive-sms-calls');
                         if (cached && cached.length > 200) {
                             var el = document.getElementById('sms-calls-live');
-                            if (el) el.innerHTML = cached;
+                            if (el) {
+                                el.innerHTML = cached;
+                                var scroll = parseInt(localStorage.getItem('hive-sms-calls-scroll') || '0');
+                                if (scroll > 0) {
+                                    var scrollable = el.querySelector('.scrollbar-gutter') || el;
+                                    scrollable.scrollTop = scroll;
+                                }
+                            }
                         }
                     } catch(e) {}
                 })();

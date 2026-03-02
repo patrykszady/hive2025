@@ -6,6 +6,7 @@ use App\Livewire\Sms\SmsNewThread;
 use App\Models\CallLog;
 use App\Models\SmsGroupThread;
 use App\Models\SmsMessage;
+use App\Models\SmsThreadParticipant;
 use App\Models\SmsThreadRead;
 use App\Models\User;
 use App\Models\Vendor;
@@ -35,6 +36,12 @@ class SmsConversation extends Component
     public bool $isClientUser = false;
 
     public ?int $activeCallLogId = null;
+
+    public bool $showOptInModal = false;
+
+    public string $manualOptInReason = '';
+
+    public ?int $manualOptInParticipantId = null;
 
     protected ?int $lastMarkedMessageId = null;
 
@@ -166,6 +173,76 @@ class SmsConversation extends Component
         Flux::toast(variant: 'success', heading: 'Prompt Sent', text: 'START opt-in message was resent to this thread.', duration: 4500, position: 'top right');
 
         $this->dispatch('messageSent');
+    }
+
+    public function openOptInModal(): void
+    {
+        $this->showOptInModal = true;
+        $this->manualOptInReason = '';
+        $this->manualOptInParticipantId = null;
+    }
+
+    public function manualOptIn(GroupSmsService $smsService): void
+    {
+        if ($this->isClientUser) {
+            abort(403, 'Client users cannot send messages.');
+        }
+
+        $this->validate([
+            'manualOptInParticipantId' => 'required|exists:sms_thread_participants,id',
+            'manualOptInReason' => 'required|string|max:500',
+        ], [
+            'manualOptInParticipantId.required' => 'Please select a participant.',
+            'manualOptInReason.required' => 'Please provide a reason for the manual opt-in.',
+        ]);
+
+        $participant = SmsThreadParticipant::findOrFail($this->manualOptInParticipantId);
+
+        if ((int) $participant->thread_id !== $this->threadId) {
+            abort(403);
+        }
+
+        $participant->update([
+            'opted_in_at' => now(),
+            'manual_opt_in_reason' => $this->manualOptInReason,
+            'manual_opt_in_by' => auth()->id(),
+        ]);
+
+        $thread = SmsGroupThread::findOrFail($this->threadId);
+
+        // If all participants are now opted in, send the welcome message
+        $smsService->markParticipantOptedInAndSendWelcomeIfReady(
+            $thread,
+            $participant->phone_number,
+            auth()->id(),
+        );
+
+        $name = $this->resolvePhoneDisplay($participant->phone_number);
+
+        Flux::toast(variant: 'success', heading: 'Opted In', text: "{$name} has been manually opted in.", duration: 5000, position: 'top right');
+
+        $this->manualOptInReason = '';
+        $this->manualOptInParticipantId = null;
+        $this->showOptInModal = false;
+
+        $this->dispatch('messageSent');
+    }
+
+    /**
+     * Participants pending opt-in for the current thread.
+     *
+     * @return \Illuminate\Support\Collection<int, SmsThreadParticipant>
+     */
+    #[Computed]
+    public function pendingParticipants(): \Illuminate\Support\Collection
+    {
+        if (! $this->threadId) {
+            return collect();
+        }
+
+        return SmsThreadParticipant::where('thread_id', $this->threadId)
+            ->whereNull('opted_in_at')
+            ->get();
     }
 
     #[Computed]

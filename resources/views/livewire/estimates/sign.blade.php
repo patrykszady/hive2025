@@ -357,6 +357,53 @@
                     @endforeach
                 </div>
             </flux:card>
+
+            {{-- Signing Email Tracking (vendor signers only) --}}
+            @if($isVendorSigner && $estimate->isVendorSigned() && !$estimate->isFullySigned())
+                <flux:card>
+                    <div class="flex items-center justify-between mb-4">
+                        <flux:heading size="md">Signing Email Tracking</flux:heading>
+                        @if($this->canResendSigningEmail)
+                            <flux:button size="sm" variant="primary" icon="arrow-path" wire:click="resendSigningInvites" wire:loading.attr="disabled" wire:target="resendSigningInvites">
+                                Resend Signature Email
+                            </flux:button>
+                        @endif
+                    </div>
+
+                    @if($this->signingEmailEvents->isNotEmpty())
+                        <div class="divide-y divide-zinc-200 dark:divide-zinc-700">
+                            @foreach($this->signingEmailEvents as $event)
+                                <div class="flex items-center justify-between py-2.5">
+                                    <div class="flex items-center gap-3">
+                                        <flux:badge
+                                            size="sm"
+                                            :color="match($event->event_type) {
+                                                'sent' => 'zinc',
+                                                'delivered' => 'sky',
+                                                'opened' => 'blue',
+                                                'clicked' => 'green',
+                                                'bounced' => 'red',
+                                                default => 'zinc',
+                                            }">
+                                            {{ ucfirst($event->event_type) }}
+                                        </flux:badge>
+                                        <flux:text class="text-sm">
+                                            @if(is_array($event->recipient_emails))
+                                                {{ implode(', ', $event->recipient_emails) }}
+                                            @endif
+                                        </flux:text>
+                                    </div>
+                                    <flux:text class="text-xs text-zinc-500 shrink-0 ml-4">
+                                        {{ $event->event_at?->diffForHumans() }}
+                                    </flux:text>
+                                </div>
+                            @endforeach
+                        </div>
+                    @else
+                        <flux:text class="text-sm text-zinc-500">No email tracking events recorded yet.</flux:text>
+                    @endif
+                </flux:card>
+            @endif
         @endif
     </div>
 

@@ -146,7 +146,7 @@ class GroupSmsService
     {
         return $this->buildGreeting($thread) . "\n"
             . "GS Construction welcomes you to our project msg thread. "
-            . "Msgs will be tagged with \"-PS\" for Patryk's replies, \"-GS\" for Gregory's, and our automated \"GS Crew\" replies by \"-GSC\". "
+            . "Msgs will be tagged with \"-GS\" for Gregory's replies, \"-PS\" for Patryk's, and our automated \"GS Crew\" replies by \"-GSC\". "
             . "Please save this number as \"GS Construction\" in your contacts list. "
             . "You can always also text or call us at this number."
             . "\n-GSC";

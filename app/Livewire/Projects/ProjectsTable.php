@@ -19,7 +19,7 @@ class ProjectsTable extends Component
     #[Reactive]
     public $clientVendorId = null;
     #[Reactive]
-    public $projectStatusTitle = [];
+    public $projectStatusTitle = null;
     #[Reactive]
     public $view = null;
 
@@ -66,7 +66,7 @@ class ProjectsTable extends Component
             $filters[] = 'client_id IN ['.implode(',', array_map('intval', $clientIds)).']';
         }
 
-        $statusCodes = is_array($this->projectStatusTitle) ? $this->projectStatusTitle : [$this->projectStatusTitle];
+        $statusCodes = $this->projectStatusTitle !== null && $this->projectStatusTitle !== '' ? [$this->projectStatusTitle] : [];
         $validCodes = [1, 2, 3, 4, 5, 6, 7, 8, 10, 11];
 
         if (! empty($statusCodes)) {

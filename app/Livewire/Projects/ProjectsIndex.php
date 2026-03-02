@@ -27,9 +27,9 @@ class ProjectsIndex extends Component
 
     public $client = null;
 
-    // Store selected status codes from filter (as int); default to Active (6)
-    #[Url(except: [6])]
-    public $project_status_title = [6];
+    // Store selected status code from filter (as int); default to Active (6)
+    #[Url(except: 6)]
+    public $project_status_title = 6;
 
     public $view = null;
     public $skipProjectSearchReset = false;
@@ -48,8 +48,7 @@ class ProjectsIndex extends Component
 
         if (request()->has('project_status_title')) {
             $statusParam = request()->query('project_status_title');
-            $statusParam = is_array($statusParam) ? $statusParam : [$statusParam];
-            $this->project_status_title = array_map('intval', $statusParam);
+            $this->project_status_title = $statusParam !== '' && $statusParam !== null ? (int) $statusParam : null;
         }
 
         $this->skipProjectSearchReset = request()->filled('project_name_search');
@@ -70,35 +69,25 @@ class ProjectsIndex extends Component
 
         // Special case for view mode
         if ($this->view == true) {
-            $this->project_status_title = [];
+            $this->project_status_title = null;
             return;
         }
 
         // Check URL parameters first
         if ($hasStatusParam) {
-            // Ensure it's an array
-            if (!is_array($this->project_status_title)) {
-                $this->project_status_title = [$this->project_status_title];
-            }
-            // Cast to int codes and filter out invalid codes (0, 9)
             $validCodes = [1, 2, 3, 4, 5, 6, 7, 8, 10, 11];
-            $this->project_status_title = array_values(
-                array_filter(
-                    array_map('intval', $this->project_status_title),
-                    fn($code) => in_array($code, $validCodes)
-                )
-            );
-            // If URL parameter exists, store it in session
+            $code = (int) $this->project_status_title;
+            $this->project_status_title = in_array($code, $validCodes) ? $code : null;
             Session::put('projects.status', $this->project_status_title);
         } elseif (auth()->user()->is_client_user) {
-            $this->project_status_title = [];
+            $this->project_status_title = null;
         } else {
-            $this->project_status_title = [6];
+            $this->project_status_title = 6;
         }
 
         if ($hasFilterParams && ! $hasStatusParam) {
-            $this->project_status_title = [];
-            Session::put('projects.status', []);
+            $this->project_status_title = null;
+            Session::put('projects.status', null);
         }
     }
 
@@ -111,7 +100,9 @@ class ProjectsIndex extends Component
     public function updated($field)
     {
         if ($field === 'project_status_title') {
-            // Always update session when status changes
+            if ($this->project_status_title === '') {
+                $this->project_status_title = null;
+            }
             Session::put('projects.status', $this->project_status_title);
         }
         

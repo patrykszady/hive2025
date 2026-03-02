@@ -1,18 +1,19 @@
 /**
  * Service Worker — Push Notifications + Offline Messages Cache
- * Version: 2026-02-15-v4
+ * Cache version is stamped by `npm run build` so every deploy busts stale assets.
  */
 
-const PAGE_CACHE  = 'hive-pages-v1';
-const ASSET_CACHE = 'hive-assets-v1';
+const DEPLOY_VERSION = 'mm8nnrbd';
+const PAGE_CACHE  = 'hive-pages-' + DEPLOY_VERSION;
+const ASSET_CACHE = 'hive-assets-' + DEPLOY_VERSION;
 
 self.addEventListener('install', (event) => {
-    console.log('[SW] Installing v4');
+    console.log('[SW] Installing', DEPLOY_VERSION);
     self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
-    console.log('[SW] Activating v4');
+    console.log('[SW] Activating', DEPLOY_VERSION);
     event.waitUntil(
         Promise.all([
             clients.claim(),

@@ -41,7 +41,7 @@
                             <div class="flex-1 min-w-0">
                                 <flux:field>
                                     <flux:label>Status</flux:label>
-                                    <flux:select variant="listbox" multiple clearable placeholder="Choose status..." wire:model.live="project_status_title">
+                                    <flux:select variant="listbox" clearable placeholder="All statuses..." wire:model.live="project_status_title">
                                         @foreach($projectStatuses as $status)
                                             <flux:select.option :value="$status['code']">
                                                 <flux:badge size="md" inset="top bottom" :color="$status['color']">
@@ -89,7 +89,7 @@
                 <div class="flex-1 min-w-0">
                     <flux:field>
                         <flux:label>Status</flux:label>
-                        <flux:select variant="listbox" multiple clearable placeholder="Choose status..." wire:model.live="project_status_title">
+                        <flux:select variant="listbox" clearable placeholder="All statuses..." wire:model.live="project_status_title">
                             @foreach($projectStatuses as $status)
                                 <flux:select.option :value="$status['code']">
                                     <flux:badge size="md" inset="top bottom" :color="$status['color']">

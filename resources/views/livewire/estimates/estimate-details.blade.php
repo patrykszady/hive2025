@@ -24,6 +24,7 @@
                             <flux:menu.item icon="paper-airplane" wire:click="sendInvite" wire:loading.attr="disabled" wire:target="sendInvite">Send Invite</flux:menu.item>
                         @endif
 
+
                         <flux:menu.separator />
                     @endcan
 
