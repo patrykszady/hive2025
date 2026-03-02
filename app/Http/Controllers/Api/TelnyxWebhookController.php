@@ -1970,6 +1970,9 @@ class TelnyxWebhookController extends Controller
     /**
      * Add a call to an existing conference via POST /v2/conferences/{id}/actions/join.
      * This is the correct way to add subsequent participants to an already-created conference.
+     *
+     * Note: After joining, also starts the conference if it was created with
+     * start_conference_on_create=false (which is the default for our conferences).
      */
     protected function addToConference(string $callControlId, string $conferenceId, array $params = []): void
     {
@@ -1985,6 +1988,10 @@ class TelnyxWebhookController extends Controller
             return;
         }
 
+        // Remove start_conference_on_create — it's only valid on conference creation,
+        // not on the join action. We start the conference explicitly below.
+        unset($params['start_conference_on_create']);
+
         $body = array_merge($params, [
             'call_control_id' => $callControlId,
         ]);
@@ -1998,6 +2005,11 @@ class TelnyxWebhookController extends Controller
                     'call_control_id' => $callControlId,
                     'conference_id' => $conferenceId,
                 ]);
+
+                // Start the conference now that a second participant has joined.
+                // Conferences created with start_conference_on_create=false remain
+                // in "init" state (hold audio/silence) until explicitly started.
+                $this->startConference($conferenceId);
             } else {
                 Log::channel('telnyx')->error('addToConference failed', [
                     'call_control_id' => $callControlId,
@@ -2009,6 +2021,44 @@ class TelnyxWebhookController extends Controller
         } catch (\Exception $e) {
             Log::channel('telnyx')->error('addToConference exception', [
                 'call_control_id' => $callControlId,
+                'conference_id' => $conferenceId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Start a conference that was created with start_conference_on_create=false.
+     * This transitions the conference from "init" to "in_progress" so participants
+     * can hear each other instead of hold audio/silence.
+     *
+     * Safe to call multiple times — Telnyx ignores it if the conference is already started.
+     */
+    protected function startConference(string $conferenceId): void
+    {
+        $apiKey = config('services.telnyx.api_key');
+
+        if (! $apiKey) {
+            return;
+        }
+
+        try {
+            $response = Http::withToken($apiKey)
+                ->post("https://api.telnyx.com/v2/conferences/{$conferenceId}/actions/start");
+
+            if ($response->successful()) {
+                Log::channel('telnyx')->info('Conference started', [
+                    'conference_id' => $conferenceId,
+                ]);
+            } else {
+                Log::channel('telnyx')->warning('Conference start failed (may already be started)', [
+                    'conference_id' => $conferenceId,
+                    'status' => $response->status(),
+                    'error' => $response->json(),
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::channel('telnyx')->error('Conference start exception', [
                 'conference_id' => $conferenceId,
                 'error' => $e->getMessage(),
             ]);
