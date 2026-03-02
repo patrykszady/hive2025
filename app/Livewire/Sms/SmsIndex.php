@@ -7,6 +7,9 @@ use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 
+// Child components driven via events for snappy thread switching:
+// - SmsConversation listens for 'loadThread' to swap threads without re-mounting
+
 class SmsIndex extends Component
 {
     #[Url(except: '')]
@@ -23,8 +26,6 @@ class SmsIndex extends Component
     protected $listeners = [
         'threadCreated' => 'selectThread',
         'threadSelected' => 'selectThread',
-        'messageSent' => '$refresh',
-        'threadRead' => '$refresh',
     ];
 
     public function mount(): void
@@ -63,11 +64,15 @@ class SmsIndex extends Component
         }
 
         $this->threadId = $threadId;
+
+        // Notify conversation directly so it can swap threads without re-mounting
+        $this->dispatch('loadThread', threadId: $threadId)->to(SmsConversation::class);
     }
 
     public function clearThread(): void
     {
         $this->threadId = null;
+        $this->dispatch('loadThread', threadId: null)->to(SmsConversation::class);
     }
 
     public function autoSelectLatestDesktopThread(): void

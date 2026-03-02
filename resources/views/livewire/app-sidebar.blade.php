@@ -1,4 +1,4 @@
-<div>
+<div class="flex flex-col flex-1 min-h-0">
     <flux:sidebar.nav>
         {{-- Notifications (both client and non-client users) --}}
         <flux:sidebar.item wire:navigate.hover icon="bell" href="{{ route('notifications.index') }}" class="[&_[data-content]]:!overflow-visible">
@@ -116,4 +116,20 @@
             @endif
         @endif
     </flux:sidebar.nav>
+
+    <flux:dropdown position="top" align="start">
+        <flux:sidebar.profile avatar:color="indigo" name="{{ auth()->user()->full_name }}" />
+        <flux:menu>
+            <flux:menu.item wire:navigate.hover href="{{ route('users.show', auth()->id()) }}" icon="user">Profile</flux:menu.item>
+            <flux:menu.item href="{{ route('account_selection', ['explicit' => 1]) }}">Switch Account</flux:menu.item>
+            @can('admin_login_as_user', App\Models\User::class)
+                <flux:menu.item href="{{ route('admin_login_as_user') }}">Incognito</flux:menu.item>
+            @endcan
+            <flux:menu.separator />
+            <form action="{{ route('logout') }}" method="POST">
+                @csrf
+                <flux:menu.item type="submit" icon="arrow-right-start-on-rectangle">Logout</flux:menu.item>
+            </form>
+        </flux:menu>
+    </flux:dropdown>
 </div>

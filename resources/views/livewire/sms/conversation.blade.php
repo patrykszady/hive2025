@@ -1,4 +1,10 @@
-<div class="flex-1 min-h-0 flex flex-col">
+<div
+    class="flex-1 min-h-0 flex flex-col"
+    x-data="{ switching: false }"
+    x-on:thread-switching.window="switching = true; $el.style.opacity = '0'"
+    x-on:thread-ready.window="$nextTick(() => { switching = false; $el.style.opacity = '1' })"
+    x-bind:style="switching ? 'transition: none' : 'transition: opacity 100ms'"
+>
     @if ($this->thread)
         {{-- Header --}}
         @php
@@ -27,7 +33,7 @@
                     square
                     icon="arrow-left"
                     class="lg:hidden shrink-0"
-                    wire:click="$parent.set('threadId', null)"
+                    wire:click="$parent.clearThread()"
                     aria-label="Back to conversations"
                 ></flux:button>
                 @if ($this->thread->client)
@@ -180,68 +186,15 @@
 
         {{-- Messages --}}
         @php
-            // Build phone-to-name lookup — start with client user first names,
-            // then merge the component's resolvePhoneDisplay map as fallback.
-            $clientPhoneNames = collect();
-            if ($this->thread->client) {
-                foreach ($this->thread->client->users as $user) {
-                    $telnyx = $user->routeNotificationForTelnyx();
-                    if ($telnyx) {
-                        $clientPhoneNames[$telnyx] = $user->first_name;
-                    }
-                }
-                $rawHome = $this->thread->client->getRawOriginal('home_phone');
-                if ($rawHome) {
-                    $formatted = \App\Services\GroupSmsService::formatE164($rawHome);
-                    if (! $clientPhoneNames->has($formatted)) {
-                        $clientPhoneNames[$formatted] = $this->thread->client->name;
-                    }
-                }
-            }
-            // $phoneNameMap comes from render() via resolvePhoneDisplay — covers vendors/users.
-            // Client first-name entries take precedence.
-            $phoneNameMap = array_merge($phoneNameMap, $clientPhoneNames->all());
+            $phoneNameMap = $this->phoneNameMap;
+            $processed = $this->processedMessages;
+            $visibleMessages = $processed['visible'];
+            $reactionsMap = $processed['reactions'];
 
             $tz = browser_timezone();
             $now = now($tz);
             $todayDate = $now->toDateString();
             $yesterdayDate = $now->copy()->subDay()->toDateString();
-
-            // ── Tapback reactions ──
-            // Build a map of message ID → [emoji => [sender_name, ...]]
-            // by matching the quoted text in each tapback to a real message.
-            $allMessages = $this->smsMessages;
-            $tapbackIds = collect();
-            $reactionsMap = []; // keyed by message ID
-
-            foreach ($allMessages as $msg) {
-                $tapback = $msg->parseTapback();
-                if (! $tapback || ! $tapback['emoji']) {
-                    continue;
-                }
-                $tapbackIds->push($msg->id);
-
-                // Find the original message by matching the quoted text snippet
-                // against display_text (strip signature) of other messages in the thread.
-                $quotedNormalized = mb_strtolower(trim($tapback['quoted']));
-                $matched = $allMessages->first(function ($candidate) use ($quotedNormalized, $msg) {
-                    if ($candidate->id === $msg->id) return false;
-                    $candidateText = $candidate->display_text;
-                    if (! $candidateText) return false;
-                    $candidateNormalized = mb_strtolower(trim($candidateText));
-                    // The tapback quote may be truncated, so check if either contains the other
-                    return str_contains($candidateNormalized, $quotedNormalized)
-                        || str_contains($quotedNormalized, $candidateNormalized);
-                });
-
-                if ($matched) {
-                    $senderName = $phoneNameMap[$msg->from_number] ?? substr($msg->from_number, -4);
-                    $reactionsMap[$matched->id][$tapback['emoji']][] = $senderName;
-                }
-            }
-
-            // Filter out tapback messages from the visible list
-            $visibleMessages = $allMessages->reject(fn ($m) => $tapbackIds->contains($m->id));
         @endphp
 
         <div class="relative flex-1 min-h-0">
@@ -250,6 +203,11 @@
             class="sms-messages h-full overflow-y-auto flex flex-col-reverse gap-3 px-2 pt-6 pb-6"
         >
             @forelse ($visibleMessages->reverse() as $msg)
+                @if ($loop->last && $visibleMessages->count() >= $messageLimit)
+                    <div wire:intersect="loadMoreMessages" class="text-center py-2">
+                        <span wire:loading wire:target="loadMoreMessages" class="text-xs text-zinc-400">Loading...</span>
+                    </div>
+                @endif
                 @php
                     $msgLocal = $msg->created_at->copy()->setTimezone($tz);
                     $msgDate = $msgLocal->toDateString();
@@ -393,7 +351,7 @@
                     </x-slot>
 
                     <x-slot name="actionsTrailing">
-                        <flux:button type="submit" size="sm" variant="primary" square icon="paper-airplane" wire:loading.attr="disabled" :disabled="$pendingOptIn" aria-label="Send message"></flux:button>
+                        <flux:button type="submit" size="sm" variant="primary" square icon="paper-airplane" class="data-loading:opacity-50" :disabled="$pendingOptIn" aria-label="Send message"></flux:button>
                     </x-slot>
                 </flux:composer>
             </form>
@@ -422,8 +380,7 @@
                             variant="primary"
                             color="amber"
                             wire:click="resendOptInPrompt"
-                            wire:loading.attr="disabled"
-                            wire:target="resendOptInPrompt"
+                            class="data-loading:opacity-50 data-loading:pointer-events-none"
                         >
                             Resend
                         </flux:button>
@@ -482,8 +439,7 @@
                     <flux:button
                         type="submit"
                         variant="primary"
-                        wire:loading.attr="disabled"
-                        wire:target="manualOptIn"
+                        class="data-loading:opacity-50 data-loading:pointer-events-none"
                     >
                         Confirm Opt-In
                     </flux:button>

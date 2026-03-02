@@ -1,10 +1,15 @@
-<div class="space-y-1 max-h-[calc(100dvh-15rem)] lg:max-h-full lg:h-full scrollbar-gutter">
+<div
+    x-data="{ localSelected: @js($selectedThreadId) }"
+    x-init="$watch('$wire.selectedThreadId', v => localSelected = v)"
+    class="space-y-1 max-h-[calc(100dvh-15rem)] lg:max-h-full lg:h-full scrollbar-gutter"
+>
     @forelse ($this->threads as $thread)
         <button
             wire:key="thread-{{ $thread->id }}"
-            wire:click="select({{ $thread->id }})"
-            x-on:click="window.dispatchEvent(new CustomEvent('sms-thread-loading'))"
-            class="w-full text-left px-3 py-2.5 rounded-lg transition-colors {{ $selectedThreadId === $thread->id ? 'bg-zinc-100 dark:bg-zinc-700' : 'hover:bg-zinc-50 dark:hover:bg-zinc-800' }}"
+            wire:click="$parent.selectThread({{ $thread->id }})"
+            x-on:click="localSelected = {{ $thread->id }}; $dispatch('thread-switching')"
+            x-bind:class="localSelected === {{ $thread->id }} ? 'bg-zinc-100 dark:bg-zinc-700' : 'hover:bg-zinc-50 dark:hover:bg-zinc-800'"
+            class="w-full text-left px-3 py-2.5 rounded-lg transition-colors"
         >
             <div class="flex items-center justify-between gap-2">
                 <div class="min-w-0 flex-1">

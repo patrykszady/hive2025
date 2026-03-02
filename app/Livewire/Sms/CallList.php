@@ -9,11 +9,13 @@ use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Isolate;
 use Livewire\Attributes\On;
 use Livewire\Component;
 use Livewire\WithPagination;
 use Flux;
 
+#[Isolate]
 class CallList extends Component
 {
     use WithPagination;
@@ -61,7 +63,7 @@ class CallList extends Component
     /**
      * @return \Illuminate\Database\Eloquent\Collection<User>
      */
-    #[Computed]
+    #[Computed(cache: true, key: 'call-list-contacts', seconds: 300)]
     public function contactUsers(): mixed
     {
         return User::whereNotNull('cell_phone')
@@ -306,6 +308,12 @@ class CallList extends Component
      */
     public function resolvePhoneDisplay(string $e164): string
     {
+        static $cache = [];
+
+        if (isset($cache[$e164])) {
+            return $cache[$e164];
+        }
+
         $digits = preg_replace('/[^0-9]/', '', $e164);
 
         $normalized = $digits;
@@ -322,7 +330,7 @@ class CallList extends Component
             ->first();
 
         if ($user && trim($user->first_name . ' ' . $user->last_name) !== '') {
-            return trim($user->first_name . ' ' . $user->last_name);
+            return $cache[$e164] = trim($user->first_name . ' ' . $user->last_name);
         }
 
         $vendor = Vendor::where('business_phone', $normalized)
@@ -331,10 +339,10 @@ class CallList extends Component
             ->first();
 
         if ($vendor && $vendor->short_name) {
-            return $vendor->short_name;
+            return $cache[$e164] = $vendor->short_name;
         }
 
-        return $this->formatPhone($e164);
+        return $cache[$e164] = $this->formatPhone($e164);
     }
 
     /**

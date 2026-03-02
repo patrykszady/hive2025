@@ -8,10 +8,12 @@ use App\Models\User;
 use App\Models\Vendor;
 use App\Services\GroupSmsService;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Isolate;
 use Livewire\Attributes\Reactive;
 use Livewire\Component;
 use Livewire\WithPagination;
 
+#[Isolate]
 class SmsThreadList extends Component
 {
     use WithPagination;
@@ -108,6 +110,12 @@ class SmsThreadList extends Component
      */
     public function resolvePhoneDisplay(string $e164): string
     {
+        static $cache = [];
+
+        if (isset($cache[$e164])) {
+            return $cache[$e164];
+        }
+
         $digits = preg_replace('/[^0-9]/', '', $e164);
 
         // Normalize: strip leading 1 for 11-digit US numbers
@@ -127,7 +135,7 @@ class SmsThreadList extends Component
             ->first();
 
         if ($user && trim($user->first_name . ' ' . $user->last_name) !== '') {
-            return trim($user->first_name . ' ' . $user->last_name);
+            return $cache[$e164] = trim($user->first_name . ' ' . $user->last_name);
         }
 
         // Search vendors by business_phone
@@ -137,16 +145,16 @@ class SmsThreadList extends Component
             ->first();
 
         if ($vendor && $vendor->short_name) {
-            return $vendor->short_name;
+            return $cache[$e164] = $vendor->short_name;
         }
 
         // Format as (XXX) XXX-XXXX using best 10-digit version
         $display10 = strlen($normalized) === 10 ? $normalized : $last10;
         if (strlen($display10) === 10) {
-            return '(' . substr($display10, 0, 3) . ') ' . substr($display10, 3, 3) . '-' . substr($display10, 6);
+            return $cache[$e164] = '(' . substr($display10, 0, 3) . ') ' . substr($display10, 3, 3) . '-' . substr($display10, 6);
         }
 
-        return $e164;
+        return $cache[$e164] = $e164;
     }
 
     public function resolvePreviewSender(?string $fromNumber, ?SmsGroupThread $thread = null): ?string

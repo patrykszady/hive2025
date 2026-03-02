@@ -15,10 +15,13 @@ use Flux;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Isolate;
 use Livewire\Attributes\On;
+use Livewire\Attributes\Renderless;
 use Livewire\Component;
 use Livewire\WithFileUploads;
 
+#[Isolate]
 class SmsConversation extends Component
 {
     use WithFileUploads;
@@ -45,9 +48,39 @@ class SmsConversation extends Component
 
     protected ?int $lastMarkedMessageId = null;
 
+    public int $messageLimit = 100;
+
     public function mount(): void
     {
         $this->markThreadAsRead();
+    }
+
+    /**
+     * Swap to a different thread without destroying/recreating the component.
+     * Called from SmsIndex when user selects a thread or navigates back.
+     */
+    #[On('loadThread')]
+    public function loadThread(?int $threadId): void
+    {
+        if ($threadId === $this->threadId) {
+            $this->dispatch('thread-ready');
+            return;
+        }
+
+        $this->threadId = $threadId;
+        $this->messageLimit = 100;
+        $this->newMessage = '';
+        $this->attachment = null;
+        $this->showImageLightbox = false;
+        $this->lightboxImageUrl = null;
+        $this->activeCallLogId = null;
+        $this->showOptInModal = false;
+        $this->manualOptInReason = '';
+        $this->manualOptInParticipantId = null;
+        $this->lastMarkedMessageId = null;
+
+        $this->markThreadAsRead();
+        $this->dispatch('thread-ready');
     }
 
     /** @return array<string, string> */
@@ -101,6 +134,11 @@ class SmsConversation extends Component
             ->flatMap(fn (SmsMessage $msg) => $msg->media_urls ?? [])
             ->values()
             ->all();
+    }
+
+    public function loadMoreMessages(): void
+    {
+        $this->messageLimit += 100;
     }
 
     public function updatedThreadId(): void
@@ -539,8 +577,97 @@ class SmsConversation extends Component
         return SmsMessage::where('thread_id', $this->threadId)
             ->select(['id', 'thread_id', 'direction', 'from_number', 'text', 'media_urls', 'created_at', 'sent_by_user_id'])
             ->with('sentByUser:id,first_name,last_name')
-            ->orderBy('created_at', 'asc')
-            ->get();
+            ->orderByDesc('created_at')
+            ->limit($this->messageLimit)
+            ->get()
+            ->reverse()
+            ->values();
+    }
+
+    /**
+     * Build phone number → display name lookup for all inbound senders.
+     * Merges client user first names with resolvePhoneDisplay fallback.
+     *
+     * @return array<string, string>
+     */
+    #[Computed]
+    public function phoneNameMap(): array
+    {
+        $map = $this->smsMessages
+            ->where('direction', 'inbound')
+            ->pluck('from_number')
+            ->unique()
+            ->filter()
+            ->mapWithKeys(fn (string $number) => [$number => $this->resolvePhoneDisplay($number)])
+            ->all();
+
+        // Client user first names take precedence
+        if ($this->thread?->client) {
+            foreach ($this->thread->client->users as $user) {
+                $telnyx = $user->routeNotificationForTelnyx();
+                if ($telnyx) {
+                    $map[$telnyx] = $user->first_name;
+                }
+            }
+            $rawHome = $this->thread->client->getRawOriginal('home_phone');
+            if ($rawHome) {
+                $formatted = \App\Services\GroupSmsService::formatE164($rawHome);
+                if (! isset($map[$formatted])) {
+                    $map[$formatted] = $this->thread->client->name;
+                }
+            }
+        }
+
+        return $map;
+    }
+
+    /**
+     * Parse tapback reactions and build:
+     * - visibleMessages: messages with tapbacks filtered out
+     * - reactionsMap: message ID → [emoji => [sender_name, ...]]
+     *
+     * @return array{visible: \Illuminate\Support\Collection, reactions: array}
+     */
+    #[Computed]
+    public function processedMessages(): array
+    {
+        $allMessages = $this->smsMessages;
+        $phoneNameMap = $this->phoneNameMap;
+        $tapbackIds = collect();
+        $reactionsMap = [];
+
+        foreach ($allMessages as $msg) {
+            $tapback = $msg->parseTapback();
+            if (! $tapback || ! $tapback['emoji']) {
+                continue;
+            }
+            $tapbackIds->push($msg->id);
+
+            $quotedNormalized = mb_strtolower(trim($tapback['quoted']));
+            $matched = $allMessages->first(function ($candidate) use ($quotedNormalized, $msg) {
+                if ($candidate->id === $msg->id) {
+                    return false;
+                }
+                $candidateText = $candidate->display_text;
+                if (! $candidateText) {
+                    return false;
+                }
+                $candidateNormalized = mb_strtolower(trim($candidateText));
+
+                return str_contains($candidateNormalized, $quotedNormalized)
+                    || str_contains($quotedNormalized, $candidateNormalized);
+            });
+
+            if ($matched) {
+                $senderName = $phoneNameMap[$msg->from_number] ?? substr($msg->from_number, -4);
+                $reactionsMap[$matched->id][$tapback['emoji']][] = $senderName;
+            }
+        }
+
+        return [
+            'visible' => $allMessages->reject(fn ($m) => $tapbackIds->contains($m->id)),
+            'reactions' => $reactionsMap,
+        ];
     }
 
     /**
@@ -563,15 +690,7 @@ class SmsConversation extends Component
 
     public function render()
     {
-        $phoneNameMap = $this->smsMessages
-            ->where('direction', 'inbound')
-            ->pluck('from_number')
-            ->unique()
-            ->filter()
-            ->mapWithKeys(fn (string $number) => [$number => $this->resolvePhoneDisplay($number)])
-            ->all();
-
-        return view('livewire.sms.conversation', compact('phoneNameMap'));
+        return view('livewire.sms.conversation');
     }
 
     public function placeholder()
@@ -584,6 +703,12 @@ class SmsConversation extends Component
      */
     public function resolvePhoneDisplay(string $e164): string
     {
+        static $cache = [];
+
+        if (isset($cache[$e164])) {
+            return $cache[$e164];
+        }
+
         $digits = preg_replace('/[^0-9]/', '', $e164);
 
         $normalized = $digits;
@@ -600,7 +725,7 @@ class SmsConversation extends Component
             ->first();
 
         if ($user && trim($user->first_name . ' ' . $user->last_name) !== '') {
-            return trim($user->first_name . ' ' . $user->last_name);
+            return $cache[$e164] = trim($user->first_name . ' ' . $user->last_name);
         }
 
         $vendor = Vendor::where('business_phone', $normalized)
@@ -609,15 +734,15 @@ class SmsConversation extends Component
             ->first();
 
         if ($vendor && $vendor->short_name) {
-            return $vendor->short_name;
+            return $cache[$e164] = $vendor->short_name;
         }
 
         $display10 = strlen($normalized) === 10 ? $normalized : $last10;
         if (strlen($display10) === 10) {
-            return '(' . substr($display10, 0, 3) . ') ' . substr($display10, 3, 3) . '-' . substr($display10, 6);
+            return $cache[$e164] = '(' . substr($display10, 0, 3) . ') ' . substr($display10, 3, 3) . '-' . substr($display10, 6);
         }
 
-        return $e164;
+        return $cache[$e164] = $e164;
     }
 
     protected function markThreadAsRead(): void
@@ -644,7 +769,7 @@ class SmsConversation extends Component
 
         $this->lastMarkedMessageId = $latestMessageId;
 
-        $this->dispatch('threadRead')->to(SmsIndex::class);
+        // Notify thread list to update unread indicators
         $this->dispatch('sms-thread-read');
     }
 }

@@ -10,7 +10,7 @@
         audioCtx: null,
         showSkeletonBriefly() {
             this.showConversationSkeleton = true;
-            setTimeout(() => this.showConversationSkeleton = false, 450);
+            setTimeout(() => this.showConversationSkeleton = false, 300);
         },
         ensureAudioContext() {
             if (!this.audioCtx) {
@@ -142,7 +142,6 @@
                 if (!document.hidden) stopFlashing();
             });
 
-            window.addEventListener('sms-thread-loading', () => showSkeletonBriefly());
             if (! $wire.threadId) {
                 showSkeletonBriefly();
                 if (window.matchMedia('(min-width: 1024px)').matches) {
@@ -247,26 +246,16 @@
 
     {{-- Conversation - Hidden on mobile when no thread selected, fully hidden on calls tab --}}
     <div id="sms-convo-wrap" class="flex-1 min-w-0 flex flex-col min-h-0 max-w-md mx-auto lg:mx-0 lg:max-w-none {{ $activeTab === 'calls' ? 'hidden' : (!$threadId ? 'hidden lg:block' : '') }}">
-        <div x-show="showConversationSkeleton" class="flex-1 min-h-0">
+        {{-- Initial load skeleton (only while auto-selecting first thread) --}}
+        <div x-show="showConversationSkeleton" x-cloak class="flex-1 min-h-0">
             @include('livewire.sms.conversation_placeholder')
         </div>
 
         <div
-            wire:loading.flex
-            wire:target="threadId,autoSelectLatestDesktopThread,autoSelectSingleThreadIfOnlyOne"
-            class="flex-1 min-h-0"
-            x-show="!showConversationSkeleton"
-        >
-            @include('livewire.sms.conversation_placeholder')
-        </div>
-
-        <div
-            wire:loading.remove
-            wire:target="threadId,autoSelectLatestDesktopThread,autoSelectSingleThreadIfOnlyOne"
             class="flex-1 min-h-0 flex flex-col"
             x-show="!showConversationSkeleton"
         >
-            <livewire:sms.sms-conversation :thread-id="$threadId" :is-client-user="$isClientUser" :key="'conv-' . $threadId . '-' . ($isClientUser ? 'c' : 'a')" lazy />
+            <livewire:sms.sms-conversation :thread-id="$threadId" :is-client-user="$isClientUser" />
         </div>
     </div>
     <script>
