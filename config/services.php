@@ -23,6 +23,8 @@ return [
         'voice_forward_to' => env('TELNYX_VOICE_FORWARD_TO'),
         'voice_timeout' => env('TELNYX_VOICE_TIMEOUT', 30),
         'hold_audio_url' => env('TELNYX_HOLD_AUDIO_URL'),
+        'tts_voice' => env('TELNYX_TTS_VOICE', 'Azure.en-US-AvaMultilingualNeural'),
+        'tts_voice_type' => env('TELNYX_TTS_VOICE_TYPE', 'azure'),
     ],
 
     'mailtrap-sdk' => [

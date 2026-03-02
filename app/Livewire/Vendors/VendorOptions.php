@@ -238,7 +238,7 @@ class VendorOptions extends Component
             $response = \Illuminate\Support\Facades\Http::withToken($apiKey)
                 ->post('https://api.telnyx.com/v2/text-to-speech/speech', [
                     'text' => $text,
-                    'voice' => 'Telnyx.NaturalHD.astra',
+                    'voice' => config('services.telnyx.tts_voice'),
                 ]);
 
             if ($response->successful()) {

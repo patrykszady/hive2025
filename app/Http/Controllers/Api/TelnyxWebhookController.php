@@ -362,10 +362,7 @@ class TelnyxWebhookController extends Controller
                 // Hang up the user since we can't reach the target
                 $this->sendCallCommand($callControlId, 'speak', [
                     'payload' => 'Sorry, we could not connect your call. Please try again.',
-                    'voice' => 'Telnyx.NaturalHD.astra',
-                    'language' => 'en-US',
-                    'payload_type' => 'text',
-                    'voice_settings' => ['type' => 'telnyx'],
+                    ...$this->ttsVoiceParams(),
                     'client_state' => base64_encode(json_encode([
                         'action' => 'click_to_call_failed_tts',
                         'call_log_id' => $callLogId,
@@ -412,10 +409,7 @@ class TelnyxWebhookController extends Controller
 
         $this->sendCallCommand($callControlId, 'speak', [
             'payload' => $ttsPayload,
-            'voice' => 'Telnyx.NaturalHD.astra',
-            'language' => 'en-US',
-            'payload_type' => 'text',
-            'voice_settings' => ['type' => 'telnyx'],
+            ...$this->ttsVoiceParams(),
             'client_state' => base64_encode(json_encode([
                 'action' => 'click_to_call_target_intro_done',
                 'call_log_id' => $callLogId,
@@ -449,10 +443,7 @@ class TelnyxWebhookController extends Controller
         if ($userCallControlId) {
             $this->sendCallCommand($userCallControlId, 'speak', [
                 'payload' => 'The person you called did not answer. Please try again later.',
-                'voice' => 'Telnyx.NaturalHD.astra',
-                'language' => 'en-US',
-                'payload_type' => 'text',
-                'voice_settings' => ['type' => 'telnyx'],
+                ...$this->ttsVoiceParams(),
                 'client_state' => base64_encode(json_encode([
                     'action' => 'click_to_call_failed_tts',
                     'call_log_id' => $callLogId,
@@ -498,10 +489,7 @@ class TelnyxWebhookController extends Controller
 
         $this->sendCallCommand($callControlId, 'speak', [
             'payload' => $ttsPayload,
-            'voice' => 'Telnyx.NaturalHD.astra',
-            'language' => 'en-US',
-            'payload_type' => 'text',
-            'voice_settings' => ['type' => 'telnyx'],
+            ...$this->ttsVoiceParams(),
             'client_state' => base64_encode(json_encode([
                 'action' => 'conference_invite_intro_done',
                 'call_log_id' => $callLogId,
@@ -580,12 +568,7 @@ class TelnyxWebhookController extends Controller
         // Play TTS to the caller — when it finishes, caller joins the conference
         $this->sendCallCommand($callControlId, 'speak', [
             'payload' => $ttsPayload,
-            'voice' => 'Telnyx.NaturalHD.astra',
-            'language' => 'en-US',
-            'payload_type' => 'text',
-            'voice_settings' => [
-                'type' => 'telnyx',
-            ],
+            ...$this->ttsVoiceParams(),
             'client_state' => base64_encode(json_encode([
                 'action' => 'welcome_done_join_conference',
                 'call_log_id' => $callLogId,
@@ -692,10 +675,7 @@ class TelnyxWebhookController extends Controller
         }
         $this->sendCallCommand($callControlId, 'speak', [
             'payload' => $connectPayload,
-            'voice' => 'Telnyx.NaturalHD.astra',
-            'language' => 'en-US',
-            'payload_type' => 'text',
-            'voice_settings' => ['type' => 'telnyx'],
+            ...$this->ttsVoiceParams(),
             'client_state' => base64_encode(json_encode([
                 'action' => 'admin_connect_message_done',
                 'call_log_id' => $callLogId,
@@ -902,10 +882,7 @@ class TelnyxWebhookController extends Controller
 
             $this->sendCallCommand($callControlId, 'speak', [
                 'payload' => 'The person you called did not answer. Please try again later.',
-                'voice' => 'Telnyx.NaturalHD.astra',
-                'language' => 'en-US',
-                'payload_type' => 'text',
-                'voice_settings' => ['type' => 'telnyx'],
+                ...$this->ttsVoiceParams(),
                 'client_state' => base64_encode(json_encode([
                     'action' => 'click_to_call_failed_tts',
                     'call_log_id' => $callLogId,
@@ -1429,12 +1406,7 @@ class TelnyxWebhookController extends Controller
 
         $this->sendCallCommand($callControlId, 'gather_using_speak', [
             'payload' => $ivrPrompt,
-            'voice' => 'Telnyx.NaturalHD.astra',
-            'language' => 'en-US',
-            'payload_type' => 'text',
-            'voice_settings' => [
-                'type' => 'telnyx',
-            ],
+            ...$this->ttsVoiceParams(),
             'valid_digits' => $validDigits,
             'minimum_digits' => 1,
             'maximum_digits' => 1,
@@ -1512,10 +1484,7 @@ class TelnyxWebhookController extends Controller
 
             $this->sendCallCommand($callControlId, 'speak', [
                 'payload' => $press1Payload,
-                'voice' => 'Telnyx.NaturalHD.astra',
-                'language' => 'en-US',
-                'payload_type' => 'text',
-                'voice_settings' => ['type' => 'telnyx'],
+                ...$this->ttsVoiceParams(),
                 'client_state' => base64_encode(json_encode([
                     'action' => 'ivr_retry_connect',
                     'call_log_id' => $callLogId,
@@ -1545,10 +1514,7 @@ class TelnyxWebhookController extends Controller
 
             $this->sendCallCommand($callControlId, 'speak', [
                 'payload' => $press2Payload,
-                'voice' => 'Telnyx.NaturalHD.astra',
-                'language' => 'en-US',
-                'payload_type' => 'text',
-                'voice_settings' => ['type' => 'telnyx'],
+                ...$this->ttsVoiceParams(),
                 'client_state' => base64_encode(json_encode([
                     'action' => 'ivr_sms_confirmation',
                     'call_log_id' => $callLogId,
@@ -1591,10 +1557,7 @@ class TelnyxWebhookController extends Controller
 
             $this->sendCallCommand($callControlId, 'speak', [
                 'payload' => $greetingPayload,
-                'voice' => 'Telnyx.NaturalHD.astra',
-                'language' => 'en-US',
-                'payload_type' => 'text',
-                'voice_settings' => ['type' => 'telnyx'],
+                ...$this->ttsVoiceParams(),
                 'client_state' => base64_encode(json_encode([
                     'action' => 'voicemail_prompt_done',
                     'call_log_id' => $callLogId,
@@ -1953,10 +1916,7 @@ class TelnyxWebhookController extends Controller
             $speakResponse = Http::withToken($apiKey)
                 ->post("https://api.telnyx.com/v2/conferences/{$conferenceId}/actions/speak", [
                     'payload' => $ttsPayload,
-                    'voice' => 'Telnyx.NaturalHD.astra',
-                    'language' => 'en-US',
-                    'payload_type' => 'text',
-                    'voice_settings' => ['type' => 'telnyx'],
+                    ...$this->ttsVoiceParams(),
                 ]);
 
             if ($speakResponse->successful()) {
@@ -2410,5 +2370,22 @@ class TelnyxWebhookController extends Controller
         ]);
 
         return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Get TTS voice parameters for Telnyx speak/gather commands.
+     *
+     * @return array{voice: string, language: string, payload_type: string, voice_settings: array{type: string}}
+     */
+    protected function ttsVoiceParams(): array
+    {
+        return [
+            'voice' => config('services.telnyx.tts_voice'),
+            'language' => 'en-US',
+            'payload_type' => 'text',
+            'voice_settings' => [
+                'type' => config('services.telnyx.tts_voice_type'),
+            ],
+        ];
     }
 }
