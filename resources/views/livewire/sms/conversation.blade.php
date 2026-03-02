@@ -443,7 +443,7 @@
         </div>
 
         {{-- Manual Opt-In Modal --}}
-        <flux:modal wire:model="showOptInModal" class="max-w-md space-y-6">
+        <flux:modal wire:model="showOptInModal" name="manual-opt-in" class="max-w-md space-y-6">
             <div>
                 <flux:heading size="lg">Manual Opt-In</flux:heading>
                 <flux:text class="mt-1">Manually opt in a participant who confirmed consent outside of SMS (e.g. texted START to a different number, approved on a phone call, emailed with START).</flux:text>
@@ -453,7 +453,7 @@
                 <flux:field>
                     <flux:label>Participant</flux:label>
                     @if ($this->pendingParticipants->count() > 0)
-                        <flux:select wire:model.live="manualOptInParticipantId" placeholder="Select participant...">
+                        <flux:select wire:model.live="manualOptInParticipantId" variant="listbox" placeholder="Select participant...">
                             @foreach ($this->pendingParticipants as $participant)
                                 <flux:select.option value="{{ $participant->id }}">
                                     {{ $this->resolvePhoneDisplay($participant->phone_number) }}
