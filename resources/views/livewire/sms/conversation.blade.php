@@ -504,6 +504,7 @@
                 x-data="{
                     images: @js($this->threadImages),
                     currentIndex: 0,
+                    activeUrl: '',
                     scale: 1,
                     translateX: 0,
                     translateY: 0,
@@ -521,7 +522,7 @@
                     lastTouchY: 0,
                     swipeStartX: null,
 
-                    get currentUrl() { return this.images[this.currentIndex] ?? ''; },
+                    get currentUrl() { return this.activeUrl || this.images[this.currentIndex] || ''; },
                     get hasMultiple() { return this.images.length > 1; },
                     get hasPrev() { return this.currentIndex > 0; },
                     get hasNext() { return this.currentIndex < this.images.length - 1; },
@@ -530,20 +531,25 @@
                         if (idx < 0 || idx >= this.images.length) return;
                         this.resetZoom();
                         this.currentIndex = idx;
+                        this.activeUrl = this.images[idx] || '';
                     },
                     prev() { this.goTo(this.currentIndex - 1); },
                     next() { this.goTo(this.currentIndex + 1); },
 
                     syncFromWire(url) {
                         if (!url) return;
-                        const idx = this.images.indexOf(url);
-                        if (idx !== -1) {
-                            this.currentIndex = idx;
-                        } else {
+                        this.activeUrl = url;
+
+                        let idx = this.images.indexOf(url);
+                        if (idx === -1) {
                             const decoded = decodeURIComponent(url);
-                            const alt = this.images.findIndex(u => decodeURIComponent(u) === decoded);
-                            if (alt !== -1) this.currentIndex = alt;
+                            idx = this.images.findIndex(u => decodeURIComponent(u) === decoded);
                         }
+                        if (idx === -1) {
+                            this.images.push(url);
+                            idx = this.images.length - 1;
+                        }
+                        this.currentIndex = idx;
                     },
 
                     resetZoom() {
@@ -686,11 +692,13 @@
                         if (v) {
                             syncFromWire($wire.lightboxImageUrl);
                         } else {
+                            activeUrl = '';
                             resetZoom();
                         }
                     });
                     $watch('$wire.lightboxImageUrl', v => { if (v && $wire.showImageLightbox) syncFromWire(v); });
                 "
+                @lightbox-images-updated.window="if ($event.detail.images) { images = $event.detail.images; syncFromWire(activeUrl); }"
                 :class="isZoomed ? 'cursor-grab active:cursor-grabbing' : ''"
                 @wheel.prevent="handleWheel($event)"
                 @dblclick="handleDoubleTap($event)"

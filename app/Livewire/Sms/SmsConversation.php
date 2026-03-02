@@ -86,6 +86,7 @@ class SmsConversation extends Component
     {
         $this->lightboxImageUrl = $url;
         $this->showImageLightbox = true;
+        $this->dispatch('lightbox-images-updated', images: $this->threadImages);
     }
 
     /**
@@ -322,7 +323,7 @@ class SmsConversation extends Component
                         'target_phone' => $targetPhone,
                         'call_log_id' => $callLog->id,
                     ])),
-                    'webhook_url' => rtrim(config('app.url'), '/') . '/webhooks/telnyx/voice',
+                    'webhook_url' => $this->telnyxWebhookUrl(),
                 ]);
 
             if ($response->successful()) {
@@ -406,7 +407,7 @@ class SmsConversation extends Component
                         'conference_name' => $conferenceName,
                         'caller_name' => $callerFirstName,
                     ])),
-                    'webhook_url' => rtrim(config('app.url'), '/') . '/webhooks/telnyx/voice',
+                    'webhook_url' => $this->telnyxWebhookUrl(),
                 ]);
 
             if ($response->successful()) {
@@ -540,6 +541,24 @@ class SmsConversation extends Component
             ->with('sentByUser:id,first_name,last_name')
             ->orderBy('created_at', 'asc')
             ->get();
+    }
+
+    /**
+     * Build a publicly reachable webhook URL for Telnyx voice callbacks.
+     */
+    protected function telnyxWebhookUrl(): string
+    {
+        $appUrl = config('app.url');
+
+        if (str_contains($appUrl, '127.0.0.1') || str_contains($appUrl, 'localhost')) {
+            $publicUrl = config('services.telnyx.public_url');
+
+            if ($publicUrl) {
+                return rtrim($publicUrl, '/') . '/webhooks/telnyx/voice';
+            }
+        }
+
+        return rtrim($appUrl, '/') . '/webhooks/telnyx/voice';
     }
 
     public function render()

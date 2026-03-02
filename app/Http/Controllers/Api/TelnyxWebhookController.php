@@ -310,7 +310,7 @@ class TelnyxWebhookController extends Controller
 
         // Step 1: Join the user to a conference (they hear ringback while target is dialed)
         $holdAudioUrl = config('services.telnyx.hold_audio_url')
-            ?: rtrim(config('app.url'), '/') . '/audio/ringback.wav';
+            ?: $this->telnyxBaseUrl() . '/audio/ringback.wav';
 
         $this->joinConference($callControlId, [
             'name' => $conferenceName,
@@ -344,7 +344,7 @@ class TelnyxWebhookController extends Controller
                         'caller_name' => $callerFirstName,
                         'user_call_control_id' => $callControlId,
                     ])),
-                    'webhook_url' => rtrim(config('app.url'), '/') . '/webhooks/telnyx/voice',
+                    'webhook_url' => $this->telnyxBaseUrl() . '/webhooks/telnyx/voice',
                 ]);
 
             if ($response->successful()) {
@@ -619,7 +619,7 @@ class TelnyxWebhookController extends Controller
 
         // Play ringback tone while caller waits for an admin to join
         $holdAudioUrl = config('services.telnyx.hold_audio_url')
-            ?: rtrim(config('app.url'), '/') . '/audio/ringback.wav';
+            ?: $this->telnyxBaseUrl() . '/audio/ringback.wav';
         $conferenceParams['hold_audio_url'] = $holdAudioUrl;
 
         $this->joinConference($callControlId, $conferenceParams, $callLogId);
@@ -1038,7 +1038,7 @@ class TelnyxWebhookController extends Controller
             $callLogId = $clientState['call_log_id'] ?? null;
             $adminUserId = $clientState['admin_user_id'] ?? null;
             $conferenceName = $clientState['conference_name'] ?? null;
-            $conferenceId = $this->getConferenceId($callLogId);
+            $conferenceId = $this->resolveConferenceId($callLogId, $conferenceName);
 
             Log::channel('telnyx')->info('Admin connect message done — joining conference', [
                 'call_control_id' => $callControlId,
@@ -1058,30 +1058,20 @@ class TelnyxWebhookController extends Controller
                         'admin_user_id' => $adminUserId,
                     ])),
                 ]);
-            } elseif ($conferenceName) {
-                // Fallback: create new conference if ID not found (shouldn't happen)
-                Log::channel('telnyx')->warning('No conference_id in metadata — falling back to create', [
+            } else {
+                Log::channel('telnyx')->error('Could not resolve conference ID for admin join', [
                     'call_log_id' => $callLogId,
                     'conference_name' => $conferenceName,
+                    'admin_user_id' => $adminUserId,
                 ]);
-                $this->joinConference($callControlId, [
-                    'name' => $conferenceName,
-                    'beep_enabled' => 'never',
-                    'end_conference_on_exit' => false,
-                    'start_conference_on_create' => true,
-                    'client_state' => base64_encode(json_encode([
-                        'action' => 'admin_in_conference',
-                        'call_log_id' => $callLogId,
-                        'admin_user_id' => $adminUserId,
-                    ])),
-                ], $callLogId);
+                $this->sendCallCommand($callControlId, 'hangup');
             }
         } elseif ($action === 'click_to_call_target_intro_done') {
             // Target heard the TTS intro → join the EXISTING conference with the user
             $callLogId = $clientState['call_log_id'] ?? null;
             $conferenceName = $clientState['conference_name'] ?? null;
             $participantName = $clientState['participant_name'] ?? null;
-            $conferenceId = $this->getConferenceId($callLogId);
+            $conferenceId = $this->resolveConferenceId($callLogId, $conferenceName);
 
             Log::channel('telnyx')->info('Click-to-call: target intro done — joining conference', [
                 'call_control_id' => $callControlId,
@@ -1106,22 +1096,12 @@ class TelnyxWebhookController extends Controller
                 if ($participantName && $participantName !== 'Someone') {
                     $this->announceConferenceJoin($conferenceName, $participantName);
                 }
-            } elseif ($conferenceName) {
-                // Fallback: create new conference if ID not found
-                Log::channel('telnyx')->warning('No conference_id in metadata — falling back to create', [
+            } else {
+                Log::channel('telnyx')->error('Could not resolve conference ID for click-to-call target join', [
                     'call_log_id' => $callLogId,
                     'conference_name' => $conferenceName,
                 ]);
-                $this->joinConference($callControlId, [
-                    'name' => $conferenceName,
-                    'beep_enabled' => 'on_enter',
-                    'end_conference_on_exit' => false,
-                    'start_conference_on_create' => true,
-                    'client_state' => base64_encode(json_encode([
-                        'action' => 'click_to_call_target_in_conference',
-                        'call_log_id' => $callLogId,
-                    ])),
-                ], $callLogId);
+                $this->sendCallCommand($callControlId, 'hangup');
             }
 
             $callLog = $callLogId ? CallLog::find($callLogId) : null;
@@ -1131,7 +1111,7 @@ class TelnyxWebhookController extends Controller
             $callLogId = $clientState['call_log_id'] ?? null;
             $conferenceName = $clientState['conference_name'] ?? null;
             $participantName = $clientState['participant_name'] ?? null;
-            $conferenceId = $this->getConferenceId($callLogId);
+            $conferenceId = $this->resolveConferenceId($callLogId, $conferenceName);
 
             Log::channel('telnyx')->info('Conference invite: intro done — joining conference', [
                 'call_control_id' => $callControlId,
@@ -1156,22 +1136,12 @@ class TelnyxWebhookController extends Controller
                 if ($participantName && $participantName !== 'Someone') {
                     $this->announceConferenceJoin($conferenceName, $participantName);
                 }
-            } elseif ($conferenceName) {
-                // Fallback
-                Log::channel('telnyx')->warning('No conference_id in metadata — falling back to create', [
+            } else {
+                Log::channel('telnyx')->error('Could not resolve conference ID for invite join', [
                     'call_log_id' => $callLogId,
                     'conference_name' => $conferenceName,
                 ]);
-                $this->joinConference($callControlId, [
-                    'name' => $conferenceName,
-                    'beep_enabled' => 'on_enter',
-                    'end_conference_on_exit' => false,
-                    'start_conference_on_create' => true,
-                    'client_state' => base64_encode(json_encode([
-                        'action' => 'conference_invite_in_conference',
-                        'call_log_id' => $callLogId,
-                    ])),
-                ], $callLogId);
+                $this->sendCallCommand($callControlId, 'hangup');
             }
         } elseif ($action === 'click_to_call_failed_tts') {
             // Failed to reach target — TTS error message done → hang up
@@ -2079,6 +2049,81 @@ class TelnyxWebhookController extends Controller
     }
 
     /**
+     * Look up an active conference ID by name via the Telnyx API.
+     * Used as a fallback when metadata doesn't have the conference_id
+     * (race condition between concurrent webhook requests).
+     */
+    protected function findConferenceIdByName(string $conferenceName): ?string
+    {
+        $apiKey = config('services.telnyx.api_key');
+
+        if (! $apiKey) {
+            return null;
+        }
+
+        try {
+            $response = Http::withToken($apiKey)
+                ->get('https://api.telnyx.com/v2/conferences', [
+                    'filter[name]' => $conferenceName,
+                ]);
+
+            if ($response->successful()) {
+                $conference = collect($response->json('data') ?? [])->first();
+                $id = $conference['id'] ?? null;
+
+                if ($id) {
+                    Log::channel('telnyx')->info('Found conference by name via API', [
+                        'conference_name' => $conferenceName,
+                        'conference_id' => $id,
+                    ]);
+                }
+
+                return $id;
+            }
+        } catch (\Exception $e) {
+            Log::channel('telnyx')->error('findConferenceIdByName exception', [
+                'conference_name' => $conferenceName,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return null;
+    }
+
+    /**
+     * Resolve the conference ID — first from CallLog metadata, then via Telnyx API lookup.
+     * Handles race conditions where concurrent webhook writes may not yet have persisted the conference_id.
+     */
+    protected function resolveConferenceId(?int $callLogId, ?string $conferenceName): ?string
+    {
+        // First try fast path: metadata
+        $id = $this->getConferenceId($callLogId);
+
+        if ($id) {
+            return $id;
+        }
+
+        // Fallback: look up by name via Telnyx API
+        if ($conferenceName) {
+            $id = $this->findConferenceIdByName($conferenceName);
+
+            // Persist so future lookups hit the fast path
+            if ($id && $callLogId) {
+                $callLog = CallLog::find($callLogId);
+                if ($callLog) {
+                    $metadata = $callLog->fresh()->metadata ?? [];
+                    if (empty($metadata['conference_id'])) {
+                        $metadata['conference_id'] = $id;
+                        $callLog->update(['metadata' => $metadata]);
+                    }
+                }
+            }
+        }
+
+        return $id;
+    }
+
+    /**
      * Announce a participant joining a conference via TTS to all existing participants.
      * Looks up the Telnyx conference by name, then uses the conference speak API.
      */
@@ -2592,5 +2637,27 @@ class TelnyxWebhookController extends Controller
                 'type' => config('services.telnyx.tts_voice_type'),
             ],
         ];
+    }
+
+    /**
+     * Build a publicly reachable base URL for Telnyx webhooks.
+     *
+     * In dev environments where APP_URL is localhost, Telnyx cannot reach the
+     * webhook endpoint.  When TELNYX_PUBLIC_URL (e.g. a Cloudflare tunnel) is
+     * set, we use that instead.
+     */
+    protected function telnyxBaseUrl(): string
+    {
+        $appUrl = config('app.url');
+
+        if (str_contains($appUrl, '127.0.0.1') || str_contains($appUrl, 'localhost')) {
+            $publicUrl = config('services.telnyx.public_url');
+
+            if ($publicUrl) {
+                return rtrim($publicUrl, '/');
+            }
+        }
+
+        return rtrim($appUrl, '/');
     }
 }
