@@ -310,6 +310,7 @@ class TelnyxWebhookController extends Controller
             ?: $this->telnyxBaseUrl() . '/audio/ringback.wav';
         $this->sendCallCommand($callControlId, 'playback_start', [
             'audio_url' => $holdAudioUrl,
+            'loop' => 'infinity',
             'client_state' => base64_encode(json_encode([
                 'action' => 'click_to_call_waiting',
                 'call_log_id' => $callLogId,
@@ -388,35 +389,25 @@ class TelnyxWebhookController extends Controller
     protected function handleClickToCallTargetAnswered(string $callControlId, array $clientState): JsonResponse
     {
         $callLogId = $clientState['call_log_id'] ?? null;
-        $callerName = $clientState['caller_name'] ?? 'Someone';
         $userCallControlId = $clientState['user_call_control_id'] ?? null;
 
-        // Resolve the target's name from the CallLog forwarded_to phone
-        $callLog = $callLogId ? CallLog::find($callLogId) : null;
-        $targetPhone = $callLog?->forwarded_to;
-        $participantName = $this->resolveNameFromPhone($targetPhone) ?? 'Someone';
-
-        $vendor = Vendor::find(1);
-        $shortName = data_get($vendor?->options ?? [], 'short_name') ?: ($vendor?->business_name ?? 'GS Construction');
-
-        $ttsPayload = "{$callerName} from {$shortName} is calling you. He will be on the line shortly.";
-
-        Log::channel('telnyx')->info('Click-to-call: target answered — playing intro TTS', [
-            'call_control_id' => $callControlId,
+        Log::channel('telnyx')->info('Click-to-call: target answered — bridging immediately', [
+            'target_call_control_id' => $callControlId,
             'user_call_control_id' => $userCallControlId,
-            'participant_name' => $participantName,
-            'tts' => $ttsPayload,
+            'call_log_id' => $callLogId,
         ]);
 
-        $this->sendCallCommand($callControlId, 'speak', [
-            'payload' => $ttsPayload,
-            ...$this->ttsVoiceParams(),
-            'client_state' => base64_encode(json_encode([
-                'action' => 'click_to_call_target_intro_done',
+        if ($userCallControlId) {
+            $this->bridgeCalls($callControlId, $userCallControlId);
+
+            $callLog = $callLogId ? CallLog::find($callLogId) : null;
+            $callLog?->update(['status' => CallLog::STATUS_TRANSFERRED]);
+        } else {
+            Log::channel('telnyx')->error('No user call control ID for bridge', [
                 'call_log_id' => $callLogId,
-                'user_call_control_id' => $userCallControlId,
-            ])),
-        ]);
+            ]);
+            $this->sendCallCommand($callControlId, 'hangup');
+        }
 
         return response()->json(['status' => 'ok']);
     }
@@ -944,6 +935,7 @@ class TelnyxWebhookController extends Controller
                     ?: $this->telnyxBaseUrl() . '/audio/ringback.wav';
                 $this->sendCallCommand($callControlId, 'playback_start', [
                     'audio_url' => $holdAudioUrl,
+                    'loop' => 'infinity',
                     'client_state' => base64_encode(json_encode([
                         'action' => 'caller_waiting',
                         'call_log_id' => $callLogId,
@@ -984,6 +976,7 @@ class TelnyxWebhookController extends Controller
                 ?: $this->telnyxBaseUrl() . '/audio/ringback.wav';
             $this->sendCallCommand($callControlId, 'playback_start', [
                 'audio_url' => $holdAudioUrl,
+                'loop' => 'infinity',
                 'client_state' => base64_encode(json_encode([
                     'action' => 'caller_waiting',
                     'call_log_id' => $callLogId,
