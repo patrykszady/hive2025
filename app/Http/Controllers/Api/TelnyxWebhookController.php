@@ -69,19 +69,30 @@ class TelnyxWebhookController extends Controller
             return response()->json(['status' => 'ok']);
         }
 
-        return match ($eventType) {
-            'call.initiated' => $this->handleCallInitiated($data),
-            'call.answered' => $this->handleCallAnswered($data),
-            'call.hangup' => $this->handleCallHangup($data),
-            'call.bridged' => $this->handleCallBridged($data),
-            'call.leave' => $this->handleCallLeave($data),
-            'call.speak.ended' => $this->handleCallSpeakEnded($data),
-            'call.speak.started' => $this->handleCallSpeakStarted($data),
-            'call.gather.ended' => $this->handleCallGatherEnded($data),
-            'call.recording.saved' => $this->handleCallRecordingSaved($data),
-            'call.machine.detection.ended' => $this->handleAmdEnded($data),
-            default => $this->handleUnknownVoiceEvent($eventType, $data),
-        };
+        try {
+            return match ($eventType) {
+                'call.initiated' => $this->handleCallInitiated($data),
+                'call.answered' => $this->handleCallAnswered($data),
+                'call.hangup' => $this->handleCallHangup($data),
+                'call.bridged' => $this->handleCallBridged($data),
+                'call.leave' => $this->handleCallLeave($data),
+                'call.speak.ended' => $this->handleCallSpeakEnded($data),
+                'call.speak.started' => $this->handleCallSpeakStarted($data),
+                'call.gather.ended' => $this->handleCallGatherEnded($data),
+                'call.recording.saved' => $this->handleCallRecordingSaved($data),
+                'call.machine.detection.ended' => $this->handleAmdEnded($data),
+                default => $this->handleUnknownVoiceEvent($eventType, $data),
+            };
+        } catch (\Throwable $e) {
+            Log::channel('telnyx')->error('Voice webhook handler exception', [
+                'event_type' => $eventType,
+                'call_control_id' => $data['payload']['call_control_id'] ?? null,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+        }
     }
 
     // =========================================================================

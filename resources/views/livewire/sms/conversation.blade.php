@@ -47,11 +47,14 @@
             @if (! $isClientUser)
                 @php
                     $callableContacts = collect();
+                    $ownTelnyxNumber = config('services.telnyx.from');
 
                     if ($this->thread->client && $this->thread->client->users->isNotEmpty()) {
                         foreach ($this->thread->client->users as $user) {
                             $raw = $user->getRawOriginal('cell_phone');
                             if (! $raw) continue;
+                            $e164 = $user->routeNotificationForTelnyx();
+                            if ($e164 === $ownTelnyxNumber) continue;
                             $digits = preg_replace('/[^0-9]/', '', $raw);
                             if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
                                 $digits = substr($digits, 1);
@@ -61,13 +64,14 @@
                                 : $raw;
                             $callableContacts->push([
                                 'name' => $user->first_name,
-                                'e164' => $user->routeNotificationForTelnyx(),
+                                'e164' => $e164,
                                 'display' => $display,
                             ]);
                         }
                     } else {
                         $participants = $this->thread->participants ?? [];
                         foreach ($participants as $phone) {
+                            if ($phone === $ownTelnyxNumber) continue;
                             $name = $this->resolvePhoneDisplay($phone);
                             $digits = preg_replace('/[^0-9]/', '', $phone);
                             if (strlen($digits) === 11 && str_starts_with($digits, '1')) {

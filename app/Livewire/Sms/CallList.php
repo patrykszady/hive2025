@@ -222,6 +222,15 @@ class CallList extends Component
         $connectionId = config('services.telnyx.connection_id');
         $from = config('services.telnyx.from');
 
+        // Prevent calling our own Telnyx number (loopback)
+        if ($phone === $from) {
+            Log::channel('telnyx')->warning('Click-to-call blocked: target is own Telnyx number', [
+                'target_phone' => $phone,
+            ]);
+            Flux::toast(variant: 'danger', heading: 'Invalid Number', text: 'Cannot call the company phone number.', duration: 5000, position: 'top right');
+            return;
+        }
+
         if (! $apiKey || ! $connectionId) {
             Flux::toast(variant: 'danger', heading: 'Not Configured', text: 'Voice calling is not configured.', duration: 5000, position: 'top right');
             return;
