@@ -19,8 +19,8 @@
 
 <div style="height: 8px; line-height: 8px;">&nbsp;</div>
 
-<div style="text-align: center; background-color: #f4f4f5; border-radius: 8px; padding: 20px 24px; margin: 0 auto; max-width: 420px;">
-	<p style="margin: 0 0 12px 0; font-size: 15px; color: #3f3f46; line-height: 1.5;">
+<div style="text-align: center; border: 1px solid #d4d4d8; border-radius: 8px; padding: 20px 24px; margin: 0 auto; max-width: 420px;">
+	<p style="margin: 0 0 12px 0; font-size: 15px; line-height: 1.5;">
 		Log in or register to review and sign. You can also view your estimate, schedule, project updates, and stay connected with {{ $contractorName }}. Registering is easy — just confirm your number, email, and set a password.
 	</p>
 	<div style="height: 8px; line-height: 8px;">&nbsp;</div>
