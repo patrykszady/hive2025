@@ -10,6 +10,8 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Queue\Middleware\ThrottlesExceptions;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Storage;
+use Intervention\Image\Facades\Image;
 
 class SendGroupMms implements ShouldQueue
 {
@@ -57,9 +59,11 @@ class SendGroupMms implements ShouldQueue
         $messagingProfileId = config('services.telnyx.messaging_profile_id');
         $participants = $message->to_numbers ?? [];
         $text = $message->text;
-        // Convert relative paths to absolute URLs so Telnyx can fetch the media
+
+        // Compress images for MMS (Telnyx limit: 1 MB total) and build public URLs
         $mediaUrls = collect($message->media_urls ?? [])
-            ->map(fn (string $url): string => str_starts_with($url, '/') ? url($url) : $url)
+            ->map(fn (string $url): string => $this->prepareMediaUrl($url))
+            ->filter()
             ->all();
 
         // In dev, redirect all outbound SMS to the dev number
@@ -72,8 +76,26 @@ class SendGroupMms implements ShouldQueue
         }
 
         try {
-            if (count($participants) > 1 || ! empty($mediaUrls)) {
-                $result = $this->sendGroupMms($apiKey, $messagingProfileId, $message->from_number, $participants, $text, $mediaUrls);
+            if (! empty($mediaUrls)) {
+                // Telnyx limits each MMS to 1 MB total media.
+                // Send each image as a separate MMS; attach the text to the first one only.
+                $results = [];
+
+                foreach ($mediaUrls as $i => $singleUrl) {
+                    $msgText = ($i === 0) ? $text : '';
+                    $results[] = $this->sendGroupMms(
+                        $apiKey, $messagingProfileId, $message->from_number, $participants, $msgText, [$singleUrl]
+                    );
+
+                    // Small delay between sends to avoid carrier throttling
+                    if ($i < count($mediaUrls) - 1) {
+                        usleep(500_000); // 500ms
+                    }
+                }
+
+                $result = $results[0];
+            } elseif (count($participants) > 1) {
+                $result = $this->sendGroupMms($apiKey, $messagingProfileId, $message->from_number, $participants, $text, []);
             } else {
                 $result = $this->sendSms($apiKey, $messagingProfileId, $message->from_number, $participants[0], $text);
             }
@@ -159,5 +181,132 @@ class SendGroupMms implements ShouldQueue
         }
 
         return $response->json('data') ?? [];
+    }
+
+    /**
+     * Compress a local image for MMS delivery (must be < 1 MB) and return a public URL.
+     */
+    protected function prepareMediaUrl(string $url): string
+    {
+        // Already an absolute external URL — pass through
+        if (! str_starts_with($url, '/')) {
+            return $url;
+        }
+
+        // Convert /storage/sms-attachments/file.jpg → sms-attachments/file.jpg
+        $relativePath = preg_replace('#^/storage/#', '', $url);
+        $disk = Storage::disk('public');
+
+        if (! $disk->exists($relativePath)) {
+            Log::channel('telnyx')->warning('MMS attachment not found on disk', ['path' => $relativePath]);
+
+            return '';
+        }
+
+        $fullPath = $disk->path($relativePath);
+        $fileSize = filesize($fullPath);
+
+        // If already under 900 KB, no compression needed
+        if ($fileSize <= 900 * 1024) {
+            return $this->toPublicUrl($url);
+        }
+
+        // Compress for MMS delivery
+        try {
+            $compressedPath = $this->compressForMms($relativePath, $fullPath);
+
+            return $this->toPublicUrl('/storage/' . $compressedPath);
+        } catch (\Throwable $e) {
+            Log::channel('telnyx')->error('Failed to compress MMS image, using original', [
+                'path' => $relativePath,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $this->toPublicUrl($url);
+        }
+    }
+
+    /**
+     * Compress an image to fit within the Telnyx 1 MB MMS limit.
+     * Saves a compressed copy to sms-attachments/mms/ and returns the relative path.
+     */
+    protected function compressForMms(string $relativePath, string $fullPath): string
+    {
+        $extension = pathinfo($fullPath, PATHINFO_EXTENSION) ?: 'jpg';
+        $compressedRelative = 'sms-attachments/mms/' . pathinfo($relativePath, PATHINFO_FILENAME) . '_mms.' . $extension;
+        $disk = Storage::disk('public');
+
+        // If already compressed previously, reuse it
+        if ($disk->exists($compressedRelative) && $disk->size($compressedRelative) <= 950 * 1024) {
+            return $compressedRelative;
+        }
+
+        $image = Image::make($fullPath);
+
+        // Step 1: Resize if dimensions are very large (keep aspect ratio)
+        $maxDimension = 1200;
+        if ($image->width() > $maxDimension || $image->height() > $maxDimension) {
+            $image->resize($maxDimension, $maxDimension, function ($constraint) {
+                $constraint->aspectRatio();
+                $constraint->upsize();
+            });
+        }
+
+        // Step 2: Progressively lower quality until under 900KB
+        $targetBytes = 900 * 1024;
+
+        foreach ([75, 60, 45, 30] as $quality) {
+            $encoded = (string) $image->encode('jpg', $quality);
+
+            if (strlen($encoded) <= $targetBytes) {
+                $disk->put($compressedRelative, $encoded);
+
+                Log::channel('telnyx')->info('Compressed MMS image', [
+                    'original' => $relativePath,
+                    'compressed' => $compressedRelative,
+                    'quality' => $quality,
+                    'size_kb' => round(strlen($encoded) / 1024),
+                ]);
+
+                return $compressedRelative;
+            }
+        }
+
+        // Step 3: Even smaller dimensions as last resort
+        $image->resize(800, 800, function ($constraint) {
+            $constraint->aspectRatio();
+            $constraint->upsize();
+        });
+
+        $encoded = (string) $image->encode('jpg', 30);
+        $disk->put($compressedRelative, $encoded);
+
+        Log::channel('telnyx')->info('Compressed MMS image (aggressive)', [
+            'original' => $relativePath,
+            'compressed' => $compressedRelative,
+            'size_kb' => round(strlen($encoded) / 1024),
+        ]);
+
+        return $compressedRelative;
+    }
+
+    /**
+     * Convert a relative /storage/... path to an absolute public URL.
+     * Uses APP_URL, but falls back to the Telnyx-accessible public URL config if APP_URL is localhost.
+     */
+    protected function toPublicUrl(string $path): string
+    {
+        $appUrl = config('app.url');
+
+        // If APP_URL is localhost (common in dev), use the public tunnel URL
+        if (str_contains($appUrl, '127.0.0.1') || str_contains($appUrl, 'localhost')) {
+            $publicUrl = config('services.telnyx.public_url');
+
+            if ($publicUrl) {
+                return rtrim($publicUrl, '/') . $path;
+            }
+        }
+
+        return url($path);
     }
 }

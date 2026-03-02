@@ -71,7 +71,9 @@ class SmsConversation extends Component
     public function updatedAttachment(): void
     {
         $this->validate([
-            'attachment' => 'nullable|file|mimes:jpg,jpeg,png,gif,webp|max:5120',
+            'attachment' => 'nullable|file|mimes:jpg,jpeg,png,gif,webp|max:15360',
+        ], [
+            'attachment.max' => 'The attachment must not be greater than 15MB.',
         ]);
     }
 
@@ -113,8 +115,10 @@ class SmsConversation extends Component
 
         $this->validate([
             'newMessage' => 'required_without:attachment|nullable|string|max:1600',
-            'attachment' => 'nullable|file|mimes:jpg,jpeg,png,gif,webp|max:5120',
+            'attachment' => 'nullable|file|mimes:jpg,jpeg,png,gif,webp|max:15360',
             'threadId' => 'required|exists:sms_group_threads,id',
+        ], [
+            'attachment.max' => 'The attachment must not be greater than 15MB.',
         ]);
 
         $thread = SmsGroupThread::findOrFail($this->threadId);

@@ -89,5 +89,12 @@
         <flux:toast position="top end" />
 
         @fluxScripts
+
+        {{-- Close any stale modals restored from wire:navigate page cache --}}
+        <script>
+            document.addEventListener('livewire:navigated', () => {
+                document.querySelectorAll('dialog[open]').forEach(d => d.close());
+            });
+        </script>
     </body>
 </html>

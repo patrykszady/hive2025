@@ -499,7 +499,7 @@
             }
         </style>
 
-        <flux:modal wire:model="showImageLightbox" name="sms-image-lightbox" class="!p-0 !rounded-xl max-w-lg sm:max-w-xl md:max-w-2xl">
+        <flux:modal wire:model="showImageLightbox" name="sms-image-lightbox" :closable="false" class="!p-0 !rounded-xl max-w-lg sm:max-w-xl md:max-w-2xl">
             <div
                 x-data="{
                     images: @js($this->threadImages),
@@ -535,8 +535,15 @@
                     next() { this.goTo(this.currentIndex + 1); },
 
                     syncFromWire(url) {
+                        if (!url) return;
                         const idx = this.images.indexOf(url);
-                        if (idx !== -1) this.currentIndex = idx;
+                        if (idx !== -1) {
+                            this.currentIndex = idx;
+                        } else {
+                            const decoded = decodeURIComponent(url);
+                            const alt = this.images.findIndex(u => decodeURIComponent(u) === decoded);
+                            if (alt !== -1) this.currentIndex = alt;
+                        }
                     },
 
                     resetZoom() {
@@ -675,8 +682,14 @@
                 }"
                 x-ref="zoomContainer"
                 x-init="
-                    $watch('$wire.showImageLightbox', v => { if (!v) { resetZoom(); } });
-                    $watch('$wire.lightboxImageUrl', v => { if (v) syncFromWire(v); });
+                    $watch('$wire.showImageLightbox', v => {
+                        if (v) {
+                            syncFromWire($wire.lightboxImageUrl);
+                        } else {
+                            resetZoom();
+                        }
+                    });
+                    $watch('$wire.lightboxImageUrl', v => { if (v && $wire.showImageLightbox) syncFromWire(v); });
                 "
                 :class="isZoomed ? 'cursor-grab active:cursor-grabbing' : ''"
                 @wheel.prevent="handleWheel($event)"
