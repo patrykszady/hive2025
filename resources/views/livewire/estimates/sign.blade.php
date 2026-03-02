@@ -407,9 +407,7 @@
         @endif
     </div>
 
-    @persist('toast')
-        <flux:toast />
-    @endpersist
+    <flux:toast />
 
     @if($step === 'sign')
         <script src="{{ asset('js/signature_pad.umd.min.js') }}"></script>

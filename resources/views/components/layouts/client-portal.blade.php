@@ -46,9 +46,8 @@
             </div>
         </footer>
 
-        @persist('toast')
-            <flux:toast />
-        @endpersist
+        {{-- Toast without @persist to prevent stale toasts across wire:navigate --}}
+        <flux:toast />
 
         @fluxScripts
     </body>

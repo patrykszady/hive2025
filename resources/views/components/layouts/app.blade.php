@@ -86,9 +86,7 @@
             </div>
         </flux:main>
 
-        @persist('toast')
-            <flux:toast position="top end" />
-        @endpersist
+        <flux:toast position="top end" />
 
         @fluxScripts
     </body>

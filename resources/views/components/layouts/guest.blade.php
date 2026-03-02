@@ -11,9 +11,7 @@
         </div>
 
         
-        @persist('toast')
-            <flux:toast />
-        @endpersist
+        <flux:toast />
 
         @fluxScripts
     </body>

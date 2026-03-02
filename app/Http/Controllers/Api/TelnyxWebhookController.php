@@ -949,6 +949,13 @@ class TelnyxWebhookController extends Controller
 
         $action = $clientState['action'] ?? null;
 
+        Log::channel('telnyx')->info('handleCallSpeakEnded ENTRY', [
+            'call_control_id' => $callControlId,
+            'action' => $action,
+            'client_state' => $clientState,
+            'client_state_raw_present' => $clientStateRaw !== null,
+        ]);
+
         if ($action === 'welcome_done_join_conference') {
             $callLogId = $clientState['call_log_id'] ?? null;
             $originalCaller = $clientState['original_caller'] ?? null;
@@ -1847,6 +1854,11 @@ class TelnyxWebhookController extends Controller
      */
     protected function joinConference(string $callControlId, array $params = []): void
     {
+        Log::channel('telnyx')->info('joinConference CALLED', [
+            'call_control_id' => $callControlId,
+            'conference_name' => $params['name'] ?? null,
+        ]);
+
         $apiKey = config('services.telnyx.api_key');
 
         if (! $apiKey) {
@@ -1859,6 +1871,11 @@ class TelnyxWebhookController extends Controller
         ]);
 
         try {
+            Log::channel('telnyx')->info('joinConference POSTing to Telnyx API', [
+                'call_control_id' => $callControlId,
+                'conference_name' => $params['name'] ?? null,
+            ]);
+
             $response = Http::withToken($apiKey)
                 ->post('https://api.telnyx.com/v2/conferences', $body);
 
