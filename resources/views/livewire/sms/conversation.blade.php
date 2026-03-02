@@ -453,7 +453,7 @@
                 <flux:field>
                     <flux:label>Participant</flux:label>
                     @if ($this->pendingParticipants->count() > 0)
-                        <flux:select wire:model="manualOptInParticipantId" placeholder="Select participant...">
+                        <flux:select wire:model.live="manualOptInParticipantId" placeholder="Select participant...">
                             @foreach ($this->pendingParticipants as $participant)
                                 <flux:select.option value="{{ $participant->id }}">
                                     {{ $this->resolvePhoneDisplay($participant->phone_number) }}
