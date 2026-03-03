@@ -1,15 +1,21 @@
 <div
-    x-data="{ localSelected: @js($selectedThreadId) }"
-    x-init="$watch('$wire.selectedThreadId', v => localSelected = v)"
+    x-data="{ pending: null }"
+    x-init="$watch('$wire.selectedThreadId', v => { if (v !== pending) pending = null })"
     class="space-y-1 max-h-[calc(100dvh-15rem)] lg:max-h-full lg:h-full scrollbar-gutter"
 >
     @forelse ($this->threads as $thread)
         <button
             wire:key="thread-{{ $thread->id }}"
-            wire:click="$parent.selectThread({{ $thread->id }})"
-            x-on:click="localSelected = {{ $thread->id }}; $dispatch('thread-switching')"
-            x-bind:class="localSelected === {{ $thread->id }} ? 'bg-zinc-100 dark:bg-zinc-700' : 'hover:bg-zinc-50 dark:hover:bg-zinc-800'"
-            class="w-full text-left px-3 py-2.5 rounded-lg transition-colors"
+            x-on:click="pending = {{ $thread->id }}; Livewire.dispatch('threadSelected', { threadId: {{ $thread->id }} }); $dispatch('thread-switching')"
+            @class([
+                'w-full text-left px-3 py-2.5 rounded-lg',
+                'bg-zinc-100 dark:bg-zinc-700' => $selectedThreadId === $thread->id,
+                'hover:bg-zinc-50 dark:hover:bg-zinc-800' => $selectedThreadId !== $thread->id,
+            ])
+            x-bind:class="pending !== null && {
+                '!bg-zinc-100 dark:!bg-zinc-700': pending === {{ $thread->id }},
+                '!bg-transparent hover:!bg-zinc-50 dark:hover:!bg-zinc-800': pending !== {{ $thread->id }} && {{ $selectedThreadId === $thread->id ? 'true' : 'false' }},
+            }"
         >
             <div class="flex items-center justify-between gap-2">
                 <div class="min-w-0 flex-1">

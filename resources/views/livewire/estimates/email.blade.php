@@ -127,7 +127,7 @@
 
     <x-slot name="footer">
         <flux:spacer />
-        <flux:button type="submit" form="estimate_email_modal_form" variant="primary" wire:loading.attr="disabled" wire:target="send">
+        <flux:button type="button" wire:click="send" variant="primary" wire:loading.attr="disabled" wire:target="send">
             Send Email
         </flux:button>
     </x-slot>

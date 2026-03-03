@@ -118,7 +118,8 @@ class GroupSmsService
             return false;
         }
 
-        $this->sendToThread($thread, $this->buildWelcomeMessage($thread), [], $sentByUserId);
+        // Welcome message is automated (tagged -GSC), so don't attribute it to the triggering user
+        $this->sendToThread($thread, $this->buildWelcomeMessage($thread), [], null);
         $thread->update(['welcome_sent_at' => now()]);
 
         return true;

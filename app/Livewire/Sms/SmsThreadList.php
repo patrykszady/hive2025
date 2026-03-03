@@ -99,6 +99,10 @@ class SmsThreadList extends Component
             ->all();
     }
 
+    /**
+     * Kept as a safety net for stale Livewire snapshots that still reference
+     * wire:click="select(...)".  New template dispatches via Alpine instead.
+     */
     public function select(int $threadId): void
     {
         $this->dispatch('threadSelected', threadId: $threadId)->to(SmsIndex::class);

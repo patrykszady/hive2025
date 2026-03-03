@@ -191,8 +191,13 @@
                     <flux:input wire:model.live.debounce.500ms="search" icon="magnifying-glass" placeholder="Search messages..." size="sm" />
                 </div>
 
-                <div id="sms-threads-live" class="lg:flex-1 lg:min-h-0">
-                    <livewire:sms.sms-thread-list :search="$search" :selected-thread-id="$threadId" :is-client-user="$isClientUser" lazy />
+                <div class="lg:flex-1 lg:min-h-0 relative">
+                    {{-- Cached overlay: shown instantly, auto-hides when the real Livewire component renders --}}
+                    <div id="sms-threads-cache" class="absolute inset-0 z-10 bg-white dark:bg-zinc-900" style="display:none"></div>
+
+                    <div id="sms-threads-live">
+                        <livewire:sms.sms-thread-list :search="$search" :selected-thread-id="$threadId" :is-client-user="$isClientUser" lazy />
+                    </div>
                 </div>
                 <script>
                 (function() {
@@ -201,14 +206,27 @@
                         if (Date.now() - ts > 30 * 86400 * 1000) return;
                         var cached = localStorage.getItem('hive-sms-threads');
                         if (cached && cached.length > 200) {
-                            var el = document.getElementById('sms-threads-live');
-                            if (el) {
-                                el.innerHTML = cached;
+                            var overlay = document.getElementById('sms-threads-cache');
+                            if (overlay) {
+                                overlay.innerHTML = cached;
+                                overlay.style.display = '';
                                 var scroll = parseInt(localStorage.getItem('hive-sms-threads-scroll') || '0');
                                 if (scroll > 0) {
-                                    var scrollable = el.querySelector('.scrollbar-gutter') || el;
+                                    var scrollable = overlay.querySelector('.scrollbar-gutter') || overlay;
                                     scrollable.scrollTop = scroll;
                                 }
+                            }
+                            // Hide overlay once real component renders
+                            var liveEl = document.getElementById('sms-threads-live');
+                            if (liveEl) {
+                                var obs = new MutationObserver(function() {
+                                    if (!liveEl.querySelector('.animate-pulse')) {
+                                        var o = document.getElementById('sms-threads-cache');
+                                        if (o) o.style.display = 'none';
+                                        obs.disconnect();
+                                    }
+                                });
+                                obs.observe(liveEl, { childList: true, subtree: true });
                             }
                         }
                     } catch(e) {}
