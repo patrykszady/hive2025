@@ -230,7 +230,7 @@
         <div
             x-show="atLeftEdge"
             x-cloak
-            class="absolute left-0 top-0 bottom-0 z-20 flex items-center pl-2"
+            class="absolute left-0 top-0 bottom-0 z-20 flex items-center pl-2 pointer-events-none"
         >
             <flux:button
                 x-on:click="prepareForLoad('start'); $wire.loadPreviousDays()"
@@ -239,7 +239,7 @@
                 variant="filled"
                 size="sm"
                 icon="chevron-left"
-                class="shadow-lg"
+                class="shadow-lg pointer-events-auto"
             >
                 Previous
             </flux:button>
@@ -249,7 +249,7 @@
         <div
             x-show="atRightEdge"
             x-cloak
-            class="absolute right-0 top-0 bottom-0 z-20 flex items-center pr-2"
+            class="absolute right-0 top-0 bottom-0 z-20 flex items-center pr-2 pointer-events-none"
         >
             <flux:button
                 x-on:click="prepareForLoad('end'); $wire.loadFutureDays()"
@@ -258,7 +258,7 @@
                 variant="filled"
                 size="sm"
                 icon-trailing="chevron-right"
-                class="shadow-lg"
+                class="shadow-lg pointer-events-auto"
             >
                 Next
             </flux:button>

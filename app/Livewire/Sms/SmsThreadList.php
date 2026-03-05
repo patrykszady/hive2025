@@ -6,17 +6,15 @@ use App\Models\SmsGroupThread;
 use App\Models\SmsThreadRead;
 use App\Models\User;
 use App\Models\Vendor;
-use App\Services\GroupSmsService;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Isolate;
 use Livewire\Attributes\Reactive;
 use Livewire\Component;
-use Livewire\WithPagination;
 
 #[Isolate]
 class SmsThreadList extends Component
 {
-    use WithPagination;
+    public int $limit = 20;
 
     #[Reactive]
     public string $search = '';
@@ -44,7 +42,14 @@ class SmsThreadList extends Component
 
     public function updating($field): void
     {
-        $this->resetPage();
+        if ($field !== 'limit') {
+            $this->limit = 20;
+        }
+    }
+
+    public function loadMore(): void
+    {
+        $this->limit += 20;
     }
 
     #[Computed]
@@ -68,15 +73,14 @@ class SmsThreadList extends Component
                 });
             })
             ->orderByDesc('last_activity_at')
-            ->paginate(20);
+            ->limit($this->limit)
+            ->get();
     }
 
     #[Computed]
     public function unreadThreadIds(): array
     {
-        $threadCollection = $this->threads->getCollection();
-
-        $latestInboundByThread = $threadCollection
+        $latestInboundByThread = $this->threads
             ->mapWithKeys(fn ($thread) => [$thread->id => $thread->latestMessage])
             ->filter(fn ($message) => $message && $message->isInbound());
 

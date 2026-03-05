@@ -271,20 +271,24 @@ class HourCreate extends Component
         $this->form->setProjects($this->projects->toArray());
     }
 
-    public function incrementHours($index)
+    public function incrementHours($index): void
     {
-        $currentHours = $this->form->projects[$index]['hours'] ?? 0;
+        $currentHours = (float) ($this->form->projects[$index]['hours'] ?? 0);
         if ($currentHours < 16) {
-            $this->form->projects[$index]['hours'] = $currentHours + 1;
+            $this->form->projects[$index]['hours'] = $currentHours + 0.5;
         }
+        unset($this->hours_count);
+        $this->dispatch('hours-count-updated', count: $this->hours_count);
     }
 
-    public function decrementHours($index)
+    public function decrementHours($index): void
     {
-        $currentHours = $this->form->projects[$index]['hours'] ?? 0;
-        if ($currentHours >= 1) {
-            $this->form->projects[$index]['hours'] = $currentHours - 1;
+        $currentHours = (float) ($this->form->projects[$index]['hours'] ?? 0);
+        if ($currentHours >= 0.5) {
+            $this->form->projects[$index]['hours'] = $currentHours - 0.5;
         }
+        unset($this->hours_count);
+        $this->dispatch('hours-count-updated', count: $this->hours_count);
     }
 
     public function add_project()

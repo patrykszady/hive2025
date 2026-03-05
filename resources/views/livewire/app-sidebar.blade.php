@@ -1,7 +1,7 @@
 <div class="flex flex-col flex-1 min-h-0">
     <flux:sidebar.nav>
         {{-- Notifications (both client and non-client users) --}}
-        <flux:sidebar.item wire:navigate.hover icon="bell" href="{{ route('notifications.index') }}" class="[&_[data-content]]:!overflow-visible">
+        <flux:sidebar.item wire:navigate.hover icon="bell" href="{{ route('notifications.index') }}" tooltip="Notifications" class="[&_[data-content]]:!overflow-visible">
             <span class="inline-flex items-center gap-2">
                 <span>Notifications</span>
                 <livewire:notifications.notification-sidebar-badge />
@@ -11,7 +11,7 @@
         @if($isClientUser)
             <flux:sidebar.item wire:navigate.hover icon="home" href="{{ $clientHome }}">Home</flux:sidebar.item>
             <flux:sidebar.item wire:navigate.hover icon="folder" href="/projects">Projects</flux:sidebar.item>
-            <flux:sidebar.item wire:navigate.hover icon="chat-bubble-left-right" href="{{ route('sms.index') }}" class="[&_[data-content]]:!overflow-visible">
+            <flux:sidebar.item wire:navigate.hover icon="chat-bubble-left-right" href="{{ route('sms.index') }}" tooltip="Messages" class="[&_[data-content]]:!overflow-visible">
                 <span class="inline-flex items-center gap-2">
                     <span>Messages</span>
                     <livewire:sms.sms-sidebar-badge />
@@ -28,7 +28,7 @@
             <flux:sidebar.item wire:navigate.hover icon="home" href="/hub">Home</flux:sidebar.item>
 
             @if($isAdmin)
-                <flux:sidebar.item wire:navigate.hover icon="chat-bubble-left-right" href="{{ route('sms.index') }}" class="[&_[data-content]]:!overflow-visible">
+                <flux:sidebar.item wire:navigate.hover icon="chat-bubble-left-right" href="{{ route('sms.index') }}" tooltip="Messages" class="[&_[data-content]]:!overflow-visible">
                     <span class="inline-flex items-center gap-2">
                         <span>Messages</span>
                         <livewire:sms.sms-sidebar-badge />

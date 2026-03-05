@@ -95,6 +95,14 @@
             document.addEventListener('livewire:navigated', () => {
                 document.querySelectorAll('dialog[open]').forEach(d => d.close());
             });
+
+            {{-- Close mobile sidebar when navigating via wire:navigate --}}
+            document.addEventListener('livewire:navigating', () => {
+                const sidebar = document.querySelector('ui-sidebar');
+                if (sidebar && sidebar.hasAttribute('data-flux-sidebar-on-mobile') && !sidebar.hasAttribute('data-flux-sidebar-collapsed-mobile')) {
+                    document.dispatchEvent(new CustomEvent('flux-sidebar-toggle'));
+                }
+            });
         </script>
     </body>
 </html>

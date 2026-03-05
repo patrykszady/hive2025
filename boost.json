@@ -2,9 +2,15 @@
     "agents": [
         "copilot"
     ],
-    "editors": [
-        "vscode"
-    ],
-    "guidelines": [],
-    "sail": false
+    "guidelines": true,
+    "herd_mcp": false,
+    "mcp": true,
+    "nightwatch_mcp": true,
+    "sail": false,
+    "skills": [
+        "fluxui-development",
+        "livewire-development",
+        "pest-testing",
+        "tailwindcss-development"
+    ]
 }

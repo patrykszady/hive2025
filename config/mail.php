@@ -9,8 +9,8 @@ return [
         'name' => env('MAIL_FROM_NAME'),
     ],
 
-    // Where to redirect all outgoing mail in local/development.
-    'dev_email' => env('MAIL_DEV_EMAIL'),
+    // Where to redirect all outgoing mail in local/development/testing.
+    'dev_email' => env('MAIL_DEV_TO_ADDRESS', env('MAIL_DEV_EMAIL')),
 
     'mailers' => [
         'nylas' => [

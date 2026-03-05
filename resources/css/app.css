@@ -163,8 +163,9 @@ input[type="number"] {
         margin-left: var(--flux-sidebar-width, 16rem);
     }
     
-    /* When sidebar is collapsed */
-    [data-flux-sidebar-collapsed-desktop] ~ [data-flux-main] {
+    /* When sidebar is collapsed — use :has() because @persist wraps
+       the sidebar in a <div>, breaking the ~ sibling selector */
+    body:has([data-flux-sidebar-collapsed-desktop]) [data-flux-main] {
       margin-left: var(--flux-sidebar-width-collapsed, 3.5rem);
     }
 }

@@ -8,6 +8,16 @@
 
 cd "$(dirname "$0")"
 
+# Load local development env overrides (not committed secrets).
+for DEV_ENV_FILE in ".env.dev" ".env.dev.local"; do
+  if [ -f "$DEV_ENV_FILE" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$DEV_ENV_FILE"
+    set +a
+  fi
+done
+
 LOG_DIR="storage/logs/dev"
 LOCK_FILE="/tmp/hive-dev-server.lock"
 mkdir -p "$LOG_DIR"
@@ -105,6 +115,10 @@ status $? "Redis started (or already running)" "Failed to start Redis"
 # Meilisearch
 MEILI_HOST=$(grep -E '^MEILISEARCH_HOST=' .env 2>/dev/null | cut -d '=' -f2- | tr -d '\r' | xargs)
 MEILI_KEY=$(grep -E '^MEILISEARCH_KEY=' .env 2>/dev/null | sed -E "s/^MEILISEARCH_KEY=['\"]?([^'\"]*)['\"]?/\1/" | tr -d '\r' | xargs)
+MEILI_BIN="$(command -v meilisearch 2>/dev/null)"
+if [ -z "$MEILI_BIN" ] && [ -x "$HOME/.local/bin/meilisearch" ]; then
+  MEILI_BIN="$HOME/.local/bin/meilisearch"
+fi
 MEILI_HOST=${MEILI_HOST:-http://127.0.0.1:7700}
 MEILI_HTTP_ADDR=$(echo "$MEILI_HOST" | sed -E 's#^https?://##')
 
@@ -112,17 +126,21 @@ if pgrep -x meilisearch >/dev/null 2>&1; then
   echo "ℹ️  Meilisearch already running → $MEILI_HOST"
 else
   echo "🔄 Starting Meilisearch at $MEILI_HOST..."
-  if [ -n "$MEILI_KEY" ]; then
-    nohup meilisearch --http-addr "$MEILI_HTTP_ADDR" --master-key "$MEILI_KEY" >"$LOG_DIR/meilisearch.log" 2>&1 &
+  if [ -z "$MEILI_BIN" ]; then
+    echo "❌ Meilisearch binary not found in PATH or ~/.local/bin/meilisearch"
   else
-    nohup meilisearch --http-addr "$MEILI_HTTP_ADDR" >"$LOG_DIR/meilisearch.log" 2>&1 &
-  fi
-  MEILI_PID=$!
-  sleep 1.2
-  if curl -fsS "$MEILI_HOST/health" >/dev/null 2>&1; then
-    echo "✅ Meilisearch healthy (pid: $MEILI_PID) → $MEILI_HOST"
-  else
-    echo "❌ Meilisearch not healthy at $MEILI_HOST → check $LOG_DIR/meilisearch.log"
+    if [ -n "$MEILI_KEY" ]; then
+      nohup "$MEILI_BIN" --http-addr "$MEILI_HTTP_ADDR" --master-key "$MEILI_KEY" >"$LOG_DIR/meilisearch.log" 2>&1 &
+    else
+      nohup "$MEILI_BIN" --http-addr "$MEILI_HTTP_ADDR" >"$LOG_DIR/meilisearch.log" 2>&1 &
+    fi
+    MEILI_PID=$!
+    sleep 1.2
+    if curl -fsS "$MEILI_HOST/health" >/dev/null 2>&1; then
+      echo "✅ Meilisearch healthy (pid: $MEILI_PID) → $MEILI_HOST"
+    else
+      echo "❌ Meilisearch not healthy at $MEILI_HOST → check $LOG_DIR/meilisearch.log"
+    fi
   fi
 fi
 
@@ -300,19 +318,42 @@ fi
     echo "🌐 Starting Cloudflare Tunnel (dev.hive.contractors)"
     echo "════════════════════════════════════════════════════════════════"
 
-    CLOUDFLARED_CONFIG="/home/patryk/web/hive2025/cloudflared-config.yml"
-    if pgrep -f "cloudflared tunnel .*hive-dev" >/dev/null 2>&1; then
-      TUNNEL_PID=$(pgrep -f "cloudflared tunnel .*hive-dev" | head -n 1)
+    CLOUDFLARED_CONFIG="/home/patry/web/hive2025/cloudflared-config.yml"
+    CLOUDFLARED_BIN="$(command -v cloudflared 2>/dev/null)"
+    if [ -z "$CLOUDFLARED_BIN" ] && [ -x "$HOME/.local/bin/cloudflared" ]; then
+      CLOUDFLARED_BIN="$HOME/.local/bin/cloudflared"
+    fi
+
+    CLOUDFLARE_TUNNEL_ID="${CLOUDFLARE_TUNNEL_ID:-2f84efc0-98d3-42b6-8ddf-c53d0bb0ce27}"
+    CLOUDFLARE_CREDENTIALS_FILE="$HOME/.cloudflared/${CLOUDFLARE_TUNNEL_ID}.json"
+
+    if [ -z "$CLOUDFLARED_BIN" ]; then
+      echo "❌ cloudflared not found in PATH or ~/.local/bin/cloudflared"
+    elif pgrep -f "cloudflared tunnel" >/dev/null 2>&1; then
+      TUNNEL_PID=$(pgrep -f "cloudflared tunnel" | head -n 1)
       echo "✅ Cloudflare tunnel already running (pid: $TUNNEL_PID)"
     else
       echo "🔄 Starting Cloudflare tunnel..."
-      nohup cloudflared tunnel --config "$CLOUDFLARED_CONFIG" run hive-dev >"$LOG_DIR/cloudflared.log" 2>&1 &
-      TUNNEL_PID=$!
-      sleep 0.7
-      if ps -p "$TUNNEL_PID" >/dev/null 2>&1; then
-        echo "✅ Cloudflare tunnel started (pid: $TUNNEL_PID)"
+      LAUNCHED_TUNNEL=false
+      if [ -f "$CLOUDFLARE_CREDENTIALS_FILE" ]; then
+        nohup "$CLOUDFLARED_BIN" tunnel --config "$CLOUDFLARED_CONFIG" run >"$LOG_DIR/cloudflared.log" 2>&1 &
+        LAUNCHED_TUNNEL=true
+      elif [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
+        nohup "$CLOUDFLARED_BIN" tunnel run --token "$CLOUDFLARE_TUNNEL_TOKEN" >"$LOG_DIR/cloudflared.log" 2>&1 &
+        LAUNCHED_TUNNEL=true
       else
-        echo "❌ Cloudflare tunnel failed → check logs: $LOG_DIR/cloudflared.log"
+        echo "❌ Missing tunnel credentials: expected $CLOUDFLARE_CREDENTIALS_FILE"
+        echo "   Set CLOUDFLARE_TUNNEL_TOKEN or restore the credentials JSON file."
+      fi
+
+      if [ "$LAUNCHED_TUNNEL" = true ]; then
+        TUNNEL_PID=$!
+        sleep 0.7
+        if ps -p "$TUNNEL_PID" >/dev/null 2>&1; then
+          echo "✅ Cloudflare tunnel started (pid: $TUNNEL_PID)"
+        else
+          echo "❌ Cloudflare tunnel failed → check logs: $LOG_DIR/cloudflared.log"
+        fi
       fi
     fi
 

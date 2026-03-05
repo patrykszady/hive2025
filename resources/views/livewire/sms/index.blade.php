@@ -160,8 +160,8 @@
     </div>
 
     {{-- Thread List - Hidden on mobile when thread is selected --}}
-    <div class="w-full lg:w-80 shrink-0 min-w-0 max-w-md mx-auto lg:mx-0 lg:max-w-none lg:flex lg:flex-col {{ $threadId && $activeTab === 'messages' ? 'hidden lg:flex' : '' }}">
-        <x-island-card class="lg:flex lg:flex-col lg:flex-1 lg:min-h-0">
+    <div class="w-full lg:w-80 shrink-0 min-w-0 min-h-0 max-w-md mx-auto lg:mx-0 lg:max-w-none lg:flex lg:flex-col {{ $threadId && $activeTab === 'messages' ? 'hidden lg:flex' : '' }}">
+        <x-island-card class="flex flex-col h-full min-h-0 overflow-hidden">
             {{-- Tabs --}}
             @if (! $isClientUser)
                 <div class="flex items-center justify-between">
@@ -186,16 +186,16 @@
                 </div>
             @endif
 
-            <div class="{{ $activeTab === 'messages' ? 'lg:flex lg:flex-col lg:flex-1 lg:min-h-0' : 'hidden' }}">
+            <div class="{{ $activeTab === 'messages' ? 'flex flex-col flex-1 min-h-0' : 'hidden' }}">
                 <div class="mb-2">
                     <flux:input wire:model.live.debounce.500ms="search" icon="magnifying-glass" placeholder="Search messages..." size="sm" />
                 </div>
 
-                <div class="lg:flex-1 lg:min-h-0 relative">
+                <div class="flex-1 min-h-0 relative">
                     {{-- Cached overlay: shown instantly, auto-hides when the real Livewire component renders --}}
                     <div id="sms-threads-cache" class="absolute inset-0 z-10 bg-white dark:bg-zinc-900" style="display:none"></div>
 
-                    <div id="sms-threads-live">
+                    <div id="sms-threads-live" class="h-full">
                         <livewire:sms.sms-thread-list :search="$search" :selected-thread-id="$threadId" :is-client-user="$isClientUser" lazy />
                     </div>
                 </div>
@@ -234,8 +234,8 @@
                 </script>
             </div>
 
-            <div class="{{ $activeTab === 'calls' ? 'lg:flex lg:flex-col lg:flex-1 lg:min-h-0' : 'hidden' }}">
-                <div id="sms-calls-live" class="lg:flex-1 lg:min-h-0">
+            <div class="{{ $activeTab === 'calls' ? 'flex flex-col flex-1 min-h-0' : 'hidden' }}">
+                <div id="sms-calls-live" class="flex-1 min-h-0 h-full">
                     <livewire:sms.call-list lazy />
                 </div>
                 <script>

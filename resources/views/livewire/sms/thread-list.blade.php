@@ -1,7 +1,7 @@
 <div
     x-data="{ pending: null }"
     x-init="$watch('$wire.selectedThreadId', v => { if (v !== pending) pending = null })"
-    class="space-y-1 max-h-[calc(100dvh-15rem)] lg:max-h-full lg:h-full scrollbar-gutter"
+    class="space-y-1 h-full scrollbar-gutter"
 >
     @forelse ($this->threads as $thread)
         <button
@@ -82,9 +82,9 @@
         </div>
     @endforelse
 
-    @if ($this->threads->hasPages())
-        <div class="pt-2">
-            {{ $this->threads->links() }}
+    @if ($this->threads->count() >= $limit)
+        <div wire:intersect="loadMore" class="text-center py-2">
+            <span wire:loading wire:target="loadMore" class="text-xs text-zinc-400">Loading...</span>
         </div>
     @endif
 </div>

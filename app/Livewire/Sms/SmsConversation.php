@@ -190,6 +190,9 @@ class SmsConversation extends Component
         $this->newMessage = '';
         $this->attachment = null;
 
+        // Clear memoized computed properties so the re-render fetches fresh data
+        unset($this->smsMessages, $this->processedMessages, $this->phoneNameMap);
+
         $this->dispatch('messageSent');
     }
 

@@ -83,8 +83,8 @@ class ScoutReindex extends Command
                 $importOptions['--chunk'] = 100;
             }
 
-            $this->line("  Importing {$model}...");
-            $this->call('scout:import', $importOptions);
+            $this->line("  Queueing import for {$model}...");
+            $this->call('scout:queue-import', $importOptions);
 
             $duration = round((microtime(true) - $start) * 1000, 2);
             $this->line("  Done {$model} ({$duration}ms)");
@@ -129,12 +129,12 @@ class ScoutReindex extends Command
 
             if (app()->environment('production')) {
                 $importOptions['--chunk'] = 100;
-                $this->line("  Importing {$model} (chunk size: 100)...");
+                $this->line("  Queueing import for {$model} (chunk size: 100)...");
             } else {
-                $this->line("  Importing {$model}...");
+                $this->line("  Queueing import for {$model}...");
             }
 
-            $this->call('scout:import', $importOptions);
+            $this->call('scout:queue-import', $importOptions);
 
             $duration = round((microtime(true) - $start) * 1000, 2);
             $this->line("  Imported {$model} ({$duration}ms)");

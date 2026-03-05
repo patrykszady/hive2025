@@ -8,6 +8,8 @@
 /storage/files/_temp_ocr
 /vendor
 .env
+.env.dev
+.env.dev.local
 .env.backup
 .phpunit.result.cache
 .phpunit.cache

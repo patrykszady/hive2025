@@ -201,6 +201,8 @@
             <div class="sms-fade-overlay top"></div>
         <div
             class="sms-messages h-full overflow-y-auto flex flex-col-reverse gap-3 px-2 pt-6 pb-6"
+            x-on:message-sent.window="$nextTick(() => $el.scrollTop = 0)"
+            x-on:sms-new-message-received.window="if ($el.scrollTop < 150) $nextTick(() => $el.scrollTop = 0)"
         >
             @forelse ($visibleMessages->reverse() as $msg)
                 @if ($loop->last && $visibleMessages->count() >= $messageLimit)

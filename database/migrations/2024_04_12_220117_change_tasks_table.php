@@ -11,12 +11,29 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('tasks', function (Blueprint $table) {
-            $table->date('end_date')->after('start_date')->nullable();
-            $table->json('options')->after('user_id')->nullable();
-            $table->renameColumn('position', 'duration');
-            $table->integer('order')->after('position');
-        });
+        if (! Schema::hasColumn('tasks', 'end_date')) {
+            Schema::table('tasks', function (Blueprint $table) {
+                $table->date('end_date')->after('start_date')->nullable();
+            });
+        }
+
+        if (! Schema::hasColumn('tasks', 'options')) {
+            Schema::table('tasks', function (Blueprint $table) {
+                $table->json('options')->after('user_id')->nullable();
+            });
+        }
+
+        if (Schema::hasColumn('tasks', 'position') && ! Schema::hasColumn('tasks', 'duration')) {
+            Schema::table('tasks', function (Blueprint $table) {
+                $table->renameColumn('position', 'duration');
+            });
+        }
+
+        if (! Schema::hasColumn('tasks', 'order')) {
+            Schema::table('tasks', function (Blueprint $table) {
+                $table->integer('order')->after('duration');
+            });
+        }
     }
 
     /**
@@ -24,11 +41,28 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::table('tasks', function (Blueprint $table) {
-            $table->dropColumn('end_date');
-            $table->dropColumn('options');
-            $table->dropColumn('order');
-            $table->renameColumn('duration', 'position');
-        });
+        if (Schema::hasColumn('tasks', 'end_date')) {
+            Schema::table('tasks', function (Blueprint $table) {
+                $table->dropColumn('end_date');
+            });
+        }
+
+        if (Schema::hasColumn('tasks', 'options')) {
+            Schema::table('tasks', function (Blueprint $table) {
+                $table->dropColumn('options');
+            });
+        }
+
+        if (Schema::hasColumn('tasks', 'order')) {
+            Schema::table('tasks', function (Blueprint $table) {
+                $table->dropColumn('order');
+            });
+        }
+
+        if (Schema::hasColumn('tasks', 'duration') && ! Schema::hasColumn('tasks', 'position')) {
+            Schema::table('tasks', function (Blueprint $table) {
+                $table->renameColumn('duration', 'position');
+            });
+        }
     }
 };

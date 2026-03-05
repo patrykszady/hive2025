@@ -1,5 +1,5 @@
-tunnel: hive-dev
-credentials-file: /home/patryk/.cloudflared/2f84efc0-98d3-42b6-8ddf-c53d0bb0ce27.json
+tunnel: 2f84efc0-98d3-42b6-8ddf-c53d0bb0ce27
+credentials-file: /home/patry/.cloudflared/2f84efc0-98d3-42b6-8ddf-c53d0bb0ce27.json
 
 ingress:
   - hostname: reverb.hive.contractors
