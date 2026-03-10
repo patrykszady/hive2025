@@ -116,6 +116,9 @@ class HourCreate extends Component
         }else{
             $this->selectedDate(browser_today());
         }
+
+        unset($this->hours_count);
+        $this->dispatch('hours-count-updated', count: $this->hours_count);
     }
 
     #[Computed]
