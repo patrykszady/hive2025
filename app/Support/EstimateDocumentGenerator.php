@@ -32,7 +32,7 @@ class EstimateDocumentGenerator
         
         $estimate = Estimate::withoutGlobalScopes()
             ->with([
-                'estimate_sections.estimate_line_items',
+                'estimate_sections.estimate_line_items.allowances',
                 'vendor' => fn ($query) => $query->withoutGlobalScopes(),
                 'project' => fn ($query) => $query
                     ->withoutGlobalScopes()
@@ -240,7 +240,7 @@ class EstimateDocumentGenerator
     {
         $estimate = Estimate::withoutGlobalScopes()
             ->with([
-                'estimate_sections.estimate_line_items',
+                'estimate_sections.estimate_line_items.allowances',
                 'vendor' => fn ($query) => $query->withoutGlobalScopes(),
                 'project' => fn ($query) => $query
                     ->withoutGlobalScopes()
@@ -304,6 +304,59 @@ class EstimateDocumentGenerator
                     'cost' => $hideUnitFields ? null : $lineItem->cost,
                     'total' => $lineItem->total,
                 ]);
+
+                foreach ($lineItem->allowances as $allowance) {
+                    $writer->addRow([
+                        '' => '',
+                        'title' => 'Allowance: ' . $allowance->description,
+                        'category' => null,
+                        'sub_category' => null,
+                        'quantity' => null,
+                        'unit' => null,
+                        'cost' => null,
+                        'total' => $allowance->amount,
+                    ], (new Style)->setFontItalic());
+                }
+
+                if ($lineItem->allowances->isNotEmpty()) {
+                    $writer->addRow([
+                        '' => '',
+                        'title' => 'Total + Allowances',
+                        'category' => null,
+                        'sub_category' => null,
+                        'quantity' => null,
+                        'unit' => null,
+                        'cost' => null,
+                        'total' => $lineItem->total + $lineItem->allowances->sum('amount'),
+                    ], (new Style)->setFontBold());
+                }
+            }
+
+            $sectionAllowanceTotal = $section->estimate_line_items
+                ->sum(fn ($li) => $li->allowances->sum('amount'));
+
+            if ($sectionAllowanceTotal > 0) {
+                $writer->addRow([
+                    '' => '',
+                    'title' => 'Allowances',
+                    'category' => null,
+                    'sub_category' => null,
+                    'quantity' => null,
+                    'unit' => null,
+                    'cost' => null,
+                    'total' => $sectionAllowanceTotal,
+                ], (new Style)->setFontItalic());
+
+                $writer->addRow([
+                    '' => '',
+                    'title' => 'Total + Allowances',
+                    'category' => null,
+                    'sub_category' => null,
+                    'quantity' => null,
+                    'unit' => null,
+                    'cost' => null,
+                    'total' => $section->total + $sectionAllowanceTotal,
+                ], (new Style)->setFontBold()->setBorder($border));
             }
 
             $writer->addRow([]);

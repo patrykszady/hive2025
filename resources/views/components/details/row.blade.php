@@ -6,6 +6,7 @@
     'copyable' => false,
     'align' => 'left',
     'indent' => 0,
+    'titleClass' => '',
     'truncate' => true,
     'noCloak' => false,
     'navigate' => false,
@@ -42,7 +43,7 @@
         </flux:subheading>
     @else
         {{-- LEFT-ALIGNED: content is clickable --}}
-        <flux:subheading class="{{ $shouldTruncate ? 'truncate' : 'whitespace-normal break-words' }} {{ $indentClass }}">
+        <flux:subheading class="{{ $shouldTruncate ? 'truncate' : 'whitespace-normal break-words' }} {{ $indentClass }} {{ $titleClass }}">
             {{ $title }}
         </flux:subheading>
     @endif

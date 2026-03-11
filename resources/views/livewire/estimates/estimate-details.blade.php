@@ -120,6 +120,28 @@
                 :content="money(($nonLivewire ?? false) ? ($estimateTotal ?? 0) : $this->estimate_total)"
                 :no-cloak="$nonLivewire ?? false"
             />
+
+            @php
+                $estimateAllowanceTotal = $estimate->estimate_sections
+                    ->flatMap(fn ($s) => $s->estimate_line_items)
+                    ->sum(fn ($li) => $li->allowances->sum('amount'));
+                $estTotal = ($nonLivewire ?? false) ? ($estimateTotal ?? 0) : $this->estimate_total;
+            @endphp
+            @if($estimateAllowanceTotal > 0)
+                <x-details.row 
+                    title="Allowances" 
+                    title-class="italic"
+                    :no-cloak="$nonLivewire ?? false"
+                >
+                    <span class="text-gray-400 italic">{{ money($estimateAllowanceTotal) }}</span>
+                </x-details.row>
+                <x-details.row 
+                    title="Total + Allowances" 
+                    :no-cloak="$nonLivewire ?? false"
+                >
+                    <span class="text-gray-500">{{ money($estTotal + $estimateAllowanceTotal) }}</span>
+                </x-details.row>
+            @endif
         @endunless
 
         @unless($nonLivewire ?? false)

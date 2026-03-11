@@ -110,11 +110,11 @@ class EstimateShow extends Component
     public function estimate_refresh()
     {
         // Refresh the estimate model and eager load relationships
-        $this->estimate = $this->estimate->fresh(['estimate_sections.estimate_line_items']);
+        $this->estimate = $this->estimate->fresh(['estimate_sections.estimate_line_items.allowances']);
         
         // Get fresh section data with updated totals from database
         $sections = $this->estimate->estimate_sections()
-            ->with(['estimate_line_items', 'bid'])
+            ->with(['estimate_line_items.allowances', 'bid'])
             ->get();
 
         // If totals got out of sync (e.g. section was restored but total became 0), fix it.
@@ -485,7 +485,7 @@ class EstimateShow extends Component
 
         //create new estimate section
         foreach ($line_items as $duplicate_section_line) {
-            EstimateLineItem::create([
+            $newLineItem = EstimateLineItem::create([
                 'estimate_id' => $this->estimate->id,
                 'line_item_id' => $duplicate_section_line->line_item_id,
                 'section_id' => $new_section->id,
@@ -500,6 +500,14 @@ class EstimateShow extends Component
                 'desc' => $duplicate_section_line->desc,
                 'notes' => $duplicate_section_line->notes,
             ]);
+
+            // Duplicate allowances
+            foreach ($duplicate_section_line->allowances as $allowance) {
+                $newLineItem->allowances()->create([
+                    'description' => $allowance->description,
+                    'amount' => $allowance->amount,
+                ]);
+            }
         }
 
         $this->estimate_refresh();

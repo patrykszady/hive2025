@@ -103,7 +103,9 @@ class EstimateLineItemCreate extends Component
     public function editOnEstimate($estimate_line_item_id)
     {
         $this->form->reset();
-        $this->estimate_line_item = $this->estimate->estimate_line_items()->findOrFail($estimate_line_item_id);
+        $this->estimate_line_item = $this->estimate->estimate_line_items()
+            ->with('allowances')
+            ->findOrFail($estimate_line_item_id);
 
         $this->form->setEstimateLineItem($this->estimate_line_item);
         $this->form->total = $this->getTotalLineItemProperty();
@@ -190,6 +192,17 @@ class EstimateLineItemCreate extends Component
         $this->section_item_count = null;
         $this->dispatch('refreshComponent')->to('estimates.estimate-show');
         $this->dispatch('refresh')->to(ProjectFinances::class);
+    }
+
+    public function addAllowance(): void
+    {
+        $this->form->allowances[] = ['id' => null, 'description' => '', 'amount' => ''];
+    }
+
+    public function removeAllowance(int $index): void
+    {
+        unset($this->form->allowances[$index]);
+        $this->form->allowances = array_values($this->form->allowances);
     }
 
     public function render()

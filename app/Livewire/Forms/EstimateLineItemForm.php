@@ -3,6 +3,7 @@
 namespace App\Livewire\Forms;
 
 use App\Models\EstimateLineItem;
+use App\Models\EstimateLineItemAllowance;
 use App\Models\LineItem;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Rule;
@@ -40,6 +41,9 @@ class EstimateLineItemForm extends Form
     #[Rule('required')]
     public $total = '';
 
+    /** @var array<int, array{description: string, amount: string}> */
+    public array $allowances = [];
+
     public function setLineItem(LineItem $line_item)
     {
         $this->line_item = $line_item;
@@ -65,6 +69,15 @@ class EstimateLineItemForm extends Form
         $this->cost = $estimate_line_item->cost;
         $this->quantity = $estimate_line_item->quantity;
         $this->total = $estimate_line_item->total;
+
+        $this->allowances = $estimate_line_item->allowances
+            ->map(fn (EstimateLineItemAllowance $a) => [
+                'id' => $a->id,
+                'description' => $a->description,
+                'amount' => $a->amount,
+            ])
+            ->values()
+            ->toArray();
     }
 
     public function store()
@@ -72,7 +85,7 @@ class EstimateLineItemForm extends Form
         $this->authorize('create', LineItem::class);
         $this->validate();
 
-        EstimateLineItem::create([
+        $lineItem = EstimateLineItem::create([
             'estimate_id' => $this->component->estimate->id,
             'line_item_id' => $this->line_item->id,
             'section_id' => $this->component->section_id,
@@ -87,6 +100,8 @@ class EstimateLineItemForm extends Form
             'notes' => $this->notes,
             'order' => $this->component->section_item_count + 1,
         ]);
+
+        $this->syncAllowances($lineItem);
 
         $this->reset();
     }
@@ -111,6 +126,44 @@ class EstimateLineItemForm extends Form
             'notes' => $this->notes,
         ]);
 
+        $this->syncAllowances($this->estimate_line_item);
+
         $this->reset();
+    }
+
+    /**
+     * Sync allowance rows for the given estimate line item.
+     */
+    protected function syncAllowances(EstimateLineItem $lineItem): void
+    {
+        $keepIds = [];
+
+        foreach ($this->allowances as $entry) {
+            $description = trim($entry['description'] ?? '');
+            $amount = (float) ($entry['amount'] ?? 0);
+
+            if ($description === '' && $amount <= 0) {
+                continue;
+            }
+
+            if (! empty($entry['id'])) {
+                $allowance = EstimateLineItemAllowance::find($entry['id']);
+                if ($allowance) {
+                    $allowance->update(['description' => $description, 'amount' => $amount]);
+                    $keepIds[] = $allowance->id;
+
+                    continue;
+                }
+            }
+
+            $allowance = $lineItem->allowances()->create([
+                'description' => $description,
+                'amount' => $amount,
+            ]);
+            $keepIds[] = $allowance->id;
+        }
+
+        // Soft-delete removed allowances
+        $lineItem->allowances()->whereNotIn('id', $keepIds)->delete();
     }
 }

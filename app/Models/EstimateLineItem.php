@@ -6,6 +6,7 @@ use App\Traits\Sortable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\Pivot;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
@@ -36,5 +37,10 @@ class EstimateLineItem extends Pivot
     public function line_item(): BelongsTo
     {
         return $this->belongsTo(LineItem::class);
+    }
+
+    public function allowances(): HasMany
+    {
+        return $this->hasMany(EstimateLineItemAllowance::class, 'estimate_line_item_id', 'id');
     }
 }

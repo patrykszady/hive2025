@@ -82,6 +82,37 @@
                     />
                 </div>
             </div>
+
+            {{-- ALLOWANCES --}}
+            <div class="space-y-2">
+                <div class="flex items-center justify-between">
+                    <flux:heading size="sm">Allowances</flux:heading>
+                    <flux:button size="xs" icon="plus" variant="ghost" wire:click="addAllowance">Add Allowance</flux:button>
+                </div>
+
+                @foreach($form->allowances as $aIndex => $allowance)
+                    <div class="flex flex-col sm:flex-row gap-2 items-start" wire:key="allowance-{{ $aIndex }}">
+                        <div class="flex-1 min-w-0">
+                            <flux:input
+                                wire:model="form.allowances.{{ $aIndex }}.description"
+                                placeholder="Allowance description"
+                                size="sm"
+                            />
+                        </div>
+                        <div class="w-32">
+                            <flux:input
+                                wire:model="form.allowances.{{ $aIndex }}.amount"
+                                placeholder="0.00"
+                                type="number"
+                                inputmode="decimal"
+                                step="0.01"
+                                size="sm"
+                            />
+                        </div>
+                        <flux:button size="sm" icon="x-mark" variant="ghost" wire:click="removeAllowance({{ $aIndex }})" />
+                    </div>
+                @endforeach
+            </div>
         </div>
     </form>
 

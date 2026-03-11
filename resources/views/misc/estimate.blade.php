@@ -115,38 +115,42 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    @foreach($estimate->estimate_line_items()->where('section_id', $section->id)->orderBy('order', 'ASC')->get() as $key => $estimate_line_item)
+                                    @foreach($estimate->estimate_line_items()->with('allowances')->where('section_id', $section->id)->orderBy('order', 'ASC')->get() as $key => $estimate_line_item)
                                         <tbody style="break-inside: avoid;">
-                                        <tr class="sm:border-b sm:border-gray-400">
-                                            <td class="hidden px-3 py-5 text-right text-gray-500 align-text-top text-md sm:table-cell bg-gray-50">{{$index + 1}}.{{$key + 1}}</td>
+                                        <tr class="sm:border-b sm:border-gray-400 bg-gray-50">
+                                            <td class="hidden px-3 py-5 text-right text-gray-500 align-text-top text-md sm:table-cell">{{$index + 1}}.{{$key + 1}}</td>
                                             {{-- first td --}}
 
-                                            <td class="pl-4 pr-3 text-md max-w-0 sm:pl-6 bg-gray-50">
-                                                <a
-                                                {{-- <x-cards.button type="button" wire:click="$dispatchTo('line-items.estimate-line-item-create', 'addToEstimate', { section_id: {{$section['section_id']}} })"> --}}
-                                                    class="cursor-pointer"
-                                                    {{-- {{$estimate_line_item->pivot->id}}, {{$section['section_id']}} --}}
-                                                    {{--  section_id: {{$section['section_id']}},  --}}
-
-                                                    {{-- href="{{route('estimates.show', $estimate->id)}}" --}}
-                                                    >
+                                            <td class="py-5 pl-4 pr-3 text-md max-w-0 sm:pl-6 align-top">
+                                                <div class="flex flex-col leading-5">
                                                     <div class="text-lg font-medium text-gray-900">{{$estimate_line_item->name}}</div>
                                                     <div class="text-xs font-bold text-indigo-900">{{$estimate_line_item->category}}/{{$estimate_line_item->sub_category}}</div>
-                                                </a>
-                                                {{-- @if($estimate_line_item->pivot->notes)
-                                                    <div class="hidden mt-1 italic text-gray-500 sm:table-cell">
-                                                        {{$estimate_line_item->pivot->notes}}
-                                                    </div>
-                                                @endif --}}
+                                                    @foreach($estimate_line_item->allowances as $allowance)
+                                                        <div class="text-xs italic text-gray-400">Allowance: {{ $allowance->description }}</div>
+                                                    @endforeach
+                                                </div>
                                             </td>
 
-                                            <td class="hidden px-3 py-5 text-right text-gray-500 align-text-top text-md sm:table-cell bg-gray-50">{{$estimate_line_item->unit_type !== 'no_unit' ? $estimate_line_item->quantity : ''}}</td>
-                                            <td class="hidden px-3 py-5 text-right text-gray-500 align-text-top text-md sm:table-cell bg-gray-50">{{$estimate_line_item->unit_type !== 'no_unit' ? $estimate_line_item->unit_type : ''}}</td>
+                                            <td class="hidden px-3 py-5 text-right text-gray-500 align-text-top text-md sm:table-cell">{{$estimate_line_item->unit_type !== 'no_unit' ? $estimate_line_item->quantity : ''}}</td>
+                                            <td class="hidden px-3 py-5 text-right text-gray-500 align-text-top text-md sm:table-cell">{{$estimate_line_item->unit_type !== 'no_unit' ? $estimate_line_item->unit_type : ''}}</td>
 
                                             @if($type != 'Work Order')
-                                                <td class="hidden px-3 py-5 text-right text-gray-500 align-text-top text-md sm:table-cell bg-gray-50">{{$estimate_line_item->unit_type !== 'no_unit' ? money($estimate_line_item->cost) : ''}}</td>
+                                                <td class="hidden px-3 py-5 text-right text-gray-500 align-text-top text-md sm:table-cell">{{$estimate_line_item->unit_type !== 'no_unit' ? money($estimate_line_item->cost) : ''}}</td>
                                                 {{-- last td --}}
-                                                <td class="py-5 pl-3 pr-4 text-right text-gray-800 align-text-top text-md sm:pr-6 bg-gray-50">{{money($estimate_line_item->total)}}</td>
+                                                <td class="py-5 pl-3 pr-4 text-right text-gray-800 align-top text-md sm:pr-6">
+                                                    @if($estimate_line_item->allowances->isNotEmpty())
+                                                        <div class="flex flex-col leading-5">
+                                                            <div class="text-lg font-medium">{{money($estimate_line_item->total)}}</div>
+                                                            <div class="text-xs">&nbsp;</div>
+                                                            @foreach($estimate_line_item->allowances as $allowance)
+                                                                <div class="text-xs italic text-gray-400">{{ money($allowance->amount) }}</div>
+                                                            @endforeach
+                                                            <div class="text-xs font-semibold text-gray-500 border-t border-gray-200" style="padding-top: 2px; margin-top: 2px;">{{ money($estimate_line_item->total + $estimate_line_item->allowances->sum('amount')) }}</div>
+                                                        </div>
+                                                    @else
+                                                        <div>{{money($estimate_line_item->total)}}</div>
+                                                    @endif
+                                                </td>
                                             @endif
                                         </tr>
 
@@ -169,9 +173,22 @@
                             </table>
 
                             @if($type != 'Work Order')
+                                @php
+                                    $pdfSectionAllowanceTotal = $estimate->estimate_line_items()
+                                        ->with('allowances')
+                                        ->where('section_id', $section->id)
+                                        ->get()
+                                        ->sum(fn ($li) => $li->allowances->sum('amount'));
+                                @endphp
                                 <x-cards.footer>
                                     <button></button>
-                                    <h3>Section Total: {{money($section->total)}}</h3>
+                                    <div class="text-right">
+                                        <h3>Total: {{money($section->total)}}</h3>
+                                        @if($pdfSectionAllowanceTotal > 0)
+                                            <div class="text-xs italic text-gray-400">Allowances: {{ money($pdfSectionAllowanceTotal) }}</div>
+                                            <div class="text-xs font-semibold text-gray-500 border-t border-gray-200 pt-1 mt-1">Total + Allowances: {{ money($section->total + $pdfSectionAllowanceTotal) }}</div>
+                                        @endif
+                                    </div>
                                 </x-cards.footer>
                             @endif
                         </flux:card>
@@ -181,21 +198,36 @@
                 {{-- ESTIMATE TOTAL --}}
                 @if($type != 'Work Order')
                     @if($projectStatusTitle && !in_array($projectStatusTitle, ['Active', 'Complete', 'Service Call']))
+                        @php
+                            $pdfEstimateAllowanceTotal = $estimate->estimate_sections
+                                ->flatMap(fn ($s) => $s->estimate_line_items)
+                                ->sum(fn ($li) => $li->allowances->sum('amount'));
+                        @endphp
                         <div class="flex justify-between">
                             <div></div>
-                            <x-lists.ul
-                                {{-- wire:target="print"
-                                wire:loading.attr="disabled"
-                                wire:loading.class="opacity-50 text-opacity-40" --}}
-                                >
+                            <x-lists.ul>
                                 <x-lists.search_li
                                     :basic=true
                                     :bold="TRUE"
-                                    {{-- make gray --}}
                                     :line_title="'TOTAL ESTIMATE'"
                                     :line_data="money($estimate_total + ($reimbursements ?? 0))"
                                     >
                                 </x-lists.search_li>
+                                @if($pdfEstimateAllowanceTotal > 0)
+                                    <x-lists.search_li
+                                        :basic=true
+                                        :line_title="'ALLOWANCES'"
+                                        :line_data="money($pdfEstimateAllowanceTotal)"
+                                        >
+                                    </x-lists.search_li>
+                                    <x-lists.search_li
+                                        :basic=true
+                                        :bold="TRUE"
+                                        :line_title="'TOTAL + ALLOWANCES'"
+                                        :line_data="money($estimate_total + ($reimbursements ?? 0) + $pdfEstimateAllowanceTotal)"
+                                        >
+                                    </x-lists.search_li>
+                                @endif
                             </x-lists.ul>
                         </div>
                     @endif

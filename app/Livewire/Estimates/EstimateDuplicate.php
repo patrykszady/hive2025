@@ -167,6 +167,14 @@ class EstimateDuplicate extends Component
             $new_line_item->total = $line_item_template->cost * $estimate_line_item->quantity;
 
             $new_line_item->save(); // Observer will add this to section total
+
+            // Duplicate allowances
+            foreach ($estimate_line_item->allowances as $allowance) {
+                $new_line_item->allowances()->create([
+                    'description' => $allowance->description,
+                    'amount' => $allowance->amount,
+                ]);
+            }
         }
 
         // Reset form
