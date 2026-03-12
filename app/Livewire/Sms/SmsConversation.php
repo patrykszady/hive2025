@@ -63,6 +63,9 @@ class SmsConversation extends Component
     public function loadThread(?int $threadId): void
     {
         if ($threadId === $this->threadId) {
+            // Same thread — refresh messages (e.g., after notification click)
+            unset($this->smsMessages, $this->processedMessages, $this->phoneNameMap);
+            $this->markThreadAsRead();
             $this->dispatch('thread-ready');
             return;
         }
@@ -99,6 +102,13 @@ class SmsConversation extends Component
     {
         $this->markThreadAsRead();
         $this->dispatch('sms-new-message-received');
+    }
+
+    #[On('refreshMessages')]
+    public function refreshMessages(): void
+    {
+        unset($this->smsMessages, $this->processedMessages, $this->phoneNameMap);
+        $this->markThreadAsRead();
     }
 
     public function updatedAttachment(): void

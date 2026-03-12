@@ -16,6 +16,7 @@ use App\Models\SmsThreadParticipant;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Services\GroupSmsService;
+use App\Services\SpamFilterService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
@@ -23,8 +24,10 @@ use Illuminate\Support\Facades\Log;
 
 class TelnyxWebhookController extends Controller
 {
-    public function __construct(protected GroupSmsService $groupSmsService)
-    {
+    public function __construct(
+        protected GroupSmsService $groupSmsService,
+        protected SpamFilterService $spamFilterService,
+    ) {
     }
 
     /**
@@ -167,6 +170,54 @@ class TelnyxWebhookController extends Controller
             return response()->json(['status' => 'ok']);
         }
 
+        // ── Spam filter ──────────────────────────────────────────────
+        // Check blocked callers list, STIR/SHAKEN attestation, and
+        // ipqualityscore spam database before accepting the call.
+        $vendor = Vendor::find(1); // TODO: Multi-vendor support
+        $vendorOptions = $vendor ? (array) $vendor->options : [];
+        $attestation = data_get($payload, 'sip_headers.x-verstat')
+            ?? data_get($payload, 'custom_headers.x-verstat')
+            ?? data_get($payload, 'stir_shaken.verstat')
+            ?? null;
+        // Telnyx sends verstat values like "TN-Validation-Passed-A"
+        if (is_string($attestation) && preg_match('/Passed-([ABC])$/i', $attestation, $m)) {
+            $attestation = strtoupper($m[1]);
+        } elseif (! in_array($attestation, ['A', 'B', 'C'], true)) {
+            $attestation = null;
+        }
+
+        // Pre-check if caller is known (without creating CallLog yet)
+        $isKnownCaller = false;
+        if ($incomingFrom) {
+            $normalizedPhone = preg_replace('/[^0-9]/', '', $incomingFrom);
+            $isKnownCaller = User::where('cell_phone', 'LIKE', "%{$normalizedPhone}")
+                ->orWhere('cell_phone', 'LIKE', "%{$incomingFrom}")
+                ->exists()
+                || Client::where('home_phone', 'LIKE', "%{$normalizedPhone}")
+                ->orWhere('home_phone', 'LIKE', "%{$incomingFrom}")
+                ->exists();
+        }
+
+        $spamResult = $this->spamFilterService->evaluate([
+            'phone_number' => $incomingFrom ?? 'unknown',
+            'vendor_id' => $vendor?->id,
+            'is_known_caller' => $isKnownCaller,
+            'stir_shaken_attestation' => $attestation,
+            'spam_filter_enabled' => true,
+            'spam_sensitivity' => 'medium',
+        ]);
+
+        if ($spamResult['blocked']) {
+            Log::channel('telnyx')->info('Spam call blocked', [
+                'call_control_id' => $callControlId,
+                'from' => $incomingFrom,
+                'reason' => $spamResult['reason'],
+                'attestation' => $attestation,
+            ]);
+            $this->sendCallCommand($callControlId, 'hangup');
+            return response()->json(['status' => 'ok']);
+        }
+
         // Log the incoming call
         $callLog = CallLog::create([
             'call_id' => $callControlId,
@@ -191,6 +242,12 @@ class TelnyxWebhookController extends Controller
                 'user_id' => $user->id,
                 'caller_name' => $user->full_name,
             ]);
+        } else {
+            // Unknown caller — attempt Telnyx CNAM reverse lookup
+            $cnamName = $callLog->lookUpCallerViaCnam();
+            if ($cnamName) {
+                $callLog->update(['caller_name' => $cnamName]);
+            }
         }
 
         // Send browser push notification to admins: "{Caller Name} is Calling"
@@ -201,19 +258,20 @@ class TelnyxWebhookController extends Controller
             'from' => $payload['from'] ?? null,
             'to' => $payload['to'] ?? null,
             'caller_user_id' => $user?->id,
-            'caller_name' => $user?->full_name,
+            'caller_name' => $callLog->caller_name,
         ]);
 
         // Answer the call — on call.answered we'll play TTS then ring admins
         // send_silence_when_idle keeps RTP flowing during silence while waiting
         // for an admin to answer and bridge.
+        $callerFirstName = $user?->first_name ?? $callLog->caller_name;
         $this->sendCallCommand($callControlId, 'answer', [
             'send_silence_when_idle' => true,
             'client_state' => base64_encode(json_encode([
                 'action' => 'welcome_or_ring',
                 'call_log_id' => $callLog->id,
                 'original_caller' => $payload['from'] ?? null,
-                'caller_name' => $user?->first_name,
+                'caller_name' => $callerFirstName,
                 'caller_user_id' => $user?->id,
             ])),
         ]);
@@ -384,7 +442,7 @@ class TelnyxWebhookController extends Controller
     }
 
     /**
-     * Handle click-to-call target answering — play TTS intro then bridge with user.
+     * Handle click-to-call target answering — bridge with user immediately.
      */
     protected function handleClickToCallTargetAnswered(string $callControlId, array $clientState): JsonResponse
     {
@@ -593,7 +651,7 @@ class TelnyxWebhookController extends Controller
 
         $adminUser = $adminUserId ? User::find($adminUserId) : null;
 
-        Log::channel('telnyx')->info('Admin answered — playing connect message then bridging with caller', [
+        Log::channel('telnyx')->info('Admin answered — bridging with caller immediately', [
             'admin_call_control_id' => $callControlId,
             'incoming_call_control_id' => $incomingCallControlId,
             'admin_user_id' => $adminUserId,
@@ -612,34 +670,11 @@ class TelnyxWebhookController extends Controller
             'metadata' => $metadata,
         ]);
 
-        // Play a brief TTS to the admin using customizable template, then bridge
-        $callerName = $callLog->caller_name ?: 'a caller';
-        $adminFirstName = $adminUser?->first_name ?: '';
-        $vendor = Vendor::find(1);
-        $shortName = data_get($vendor?->options ?? [], 'short_name') ?: ($vendor?->business_name ?? 'our team');
-        $connectTemplate = data_get($vendor?->options ?? [], 'admin_connect_message')
-            ?: "{greeting}! We're connecting you to {name}.";
-        $connectPayload = str_replace(
-            ['{name}', '{company}', '{greeting}'],
-            [$callerName, $shortName, $this->buildTimeGreeting()],
-            $connectTemplate
-        );
-        $connectPayload = preg_replace('/\s+/', ' ', trim($connectPayload));
-        $connectPayload = preg_replace('/\s+([!.?,])/', '$1', $connectPayload);
-        // Prepend admin's first name if available
-        if ($adminFirstName) {
-            $connectPayload = "{$adminFirstName}, {$connectPayload}";
-        }
-        $this->sendCallCommand($callControlId, 'speak', [
-            'payload' => $connectPayload,
-            ...$this->ttsVoiceParams(),
-            'client_state' => base64_encode(json_encode([
-                'action' => 'admin_connect_message_done',
-                'call_log_id' => $callLogId,
-                'admin_user_id' => $adminUserId,
-                'incoming_call_control_id' => $incomingCallControlId,
-            ])),
-        ]);
+        // Bridge admin with the incoming caller immediately (no TTS)
+        $this->bridgeCalls($callControlId, $incomingCallControlId);
+
+        // Hang up other ringing admin legs
+        $this->hangupOtherAdminLegs($callLogId, $callControlId);
 
         return response()->json(['status' => 'ok']);
     }
@@ -1005,31 +1040,6 @@ class TelnyxWebhookController extends Controller
             ]);
 
             $this->sendCallCommand($callControlId, 'hangup');
-        } elseif ($action === 'admin_connect_message_done') {
-            // Admin heard "We're connecting you to {name}" → bridge with the caller
-            $callLogId = $clientState['call_log_id'] ?? null;
-            $adminUserId = $clientState['admin_user_id'] ?? null;
-            $incomingCallControlId = $clientState['incoming_call_control_id'] ?? null;
-
-            Log::channel('telnyx')->info('Admin connect message done — bridging with caller', [
-                'admin_call_control_id' => $callControlId,
-                'incoming_call_control_id' => $incomingCallControlId,
-                'admin_user_id' => $adminUserId,
-            ]);
-
-            if ($incomingCallControlId) {
-                // Bridge admin with the incoming caller (1-on-1 connection)
-                $this->bridgeCalls($callControlId, $incomingCallControlId);
-
-                // Hang up other ringing admin legs
-                $this->hangupOtherAdminLegs($callLogId, $callControlId);
-            } else {
-                Log::channel('telnyx')->error('No incoming call control ID for bridge', [
-                    'call_log_id' => $callLogId,
-                    'admin_user_id' => $adminUserId,
-                ]);
-                $this->sendCallCommand($callControlId, 'hangup');
-            }
         } elseif ($action === 'click_to_call_target_intro_done') {
             // Target heard the TTS intro → bridge with the user who initiated the call
             $callLogId = $clientState['call_log_id'] ?? null;

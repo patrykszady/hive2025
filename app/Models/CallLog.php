@@ -2,11 +2,16 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class CallLog extends Model
 {
+    use HasFactory;
     // Status constants
     public const STATUS_INITIATED = 'initiated';
     public const STATUS_ANSWERED = 'answered';
@@ -93,5 +98,65 @@ class CallLog extends Model
         }
 
         return User::where('cell_phone', 'LIKE', "%{$digits}%")->first();
+    }
+
+    /**
+     * Look up caller name via Telnyx CNAM (Number Lookup API).
+     * Results are cached for 30 days to avoid repeat API calls.
+     */
+    public function lookUpCallerViaCnam(): ?string
+    {
+        $phone = $this->from_number;
+
+        if (! $phone || $phone === 'unknown') {
+            return null;
+        }
+
+        $cacheKey = 'cnam_' . md5($phone);
+
+        return Cache::remember($cacheKey, now()->addDays(30), function () use ($phone) {
+            $apiKey = config('services.telnyx.api_key');
+
+            if (! $apiKey) {
+                return null;
+            }
+
+            try {
+                $cleanPhone = preg_replace('/[^0-9+]/', '', $phone);
+
+                if (! str_starts_with($cleanPhone, '+')) {
+                    $cleanPhone = '+' . $cleanPhone;
+                }
+
+                $response = Http::timeout(5)
+                    ->withToken($apiKey)
+                    ->get("https://api.telnyx.com/v2/number_lookup/{$cleanPhone}", [
+                        'type' => 'caller-name',
+                    ]);
+
+                if (! $response->successful()) {
+                    Log::channel('telnyx')->warning('CNAM lookup failed', [
+                        'phone' => $phone,
+                        'status' => $response->status(),
+                    ]);
+                    return null;
+                }
+
+                $data = $response->json('data');
+                $cnam = data_get($data, 'caller_name.caller_name');
+
+                if ($cnam && data_get($data, 'caller_name.error_code') === null) {
+                    return $cnam;
+                }
+
+                return null;
+            } catch (\Exception $e) {
+                Log::channel('telnyx')->error('CNAM lookup exception', [
+                    'phone' => $phone,
+                    'error' => $e->getMessage(),
+                ]);
+                return null;
+            }
+        });
     }
 }

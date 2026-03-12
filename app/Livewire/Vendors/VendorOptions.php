@@ -37,7 +37,6 @@ class VendorOptions extends Component
     public string $ivr_press1_message = '';
     public string $ivr_press2_message = '';
     public string $voicemail_greeting = '';
-    public string $admin_connect_message = '';
 
     public const DEFAULT_WELCOME = "{greeting} {name}! Thanks for calling {company}. One moment while we connect you.";
     public const DEFAULT_VOICEMAIL = "{company} is not available right now. {name}, if this is an emergency, press 1 to re-dial {company}. Press 2 to send a text on your behalf so {company} knows to call you back ASAP. Stay on the line to leave a voicemail.";
@@ -45,7 +44,6 @@ class VendorOptions extends Component
     public const DEFAULT_IVR_PRESS1 = "{name}, no problem! Let me try connecting you again. I also texted you emergency numbers in case you cannot get through again.";
     public const DEFAULT_IVR_PRESS2 = "Got it! We've sent a message to {company} letting them know you called. They should be reaching out to you shortly. Take care!";
     public const DEFAULT_VOICEMAIL_GREETING = "{greeting} {name}, you've reached {company}. We can't get to the phone right now, but leave us a message after the beep and we'll get back to you shortly.";
-    public const DEFAULT_ADMIN_CONNECT = "{greeting}! We're connecting you to {name}.";
 
     /** @var \Illuminate\Support\Collection<\App\Models\User> Available admin users with cell phones */
     public $adminUsersWithPhones;
@@ -76,7 +74,6 @@ class VendorOptions extends Component
         $this->ivr_press1_message = data_get($this->vendor->options, 'ivr_press1_message', '') ?: self::DEFAULT_IVR_PRESS1;
         $this->ivr_press2_message = data_get($this->vendor->options, 'ivr_press2_message', '') ?: self::DEFAULT_IVR_PRESS2;
         $this->voicemail_greeting = data_get($this->vendor->options, 'voicemail_greeting', '') ?: self::DEFAULT_VOICEMAIL_GREETING;
-        $this->admin_connect_message = data_get($this->vendor->options, 'admin_connect_message', '') ?: self::DEFAULT_ADMIN_CONNECT;
         $this->adminUsersWithPhones = $this->vendor->getAdminUsersWithCellPhones();
     }
 
@@ -101,7 +98,6 @@ class VendorOptions extends Component
             'ivr_press1_message' => 'nullable|string|max:500',
             'ivr_press2_message' => 'nullable|string|max:500',
             'voicemail_greeting' => 'nullable|string|max:500',
-            'admin_connect_message' => 'nullable|string|max:500',
         ];
     }
 
@@ -132,7 +128,6 @@ class VendorOptions extends Component
         $options['ivr_press1_message'] = $this->ivr_press1_message ?: null;
         $options['ivr_press2_message'] = $this->ivr_press2_message ?: null;
         $options['voicemail_greeting'] = $this->voicemail_greeting ?: null;
-        $options['admin_connect_message'] = $this->admin_connect_message ?: null;
 
         // Handle logo upload
         if ($this->logo) {
@@ -213,7 +208,6 @@ class VendorOptions extends Component
             'ivr_press1' => $this->ivr_press1_message ?: self::DEFAULT_IVR_PRESS1,
             'ivr_press2' => $this->ivr_press2_message ?: self::DEFAULT_IVR_PRESS2,
             'voicemail_greeting' => $this->voicemail_greeting ?: self::DEFAULT_VOICEMAIL_GREETING,
-            'admin_connect' => $this->admin_connect_message ?: self::DEFAULT_ADMIN_CONNECT,
             default => '',
         };
 

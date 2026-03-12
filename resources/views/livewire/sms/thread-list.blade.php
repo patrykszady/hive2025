@@ -1,8 +1,65 @@
 <div
-    x-data="{ pending: null }"
+    x-data="{
+        pending: null,
+        pulling: false,
+        pullY: 0,
+        startY: 0,
+        refreshing: false,
+        onTouchStart(e) {
+            if (this.$el.scrollTop === 0) {
+                this.startY = e.touches[0].clientY;
+                this.pulling = true;
+            }
+        },
+        onTouchMove(e) {
+            if (!this.pulling) return;
+            const dy = e.touches[0].clientY - this.startY;
+            if (dy > 0 && this.$el.scrollTop === 0) {
+                this.pullY = Math.min(dy * 0.4, 80);
+                if (dy > 10) e.preventDefault();
+            } else {
+                this.pullY = 0;
+            }
+        },
+        onTouchEnd() {
+            if (this.pullY >= 60 && !this.refreshing) {
+                this.refreshing = true;
+                this.pullY = 50;
+                $wire.$refresh().then(() => {
+                    Livewire.dispatch('refreshMessages');
+                    this.refreshing = false;
+                    this.pullY = 0;
+                    this.pulling = false;
+                });
+            } else {
+                this.pullY = 0;
+                this.pulling = false;
+            }
+        },
+    }"
     x-init="$watch('$wire.selectedThreadId', v => { if (v !== pending) pending = null })"
-    class="space-y-1 h-full scrollbar-gutter"
+    x-on:touchstart.passive="onTouchStart($event)"
+    x-on:touchmove="onTouchMove($event)"
+    x-on:touchend="onTouchEnd()"
+    class="space-y-1 h-full scrollbar-gutter overflow-y-auto overscroll-contain"
+    style="-webkit-overflow-scrolling: touch"
 >
+    {{-- Pull-to-refresh indicator --}}
+    <div
+        x-show="pullY > 0"
+        x-bind:style="'height: ' + pullY + 'px'"
+        class="flex items-end justify-center overflow-hidden transition-none"
+    >
+        <div class="pb-2">
+            <svg x-show="!refreshing" x-bind:style="'transform: rotate(' + (pullY * 3) + 'deg)'" class="size-5 text-zinc-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M15.312 11.424a5.5 5.5 0 0 1-9.201 2.466l-.312-.311h2.433a.75.75 0 0 0 0-1.5H4.598a.75.75 0 0 0-.75.75v3.634a.75.75 0 0 0 1.5 0v-2.033l.31.31A7 7 0 0 0 17.25 10a.75.75 0 0 0-1.5 0 5.5 5.5 0 0 1-.438 1.424ZM4.688 8.576a5.5 5.5 0 0 1 9.201-2.466l.312.311h-2.433a.75.75 0 0 0 0 1.5h3.634a.75.75 0 0 0 .75-.75V3.537a.75.75 0 0 0-1.5 0v2.033l-.31-.31A7 7 0 0 0 2.75 10a.75.75 0 0 0 1.5 0 5.5 5.5 0 0 1 .438-1.424Z" clip-rule="evenodd" />
+            </svg>
+            <svg x-show="refreshing" class="size-5 text-indigo-500 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+        </div>
+    </div>
     @forelse ($this->threads as $thread)
         <button
             wire:key="thread-{{ $thread->id }}"

@@ -3,6 +3,7 @@
 namespace App\Livewire\Sms;
 
 use App\Models\CallLog;
+use App\Models\SmsGroupThread;
 use App\Models\User;
 use App\Models\Vendor;
 use Illuminate\Support\Str;
@@ -12,13 +13,12 @@ use Livewire\Attributes\Computed;
 use Livewire\Attributes\Isolate;
 use Livewire\Attributes\On;
 use Livewire\Component;
-use Livewire\WithPagination;
 use Flux;
 
 #[Isolate]
 class CallList extends Component
 {
-    use WithPagination;
+    public int $limit = 25;
 
     public string $callFilter = 'all';
 
@@ -56,8 +56,13 @@ class CallList extends Component
     public function updatedCallFilter(): void
     {
         $this->normalizeCallFilter();
-        $this->resetPage();
+        $this->limit = 25;
         $this->selectedCallId = null;
+    }
+
+    public function loadMore(): void
+    {
+        $this->limit += 25;
     }
 
     /**
@@ -73,16 +78,24 @@ class CallList extends Component
     }
 
     /**
-     * @return \Illuminate\Pagination\LengthAwarePaginator<CallLog>
+     * @return \Illuminate\Database\Eloquent\Collection<int, CallLog>
      */
     #[Computed]
     public function calls(): mixed
     {
+        $telnyxFrom = config('services.telnyx.from');
+
         return CallLog::query()
             ->when($this->callFilter === 'missed', fn ($q) => $q->where('status', CallLog::STATUS_MISSED))
             ->when($this->callFilter === 'voicemail', fn ($q) => $q->where('has_voicemail', true))
+            ->when($telnyxFrom, fn ($q) => $q->where(function ($q) use ($telnyxFrom) {
+                // Exclude phantom/loopback legs where from_number is our own Telnyx number
+                $q->where('direction', '!=', 'incoming')
+                    ->orWhere('from_number', '!=', $telnyxFrom);
+            }))
             ->orderByDesc('created_at')
-            ->paginate(25);
+            ->limit($this->limit)
+            ->get();
     }
 
     public function generateDemoCalls(): void
@@ -157,7 +170,7 @@ class CallList extends Component
         }
 
         $this->callFilter = 'all';
-        $this->resetPage();
+        $this->limit = 25;
         $this->selectedCallId = null;
 
         Flux::toast(
@@ -300,6 +313,21 @@ class CallList extends Component
             ]);
 
             Flux::toast(variant: 'danger', heading: 'Error', text: 'Something went wrong initiating the call.', duration: 5000, position: 'top right');
+        }
+    }
+
+    /**
+     * Navigate to the SMS thread for a phone number.
+     */
+    public function textBack(string $phone): void
+    {
+        $telnyxFrom = config('services.telnyx.from');
+        $thread = SmsGroupThread::findByParticipant($telnyxFrom, $phone);
+
+        if ($thread) {
+            $this->redirect(route('sms.index', ['threadId' => $thread->id, 'activeTab' => 'messages']), navigate: true);
+        } else {
+            Flux::toast(variant: 'warning', heading: 'No Thread', text: 'No message thread found for this number.', duration: 4000, position: 'top right');
         }
     }
 

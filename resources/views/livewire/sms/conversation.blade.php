@@ -1,11 +1,63 @@
 <div
     class="flex-1 min-h-0 flex flex-col"
-    x-data="{ switching: false }"
+    x-data="{
+        switching: false,
+        pulling: false,
+        pullY: 0,
+        startY: 0,
+        refreshing: false,
+        onPullStart(e) {
+            if (window.innerWidth >= 1024) return;
+            this.startY = e.touches[0].clientY;
+            this.pulling = true;
+        },
+        onPullMove(e) {
+            if (!this.pulling || window.innerWidth >= 1024) return;
+            const dy = e.touches[0].clientY - this.startY;
+            if (dy > 0) {
+                this.pullY = Math.min(dy * 0.4, 80);
+                if (dy > 10) e.preventDefault();
+            } else {
+                this.pullY = 0;
+            }
+        },
+        onPullEnd() {
+            if (this.pullY >= 60 && !this.refreshing) {
+                this.refreshing = true;
+                this.pullY = 50;
+                $wire.call('refreshMessages').then(() => {
+                    this.refreshing = false;
+                    this.pullY = 0;
+                    this.pulling = false;
+                });
+            } else {
+                this.pullY = 0;
+                this.pulling = false;
+            }
+        },
+    }"
     x-on:thread-switching.window="switching = true; $el.style.opacity = '0'"
     x-on:thread-ready.window="$nextTick(() => { switching = false; $el.style.opacity = '1' })"
     x-bind:style="switching ? 'transition: none' : 'transition: opacity 100ms'"
 >
     @if ($this->thread)
+        {{-- Pull-to-refresh indicator (mobile only) --}}
+        <div
+            x-show="pullY > 0"
+            x-bind:style="'height: ' + pullY + 'px'"
+            class="flex items-end justify-center overflow-hidden transition-none lg:hidden"
+        >
+            <div class="pb-2">
+                <svg x-show="!refreshing" x-bind:style="'transform: rotate(' + (pullY * 3) + 'deg)'" class="size-5 text-zinc-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M15.312 11.424a5.5 5.5 0 0 1-9.201 2.466l-.312-.311h2.433a.75.75 0 0 0 0-1.5H4.598a.75.75 0 0 0-.75.75v3.634a.75.75 0 0 0 1.5 0v-2.033l.31.31A7 7 0 0 0 17.25 10a.75.75 0 0 0-1.5 0 5.5 5.5 0 0 1-.438 1.424ZM4.688 8.576a5.5 5.5 0 0 1 9.201-2.466l.312.311h-2.433a.75.75 0 0 0 0 1.5h3.634a.75.75 0 0 0 .75-.75V3.537a.75.75 0 0 0-1.5 0v2.033l-.31-.31A7 7 0 0 0 2.75 10a.75.75 0 0 0 1.5 0 5.5 5.5 0 0 1 .438-1.424Z" clip-rule="evenodd" />
+                </svg>
+                <svg x-show="refreshing" class="size-5 text-indigo-500 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+            </div>
+        </div>
+
         {{-- Header --}}
         @php
             $headerTitle = 'Group Message';
@@ -22,7 +74,12 @@
                 }
             }
         @endphp
-        <div class="border-b border-zinc-200 dark:border-zinc-700 px-4 py-2">
+        <div
+            class="border-b border-zinc-200 dark:border-zinc-700 px-4 py-2"
+            x-on:touchstart.passive="onPullStart($event)"
+            x-on:touchmove="onPullMove($event)"
+            x-on:touchend="onPullEnd()"
+        >
             {{-- Title row --}}
             <div class="flex items-center gap-1.5" style="padding-left: 2rem" x-bind:style="window.innerWidth >= 1024 ? 'padding-left: 0' : 'padding-left: 2rem'">
                 {{-- Mobile back button --}}
@@ -122,7 +179,7 @@
 
                 {{-- Active call bar with "Add to Call" --}}
                 @if ($activeCallLogId)
-                    <div class="relative flex items-center gap-2 mt-1.5 px-2 py-1.5 rounded-lg bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800" x-data="{ showInvite: false }">
+                    <div data-active-call-bar class="relative flex items-center gap-2 mt-1.5 px-2 py-1.5 rounded-lg bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800" x-data="{ showInvite: false }">
                         <div class="flex items-center gap-1.5 text-green-700 dark:text-green-400">
                             <span class="relative flex size-2">
                                 <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>

@@ -3,7 +3,7 @@
  * Cache version is stamped by `npm run build` so every deploy busts stale assets.
  */
 
-const DEPLOY_VERSION = 'mmlebu0w';
+const DEPLOY_VERSION = 'mmo3z40g';
 const PAGE_CACHE  = 'hive-pages-' + DEPLOY_VERSION;
 const ASSET_CACHE = 'hive-assets-' + DEPLOY_VERSION;
 
@@ -153,16 +153,35 @@ self.addEventListener('notificationclick', (event) => {
 
     const path = event.notification.data?.url || '/dashboard';
     const targetUrl = new URL(path, self.location.origin).href;
+    const parsedUrl = new URL(path, self.location.origin);
+    const threadId = parsedUrl.searchParams.get('threadId');
 
     event.waitUntil(
         clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-            // Try to focus an existing tab and navigate it
+            // If targeting a messages thread, post a message to an existing /messages page
+            if (threadId) {
+                for (const client of clientList) {
+                    try {
+                        const clientUrl = new URL(client.url);
+                        if (clientUrl.origin === self.location.origin && clientUrl.pathname === '/messages') {
+                            client.postMessage({
+                                type: 'navigate-thread',
+                                threadId: parseInt(threadId, 10),
+                            });
+                            return client.focus();
+                        }
+                    } catch (e) { /* skip invalid client URLs */ }
+                }
+            }
+
+            // No existing /messages page — try focusing any app window and navigating
             for (const client of clientList) {
                 if (client.url.startsWith(self.location.origin) && 'focus' in client) {
                     return client.focus().then((focused) => focused.navigate(targetUrl));
                 }
             }
-            // No existing tab — open a new one
+
+            // No existing window — open a new one
             return clients.openWindow(targetUrl);
         })
     );

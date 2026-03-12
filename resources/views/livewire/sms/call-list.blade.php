@@ -16,6 +16,20 @@
 
             // Resolve the "other party" phone to a contact name
             $otherNumber = $isOutgoing ? $call->to_number : $call->from_number;
+
+            // If otherNumber is our own Telnyx number (phantom leg), try finding the
+            // original caller from a sibling call log in the same session.
+            $telnyxFrom = config('services.telnyx.from');
+            if ($otherNumber && $telnyxFrom && $otherNumber === $telnyxFrom && $call->call_session_id) {
+                $originalLeg = \App\Models\CallLog::where('call_session_id', $call->call_session_id)
+                    ->where('direction', 'incoming')
+                    ->where('from_number', '!=', $telnyxFrom)
+                    ->first();
+                if ($originalLeg) {
+                    $otherNumber = $originalLeg->from_number;
+                }
+            }
+
             $resolvedName = $otherNumber ? $this->resolvePhoneDisplay($otherNumber) : null;
             $formattedOther = $otherNumber ? $this->formatPhone($otherNumber) : null;
 
@@ -100,16 +114,23 @@
                         <div class="flex items-center justify-between">
                             <div class="text-sm lg:text-xs text-zinc-500">
                                 {{ $call->created_at->copy()->setTimezone(browser_timezone())->format('M j, Y g:i A') }}
-                                @if ($call->forwarded_to)
+                                @if ($call->forwarded_to && $this->formatPhone($call->forwarded_to) !== $formattedOther)
                                     &middot; {{ $this->formatPhone($call->forwarded_to) }}
                                 @endif
                             </div>
 
-                            @if ($call->from_number)
-                                <flux:button size="xs" variant="primary" icon="phone" wire:click.stop="callBack('{{ $call->from_number }}')">
-                                    Call Back
-                                </flux:button>
-                            @endif
+                            <div class="flex items-center gap-1">
+                                @if ($otherNumber)
+                                    <flux:button size="xs" variant="ghost" icon="chat-bubble-left" wire:click.stop="textBack('{{ $otherNumber }}')">
+                                        Text
+                                    </flux:button>
+                                @endif
+                                @if ($otherNumber)
+                                    <flux:button size="xs" variant="primary" icon="phone" wire:click.stop="callBack('{{ $otherNumber }}')">
+                                        Call Back
+                                    </flux:button>
+                                @endif
+                            </div>
                         </div>
 
                         @if ($call->has_voicemail && $call->recording_url)
@@ -137,10 +158,10 @@
         </div>
     @endforelse
 
-    {{-- Pagination --}}
-    @if ($this->calls->hasPages())
-        <div class="mt-3">
-            {{ $this->calls->links() }}
+    {{-- Infinite scroll --}}
+    @if ($this->calls->count() >= $limit)
+        <div wire:intersect="loadMore" class="text-center py-2">
+            <span wire:loading wire:target="loadMore" class="text-xs text-zinc-400">Loading...</span>
         </div>
     @endif
 

@@ -169,21 +169,6 @@
                         </div>
                     </div>
 
-                    {{-- Admin Connect Message --}}
-                    <div class="space-y-2">
-                        <div class="flex items-center justify-between gap-4">
-                            <div>
-                                <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Recipient Connect Message</div>
-                                <div class="text-xs text-zinc-500">Played to the recipient when they pick up, before connecting to the caller.</div>
-                            </div>
-                            <flux:button size="xs" variant="ghost" icon="play" wire:click="previewTts('admin_connect')" wire:loading.attr="disabled" wire:target="previewTts" title="Preview connect message" />
-                        </div>
-                        <div>
-                            <flux:textarea wire:model="admin_connect_message" rows="1" placeholder="{{ \App\Livewire\Vendors\VendorOptions::DEFAULT_ADMIN_CONNECT }}" resize="vertical" />
-                            <div class="text-xs text-zinc-400 mt-1">Recipient's name is automatically prepended. Placeholders: <code class="text-zinc-500">{name}</code> <code class="text-zinc-500">{company}</code> <code class="text-zinc-500">{greeting}</code></div>
-                        </div>
-                    </div>
-
                     {{-- Voicemail Menu --}}
                     <div class="space-y-2">
                         <div>

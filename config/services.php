@@ -28,6 +28,10 @@ return [
         'public_url' => env('TELNYX_PUBLIC_URL'),
     ],
 
+    'ipqualityscore' => [
+        'api_key' => env('IPQS_API_KEY'),
+    ],
+
     'mailtrap-sdk' => [
         'host' => env('MAILTRAP_HOST', 'send.api.mailtrap.io'),
         'apiKey' => env('MAILTRAP_API_KEY'),

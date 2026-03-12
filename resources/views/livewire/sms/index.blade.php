@@ -113,7 +113,9 @@
                 if (convoWrap) {
                     const live = convoWrap.querySelector('[wire\\:id]');
                     if (live && !live.querySelector('.animate-pulse') && live.innerHTML.length > 200) {
-                        localStorage.setItem('hive-sms-convo', live.outerHTML);
+                        const clone = live.cloneNode(true);
+                        clone.querySelectorAll('[data-active-call-bar]').forEach(el => el.remove());
+                        localStorage.setItem('hive-sms-convo', clone.outerHTML);
                     }
                 }
                 const callsEl = document.getElementById('sms-calls-live');
@@ -141,6 +143,16 @@
             document.addEventListener('visibilitychange', () => {
                 if (!document.hidden) stopFlashing();
             });
+
+            // Handle notification clicks from the service worker
+            if (navigator.serviceWorker) {
+                navigator.serviceWorker.addEventListener('message', (event) => {
+                    if (event.data?.type === 'navigate-thread' && event.data?.threadId) {
+                        $wire.selectThread(event.data.threadId);
+                        stopFlashing();
+                    }
+                });
+            }
 
             if (! $wire.threadId) {
                 showSkeletonBriefly();
