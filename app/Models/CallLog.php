@@ -147,6 +147,13 @@ class CallLog extends Model
                 $cnam = data_get($data, 'caller_name.caller_name');
 
                 if ($cnam && data_get($data, 'caller_name.error_code') === null) {
+                    // CNAM from carriers is typically ALL CAPS "LAST FIRST" — flip to "FIRST LAST"
+                    // but keep ALL CAPS so the UI can distinguish lookups from known users
+                    $parts = preg_split('/\s+/', trim($cnam));
+                    if (count($parts) === 2 && preg_match('/^[A-Z]+\s[A-Z]+$/', trim($cnam))) {
+                        $cnam = $parts[1] . ' ' . $parts[0];
+                    }
+
                     return $cnam;
                 }
 

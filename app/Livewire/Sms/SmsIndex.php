@@ -27,6 +27,7 @@ class SmsIndex extends Component
         'threadCreated' => 'selectThread',
         'threadSelected' => 'selectThread',
         'threadDeleted' => 'handleThreadDeleted',
+        'switchToThread' => 'switchToThread',
     ];
 
     public function mount(): void
@@ -71,6 +72,13 @@ class SmsIndex extends Component
 
         // Browser event for Alpine-driven thread highlighting (avoids full child re-render)
         $this->js("window.dispatchEvent(new CustomEvent('thread-selected', { detail: { threadId: ".json_encode($threadId)." } }))");
+    }
+
+    public function switchToThread(int $threadId): void
+    {
+        $this->activeTab = 'messages';
+        session(['sms_active_tab' => 'messages']);
+        $this->selectThread($threadId);
     }
 
     public function clearThread(): void

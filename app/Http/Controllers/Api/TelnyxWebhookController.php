@@ -266,6 +266,17 @@ class TelnyxWebhookController extends Controller
             // but do NOT use the CNAM name in TTS greetings (it's a carrier-registered
             // name, not appropriate for personalized greetings)
             $cnamName = $callLog->lookUpCallerViaCnam();
+
+            // If CNAM fails, fall back to name from a previous call log for this number
+            if (! $cnamName && $callLog->from_number) {
+                $cnamName = CallLog::where('from_number', $callLog->from_number)
+                    ->where('id', '!=', $callLog->id)
+                    ->whereNotNull('caller_name')
+                    ->whereNotIn('caller_name', ['Incoming Call', 'Outgoing Call'])
+                    ->latest()
+                    ->value('caller_name');
+            }
+
             if ($cnamName) {
                 $callLog->update(['caller_name' => $cnamName]);
             }

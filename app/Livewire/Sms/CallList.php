@@ -326,7 +326,9 @@ class CallList extends Component
             ->first();
 
         if ($thread) {
-            $this->redirect(route('sms.index', ['threadId' => $thread->id, 'activeTab' => 'messages']), navigate: true);
+            // Switch to messages tab and select the thread via parent component
+            // (redirect + navigate: true can cause blank pages on mobile webapps)
+            $this->dispatch('switchToThread', threadId: $thread->id);
         } else {
             $this->dispatch('openNewThreadWithPhone', phone: $phone)->to(SmsNewThread::class);
         }
@@ -369,6 +371,17 @@ class CallList extends Component
 
         if ($vendor && $vendor->short_name) {
             return $cache[$e164] = $vendor->short_name;
+        }
+
+        // Fall back to caller_name from a previous call log for this number
+        $callLogName = CallLog::where(fn ($q) => $q->where('from_number', $e164)->orWhere('to_number', $e164))
+            ->whereNotNull('caller_name')
+            ->whereNotIn('caller_name', ['Incoming Call', 'Outgoing Call'])
+            ->latest()
+            ->value('caller_name');
+
+        if ($callLogName) {
+            return $cache[$e164] = $callLogName;
         }
 
         return $cache[$e164] = $this->formatPhone($e164);
