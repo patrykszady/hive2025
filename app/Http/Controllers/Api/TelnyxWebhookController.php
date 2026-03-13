@@ -19,6 +19,7 @@ use App\Services\GroupSmsService;
 use App\Services\SpamFilterService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -400,7 +401,7 @@ class TelnyxWebhookController extends Controller
 
         // Play ringback tone to the user while target is being dialed
         $holdAudioUrl = config('services.telnyx.hold_audio_url')
-            ?: $this->telnyxBaseUrl() . '/audio/ringback.wav';
+            ?: $this->telnyxBaseUrl() . '/telnyx-audio/ringback.wav';
         $this->sendCallCommand($callControlId, 'playback_start', [
             'audio_url' => $holdAudioUrl,
             'client_state' => base64_encode(json_encode([
@@ -422,6 +423,11 @@ class TelnyxWebhookController extends Controller
                     'from' => $from,
                     'from_display_name' => 'GS Construction',
                     'timeout_secs' => (int) config('services.telnyx.voice_timeout', 30),
+                    'answering_machine_detection' => 'detect',
+                    'answering_machine_detection_config' => [
+                        'after_greeting_silence_millis' => 800,
+                        'total_analysis_time_millis' => 3500,
+                    ],
                     'client_state' => base64_encode(json_encode([
                         'action' => 'click_to_call_target_ring',
                         'call_log_id' => $callLogId,
@@ -925,11 +931,17 @@ class TelnyxWebhookController extends Controller
     protected function handleCallBridged(array $data): JsonResponse
     {
         $payload = $data['payload'] ?? [];
+        $callControlId = $payload['call_control_id'] ?? null;
 
         Log::channel('telnyx')->info('Call bridged', [
-            'call_control_id' => $payload['call_control_id'] ?? null,
+            'call_control_id' => $callControlId,
             'call_session_id' => $payload['call_session_id'] ?? null,
         ]);
+
+        // Set a cache flag so the playback re-loop knows to stop
+        if ($callControlId) {
+            Cache::put("telnyx_bridged:{$callControlId}", true, now()->addMinutes(10));
+        }
 
         return response()->json(['status' => 'ok']);
     }
@@ -967,16 +979,21 @@ class TelnyxWebhookController extends Controller
         // Re-loop ringback audio while caller is waiting for admin or click-to-call target
         if (in_array($action, ['caller_waiting', 'click_to_call_waiting'], true)) {
             $callLogId = $clientState['call_log_id'] ?? null;
-            $callLog = $callLogId ? CallLog::find($callLogId) : null;
-            $metadata = $callLog ? ($callLog->metadata ?? []) : [];
 
-            // Only re-loop if caller is still waiting (no admin/target has bridged yet)
-            $alreadyBridged = ! empty($metadata['joined_admin_ids'])
-                || ($callLog && $callLog->status === CallLog::STATUS_TRANSFERRED);
+            // Check cache flag first (fastest, avoids DB race condition)
+            $bridgedViaCache = $callControlId && Cache::has("telnyx_bridged:{$callControlId}");
 
-            if (! $alreadyBridged) {
+            if (! $bridgedViaCache) {
+                // Also check DB as a fallback
+                $callLog = $callLogId ? CallLog::find($callLogId) : null;
+                $metadata = $callLog ? ($callLog->metadata ?? []) : [];
+                $bridgedViaCache = ! empty($metadata['joined_admin_ids'])
+                    || ($callLog && $callLog->status === CallLog::STATUS_TRANSFERRED);
+            }
+
+            if (! $bridgedViaCache) {
                 $holdAudioUrl = config('services.telnyx.hold_audio_url')
-                    ?: $this->telnyxBaseUrl() . '/audio/ringback.wav';
+                    ?: $this->telnyxBaseUrl() . '/telnyx-audio/ringback.wav';
                 $this->sendCallCommand($callControlId, 'playback_start', [
                     'audio_url' => $holdAudioUrl,
                     'client_state' => base64_encode(json_encode([
@@ -1050,7 +1067,7 @@ class TelnyxWebhookController extends Controller
 
                 // Play ringback tone so caller hears ringing while waiting for admin
                 $holdAudioUrl = config('services.telnyx.hold_audio_url')
-                    ?: $this->telnyxBaseUrl() . '/audio/ringback.wav';
+                    ?: $this->telnyxBaseUrl() . '/telnyx-audio/ringback.wav';
                 $this->sendCallCommand($callControlId, 'playback_start', [
                     'audio_url' => $holdAudioUrl,
                     'client_state' => base64_encode(json_encode([
@@ -1090,7 +1107,7 @@ class TelnyxWebhookController extends Controller
 
             // Play ringback while waiting for admin to answer
             $holdAudioUrl = config('services.telnyx.hold_audio_url')
-                ?: $this->telnyxBaseUrl() . '/audio/ringback.wav';
+                ?: $this->telnyxBaseUrl() . '/telnyx-audio/ringback.wav';
             $this->sendCallCommand($callControlId, 'playback_start', [
                 'audio_url' => $holdAudioUrl,
                 'client_state' => base64_encode(json_encode([
@@ -1230,15 +1247,63 @@ class TelnyxWebhookController extends Controller
             'action' => $action,
         ]);
 
-        // If this is an admin ring leg and AMD detected a machine, hang it up.
-        // This prevents bridging the caller with the admin's carrier voicemail.
-        if ($action === 'admin_ring' && in_array($result, ['machine', 'machine_start', 'machine_end_beep', 'machine_end_silence', 'machine_end_other'], true)) {
-            Log::channel('telnyx')->info('AMD detected voicemail on admin leg — hanging up', [
+        $isMachine = in_array($result, ['machine', 'machine_start', 'machine_end_beep', 'machine_end_silence', 'machine_end_other'], true);
+
+        // If this is an admin ring leg and AMD detected a machine, hang it up
+        // BUT only if the call hasn't been bridged yet (otherwise hanging up kills both sides).
+        if ($action === 'admin_ring' && $isMachine) {
+            $callLogId = $clientState['call_log_id'] ?? null;
+            $callLog = $callLogId ? CallLog::find($callLogId) : null;
+            $alreadyBridged = $callLog && $callLog->status === CallLog::STATUS_TRANSFERRED;
+
+            if ($alreadyBridged) {
+                Log::channel('telnyx')->info('AMD detected machine on admin leg but call already bridged — ignoring', [
+                    'call_control_id' => $callControlId,
+                    'result' => $result,
+                    'call_log_id' => $callLogId,
+                ]);
+            } else {
+                Log::channel('telnyx')->info('AMD detected voicemail on admin leg — hanging up', [
+                    'call_control_id' => $callControlId,
+                    'result' => $result,
+                    'call_log_id' => $callLogId,
+                ]);
+                $this->sendCallCommand($callControlId, 'hangup');
+            }
+        }
+
+        // If this is a click-to-call target and AMD detected a machine, hang it up
+        // and notify the user that the target didn't answer.
+        if ($action === 'click_to_call_target_ring' && $isMachine) {
+            $callLogId = $clientState['call_log_id'] ?? null;
+            $userCallControlId = $clientState['user_call_control_id'] ?? null;
+
+            Log::channel('telnyx')->info('AMD detected voicemail on click-to-call target — hanging up', [
                 'call_control_id' => $callControlId,
                 'result' => $result,
-                'call_log_id' => $clientState['call_log_id'] ?? null,
+                'call_log_id' => $callLogId,
             ]);
+
             $this->sendCallCommand($callControlId, 'hangup');
+
+            // Tell the user the target didn't answer
+            if ($userCallControlId) {
+                $this->sendCallCommand($userCallControlId, 'speak', [
+                    'payload' => 'The person you called did not answer. Please try again later.',
+                    ...$this->ttsVoiceParams(),
+                    'client_state' => base64_encode(json_encode([
+                        'action' => 'click_to_call_failed_tts',
+                        'call_log_id' => $callLogId,
+                    ])),
+                ]);
+            }
+
+            $callLog = $callLogId ? CallLog::find($callLogId) : null;
+            $callLog?->update([
+                'status' => CallLog::STATUS_MISSED,
+                'hangup_cause' => 'machine_detected',
+                'ended_at' => now(),
+            ]);
         }
 
         return response()->json(['status' => 'ok']);
@@ -1416,6 +1481,9 @@ class TelnyxWebhookController extends Controller
      */
     protected function triggerVoicemail(string $callControlId, ?int $callLogId): void
     {
+        // Stop the ringback re-loop immediately so gather_using_speak isn't overridden
+        Cache::put("telnyx_bridged:{$callControlId}", true, now()->addMinutes(10));
+
         // Check if voicemail is enabled
         $vendor = Vendor::find(1);
         $voicemailEnabled = (bool) data_get($vendor?->options ?? [], 'voicemail_enabled', true);

@@ -85,6 +85,49 @@ Route::get('robots.txt', function () {
     return response($content, 200, ['Content-Type' => 'text/plain']);
 })->name('robots');
 
+// Serve audio files with proper range request support (required for Telnyx streaming)
+Route::get('telnyx-audio/{filename}', function (string $filename) {
+    $path = public_path("audio/{$filename}");
+
+    if (! file_exists($path) || ! preg_match('/\.(wav|mp3|ogg)$/i', $filename)) {
+        abort(404);
+    }
+
+    $size = filesize($path);
+    $mimeTypes = ['wav' => 'audio/wav', 'mp3' => 'audio/mpeg', 'ogg' => 'audio/ogg'];
+    $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+    $mime = $mimeTypes[$ext] ?? 'application/octet-stream';
+
+    $headers = [
+        'Content-Type' => $mime,
+        'Accept-Ranges' => 'bytes',
+        'Cache-Control' => 'public, max-age=86400',
+    ];
+
+    // Handle range requests (required by Telnyx audio streaming)
+    $range = request()->header('Range');
+    if ($range && preg_match('/bytes=(\d+)-(\d*)/', $range, $matches)) {
+        $start = (int) $matches[1];
+        $end = $matches[2] !== '' ? (int) $matches[2] : $size - 1;
+        $end = min($end, $size - 1);
+        $length = $end - $start + 1;
+
+        $headers['Content-Range'] = "bytes {$start}-{$end}/{$size}";
+        $headers['Content-Length'] = $length;
+
+        return response()->stream(function () use ($path, $start, $length) {
+            $stream = fopen($path, 'rb');
+            fseek($stream, $start);
+            echo fread($stream, $length);
+            fclose($stream);
+        }, 206, $headers);
+    }
+
+    $headers['Content-Length'] = $size;
+
+    return response()->file($path, $headers);
+})->where('filename', '[a-zA-Z0-9_\-]+\.(wav|mp3|ogg)');
+
 // Passkey debug logging endpoint (temporary for debugging)
 Route::post('api/passkey-debug-log', function () {
     $data = request()->all();
