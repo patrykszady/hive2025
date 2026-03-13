@@ -81,6 +81,7 @@ class TelnyxWebhookController extends Controller
                 'call.leave' => $this->handleCallLeave($data),
                 'call.speak.ended' => $this->handleCallSpeakEnded($data),
                 'call.speak.started' => $this->handleCallSpeakStarted($data),
+                'call.playback.ended' => $this->handleCallPlaybackEnded($data),
                 'call.gather.ended' => $this->handleCallGatherEnded($data),
                 'call.recording.saved' => $this->handleCallRecordingSaved($data),
                 'call.machine.detection.ended' => $this->handleAmdEnded($data),
@@ -261,7 +262,9 @@ class TelnyxWebhookController extends Controller
                 'caller_name' => $user->full_name,
             ]);
         } else {
-            // Unknown caller — attempt Telnyx CNAM reverse lookup
+            // Unknown caller — attempt Telnyx CNAM reverse lookup for internal records
+            // but do NOT use the CNAM name in TTS greetings (it's a carrier-registered
+            // name, not appropriate for personalized greetings)
             $cnamName = $callLog->lookUpCallerViaCnam();
             if ($cnamName) {
                 $callLog->update(['caller_name' => $cnamName]);
@@ -282,7 +285,10 @@ class TelnyxWebhookController extends Controller
         // Answer the call — on call.answered we'll play TTS then ring admins
         // send_silence_when_idle keeps RTP flowing during silence while waiting
         // for an admin to answer and bridge.
-        $callerFirstName = $user?->first_name ?? $callLog->caller_name;
+        // Only use the caller's first name for TTS if they are a known user in our system.
+        // CNAM reverse-lookup names (from carrier registration) should not be used in TTS
+        // greetings — they are often formal/all-caps and not appropriate for a personal greeting.
+        $callerFirstName = $user ? $user->first_name : null;
         $this->sendCallCommand($callControlId, 'answer', [
             'send_silence_when_idle' => true,
             'client_state' => base64_encode(json_encode([
@@ -386,7 +392,6 @@ class TelnyxWebhookController extends Controller
             ?: $this->telnyxBaseUrl() . '/audio/ringback.wav';
         $this->sendCallCommand($callControlId, 'playback_start', [
             'audio_url' => $holdAudioUrl,
-            'loop' => 'infinity',
             'client_state' => base64_encode(json_encode([
                 'action' => 'click_to_call_waiting',
                 'call_log_id' => $callLogId,
@@ -933,6 +938,55 @@ class TelnyxWebhookController extends Controller
     }
 
     /**
+     * Handle call.playback.ended - audio playback finished.
+     * If the caller is still waiting for an admin, re-start the ringback audio.
+     */
+    protected function handleCallPlaybackEnded(array $data): JsonResponse
+    {
+        $payload = $data['payload'] ?? [];
+        $callControlId = $payload['call_control_id'] ?? null;
+        $clientStateRaw = $payload['client_state'] ?? null;
+
+        $clientState = $clientStateRaw
+            ? json_decode(base64_decode($clientStateRaw), true)
+            : null;
+
+        $action = $clientState['action'] ?? null;
+
+        // Re-loop ringback audio while caller is waiting for admin or click-to-call target
+        if (in_array($action, ['caller_waiting', 'click_to_call_waiting'], true)) {
+            $callLogId = $clientState['call_log_id'] ?? null;
+            $callLog = $callLogId ? CallLog::find($callLogId) : null;
+            $metadata = $callLog ? ($callLog->metadata ?? []) : [];
+
+            // Only re-loop if caller is still waiting (no admin/target has bridged yet)
+            $alreadyBridged = ! empty($metadata['joined_admin_ids'])
+                || ($callLog && $callLog->status === CallLog::STATUS_TRANSFERRED);
+
+            if (! $alreadyBridged) {
+                $holdAudioUrl = config('services.telnyx.hold_audio_url')
+                    ?: $this->telnyxBaseUrl() . '/audio/ringback.wav';
+                $this->sendCallCommand($callControlId, 'playback_start', [
+                    'audio_url' => $holdAudioUrl,
+                    'client_state' => base64_encode(json_encode([
+                        'action' => $action,
+                        'call_log_id' => $callLogId,
+                    ])),
+                ]);
+            }
+
+            return response()->json(['status' => 'ok']);
+        }
+
+        Log::channel('telnyx')->info('Playback ended (non-ringback)', [
+            'call_control_id' => $callControlId,
+            'action' => $action,
+        ]);
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
      * Handle call.speak.ended - TTS finished playing.
      * If action is 'ring_admins_after_speak', now dial the admins.
      */
@@ -988,7 +1042,6 @@ class TelnyxWebhookController extends Controller
                     ?: $this->telnyxBaseUrl() . '/audio/ringback.wav';
                 $this->sendCallCommand($callControlId, 'playback_start', [
                     'audio_url' => $holdAudioUrl,
-                    'loop' => 'infinity',
                     'client_state' => base64_encode(json_encode([
                         'action' => 'caller_waiting',
                         'call_log_id' => $callLogId,
@@ -1029,7 +1082,6 @@ class TelnyxWebhookController extends Controller
                 ?: $this->telnyxBaseUrl() . '/audio/ringback.wav';
             $this->sendCallCommand($callControlId, 'playback_start', [
                 'audio_url' => $holdAudioUrl,
-                'loop' => 'infinity',
                 'client_state' => base64_encode(json_encode([
                     'action' => 'caller_waiting',
                     'call_log_id' => $callLogId,
@@ -1145,15 +1197,38 @@ class TelnyxWebhookController extends Controller
 
     /**
      * Handle answering machine detection result.
+     * If a machine/voicemail is detected on an admin ring leg, hang it up
+     * so the caller doesn't get bridged to the admin's carrier voicemail.
      */
     protected function handleAmdEnded(array $data): JsonResponse
     {
         $payload = $data['payload'] ?? [];
+        $callControlId = $payload['call_control_id'] ?? null;
+        $result = $payload['result'] ?? null;
+        $clientStateRaw = $payload['client_state'] ?? null;
+
+        $clientState = $clientStateRaw
+            ? json_decode(base64_decode($clientStateRaw), true)
+            : null;
+
+        $action = $clientState['action'] ?? null;
 
         Log::channel('telnyx')->info('AMD ended', [
-            'call_control_id' => $payload['call_control_id'] ?? null,
-            'result' => $payload['result'] ?? null,
+            'call_control_id' => $callControlId,
+            'result' => $result,
+            'action' => $action,
         ]);
+
+        // If this is an admin ring leg and AMD detected a machine, hang it up.
+        // This prevents bridging the caller with the admin's carrier voicemail.
+        if ($action === 'admin_ring' && in_array($result, ['machine', 'machine_start', 'machine_end_beep', 'machine_end_silence', 'machine_end_other'], true)) {
+            Log::channel('telnyx')->info('AMD detected voicemail on admin leg — hanging up', [
+                'call_control_id' => $callControlId,
+                'result' => $result,
+                'call_log_id' => $clientState['call_log_id'] ?? null,
+            ]);
+            $this->sendCallCommand($callControlId, 'hangup');
+        }
 
         return response()->json(['status' => 'ok']);
     }
@@ -1268,6 +1343,11 @@ class TelnyxWebhookController extends Controller
                         'from' => $telnyxFrom,
                         'from_display_name' => $callLog?->caller_name ?: ($originalCaller ?? 'Incoming Call'),
                         'timeout_secs' => $timeout,
+                        'answering_machine_detection' => 'detect',
+                        'answering_machine_detection_config' => [
+                            'after_greeting_silence_millis' => 800,
+                            'total_analysis_time_millis' => 3500,
+                        ],
                         'client_state' => base64_encode(json_encode([
                             'action' => 'admin_ring',
                             'call_log_id' => $callLogId,
