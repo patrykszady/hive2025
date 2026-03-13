@@ -61,13 +61,26 @@ it('allows calls with A attestation', function () {
     Http::assertNothingSent();
 });
 
-it('blocks calls with no attestation on medium sensitivity', function () {
+it('does not block calls with no attestation on medium sensitivity', function () {
+    // Null attestation is common for legitimate carriers — medium should
+    // fall through to the IPQS spam database check instead of blocking.
+    $this->service->shouldReceive('checkSpamDatabase')->andReturn(null);
+
+    $result = $this->service->evaluate(makeContext([
+        'stir_shaken_attestation' => null,
+        'spam_sensitivity' => 'medium',
+    ]));
+
+    expect($result['blocked'])->toBeFalse();
+});
+
+it('blocks calls with no attestation on high sensitivity', function () {
     $this->service->shouldReceive('autoBlock')->once()
         ->with('+15551234567', 1, Mockery::type('string'));
 
     $result = $this->service->evaluate(makeContext([
         'stir_shaken_attestation' => null,
-        'spam_sensitivity' => 'medium',
+        'spam_sensitivity' => 'high',
     ]));
 
     expect($result['blocked'])->toBeTrue()
@@ -87,24 +100,17 @@ it('blocks C attestation on high sensitivity', function () {
         ->and($result['reason'])->toBe('low_attestation');
 });
 
-it('does not block C attestation on medium sensitivity', function () {
-    Http::fake([
-        'ipqualityscore.com/*' => Http::response([
-            'success' => true,
-            'fraud_score' => 20,
-            'active' => true,
-            'valid' => true,
-            'risky' => false,
-            'VOIP' => false,
-        ]),
-    ]);
+it('blocks C attestation on medium sensitivity', function () {
+    $this->service->shouldReceive('autoBlock')->once()
+        ->with('+15551234567', 1, Mockery::type('string'));
 
     $result = $this->service->evaluate(makeContext([
         'stir_shaken_attestation' => 'C',
         'spam_sensitivity' => 'medium',
     ]));
 
-    expect($result['blocked'])->toBeFalse();
+    expect($result['blocked'])->toBeTrue()
+        ->and($result['reason'])->toBe('low_attestation');
 });
 
 it('does not block by attestation on low sensitivity', function () {

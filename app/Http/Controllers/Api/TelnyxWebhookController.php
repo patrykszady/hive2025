@@ -214,6 +214,24 @@ class TelnyxWebhookController extends Controller
                 'reason' => $spamResult['reason'],
                 'attestation' => $attestation,
             ]);
+
+            // Log blocked call so it appears in the Calls tab
+            CallLog::create([
+                'call_id' => $callControlId,
+                'call_control_id' => $callControlId,
+                'call_session_id' => $payload['call_session_id'] ?? null,
+                'call_leg_id' => $payload['call_leg_id'] ?? null,
+                'connection_id' => $payload['connection_id'] ?? null,
+                'direction' => 'incoming',
+                'from_number' => $payload['from'] ?? 'unknown',
+                'to_number' => $payload['to'] ?? config('services.telnyx.from'),
+                'status' => CallLog::STATUS_BLOCKED,
+                'metadata' => [
+                    'blocked_reason' => $spamResult['reason'],
+                    'attestation' => $attestation,
+                ],
+            ]);
+
             $this->sendCallCommand($callControlId, 'hangup');
             return response()->json(['status' => 'ok']);
         }

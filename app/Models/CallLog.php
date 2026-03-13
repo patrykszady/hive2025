@@ -20,6 +20,7 @@ class CallLog extends Model
     public const STATUS_MISSED = 'missed';
     public const STATUS_VOICEMAIL = 'voicemail';
     public const STATUS_FAILED = 'failed';
+    public const STATUS_BLOCKED = 'blocked';
 
     protected $fillable = [
         'call_id',

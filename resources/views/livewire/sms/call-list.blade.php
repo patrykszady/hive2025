@@ -57,7 +57,9 @@
         >
             {{-- Status icon --}}
             <div class="shrink-0">
-                @if ($call->status === 'missed' && $call->has_voicemail)
+                @if ($call->status === 'blocked')
+                    <flux:icon icon="shield-exclamation" variant="micro" class="size-4 text-amber-500" />
+                @elseif ($call->status === 'missed' && $call->has_voicemail)
                     <flux:icon icon="microphone" variant="micro" class="size-4 text-indigo-500" />
                 @elseif ($call->status === 'missed')
                     <flux:icon icon="phone-x-mark" variant="micro" class="size-4 text-red-500" />

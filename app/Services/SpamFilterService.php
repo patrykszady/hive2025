@@ -76,12 +76,14 @@ class SpamFilterService
      */
     protected function shouldBlockByAttestation(?string $attestation, string $sensitivity): bool
     {
+        // Null attestation means carrier didn't provide STIR/SHAKEN data —
+        // this is common for legitimate calls, so only block on high sensitivity.
         // High sensitivity: block C and unknown attestation
-        // Medium sensitivity: block only no attestation
+        // Medium sensitivity: block only C attestation
         // Low sensitivity: never block by attestation alone
         return match ($sensitivity) {
             'high' => in_array($attestation, [self::ATTESTATION_C, null], true),
-            'medium' => $attestation === null,
+            'medium' => $attestation === self::ATTESTATION_C,
             'low' => false,
             default => false,
         };
