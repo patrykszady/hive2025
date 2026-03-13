@@ -1,4 +1,4 @@
-<div class="space-y-2 max-h-[calc(100dvh-13rem)] lg:max-h-full lg:h-full scrollbar-gutter">
+<div class="space-y-2 h-full overflow-y-auto scrollbar-gutter" x-data="{ selectedCallId: null }">
     {{-- Filter tabs --}}
     <div class="mb-3 flex items-center gap-2 sticky top-0 z-10 bg-white dark:bg-zinc-800">
         <flux:tabs wire:model.live="callFilter" variant="segmented" size="sm" class="w-full !flex [&>button]:flex-1">
@@ -41,7 +41,7 @@
             // Show formatted phone as secondary only when display name differs from it
             $secondaryNumber = ($formattedOther && $displayName !== $formattedOther)
                 ? $formattedOther
-                : ($isOutgoing && $call->from_number ? $this->resolvePhoneDisplay($call->from_number) : null);
+                : null;
 
             // Don't show secondary if it matches the display name
             if ($secondaryNumber === $displayName) {
@@ -51,9 +51,9 @@
 
         <div
             wire:key="call-{{ $call->id }}"
-            wire:click="selectCall({{ $call->id }})"
-            class="flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors
-                {{ $selectedCallId === $call->id ? 'bg-zinc-100 dark:bg-zinc-700' : 'hover:bg-zinc-50 dark:hover:bg-zinc-800' }}"
+            x-on:click="selectedCallId = selectedCallId === {{ $call->id }} ? null : {{ $call->id }}"
+            class="flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors"
+            :class="selectedCallId === {{ $call->id }} ? 'bg-zinc-100 dark:bg-zinc-700' : 'hover:bg-zinc-50 dark:hover:bg-zinc-800'"
         >
             {{-- Status icon --}}
             <div class="shrink-0">
@@ -85,55 +85,50 @@
                     </span>
                 </div>
 
-                <div class="flex items-center gap-2 mt-0.5">
-                    @if ($secondaryNumber)
-                        <span class="text-sm lg:text-xs text-zinc-400">{{ $secondaryNumber }}</span>
-                    @endif
+                <div class="flex items-center justify-between gap-2 mt-0.5">
+                    <div class="flex items-center gap-2">
+                        @if ($secondaryNumber)
+                            <span class="text-sm lg:text-xs text-zinc-400">{{ $secondaryNumber }}</span>
+                        @endif
 
-                    @if ($call->duration_seconds && $call->duration_seconds > 0)
-                        <span class="text-sm lg:text-xs text-zinc-400">
-                            @if ($call->duration_seconds < 60)
-                                {{ $call->duration_seconds }} secs
+                        @if ($call->status === 'missed' && $call->has_voicemail)
+                            <span class="text-sm lg:text-xs text-red-400 font-medium">Missed</span>
+                            <span class="text-sm lg:text-xs text-indigo-500 font-medium">Voicemail</span>
+                        @elseif ($call->status === 'missed')
+                            <span class="text-sm lg:text-xs text-red-400 font-medium">Missed</span>
+                        @elseif ($call->status === 'failed')
+                            <span class="text-sm lg:text-xs text-rose-500 font-medium">Failed</span>
+                        @endif
+                    </div>
+
+                    @if ($call->duration_seconds && abs($call->duration_seconds) > 0)
+                        @php $dur = abs($call->duration_seconds); @endphp
+                        <span class="text-sm lg:text-xs text-zinc-400 whitespace-nowrap italic">
+                            @if ($dur < 60)
+                                {{ $dur }}s
                             @else
-                                {{ round($call->duration_seconds / 60) }} mins
+                                {{ floor($dur / 60) }}m {{ $dur % 60 }}s
                             @endif
                         </span>
-                    @endif
-
-                    @if ($call->status === 'missed' && $call->has_voicemail)
-                        <span class="text-sm lg:text-xs text-red-400 font-medium">Missed</span>
-                        <span class="text-sm lg:text-xs text-indigo-500 font-medium">Voicemail</span>
-                    @elseif ($call->status === 'missed')
-                        <span class="text-sm lg:text-xs text-red-400 font-medium">Missed</span>
-                    @elseif ($call->status === 'failed')
-                        <span class="text-sm lg:text-xs text-rose-500 font-medium">Failed</span>
                     @endif
                 </div>
 
                 {{-- Expanded details --}}
-                @if ($selectedCallId === $call->id)
-                    <div class="mt-2 pt-2 border-t border-zinc-200 dark:border-zinc-600 space-y-2">
-                        <div class="flex items-center justify-between">
-                            <div class="text-sm lg:text-xs text-zinc-500">
-                                {{ $call->created_at->copy()->setTimezone(browser_timezone())->format('M j, Y g:i A') }}
-                                @if ($call->forwarded_to && $this->formatPhone($call->forwarded_to) !== $formattedOther)
-                                    &middot; {{ $this->formatPhone($call->forwarded_to) }}
-                                @endif
-                            </div>
-
-                            <div class="flex items-center gap-1">
-                                @if ($otherNumber)
-                                    <flux:button size="xs" variant="ghost" icon="chat-bubble-left" wire:click.stop="textBack('{{ $otherNumber }}')">
-                                        Text
-                                    </flux:button>
-                                @endif
-                                @if ($otherNumber)
-                                    <flux:button size="xs" variant="primary" icon="phone" wire:click.stop="callBack('{{ $otherNumber }}')">
-                                        Call Back
-                                    </flux:button>
-                                @endif
-                            </div>
+                <div x-show="selectedCallId === {{ $call->id }}" x-cloak class="mt-2 pt-2 border-t border-zinc-200 dark:border-zinc-600 space-y-2">
+                        <div class="text-sm lg:text-xs text-zinc-500">
+                            {{ $call->created_at->copy()->setTimezone(browser_timezone())->format('M j, Y g:i A') }}
                         </div>
+
+                        @if ($otherNumber)
+                            <div class="flex flex-col gap-1">
+                                <flux:button size="xs" variant="primary" icon="phone" wire:click.stop="callBack('{{ $otherNumber }}')">
+                                    Call Back
+                                </flux:button>
+                                <flux:button size="xs" variant="ghost" icon="chat-bubble-left" wire:click.stop="textBack('{{ $otherNumber }}')">
+                                    Text
+                                </flux:button>
+                            </div>
+                        @endif
 
                         @if ($call->has_voicemail && $call->recording_url)
                             <div class="mt-1">
@@ -150,8 +145,7 @@
                                 </audio>
                             </div>
                         @endif
-                    </div>
-                @endif
+                </div>
             </div>
         </div>
     @empty

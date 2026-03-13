@@ -19,7 +19,6 @@ class SmsThreadList extends Component
     #[Reactive]
     public string $search = '';
 
-    #[Reactive]
     public ?int $selectedThreadId = null;
 
     #[Reactive]

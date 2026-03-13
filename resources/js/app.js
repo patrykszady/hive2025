@@ -6,6 +6,13 @@ import Pusher from 'pusher-js';
 // Register/update service worker on every page load to replace stale versions
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
+
+    // Handle navigation requests from notification clicks (iOS fallback)
+    navigator.serviceWorker.addEventListener('message', (event) => {
+        if (event.data?.type === 'navigate-url' && event.data?.url) {
+            window.location.href = event.data.url;
+        }
+    });
 }
 
 window.Pusher = Pusher;

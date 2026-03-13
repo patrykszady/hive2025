@@ -321,13 +321,14 @@ class CallList extends Component
      */
     public function textBack(string $phone): void
     {
-        $telnyxFrom = config('services.telnyx.from');
-        $thread = SmsGroupThread::findByParticipant($telnyxFrom, $phone);
+        $thread = SmsGroupThread::whereJsonContains('participants', $phone)
+            ->orderByDesc('last_activity_at')
+            ->first();
 
         if ($thread) {
             $this->redirect(route('sms.index', ['threadId' => $thread->id, 'activeTab' => 'messages']), navigate: true);
         } else {
-            Flux::toast(variant: 'warning', heading: 'No Thread', text: 'No message thread found for this number.', duration: 4000, position: 'top right');
+            $this->dispatch('openNewThreadWithPhone', phone: $phone)->to(SmsNewThread::class);
         }
     }
 

@@ -26,6 +26,7 @@ class SmsIndex extends Component
     protected $listeners = [
         'threadCreated' => 'selectThread',
         'threadSelected' => 'selectThread',
+        'threadDeleted' => 'handleThreadDeleted',
     ];
 
     public function mount(): void
@@ -67,12 +68,22 @@ class SmsIndex extends Component
 
         // Notify conversation directly so it can swap threads without re-mounting
         $this->dispatch('loadThread', threadId: $threadId)->to(SmsConversation::class);
+
+        // Browser event for Alpine-driven thread highlighting (avoids full child re-render)
+        $this->js("window.dispatchEvent(new CustomEvent('thread-selected', { detail: { threadId: ".json_encode($threadId)." } }))");
     }
 
     public function clearThread(): void
     {
         $this->threadId = null;
         $this->dispatch('loadThread', threadId: null)->to(SmsConversation::class);
+        $this->js("window.dispatchEvent(new CustomEvent('thread-selected', { detail: { threadId: null } }))");
+    }
+
+    public function handleThreadDeleted(): void
+    {
+        $this->threadId = null;
+        $this->js("window.dispatchEvent(new CustomEvent('thread-selected', { detail: { threadId: null } }))");
     }
 
     public function autoSelectLatestDesktopThread(): void

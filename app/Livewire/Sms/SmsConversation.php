@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Sms;
 
+use App\Livewire\Sms\SmsIndex;
 use App\Livewire\Sms\SmsNewThread;
 use App\Models\CallLog;
 use App\Models\SmsGroupThread;
@@ -42,13 +43,15 @@ class SmsConversation extends Component
 
     public bool $showOptInModal = false;
 
+    public bool $showDeleteConfirm = false;
+
     public string $manualOptInReason = '';
 
     public ?int $manualOptInParticipantId = null;
 
     protected ?int $lastMarkedMessageId = null;
 
-    public int $messageLimit = 100;
+    public int $messageLimit = 30;
 
     public function mount(): void
     {
@@ -71,7 +74,7 @@ class SmsConversation extends Component
         }
 
         $this->threadId = $threadId;
-        $this->messageLimit = 100;
+        $this->messageLimit = 30;
         $this->newMessage = '';
         $this->attachment = null;
         $this->showImageLightbox = false;
@@ -148,7 +151,30 @@ class SmsConversation extends Component
 
     public function loadMoreMessages(): void
     {
-        $this->messageLimit += 100;
+        $this->messageLimit += 50;
+    }
+
+    public function deleteThread(): void
+    {
+        if ($this->isClientUser) {
+            abort(403, 'Client users cannot delete threads.');
+        }
+
+        if (! $this->threadId) {
+            return;
+        }
+
+        $thread = SmsGroupThread::findOrFail($this->threadId);
+
+        $thread->messages()->delete();
+        $thread->reads()->delete();
+        $thread->threadParticipants()->delete();
+        $thread->delete();
+
+        $this->showDeleteConfirm = false;
+        $this->threadId = null;
+
+        $this->dispatch('threadDeleted')->to(SmsIndex::class);
     }
 
     public function updatedThreadId(): void

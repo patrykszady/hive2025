@@ -1,6 +1,6 @@
 <div
     x-data="{
-        pending: null,
+        selected: @js($selectedThreadId),
         pulling: false,
         pullY: 0,
         startY: 0,
@@ -37,7 +37,7 @@
             }
         },
     }"
-    x-init="$watch('$wire.selectedThreadId', v => { if (v !== pending) pending = null })"
+    x-on:thread-selected.window="selected = $event.detail.threadId"
     x-on:touchstart.passive="onTouchStart($event)"
     x-on:touchmove="onTouchMove($event)"
     x-on:touchend="onTouchEnd()"
@@ -63,16 +63,11 @@
     @forelse ($this->threads as $thread)
         <button
             wire:key="thread-{{ $thread->id }}"
-            x-on:click="pending = {{ $thread->id }}; Livewire.dispatch('threadSelected', { threadId: {{ $thread->id }} }); $dispatch('thread-switching')"
-            @class([
-                'w-full text-left px-3 py-2.5 rounded-lg',
-                'bg-zinc-100 dark:bg-zinc-700' => $selectedThreadId === $thread->id,
-                'hover:bg-zinc-50 dark:hover:bg-zinc-800' => $selectedThreadId !== $thread->id,
-            ])
-            x-bind:class="pending !== null && {
-                '!bg-zinc-100 dark:!bg-zinc-700': pending === {{ $thread->id }},
-                '!bg-transparent hover:!bg-zinc-50 dark:hover:!bg-zinc-800': pending !== {{ $thread->id }} && {{ $selectedThreadId === $thread->id ? 'true' : 'false' }},
-            }"
+            x-on:click="selected = {{ $thread->id }}; Livewire.dispatch('threadSelected', { threadId: {{ $thread->id }} }); $dispatch('thread-switching')"
+            class="w-full text-left px-3 py-2.5 rounded-lg"
+            x-bind:class="selected === {{ $thread->id }}
+                ? 'bg-zinc-100 dark:bg-zinc-700'
+                : 'hover:bg-zinc-50 dark:hover:bg-zinc-800'"
         >
             <div class="flex items-center justify-between gap-2">
                 <div class="min-w-0 flex-1">
@@ -145,5 +140,19 @@
         </div>
     @endif
 </div>
+
+@script
+<script>
+    const scrollEl = $wire.$el;
+
+    Livewire.hook('commit', ({ component, succeed }) => {
+        if (component.id !== $wire.$id) return;
+        const top = scrollEl.scrollTop;
+        succeed(() => {
+            scrollEl.scrollTop = top;
+        });
+    });
+</script>
+@endscript
 
 

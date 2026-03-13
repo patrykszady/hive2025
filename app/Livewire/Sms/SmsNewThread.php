@@ -25,11 +25,22 @@ class SmsNewThread extends Component
 
     public string $newNumber = '';
 
-    protected $listeners = ['openNewThread' => 'open'];
+    protected $listeners = [
+        'openNewThread' => 'open',
+        'openNewThreadWithPhone' => 'openWithPhone',
+    ];
 
     public function open(): void
     {
         $this->reset(['clientId', 'message', 'existingThreadId', 'recipients', 'newNumber']);
+        $this->showModal = true;
+    }
+
+    public function openWithPhone(string $phone): void
+    {
+        $this->reset(['clientId', 'message', 'existingThreadId', 'recipients', 'newNumber']);
+        $this->newNumber = $phone;
+        $this->addNumber();
         $this->showModal = true;
     }
 

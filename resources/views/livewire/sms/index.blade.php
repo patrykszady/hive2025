@@ -150,6 +150,8 @@
                     if (event.data?.type === 'navigate-thread' && event.data?.threadId) {
                         $wire.selectThread(event.data.threadId);
                         stopFlashing();
+                    } else if (event.data?.type === 'navigate-url' && event.data?.url) {
+                        window.location.href = event.data.url;
                     }
                 });
             }

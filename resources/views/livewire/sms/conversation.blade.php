@@ -105,6 +105,26 @@
                         Project
                     </flux:button>
                 @endif
+
+                @if (! $isClientUser)
+                    <flux:dropdown position="bottom" align="end">
+                        <flux:button variant="ghost" size="sm" square icon="ellipsis-vertical" />
+                        <flux:menu>
+                            @if (! $this->thread->allParticipantsOptedIn())
+                                <flux:menu.item icon="arrow-path" wire:click="resendOptInPrompt">
+                                    Resend Opt-in
+                                </flux:menu.item>
+                                <flux:menu.item icon="shield-check" wire:click="openOptInModal">
+                                    Manual Opt-in
+                                </flux:menu.item>
+                                <flux:separator />
+                            @endif
+                            <flux:menu.item variant="danger" icon="trash" x-on:click="$wire.showDeleteConfirm = true">
+                                Delete Thread
+                            </flux:menu.item>
+                        </flux:menu>
+                    </flux:dropdown>
+                @endif
             </div>
 
             @if (! $isClientUser)
@@ -432,26 +452,6 @@
                     <div class="ml-auto flex items-center gap-2 whitespace-nowrap">
                         <flux:icon name="exclamation-triangle" class="size-4 text-amber-500" />
                         <flux:text class="text-xs text-amber-600 dark:text-amber-400">Awaiting START reply</flux:text>
-
-                        <flux:button
-                            type="button"
-                            size="xs"
-                            variant="primary"
-                            color="amber"
-                            wire:click="resendOptInPrompt"
-                            class="data-loading:opacity-50 data-loading:pointer-events-none"
-                        >
-                            Resend
-                        </flux:button>
-
-                        <flux:button
-                            type="button"
-                            size="xs"
-                            variant="primary"
-                            wire:click="openOptInModal"
-                        >
-                            Manual Opt-in
-                        </flux:button>
                     </div>
                 @endif
             </div>
@@ -797,6 +797,25 @@
                         :style="`transform: scale(${scale}) translate(${translateX / scale}px, ${translateY / scale}px); transform-origin: center center;`"
                         draggable="false"
                     />
+                </div>
+            </div>
+        </flux:modal>
+
+        {{-- Delete Thread Confirmation --}}
+        <flux:modal wire:model.self="showDeleteConfirm" class="min-w-[22rem]">
+            <div class="space-y-6">
+                <div>
+                    <flux:heading size="lg">Delete thread?</flux:heading>
+                    <flux:text class="mt-2">
+                        This will permanently delete this conversation and all its messages. This action cannot be undone.
+                    </flux:text>
+                </div>
+                <div class="flex gap-2">
+                    <flux:spacer />
+                    <flux:modal.close>
+                        <flux:button variant="ghost">Cancel</flux:button>
+                    </flux:modal.close>
+                    <flux:button variant="danger" wire:click="deleteThread">Delete</flux:button>
                 </div>
             </div>
         </flux:modal>
