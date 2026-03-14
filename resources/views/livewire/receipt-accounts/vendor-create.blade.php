@@ -1,5 +1,5 @@
 <x-form-modal name="receipt_account_vendor_form_modal" :title="$vendor->name ?? 'NO VENDOR'">
-    <flux:subheading class="mb-4">Choose which Distribution all receipts or transactions from {{ $vendor->name ?? 'this vendor' }} should be automatically attached to. Select NO DISTRIBUTION if you do not want to assign automatically but still save the expense(will be asked to match project manually) </flux:subheading>
+    <flux:subheading class="mb-4">Create automatic receipt and transaction matches for {{ $vendor->name ?? 'this vendor' }}. Matched expenses will be assigned a distribution automatically.</flux:subheading>
 
     <flux:separator text="Recurring Expenses/Transactions" variant="subtle" />
 
@@ -29,18 +29,7 @@
         </flux:table.rows>
     </flux:table>
 
-    <flux:separator text="Distribution for all receipts and transactions" variant="subtle" />
-
     <form id="receipt_account_vendor_form_modal_form" wire:submit="store" class="space-y-4">
-        <flux:select label="Distribution" wire:model.live="distribution_id" variant="listbox" placeholder="Select Distribution...">
-            <flux:select.option value="NO_PROJECT">NO DISTRIBUTION</flux:select.option>
-            @foreach($distributions as $distribution)
-                <flux:select.option value="{{$distribution->id}}">{{$distribution->name}}</flux:select.option>
-            @endforeach
-        </flux:select>
-
-        <flux:separator text="Unless receipt/transaction Amount is Matched below:" variant="subtle" />
-
         <flux:card class="space-y-4">
             {{-- HEADING --}}
             <div class="flex justify-between">

@@ -26,7 +26,7 @@ class ReceiptAccountVendorCreate extends Component
 
     // public BulkMatchForm $form;
     public $distributions = []; //coming from ReceiptAccountsIndex
-    public $distribution_id = null;
+
     public $transactions_bulk_matches = []; //simple array, not models
     public $vendor_transactions = [];
 
@@ -38,12 +38,10 @@ class ReceiptAccountVendorCreate extends Component
     {
         return [
             'vendor.logged_in' => 'nullable',
-            'distribution_id' => 'required',
             'transactions_bulk_matches.*.options.amount_type' => 'required',
             'transactions_bulk_matches.*.options.desc' => 'nullable',
             'transactions_bulk_matches.*.amount' => [
                 'required_unless:transactions_bulk_matches.*.options.amount_type,ANY',
-                //'numeric', // Optionally enforce numeric validation here if applicable
             ],
             'transactions_bulk_matches.*.distribution_id' => 'required_unless:transactions_bulk_matches.*.split,true',
             'transactions_bulk_matches.*.split' => 'nullable',
@@ -149,18 +147,6 @@ class ReceiptAccountVendorCreate extends Component
             ->sortByDesc('count'); // Sort by total count for each amount group
 
         // dd($this->vendor?->receipt_account()?->exists() ?? false);
-        $this->distribution_id = NULL;
-        if (isset($this->vendor->receipt_account)) {
-            $receipt_account = $this->vendor->receipt_account;
-            if ($receipt_account->distribution_id) {
-                $this->distribution_id = $receipt_account->distribution_id;
-            } elseif ($receipt_account->project_id === 0) {
-                $this->distribution_id = 'NO_PROJECT';
-            }
-        }
-
-        // $this->vendor->logged_in = $this->vendor->receipt_account && $this->vendor->receipt_account->options ? ($this->vendor->receipt_account->options['access_token'] ? true : false) : false;
-        // $this->vendor->logged_in = isset($this->vendor->receipt_account->options) ? (isset($this->vendor->receipt_account->options['errors']) ? false : true) : false;
 
         $this->modal('receipt_account_vendor_form_modal')->show();
     }
@@ -250,25 +236,12 @@ class ReceiptAccountVendorCreate extends Component
     {
         $this->validate();
 
-        if (is_numeric($this->distribution_id)) {
-            $distribution_id = $this->distribution_id;
-            $project_id = null;
-        } else {
-            //NO PROJECT
-            $distribution_id = null;
-            $project_id = 0;
-        }
-
         if (is_null($this->vendor->receipt_account)) {
-            //create new
             $receipt_account = new ReceiptAccount;
         } else {
-            //edit existing
             $receipt_account = $this->vendor->receipt_account;
         }
 
-        $receipt_account->project_id = $project_id;
-        $receipt_account->distribution_id = $distribution_id;
         $receipt_account->belongs_to_vendor_id = auth()->user()->vendor->id;
         $receipt_account->vendor_id = $this->vendor->id;
         $receipt_account->save();

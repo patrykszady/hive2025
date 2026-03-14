@@ -40,7 +40,8 @@ class ReceiptAccountsIndex extends Component
     public function vendors()
     {
         $vendors = Vendor::query()
-            ->with(['receipt_account.distribution'])
+            ->with(['receipt_account'])
+            ->withCount('transactions_bulk_match')
             // ->withoutGlobalScopes()
             //   ->whereIn('id', $this->receipt_accounts)
             ->whereHas('receipt_account')

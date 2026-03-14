@@ -8,6 +8,7 @@ use App\Models\ExpenseReceipts;
 use App\Models\Transaction;
 use App\Models\Receipt;
 use App\Models\ReceiptAccount;
+use App\Models\TransactionBulkMatch;
 use App\Models\Vendor;
 
 use App\Services\NylasService;
@@ -1105,12 +1106,15 @@ class CompanyEmailController extends Controller
                                 'vendor_id' => $receipt->vendor_id,
                             ]);
 
+                            // Find matching bulk match rule for this amount
+                            $bulkMatch = TransactionBulkMatch::findMatchForAmount($receipt->vendor_id, (float) $amount);
+
                             // Create new expense with receipt
                             $expense = new Expense;
                             $expense->amount = $amount;
                             $expense->reimbursment = null;
-                            $expense->project_id = $receipt_account->project_id;
-                            $expense->distribution_id = $receipt_account->distribution_id;
+                            $expense->project_id = null;
+                            $expense->distribution_id = $bulkMatch?->distribution_id;
                             $expense->created_by_user_id = 0; //automated
                             $expense->date = $date;
                             $expense->invoice = $invoice;
@@ -1118,6 +1122,9 @@ class CompanyEmailController extends Controller
                             $expense->note = null;
                             $expense->belongs_to_vendor_id = $receipt_account->belongs_to_vendor_id;
                             $expense->save();
+
+                            // Apply splits if the match has them
+                            $bulkMatch?->applySplits($expense, (float) $amount);
 
                             //ATTACHMENTS
                             $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, !empty($receipt->options['html_to_pdf']) ? null : $message);
@@ -1136,12 +1143,15 @@ class CompanyEmailController extends Controller
                                 ]);
                             }
                         } else {
+                            // Find matching bulk match rule for this amount
+                            $bulkMatch = TransactionBulkMatch::findMatchForAmount($receipt->vendor_id, (float) $amount);
+
                             // No duplicate and no partial expenses found - create new expense
                             $expense = new Expense;
                             $expense->amount = $amount;
                             $expense->reimbursment = null;
-                            $expense->project_id = $receipt_account->project_id;
-                            $expense->distribution_id = $receipt_account->distribution_id;
+                            $expense->project_id = null;
+                            $expense->distribution_id = $bulkMatch?->distribution_id;
                             $expense->created_by_user_id = 0; //automated
                             $expense->date = $date;
                             $expense->invoice = $invoice;
@@ -1149,6 +1159,9 @@ class CompanyEmailController extends Controller
                             $expense->note = null;
                             $expense->belongs_to_vendor_id = $receipt_account->belongs_to_vendor_id;
                             $expense->save();
+
+                            // Apply splits if the match has them
+                            $bulkMatch?->applySplits($expense, (float) $amount);
 
                             //ATTACHMENTS
                             $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, !empty($receipt->options['html_to_pdf']) ? null : $message);

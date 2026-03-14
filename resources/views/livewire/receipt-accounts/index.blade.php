@@ -21,7 +21,7 @@
     <flux:table>
         <flux:table.columns>
             <flux:table.column>Vendor</flux:table.column>
-            <flux:table.column>Project</flux:table.column>
+            <flux:table.column>Matches</flux:table.column>
             <flux:table.column>Details</flux:table.column>
         </flux:table.columns>
 
@@ -35,7 +35,11 @@
                         >
                         {{ $vendor->name }}
                     </flux:table.cell>
-                    <flux:table.cell>{{ !isset($vendor->receipt_account) ? '' : ($vendor->receipt_account->distribution_id ? $vendor->receipt_account->distribution->name : 'NO DISTRIBUTION') }}</flux:table.cell>
+                    <flux:table.cell>
+                        <flux:badge size="sm" color="sky" inset="top bottom">
+                            {{ $vendor->transactions_bulk_match_count ?? 0 }} {{ Str::plural('match', $vendor->transactions_bulk_match_count ?? 0) }}
+                        </flux:badge>
+                    </flux:table.cell>
                     <flux:table.cell>
                         {{-- <flux:badge size="sm" :color="$vendor->status == 'Active' ? 'green' : ($vendor->status == 'Disabled' ? 'red' : 'indigo')" inset="top bottom">
                             {{ $vendor->type }}

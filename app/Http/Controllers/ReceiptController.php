@@ -10,6 +10,7 @@ use App\Models\Project;
 use App\Models\Receipt;
 use App\Models\ReceiptAccount;
 use App\Models\Transaction;
+use App\Models\TransactionBulkMatch;
 use App\Models\Vendor;
 use App\Services\NylasService;
 // use App\Http\Requests\GetGiftCardRequest;
@@ -291,18 +292,19 @@ class ReceiptController extends Controller
                     //7-17-2023 duplicate by Invoice/ Order # only... see if Order status changed
                     if ($duplicates->isEmpty()) {
                         //create expense
+                        $bulkMatch = TransactionBulkMatch::findMatchForAmount(54, (float) $order['orderNetTotal']['amount']);
                         $expense = Expense::create([
                             'amount' => $order['orderNetTotal']['amount'],
                             'date' => $order_date,
-                            // /$receipt_account->project_id
                             'project_id' => null,
-                            'distribution_id' => $receipt_account->distribution_id,
+                            'distribution_id' => $bulkMatch?->distribution_id,
                             'created_by_user_id' => 0, //automated
                             'invoice' => $order['orderId'],
                             'vendor_id' => 54, //54 = AMAZON
                             'note' => null,
                             'belongs_to_vendor_id' => $receipt_account->belongs_to_vendor_id,
                         ]);
+                        $bulkMatch?->applySplits($expense, (float) $order['orderNetTotal']['amount']);
                     } else {
                         $expense = $duplicates->first();
                         if ($order['orderStatus'] == 'CANCELLED') {
@@ -457,18 +459,20 @@ class ReceiptController extends Controller
                 if ($duplicates->isEmpty()) {
                     //create expense Model
                     //CREATE expense
+                    $refundAmount = (float) $transaction['amount']['amount'];
+                    $bulkMatch = TransactionBulkMatch::findMatchForAmount(54, $refundAmount);
                     $expense = Expense::create([
                         'amount' => '-'.$transaction['amount']['amount'],
                         'date' => $order_date,
-                        // $receipt_account->project_id
                         'project_id' => null,
-                        'distribution_id' => $receipt_account->distribution_id,
+                        'distribution_id' => $bulkMatch?->distribution_id,
                         'created_by_user_id' => 0, //automated
                         'invoice' => $order_id,
                         'vendor_id' => 54, //54 = AMAZON
                         'note' => null,
                         'belongs_to_vendor_id' => $receipt_account->belongs_to_vendor_id,
                     ]);
+                    $bulkMatch?->applySplits($expense, $refundAmount);
 
                     //find associated expense and link
                     $associated =

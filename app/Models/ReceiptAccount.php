@@ -36,11 +36,6 @@ class ReceiptAccount extends Model
         return $this->belongsTo(Vendor::class);
     }
 
-    public function distribution(): BelongsTo
-    {
-        return $this->belongsTo(Distribution::class);
-    }
-
     /**
      * Receipts associated to this receipt account via shared vendor_id.
      */
