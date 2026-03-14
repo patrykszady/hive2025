@@ -645,7 +645,20 @@ class TransactionController extends Controller
                         continue;
                     }
 
-                    // 2) Otherwise, map from Plaid detailed category
+                    // 2) Override: map transaction name to category (exact or prefix match)
+                    $transactionName = $transaction->details['name'] ?? null;
+                    if ($transactionName) {
+                        $nameOverride = $this->resolveNameOverride($transactionName, $categories);
+                        if ($nameOverride) {
+                            if ((int) $transaction->expense->category_id !== (int) $nameOverride->id) {
+                                $transaction->expense->category()->associate($nameOverride);
+                                $transaction->expense->save();
+                            }
+                            continue;
+                        }
+                    }
+
+                    // 3) Otherwise, map from Plaid detailed category
                     $transaction_category = $transaction->details['personal_finance_category']['detailed'] ?? null;
                     if ($transaction_category) {
                         $category = $categories->where('detailed', $transaction_category)->first();
@@ -741,6 +754,44 @@ class TransactionController extends Controller
                     ->update(['category_id' => $category]);
             }
         }
+    }
+
+    /**
+     * Transaction name-to-category overrides.
+     * Exact matches are checked first, then prefix (startsWith) matches.
+     *
+     * @return array<string, string> name pattern => category detailed code
+     */
+    private function transactionNameOverrides(): array
+    {
+        return [
+            // Exact matches
+            'PAST DUE FEE' => 'BANK_FEES_LATE_FEES',
+            'INTEREST CHARGE:PURCHASES' => 'BANK_FEES_INTEREST_CHARGE',
+            'INTEREST CHARGE ADJUSTMENT' => 'INCOME_INTEREST_EARNED',
+
+            // Prefix matches (checked via str_starts_with)
+            'CAPITAL ONE MOBILE PYMT' => 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT',
+            'CAPITAL ONE AUTOPAY PYMT' => 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT',
+            'CAPITAL ONE ONLINE PYMT' => 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT',
+            'CAPITAL ONE CRCARDPMT' => 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT',
+            'CAPITAL ONE MEMBER FEE' => 'BANK_FEES_OTHER_BANK_FEES',
+            'OTHER DECREASE CAPITAL ONE' => 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT',
+        ];
+    }
+
+    /**
+     * Resolve a category override from transaction name.
+     */
+    private function resolveNameOverride(string $name, $categories): ?Category
+    {
+        foreach ($this->transactionNameOverrides() as $pattern => $detailed) {
+            if ($name === $pattern || str_starts_with($name, $pattern)) {
+                return $categories->where('detailed', $detailed)->first();
+            }
+        }
+
+        return null;
     }
 
     public function add_vendor_to_transactions()

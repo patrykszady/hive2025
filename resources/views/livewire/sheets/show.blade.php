@@ -206,6 +206,67 @@
         </x-slot:header_buttons>
     </x-details.card>
 
+    {{-- UNCATEGORIZED EXPENSES --}}
+    @if($this->uncategorizedExpenses()->isNotEmpty())
+        <x-details.card title="Uncategorized Expenses" :expanded="false" :details_text="false">
+            <x-slot:header_buttons>
+                <flux:badge color="amber" size="sm">
+                    {{ $this->uncategorizedExpenses()->count() }} expenses
+                </flux:badge>
+            </x-slot:header_buttons>
+            <x-slot name="subheading">
+                <span class="text-sm italic text-zinc-500 dark:text-zinc-400">
+                    Expenses linked to bank transactions but missing a category. Select a category to assign it.
+                </span>
+            </x-slot>
+            <x-slot:details>
+                @foreach($this->uncategorizedExpenses() as $expense)
+                    <div wire:key="uncat-{{ $expense->id }}" class="flex items-center justify-between gap-3 px-3 py-2 border-b border-zinc-100 dark:border-zinc-700 last:border-b-0">
+                        <div class="min-w-0 flex-1">
+                            <div class="flex items-center gap-2">
+                                <span class="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                                    {{ money($expense->amount) }}
+                                </span>
+                                <span class="text-xs text-zinc-500 dark:text-zinc-400">
+                                    {{ $expense->date->format('m/d/Y') }}
+                                </span>
+                            </div>
+                            <div class="text-sm text-zinc-600 dark:text-zinc-300 truncate">
+                                @if($expense->vendor)
+                                    <a href="{{ route('vendors.show', $expense->vendor_id) }}" class="hover:underline">
+                                        {{ $expense->vendor->business_name }}
+                                    </a>
+                                @else
+                                    <span class="text-zinc-400">No Vendor</span>
+                                @endif
+                            </div>
+                        </div>
+                        <div class="shrink-0 w-56" x-data="{ categoryId: null }" x-effect="if (categoryId) { $wire.categorizeExpense({{ $expense->id }}, categoryId) }">
+                            <flux:select
+                                size="sm"
+                                variant="listbox"
+                                searchable
+                                placeholder="Select category..."
+                                x-model="categoryId"
+                            >
+                                @foreach($this->availableCategories() as $category)
+                                    <flux:select.option value="{{ $category->id }}">
+                                        {{ $category->friendly_primary }} — {{ $category->friendly_detailed }}
+                                    </flux:select.option>
+                                @endforeach
+                            </flux:select>
+                        </div>
+                    </div>
+                @endforeach
+            </x-slot:details>
+            <x-slot:footer>
+                <flux:button size="sm" variant="primary" color="amber" disabled>
+                    {{ money($this->uncategorizedExpenses()->sum('amount')) }}
+                </flux:button>
+            </x-slot:footer>
+        </x-details.card>
+    @endif
+
     {{-- UNASSIGNED TRANSACTIONS --}}
     {{-- <x-details.card title="Unassigned Transactions" :expanded="false" details_text="Create Expense">
         <x-slot name="subheading">

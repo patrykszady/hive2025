@@ -37,8 +37,8 @@ class AppSidebar extends Component
         });
 
         // Route-dependent state should not be cached — it changes per request.
-        $sidebarData['accountingExpanded'] = request()->is('banks*', 'distributions*', 'sheets*')
-            || request()->routeIs('banks*', 'distributions*', 'sheets*');
+        $sidebarData['accountingExpanded'] = request()->is('banks*', 'distributions*', 'sheets*', 'vendors/categories*')
+            || request()->routeIs('banks*', 'distributions*', 'sheets*', 'categories*');
         $sidebarData['globalActionsExpanded'] = request()->is('transactions/match_vendor');
         $sidebarData['settingsExpanded'] = request()->is('email_templates*', 'company_emails*', 'vendor_docs*', 'vendor_options*')
             || request()->routeIs('email_templates*', 'company_emails*', 'vendor_docs*', 'vendor_options*');

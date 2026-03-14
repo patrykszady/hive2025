@@ -5,8 +5,6 @@ namespace App\Livewire\Vendors;
 use App\Livewire\Forms\VendorForm;
 use App\Models\User;
 use App\Models\Vendor;
-use App\Models\Expense;
-use App\Models\Category;
 
 use App\Services\GooglePlacesService;
 use App\Traits\HandlesAddresses;
@@ -43,9 +41,6 @@ class VendorCreate extends Component
     public $new_vendors_for_company = null;
 
     public $open_vendor_form = false;
-    
-    // For expenses tab
-    public $expense_period = 'all'; // Possible values: 'month', 'quarter', 'year', 'all'
 
     protected $listeners =
         [
@@ -84,72 +79,6 @@ class VendorCreate extends Component
         return (bool) $this->user && ($this->form->business_type !== 'Retail');
     }
 
-    #[Computed]
-    public function vendorExpensesByCategory()
-    {
-        // Only get expenses if we're editing an existing vendor
-        if (!isset($this->form->vendor) || !$this->form->vendor->id) {
-            return collect();
-        }
-
-        $expenses = Expense::query()
-            ->where('vendor_id', $this->form->vendor->id)
-            ->with('category')
-            ->get();
-        
-        // Group expenses by primary category first
-        $groupedByPrimary = $expenses->groupBy(function($expense) {
-            return $expense->category ? $expense->category->friendly_primary : 'Uncategorized';
-        });
-        
-        // Calculate totals and prepare data for display with subcategories
-        $result = [];
-        foreach ($groupedByPrimary as $primaryName => $primaryItems) {
-            // Group by subcategory (friendly_detailed)
-            $subcategoriesGrouped = $primaryItems->groupBy(function($expense) {
-                return $expense->category ? $expense->category->friendly_detailed : 'Uncategorized';
-            });
-            
-            $subcategoryData = [];
-            foreach ($subcategoriesGrouped as $subcategoryName => $items) {
-                $subcategoryData[] = [
-                    'name' => $subcategoryName,
-                    'total' => $items->sum('amount'),
-                    'count' => $items->count(),
-                    'expenses' => $items->sortByDesc('date')->values()
-                ];
-            }
-            
-            // Sort subcategories by total amount (highest first)
-            usort($subcategoryData, function($a, $b) {
-                return $b['total'] <=> $a['total'];
-            });
-            
-            $result[$primaryName] = [
-                'name' => $primaryName,
-                'total' => $primaryItems->sum('amount'),
-                'count' => $primaryItems->count(),
-                'subcategories' => $subcategoryData
-            ];
-        }
-        
-        // Sort primary categories by total amount (highest first)
-        return collect($result)->sortByDesc('total');
-    }
-    
-    #[Computed]
-    public function totalExpenses()
-    {
-        return $this->vendorExpensesByCategory()->sum('total');
-    }
-
-    public function updateExpensePeriod($period)
-    {
-        $this->expense_period = $period;
-    }
-
-    public $selectedCategoryId = null;
-
     public function editVendor(Vendor $vendor)
     {
         $this->form->setVendor($vendor);
@@ -165,9 +94,6 @@ class VendorCreate extends Component
         $this->business_name_text = $vendor->business_name;
         $this->open_vendor_form = true;
         $this->vendor_add_type = $vendor->id;
-
-        // Set the selected category to the vendor's current category
-        $this->selectedCategoryId = $vendor->category_id;
 
         $this->view_text = [
             'card_title' => 'Update Vendor',
@@ -336,45 +262,6 @@ class VendorCreate extends Component
             // route / href / wire:click
             text: $vendor->name . ' was created.',
         );
-    }
-
-    #[Computed]
-    public function availableCategories()
-    {
-        return Category::orderBy('friendly_primary')
-            ->orderBy('friendly_detailed')
-            ->get();
-    }
-    
-    public function updateVendorCategory()
-    {
-        // Make sure we have a vendor
-        if (!isset($this->form->vendor) || !$this->form->vendor->id) {
-            return;
-        }
-        
-        $vendor = $this->form->vendor;
-        
-        // Update the vendor's category
-        $vendor->update([
-            'category_id' => $this->selectedCategoryId
-        ]);
-        
-        // Update all expenses for this vendor
-        $expenseCount = Expense::where('vendor_id', $vendor->id)
-            ->update(['category_id' => $this->selectedCategoryId]);
-        
-        // Show a success message
-        Flux::toast(
-            duration: 5000,
-            position: 'top right',
-            variant: 'success',
-            heading: 'Category Updated',
-            text: "Updated category for {$vendor->name} and {$expenseCount} expenses.",
-        );
-        
-        // Refresh the component to show updated data
-        $this->dispatch('refreshComponent')->self();
     }
 
     public function render()

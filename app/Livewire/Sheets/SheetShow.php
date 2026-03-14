@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Sheets;
 
+use App\Models\Category;
 use App\Models\Check;
 use App\Models\Expense;
 use App\Models\Payment;
@@ -9,6 +10,7 @@ use App\Models\Sheet;
 use App\Models\Vendor;
 use App\Models\Transaction;
 use App\Models\Timesheet;
+use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
@@ -372,6 +374,56 @@ class SheetShow extends Component
         });
         
         return $sortedCategories;
+    }
+
+    #[Computed]
+    public function uncategorizedExpenses()
+    {
+        if (!$this->end_date || empty($this->bank_account_ids)) {
+            return collect();
+        }
+
+        return Expense::whereBetween('date', [$this->start_date, $this->end_date])
+            ->whereNull('category_id')
+            ->whereHas('transactions', function ($query) {
+                $query->whereIn('bank_account_id', $this->bank_account_ids);
+            })
+            ->with(['vendor'])
+            ->orderByDesc('amount')
+            ->get();
+    }
+
+    #[Computed]
+    public function availableCategories()
+    {
+        return Category::orderBy('friendly_primary')
+            ->orderBy('friendly_detailed')
+            ->get();
+    }
+
+    public function categorizeExpense(int $expenseId, ?string $categoryId): void
+    {
+        if (!$categoryId) {
+            return;
+        }
+
+        $expense = Expense::findOrFail($expenseId);
+        $category = Category::findOrFail((int) $categoryId);
+
+        $expense->update(['category_id' => $category->id]);
+
+        // Also set the vendor's default category if it doesn't have one
+        if ($expense->vendor && !$expense->vendor->category_id) {
+            $expense->vendor->update(['category_id' => $category->id]);
+        }
+
+        unset($this->uncategorizedExpenses);
+
+        Flux::toast(
+            variant: 'success',
+            heading: 'Category Assigned',
+            text: "Expense categorized as {$category->friendly_primary} — {$category->friendly_detailed}.",
+        );
     }
 
     public function export_csv()

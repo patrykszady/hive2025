@@ -82,6 +82,7 @@
                     <flux:sidebar.item wire:navigate.hover href="/banks" icon="building-library">Banks</flux:sidebar.item>
                     <flux:sidebar.item wire:navigate.hover href="/distributions" icon="receipt-percent">Distributions</flux:sidebar.item>
                     <flux:sidebar.item wire:navigate.hover href="/sheets" icon="document-currency-dollar">Sheets</flux:sidebar.item>
+                    <flux:sidebar.item wire:navigate.hover href="/vendors/categories" icon="tag">Categories</flux:sidebar.item>
                 </flux:sidebar.group>
             @endif
         @endif

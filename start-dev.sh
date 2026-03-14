@@ -318,7 +318,7 @@ fi
     echo "🌐 Starting Cloudflare Tunnel (dev.hive.contractors)"
     echo "════════════════════════════════════════════════════════════════"
 
-    CLOUDFLARED_CONFIG="/home/patry/web/hive2025/cloudflared-config.yml"
+    CLOUDFLARED_CONFIG="/home/patryk/web/hive2025/cloudflared-config.yml"
     CLOUDFLARED_BIN="$(command -v cloudflared 2>/dev/null)"
     if [ -z "$CLOUDFLARED_BIN" ] && [ -x "$HOME/.local/bin/cloudflared" ]; then
       CLOUDFLARED_BIN="$HOME/.local/bin/cloudflared"

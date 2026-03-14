@@ -350,14 +350,12 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
     //VENDORS
     Route::get('/vendors', VendorsIndex::class)->name('vendors.index');
     Route::get('/vendors/sheet_types', VendorSheetsTypeIndex::class)->name('vendors.sheets_type');
+    Route::get('/vendors/categories', CategoriesIndex::class)->name('categories.index');
     Route::get('/vendors/{vendor}', VendorShow::class)
         // Redirect to dashboard if requesting own primary vendor (separate from authorization)
         ->middleware(['vendor.own-redirect', 'can:view,vendor'])
         ->name('vendors.show');
     Route::get('/vendors/{vendor}/payment', VendorPaymentCreate::class)->name('vendors.payment');
-
-    //CATEGORIES
-    Route::get('/categories', CategoriesIndex::class)->name('categories.index');
 
     //ESTIMATES
     Route::get('/estimates', EstimatesIndex::class)->name('estimates.index');
