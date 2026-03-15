@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Laravel\Scout\Searchable;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 class Transaction extends Model
 {
@@ -36,6 +37,27 @@ class Transaction extends Model
     protected static function booted()
     {
         static::addGlobalScope(new TransactionScope);
+
+        // Prevent linking a transaction to an expense with a different vendor
+        static::saving(function ($transaction) {
+            if ($transaction->isDirty('expense_id') && $transaction->expense_id !== null && $transaction->vendor_id !== null) {
+                $expense = Expense::withoutGlobalScopes()->find($transaction->expense_id);
+                if ($expense && $expense->vendor_id !== null && (int) $expense->vendor_id !== (int) $transaction->vendor_id) {
+                    // Allow service fee transactions (small amounts with SERVICEFEE in description)
+                    $isServiceFee = $transaction->amount <= 10.00 && str_contains($transaction->plaid_merchant_description ?? '', 'SERVICEFEE');
+                    if (!$isServiceFee) {
+                        Log::warning('Blocked cross-vendor transaction→expense link', [
+                            'transaction_id' => $transaction->id,
+                            'transaction_vendor_id' => $transaction->vendor_id,
+                            'transaction_amount' => $transaction->amount,
+                            'expense_id' => $transaction->expense_id,
+                            'expense_vendor_id' => $expense->vendor_id,
+                        ]);
+                        $transaction->expense_id = null;
+                    }
+                }
+            }
+        });
         
         // When a transaction is saved or deleted, re-index related expenses
         // This ensures expense status updates when check transactions change

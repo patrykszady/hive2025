@@ -1254,6 +1254,10 @@ class TransactionController extends Controller
 
                                 foreach ($transaction_results as $transaction) {
                                     $transaction = Transaction::findOrFail($transaction['transaction_id']);
+                                    // Only link if vendor matches (service fee transactions are excluded)
+                                    if ($transaction->vendor_id !== $expense->vendor_id && !str_contains($transaction->plaid_merchant_description ?? '', 'SERVICEFEE')) {
+                                        continue;
+                                    }
                                     $transaction->expense()->associate($expense);
                                     $transaction->save();
                                 }
@@ -2529,6 +2533,7 @@ class TransactionController extends Controller
                             //find duplicate expenses
                             $duplicates =
                                 Expense::where('belongs_to_vendor_id', $transaction->bank_account->bank->vendor_id)->
+                                    where('vendor_id', $transaction->vendor_id)->
                                     whereNull('deleted_at')->
                                     where('amount', $transaction->amount)->
                                     whereBetween('date', [$duplicate_start_date, $duplicate_end_date])->
