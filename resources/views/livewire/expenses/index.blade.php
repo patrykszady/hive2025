@@ -273,19 +273,7 @@
     @endif
 
     @if($view === NULL && auth()->user()->can('create', App\Models\Expense::class))
-        <x-island-card heading="Transactions" wire:init="loadTransactions" x-data="{
-            init() {
-                window.addEventListener('remove-transaction-row', (event) => {
-                    const transactionId = event.detail.id;
-                    const row = document.querySelector(`[data-transaction-row='${transactionId}']`);
-                    if (row) {
-                        row.style.transition = 'opacity 0.3s ease-out';
-                        row.style.opacity = '0';
-                        setTimeout(() => row.remove(), 300);
-                    }
-                });
-            }
-        }">
+        <x-island-card heading="Transactions" wire:init="loadTransactions">
 
             <div>
                 @if($this->transactionsReady)
@@ -300,7 +288,7 @@
 
                         <flux:table.rows>
                             @foreach ($this->transactions as $transaction)
-                                <flux:table.row :key="$transaction->id" data-transaction-row="{{ $transaction->id }}">
+                                <flux:table.row :key="$transaction->id" wire:transition>
                                     <flux:table.cell
                                         wire:click="$dispatchTo('expenses.expense-create', 'createExpenseFromTransaction', { transaction: {{$transaction->id}}})"
                                         variant="strong"

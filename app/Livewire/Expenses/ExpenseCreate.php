@@ -3,6 +3,7 @@
 namespace App\Livewire\Expenses;
 
 use App\Livewire\Forms\ExpenseForm;
+use App\Livewire\Expenses\ExpenseIndex;
 use App\Models\BankAccount;
 use App\Models\Check;
 use App\Models\Distribution;
@@ -491,6 +492,9 @@ class ExpenseCreate extends Component
             return $this->addError('no_splits', 'Splits required if Project is Split');
         }
 
+        // Capture transaction ID before store/reset clears it
+        $transactionId = $this->form->transaction?->id;
+
         $expense = $this->form->store($this->existing_check_id);
         
         // If user selected an existing check, recalculate check amount
@@ -506,13 +510,12 @@ class ExpenseCreate extends Component
 
         $this->resetModal();
         
-        // If created from transaction, dispatch event to remove it from the UI
-        if ($this->form->transaction) {
-            $this->dispatch('transaction-used', transactionId: $this->form->transaction->id);
+        // Dispatch transaction removal (captured before resetModal cleared form)
+        if ($transactionId) {
+            $this->dispatch('transaction-used', transactionId: $transactionId);
+        } else {
+            $this->dispatch('refreshComponent')->to(ExpenseIndex::class);
         }
-        //queue
-
-        $this->dispatch('refreshComponent')->to('expenses.expense-index');
     }
 
     public function render()

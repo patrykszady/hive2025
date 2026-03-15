@@ -10,8 +10,6 @@
         id="expenses_form_modal_form"
         wire:submit="{{$view_text['form_submit']}}"
         class="space-y-4"
-        x-data="{ transactionId: {{ $form->transaction?->id ?? 'null' }} }"
-        x-on:submit="if (transactionId) { window.dispatchEvent(new CustomEvent('remove-transaction-row', { detail: { id: transactionId } })) }"
     >
         {{-- AMOUNT --}}
         <div

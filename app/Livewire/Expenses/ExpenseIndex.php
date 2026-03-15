@@ -14,6 +14,7 @@ use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Cache;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -46,8 +47,9 @@ class ExpenseIndex extends Component
     public $sortBy = 'date';
     public $sortDirection = 'desc';
     public bool $transactionsReady = false;
+    public array $removedTransactionIds = [];
 
-    protected $listeners = ['refreshComponent' => '$refresh', 'transaction-used' => 'removeTransaction'];
+    protected $listeners = ['refreshComponent' => '$refresh'];
 
     public function updating()
     {
@@ -133,12 +135,11 @@ class ExpenseIndex extends Component
         $this->transactionsReady = true;
     }
 
-    public function removeTransaction($transactionId)
+    #[On('transaction-used')]
+    public function removeTransaction(int $transactionId): void
     {
-        // This will force a refresh of the transactions computed property
-        // which will exclude the transaction since it now has an expense_id
+        $this->removedTransactionIds[] = $transactionId;
         unset($this->transactions);
-        $this->js('window.dispatchEvent(new CustomEvent("remove-transaction-row", { detail: { id: ' . $transactionId . ' } }))');
     }
 
     #[Computed]
@@ -446,6 +447,14 @@ class ExpenseIndex extends Component
             'transaction_date',
             'desc'
         )->paginate(100, pageName: 'transactions-page');
+
+        // Filter out transactions that were just converted (MeiliSearch may not have indexed yet)
+        if (!empty($this->removedTransactionIds)) {
+            $removed = $this->removedTransactionIds;
+            $transactions->setCollection(
+                $transactions->getCollection()->reject(fn ($t) => in_array($t->id, $removed))
+            );
+        }
         
         // Then load the relationships on the collection
         if ($transactions->count() > 0) {
