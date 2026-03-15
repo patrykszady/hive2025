@@ -3,7 +3,7 @@
  * Cache version is stamped by `npm run build` so every deploy busts stale assets.
  */
 
-const DEPLOY_VERSION = 'mmr8ezug';
+const DEPLOY_VERSION = 'mmr8q2c2';
 const PAGE_CACHE  = 'hive-pages-' + DEPLOY_VERSION;
 const ASSET_CACHE = 'hive-assets-' + DEPLOY_VERSION;
 

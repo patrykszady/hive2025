@@ -209,10 +209,10 @@ class ReceiptController extends Controller
             
             $endDate = $nowUtc->copy();
 
-            // Chunk date ranges into 10-day windows to keep response sizes manageable
+            // Chunk date ranges into 1-day windows (Amazon API max range is 24 hours)
             $chunkStart = $startDate->copy();
             while ($chunkStart->lte($endDate)) {
-                $chunkEnd = $chunkStart->copy()->addDays(9)->endOfDay()->setTimezone('UTC');
+                $chunkEnd = $chunkStart->copy()->endOfDay()->setTimezone('UTC');
                 if ($chunkEnd->gt($endDate)) {
                     $chunkEnd = $endDate->copy();
                 }
