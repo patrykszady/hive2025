@@ -2514,7 +2514,7 @@ class TransactionController extends Controller
                                 ->when($match->amount != null, function ($query) use ($match) {
                                     return $query->where('amount', isset($match->options['amount_type']) ? $match->options['amount_type'] : '=', $match->amount);
                                 })
-                                ->when(isset($match->options['desc']), function ($query) use ($match) {
+                                ->when(!empty($match->options['desc']), function ($query) use ($match) {
                                     return $query->where('plaid_merchant_description', $match->options['desc']);
                                 })
                                 ->get();

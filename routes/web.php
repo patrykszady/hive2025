@@ -27,6 +27,7 @@ use App\Livewire\Clients\ClientsIndex;
 use App\Livewire\Clients\ClientsShow;
 use App\Livewire\CompanyEmails\CompanyEmailsIndex;
 use App\Livewire\Dashboard\DashboardShow;
+use App\Livewire\ReceiptAccounts\ReceiptAccountsIndex;
 use App\Livewire\Distributions\DistributionsIndex;
 use App\Livewire\Distributions\DistributionsShow;
 use App\Livewire\EmailTemplates\EmailTemplateIndex;
@@ -380,6 +381,9 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
     //COMPANY EMAILS
     Route::get('/company_emails', CompanyEmailsIndex::class)->name('company_emails.index');
     Route::get('/forward-receipt-emails', [CompanyEmailController::class, 'forwardRecentReceiptEmailsToCentral'])->name('forward.receipt.emails');
+
+    //VENDOR MATCH
+    Route::get('/vendor_match', ReceiptAccountsIndex::class)->name('vendor_match.index');
 
     //CLIENTS
     Route::get('/clients', ClientsIndex::class)->name('clients.index');

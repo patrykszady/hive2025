@@ -9,6 +9,7 @@ use App\Models\TransactionBulkMatch;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Title;
 use Livewire\Component;
 
 class ReceiptAccountsIndex extends Component
@@ -98,6 +99,7 @@ class ReceiptAccountsIndex extends Component
         // ]);
     }
 
+    #[Title('Vendor Match')]
     public function render()
     {
         $this->authorize('viewAny', TransactionBulkMatch::class);

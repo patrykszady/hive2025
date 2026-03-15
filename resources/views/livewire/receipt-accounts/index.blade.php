@@ -1,4 +1,5 @@
-<x-island-card heading="Receipt/Transaction Vendor/Distribution Match" subheading="Vendors you are able to automatically receive Receipts for are below. Create automatic receipt and transaction matches." class="{{$view == NULL ? 'w-full px-4 sm:px-6 lg:max-w-xl lg:px-8 pb-5 mb-1' : ''}}">
+<div class="w-full px-4 sm:px-6 lg:max-w-xl lg:px-8 pb-5 mb-1 space-y-6">
+<x-island-card heading="Vendor Match" subheading="Create automatic receipt and transaction matches per vendor. Matched expenses will be assigned a distribution automatically.">
 
     <flux:separator text="New Vendor Match" variant="subtle" />
 
@@ -52,3 +53,4 @@
 
     <livewire:receipt-accounts.receipt-account-vendor-create :distributions="$distributions"/>
 </x-island-card>
+</div>

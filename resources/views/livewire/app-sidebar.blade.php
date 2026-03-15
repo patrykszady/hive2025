@@ -108,7 +108,7 @@
                     @endif
                     @if($canViewCompanyEmails)
                         <flux:sidebar.item wire:navigate.hover href="/company_emails" icon="inbox-stack">Email Accounts</flux:sidebar.item>
-                        <flux:sidebar.item wire:navigate.hover href="/company_emails" icon="receipt-percent">Expense Bulk Match</flux:sidebar.item>
+                        <flux:sidebar.item wire:navigate.hover href="/vendor_match" icon="receipt-percent">Vendor Match</flux:sidebar.item>
                     @endif
                     @if($canViewVendorDocs)
                         <flux:sidebar.item wire:navigate.hover href="/vendor_docs" icon="eye-slash">Vendor Docs</flux:sidebar.item>

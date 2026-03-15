@@ -37,9 +37,6 @@
         </x-lists.details_list>
     </x-island-card>
 
-    @if(request()->routeIs('company_emails.index'))
-        <livewire:receipt-accounts.receipt-accounts-index />
-    @endif
 </div>
 
 <script>
