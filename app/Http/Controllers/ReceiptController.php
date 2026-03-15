@@ -180,23 +180,34 @@ class ReceiptController extends Controller
             $path = '/reports/2021-01-08/orders/';
             $s4 = new \Aws\Signature\SignatureV4('execute-api', 'us-east-1');
 
-            //Incremental sync: fetch from last sync or default to 2 days ago
-            //Nightly full 30-day sync catches order status changes (cancellations, returns)
+            // Incremental sync: fetch from last sync or default to 2 days ago.
+            // Full sync is clamped to Amazon's rolling 30-day window.
             $lastFullSync = isset($receipt_account->options['amazon_orders_full_synced_at'])
                 ? Carbon::parse($receipt_account->options['amazon_orders_full_synced_at'])
                 : null;
             
             $needsFullSync = !$lastFullSync || $lastFullSync->lt(Carbon::today());
+            $nowUtc = Carbon::now('UTC');
+            $maxLookbackStart = $nowUtc->copy()->subDays(29)->startOfDay();
             
             if ($needsFullSync) {
-                $startDate = Carbon::today()->subDays(30)->setTimezone('UTC');
+                $startDate = $maxLookbackStart->copy();
             } else {
                 $startDate = isset($receipt_account->options['amazon_orders_synced_at'])
                     ? Carbon::parse($receipt_account->options['amazon_orders_synced_at'])->setTimezone('UTC')
-                    : Carbon::today()->subDays(2)->setTimezone('UTC');
+                    : $nowUtc->copy()->subDays(2);
+            }
+
+            if ($startDate->lt($maxLookbackStart)) {
+                Log::channel('amazon_orders')->warning('Clamping Amazon orders startDate to API lookback window', [
+                    'receipt_account_id' => $receipt_account->id,
+                    'original_start' => $startDate->toIso8601String(),
+                    'clamped_start' => $maxLookbackStart->toIso8601String(),
+                ]);
+                $startDate = $maxLookbackStart->copy();
             }
             
-            $endDate = Carbon::today()->endOfDay()->setTimezone('UTC');
+            $endDate = $nowUtc->copy();
 
             // Chunk date ranges into 10-day windows to keep response sizes manageable
             $chunkStart = $startDate->copy();
