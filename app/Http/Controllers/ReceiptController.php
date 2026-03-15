@@ -11,6 +11,7 @@ use App\Models\Receipt;
 use App\Models\ReceiptAccount;
 use App\Models\Transaction;
 use App\Models\TransactionBulkMatch;
+use App\Models\Distribution;
 use App\Models\Vendor;
 use App\Services\NylasService;
 // use App\Http\Requests\GetGiftCardRequest;
@@ -176,29 +177,8 @@ class ReceiptController extends Controller
             ]);
 
             $url = 'https://na.business-api.amazon.com';
-
-            // //FOR TESTING ONLY
-            //INDIVIDUAL ORDER
-            // $path = '/reports/2021-01-08/orders/113-2420373-2571468/';
             $path = '/reports/2021-01-08/orders/';
-            // $params = array(
-            //     'includeCharges' => 'true',
-            //     'includeLineItems' => 'true',
-            //     'includeShipments' => 'true',
-            // );
-            // // . '?' . http_build_query ($params)
-            // $full_url = $url . $path . '?' . http_build_query ($params);
-
-            // $request = new \GuzzleHttp\Psr7\Request('GET', $full_url);
-            // //Intialize the signer.
-            // $s4 = new \Aws\Signature\SignatureV4("execute-api", "us-east-1");
-            // //Build the signed request using the Credentials object. This is required in order to authenticate the call.
-            // $signedRequest = $s4->signRequest($request, $credentials);
-            // //Send the (signed) API request.
-            // $response = $client->send($signedRequest);
-            // $result = collect(json_decode($response->getBody()->getContents(), true));
-
-            // dd($result);
+            $s4 = new \Aws\Signature\SignatureV4('execute-api', 'us-east-1');
 
             //Incremental sync: fetch from last sync or default to 2 days ago
             //Nightly full 30-day sync catches order status changes (cancellations, returns)
@@ -216,53 +196,65 @@ class ReceiptController extends Controller
                     : Carbon::today()->subDays(2)->setTimezone('UTC');
             }
             
-            $dates = CarbonPeriod::create($startDate, Carbon::today()->setTimezone('UTC'));
+            $endDate = Carbon::today()->endOfDay()->setTimezone('UTC');
 
-            foreach ($dates as $date) {
-                $today = $date;
-
-                $params = [
-                    'startDate' => $today->startOfDay()->toIso8601String(),
-                    'endDate' => $today->endOfDay()->toIso8601String(),
-                    'includeCharges' => 'true',
-                    'includeLineItems' => 'true',
-                    'includeShipments' => 'true',
-                ];
-
-                $full_url = $url.$path.'?'.http_build_query($params);
-                $request = new \GuzzleHttp\Psr7\Request('GET', $full_url);
-                //Intialize the signer.
-                $s4 = new \Aws\Signature\SignatureV4('execute-api', 'us-east-1');
-                //Build the signed request using the Credentials object. This is required in order to authenticate the call.
-                $signedRequest = $s4->signRequest($request, $credentials);
-                
-                //Send the (signed) API request with retry logic for rate limits
-                try {
-                    $response = $client->send($signedRequest);
-                    $orders = collect(json_decode($response->getBody()->getContents(), true)['orders']);
-                } catch (\GuzzleHttp\Exception\ClientException $e) {
-                    // If rate limited (429), skip this date and continue
-                    if ($e->getCode() === 429) {
-                        Log::channel('amazon_orders')->warning('Rate limited, skipping date', [
-                            'date' => $today->toDateString(),
-                            'receipt_account_id' => $receipt_account->id,
-                        ]);
-                        continue;
-                    }
-                    throw $e;
+            // Chunk date ranges into 10-day windows to keep response sizes manageable
+            $chunkStart = $startDate->copy();
+            while ($chunkStart->lte($endDate)) {
+                $chunkEnd = $chunkStart->copy()->addDays(9)->endOfDay()->setTimezone('UTC');
+                if ($chunkEnd->gt($endDate)) {
+                    $chunkEnd = $endDate->copy();
                 }
-                
-                // Add delay between requests to avoid rate limits (2 seconds)
-                sleep(2);
 
-                //Log all orders for this date
-                Log::channel('amazon_orders')->info('Orders fetched', [
-                    'date' => $today->toDateString(),
-                    'receipt_account_id' => $receipt_account->id,
-                    'belongs_to_vendor_id' => $receipt_account->belongs_to_vendor_id,
-                    'order_count' => $orders->count(),
-                    'is_full_sync' => $needsFullSync,
-                ]);
+                // Paginate through all orders in this date chunk
+                $nextPageToken = null;
+                do {
+                    $params = [
+                        'startDate' => $chunkStart->toIso8601String(),
+                        'endDate' => $chunkEnd->toIso8601String(),
+                        'includeCharges' => 'true',
+                        'includeLineItems' => 'true',
+                        'includeShipments' => 'true',
+                    ];
+
+                    if ($nextPageToken) {
+                        $params = ['nextPageToken' => $nextPageToken];
+                    }
+
+                    $full_url = $url.$path.'?'.http_build_query($params);
+                    $request = new \GuzzleHttp\Psr7\Request('GET', $full_url);
+                    $signedRequest = $s4->signRequest($request, $credentials);
+
+                    try {
+                        $response = $client->send($signedRequest);
+                        $responseData = json_decode($response->getBody()->getContents(), true);
+                        $orders = collect($responseData['orders']);
+                        $nextPageToken = $responseData['nextPageToken'] ?? null;
+                    } catch (\GuzzleHttp\Exception\ClientException $e) {
+                        if ($e->getCode() === 429) {
+                            Log::channel('amazon_orders')->warning('Rate limited, retrying after delay', [
+                                'chunk_start' => $chunkStart->toDateString(),
+                                'chunk_end' => $chunkEnd->toDateString(),
+                                'receipt_account_id' => $receipt_account->id,
+                            ]);
+                            sleep(5);
+                            continue;
+                        }
+                        throw $e;
+                    }
+
+                    // Respect rate limit: 0.5 req/sec (1 request per 2 seconds)
+                    sleep(2);
+
+                    Log::channel('amazon_orders')->info('Orders fetched', [
+                        'chunk_start' => $chunkStart->toDateString(),
+                        'chunk_end' => $chunkEnd->toDateString(),
+                        'receipt_account_id' => $receipt_account->id,
+                        'belongs_to_vendor_id' => $receipt_account->belongs_to_vendor_id,
+                        'order_count' => $orders->count(),
+                        'has_next_page' => ! is_null($nextPageToken),
+                        'is_full_sync' => $needsFullSync,
+                    ]);
 
                 foreach ($orders as $orders_key => $order) {
                     //Log full order payload
@@ -277,27 +269,24 @@ class ReceiptController extends Controller
                     ]);
                     $order_date = Carbon::parse($order['orderDate'])->setTimezone('America/Chicago')->format('Y-m-d');
 
-                    //check for expense duplicates
-                    $duplicates =
-                        Expense::withoutGlobalScopes()->
-                            where('belongs_to_vendor_id', $receipt_account->belongs_to_vendor_id)->
-                            where('vendor_id', 54)-> //54 = AMAZON
-                            // whereNull('deleted_at')->
-                            where('invoice', $order['orderId'])->
-                            // where('amount', $order['orderNetTotal']['amount'])->
-                            where('amount', 'NOT LIKE', '-%')->
-                            where('date', $order_date)->
-                            get();
+                    $existingExpense = Expense::withoutGlobalScopes()
+                        ->where('belongs_to_vendor_id', $receipt_account->belongs_to_vendor_id)
+                        ->where('vendor_id', 54)
+                        ->where('invoice', $order['orderId'])
+                        ->where('amount', 'NOT LIKE', '-%')
+                        ->where('date', $order_date)
+                        ->first();
 
-                    //7-17-2023 duplicate by Invoice/ Order # only... see if Order status changed
-                    if ($duplicates->isEmpty()) {
+                    if (! $existingExpense) {
                         //create expense
                         $bulkMatch = TransactionBulkMatch::findMatchForAmount(54, (float) $order['orderNetTotal']['amount']);
+                        $distributionId = $bulkMatch?->distribution_id
+                            ?? $this->matchDistributionByPurchaseOrder($order['purchaseOrderNumber'] ?? '', $receipt_account->belongs_to_vendor_id);
                         $expense = Expense::create([
                             'amount' => $order['orderNetTotal']['amount'],
                             'date' => $order_date,
                             'project_id' => null,
-                            'distribution_id' => $bulkMatch?->distribution_id,
+                            'distribution_id' => $distributionId,
                             'created_by_user_id' => 0, //automated
                             'invoice' => $order['orderId'],
                             'vendor_id' => 54, //54 = AMAZON
@@ -306,7 +295,7 @@ class ReceiptController extends Controller
                         ]);
                         $bulkMatch?->applySplits($expense, (float) $order['orderNetTotal']['amount']);
                     } else {
-                        $expense = $duplicates->first();
+                        $expense = $existingExpense;
                         if ($order['orderStatus'] == 'CANCELLED') {
                             $expense->amount = 0.00;
                             $expense->save();
@@ -319,20 +308,18 @@ class ReceiptController extends Controller
 
                             $expense->delete();
                         } else {
-                            if ($expense->amount != $order['orderNetTotal']['amount']) {
-                                $expense->amount = $order['orderNetTotal']['amount'];
-                                $expense->save();
+                            // Use actual charge total when charges exist (what hits the bank),
+                            // otherwise fall back to orderNetTotal.
+                            $chargesTotal = 0.0;
+                            foreach ($order['charges'] as $charge) {
+                                $chargesTotal += (float) ($charge['amount']['amount'] ?? 0);
                             }
+                            $correctAmount = $chargesTotal > 0 ? $chargesTotal : $order['orderNetTotal']['amount'];
+
+                            $this->syncAmazonExpenseAmount($expense, (float) $correctAmount);
                         }
 
-                        //CHARGES
-                        $charges = [];
-                        foreach ($order['charges'] as $charges_key => $charge) {
-                            $charges[$charges_key]['transactionDate'] = $charge['transactionDate'];
-                            $charges[$charges_key]['transactionId'] = $charge['transactionId'];
-                            $charges[$charges_key]['amount'] = $charge['amount']['amount'];
-                            $charges[$charges_key]['paymentInstrumentLast4Digits'] = $charge['paymentInstrumentLast4Digits'];
-                        }
+                        $charges = $this->formatAmazonCharges($order['charges']);
 
                         $receipt = $expense->receipts()->latest()->first();
 
@@ -347,20 +334,9 @@ class ReceiptController extends Controller
                         continue;
                     }
 
-                    // dd($expense);
-                    //only runs/continues below IF
-                    //$expense makes it here / doenst "continue" in the else above
-
                     //create expense_receipt_data
-                    //ITEMS
                     $items = [];
                     foreach ($order['lineItems'] as $items_key => $item) {
-                        // if(!isset($item['purchasedPricePerUnit']['amount'])){
-                        //     dd($item, $order);
-                        // }else{
-                        //     dd($item, $order);
-                        // }
-
                         $items[$items_key]['Price'] = $item['purchasedPricePerUnit']['amount'];
                         $items[$items_key]['Quantity'] = $item['itemQuantity'];
                         $items[$items_key]['TotalPrice'] = $item['itemSubTotal']['amount'] ?? 0.00;
@@ -368,14 +344,7 @@ class ReceiptController extends Controller
                         $items[$items_key]['ProductCode'] = $item['asin'];
                     }
 
-                    //CHARGES
-                    $charges = [];
-                    foreach ($order['charges'] as $charges_key => $charge) {
-                        $charges[$charges_key]['transactionDate'] = $charge['transactionDate'];
-                        $charges[$charges_key]['transactionId'] = $charge['transactionId'];
-                        $charges[$charges_key]['amount'] = $charge['amount']['amount'];
-                        $charges[$charges_key]['paymentInstrumentLast4Digits'] = $charge['paymentInstrumentLast4Digits'];
-                    }
+                    $charges = $this->formatAmazonCharges($order['charges']);
 
                     //items array!
                     $expense_receipt_data = [
@@ -389,14 +358,19 @@ class ReceiptController extends Controller
                         'charges' => $charges,
                     ];
 
-                    ExpenseReceipts::create([
+                    $expenseReceipt = ExpenseReceipts::create([
                         'expense_id' => $expense->id,
                         'receipt_html' => null,
                         'receipt_items' => $expense_receipt_data,
                         'receipt_filename' => null,
                     ]);
+
+                    // Download OrderSummary PDF via Document API and save as receipt file
+                    $this->downloadAmazonOrderDocument($client, $s4, $credentials, $order['orderId'], $expense, $expenseReceipt);
                 }
-                // sleep(1);
+                } while ($nextPageToken);
+
+                $chunkStart = $chunkEnd->copy()->addDay()->startOfDay();
             }
 
             //Update orders sync timestamp after successful processing
@@ -422,50 +396,78 @@ class ReceiptController extends Controller
 
             $full_url = $url.$path.'?'.http_build_query($params);
             $request = new \GuzzleHttp\Psr7\Request('GET', $full_url);
-            //Intialize the signer.
-            $s4 = new \Aws\Signature\SignatureV4('execute-api', 'us-east-1');
-            //Build the signed request using the Credentials object. This is required in order to authenticate the call.
             $signedRequest = $s4->signRequest($request, $credentials);
-            //Send the (signed) API request.
             $response = $client->send($signedRequest);
 
             $transactions = collect(json_decode($response->getBody()->getContents(), true));
-            $transactions = collect($transactions['transactions'])->where('transactionType', '!=', 'CHARGE');
+            $chargeTransactions = collect($transactions['transactions'])->where('transactionType', 'CHARGE');
+            $nonChargeTransactions = collect($transactions['transactions'])->where('transactionType', '!=', 'CHARGE');
 
-            foreach ($transactions as $transaction) {
+            // Process CHARGE transactions: update existing expense amounts
+            // when the actual charged amount differs from the order total.
+            foreach ($chargeTransactions as $chargeTransaction) {
+                $chargeOrderId = $chargeTransaction['transactionLineItems'][0]['orderId'] ?? null;
+                if (! $chargeOrderId) {
+                    continue;
+                }
+
+                $chargeAmount = (float) ($chargeTransaction['amount']['amount'] ?? 0);
+                if ($chargeAmount <= 0) {
+                    continue;
+                }
+
+                $existingExpense = Expense::where('belongs_to_vendor_id', $receipt_account->belongs_to_vendor_id)
+                    ->where('vendor_id', 54)
+                    ->whereNull('deleted_at')
+                    ->where('invoice', $chargeOrderId)
+                    ->where('amount', 'NOT LIKE', '-%')
+                    ->first();
+
+                if ($existingExpense) {
+                    $this->syncAmazonExpenseAmount($existingExpense, $chargeAmount);
+                }
+            }
+
+            foreach ($nonChargeTransactions as $transaction) {
                 $order_date = Carbon::create($transaction['transactionDate'])->format('Y-m-d');
                 $order_id = $transaction['transactionLineItems'][0]['orderId'];
-                // $invoice_numbers = [];
-                // foreach($transaction['transactionLineItems'] as $key => $line_item){
-                //     $invoice_numbers[$key]['orderId'] = $line_item['orderId'];
-                //     $invoice_numbers[$key]['orderLineItemId'] = $line_item['orderLineItemId'];
-                //     $invoice_numbers[$key]['shipmentId'] = $line_item['shipmentId'];
-                // }
-                // dd($invoice_numbers);
-                //check for expense duplicates
-                // dd($transaction);
 
-                $duplicates =
-                    Expense::where('belongs_to_vendor_id', $receipt_account->belongs_to_vendor_id)->
-                        where('vendor_id', 54)-> //54 = AMAZON
-                        whereNull('deleted_at')->
-                        where('invoice', $order_id)->
-                        // where('amount', $order['orderNetTotal']['amount'])->
-                        where('amount', 'LIKE', '-%')->
-                        where('date', $order_date)->
-                        get();
+                $existingRefund = Expense::where('belongs_to_vendor_id', $receipt_account->belongs_to_vendor_id)
+                    ->where('vendor_id', 54)
+                    ->whereNull('deleted_at')
+                    ->where('invoice', $order_id)
+                    ->where('amount', 'LIKE', '-%')
+                    ->where('date', $order_date)
+                    ->exists();
 
-                //7-17-2023 duplicate by Invoice/ Order # only... see if Order status changed
-                if ($duplicates->isEmpty()) {
+                if (! $existingRefund) {
                     //create expense Model
                     //CREATE expense
                     $refundAmount = (float) $transaction['amount']['amount'];
                     $bulkMatch = TransactionBulkMatch::findMatchForAmount(54, $refundAmount);
+
+                    // Inherit distribution from the original order expense, or match PO
+                    $refundDistributionId = $bulkMatch?->distribution_id;
+                    if (! $refundDistributionId) {
+                        $originalExpense = Expense::withoutGlobalScopes()
+                            ->where('belongs_to_vendor_id', $receipt_account->belongs_to_vendor_id)
+                            ->where('vendor_id', 54)
+                            ->where('invoice', $order_id)
+                            ->where('amount', 'NOT LIKE', '-%')
+                            ->whereNull('deleted_at')
+                            ->first();
+                        $refundDistributionId = $originalExpense?->distribution_id
+                            ?? $this->matchDistributionByPurchaseOrder(
+                                $transaction['transactionLineItems'][0]['purchaseOrderNumber'] ?? '',
+                                $receipt_account->belongs_to_vendor_id
+                            );
+                    }
+
                     $expense = Expense::create([
                         'amount' => '-'.$transaction['amount']['amount'],
                         'date' => $order_date,
                         'project_id' => null,
-                        'distribution_id' => $bulkMatch?->distribution_id,
+                        'distribution_id' => $refundDistributionId,
                         'created_by_user_id' => 0, //automated
                         'invoice' => $order_id,
                         'vendor_id' => 54, //54 = AMAZON
@@ -474,16 +476,12 @@ class ReceiptController extends Controller
                     ]);
                     $bulkMatch?->applySplits($expense, $refundAmount);
 
-                    //find associated expense and link
-                    $associated =
-                        Expense::where('belongs_to_vendor_id', $receipt_account->belongs_to_vendor_id)->
-                            where('vendor_id', 54)-> //54 = AMAZON
-                            whereNull('deleted_at')->
-                            where('invoice', $order_id)->
-                            // where('amount', $order['orderNetTotal']['amount'])->
-                            where('amount', 'NOT LIKE', '-%')->
-                            // where('date', $order_date)->
-                            first();
+                    $associated = Expense::where('belongs_to_vendor_id', $receipt_account->belongs_to_vendor_id)
+                        ->where('vendor_id', 54)
+                        ->whereNull('deleted_at')
+                        ->where('invoice', $order_id)
+                        ->where('amount', 'NOT LIKE', '-%')
+                        ->first();
 
                     if ($associated) {
                         $associated->parent_expense_id = $expense->id;
@@ -528,14 +526,6 @@ class ReceiptController extends Controller
                         'receipt_filename' => null,
                     ]);
                 } else {
-                    // $expense = $duplicates->first();
-
-                    // if($expense->amount != '-' . $transaction['amount']['amount']){
-                    //     $expense->amount = '-' . $transaction['amount']['amount'];
-                    //     $expense->save();
-                    // }else{
-
-                    // }
                     continue;
                 }
             }
@@ -1031,7 +1021,7 @@ class ReceiptController extends Controller
         }
 
         if (! is_null($contentTotal) && ! is_null($amount)) {
-            if ($amount < 1 || $contentTotal > ($amount * 10)) {
+            if (($amount >= 0 && $amount < 1) || $contentTotal > ($amount * 10)) {
                 $amount = $contentTotal;
             }
         }
@@ -1171,6 +1161,234 @@ class ReceiptController extends Controller
         return null;
     }
 
+    /**
+     * Single source of truth for updating an Amazon expense amount.
+     * Updates the expense and its receipt total when the correct amount differs.
+     */
+    private function syncAmazonExpenseAmount(Expense $expense, float $correctAmount): void
+    {
+        if ((float) $expense->amount === $correctAmount) {
+            return;
+        }
+
+        $expense->amount = $correctAmount;
+        $expense->save();
+
+        $receipt = $expense->receipts()->latest()->first();
+        if ($receipt) {
+            $items = $receipt->receipt_items;
+            $items['total'] = $correctAmount;
+            $receipt->receipt_items = $items;
+            $receipt->save();
+        }
+    }
+
+    /**
+     * Match an Amazon Purchase Order number to a distribution.
+     * Normalizes both strings (lowercase, strip non-alphanumeric) for fuzzy matching.
+     */
+    private function matchDistributionByPurchaseOrder(string $purchaseOrder, int $belongsToVendorId): ?int
+    {
+        $purchaseOrder = trim($purchaseOrder);
+        if ($purchaseOrder === '') {
+            return null;
+        }
+
+        $normalized = strtolower(preg_replace('/[^a-z0-9]/i', '', $purchaseOrder));
+
+        $distributions = Distribution::withoutGlobalScopes()
+            ->where('vendor_id', $belongsToVendorId)
+            ->get();
+
+        foreach ($distributions as $distribution) {
+            $normalizedName = strtolower(preg_replace('/[^a-z0-9]/i', '', $distribution->name));
+            if ($normalized === $normalizedName) {
+                return $distribution->id;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Download an Amazon OrderSummary PDF via the Document API and save it as the expense receipt.
+     * 3-step async process: createReport → poll getReport → download from presigned URL.
+     */
+    private function downloadAmazonOrderDocument(
+        \GuzzleHttp\Client $client,
+        \Aws\Signature\SignatureV4 $s4,
+        \Aws\Credentials\Credentials $credentials,
+        string $orderId,
+        Expense $expense,
+        ExpenseReceipts $expenseReceipt
+    ): void {
+        $baseUrl = 'https://na.business-api.amazon.com';
+
+        try {
+            // Step 1: Request the OrderSummary report
+            $createBody = json_encode([
+                'reportOptions' => [
+                    'orderId' => $orderId,
+                    'documentType' => 'OrderSummary',
+                ],
+                'reportType' => 'GET_AB_INVOICE_PDF',
+                'marketplaceIds' => ['ATVPDKIKX0DER'],
+            ]);
+
+            $createRequest = new \GuzzleHttp\Psr7\Request(
+                'POST',
+                $baseUrl . '/reports/2021-09-30/reports',
+                ['Content-Type' => 'application/json'],
+                $createBody
+            );
+            $signedRequest = $s4->signRequest($createRequest, $credentials);
+            $response = $client->send($signedRequest);
+            $createData = json_decode($response->getBody()->getContents(), true);
+            $reportId = $createData['reportId'] ?? null;
+
+            if (! $reportId) {
+                Log::channel('amazon_orders')->warning('Document API: no reportId returned', [
+                    'order_id' => $orderId,
+                    'expense_id' => $expense->id,
+                    'response' => $createData,
+                ]);
+                return;
+            }
+
+            // Step 2: Poll getReport until processing is complete (max ~5 minutes)
+            $reportDocumentId = null;
+            $maxAttempts = 20;
+            for ($attempt = 0; $attempt < $maxAttempts; $attempt++) {
+                sleep(15);
+
+                $getReportRequest = new \GuzzleHttp\Psr7\Request(
+                    'GET',
+                    $baseUrl . '/reports/2021-09-30/reports/' . $reportId
+                );
+                $signedRequest = $s4->signRequest($getReportRequest, $credentials);
+                $response = $client->send($signedRequest);
+                $reportData = json_decode($response->getBody()->getContents(), true);
+                $status = $reportData['processingStatus'] ?? 'UNKNOWN';
+
+                if (in_array($status, ['DONE'])) {
+                    $reportDocumentId = $reportData['reportDocumentId'] ?? null;
+                    break;
+                }
+
+                if (in_array($status, ['CANCELLED', 'FATAL'])) {
+                    Log::channel('amazon_orders')->warning('Document API: report processing failed', [
+                        'order_id' => $orderId,
+                        'expense_id' => $expense->id,
+                        'report_id' => $reportId,
+                        'status' => $status,
+                    ]);
+                    return;
+                }
+            }
+
+            if (! $reportDocumentId) {
+                Log::channel('amazon_orders')->warning('Document API: timed out waiting for report', [
+                    'order_id' => $orderId,
+                    'expense_id' => $expense->id,
+                    'report_id' => $reportId,
+                ]);
+                return;
+            }
+
+            // Step 3: Get the presigned URL and download the document
+            $getDocRequest = new \GuzzleHttp\Psr7\Request(
+                'GET',
+                $baseUrl . '/reports/2021-09-30/documents/' . $reportDocumentId
+            );
+            $signedRequest = $s4->signRequest($getDocRequest, $credentials);
+            $response = $client->send($signedRequest);
+            $docData = json_decode($response->getBody()->getContents(), true);
+            $presignedUrl = $docData['url'] ?? null;
+            $compressionAlgorithm = $docData['compressionAlgorithm'] ?? null;
+
+            if (! $presignedUrl) {
+                Log::channel('amazon_orders')->warning('Document API: no presigned URL', [
+                    'order_id' => $orderId,
+                    'expense_id' => $expense->id,
+                    'report_document_id' => $reportDocumentId,
+                ]);
+                return;
+            }
+
+            // Download the file from the presigned URL (no auth needed)
+            $downloadClient = new \GuzzleHttp\Client();
+            $downloadResponse = $downloadClient->get($presignedUrl);
+            $fileContents = $downloadResponse->getBody()->getContents();
+
+            // Decompress: gzip first, then zip to get the PDF
+            if ($compressionAlgorithm === 'GZIP') {
+                $fileContents = gzdecode($fileContents);
+            }
+
+            // The result after gzip decompression is a zip archive containing the PDF
+            $tempZipPath = tempnam(sys_get_temp_dir(), 'amz_doc_');
+            file_put_contents($tempZipPath, $fileContents);
+
+            $zip = new \ZipArchive();
+            if ($zip->open($tempZipPath) === true) {
+                // Extract the first file (the PDF)
+                $pdfContents = $zip->getFromIndex(0);
+                $zip->close();
+                unlink($tempZipPath);
+
+                if ($pdfContents === false) {
+                    Log::channel('amazon_orders')->warning('Document API: zip archive empty', [
+                        'order_id' => $orderId,
+                        'expense_id' => $expense->id,
+                    ]);
+                    return;
+                }
+            } else {
+                // Not a zip — the decompressed content may already be the PDF
+                $pdfContents = $fileContents;
+                unlink($tempZipPath);
+            }
+
+            // Save PDF to storage
+            $filename = $expense->id . '-amazon-' . $orderId . '.pdf';
+            Storage::disk('files')->put('receipts/' . $filename, $pdfContents);
+
+            // Update the receipt record with the filename
+            $expenseReceipt->receipt_filename = $filename;
+            $expenseReceipt->save();
+
+            Log::channel('amazon_orders')->info('Document API: OrderSummary PDF saved', [
+                'order_id' => $orderId,
+                'expense_id' => $expense->id,
+                'filename' => $filename,
+            ]);
+        } catch (\Exception $e) {
+            Log::channel('amazon_orders')->error('Document API: failed to download document', [
+                'order_id' => $orderId,
+                'expense_id' => $expense->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Format Amazon order charges into a normalized array.
+     */
+    private function formatAmazonCharges(array $rawCharges): array
+    {
+        $charges = [];
+        foreach ($rawCharges as $key => $charge) {
+            $charges[$key] = [
+                'transactionDate' => $charge['transactionDate'],
+                'transactionId' => $charge['transactionId'],
+                'amount' => $charge['amount']['amount'],
+                'paymentInstrumentLast4Digits' => $charge['paymentInstrumentLast4Digits'],
+            ];
+        }
+
+        return $charges;
+    }
+
     private function sumLineItemTotals(array $items): ?float
     {
         $total = 0.0;
@@ -1194,8 +1412,8 @@ class ReceiptController extends Controller
     private function extractTotalFromContent(string $content): ?float
     {
         $patterns = [
-            '/\b(?:TOTAL|AMOUNT\s+DUE|AMOUNT|BALANCE|CHARGE|PAYMENT)\b[^0-9]{0,20}(\d{1,3}(?:,\d{3})*(?:\.\d{2}))/i',
-            '/\b(\d{1,3}(?:,\d{3})*(?:\.\d{2}))\s+(?:master\s*card|visa|amex|discover|card|debit|credit|mc)\b/i',
+            '/\b(?:TOTAL|AMOUNT\s+DUE|AMOUNT|BALANCE|CHARGE|PAYMENT)\b[^0-9-]{0,20}(-?\d{1,3}(?:,\d{3})*(?:\.\d{2}))/i',
+            '/(-?\d{1,3}(?:,\d{3})*(?:\.\d{2}))\s+(?:master\s*card|visa|amex|discover|card|debit|credit|mc)\b/i',
         ];
 
         foreach ($patterns as $pattern) {
