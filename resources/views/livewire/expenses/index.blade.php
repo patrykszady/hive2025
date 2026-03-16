@@ -13,11 +13,10 @@
                                 <flux:input wire:model.live.debounce.300ms="amount" label="Amount" icon="magnifying-glass" placeholder="Search Amount" />
                             </div>
                             <div class="min-w-0 w-full">
-                                <flux:select wire:model.live="expense_vendor" label="Vendor" variant="listbox" searchable placeholder="Choose Vendor...">
+                                <flux:select wire:model.live="expense_vendor" label="Vendor" variant="listbox" searchable clearable placeholder="Choose Vendor...">
                                     <x-slot name="search">
                                         <flux:select.search placeholder="Search..." />
                                     </x-slot>
-                                    <flux:select.option value="">ALL VENDORS</flux:select.option>
                                     <flux:select.option value="0">NO VENDOR</flux:select.option>
                                     <flux:select.option disabled>---------</flux:select.option>
                                     @foreach ($vendors as $vendor)
@@ -26,11 +25,10 @@
                                 </flux:select>
                             </div>
                             <div class="min-w-0 w-full">
-                                <flux:select wire:model.live="project_id" label="Project" variant="listbox" searchable placeholder="Choose Project...">
+                                <flux:select wire:model.live="project_id" label="Project" variant="listbox" searchable clearable placeholder="Choose Project...">
                                     <x-slot name="search">
                                         <flux:select.search placeholder="Search..." />
                                     </x-slot>
-                                    <flux:select.option value="">ALL PROJECTS</flux:select.option>
                                     <flux:select.option value="NO_PROJECT">NO PROJECT</flux:select.option>
                                     <flux:select.option value="SPLIT">SPLIT</flux:select.option>
                                     <flux:select.option disabled>---------</flux:select.option>
@@ -50,6 +48,17 @@
                                     <flux:select.option value="No Project"><flux:badge size="md" inset="top bottom" color="red">No Project</flux:badge></flux:select.option>
                                     <flux:select.option value="Missing Info"><flux:badge size="md" inset="top bottom" color="amber">Missing Info</flux:badge></flux:select.option>
                                 </flux:select>
+                            </div>
+                            <div class="min-w-0 w-full">
+                                <flux:date-picker
+                                    wire:model.live="date_range"
+                                    mode="range"
+                                    with-presets
+                                    presets="last30Days last3Months last6Months thisMonth lastMonth thisYear lastYear custom"
+                                    clearable
+                                    placeholder="All time"
+                                    label="Date Range"
+                                />
                             </div>
                             @can('create', App\Models\Expense::class)
                                 @if($amount && $view == NULL)
@@ -78,12 +87,11 @@
                 </div>
 
                 <div class="flex-1 min-w-0 w-full">
-                    <flux:select wire:model.live="expense_vendor" label="Vendor" variant="listbox" searchable placeholder="Choose Vendor...">
+                    <flux:select wire:model.live="expense_vendor" label="Vendor" variant="listbox" searchable clearable placeholder="Choose Vendor...">
                         <x-slot name="search">
                             <flux:select.search placeholder="Search..." />
                         </x-slot>
 
-                        <flux:select.option value="">ALL VENDORS</flux:select.option>
                         <flux:select.option value="0">NO VENDOR</flux:select.option>
                         <flux:select.option disabled>---------</flux:select.option>
                         @foreach ($vendors as $vendor)
@@ -93,12 +101,11 @@
                 </div>
 
                 <div class="flex-1 min-w-0 w-full">
-                    <flux:select wire:model.live="project_id" label="Project" variant="listbox" searchable placeholder="Choose Project...">
+                    <flux:select wire:model.live="project_id" label="Project" variant="listbox" searchable clearable placeholder="Choose Project...">
                         <x-slot name="search">
                             <flux:select.search placeholder="Search..." />
                         </x-slot>
 
-                        <flux:select.option value="">ALL PROJECTS</flux:select.option>
                         <flux:select.option value="NO_PROJECT">NO PROJECT</flux:select.option>
                         <flux:select.option value="SPLIT">SPLIT</flux:select.option>
                         <flux:select.option disabled>---------</flux:select.option>
@@ -119,6 +126,18 @@
                         <flux:select.option value="No Project"><flux:badge size="md" inset="top bottom" color="red">No Project</flux:badge></flux:select.option>
                         <flux:select.option value="Missing Info"><flux:badge size="md" inset="top bottom" color="amber">Missing Info</flux:badge></flux:select.option>
                     </flux:select>
+                </div>
+
+                <div class="flex-1 min-w-0 w-full">
+                    <flux:date-picker
+                        wire:model.live="date_range"
+                        mode="range"
+                        with-presets
+                        presets="last30Days last3Months last6Months thisMonth lastMonth thisYear lastYear custom"
+                        clearable
+                        placeholder="All time"
+                        label="Date Range"
+                    />
                 </div>
             </div>
         </x-island-card>

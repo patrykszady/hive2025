@@ -5,7 +5,9 @@ namespace App\Livewire\Expenses;
 use App\Models\Distribution;
 use App\Models\Expense;
 use App\Models\ExpenseSplits;
+use Carbon\Carbon;
 use App\Models\Project;
+use Flux\DateRange;
 use App\Models\Transaction;
 use App\Models\Vendor;
 use App\Models\Check;
@@ -35,6 +37,9 @@ class ExpenseIndex extends Component
 
     #[Url(except: [])]
     public $expense_statuses = [];
+
+    public ?DateRange $date_range = null;
+
     public $check = '';
     public $bank_plaid_ins_id = '';
     public $banks = [];
@@ -224,6 +229,15 @@ class ExpenseIndex extends Component
                     $baseQuery->where(function ($q) {
                         $q->whereNull('project_id')->orWhere('project_id', 0);
                     })->whereNull('distribution_id')->whereDoesntHave('splits');
+                }
+
+                // Date range filter for prefix search (Eloquent path)
+                $bounds = $this->dateBounds();
+                if ($bounds) {
+                    $baseQuery->whereBetween('date', [
+                        Carbon::createFromTimestamp($bounds[0])->toDateString(),
+                        Carbon::createFromTimestamp($bounds[1])->toDateString(),
+                    ]);
                 }
 
                 $baseExpenses = $baseQuery->get();
@@ -444,6 +458,12 @@ class ExpenseIndex extends Component
             $filterConditions[] = "check_id = {$this->check}";
         }
 
+        // Apply date range filter to transactions
+        $bounds = $this->dateBounds();
+        if ($bounds) {
+            $filterConditions[] = "transaction_date >= {$bounds[0]} AND transaction_date <= {$bounds[1]}";
+        }
+
         $hasTextSearch = trim($this->transaction_search) !== '';
 
         $transactions = Transaction::scopedSearch(
@@ -512,8 +532,47 @@ class ExpenseIndex extends Component
         if (is_numeric($this->check)) {
             $filterConditions[] = "check_id = {$this->check}";
         }
+
+        // Apply date range filter
+        $dateFilter = $this->buildDateFilter();
+        if ($dateFilter) {
+            $filterConditions[] = $dateFilter;
+        }
         
         return $filterConditions;
+    }
+
+    /**
+     * Build a Meilisearch date filter from the date_range property.
+     * Returns null if no filter, or a filter string like "date >= X AND date <= Y".
+     */
+    private function buildDateFilter(): ?string
+    {
+        $bounds = $this->dateBounds();
+        if (! $bounds) {
+            return null;
+        }
+
+        return "date >= {$bounds[0]} AND date <= {$bounds[1]}";
+    }
+
+    /**
+     * @return array{0: int, 1: int}|null  [startTimestamp, endTimestamp] or null
+     */
+    private function dateBounds(): ?array
+    {
+        if (! $this->date_range) {
+            return null;
+        }
+
+        $start = $this->date_range->start();
+        $end = $this->date_range->end();
+
+        if (! $start || ! $end) {
+            return null;
+        }
+
+        return [$start->copy()->startOfDay()->timestamp, $end->copy()->endOfDay()->timestamp];
     }
     
     #[Title('Expenses')]
