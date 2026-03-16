@@ -62,6 +62,18 @@ class Transaction extends Model
         // When a transaction is saved or deleted, re-index related expenses
         // This ensures expense status updates when check transactions change
         static::saved(function ($transaction) {
+            // Soft-delete $0 posted (non-pending) transactions from Plaid — they carry no value
+            if (
+                ! $transaction->trashed()
+                && $transaction->posted_date !== null
+                && (float) $transaction->amount === 0.00
+                && $transaction->plaid_transaction_id !== null
+            ) {
+                $transaction->delete();
+
+                return;
+            }
+
             // Re-index direct expense if linked
             if ($transaction->expense_id) {
                 $expense = Expense::withoutGlobalScopes()->find($transaction->expense_id);
@@ -121,6 +133,8 @@ class Transaction extends Model
         
         // Ensure amount is consistently cast to float like Expense model
         $array['amount'] = (float) $this->amount;
+
+        $array['vendor_name'] = $this->vendor?->business_name;
 
         return $array;
     }

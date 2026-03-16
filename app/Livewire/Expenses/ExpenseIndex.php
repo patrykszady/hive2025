@@ -46,6 +46,7 @@ class ExpenseIndex extends Component
     public $paginate_number = 8;
     public $sortBy = 'date';
     public $sortDirection = 'desc';
+    public string $transaction_search = '';
     public bool $transactionsReady = false;
     public array $removedTransactionIds = [];
 
@@ -443,8 +444,10 @@ class ExpenseIndex extends Component
             $filterConditions[] = "check_id = {$this->check}";
         }
 
+        $searchQuery = trim($this->transaction_search) !== '' ? $this->transaction_search : $this->amount;
+
         $transactions = Transaction::scopedSearch(
-            $this->amount,
+            $searchQuery,
             $filterConditions,
             'transaction_date',
             'desc'

@@ -206,7 +206,7 @@
                                     @if($expense->splits->count() > 0)
                                         SPLIT
                                     @else
-                                        <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $expense->project?->name ?? 'No Project' }}">{{ $expense->project?->name ?? 'No Project' }}</div>
+                                        <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis font-semibold" title="{{ $expense->project?->name ?? 'No Project' }}">{{ $expense->project?->name ?? 'No Project' }}</div>
                                         @php
                                             $po = $expense->receipts->first()?->receipt_items['purchase_order'] ?? null;
                                         @endphp
@@ -280,7 +280,9 @@
 
     @if($view === NULL && auth()->user()->can('create', App\Models\Expense::class))
         <x-island-card heading="Transactions" wire:init="loadTransactions">
-
+            <div class="px-6 pt-4 pb-2">
+                <flux:input wire:model.live.debounce.300ms="transaction_search" placeholder="Search vendor (e.g. ZELLE)..." icon="magnifying-glass" clearable />
+            </div>
             <div>
                 @if($this->transactionsReady)
                     <flux:table :paginate="$this->transactions->hasPages() ? $this->transactions : null" wire:loading.class="opacity-50 text-opacity-50">
@@ -303,9 +305,15 @@
                                         {{ money($transaction->amount) }}
                                     </flux:table.cell>
                                     <flux:table.cell>{{ $transaction->transaction_date->format('m/d/Y') }}</flux:table.cell>
-                                    <flux:table.cell class="max-w-[150px] truncate" title="{{ $transaction->vendor->name != 'No Vendor' ? $transaction->vendor->name : $transaction->plaid_merchant_description }}">
-                                        {{ $transaction->vendor->name != 'No Vendor' ? $transaction->vendor->name : $transaction->plaid_merchant_description }}
-                                    </flux:table.cell>
+                                    @if($transaction->vendor->name != 'No Vendor')
+                                        <flux:table.cell class="max-w-[150px] truncate" title="{{ $transaction->vendor->name }}">
+                                            {{ $transaction->vendor->name }}
+                                        </flux:table.cell>
+                                    @else
+                                        <flux:table.cell class="whitespace-normal break-words" title="{{ $transaction->plaid_merchant_description }}">
+                                            {{ $transaction->plaid_merchant_description }}
+                                        </flux:table.cell>
+                                    @endif
                                     <flux:table.cell>{{ $transaction->bank_account->bank->name }}</flux:table.cell>
                                     <flux:table.cell>{{ isset($transaction->owner) ? $transaction->owner : $transaction->bank_account->account_number }}</flux:table.cell>
                                     {{--

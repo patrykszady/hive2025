@@ -164,9 +164,9 @@ return [
                     'expense_id', 'check_id', 'bank_account_id', '__soft_deleted', 'amount', 'expenses_count'
                 ],
                 'sortableAttributes' => ['transaction_date', 'amount'],
-                'searchableAttributes' => ['amount'],
-                'typoTolerance' => ['enabled' => false],
-                'rankingRules' => ['sort', 'exactness'],
+                'searchableAttributes' => ['plaid_merchant_description', 'plaid_merchant_name', 'vendor_name', 'amount'],
+                'typoTolerance' => ['enabled' => true],
+                'rankingRules' => ['words', 'typo', 'proximity', 'exactness', 'sort'],
             ],
             
             Vendor::class => [
