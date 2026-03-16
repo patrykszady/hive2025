@@ -444,13 +444,14 @@ class ExpenseIndex extends Component
             $filterConditions[] = "check_id = {$this->check}";
         }
 
-        $searchQuery = trim($this->transaction_search) !== '' ? $this->transaction_search : $this->amount;
+        $hasTextSearch = trim($this->transaction_search) !== '';
 
         $transactions = Transaction::scopedSearch(
-            $searchQuery,
+            $hasTextSearch ? $this->transaction_search : $this->amount,
             $filterConditions,
             'transaction_date',
-            'desc'
+            'desc',
+            $hasTextSearch,
         )->paginate(100, pageName: 'transactions-page');
 
         // Filter out transactions that were just converted (MeiliSearch may not have indexed yet)

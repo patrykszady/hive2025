@@ -166,7 +166,7 @@ return [
                 'sortableAttributes' => ['transaction_date', 'amount'],
                 'searchableAttributes' => ['plaid_merchant_description', 'plaid_merchant_name', 'vendor_name', 'amount'],
                 'typoTolerance' => ['enabled' => true],
-                'rankingRules' => ['words', 'typo', 'proximity', 'exactness', 'sort'],
+                'rankingRules' => ['sort', 'exactness'],
             ],
             
             Vendor::class => [

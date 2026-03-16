@@ -143,9 +143,9 @@ class Transaction extends Model
      * Create a search builder that respects user access permissions
      * and allows chaining additional filters
      */
-    public static function scopedSearch($query = '', $filterConditions = [], $sortBy = 'transaction_date', $sortDirection = 'desc')
+    public static function scopedSearch($query = '', $filterConditions = [], $sortBy = 'transaction_date', $sortDirection = 'desc', bool $textSearch = false)
     {
-        return self::search($query, function ($meilisearch, $searchQuery, $options) use ($filterConditions, $sortBy, $sortDirection) {
+        return self::search($query, function ($meilisearch, $searchQuery, $options) use ($filterConditions, $sortBy, $sortDirection, $textSearch) {
             // Get the current user
             $user = auth()->user();
             
@@ -176,6 +176,13 @@ class Transaction extends Model
             
             // Apply search options using shared trait logic
             $options = self::applySearchOptions($options, $baseFilter, $augmentedFilters, $actualQuery, $sortBy, $sortDirection);
+
+            // Restrict which fields are searched based on search type
+            if ($textSearch && trim($actualQuery) !== '') {
+                $options['attributesToSearchOn'] = ['plaid_merchant_description', 'plaid_merchant_name', 'vendor_name'];
+            } elseif (!$textSearch && trim($actualQuery) !== '') {
+                $options['attributesToSearchOn'] = ['amount'];
+            }
             
             return $meilisearch->search($actualQuery, $options);
         });
