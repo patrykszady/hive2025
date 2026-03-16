@@ -340,6 +340,12 @@ class ReceiptController extends Controller
 
                             $receipt->receipt_items = $items;
                             $receipt->save();
+
+                            // Download OrderSummary PDF if this receipt doesn't have one yet
+                            // Only download when order is shipped/delivered so we get the "Final Details" PDF
+                            if (empty($receipt->receipt_filename) && in_array($order['orderStatus'], ['SHIPPED', 'DELIVERED'])) {
+                                $this->downloadAmazonOrderDocument($client, $s4, $credentials, $order['orderId'], $expense, $receipt);
+                            }
                         }
 
                         continue;
@@ -376,8 +382,10 @@ class ReceiptController extends Controller
                         'receipt_filename' => null,
                     ]);
 
-                    // Download OrderSummary PDF via Document API and save as receipt file
-                    $this->downloadAmazonOrderDocument($client, $s4, $credentials, $order['orderId'], $expense, $expenseReceipt);
+                    // Download OrderSummary PDF via Document API — only when shipped/delivered for "Final Details" PDF
+                    if (in_array($order['orderStatus'], ['SHIPPED', 'DELIVERED'])) {
+                        $this->downloadAmazonOrderDocument($client, $s4, $credentials, $order['orderId'], $expense, $expenseReceipt);
+                    }
                 }
                 } while ($nextPageToken);
 
