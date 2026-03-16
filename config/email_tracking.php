@@ -22,11 +22,14 @@ return [
 
     // Comma-separated list of internal/staff email domains to ignore for open tracking.
     // Opens from these domains will be treated as "sender" opens and ignored.
-    // Example: "gs.construction,mycompany.com" to ignore opens from staff email addresses.
-    'internal_domains' => array_values(array_filter(
-        array_map('trim', explode(',', (string) env('EMAIL_TRACKING_INTERNAL_DOMAINS', ''))),
+    // Env var can add extra domains: EMAIL_TRACKING_INTERNAL_DOMAINS="extra.com,other.com"
+    'internal_domains' => array_values(array_unique(array_filter(
+        array_merge(
+            ['gs.construction', 'hive.contractors'],
+            array_map('trim', explode(',', (string) env('EMAIL_TRACKING_INTERNAL_DOMAINS', ''))),
+        ),
         static fn (string $value): bool => $value !== ''
-    )),
+    ))),
 
     // If an opened/clicked event happens "too soon" after our tracked 'sent' event (same tracking_id),
     // treat it as automated prefetch/scanning.

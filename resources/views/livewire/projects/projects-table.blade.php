@@ -32,6 +32,7 @@
             </flux:table.columns>
 
             <flux:table.rows>
+                @php($projectStatuses = \App\Models\ProjectStatus::selectableStatuses())
                 @foreach ($this->projects as $project)
                     <flux:table.row :key="$project->id">
                         @if($view == 'clients.index')
@@ -88,7 +89,26 @@
                             @endif
                         @endif
                         <flux:table.cell align="end" class="w-[30%] min-w-[5rem] shrink-0">
-                            <flux:badge size="sm" :color="$project->latestStatus->badge_color" inset="top bottom">{{ $project->latestStatus->title }}</flux:badge>
+                            @if(auth()->user()->is_client_user)
+                                <flux:badge size="sm" :color="$project->latestStatus->badge_color" inset="top bottom">{{ $project->latestStatus->title }}</flux:badge>
+                            @else
+                                <div x-data="{ status: {{ $project->latestStatus->status_code }} }" x-init="$watch('status', value => $wire.updateProjectStatus({{ $project->id }}, value))">
+                                    <flux:select
+                                        x-model="status"
+                                        variant="listbox"
+                                        size="sm"
+                                        class="!min-w-0"
+                                    >
+                                        @foreach($projectStatuses as $status)
+                                            <flux:select.option :value="$status['code']">
+                                                <flux:badge size="sm" inset="top bottom" :color="$status['color']">
+                                                    {{ $status['label'] }}
+                                                </flux:badge>
+                                            </flux:select.option>
+                                        @endforeach
+                                    </flux:select>
+                                </div>
+                            @endif
                         </flux:table.cell>
                     </flux:table.row>
                 @endforeach

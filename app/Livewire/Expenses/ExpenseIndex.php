@@ -291,6 +291,7 @@ class ExpenseIndex extends Component
                           'distribution:id,name'
                       ]);
                 };
+                $relations['receipts'] = fn ($q) => $q->select('id','expense_id','receipt_items')->latest()->limit(1);
                 $slice->load($relations);
             }
 
@@ -353,6 +354,7 @@ class ExpenseIndex extends Component
                       'distribution:id,name'
                   ]);
             };
+            $relations['receipts'] = fn ($q) => $q->select('id','expense_id','receipt_items')->latest()->limit(1);
             $expenses->getCollection()->load($relations);
         }
 

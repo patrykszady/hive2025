@@ -207,6 +207,12 @@
                                         SPLIT
                                     @else
                                         <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $expense->project?->name ?? 'No Project' }}">{{ $expense->project?->name ?? 'No Project' }}</div>
+                                        @php
+                                            $po = $expense->receipts->first()?->receipt_items['purchase_order'] ?? null;
+                                        @endphp
+                                        @if($po && $po !== 'null')
+                                            <div class="text-xs italic text-zinc-500 dark:text-zinc-400 truncate" title="{{ $po }}">{{ $po }}</div>
+                                        @endif
                                     @endif
                                 </flux:table.cell>
                             @endif

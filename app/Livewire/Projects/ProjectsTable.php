@@ -3,6 +3,8 @@
 namespace App\Livewire\Projects;
 
 use App\Models\Project;
+use App\Models\ProjectStatus;
+use Flux;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Reactive;
 use Livewire\Component;
@@ -93,6 +95,34 @@ class ProjectsTable extends Component
                 $query->with(['latestStatus', 'client.users', 'createdByVendor']);
             })
             ->paginate(20, pageName: $this->getPageName());
+    }
+
+    public function updateProjectStatus(int $projectId, int $statusCode): void
+    {
+        if (auth()->user()?->is_client_user) {
+            abort(403);
+        }
+
+        $project = Project::findOrFail($projectId);
+        $this->authorize('update', $project);
+
+        $validCodes = [1, 2, 3, 4, 5, 6, 7, 8, 10, 11];
+        if (! in_array($statusCode, $validCodes, true)) {
+            return;
+        }
+
+        ProjectStatus::create([
+            'project_id' => $project->id,
+            'belongs_to_vendor_id' => auth()->user()->vendor->id,
+            'status_code' => $statusCode,
+            'start_date' => today()->format('Y-m-d'),
+        ]);
+
+        if ($statusCode === 10) {
+            $project->estimates()->delete();
+        }
+
+        Flux::toast('Status updated.');
     }
 
     public function render()
