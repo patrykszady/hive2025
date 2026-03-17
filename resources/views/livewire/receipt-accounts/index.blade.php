@@ -23,7 +23,7 @@
         <flux:table.columns>
             <flux:table.column>Vendor</flux:table.column>
             <flux:table.column>Matches</flux:table.column>
-            <flux:table.column>Details</flux:table.column>
+            <flux:table.column>Receipts</flux:table.column>
         </flux:table.columns>
 
         <flux:table.rows>
@@ -37,14 +37,18 @@
                         {{ $vendor->name }}
                     </flux:table.cell>
                     <flux:table.cell>
-                        <flux:badge size="sm" color="sky" inset="top bottom">
-                            {{ $vendor->transactions_bulk_match_count ?? 0 }} {{ Str::plural('match', $vendor->transactions_bulk_match_count ?? 0) }}
-                        </flux:badge>
+                        @if($vendor->transactions_bulk_match_count)
+                            <flux:badge size="sm" color="sky" inset="top bottom">
+                                {{ $vendor->transactions_bulk_match_count }} {{ Str::plural('match', $vendor->transactions_bulk_match_count) }}
+                            </flux:badge>
+                        @endif
                     </flux:table.cell>
                     <flux:table.cell>
-                        {{-- <flux:badge size="sm" :color="$vendor->status == 'Active' ? 'green' : ($vendor->status == 'Disabled' ? 'red' : 'indigo')" inset="top bottom">
-                            {{ $vendor->type }}
-                        </flux:badge> --}}
+                        @if($vendor->receipts_count)
+                            <flux:badge size="sm" :color="$vendor->receipt_account ? 'amber' : 'red'" inset="top bottom">
+                                {{ $vendor->receipts_count }} {{ Str::plural('receipt', $vendor->receipts_count) }}
+                            </flux:badge>
+                        @endif
                     </flux:table.cell>
                 </flux:table.row>
             @endforeach

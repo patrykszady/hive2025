@@ -871,6 +871,20 @@ class NylasService
         $sourceMailboxEmail = $companyEmail?->email ?? ($messageData['to'][0]['email'] ?? null);
         $originalToEmail = $messageData['to'][0]['email'] ?? null;
 
+        // Try to parse the original send date from forwarded email body (e.g. "Sent: Thursday, February 12, 2026")
+        // Store as Y-m-d string to avoid timezone off-by-one when converting a date-only value.
+        $originalDate = null;
+        if (!empty($bodyHtml)) {
+            $bodyText = strip_tags($bodyHtml);
+            if (preg_match('/(?:^|\s)(?:Sent|Date):\s*(?:\w+,\s*)?(\w+ \d{1,2},\s*\d{4})/im', $bodyText, $dateMatch)) {
+                try {
+                    $originalDate = Carbon::parse(trim($dateMatch[1]))->format('Y-m-d');
+                } catch (\Exception $e) {
+                    // Date string could not be parsed; original_date will be omitted
+                }
+            }
+        }
+
         // Build single custom header with all metadata as JSON (to avoid provider header limits)
         $metadata = [
             'from_email' => (string) $fromEmail,
@@ -880,6 +894,10 @@ class NylasService
             'company_email_id' => (string) $companyEmailId,
             'original_to_email' => (string) $originalToEmail,
         ];
+
+        if ($originalDate !== null) {
+            $metadata['original_date'] = $originalDate;
+        }
         
         $customHeaders = [
             ['name' => 'X-Hive-Metadata', 'value' => json_encode($metadata)],
@@ -1186,11 +1204,12 @@ class NylasService
             }
             
             // Special handling for forwarded emails: if sender doesn't match any receipt,
-            // check if the subject EXACTLY matches a receipt pattern. This allows users
-            // to forward receipts from personal accounts while avoiding false positives.
+            // check if the subject contains a receipt pattern. Uses partial matching
+            // since forwarded subjects often include extra text (e.g. recipient name).
+            // validateMessageWouldMatchReceipt() will do full validation with body extraction.
             if (!$matched && $isForwardedEmail) {
                 foreach ($allSubjectPatterns as $pattern) {
-                    if ($cleanSubject === $pattern) {
+                    if (str_contains($cleanSubject, $pattern)) {
                         $aggregated[$m['id']] = $m;
                         break;
                     }

@@ -229,10 +229,11 @@
 
                     <x-slot:details>
                         @if($expense->receipts->count() > 1)
-                            {{-- Show tabs for multiple receipts --}}
+                            {{-- Show tabs for multiple receipts (newest first) --}}
+                            @php $orderedReceipts = $expense->receipts->sortByDesc('id')->values(); @endphp
                             <flux:tab.group>
                                 <flux:tabs>
-                                    @foreach($expense->receipts as $receipt)
+                                    @foreach($orderedReceipts as $receipt)
                                         <flux:tab :name="$receipt->id" class="group">
                                             <span class="inline-flex items-center gap-2">
                                                 <span>Receipt {{ $loop->iteration }}</span>
@@ -254,7 +255,7 @@
                                         </flux:tab>
                                     @endforeach
                                 </flux:tabs>
-                                @foreach($expense->receipts as $receipt)
+                                @foreach($orderedReceipts as $receipt)
                                     <flux:tab.panel :name="$receipt->id" class="!pt-2">
                                             <x-expenses.receipt 
                                                 :receipt="$receipt" 

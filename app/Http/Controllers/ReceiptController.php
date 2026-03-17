@@ -586,7 +586,7 @@ class ReceiptController extends Controller
     }
 
 
-    public function azure_docs_api($file_location, $document_model, $doc_type, string $logChannel = 'vendor_docs')
+    public function azure_docs_api($file_location, $document_model, $doc_type, string $logChannel = 'vendor_docs', array $queryFields = [])
     {
         $file = Storage::disk('files')->get($file_location);
 
@@ -632,7 +632,11 @@ class ReceiptController extends Controller
         $azure_api_key = env('AZURE_DI_API_KEY');
         $azure_api_version = env('AZURE_DI_VERSION');
 
-        curl_setopt($ch, CURLOPT_URL, 'https://'.env('AZURE_DI_ENDPOINT').'/documentintelligence/documentModels/'.$document_model.':analyze?api-version='.$azure_api_version);
+        $analyzeUrl = 'https://'.env('AZURE_DI_ENDPOINT').'/documentintelligence/documentModels/'.$document_model.':analyze?api-version='.$azure_api_version;
+        if (!empty($queryFields)) {
+            $analyzeUrl .= '&features=queryFields&queryFields=' . implode(',', $queryFields);
+        }
+        curl_setopt($ch, CURLOPT_URL, $analyzeUrl);
         curl_setopt($ch, CURLOPT_POSTFIELDS, $file);
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
@@ -738,9 +742,9 @@ class ReceiptController extends Controller
     }
 
     //send receipt location, document_model_type
-    public function azure_receipts($ocr_path, $doc_type, $document_model)
+    public function azure_receipts($ocr_path, $doc_type, $document_model, array $queryFields = [])
     {
-        $result = $this->azure_docs_api($ocr_path, $document_model, $doc_type, 'nylas');
+        $result = $this->azure_docs_api($ocr_path, $document_model, $doc_type, 'nylas', $queryFields);
 
         $all_fields = [];
         foreach ($result['analyzeResult']['documents'] as $document) {
@@ -772,13 +776,11 @@ class ReceiptController extends Controller
         // ®
         $ocr_receipt_extracted['content'] = htmlentities($ocr_receipt_extracted['content']);
         //TIP AMOUNT
-        // if(isset($ocr_receipt_extract_prefix['Tip'])){
-        //     $tip_amount = $ocr_receipt_extract_prefix['Tip']['valueNumber'];
-        // }else{
-        //     $tip_amount = NULL;
-        // }
-
-        // dd($ocr_receipt_extracted);
+        if (isset($ocr_receipt_extract_prefix['Tip'])) {
+            $tip = $this->extractCurrencyAmount($ocr_receipt_extract_prefix['Tip']);
+        } else {
+            $tip = null;
+        }
 
         //HANDWRITTEN
         $handwritten_notes = [];
@@ -816,12 +818,12 @@ class ReceiptController extends Controller
         $merchant_name = str_replace("\n", '', $merchant_name);
 
         //INVOICE NUMBER/ID
-        if (isset($ocr_receipt_extract_prefix['InvoiceId'])) {
-            $invoice_number = $ocr_receipt_extract_prefix['InvoiceId']['valueString'];
+        if (isset($ocr_receipt_extract_prefix['InvoiceId']) && ($ocr_receipt_extract_prefix['InvoiceId']['confidence'] ?? 0) > 0) {
+            $invoice_number = $ocr_receipt_extract_prefix['InvoiceId']['valueString'] ?? $ocr_receipt_extract_prefix['InvoiceId']['content'] ?? null;
         } elseif (isset($ocr_receipt_extract_prefix['invoice_number'])) {
             $invoice_number = $ocr_receipt_extract_prefix['invoice_number'];
-        } elseif (isset($ocr_receipt_extract_prefix['OrderNumber'])) {
-            $invoice_number = $ocr_receipt_extract_prefix['OrderNumber']['valueString'];
+        } elseif (isset($ocr_receipt_extract_prefix['OrderNumber']) && ($ocr_receipt_extract_prefix['OrderNumber']['confidence'] ?? 0) > 0) {
+            $invoice_number = $ocr_receipt_extract_prefix['OrderNumber']['valueString'] ?? $ocr_receipt_extract_prefix['OrderNumber']['content'] ?? null;
         } else {
             $invoice_number = null;
         }
@@ -919,26 +921,18 @@ class ReceiptController extends Controller
 
             $transaction_date = $transaction_date->format('Y-m-d');
         } else {
-            if($expense_amount){
-                $transaction_date = NULL;
-            }else{
+            // Allow null transaction date when:
+            // - processing email receipts ($email is set) — date is overridden from the email header anyway
+            // - updating an existing expense ($expense_amount is provided)
+            if ($email !== null || $expense_amount) {
+                $transaction_date = null;
+            } else {
                 $ocr_receipt_data = [
                     'error' => true,
                 ];
 
                 return $ocr_receipt_data;
             }
-
-            //if coming from creating email, allow $transaction_date to be NULL.
-
-            //if coming from UPDATE EXPENSE ... allow.... otherwire deny.
-            // if($email == NULL){
-            //     $ocr_receipt_data = [
-            //         'error' => true,
-            //     ];
-
-            //     return $ocr_receipt_data;
-            // }
         }
 
         //SUBTOTAL
@@ -972,7 +966,20 @@ class ReceiptController extends Controller
 
                 $line = $line_item['valueObject'];
 
-                $formatted_items[$key]['Description'] = $line['Description']['valueString'] ?? null;
+                $description = $line['Description']['valueString'] ?? null;
+
+                // Fallback: use the line item's content field when Azure doesn't extract a Description
+                if ($description === null && isset($line_item['content']) && is_string($line_item['content'])) {
+                    $rawContent = trim($line_item['content']);
+                    // Strip known field labels to isolate the product name
+                    $cleaned = preg_replace('/(?:Part\s*Number|Warranty|Quantity|Item\s*Total|Price|Unit\s*Price)\s*:.*$/is', '', $rawContent);
+                    $cleaned = trim($cleaned);
+                    if ($cleaned !== '') {
+                        $description = $cleaned;
+                    }
+                }
+
+                $formatted_items[$key]['Description'] = $description;
                 $formatted_items[$key]['ProductCode'] = $this->sanitizeProductCode($line['ProductCode']['valueString'] ?? null);
 
                 // TotalPrice / Amount with robust fallbacks
@@ -1108,6 +1115,16 @@ class ReceiptController extends Controller
             }
         }
 
+        // Calculate misc fees as the unaccounted gap between total and (subtotal + tax + tip)
+        $misc_fees = null;
+        if (!is_null($amount) && !is_null($subtotal)) {
+            $knownSum = $subtotal + ($total_tax ?? 0) + ($tip ?? 0);
+            $gap = round($amount - $knownSum, 2);
+            if ($gap > 0.004) {
+                $misc_fees = $gap;
+            }
+        }
+
         $ocr_receipt_data = [
             'content' => $ocr_receipt_extracted['content'],
             'fields' => [
@@ -1115,6 +1132,8 @@ class ReceiptController extends Controller
                 'subtotal' => $subtotal,
                 'total' => $amount,
                 'total_tax' => $total_tax,
+                'tip' => $tip,
+                'misc_fees' => $misc_fees,
                 'transaction_date' => $transaction_date,
                 'merchant_name' => $merchant_name,
                 'invoice_number' => $invoice_number,

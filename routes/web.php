@@ -50,6 +50,7 @@ use App\Livewire\Payments\PaymentShow;
 use App\Livewire\Payments\PaymentsIndex;
 use App\Livewire\Planner\CardsIndex;
 use App\Livewire\Planner\GanttIndex;
+use App\Livewire\Receipts\ReceiptsIndex;
 use App\Livewire\Projects\ProjectShow;
 use App\Livewire\Projects\ProjectsIndex;
 use App\Livewire\Sheets\SheetShow;
@@ -412,6 +413,9 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
 
     //TRANSACTIONS
     Route::get('/transactions/match_vendor', MatchVendor::class)->name('transactions.match_vendor');
+
+    //RECEIPTS
+    Route::get('/receipts', ReceiptsIndex::class)->name('receipts.index');
 
     //USERS
     Route::get('/users/{user}', UserShow::class)->name('users.show');

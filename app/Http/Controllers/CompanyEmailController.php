@@ -495,10 +495,32 @@ class CompanyEmailController extends Controller
             // Use hiveMeta directly (guaranteed present if we reach here)
             $fromEmail = $hiveMeta['from_email'];
             $toEmail = $hiveMeta['to_email'];
-            $subject = $hiveMeta['subject'];           
-            $dateEmail = Carbon::createFromTimestamp((int) $hiveMeta['unix_date'])
-                ->setTimezone('America/Chicago')
-                ->format('Y-m-d');
+            $subject = $hiveMeta['subject'];
+
+            // Prefer original_date (Y-m-d string parsed from the forwarded body's Sent: line).
+            // Fall back to unix_date (the forward timestamp) with timezone adjustment.
+            if (isset($hiveMeta['original_date'])) {
+                // Stored as Y-m-d string — use directly, no timezone conversion needed.
+                $dateEmail = $hiveMeta['original_date'];
+            } else {
+                $dateEmail = Carbon::createFromTimestamp((int) $hiveMeta['unix_date'])
+                    ->setTimezone('America/Chicago')
+                    ->format('Y-m-d');
+
+                // Fallback for emails forwarded before original_date was added to X-Hive-Metadata:
+                // Parse the "Sent:" line from the Outlook forwarded-message block in the body.
+                // No timezone conversion — the Sent: value is a plain date string, not a timestamp.
+                if (!empty($message['body'])) {
+                    $bodyText = strip_tags($message['body']);
+                    if (preg_match('/\bSent:\s*(?:\w+,\s*)?(\w+ \d{1,2},\s*\d{4})/i', $bodyText, $dateMatch)) {
+                        try {
+                            $dateEmail = Carbon::parse(trim($dateMatch[1]))->format('Y-m-d');
+                        } catch (\Exception $ex) {
+                            // Could not parse; keep existing $dateEmail
+                        }
+                    }
+                }
+            }
 
             $companyEmail = CompanyEmail::withoutGlobalScopes()
                 ->where('email', $toEmail)
@@ -523,7 +545,35 @@ class CompanyEmailController extends Controller
             // Find Receipt using intelligent matching:
             // 1. from_address can be wildcard like "@stripe.com" (matches any email ending with @stripe.com)
             // 2. from_subject can be partial match (e.g., "AT&T payment processed" matches "AT&T payment processed for account ending in 1733")
-            $receipt = $this->findMatchingReceipt($fromEmail, $subject);
+            // Strip common email prefixes (Fw:, Fwd:, Re:) that may have been added during forwarding
+            $cleanSubject = preg_replace('/^(fw:|fwd:|re:)\s*/i', '', $subject);
+            $receipt = $this->findMatchingReceipt($fromEmail, $cleanSubject);
+
+            // Fallback: if no match and body contains a "From:" line, try extracting the original sender.
+            // This handles cases where the forwarding system captured the forwarder's address
+            // instead of the original sender (e.g. szadoky5@hotmail.com instead of orders@em.autozone.com).
+            if (!$receipt && !empty($message['body'])) {
+                // Search raw HTML body — strip_tags destroys forwarded-message "From:" lines embedded in HTML
+                if (preg_match_all('/\bFrom:.*?([a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,})/i', $message['body'], $fromMatches)) {
+                    foreach ($fromMatches[1] as $candidateEmail) {
+                        $bodyFromEmail = strtolower(trim($candidateEmail));
+                        if ($bodyFromEmail === strtolower($fromEmail) || !filter_var($bodyFromEmail, FILTER_VALIDATE_EMAIL)) {
+                            continue;
+                        }
+                        $receipt = $this->findMatchingReceipt($bodyFromEmail, $cleanSubject);
+                        if ($receipt) {
+                            Log::channel('nylas')->info('Receipt matched using body-extracted from_email fallback', [
+                                'message_id' => $messageId,
+                                'metadata_from_email' => $fromEmail,
+                                'body_from_email' => $bodyFromEmail,
+                                'receipt_id' => $receipt->id,
+                            ]);
+                            $fromEmail = $bodyFromEmail;
+                            break;
+                        }
+                    }
+                }
+            }
 
             // If no matching receipt found, move to add_manually folder
             if (!$receipt) {
@@ -614,9 +664,16 @@ class CompanyEmailController extends Controller
                     $bodyType = 'text';
                 }
 
-                //PREVIEWS HTML RECEIPT
-                // print_r($receipt_html_main);
-                // dd();
+                // DEBUG: log extraction results to diagnose blank PDF
+                Log::channel('nylas')->info('Receipt HTML extraction', [
+                    'receipt_id' => $receipt->id,
+                    'message_id' => $messageId,
+                    'receipt_start_found' => $receipt_start_text,
+                    'receipt_start_pos' => $receipt_start,
+                    'receipt_end_pos' => $receipt_end,
+                    'receipt_html_main_len' => strlen($receipt_html_main),
+                    'receipt_html_main_preview' => substr(strip_tags($receipt_html_main), 0, 300),
+                ]);
 
                 // Set defaults at the top
                 $doc_type = 'pdf'; // Default to PDF for most cases
@@ -742,21 +799,41 @@ class CompanyEmailController extends Controller
                     }
                 }
 
-                $document_model = $receipt->options['document_model'];
+                $document_model = $receipt->options['document_model'] ?? null;
+
+                if (!$document_model) {
+                    $this->nylasService->moveEmailToFolder($messageId, $folderMap['Add'], $grantId, $companyEmail->id);
+                    Log::channel('nylas')->warning('Receipt is missing document_model option - moved to Add folder', [
+                        'receipt_id' => $receipt->id,
+                        'message_id' => $messageId,
+                    ]);
+                    continue;
+                }
 
                 //ocr the file
-                $ocr_receipt_extracted = app(\App\Http\Controllers\ReceiptController::class)->azure_receipts($ocr_path, $doc_type, $document_model);
+                $queryFields = !empty($receipt->options['query_fields']) ? array_map('trim', explode(',', $receipt->options['query_fields'])) : [];
+                $ocr_receipt_extracted = app(\App\Http\Controllers\ReceiptController::class)->azure_receipts($ocr_path, $doc_type, $document_model, $queryFields);
                 
                 //pass receipt info to ocr_extract method
                 $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->ocr_extract($ocr_receipt_extracted, null, 'email', $receipt);
 
+                // DEBUG: log OCR results
+                Log::channel('nylas')->info('Receipt OCR result', [
+                    'receipt_id' => $receipt->id,
+                    'message_id' => $messageId,
+                    'ocr_content_len' => strlen($ocr_receipt_data['content'] ?? ''),
+                    'ocr_content_preview' => substr($ocr_receipt_data['content'] ?? '', 0, 300),
+                    'ocr_fields' => $ocr_receipt_data['fields'] ?? [],
+                ]);
+
                 // Some OCR providers / failure modes can return a partial payload without a "fields" key.
                 // This method is executed by the scheduler; avoid crashing the whole run.
-                if (! is_array($ocr_receipt_data)) {
-                    Log::channel('nylas')->warning('OCR extract returned non-array payload', [
+                if (! is_array($ocr_receipt_data) || ($ocr_receipt_data['error'] ?? false) === true) {
+                    Log::channel('nylas')->warning('OCR extract returned error or non-array payload', [
                         'receipt_id' => $receipt->id,
                         'company_email_id' => $companyEmail->id,
                         'message_id' => $messageId,
+                        'ocr_error' => $ocr_receipt_data['error'] ?? null,
                     ]);
                     continue;
                 }
@@ -813,7 +890,10 @@ class CompanyEmailController extends Controller
                     ]);
                 }
 
-                $date = ! empty($transactionDate) ? $transactionDate : $dateEmail;
+                // use_email_date option forces the email date regardless of what OCR extracted
+                $date = (!empty($receipt->options['use_email_date']) || empty($transactionDate))
+                    ? $dateEmail
+                    : $transactionDate;
 
                 //8-18-23 we can remove this?!
                 $total = $ocr_receipt_data['fields']['total'] ?? null;
@@ -835,17 +915,39 @@ class CompanyEmailController extends Controller
                     $amount = $total;
                 }
 
+                // amount override via regex (useful when OCR picks the wrong field, e.g. "Amount Due" vs "Amount Paid")
+                if (isset($receipt->options['amount_regex'])) {
+                    $re = $receipt->options['amount_regex'];
+                    $str = $ocr_receipt_data['content'];
+                    preg_match($re, $str, $matches);
+                    if (!empty($matches[1])) {
+                        $amount = preg_replace('/[^0-9.]/', '', $matches[1]);
+                    }
+                }
+
                 // receipt number / invoice
                 if (isset($receipt->options['invoice_regex'])) {
                     $re = $receipt->options['invoice_regex'];
                     $str = $ocr_receipt_data['content'];
                     preg_match_all($re, $str, $matches, PREG_SET_ORDER, 0);
 
+                    // If no match in OCR content, try the receipt HTML text
+                    if (empty($matches) && !empty($receipt_html_main)) {
+                        preg_match_all($re, $receipt_html_main, $matches, PREG_SET_ORDER, 0);
+                    }
+
+                    // If still no match, try the OCR-extracted invoice value itself
+                    if (empty($matches) && !empty($ocr_receipt_data['fields']['invoice_number'])) {
+                        preg_match_all($re, $ocr_receipt_data['fields']['invoice_number'], $matches, PREG_SET_ORDER, 0);
+                    }
+
                     if (empty($matches)) {
-                        $invoice = null;
+                        // Regex present but no match — fall back to OCR-extracted value
+                        $invoice = $ocr_receipt_data['fields']['invoice_number'] ?? null;
                     } else {
-                        // $receipt_number = str_replace(' ', '', $matches[count($matches) - 1][0]);
-                        $invoice = trim($matches[count($matches) - 1][0]);
+                        $lastMatch = $matches[count($matches) - 1];
+                        // Use capture group [1] if present, else fall back to full match [0]
+                        $invoice = trim($lastMatch[1] ?? $lastMatch[0]);
                         $ocr_receipt_data['fields']['invoice_number'] = $invoice;
                     }
                 } elseif (isset($ocr_receipt_data['fields']['invoice_number'])) {
@@ -855,7 +957,9 @@ class CompanyEmailController extends Controller
                 }
 
                 // receipt po / purchase order
-                if (isset($receipt->options['po_regex'])) {
+                if (!empty($receipt->options['no_po'])) {
+                    $purchase_order = null;
+                } elseif (isset($receipt->options['po_regex'])) {
                     $re = $receipt->options['po_regex'];
                     $str = $ocr_receipt_data['content'];
                     preg_match($re, $str, $matches);
@@ -872,6 +976,45 @@ class CompanyEmailController extends Controller
                 }
 
                 $ocr_receipt_data['fields']['purchase_order'] = $purchase_order;
+
+                // Handle "update_existing" receipts: find an existing expense with the same
+                // invoice number and vendor, update its amount/date, and attach the new
+                // receipt as an additional record (preserving the original).
+                if (!empty($receipt->options['update_existing']) && !empty($invoice)) {
+                    $existingExpense = Expense::where('belongs_to_vendor_id', $receipt_account->belongs_to_vendor_id)
+                        ->where('vendor_id', $receipt->vendor_id)
+                        ->where('invoice', trim((string) $invoice))
+                        ->whereNull('deleted_at')
+                        ->latest('id')
+                        ->first();
+
+                    if ($existingExpense) {
+                        $oldAmount = $existingExpense->amount;
+
+                        // Update expense amount and date from the update email
+                        $existingExpense->amount = $amount;
+                        $existingExpense->date = $date;
+                        $existingExpense->save();
+
+                        // Attach as a new receipt record (keeps the original intact)
+                        $this->saveExpenseReceipt($existingExpense->id, $ocr_receipt_data, $ocr_filename, !empty($receipt->options['html_to_pdf']) ? null : $message, true);
+
+                        Log::channel('nylas')->info('Updated existing expense via update_existing receipt', [
+                            'expense_id' => $existingExpense->id,
+                            'receipt_id' => $receipt->id,
+                            'invoice' => $invoice,
+                            'old_amount' => $oldAmount,
+                            'new_amount' => $amount,
+                        ]);
+
+                        // Move to Saved folder
+                        if (!empty($folderMap['Saved'])) {
+                            $this->nylasService->moveEmailToFolder($messageId, $folderMap['Saved'], $grantId, $companyEmail->id);
+                        }
+                        continue;
+                    }
+                    // No existing expense found — fall through to normal creation flow
+                }
 
                 //FIND duplicates
                 //confirm expense does not yet exist
@@ -2338,14 +2481,19 @@ class CompanyEmailController extends Controller
         $bodyHtml = $fullMessage['data']['body'] ?? '';
         
         if (!empty($bodyHtml)) {
-            // Extract original sender from email body (common in forwarded/copied emails)
-            if (preg_match('/From:.*?([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i', $bodyHtml, $matches)) {
-                $extractedEmail = strtolower(trim($matches[1]));
-                if (!empty($extractedEmail) && filter_var($extractedEmail, FILTER_VALIDATE_EMAIL)) {
-                    $receipt = $this->findMatchingReceipt($extractedEmail, $cleanSubject);
-                    
-                    if ($receipt !== null) {
-                        return true;
+            // Extract all sender emails from forwarded headers in body
+            // The first From: is often the forwarder; the original sender may be deeper
+            if (preg_match_all('/From:.*?([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i', $bodyHtml, $matches)) {
+                foreach ($matches[1] as $rawEmail) {
+                    $extractedEmail = strtolower(trim($rawEmail));
+                    if ($extractedEmail === $fromEmail || empty($extractedEmail)) {
+                        continue; // Skip the direct sender we already tried
+                    }
+                    if (filter_var($extractedEmail, FILTER_VALIDATE_EMAIL)) {
+                        $receipt = $this->findMatchingReceipt($extractedEmail, $cleanSubject);
+                        if ($receipt !== null) {
+                            return true;
+                        }
                     }
                 }
             }

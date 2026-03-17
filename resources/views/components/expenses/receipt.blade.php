@@ -77,6 +77,20 @@
                     <flux:table.cell class="!pr-5" align="end">{{money($receipt->receipt_items['total_tax'] ?? 0)}}</flux:table.cell>
                 </flux:table.row>
 
+                @if(!empty($receipt->receipt_items['tip']))
+                <flux:table.row>
+                    <flux:table.cell colspan="3" align="end" class="font-medium">Tip</flux:table.cell>
+                    <flux:table.cell class="!pr-5" align="end">{{money($receipt->receipt_items['tip'])}}</flux:table.cell>
+                </flux:table.row>
+                @endif
+
+                @if(!empty($receipt->receipt_items['misc_fees']))
+                <flux:table.row>
+                    <flux:table.cell colspan="3" align="end" class="font-medium">Fees</flux:table.cell>
+                    <flux:table.cell class="!pr-5" align="end">{{money($receipt->receipt_items['misc_fees'])}}</flux:table.cell>
+                </flux:table.row>
+                @endif
+
 
 
                 <flux:table.row>

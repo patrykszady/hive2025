@@ -42,33 +42,13 @@ class ReceiptAccountsIndex extends Component
     {
         $vendors = Vendor::query()
             ->with(['receipt_account'])
-            ->withCount('transactions_bulk_match')
-            // ->withoutGlobalScopes()
-            //   ->whereIn('id', $this->receipt_accounts)
-            ->whereHas('receipt_account')
-            // whereHas('receipt_accounts', function ($query) use ($auth_vendor) {
-            //     return $query->where('belongs_to_vendor_id', $auth_vendor->id);
-            //     })
-                // ->with(['receipts', 'receipt_account'])
+            ->withCount(['transactions_bulk_match', 'receipts'])
+            ->where(function ($query) {
+                $query->whereHas('receipt_account')
+                    ->orWhereHas('receipts');
+            })
             ->orderBy('business_name')
             ->get();
-                // ->each(function ($vendor, $key) {
-                //     if (! isset($vendor->receipt_account)) {
-                //         $vendor->type = 'Not Connected';
-                //         $vendor->status = 'Yellow';
-                //     } elseif ($vendor->receipts->first()->from_type == 4) {
-                //         if (isset($vendor->receipt_account->options['errors'])) {
-                //             $vendor->type = 'ERROR';
-                //             $vendor->status = 'Disabled';
-                //         } else {
-                //             $vendor->type = 'Login';
-                //             $vendor->status = 'Active';
-                //         }
-                //     } else {
-                //         $vendor->type = 'Email';
-                //         $vendor->status = 'Active';
-                //     }
-                // });
 
         return $vendors;
     }
