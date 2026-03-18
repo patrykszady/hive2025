@@ -50,7 +50,7 @@ class SendOutboundSmsBrowserNotifications implements ShouldQueue
 
         $senderName = trim($sender->first_name . ' ' . $sender->last_name) ?: 'A team member';
         $threadLabel = $this->resolveThreadLabel($message);
-        $body = trim($message->text ?: 'Sent a message');
+        $body = trim($message->display_text ?: 'Sent a message');
 
         $webPush->sendToSubscriptions($enabledSubscriptions, [
             'title' => "{$senderName} replied to {$threadLabel}",

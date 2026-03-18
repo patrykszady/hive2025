@@ -2160,6 +2160,17 @@ class TelnyxWebhookController extends Controller
         $to = in_array($ourNumber, $allTo) ? $ourNumber : ($allTo[0] ?? null);
 
         $text = $data['text'] ?? '';
+
+        // Fix double-encoded UTF-8 text (e.g. iMessage reactions via carrier SMS gateways).
+        // Detect Â/Ã (U+00C2/U+00C3 as 2-byte UTF-8) followed by another multi-byte sequence —
+        // the hallmark of UTF-8 bytes re-encoded as UTF-8.
+        if ($text && preg_match('/\xC3[\x82\x83]\xC2[\x80-\xBF]/', $text)) {
+            $decoded = @iconv('UTF-8', 'CP1252//IGNORE', $text);
+            if ($decoded !== false && mb_check_encoding($decoded, 'UTF-8')) {
+                $text = $decoded;
+            }
+        }
+
         $mediaUrls = collect($data['media'] ?? [])
             ->pluck('url')
             ->filter()

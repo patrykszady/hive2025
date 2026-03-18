@@ -41,7 +41,7 @@ class SendInboundSmsBrowserNotifications implements ShouldQueue
         }
 
         $fromLabel = $this->resolveSenderDisplayName($message);
-        $body = trim($message->text ?: 'New message received');
+        $body = trim($message->display_text ?: 'New message received');
 
         $webPush->sendToSubscriptions($enabledSubscriptions, [
             'title' => "New Text from {$fromLabel}",

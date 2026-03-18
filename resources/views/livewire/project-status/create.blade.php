@@ -8,31 +8,28 @@
                 </flux:accordion.heading>
 
                 <flux:accordion.content>
-                    <ul role="list" class="mt-6">
+                    <flux:timeline class="mt-6" align="start" style="--flux-timeline-indicator-size: 1.5rem;">
                         @foreach($statuses as $status)
-                            <li class="relative flex gap-x-4 pb-1 group">
-                                @if(!$loop->last)
-                                    <div class="absolute top-0 left-0 flex justify-center w-6 -bottom-1">
-                                        <div class="w-px bg-gray-200"></div>
-                                    </div>
-                                @endif
-                                <div class="relative flex items-center justify-center flex-none w-6 h-6 bg-white">
-                                    @if($loop->last)
-                                        <div class="h-6 w-6 rounded-full flex items-center justify-center opacity-30" style="border: 2px solid {{ $status->dotColor }}">
-                                            <div class="h-2.5 w-2.5 rounded-full opacity-100" style="background-color: {{ $status->dotColor }}"></div>
+                            <flux:timeline.item class="group">
+                                @if($loop->last)
+                                    <flux:timeline.indicator variant="bare">
+                                        <div class="size-5 rounded-full flex items-center justify-center opacity-40" style="border: 2px solid {{ $status->dotColor }}">
+                                            <div class="size-2.5 rounded-full opacity-100" style="background-color: {{ $status->dotColor }}"></div>
                                         </div>
-                                    @else
-                                        <div class="h-1.5 w-1.5 rounded-full bg-gray-100 ring-1 ring-gray-300"></div>
-                                    @endif
-                                </div>
-                                <div class="flex-auto py-0.5">
+                                    </flux:timeline.indicator>
+                                @else
+                                    <flux:timeline.indicator variant="bare">
+                                        <div class="size-1.5 rounded-full bg-gray-100 ring-1 ring-gray-300"></div>
+                                    </flux:timeline.indicator>
+                                @endif
+
+                                <flux:timeline.content>
                                     <div class="flex items-center gap-2">
                                         <flux:badge size="sm" :color="$status->badgeColor">{{ $status->title }}</flux:badge>
-                                        <span class="text-xs text-gray-500">{{$status->start_date->format('m/d/y')}}</span>
-                                        
+                                        <span class="text-xs text-gray-500">{{ $status->start_date->format('m/d/y') }}</span>
+
                                         @can('update', $project)
-                                            {{-- Edit button - hidden by default, shown on group hover (desktop only) --}}
-                                            <button 
+                                            <button
                                                 wire:click="editStatus({{ $status->id }})"
                                                 type="button"
                                                 class="hidden md:group-hover:inline-flex text-gray-400 hover:text-indigo-600 transition-colors"
@@ -41,64 +38,45 @@
                                                 <flux:icon.pencil variant="micro" />
                                             </button>
                                         @endcan
+
+                                        <time datetime="{{ $status->start_date }}" class="ml-auto text-xs text-gray-500">
+                                            {{ $status->start_date->diffForHumans() }}
+                                        </time>
                                     </div>
-                                    
-                                    @if($loop->index < count($statuses) - 1)
+
+                                    @if($loop->last)
+                                        @php
+                                            $daysSince = floor(abs(now()->diffInDays($status->start_date)));
+                                            $sinceText = $daysSince > 0
+                                                ? $daysSince . ' day' . ($daysSince === 1 ? '' : 's') . ' since'
+                                                : 'today';
+                                        @endphp
+                                        <div class="text-xs italic text-gray-400">{{ $sinceText }}</div>
+                                    @elseif($loop->index < count($statuses) - 1)
                                         @php
                                             $nextStatus = $statuses[$loop->index + 1];
                                             $diffInDays = floor(abs($nextStatus->start_date->diffInDays($status->start_date)));
-                                            
-                                            if ($diffInDays > 0) {
-                                                $timeText = $diffInDays . ' day' . ($diffInDays === 1 ? '' : 's') . ' later';
-                                            } else {
-                                                $timeText = 'same day';
-                                            }
+                                            $timeText = $diffInDays > 0
+                                                ? $diffInDays . ' day' . ($diffInDays === 1 ? '' : 's') . ' later'
+                                                : 'same day';
                                         @endphp
-                                        <div class="text-xs italic text-gray-400 pl-4">{{ $timeText }}</div>
+                                        <div class="text-xs italic text-gray-400">{{ $timeText }}</div>
                                     @endif
-                                </div>
-                                <time datetime="{{$status->start_date}}" class="flex-none py-0.5 text-xs leading-5 text-gray-500">
-                                    {{ $status->start_date->diffForHumans() }}
-                                </time>
-                            </li>
+                                </flux:timeline.content>
+                            </flux:timeline.item>
                         @endforeach
-                        
-                        @php
-                            $lastStatus = $statuses->last();
-                            $diffInDays = floor(abs(now()->diffInDays($lastStatus->start_date)));
-                            
-                            if ($diffInDays > 0) {
-                                $timeText = $diffInDays . ' day' . ($diffInDays === 1 ? '' : 's') . ' since';
-                            } else {
-                                $timeText = 'today';
-                            }
-                        @endphp
-                        
-                        <li class="relative flex gap-x-4 pb-1">
-                            @can('update', $project)
-                                <div class="absolute top-0 left-0 flex justify-center w-6 -bottom-1">
-                                    <div class="w-px bg-gray-200"></div>
-                                </div>
-                            @endcan
-                            <div class="relative flex items-center justify-center flex-none w-6 h-6 bg-white">
-                            </div>
-                            <div class="flex-auto py-0.5">
-                                <div class="text-xs italic text-gray-400 pl-4">{{ $timeText }}</div>
-                            </div>
-                        </li>
-                        
-                        @can('update', $project)
-                            <li class="relative flex gap-x-4 pt-1">
-                                <div class="relative flex items-center justify-center flex-none w-6 h-6 bg-white">
-                                    <div class="h-1.5 w-1.5 rounded-full bg-gray-100 ring-1 ring-gray-300"></div>
-                                </div>
-                                <div class="flex-auto">
-                                    @include('livewire.project-status._status_controls')
-                                </div>
-                            </li>
-                        @endcan
 
-                    </ul>
+                        @can('update', $project)
+                            <flux:timeline.item>
+                                <flux:timeline.indicator variant="bare">
+                                    <div class="size-1.5 rounded-full bg-gray-100 ring-1 ring-gray-300"></div>
+                                </flux:timeline.indicator>
+                                <flux:timeline.content>
+                                    @include('livewire.project-status._status_controls')
+                                </flux:timeline.content>
+                            </flux:timeline.item>
+                        @endcan
+                    </flux:timeline>
                 </flux:accordion.content>
             </flux:accordion.item>
         </flux:accordion>

@@ -27,7 +27,7 @@
                         <div class="flex flex-col">
                             @if(isset($bank_account_data['account']->options->balances))
                                 <flux:button variant="primary" disabled class="self-end">
-                                    {{money($bank_account_data['account']->options->balances->current ?? '')}}
+                                    {{money(isset($bank_account_data['account']->options->balances->available) ? $bank_account_data['account']->options->balances->available : $bank_account_data['account']->options->balances->current ?? '')}}
                                 </flux:button>
                             @endif
                             <div class="text-xs mt-1">

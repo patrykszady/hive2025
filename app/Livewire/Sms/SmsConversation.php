@@ -680,7 +680,6 @@ class SmsConversation extends Component
             if (! $tapback || ! $tapback['emoji']) {
                 continue;
             }
-            $tapbackIds->push($msg->id);
 
             $quotedNormalized = mb_strtolower(trim($tapback['quoted']));
             $matched = $allMessages->first(function ($candidate) use ($quotedNormalized, $msg) {
@@ -696,6 +695,14 @@ class SmsConversation extends Component
                 return str_contains($candidateNormalized, $quotedNormalized)
                     || str_contains($quotedNormalized, $candidateNormalized);
             });
+
+            // Generic (strict) tapbacks are only processed when the quoted text
+            // actually matches a message in the thread — avoids hiding normal messages.
+            if (($tapback['strict'] ?? false) && ! $matched) {
+                continue;
+            }
+
+            $tapbackIds->push($msg->id);
 
             if ($matched) {
                 $senderName = $phoneNameMap[$msg->from_number] ?? substr($msg->from_number, -4);

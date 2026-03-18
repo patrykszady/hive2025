@@ -794,6 +794,21 @@ class TransactionController extends Controller
         return null;
     }
 
+    /**
+     * Soft-delete $0.00 posted Plaid transactions that carry no value.
+     * Mirrors the check in Transaction::booted() saved event, but sweeps
+     * any records that slipped through (e.g. synced before the event existed).
+     */
+    public function cleanup_zero_transactions(): int
+    {
+        return Transaction::withoutGlobalScopes()
+            ->whereNull('deleted_at')
+            ->whereNotNull('posted_date')
+            ->where('amount', '0.00')
+            ->whereNotNull('plaid_transaction_id')
+            ->delete();
+    }
+
     public function add_vendor_to_transactions()
     {
         // Query BankAccount once and load the related Bank
