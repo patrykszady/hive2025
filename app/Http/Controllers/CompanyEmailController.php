@@ -459,43 +459,53 @@ class CompanyEmailController extends Controller
             // Messages without this header should not be here and will be moved to error folder
             $hiveMeta = null;
             if (isset($message['headers']) && is_array($message['headers'])) {
-                foreach ($message['headers'] as $hdr) {
-                    if (isset($hdr['name']) && strcasecmp($hdr['name'], 'X-Hive-Metadata') === 0) {
-                        $decoded = json_decode($hdr['value'] ?? '', true);
+                $headers = $message['headers'];
+
+                // Shape A: list of header objects like [{name: 'X-Hive-Metadata', value: '...'}]
+                foreach ($headers as $hdr) {
+                    if (!is_array($hdr)) {
+                        continue;
+                    }
+
+                    if (isset($hdr['name']) && is_string($hdr['name']) && strcasecmp($hdr['name'], 'X-Hive-Metadata') === 0) {
+                        $decoded = json_decode((string) ($hdr['value'] ?? ''), true);
                         if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
                             $hiveMeta = $decoded;
                         }
                         break;
                     }
                 }
+
+                // Shape B: associative map like ['X-Hive-Metadata' => '{...}']
+                if (!$hiveMeta && array_key_exists('X-Hive-Metadata', $headers)) {
+                    $decoded = json_decode((string) ($headers['X-Hive-Metadata'] ?? ''), true);
+                    if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                        $hiveMeta = $decoded;
+                    }
+                }
+
+                if (!$hiveMeta && array_key_exists('x-hive-metadata', $headers)) {
+                    $decoded = json_decode((string) ($headers['x-hive-metadata'] ?? ''), true);
+                    if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                        $hiveMeta = $decoded;
+                    }
+                }
             }
 
             if (!$hiveMeta) {
-                // hiveMeta expected; move to Error folder and skip
-                $errorFolderId = config('nylas.hive_receipts_error_folder_id');
-                if ($errorFolderId) {
-                    try {
-                        $this->nylasService->moveEmailToFolder($messageId, $errorFolderId, $grantId, null);
-                    } catch (\Throwable $e) {
-                        Log::channel('nylas')->error('Failed moving message without X-Hive-Metadata to error folder', [
-                            'grant_id' => $grantId,
-                            'message_id' => $messageId,
-                            'error' => $e->getMessage(),
-                        ]);
-                    }
-                } else {
-                    Log::channel('nylas')->warning('Missing error folder config for message lacking X-Hive-Metadata header', [
-                        'grant_id' => $grantId,
-                        'message_id' => $messageId,
-                    ]);
-                }
-                continue;
+                Log::channel('nylas')->warning('Missing X-Hive-Metadata header; using fallback message fields', [
+                    'grant_id' => $grantId,
+                    'message_id' => $messageId,
+                ]);
             }
 
-            // Use hiveMeta directly (guaranteed present if we reach here)
-            $fromEmail = $hiveMeta['from_email'];
-            $toEmail = $hiveMeta['to_email'];
-            $subject = $hiveMeta['subject'];
+            // Prefer metadata when present; otherwise use best-effort message fields.
+            $fromEmail = $hiveMeta['from_email']
+                ?? ($message['from'][0]['email'] ?? '');
+            $toEmail = $hiveMeta['to_email']
+                ?? ($message['to'][0]['email'] ?? config('nylas.receipts_email'));
+            $subject = $hiveMeta['subject']
+                ?? ($message['subject'] ?? '');
 
             // Prefer original_date (Y-m-d string parsed from the forwarded body's Sent: line).
             // Fall back to unix_date (the forward timestamp) with timezone adjustment.
@@ -503,7 +513,8 @@ class CompanyEmailController extends Controller
                 // Stored as Y-m-d string — use directly, no timezone conversion needed.
                 $dateEmail = $hiveMeta['original_date'];
             } else {
-                $dateEmail = Carbon::createFromTimestamp((int) $hiveMeta['unix_date'])
+                $fallbackUnixDate = $hiveMeta['unix_date'] ?? ($message['date'] ?? time());
+                $dateEmail = Carbon::createFromTimestamp((int) $fallbackUnixDate)
                     ->setTimezone('America/Chicago')
                     ->format('Y-m-d');
 
@@ -525,6 +536,35 @@ class CompanyEmailController extends Controller
             $companyEmail = CompanyEmail::withoutGlobalScopes()
                 ->where('email', $toEmail)
                 ->first();
+
+            if (!$companyEmail) {
+                $companyEmail = CompanyEmail::withoutGlobalScopes()
+                    ->where('grant_id', $grantId)
+                    ->first();
+            }
+
+            // Fallback for manually forwarded emails lacking X-Hive-Metadata:
+            // try to recover original recipient from forwarded body "To:" lines.
+            if (!$companyEmail && !empty($message['body'])) {
+                if (preg_match_all('/\bTo:.*?([a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,})/i', $message['body'], $toMatches)) {
+                    foreach ($toMatches[1] as $candidateEmail) {
+                        $candidateEmail = strtolower(trim((string) $candidateEmail));
+                        if (!filter_var($candidateEmail, FILTER_VALIDATE_EMAIL)) {
+                            continue;
+                        }
+
+                        $candidateCompanyEmail = CompanyEmail::withoutGlobalScopes()
+                            ->where('email', $candidateEmail)
+                            ->first();
+
+                        if ($candidateCompanyEmail) {
+                            $companyEmail = $candidateCompanyEmail;
+                            $toEmail = $candidateEmail;
+                            break;
+                        }
+                    }
+                }
+            }
 
             if (!$companyEmail) {
                 Log::channel('nylas')->error('Unable to resolve CompanyEmail for receipt message', [
@@ -609,13 +649,28 @@ class CompanyEmailController extends Controller
                         ? $receipt->options['receipt_start']
                         : [$receipt->options['receipt_start']];
 
+                    $useLastStartMatch = !empty($receipt->options['receipt_start_last']);
+                    $includeStartText = !empty($receipt->options['include_receipt_start_text']);
+                    $startOffset = isset($receipt->options['receipt_start_offset'])
+                        ? intval($receipt->options['receipt_start_offset'])
+                        : 0;
+
                     foreach ($starts as $start_text) {
-                        $pos = strpos($string, $start_text);
-                        if (is_numeric($pos)) {
-                            // Include the "receipt_start" text or start after it, based on offset
-                            $receipt_start = $pos + (isset($receipt->options['receipt_start_offset'])
-                                ? intval($receipt->options['receipt_start_offset']) + strlen($start_text)
-                                : strlen($start_text));
+                        $matchPositions = [];
+                        $searchPos = 0;
+                        while (($pos = stripos($string, $start_text, $searchPos)) !== false) {
+                            $matchPositions[] = $pos;
+                            $searchPos = $pos + max(strlen($start_text), 1);
+                        }
+
+                        if (!empty($matchPositions)) {
+                            $pos = $useLastStartMatch ? end($matchPositions) : $matchPositions[0];
+
+                            $receipt_start = (int) $pos + $startOffset + ($includeStartText ? 0 : strlen($start_text));
+                            if ($receipt_start < 0) {
+                                $receipt_start = 0;
+                            }
+
                             $receipt_start_text = $start_text; // Store the matched text for clarity
                             break; // Exit the loop once a match is found
                         }
@@ -644,6 +699,13 @@ class CompanyEmailController extends Controller
                     if (!empty($matches[1])) {
                         $receipt_html_main = str_replace($matches[1], '', $receipt_html_main);
                     }
+                }
+
+                // Optionally remove embedded images from extracted receipt HTML.
+                if (!empty($receipt->options['remove_images'])) {
+                    $receipt_html_main = preg_replace('/<img\b[^>]*>/i', '', $receipt_html_main) ?? $receipt_html_main;
+                    $receipt_html_main = preg_replace('/<v:imagedata\b[^>]*\/?>(?:<\/v:imagedata>)?/i', '', $receipt_html_main) ?? $receipt_html_main;
+                    $receipt_html_main = preg_replace('/background-image\s*:\s*url\([^)]*\)\s*;?/i', '', $receipt_html_main) ?? $receipt_html_main;
                 }
 
                 // Strip HTML tags and convert to readable text with line breaks
@@ -919,9 +981,16 @@ class CompanyEmailController extends Controller
                 if (isset($receipt->options['amount_regex'])) {
                     $re = $receipt->options['amount_regex'];
                     $str = $ocr_receipt_data['content'];
-                    preg_match($re, $str, $matches);
-                    if (!empty($matches[1])) {
-                        $amount = preg_replace('/[^0-9.]/', '', $matches[1]);
+                    preg_match_all($re, $str, $matches, PREG_SET_ORDER, 0);
+                    if (!empty($matches)) {
+                        $lastMatch = $matches[count($matches) - 1];
+                        $matchedAmount = trim((string) ($lastMatch[1] ?? $lastMatch[0] ?? ''));
+                        $matchedAmount = preg_replace('/[^0-9.]/', '', $matchedAmount);
+                        if ($matchedAmount !== '') {
+                            $amount = isset($receipt->options['refund'])
+                                ? '-'.$matchedAmount
+                                : $matchedAmount;
+                        }
                     }
                 }
 
@@ -936,6 +1005,17 @@ class CompanyEmailController extends Controller
                         preg_match_all($re, $receipt_html_main, $matches, PREG_SET_ORDER, 0);
                     }
 
+                    // If no match in extracted receipt segment, try the full message body.
+                    if (empty($matches) && !empty($string)) {
+                        $bodyText = html_entity_decode(strip_tags($string), ENT_QUOTES, 'UTF-8');
+                        preg_match_all($re, $bodyText, $matches, PREG_SET_ORDER, 0);
+                    }
+
+                    // If still no match, try the email subject (supports cases like "Order #2988 confirmed").
+                    if (empty($matches) && !empty($subject)) {
+                        preg_match_all($re, $subject, $matches, PREG_SET_ORDER, 0);
+                    }
+
                     // If still no match, try the OCR-extracted invoice value itself
                     if (empty($matches) && !empty($ocr_receipt_data['fields']['invoice_number'])) {
                         preg_match_all($re, $ocr_receipt_data['fields']['invoice_number'], $matches, PREG_SET_ORDER, 0);
@@ -944,6 +1024,9 @@ class CompanyEmailController extends Controller
                     if (empty($matches)) {
                         // Regex present but no match — fall back to OCR-extracted value
                         $invoice = $ocr_receipt_data['fields']['invoice_number'] ?? null;
+                        if (is_string($invoice) && in_array(strtolower(trim($invoice)), ['null', 'n/a', 'na', 'none', ''], true)) {
+                            $invoice = null;
+                        }
                     } else {
                         $lastMatch = $matches[count($matches) - 1];
                         // Use capture group [1] if present, else fall back to full match [0]

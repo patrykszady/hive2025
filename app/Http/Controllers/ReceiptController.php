@@ -1115,6 +1115,15 @@ class ReceiptController extends Controller
             }
         }
 
+        if (is_array($formatted_items) && !empty($formatted_items)) {
+            $formatted_items = $this->supplementLineItemsFromContent(
+                $formatted_items,
+                (string) ($ocr_receipt_extracted['content'] ?? ''),
+                $subtotal
+            );
+            $formatted_items = $this->deduplicateLineItems($formatted_items);
+        }
+
         // Calculate misc fees as the unaccounted gap between total and (subtotal + tax + tip)
         $misc_fees = null;
         if (!is_null($amount) && !is_null($subtotal)) {
@@ -1447,6 +1456,151 @@ class ReceiptController extends Controller
         return $found ? $total : null;
     }
 
+    private function supplementLineItemsFromContent(array $items, string $content, ?float $subtotal): array
+    {
+        if ($content === '' || is_null($subtotal)) {
+            return $items;
+        }
+
+        $lineItemsTotal = $this->sumLineItemTotals($items);
+        if (is_null($lineItemsTotal) || (($subtotal - $lineItemsTotal) <= 0.01)) {
+            return $items;
+        }
+
+        $decoded = html_entity_decode($content, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $decoded = str_replace("\r", "\n", $decoded);
+
+        $existingSignatures = [];
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+
+            $code = trim((string) ($item['ProductCode'] ?? ''));
+            $qty = (float) ($item['Quantity'] ?? 0);
+            $total = (float) ($item['TotalPrice'] ?? 0);
+            $existingSignatures[$code . '|' . $qty . '|' . $total] = true;
+        }
+
+        $pattern = '/(\d+(?:\.\d+)?)\s+\d+(?:\.\d+)?\s+EA\s+([A-Z0-9][A-Z0-9.\/-]{2,})\s+EA\s+(\d{1,3}(?:,\d{3})?\.\d{2,4})\s+(\d{1,3}(?:,\d{3})?\.\d{2})(?:\s+\d+(?:\.\d+)?)?/';
+        preg_match_all($pattern, $decoded, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE);
+
+        foreach ($matches as $match) {
+            $quantity = $this->parseAmountFromString((string) ($match[1][0] ?? ''));
+            $productCode = $this->sanitizeProductCode((string) ($match[2][0] ?? '')) ?? trim((string) ($match[2][0] ?? ''));
+            $price = $this->parseAmountFromString((string) ($match[3][0] ?? ''));
+            $totalPrice = $this->parseAmountFromString((string) ($match[4][0] ?? ''));
+
+            if (empty($productCode) || is_null($quantity) || is_null($totalPrice)) {
+                continue;
+            }
+
+            $signature = $productCode . '|' . $quantity . '|' . $totalPrice;
+            if (isset($existingSignatures[$signature])) {
+                continue;
+            }
+
+            $description = null;
+            $matchStart = $match[0][1] ?? null;
+            $matchLen = strlen((string) ($match[0][0] ?? ''));
+            if (!is_null($matchStart)) {
+                $tail = substr($decoded, $matchStart + $matchLen, 220);
+                if (preg_match('/\n\s*([^\n]{4,140})/', (string) $tail, $descMatch)) {
+                    $candidate = trim((string) $descMatch[1]);
+                    if (!preg_match('/^(ordered\s+as|carrier|tracking|subtotal|tax|total|qty|ordered|shipped|uom|disp\.?)/i', $candidate)) {
+                        $description = $candidate;
+                    }
+                }
+            }
+
+            $items[] = [
+                'Description' => $description,
+                'ProductCode' => $productCode,
+                'TotalPrice' => $totalPrice,
+                'Quantity' => $quantity,
+                'Price' => $price ?? $totalPrice,
+            ];
+
+            $existingSignatures[$signature] = true;
+        }
+
+        return array_values($items);
+    }
+
+    private function deduplicateLineItems(array $items): array
+    {
+        $normalized = [];
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+
+            $normalized[] = [
+                'Description' => $item['Description'] ?? null,
+                'ProductCode' => $item['ProductCode'] ?? null,
+                'TotalPrice' => $item['TotalPrice'] ?? null,
+                'Quantity' => $item['Quantity'] ?? 1,
+                'Price' => $item['Price'] ?? ($item['TotalPrice'] ?? null),
+            ];
+        }
+
+        // First pass: exact signature dedupe
+        $seen = [];
+        $deduped = [];
+        foreach ($normalized as $item) {
+            $code = trim((string) ($item['ProductCode'] ?? ''));
+            $qty = (string) ($item['Quantity'] ?? '');
+            $total = (string) ($item['TotalPrice'] ?? '');
+            $sig = $code . '|' . $qty . '|' . $total;
+
+            if (isset($seen[$sig])) {
+                continue;
+            }
+
+            $seen[$sig] = true;
+            $deduped[] = $item;
+        }
+
+        // Second pass: if a no-code row matches qty+total of a SKU row, keep the SKU row only
+        $final = [];
+        foreach ($deduped as $index => $item) {
+            $code = trim((string) ($item['ProductCode'] ?? ''));
+            if ($code !== '') {
+                $final[] = $item;
+                continue;
+            }
+
+            $quantity = (float) ($item['Quantity'] ?? 0);
+            $totalPrice = (float) ($item['TotalPrice'] ?? 0);
+            $hasSpecificMatch = false;
+
+            foreach ($deduped as $otherIndex => $other) {
+                if ($otherIndex === $index) {
+                    continue;
+                }
+
+                $otherCode = trim((string) ($other['ProductCode'] ?? ''));
+                if ($otherCode === '') {
+                    continue;
+                }
+
+                $otherQty = (float) ($other['Quantity'] ?? 0);
+                $otherTotal = (float) ($other['TotalPrice'] ?? 0);
+
+                if (abs($otherQty - $quantity) < 0.001 && abs($otherTotal - $totalPrice) < 0.01) {
+                    $hasSpecificMatch = true;
+                    break;
+                }
+            }
+
+            if (!$hasSpecificMatch) {
+                $final[] = $item;
+            }
+        }
+
+        return array_values($final);
+    }
+
     private function extractTotalFromContent(string $content): ?float
     {
         $patterns = [
@@ -1508,8 +1662,8 @@ class ReceiptController extends Controller
 
     /**
      * Sanitize a ProductCode extracted from OCR.
-     * Removes trailing suffixes like "-4.5" that are incorrectly appended by OCR.
-     * Product codes should only contain digits (UPC/EAN barcodes).
+     * Removes trailing suffixes like "-4.5" that are incorrectly appended to numeric barcodes.
+     * Preserves alphanumeric SKU-style codes (e.g. BRK.SM500V).
      */
     private function sanitizeProductCode(?string $code): ?string
     {
@@ -1519,13 +1673,16 @@ class ReceiptController extends Controller
 
         $code = trim($code);
 
-        // Remove anything after a hyphen (e.g., "081099015861-4.5" → "081099015861")
-        if (str_contains($code, '-')) {
-            $code = explode('-', $code)[0];
+        // Normalize spaces first
+        $code = preg_replace('/\s+/', '', $code) ?? $code;
+
+        // For numeric barcodes only, remove OCR-appended decimal suffixes (e.g. 081099015861-4.5)
+        if (preg_match('/^([0-9]{8,})-\d+(?:\.\d+)?$/', $code, $matches)) {
+            return $matches[1];
         }
 
-        // Remove any non-digit characters (barcodes are numeric)
-        $code = preg_replace('/[^0-9]/', '', $code);
+        // Keep common SKU characters and strip other OCR noise
+        $code = preg_replace('/[^A-Za-z0-9._\/-]/', '', $code) ?? '';
 
         return $code !== '' ? $code : null;
     }

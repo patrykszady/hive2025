@@ -299,6 +299,11 @@
 
     @if($view === NULL && auth()->user()->can('create', App\Models\Expense::class))
         <x-island-card heading="Transactions" wire:init="loadTransactions">
+            <x-slot:actions>
+                @if($this->transactionsReady && $this->transactions->total() > 0)
+                    <flux:badge size="sm" color="yellow">{{ $this->transactions->total() }} unmatched</flux:badge>
+                @endif
+            </x-slot:actions>
             <div class="px-6 pt-4 pb-2">
                 <flux:input wire:model.live.debounce.300ms="transaction_search" placeholder="Search vendor (e.g. ZELLE)..." icon="magnifying-glass" clearable />
             </div>
