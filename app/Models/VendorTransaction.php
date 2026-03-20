@@ -10,7 +10,7 @@ class VendorTransaction extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['vendor_id', 'deposit_check', 'plaid_inst_id', 'desc', 'options'];
+    protected $fillable = ['vendor_id', 'deposit_check', 'amount_sign', 'plaid_inst_id', 'desc', 'options'];
 
     public function vendor(): BelongsTo
     {

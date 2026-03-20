@@ -949,6 +949,16 @@ class TransactionController extends Controller
 
                 if (! empty($matches)) {
                     foreach ($plaid_name_transactions as $transaction) {
+                        // Check amount_sign filter
+                        if ($vendor_transaction->amount_sign !== null) {
+                            if ($vendor_transaction->amount_sign === 1 && $transaction->amount <= 0) {
+                                continue;
+                            }
+                            if ($vendor_transaction->amount_sign === 2 && $transaction->amount >= 0) {
+                                continue;
+                            }
+                        }
+
                         $transaction->vendor_id = $vendor_transaction->vendor_id;
                         $transaction->save();
 
@@ -983,7 +993,8 @@ class TransactionController extends Controller
             //split by check_type of each institution (multiple of bank_ids)
             foreach ($deposit_check_types as $index => $deposit_check_type) {
                 //same for type 2 and 3 (check and transfer)
-                $transaction_check_desc = VendorTransaction::where('deposit_check', $deposit_check_type)->where('plaid_inst_id', $institution)->pluck('desc');
+                $vendor_transaction_rules = VendorTransaction::where('deposit_check', $deposit_check_type)->where('plaid_inst_id', $institution)->get();
+                $transaction_check_desc = $vendor_transaction_rules->pluck('desc');
 
                 $transactions = Transaction::where('expense_id', null)
                     ->where('check_number', null)
@@ -1003,6 +1014,18 @@ class TransactionController extends Controller
                     ->get();
 
                 foreach ($transactions as $transaction) {
+                    // Check amount_sign filter from the matched rule
+                    $matchedRule = $vendor_transaction_rules->first(function ($rule) use ($transaction) {
+                        return stripos($transaction->plaid_merchant_description ?? '', $rule->desc) !== false;
+                    });
+                    if ($matchedRule && $matchedRule->amount_sign !== null) {
+                        if ($matchedRule->amount_sign === 1 && $transaction->amount <= 0) {
+                            continue;
+                        }
+                        if ($matchedRule->amount_sign === 2 && $transaction->amount >= 0) {
+                            continue;
+                        }
+                    }
                     //preg here after $transactions are gathered or should it be before?...trying to do this in the LIKE statement above instead 6/10/2021
                     //NEED A WAY TO INCLUDE BILL PAY (6) IN THIS CODE
 
@@ -2530,11 +2553,11 @@ class TransactionController extends Controller
                                 ->where('vendor_id', $match->vendor_id)
                                 ->whereDoesntHave('expense')
                                 ->whereNull('check_number')
-                                ->when($match->amount != null, function ($query) use ($match) {
-                                    return $query->where('amount', isset($match->options['amount_type']) ? $match->options['amount_type'] : '=', $match->amount);
+                                ->when($match->amount != null && ($match->options['amount_type'] ?? 'ANY') !== 'ANY', function ($query) use ($match) {
+                                    return $query->where('amount', $match->options['amount_type'] ?? '=', $match->amount);
                                 })
                                 ->when(!empty($match->options['desc']), function ($query) use ($match) {
-                                    return $query->where('plaid_merchant_description', $match->options['desc']);
+                                    return $query->where('plaid_merchant_description', 'LIKE', '%' . $match->options['desc'] . '%');
                                 })
                                 ->get();
 

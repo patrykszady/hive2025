@@ -164,6 +164,7 @@ class MatchVendor extends Component
                 $vendor_transaction = VendorTransaction::create([
                     'vendor_id' => $vendor_id,
                     'deposit_check' => $deposit_check,
+                    'amount_sign' => $vendor_match['amount_sign'] ?? null,
                     'desc' => str_replace('*', "\*", $vendor_match['match_desc']),
                     'plaid_inst_id' => $institution_id,
                     'options' => $options,
