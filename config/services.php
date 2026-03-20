@@ -5,6 +5,13 @@ return [
         'api_key' => env('OPENAI_API_KEY'),
     ],
 
+    'azure_cu' => [
+        'endpoint'    => env('AZURE_CU_ENDPOINT'),
+        'api_key'     => env('AZURE_CU_API_KEY'),
+        'api_version' => env('AZURE_CU_API_VERSION', '2025-11-01'),
+        'analyzer_id' => env('AZURE_CU_ANALYZER_ID', 'hive_Receipts_1'),
+    ],
+
     'ocr_space' => [
         'api_key' => env('OCR_SPACE_API'),
         'endpoint' => env('OCR_SPACE_ENDPOINT', 'https://api.ocr.space/parse/image'),

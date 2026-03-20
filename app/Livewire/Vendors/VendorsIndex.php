@@ -111,7 +111,7 @@ class VendorsIndex extends Component
 
             $q->orderBy('vv.created_at', $this->sortDirection);
 
-            return $q->paginate(20);
+            return $q->paginate(10);
         }
 
         // Default: Use Meilisearch for search and sorting
@@ -124,7 +124,7 @@ class VendorsIndex extends Component
         $query->orderBy($this->sortBy, $this->sortDirection);
 
         // Use the AppServiceProvider macro that automatically handles search attributes
-        return $query->paginateWithSearchData(20);
+        return $query->paginateWithSearchData(10);
     }
 
     public function sort($column)

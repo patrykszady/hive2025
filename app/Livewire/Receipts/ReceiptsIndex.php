@@ -35,7 +35,6 @@ class ReceiptsIndex extends Component
             'options.receipt_end' => 'nullable|string',
             'options.receipt_start_offset' => 'nullable|string',
             'options.receipt_image_regex' => 'nullable|string',
-            'options.invoice_regex' => 'nullable|string',
             'options.query_fields' => 'nullable|string',
             'options.document_model' => 'nullable|string',
             'options.ocr' => 'nullable|string',

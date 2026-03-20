@@ -13,6 +13,7 @@ use App\Models\Transaction;
 use App\Models\TransactionBulkMatch;
 use App\Models\Distribution;
 use App\Models\Vendor;
+use App\Services\ContentUnderstandingService;
 use App\Services\NylasService;
 // use App\Http\Requests\GetGiftCardRequest;
 
@@ -561,6 +562,309 @@ class ReceiptController extends Controller
         TransactionVendorBulkMatchJob::dispatch();
     }
 
+    /**
+     * Single entry-point for receipt OCR: analyse the file via Content Understanding
+     * (with DI fallback) and normalise the extracted fields.
+     *
+     * Replaces the previous azure_receipts() → ocr_extract() two-step pipeline.
+     *
+     * @param  string       $ocrPath        Path on the 'files' disk (e.g. '_temp_ocr/2025-06-18-12-00-00-42.pdf')
+     * @param  string       $docType        File extension: pdf, png, jpg
+     * @param  float|null   $expenseAmount  Known expense amount (manual upload flow)
+     * @param  string|null  $email          Non-null when processing email receipts
+     * @param  Receipt|null $receipt        Receipt template for option overrides
+     * @return array{content: string, fields: array}|array{error: true}
+     */
+    public function extractReceipt(string $ocrPath, string $docType, ?float $expenseAmount = null, mixed $email = null, ?Receipt $receipt = null): array
+    {
+        // ── 1. Analyse via CU (primary) with DI fallback ──────────────
+        try {
+            /** @var ContentUnderstandingService $cu */
+            $cu = app(ContentUnderstandingService::class);
+            $analyzeResult = $cu->analyze($ocrPath, $docType, 'nylas');
+        } catch (\Throwable $e) {
+            Log::channel('nylas')->warning('CU analyze failed, falling back to azure_docs_api', [
+                'file'  => $ocrPath,
+                'error' => $e->getMessage(),
+            ]);
+            $analyzeResult = $this->azure_docs_api($ocrPath, 'prebuilt-invoice', $docType, 'nylas');
+        }
+
+        // Merge all document field maps into a single flat map
+        $allFields = [];
+        foreach ($analyzeResult['analyzeResult']['documents'] ?? [] as $document) {
+            $allFields = array_merge_recursive($allFields, $document['fields'] ?? []);
+        }
+
+        if (empty($allFields)) {
+            return ['error' => true];
+        }
+
+        $prefix  = $allFields;
+        $content = htmlentities($analyzeResult['analyzeResult']['content'] ?? '');
+        $styles  = $analyzeResult['analyzeResult']['styles'] ?? [];
+
+        $keyValuePairs = null;
+        if (isset($analyzeResult['analyzeResult']['keyValuePairs'])) {
+            $keyValuePairs = collect(json_decode(json_encode($analyzeResult['analyzeResult']['keyValuePairs'])));
+        }
+
+        // ── 2. Tip ────────────────────────────────────────────────────
+        $tip = isset($prefix['Tip']) ? $this->extractCurrencyAmount($prefix['Tip']) : null;
+
+        // ── 3. Handwritten notes ──────────────────────────────────────
+        $handwrittenNotes = [];
+        foreach ($styles as $style) {
+            if (($style['isHandwritten'] ?? false) && ($style['confidence'] ?? 0) > 0.6) {
+                foreach ($style['spans'] ?? [] as $span) {
+                    $handwrittenNotes[] = substr($content, $span['offset'], $span['length']);
+                }
+            }
+        }
+
+        // ── 4. Merchant / Vendor Name ─────────────────────────────────
+        $merchantName = $prefix['MerchantName']['valueString']
+            ?? $prefix['MerchantName']['content']
+            ?? $prefix['VendorName']['valueString']
+            ?? null;
+
+        if ($merchantName !== null) {
+            $merchantName = str_replace("\n", '', $merchantName);
+        }
+
+        // ── 5. Invoice Number ─────────────────────────────────────────
+        $invoiceNumber = null;
+        if (isset($prefix['InvoiceId']) && ($prefix['InvoiceId']['confidence'] ?? 0) > 0) {
+            $invoiceNumber = $prefix['InvoiceId']['valueString'] ?? $prefix['InvoiceId']['content'] ?? null;
+        } elseif (isset($prefix['invoice_number'])) {
+            $invoiceNumber = $prefix['invoice_number'];
+        } elseif (isset($prefix['OrderNumber']) && ($prefix['OrderNumber']['confidence'] ?? 0) > 0) {
+            $invoiceNumber = $prefix['OrderNumber']['valueString'] ?? $prefix['OrderNumber']['content'] ?? null;
+        }
+
+        // ── 6. Purchase Order / Job Name ──────────────────────────────
+        $purchaseOrder = trim($prefix['PurchaseOrder']['valueString'] ?? '');
+        $jobName       = trim($prefix['JobName']['valueString'] ?? '');
+
+        $values = array_filter([$purchaseOrder, $jobName], fn ($v) => $v !== '');
+        $purchaseOrderNumber = count($values) > 1 ? implode(', ', $values) : implode('', $values);
+
+        // ── 7. Total Tax ──────────────────────────────────────────────
+        $totalTax = null;
+        if (isset($prefix['TotalTaxAmount'])) {
+            $totalTax = $this->extractCurrencyAmount($prefix['TotalTaxAmount']);
+        } elseif (isset($prefix['TotalTax'])) {
+            $totalTax = $prefix['TotalTax']['valueCurrency']['amount']
+                ?? (isset($prefix['TotalTax']['valueNumber']) ? (float) $prefix['TotalTax']['valueNumber'] : null);
+        }
+
+        // ── 8. Transaction Date ───────────────────────────────────────
+        $transactionDate = null;
+        if (isset($prefix['TransactionDate'])) {
+            $transactionDate = $prefix['TransactionDate']['valueDate'] ?? $prefix['TransactionDate']['content'] ?? null;
+        } elseif (isset($prefix['DepartureDate'])) {
+            $transactionDate = $prefix['DepartureDate']['valueDate'];
+        } elseif (isset($prefix['InvoiceDate'])) {
+            $transactionDate = $prefix['InvoiceDate']['valueDate'] ?? null;
+        } elseif ($keyValuePairs) {
+            foreach (['Order Date', 'Completed Date:', 'ORDER DATE'] as $label) {
+                $match = $keyValuePairs->where('key.content', $label)->first();
+                if ($match) {
+                    $transactionDate = $match->value->content ?? null;
+                    break;
+                }
+            }
+        }
+
+        if ($transactionDate !== null) {
+            if (is_array($transactionDate)) {
+                $transactionDate = $transactionDate[0];
+            }
+            $transactionDate = Carbon::parse($transactionDate);
+            if ($transactionDate->year < date('Y', strtotime('-8 years'))) {
+                $transactionDate = $transactionDate->year(now()->year);
+            }
+            $transactionDate = $transactionDate->format('Y-m-d');
+        } else {
+            if ($email !== null || $expenseAmount) {
+                $transactionDate = null;
+            } else {
+                return ['error' => true];
+            }
+        }
+
+        // ── 9. Subtotal ──────────────────────────────────────────────
+        $subtotal = null;
+        foreach (['SubtotalAmount', 'SubTotal', 'Subtotal'] as $key) {
+            if (isset($prefix[$key])) {
+                $subtotal = $this->extractCurrencyAmount($prefix[$key]);
+                break;
+            }
+        }
+
+        // ── 10. Line Items ────────────────────────────────────────────
+        $items = $prefix['Items']['valueArray'] ?? $prefix['LineItems']['valueArray'] ?? [];
+
+        $formattedItems = null;
+        if (!empty($items)) {
+            $formattedItems = [];
+            foreach ($items as $key => $lineItem) {
+                if (!isset($lineItem['valueObject']) || !is_array($lineItem['valueObject'])) {
+                    continue;
+                }
+                $line = $lineItem['valueObject'];
+
+                $description = $line['Description']['valueString'] ?? null;
+                if ($description === null && isset($lineItem['content']) && is_string($lineItem['content'])) {
+                    $cleaned = preg_replace('/(?:Part\s*Number|Warranty|Quantity|Item\s*Total|Price|Unit\s*Price)\s*:.*$/is', '', trim($lineItem['content']));
+                    $cleaned = trim($cleaned);
+                    if ($cleaned !== '') {
+                        $description = $cleaned;
+                    }
+                }
+
+                $formattedItems[$key]['Description'] = $description;
+                $formattedItems[$key]['ProductCode']  = $this->sanitizeProductCode($line['ProductCode']['valueString'] ?? null);
+
+                if (isset($line['TotalPrice'])) {
+                    $formattedItems[$key]['TotalPrice'] = $this->extractCurrencyAmount($line['TotalPrice']);
+                } elseif (isset($line['TotalAmount'])) {
+                    $formattedItems[$key]['TotalPrice'] = $this->extractCurrencyAmount($line['TotalAmount']);
+                } elseif (isset($line['Amount'])) {
+                    $formattedItems[$key]['TotalPrice'] = $this->extractCurrencyAmount($line['Amount']);
+                } else {
+                    $formattedItems[$key]['TotalPrice'] = null;
+                }
+
+                $formattedItems[$key]['Quantity'] = isset($line['Quantity'])
+                    ? ($line['Quantity']['valueNumber'] ?? $this->extractCurrencyAmount($line['Quantity']))
+                    : 1;
+
+                if (isset($line['Price'])) {
+                    $formattedItems[$key]['Price'] = $this->extractCurrencyAmount($line['Price']);
+                } elseif (isset($line['UnitPrice'])) {
+                    $formattedItems[$key]['Price'] = $this->extractCurrencyAmount($line['UnitPrice']);
+                } else {
+                    $formattedItems[$key]['Price'] = $formattedItems[$key]['TotalPrice'];
+                }
+            }
+        }
+
+        // ── 11. Total Amount ──────────────────────────────────────────
+        $amount = null;
+        if (isset($prefix['TotalAmount'])) {
+            $amount = $this->extractCurrencyAmount($prefix['TotalAmount']);
+        } elseif (isset($prefix['Total'])) {
+            $amount = $this->extractCurrencyAmount($prefix['Total']);
+        } elseif (isset($prefix['InvoiceTotal'])) {
+            $amount = $this->extractCurrencyAmount($prefix['InvoiceTotal']);
+        } elseif (isset($prefix['SubTotal']) && isset($prefix['TotalTax'])) {
+            $amount = (float) ($this->extractCurrencyAmount($prefix['SubTotal']) ?? 0) + (float) ($this->extractCurrencyAmount($prefix['TotalTax']) ?? 0);
+        } elseif (isset($prefix['SubtotalAmount']) && isset($prefix['TotalTaxAmount'])) {
+            $amount = (float) ($this->extractCurrencyAmount($prefix['SubtotalAmount']) ?? 0) + (float) ($this->extractCurrencyAmount($prefix['TotalTaxAmount']) ?? 0);
+        } elseif ($keyValuePairs) {
+            $authMatch = $keyValuePairs->where('key.content', 'Authorized Amount:')->first();
+            if ($authMatch) {
+                $amount = $authMatch->value->content ?? null;
+            }
+        }
+
+        if ($amount === null && is_array($formattedItems)) {
+            $lineItemsTotal = $this->sumLineItemTotals($formattedItems);
+            if ($lineItemsTotal !== null) {
+                $amount = $lineItemsTotal;
+            }
+        }
+
+        $contentTotal = null;
+        if (is_string($content) && $content !== '') {
+            $contentTotal = $this->extractTotalFromContent($content);
+        }
+
+        if ($amount === null && $contentTotal !== null) {
+            $amount = $contentTotal;
+        }
+
+        if ($contentTotal !== null && $amount !== null) {
+            if (($amount >= 0 && $amount < 1) || $contentTotal > ($amount * 10)) {
+                $amount = $contentTotal;
+            }
+        }
+
+        if ($amount === null && $expenseAmount !== null) {
+            $amount = $expenseAmount;
+        }
+
+        if ($amount === null && $subtotal === null) {
+            return ['error' => true];
+        }
+
+        // Normalize arrays to scalars
+        if (is_array($amount)) { $amount = $amount[0]; }
+        if (is_array($subtotal)) { $subtotal = $subtotal[0]; }
+        if (is_array($totalTax)) { $totalTax = $totalTax[0]; }
+
+        if ($amount === null && $subtotal !== null && $totalTax !== null) {
+            $amount = $subtotal + $totalTax;
+        }
+
+        if (empty($totalTax) && empty($subtotal) && isset($amount)) {
+            $subtotal = $amount;
+        }
+
+        if ($subtotal !== null && $amount !== null && $subtotal < 1 && $amount >= 1 && empty($totalTax)) {
+            $subtotal = $amount;
+        }
+
+        // Fix OCR error: subtotal equals total but tax exists
+        if ($subtotal !== null && $amount !== null && $totalTax !== null && $subtotal == $amount && $totalTax > 0) {
+            if ($expenseAmount !== null) {
+                $expAmtFloat = (float) $expenseAmount;
+                if (abs($amount - $expAmtFloat) < 0.01) {
+                    $subtotal = $amount - $totalTax;
+                } else {
+                    $amount = $subtotal + $totalTax;
+                }
+            } else {
+                $amount = $subtotal + $totalTax;
+            }
+        }
+
+        if (is_array($formattedItems) && !empty($formattedItems)) {
+            $formattedItems = $this->supplementLineItemsFromContent($formattedItems, (string) ($content ?? ''), $subtotal);
+            $formattedItems = $this->deduplicateLineItems($formattedItems);
+        }
+
+        // Misc fees = gap between total and (subtotal + tax + tip)
+        $miscFees = null;
+        if ($amount !== null && $subtotal !== null) {
+            $knownSum = $subtotal + ($totalTax ?? 0) + ($tip ?? 0);
+            $gap = round($amount - $knownSum, 2);
+            if ($gap > 0.004) {
+                $miscFees = $gap;
+            }
+        }
+
+        return [
+            'content' => $content,
+            'fields'  => [
+                'items'             => $formattedItems,
+                'subtotal'          => $subtotal,
+                'total'             => $amount,
+                'total_tax'         => $totalTax,
+                'tip'               => $tip,
+                'misc_fees'         => $miscFees,
+                'transaction_date'  => $transactionDate,
+                'merchant_name'     => $merchantName,
+                'invoice_number'    => $invoiceNumber,
+                'purchase_order'    => $purchaseOrderNumber,
+                'handwritten_notes' => $handwrittenNotes,
+                'payment_methods'   => $this->extractPaymentMethods($prefix),
+            ],
+        ];
+    }
+
+    /** @deprecated Use extractReceipt() instead */
     public function azure_document_model($doc_type, $ocr_path)
     {
         if ($doc_type == 'pdf') {
@@ -741,10 +1045,24 @@ class ReceiptController extends Controller
         return $result;
     }
 
-    //send receipt location, document_model_type
+    /** @deprecated Use extractReceipt() instead */
     public function azure_receipts($ocr_path, $doc_type, $document_model, array $queryFields = [])
     {
-        $result = $this->azure_docs_api($ocr_path, $document_model, $doc_type, 'nylas', $queryFields);
+        // Use Content Understanding service (hive_Receipts_1 custom analyzer).
+        // $document_model and $queryFields are kept for backwards-compat but are unused —
+        // all field selection is baked into the custom CU analyzer definition.
+        try {
+            /** @var ContentUnderstandingService $cu */
+            $cu = app(ContentUnderstandingService::class);
+            $result = $cu->analyze($ocr_path, $doc_type, 'nylas');
+        } catch (\Throwable $e) {
+            Log::channel('nylas')->warning('CU analyze failed, falling back to azure_docs_api', [
+                'file'  => $ocr_path,
+                'error' => $e->getMessage(),
+            ]);
+            // Fallback to legacy Document Intelligence
+            $result = $this->azure_docs_api($ocr_path, $document_model, $doc_type, 'nylas', $queryFields);
+        }
 
         $all_fields = [];
         foreach ($result['analyzeResult']['documents'] as $document) {
@@ -756,6 +1074,7 @@ class ReceiptController extends Controller
         return $result['analyzeResult'];
     }
 
+    /** @deprecated Use extractReceipt() instead */
     public function ocr_extract($ocr_receipt_extracted, $expense_amount = null, $email = null, ?Receipt $receipt = null)
     {
         if (isset($ocr_receipt_extracted['document'])) {
@@ -1149,6 +1468,7 @@ class ReceiptController extends Controller
                 'merchant_name' => $merchant_name,
                 'purchase_order' => $purchase_order_number,
                 'handwritten_notes' => $handwritten_notes,
+                'payment_methods' => $this->extractPaymentMethods($ocr_receipt_extract_prefix),
             ],
         ];
 
@@ -1206,6 +1526,44 @@ class ReceiptController extends Controller
         }
 
         return null;
+    }
+
+    /**
+     * Extract the Payments array from an OCR field prefix (CU custom analyzer field).
+     * Returns array of ['type', 'last_four', 'amount'] entries, or empty array.
+     *
+     * @param  array<string, mixed>  $prefix
+     * @return array<int, array{type: string|null, last_four: string|null, amount: float|null}>
+     */
+    private function extractPaymentMethods(array $prefix): array
+    {
+        $paymentMethods = [];
+
+        if (!isset($prefix['Payments']['valueArray'])) {
+            return $paymentMethods;
+        }
+
+        foreach ($prefix['Payments']['valueArray'] as $row) {
+            $obj = $row['valueObject'] ?? [];
+
+            $type = $obj['PaymentType']['valueString']
+                ?? $obj['PaymentType']['content']
+                ?? null;
+            $lastFour = $obj['LastFour']['valueString']
+                ?? $obj['LastFour']['content']
+                ?? null;
+            $amount = isset($obj['Amount']) ? $this->extractCurrencyAmount($obj['Amount']) : null;
+
+            if ($type !== null) {
+                $paymentMethods[] = [
+                    'type'      => $type,
+                    'last_four' => $lastFour,
+                    'amount'    => $amount,
+                ];
+            }
+        }
+
+        return $paymentMethods;
     }
 
     /**

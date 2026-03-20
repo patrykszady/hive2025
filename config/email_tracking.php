@@ -31,6 +31,16 @@ return [
         static fn (string $value): bool => $value !== ''
     ))),
 
+    // Specific recipient addresses that should be excluded from tracking records.
+    // Use EMAIL_TRACKING_EXCLUDED_RECIPIENTS to add more addresses (comma-separated).
+    'excluded_recipients' => array_values(array_unique(array_filter(
+        array_merge(
+            ['crew@gs.construction'],
+            array_map('trim', explode(',', (string) env('EMAIL_TRACKING_EXCLUDED_RECIPIENTS', ''))),
+        ),
+        static fn (string $value): bool => $value !== ''
+    ))),
+
     // If an opened/clicked event happens "too soon" after our tracked 'sent' event (same tracking_id),
     // treat it as automated prefetch/scanning.
     'mailtrap_bot_open_within_seconds' => (int) env('MAILTRAP_BOT_OPEN_WITHIN_SECONDS', 15),

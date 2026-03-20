@@ -1,0 +1,133 @@
+{
+    "name": "HiveReceiptSchema",
+    "description": "Schema for construction company receipt and invoice OCR.",
+    "fields": {
+        "MerchantName": {
+            "type": "string",
+            "method": "extract",
+            "description": "The name of the merchant or vendor on the receipt."
+        },
+        "MerchantAddress": {
+            "type": "string",
+            "method": "extract",
+            "description": "Full address of the merchant."
+        },
+        "MerchantPhoneNumber": {
+            "type": "string",
+            "method": "extract",
+            "description": "Phone number of the merchant."
+        },
+        "TransactionDate": {
+            "type": "date",
+            "method": "extract",
+            "description": "The date of the transaction."
+        },
+        "TransactionTime": {
+            "type": "string",
+            "method": "extract",
+            "description": "The time of the transaction."
+        },
+        "SubTotal": {
+            "type": "number",
+            "method": "extract",
+            "description": "The subtotal before tax, fees, and tip."
+        },
+        "TotalTax": {
+            "type": "number",
+            "method": "extract",
+            "description": "Total tax amount charged."
+        },
+        "TotalAmount": {
+            "type": "number",
+            "method": "extract",
+            "description": "The grand total amount charged including tax, fees, and tip."
+        },
+        "InvoiceId": {
+            "type": "string",
+            "method": "extract",
+            "description": "The primary transaction identifier on the document. Look for labels such as 'Transaction Number', 'Transaction #', 'Invoice Number', 'Invoice #', 'Receipt Number', 'Receipt #', 'Order Number', 'Order #', 'Confirmation Number', or 'Trans #'. Prefer the Transaction Number if multiple identifiers are present."
+        },
+        "PurchaseOrder": {
+            "type": "string",
+            "method": "extract",
+            "description": "Purchase Order number, PO#, Job Name, Job Number, JobName, PRO JobName, or project reference. This value may appear anywhere on the document including loyalty, rewards, or membership sections. Extract only the short code or number, not the label."
+        },
+        "Tip": {
+            "type": "number",
+            "method": "extract",
+            "description": "Tip or gratuity amount paid."
+        },
+        "Fees": {
+            "type": "number",
+            "method": "extract",
+            "description": "Total of any miscellaneous fees, service charges, delivery fees, or surcharges that are not tax or tip."
+        },
+        "Items": {
+            "type": "array",
+            "description": "List of purchased line items on the receipt.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "Description": {
+                        "type": "string",
+                        "method": "extract",
+                        "description": "Name or description of the item."
+                    },
+                    "ProductCode": {
+                        "type": "string",
+                        "method": "extract",
+                        "description": "SKU, item number, or product code."
+                    },
+                    "Quantity": {
+                        "type": "number",
+                        "method": "extract",
+                        "description": "Quantity purchased."
+                    },
+                    "Price": {
+                        "type": "number",
+                        "method": "extract",
+                        "description": "Unit price per item."
+                    },
+                    "TotalPrice": {
+                        "type": "number",
+                        "method": "extract",
+                        "description": "Total price for this line item (quantity × unit price)."
+                    }
+                }
+            }
+        },
+        "Payments": {
+            "type": "array",
+            "description": "List of payment methods used on this receipt. A receipt may have multiple rows when paying with a combination of methods (e.g. gift card + credit card).",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "PaymentType": {
+                        "type": "string",
+                        "method": "classify",
+                        "description": "Payment method type. One of: CreditCard, DebitCard, Cash, GiftCard, StoreCredit, Check, Other.",
+                        "enum": [
+                            "CreditCard",
+                            "DebitCard",
+                            "Cash",
+                            "GiftCard",
+                            "StoreCredit",
+                            "Check",
+                            "Other"
+                        ]
+                    },
+                    "LastFour": {
+                        "type": "string",
+                        "method": "extract",
+                        "description": "Last four digits of the card number, if applicable."
+                    },
+                    "Amount": {
+                        "type": "number",
+                        "method": "extract",
+                        "description": "Amount paid via this payment method."
+                    }
+                }
+            }
+        }
+    }
+}

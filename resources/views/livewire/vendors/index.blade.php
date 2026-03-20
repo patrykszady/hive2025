@@ -113,4 +113,6 @@
             @endcan
         </div>
     </x-island-card>
+
+    <livewire:vendors.vendor-payment-email-tracking-table lazy />
 </div>

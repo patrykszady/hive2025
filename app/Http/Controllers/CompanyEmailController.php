@@ -872,12 +872,8 @@ class CompanyEmailController extends Controller
                     continue;
                 }
 
-                //ocr the file
-                $queryFields = !empty($receipt->options['query_fields']) ? array_map('trim', explode(',', $receipt->options['query_fields'])) : [];
-                $ocr_receipt_extracted = app(\App\Http\Controllers\ReceiptController::class)->azure_receipts($ocr_path, $doc_type, $document_model, $queryFields);
-                
-                //pass receipt info to ocr_extract method
-                $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->ocr_extract($ocr_receipt_extracted, null, 'email', $receipt);
+                //ocr the file via unified extractReceipt()
+                $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->extractReceipt($ocr_path, $doc_type, null, 'email', $receipt);
 
                 // DEBUG: log OCR results
                 Log::channel('nylas')->info('Receipt OCR result', [
@@ -994,68 +990,17 @@ class CompanyEmailController extends Controller
                     }
                 }
 
-                // receipt number / invoice
-                if (isset($receipt->options['invoice_regex'])) {
-                    $re = $receipt->options['invoice_regex'];
-                    $str = $ocr_receipt_data['content'];
-                    preg_match_all($re, $str, $matches, PREG_SET_ORDER, 0);
-
-                    // If no match in OCR content, try the receipt HTML text
-                    if (empty($matches) && !empty($receipt_html_main)) {
-                        preg_match_all($re, $receipt_html_main, $matches, PREG_SET_ORDER, 0);
-                    }
-
-                    // If no match in extracted receipt segment, try the full message body.
-                    if (empty($matches) && !empty($string)) {
-                        $bodyText = html_entity_decode(strip_tags($string), ENT_QUOTES, 'UTF-8');
-                        preg_match_all($re, $bodyText, $matches, PREG_SET_ORDER, 0);
-                    }
-
-                    // If still no match, try the email subject (supports cases like "Order #2988 confirmed").
-                    if (empty($matches) && !empty($subject)) {
-                        preg_match_all($re, $subject, $matches, PREG_SET_ORDER, 0);
-                    }
-
-                    // If still no match, try the OCR-extracted invoice value itself
-                    if (empty($matches) && !empty($ocr_receipt_data['fields']['invoice_number'])) {
-                        preg_match_all($re, $ocr_receipt_data['fields']['invoice_number'], $matches, PREG_SET_ORDER, 0);
-                    }
-
-                    if (empty($matches)) {
-                        // Regex present but no match — fall back to OCR-extracted value
-                        $invoice = $ocr_receipt_data['fields']['invoice_number'] ?? null;
-                        if (is_string($invoice) && in_array(strtolower(trim($invoice)), ['null', 'n/a', 'na', 'none', ''], true)) {
-                            $invoice = null;
-                        }
-                    } else {
-                        $lastMatch = $matches[count($matches) - 1];
-                        // Use capture group [1] if present, else fall back to full match [0]
-                        $invoice = trim($lastMatch[1] ?? $lastMatch[0]);
-                        $ocr_receipt_data['fields']['invoice_number'] = $invoice;
-                    }
-                } elseif (isset($ocr_receipt_data['fields']['invoice_number'])) {
-                    $invoice = $ocr_receipt_data['fields']['invoice_number'];
-                } else {
+                // receipt number / invoice — trust the CU API extraction
+                $invoice = $ocr_receipt_data['fields']['invoice_number'] ?? null;
+                if (is_string($invoice) && in_array(strtolower(trim($invoice)), ['null', 'n/a', 'na', 'none', ''], true)) {
                     $invoice = null;
                 }
 
-                // receipt po / purchase order
+                // receipt po / purchase order — trust the CU API extraction
                 if (!empty($receipt->options['no_po'])) {
                     $purchase_order = null;
-                } elseif (isset($receipt->options['po_regex'])) {
-                    $re = $receipt->options['po_regex'];
-                    $str = $ocr_receipt_data['content'];
-                    preg_match($re, $str, $matches);
-
-                    if (empty($matches)) {
-                        $purchase_order = null;
-                    } else {
-                        $purchase_order = trim($matches[1]);
-                    }
-                } elseif (isset($ocr_receipt_data['fields']['purchase_order'])) {
-                    $purchase_order = $ocr_receipt_data['fields']['purchase_order'];
                 } else {
-                    $purchase_order = null;
+                    $purchase_order = $ocr_receipt_data['fields']['purchase_order'] ?? null;
                 }
 
                 $ocr_receipt_data['fields']['purchase_order'] = $purchase_order;
@@ -1495,12 +1440,8 @@ class CompanyEmailController extends Controller
                         // Save the attachment to the 'files' disk under _temp_ocr.
                         Storage::disk('files')->put($ocr_path, $attachmentContent);
 
-                        // Get the document model from AzureDocumentService.
-                        $document_model = $this->azureDocumentService->getDocumentModel($ocr_path, $doc_type);
-
                         // Process the attachment using ReceiptController.
-                        $ocr_receipt_extracted = app(\App\Http\Controllers\ReceiptController::class)->azure_receipts($ocr_path, $doc_type, $document_model);
-                        $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->ocr_extract($ocr_receipt_extracted, null, true);
+                        $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->extractReceipt($ocr_path, $doc_type, null, true);
 
                         if (isset($ocr_receipt_data['error']) && $ocr_receipt_data['error'] === true)
                         {
@@ -1864,16 +1805,9 @@ class CompanyEmailController extends Controller
 
                         Storage::disk('files')->put($ocr_path, $attachmentContent);
 
-                        // Get document model based on width (like in auto receipts)
-                        $document_model = $this->azureDocumentService->getDocumentModel($ocr_path, $doc_type);
-
-                        // OCR the file
-                        $ocr_receipt_extracted = app(\App\Http\Controllers\ReceiptController::class)
-                            ->azure_receipts($ocr_path, $doc_type, $document_model);
-
-                        // Process OCR results
+                        // OCR the file via unified extractReceipt()
                         $current_ocr_data = app(\App\Http\Controllers\ReceiptController::class)
-                            ->ocr_extract($ocr_receipt_extracted, null, 'email');
+                            ->extractReceipt($ocr_path, $doc_type, null, 'email');
 
                         // If OCR extraction failed (e.g. Azure couldn't parse the file), skip this attachment
                         if (isset($current_ocr_data['error']) && $current_ocr_data['error'] === true) {

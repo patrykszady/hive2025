@@ -85,7 +85,6 @@
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <flux:input wire:model="options.receipt_start" label="Receipt Start" placeholder="Text marker for start" size="sm" />
                 <flux:input wire:model="options.receipt_end" label="Receipt End" placeholder="Text marker for end" size="sm" />
-                <flux:input wire:model="options.invoice_regex" label="Invoice Regex" placeholder="/\d{16}/m" size="sm" />
                 <flux:input wire:model="options.query_fields" label="Query Fields" placeholder="InvoiceId,OrderNumber" size="sm" />
                 <flux:input wire:model="options.receipt_image_regex" label="Image Regex" placeholder="Regex to extract image URL" size="sm" />
                 <flux:select wire:model="options.document_model" label="Document Model" size="sm" placeholder="None">

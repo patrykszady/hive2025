@@ -229,7 +229,7 @@
                                             <flux:table.column>Total</flux:table.column>
                                         </flux:table.columns>
 
-                                        <flux:table.rows wire:sort="sort_line_item">
+                                        <flux:table.rows wire:sort="sort_line_item" wire:sort:group="line-items" wire:sort:group-id="{{ $section['id'] }}">
                                             @foreach($estimate->estimate_sections->find($section['id'])->estimate_line_items->sortBy($sortBy, SORT_REGULAR, $sortDirection === 'desc') as $line_item_index => $line_item)
                                                 <flux:table.row wire:sort:item="{{$line_item->id}}" wire:key="line-item-{{$line_item->id}}" wire:transition>
                                                     <flux:table.cell wire:sort:handle class="cursor-grab active:cursor-grabbing">{{$index + 1}}.{{$line_item_index + 1}}</flux:table.cell>

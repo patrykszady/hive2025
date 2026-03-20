@@ -542,14 +542,8 @@ class ExpenseForm extends Form
         // Store the file using Storage facade
         Storage::disk('files')->put($ocr_path, file_get_contents($this->receipt_file->getRealPath()));
 
-        // Pass the path in the format that azure_document_model expects (with 'files/' prefix)
-        $azure_path = 'files/' . $ocr_path;
-        $document_model = app(\App\Http\Controllers\ReceiptController::class)->azure_document_model($doc_type, $azure_path);
-
-        //send to ReceiptController@azure_receipts
-        $ocr_receipt_extracted = app(\App\Http\Controllers\ReceiptController::class)->azure_receipts($ocr_path, $doc_type, $document_model);
-        //pass receipt info to ocr_extract method
-        $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->ocr_extract($ocr_receipt_extracted, $expense_amount);
+        // OCR via unified extractReceipt()
+        $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->extractReceipt($ocr_path, $doc_type, $expense_amount);
 
         // Check if OCR extraction failed
         if (isset($ocr_receipt_data['error']) && $ocr_receipt_data['error'] === true) {

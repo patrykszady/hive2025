@@ -569,11 +569,55 @@ class EstimateShow extends Component
         $this->estimate_refresh();
     }
 
-    public function sort_line_item($item, $position): void
+    public function sort_line_item($item, $position, $sectionId = null): void
     {
         $line_item = EstimateLineItem::findOrFail($item);
-        $line_item->move($position);
-        $this->estimate_refresh();
+
+        $sectionId = $sectionId ? (int) $sectionId : null;
+        $oldSectionId = $line_item->section_id;
+
+        if ($sectionId && $sectionId !== $oldSectionId) {
+            // Cross-section move: close the gap in the old section
+            $line_item->displace();
+
+            // Move to the new section
+            $line_item->section_id = $sectionId;
+            $line_item->save();
+
+            // Refresh the relationship so scopeSortable picks up the new section
+            $line_item->unsetRelation('section');
+
+            // Insert at the correct position in the new section
+            $line_item->move($position);
+
+            // Recalculate totals on both sections
+            $oldSection = EstimateSection::find($oldSectionId);
+            $newSection = EstimateSection::find($sectionId);
+
+            foreach ([$oldSection, $newSection] as $section) {
+                if (! $section) {
+                    continue;
+                }
+
+                $section->total = $section->estimate_line_items()->sum('total');
+                $section->save();
+
+                if ($section->bid_id) {
+                    $bid = Bid::find($section->bid_id);
+                    if ($bid) {
+                        $bid->amount = EstimateSection::where('bid_id', $bid->id)->sum('total');
+                        $bid->save();
+                    }
+                }
+            }
+
+            $this->estimate_refresh();
+            $this->refreshFinancialIslands();
+        } else {
+            // Same-section reorder
+            $line_item->move($position);
+            $this->estimate_refresh();
+        }
     }
 
     /**

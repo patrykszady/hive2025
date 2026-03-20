@@ -54,6 +54,7 @@ class MailtrapWebhookController extends Controller
             'events_ignored_untracked' => 0,
             'events_ignored_unknown' => 0,
             'events_ignored_bot' => 0,
+            'events_ignored_excluded_recipient' => 0,
             'events_ignored_non_recipient' => 0,
             'events_ignored_sender' => 0,
             'events_failed' => 0,
@@ -79,6 +80,11 @@ class MailtrapWebhookController extends Controller
             $stats['events_processed']++;
 
             [$correlationId, $eventType, $recipientEmail, $linkUrl, $eventAt, $providerMessageId, $metadata] = $normalized;
+
+            if ($this->isExcludedRecipient($recipientEmail)) {
+                $stats['events_ignored_excluded_recipient']++;
+                continue;
+            }
 
             // Ignore events we don't understand; they don't map to UX.
             if ($eventType === 'mailtrap_webhook_received') {
@@ -645,5 +651,27 @@ class MailtrapWebhookController extends Controller
         }
 
         return null;
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function excludedRecipientEmails(): array
+    {
+        return collect((array) config('email_tracking.excluded_recipients', []))
+            ->filter(fn ($email) => is_string($email) && trim($email) !== '')
+            ->map(fn (string $email): string => strtolower(trim($email)))
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    protected function isExcludedRecipient(?string $email): bool
+    {
+        if (! is_string($email) || trim($email) === '') {
+            return false;
+        }
+
+        return in_array(strtolower(trim($email)), $this->excludedRecipientEmails(), true);
     }
 }

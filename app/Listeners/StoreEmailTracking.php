@@ -136,6 +136,11 @@ class StoreEmailTracking
         }
 
         $recipients = array_values(array_unique(array_filter(array_map('strtolower', array_map('trim', $recipients)))));
+        $excludedRecipients = $this->excludedRecipientEmails();
+        $recipients = array_values(array_filter(
+            $recipients,
+            static fn (string $email): bool => ! in_array($email, $excludedRecipients, true)
+        ));
 
         // Extract email template name from metadata
         $emailTemplateName = $metadata['email_template_name'] ?? null;
@@ -172,5 +177,18 @@ class StoreEmailTracking
                 ->update(['project_id' => $projectId]);
         }
 
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function excludedRecipientEmails(): array
+    {
+        return collect((array) config('email_tracking.excluded_recipients', []))
+            ->filter(fn ($email) => is_string($email) && trim($email) !== '')
+            ->map(fn (string $email): string => strtolower(trim($email)))
+            ->unique()
+            ->values()
+            ->all();
     }
 }
