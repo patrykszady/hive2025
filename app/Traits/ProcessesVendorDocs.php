@@ -362,10 +362,13 @@ trait ProcessesVendorDocs
 
     private function extractDataFromFile($filePath, $docType)
     {
-        $document_model = env('AZURE_CUSTOM_MODEL_COI');
-        $result = app(\App\Http\Controllers\ReceiptController::class)
-            ->azure_docs_api($filePath, $document_model, $docType)['analyzeResult']['documents'][0]['fields'];
-        return $result;
+        /** @var \App\Services\ContentUnderstandingService $cu */
+        $cu = app(\App\Services\ContentUnderstandingService::class);
+        $analyzerId = config('services.azure_cu.analyzer_id_coi');
+
+        $result = $cu->analyze($filePath, $docType, 'vendor_docs', $analyzerId);
+
+        return $result['analyzeResult']['documents'][0]['fields'];
     }
 
     //Resolve the vendor ID by name with a fallback to address.

@@ -23,16 +23,18 @@ class ContentUnderstandingService
 
     /**
      * Analyze a document stored on the 'files' disk.
-     * Returns a normalised analyzeResult array compatible with the existing
-     * ocr_extract() parser (same shape as azure_docs_api returns).
+     * Returns a normalised analyzeResult array compatible with
+     * extractReceipt() and ProcessesVendorDocs.
      *
-     * @param  string  $filePath   Relative path on the 'files' disk (e.g. '_temp_ocr/foo.pdf')
-     * @param  string  $docType    'pdf' | 'jpg' | 'jpeg' | 'png'
-     * @param  string  $logChannel Laravel log channel name
+     * @param  string       $filePath    Relative path on the 'files' disk (e.g. '_temp_ocr/foo.pdf')
+     * @param  string       $docType     'pdf' | 'jpg' | 'jpeg' | 'png'
+     * @param  string       $logChannel  Laravel log channel name
+     * @param  string|null  $analyzerId  Override the default analyzer (e.g. for COI extraction)
      * @return array{analyzeResult: array}
      */
-    public function analyze(string $filePath, string $docType, string $logChannel = 'vendor_docs'): array
+    public function analyze(string $filePath, string $docType, string $logChannel = 'vendor_docs', ?string $analyzerId = null): array
     {
+        $analyzerId  = $analyzerId ?? $this->analyzerId;
         $fileContent = Storage::disk('files')->get($filePath);
 
         if (empty($fileContent)) {
@@ -43,7 +45,7 @@ class ContentUnderstandingService
         }
 
         // Submit as raw binary — CU only runs OCR on octet-stream uploads.
-        $submitUrl = "https://{$this->endpoint}/contentunderstanding/analyzers/{$this->analyzerId}:analyzeBinary?api-version={$this->apiVersion}";
+        $submitUrl = "https://{$this->endpoint}/contentunderstanding/analyzers/{$analyzerId}:analyzeBinary?api-version={$this->apiVersion}";
 
         $submitResponse = Http::withHeaders([
             'Ocp-Apim-Subscription-Key' => $this->apiKey,
@@ -75,7 +77,7 @@ class ContentUnderstandingService
         $result = $this->poll($operationUrl, $logChannel);
 
         // Normalise the Content Understanding response to the same shape
-        // that ReceiptController::ocr_extract() already knows how to read:
+        // that ReceiptController::extractReceipt() uses:
         //   $result['analyzeResult']['documents'][0]['fields']
         //   $result['analyzeResult']['content']
         //   $result['analyzeResult']['keyValuePairs']   (optional)
@@ -129,7 +131,7 @@ class ContentUnderstandingService
 
     /**
      * Normalise the Content Understanding result to the analyzeResult shape
-     * that ReceiptController::ocr_extract() reads.
+     * that ReceiptController::extractReceipt() reads.
      *
      * CU response shape (result.contents[0]):
      *   fields       → same field names as DI, but wrapped differently
