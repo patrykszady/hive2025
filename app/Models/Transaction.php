@@ -247,6 +247,7 @@ class Transaction extends Model
     {
         $query->withoutGlobalScopes()
             ->whereNull('vendor_id')
+            ->whereNull('expense_id')
             ->whereNull('deposit')
             ->whereNull('check_number')
             ->whereNull('deleted_at');
