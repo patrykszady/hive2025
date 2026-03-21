@@ -90,18 +90,31 @@
 
         @fluxScripts
 
-        {{-- Close any stale modals restored from wire:navigate page cache --}}
+        {{-- Close stale modals/toasts and sidebar on wire:navigate --}}
         <script>
-            document.addEventListener('livewire:navigated', () => {
-                document.querySelectorAll('dialog[open]').forEach(d => d.close());
-            });
+            function flushStaleToasts() {
+                document.querySelectorAll('ui-toast[popover], ui-toast-group[popover]').forEach(el => {
+                    el.querySelectorAll('[data-flux-toast-dialog]').forEach(t => t.remove());
+                    try { el.hidePopover(); } catch (e) {}
+                });
+            }
 
-            {{-- Close mobile sidebar when navigating via wire:navigate --}}
+            {{-- Strip toasts BEFORE the page gets cached --}}
             document.addEventListener('livewire:navigating', () => {
+                flushStaleToasts();
+
                 const sidebar = document.querySelector('ui-sidebar');
                 if (sidebar && sidebar.hasAttribute('data-flux-sidebar-on-mobile') && !sidebar.hasAttribute('data-flux-sidebar-collapsed-mobile')) {
                     document.dispatchEvent(new CustomEvent('flux-sidebar-toggle'));
                 }
+            });
+
+            {{-- Safety net: clean up after the cached page is restored --}}
+            document.addEventListener('livewire:navigated', () => {
+                document.querySelectorAll('dialog[open]').forEach(d => d.close());
+                flushStaleToasts();
+                {{-- Delayed pass in case Livewire replays effects after navigated --}}
+                setTimeout(flushStaleToasts, 50);
             });
         </script>
     </body>

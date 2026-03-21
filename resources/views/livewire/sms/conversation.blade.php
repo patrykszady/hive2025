@@ -281,10 +281,20 @@
             x-on:message-sent.window="$nextTick(() => $el.scrollTop = 0)"
             x-on:sms-new-message-received.window="if ($el.scrollTop < 150) $nextTick(() => $el.scrollTop = 0)"
             x-on:thread-ready.window="$nextTick(() => $el.scrollTop = 0)"
+            x-on:scroll.debounce.150ms="
+                if ($el.__loadingMore) return;
+                if ($el.scrollHeight + $el.scrollTop - $el.clientHeight < 200) {
+                    const trigger = $el.querySelector('[data-load-more]');
+                    if (trigger) {
+                        $el.__loadingMore = true;
+                        $wire.loadMoreMessages().then(() => $nextTick(() => $el.__loadingMore = false));
+                    }
+                }
+            "
         >
             @forelse ($visibleMessages->reverse() as $msg)
-                @if ($loop->last && $visibleMessages->count() >= $messageLimit)
-                    <div wire:intersect="loadMoreMessages" class="text-center py-2">
+                @if ($loop->last && $this->smsMessages->count() >= $messageLimit)
+                    <div data-load-more class="text-center py-2">
                         <span wire:loading wire:target="loadMoreMessages" class="text-xs text-zinc-400">Loading...</span>
                     </div>
                 @endif
@@ -295,6 +305,8 @@
                         $timeLabel = $msgLocal->format('g:i A');
                     } elseif ($msgDate === $yesterdayDate) {
                         $timeLabel = 'Yesterday ' . $msgLocal->format('g:i A');
+                    } elseif ($msgLocal->year !== $now->year) {
+                        $timeLabel = $msgLocal->format('M j, Y, g:i A');
                     } else {
                         $timeLabel = $msgLocal->format('M j, g:i A');
                     }

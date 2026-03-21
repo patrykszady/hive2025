@@ -117,7 +117,10 @@
                 {{-- Timestamp --}}
                 <div class="shrink-0 text-right">
                     <p class="text-xs lg:text-[10px] text-zinc-400 dark:text-zinc-500">
-                        {{ $thread->last_activity_at?->diffForHumans(short: true) ?? $thread->created_at->diffForHumans(short: true) }}
+                        @php
+                            $activityAt = $thread->last_activity_at ?? $thread->created_at;
+                        @endphp
+                        {{ $activityAt->year !== now()->year ? $activityAt->format('M j, Y') : $activityAt->diffForHumans(short: true) }}
                     </p>
                     @if (in_array($thread->id, $this->unreadThreadIds, true))
                         <div class="mt-1 flex justify-end">

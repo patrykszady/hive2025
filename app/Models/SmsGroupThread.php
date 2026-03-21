@@ -50,7 +50,7 @@ class SmsGroupThread extends Model
      */
     public function latestMessage(): HasOne
     {
-        return $this->messages()->one()->latestOfMany();
+        return $this->messages()->one()->latestOfMany('created_at');
     }
 
     public function reads(): HasMany

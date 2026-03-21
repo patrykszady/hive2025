@@ -124,6 +124,14 @@ class SmsMessage extends Model
         'Laughed at' => '😂',
         'Emphasized' => '‼️',
         'Questioned' => '❓',
+        // Emoji-prefix variants (e.g. "👍 to" from some carriers/RCS)
+        "\u{1F44D} to" => '👍',
+        "\u{2764}\u{FE0F} to" => '❤️',
+        "\u{2764} to" => '❤️',
+        "\u{1F44E} to" => '👎',
+        "\u{1F602} to" => '😂',
+        "\u{203C}\u{FE0F} to" => '‼️',
+        "\u{2753} to" => '❓',
         // "Removed" variants (un-react)
         'Removed a like from' => null,
         'Removed a heart from' => null,
@@ -241,11 +249,14 @@ class SmsMessage extends Model
 
         $text = trim($this->text);
 
-        // Repair double-encoded UTF-8 mojibake (e.g. "A ajoutÃ© un Â«Â Jâ€™aime...").
-        // Detect Â/Ã (c3 82/c3 83) followed by c2 xx — the hallmark of double-encoding.
-        if (preg_match('/\xC3[\x82\x83]\xC2[\x80-\xBF]/', $text)) {
-            $decoded = @iconv('UTF-8', 'CP1252//IGNORE', $text);
-            if ($decoded !== false && mb_check_encoding($decoded, 'UTF-8')) {
+        // Repair double-encoded UTF-8 mojibake.
+        // Two common variants:
+        // 1) Latin-1 path: high bytes (C0-FF) become C3 [80-BF] followed by C2 continuation
+        // 2) CP1252 path: â€ sequence (e.g. â€œ for ", ðŸ for emoji start)
+        if (preg_match('/\xC3[\x80-\xBF][\xC2-\xC5\xE2][\x80-\xBF]/', $text)
+            || preg_match('/\xC3[\x80-\xBF]\xC2[\x80-\xBF]/', $text)) {
+            $decoded = @mb_convert_encoding($text, 'Windows-1252', 'UTF-8');
+            if ($decoded !== false && $decoded !== '' && mb_check_encoding($decoded, 'UTF-8')) {
                 $text = $decoded;
             }
         }
@@ -406,6 +417,23 @@ class SmsMessage extends Model
         }
         if ($stripped === '?' || $stripped === '❓') {
             return '❓';
+        }
+
+        // Direct emoji match (e.g. "👍 to" from some carriers)
+        $emojiMap = [
+            "\u{1F44D}" => '👍',
+            "\u{2764}\u{FE0F}" => '❤️',
+            "\u{2764}" => '❤️',
+            "\u{1F44E}" => '👎',
+            "\u{1F602}" => '😂',
+            "\u{203C}\u{FE0F}" => '‼️',
+            "\u{203C}" => '‼️',
+            "\u{2753}" => '❓',
+        ];
+        foreach ($emojiMap as $char => $mappedEmoji) {
+            if (str_contains($text, $char)) {
+                return $mappedEmoji;
+            }
         }
 
         foreach (self::REACTION_KEYWORDS as $emoji => $keywords) {
