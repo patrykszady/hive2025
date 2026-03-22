@@ -205,7 +205,6 @@ async function handleImpervaChallenge(page) {
 
     // Solve hCaptcha via 2captcha HTTP API (no extra dependency needed)
     const https = require('https');
-    const querystring = require('querystring');
     log('  Sending hCaptcha to 2captcha…');
 
     function httpGet(url) {
@@ -218,31 +217,18 @@ async function handleImpervaChallenge(page) {
         });
     }
 
-    function httpPost(url, params) {
-        return new Promise((resolve, reject) => {
-            const body = querystring.stringify(params);
-            const reqUrl = new URL(url);
-            const options = { method: 'POST', hostname: reqUrl.hostname, path: reqUrl.pathname, headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body) } };
-            const req = https.request(options, (res) => {
-                let data = '';
-                res.on('data', chunk => data += chunk);
-                res.on('end', () => resolve(data));
-            });
-            req.on('error', reject);
-            req.write(body);
-            req.end();
-        });
-    }
-
     try {
-        // Step 1: Submit the hCaptcha task
-        const submitResp = await httpPost('https://2captcha.com/in.php', {
+        // Step 1: Submit the hCaptcha task via GET (most reliable for 2captcha)
+        const submitParams = new URLSearchParams({
             key: config.captchaApiKey,
             method: 'hcaptcha',
             sitekey: hcaptchaData.sitekey,
             pageurl: page.url(),
-            json: 1,
+            invisible: '1',
+            json: '1',
         });
+        const submitResp = await httpGet(`https://2captcha.com/in.php?${submitParams.toString()}`);
+        log(`  2captcha submit response: ${submitResp.trim()}`);
         const submitData = JSON.parse(submitResp);
         if (submitData.status !== 1) {
             throw new Error(`2captcha submit failed: ${submitData.request}`);
@@ -270,16 +256,41 @@ async function handleImpervaChallenge(page) {
 
         // Inject the hCaptcha response token
         await challengeFrame.evaluate((tkn) => {
-            // Set the response textarea
+            // Set the response textareas
             const textarea = document.querySelector('[name="h-captcha-response"], textarea[name="h-captcha-response"]');
             if (textarea) textarea.value = tkn;
-            // Also set any g-recaptcha-response (some Imperva pages use this name)
             const gTextarea = document.querySelector('[name="g-recaptcha-response"]');
             if (gTextarea) gTextarea.value = tkn;
-            // Try to submit the form
+            // Try calling the hCaptcha callback if it exists
+            if (typeof window.hcaptcha !== 'undefined') {
+                try {
+                    // Find the widget ID and set the response
+                    const widgetIds = window.hcaptcha.getAllWidgets ? window.hcaptcha.getAllWidgets() : [0];
+                    for (const wid of widgetIds) {
+                        try { window.hcaptcha.setResponse(tkn, wid); } catch {}
+                    }
+                } catch {}
+            }
+            // Try to trigger any onVerify callbacks via the data attribute
+            const hcEl = document.querySelector('[data-callback]');
+            if (hcEl) {
+                const cbName = hcEl.getAttribute('data-callback');
+                if (cbName && typeof window[cbName] === 'function') {
+                    window[cbName](tkn);
+                }
+            }
+            // Try to submit any form present
             const form = document.querySelector('form');
             if (form) form.submit();
         }, token);
+
+        // Also try submitting from the parent page context
+        await page.evaluate((tkn) => {
+            const textarea = document.querySelector('[name="h-captcha-response"], [name="g-recaptcha-response"]');
+            if (textarea) textarea.value = tkn;
+            const form = document.querySelector('form');
+            if (form) form.submit();
+        }, token).catch(() => {});
 
         await sleep(5000);
         log(`  After hCaptcha submit — URL: ${page.url()}`);
