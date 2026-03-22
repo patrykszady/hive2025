@@ -219,6 +219,17 @@ Schedule::command('scout:sync-index-settings')
     ->withoutOverlapping()
     ->onOneServer();
 
+// Menards receipt scraping — 4× daily
+foreach (['08:00', '12:00', '16:00', '20:00'] as $time) {
+    Schedule::command('menards:scrape-receipts --match-expenses --force')
+        ->dailyAt($time)
+        ->timezone('America/Chicago')
+        ->name("menards-scrape-{$time}")
+        ->environments(['production'])
+        ->withoutOverlapping()
+        ->onOneServer();
+}
+
 // System maintenance
 Schedule::command('horizon:snapshot')
     ->everyFiveMinutes()

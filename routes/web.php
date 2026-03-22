@@ -252,6 +252,15 @@ if(env('APP_ENV') === 'local') {
 
     Route::get('/match-expense-po-to-project', [ExpenseAutoMatchController::class, 'runNoProjectExpenseAutoMatchRoute'])
         ->name('match_expense_po_to_project');
+
+    Route::get('/menards-scrape-receipts', function () {
+        \Illuminate\Support\Facades\Artisan::call('menards:scrape-receipts', [
+            '--match-expenses' => true,
+            '--force' => true,
+        ]);
+
+        return '<pre>' . \Illuminate\Support\Facades\Artisan::output() . '</pre>';
+    })->name('menards.scrape');
 }
 
 Route::get('/company-email/login', [CompanyEmailController::class, 'nylasLogin'])->name('company-email.login');
