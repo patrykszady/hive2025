@@ -156,150 +156,195 @@ async function handleImpervaChallenge(page) {
     log('  Imperva/Incapsula challenge detected');
     await screenshot(page, '00_imperva_challenge');
 
-    // The hCaptcha lives inside the Imperva iframe — try to reach it
+    // ── Approach 1: Use the recaptcha plugin (supports hCaptcha + 2captcha natively) ──
+    // The plugin auto-detects hCaptcha widgets including those inside iframes
+    if (config.captchaApiKey) {
+        log('  Attempting solve via recaptcha plugin (supports hCaptcha)…');
+        try {
+            const { captchas, solutions, solved, error } = await page.solveRecaptchas();
+            log(`  Plugin result — captchas: ${captchas?.length || 0}, solved: ${solved?.length || 0}, error: ${error || 'none'}`);
+            if (solved?.length > 0) {
+                log('  Plugin solved the challenge successfully');
+                await sleep(5000);
+                // Check if we moved past the challenge
+                const stillBlocked = await page.evaluate(() => {
+                    return !!document.querySelector('iframe[src*="_Incapsula_Resource"]');
+                });
+                if (!stillBlocked) {
+                    log('  Imperva challenge cleared!');
+                    return true;
+                }
+                log('  Still on challenge page after plugin solve — will try manual approach');
+            }
+        } catch (pluginErr) {
+            log(`  Plugin solve error: ${pluginErr.message}`);
+        }
+    }
+
+    // ── Approach 2: Navigate into the Imperva iframe and try plugin there ──
     const mainIframe = await page.$('iframe#main-iframe');
-    let challengeFrame = page;
     if (mainIframe) {
         const frame = await mainIframe.contentFrame();
         if (frame) {
-            challengeFrame = frame;
-            log('  Entered Imperva iframe');
-            await sleep(3000); // let hCaptcha widget render
-        }
-    }
+            log('  Entered Imperva iframe — waiting for hCaptcha widget…');
+            await sleep(5000); // let hCaptcha widget fully render
 
-    // Detect hCaptcha sitekey
-    const hcaptchaData = await challengeFrame.evaluate(() => {
-        // hCaptcha stores sitekey in a data attribute or iframe src
-        const hcDiv = document.querySelector('[data-sitekey], .h-captcha');
-        if (hcDiv) return { sitekey: hcDiv.getAttribute('data-sitekey') };
-        const hcIframe = document.querySelector('iframe[src*="hcaptcha.com"]');
-        if (hcIframe) {
-            const match = hcIframe.src.match(/sitekey=([^&]+)/);
-            return match ? { sitekey: match[1] } : null;
-        }
-        return null;
-    }).catch(() => null);
-
-    if (!hcaptchaData?.sitekey) {
-        log('  Could not find hCaptcha sitekey — trying page-level reCAPTCHA solve');
-        // Fallback: attempt the recaptcha plugin solve (it may pick it up)
-        try {
-            const { solved } = await page.solveRecaptchas();
-            if (solved?.length) {
-                log(`  reCAPTCHA plugin solved ${solved.length} challenge(s)`);
-                await sleep(3000);
-                return true;
-            }
-        } catch { /* ignore */ }
-        log('  WARNING: Imperva challenge could not be solved automatically');
-        return false;
-    }
-
-    log(`  hCaptcha sitekey: ${hcaptchaData.sitekey}`);
-
-    if (!config.captchaApiKey) {
-        log('  ERROR: hCaptcha detected but no captchaApiKey configured');
-        return false;
-    }
-
-    // Solve hCaptcha via 2captcha HTTP API (no extra dependency needed)
-    const https = require('https');
-    log('  Sending hCaptcha to 2captcha…');
-
-    function httpGet(url) {
-        return new Promise((resolve, reject) => {
-            https.get(url, (res) => {
-                let data = '';
-                res.on('data', chunk => data += chunk);
-                res.on('end', () => resolve(data));
-            }).on('error', reject);
-        });
-    }
-
-    try {
-        // Step 1: Submit the hCaptcha task via GET (most reliable for 2captcha)
-        const submitParams = new URLSearchParams({
-            key: config.captchaApiKey,
-            method: 'hcaptcha',
-            sitekey: hcaptchaData.sitekey,
-            pageurl: page.url(),
-            invisible: '1',
-            json: '1',
-        });
-        const submitResp = await httpGet(`https://2captcha.com/in.php?${submitParams.toString()}`);
-        log(`  2captcha submit response: ${submitResp.trim()}`);
-        const submitData = JSON.parse(submitResp);
-        if (submitData.status !== 1) {
-            throw new Error(`2captcha submit failed: ${submitData.request}`);
-        }
-        const taskId = submitData.request;
-        log(`  2captcha task submitted: ${taskId}`);
-
-        // Step 2: Poll for the result
-        let token = null;
-        for (let attempt = 0; attempt < 60; attempt++) {
-            await sleep(5000);
-            const pollResp = await httpGet(`https://2captcha.com/res.php?key=${encodeURIComponent(config.captchaApiKey)}&action=get&id=${taskId}&json=1`);
-            const pollData = JSON.parse(pollResp);
-            if (pollData.status === 1) {
-                token = pollData.request;
-                break;
-            }
-            if (pollData.request !== 'CAPCHA_NOT_READY') {
-                throw new Error(`2captcha poll failed: ${pollData.request}`);
-            }
-            log(`  Waiting for hCaptcha solution… (attempt ${attempt + 1})`);
-        }
-        if (!token) throw new Error('hCaptcha solve timed out after 5 minutes');
-        log(`  hCaptcha solved — token length: ${token.length}`);
-
-        // Inject the hCaptcha response token
-        await challengeFrame.evaluate((tkn) => {
-            // Set the response textareas
-            const textarea = document.querySelector('[name="h-captcha-response"], textarea[name="h-captcha-response"]');
-            if (textarea) textarea.value = tkn;
-            const gTextarea = document.querySelector('[name="g-recaptcha-response"]');
-            if (gTextarea) gTextarea.value = tkn;
-            // Try calling the hCaptcha callback if it exists
-            if (typeof window.hcaptcha !== 'undefined') {
+            // Try plugin on all frames explicitly
+            if (config.captchaApiKey) {
                 try {
-                    // Find the widget ID and set the response
-                    const widgetIds = window.hcaptcha.getAllWidgets ? window.hcaptcha.getAllWidgets() : [0];
-                    for (const wid of widgetIds) {
-                        try { window.hcaptcha.setResponse(tkn, wid); } catch {}
+                    const { solved } = await page.solveRecaptchas();
+                    log(`  Plugin retry after iframe wait — solved: ${solved?.length || 0}`);
+                    if (solved?.length > 0) {
+                        await sleep(5000);
+                        return true;
                     }
-                } catch {}
+                } catch { /* ignore */ }
             }
-            // Try to trigger any onVerify callbacks via the data attribute
-            const hcEl = document.querySelector('[data-callback]');
-            if (hcEl) {
-                const cbName = hcEl.getAttribute('data-callback');
-                if (cbName && typeof window[cbName] === 'function') {
-                    window[cbName](tkn);
+
+            // ── Approach 3: Manual 2captcha JSON API v2 ──────────────────────
+            // Extract sitekey from the iframe content
+            const hcaptchaData = await frame.evaluate(() => {
+                const hcDiv = document.querySelector('[data-sitekey], .h-captcha');
+                if (hcDiv) return { sitekey: hcDiv.getAttribute('data-sitekey') };
+                const hcIframe = document.querySelector('iframe[src*="hcaptcha.com"]');
+                if (hcIframe) {
+                    const match = hcIframe.src.match(/sitekey=([^&]+)/);
+                    return match ? { sitekey: match[1] } : null;
                 }
+                return null;
+            }).catch(() => null);
+
+            if (hcaptchaData?.sitekey && config.captchaApiKey) {
+                log(`  hCaptcha sitekey: ${hcaptchaData.sitekey}`);
+                log(`  API key length: ${config.captchaApiKey.length}, starts with: ${config.captchaApiKey.substring(0, 4)}…`);
+                log('  Sending hCaptcha to 2captcha via JSON API v2…');
+
+                const https = require('https');
+
+                function httpJsonPost(url, body) {
+                    return new Promise((resolve, reject) => {
+                        const data = JSON.stringify(body);
+                        const urlObj = new URL(url);
+                        const options = {
+                            method: 'POST',
+                            hostname: urlObj.hostname,
+                            path: urlObj.pathname,
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Content-Length': Buffer.byteLength(data),
+                            },
+                        };
+                        const req = https.request(options, (res) => {
+                            let resp = '';
+                            res.on('data', chunk => resp += chunk);
+                            res.on('end', () => resolve(resp));
+                        });
+                        req.on('error', reject);
+                        req.write(data);
+                        req.end();
+                    });
+                }
+
+                function httpGet(url) {
+                    return new Promise((resolve, reject) => {
+                        https.get(url, (res) => {
+                            let data = '';
+                            res.on('data', chunk => data += chunk);
+                            res.on('end', () => resolve(data));
+                        }).on('error', reject);
+                    });
+                }
+
+                try {
+                    // Submit via 2captcha JSON API v2 (createTask endpoint)
+                    const createTaskBody = {
+                        clientKey: config.captchaApiKey,
+                        task: {
+                            type: 'HCaptchaTaskProxyless',
+                            websiteURL: 'https://www.menards.com/main/login.html',
+                            websiteKey: hcaptchaData.sitekey,
+                        },
+                    };
+                    log(`  createTask request: ${JSON.stringify({ ...createTaskBody, clientKey: '***' })}`);
+                    const createResp = await httpJsonPost('https://api.2captcha.com/createTask', createTaskBody);
+                    log(`  createTask response: ${createResp.trim()}`);
+                    const createData = JSON.parse(createResp);
+
+                    if (createData.errorId && createData.errorId !== 0) {
+                        throw new Error(`createTask failed: ${createData.errorCode || 'unknown'} — ${createData.errorDescription || createResp}`);
+                    }
+
+                    const taskId = createData.taskId;
+                    log(`  Task ID: ${taskId}`);
+
+                    // Poll for result
+                    let token = null;
+                    for (let attempt = 0; attempt < 60; attempt++) {
+                        await sleep(5000);
+                        const resultResp = await httpJsonPost('https://api.2captcha.com/getTaskResult', {
+                            clientKey: config.captchaApiKey,
+                            taskId: taskId,
+                        });
+                        const resultData = JSON.parse(resultResp);
+
+                        if (resultData.status === 'ready') {
+                            token = resultData.solution?.gRecaptchaResponse || resultData.solution?.token;
+                            break;
+                        }
+                        if (resultData.errorId && resultData.errorId !== 0) {
+                            throw new Error(`getTaskResult failed: ${resultData.errorCode}`);
+                        }
+                        log(`  Waiting for hCaptcha solution… (attempt ${attempt + 1})`);
+                    }
+
+                    if (!token) throw new Error('hCaptcha solve timed out after 5 minutes');
+                    log(`  hCaptcha solved — token length: ${token.length}`);
+
+                    // Inject the token into the iframe
+                    await frame.evaluate((tkn) => {
+                        const ta = document.querySelector('[name="h-captcha-response"], textarea[name="h-captcha-response"]');
+                        if (ta) ta.value = tkn;
+                        const gta = document.querySelector('[name="g-recaptcha-response"]');
+                        if (gta) gta.value = tkn;
+                        // Try hCaptcha JS callback
+                        if (typeof window.hcaptcha !== 'undefined') {
+                            try {
+                                const wids = window.hcaptcha.getAllWidgets ? window.hcaptcha.getAllWidgets() : [0];
+                                for (const w of wids) { try { window.hcaptcha.setResponse(tkn, w); } catch {} }
+                            } catch {}
+                        }
+                        const hcEl = document.querySelector('[data-callback]');
+                        if (hcEl) {
+                            const cb = hcEl.getAttribute('data-callback');
+                            if (cb && typeof window[cb] === 'function') window[cb](tkn);
+                        }
+                        const form = document.querySelector('form');
+                        if (form) form.submit();
+                    }, token);
+
+                    // Also try on the parent page
+                    await page.evaluate((tkn) => {
+                        const ta = document.querySelector('[name="h-captcha-response"], [name="g-recaptcha-response"]');
+                        if (ta) ta.value = tkn;
+                        const form = document.querySelector('form');
+                        if (form) form.submit();
+                    }, token).catch(() => {});
+
+                    await sleep(5000);
+                    log(`  After hCaptcha submit — URL: ${page.url()}`);
+                    await screenshot(page, '00_after_imperva');
+                    return true;
+                } catch (err) {
+                    log(`  Manual hCaptcha solve failed: ${err.message}`);
+                }
+            } else {
+                log('  Could not find hCaptcha sitekey in iframe');
             }
-            // Try to submit any form present
-            const form = document.querySelector('form');
-            if (form) form.submit();
-        }, token);
-
-        // Also try submitting from the parent page context
-        await page.evaluate((tkn) => {
-            const textarea = document.querySelector('[name="h-captcha-response"], [name="g-recaptcha-response"]');
-            if (textarea) textarea.value = tkn;
-            const form = document.querySelector('form');
-            if (form) form.submit();
-        }, token).catch(() => {});
-
-        await sleep(5000);
-        log(`  After hCaptcha submit — URL: ${page.url()}`);
-        await screenshot(page, '00_after_imperva');
-        return true;
-    } catch (err) {
-        log(`  hCaptcha solve failed: ${err.message}`);
-        return false;
+        }
     }
+
+    log('  WARNING: Imperva challenge could not be solved automatically');
+    return false;
 }
 
 // ── Login ─────────────────────────────────────────────────────────────────────
