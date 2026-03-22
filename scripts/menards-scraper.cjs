@@ -70,8 +70,12 @@ async function saveHtml(page, name) {
 /** Try multiple selectors, return the first element found (or null). */
 async function findFirst(page, selectors) {
     for (const sel of selectors) {
-        const el = await page.$(sel);
-        if (el) return { el, selector: sel };
+        try {
+            const el = await page.$(sel);
+            if (el) return { el, selector: sel };
+        } catch {
+            // Invalid selector (e.g. Playwright-only pseudo-classes) — skip
+        }
     }
     return null;
 }
@@ -140,6 +144,153 @@ function isWithinDateRange(txDate) {
     return txDate >= SINCE;
 }
 
+// ── Imperva / hCaptcha handling ───────────────────────────────────────────────
+async function handleImpervaChallenge(page) {
+    const isImperva = await page.evaluate(() => {
+        return !!document.querySelector('iframe[src*="_Incapsula_Resource"]')
+            || document.title.includes('Incapsula')
+            || !!document.querySelector('iframe#main-iframe[src*="_Incapsula_Resource"]');
+    });
+
+    if (!isImperva) return false;
+    log('  Imperva/Incapsula challenge detected');
+    await screenshot(page, '00_imperva_challenge');
+
+    // The hCaptcha lives inside the Imperva iframe — try to reach it
+    const mainIframe = await page.$('iframe#main-iframe');
+    let challengeFrame = page;
+    if (mainIframe) {
+        const frame = await mainIframe.contentFrame();
+        if (frame) {
+            challengeFrame = frame;
+            log('  Entered Imperva iframe');
+            await sleep(3000); // let hCaptcha widget render
+        }
+    }
+
+    // Detect hCaptcha sitekey
+    const hcaptchaData = await challengeFrame.evaluate(() => {
+        // hCaptcha stores sitekey in a data attribute or iframe src
+        const hcDiv = document.querySelector('[data-sitekey], .h-captcha');
+        if (hcDiv) return { sitekey: hcDiv.getAttribute('data-sitekey') };
+        const hcIframe = document.querySelector('iframe[src*="hcaptcha.com"]');
+        if (hcIframe) {
+            const match = hcIframe.src.match(/sitekey=([^&]+)/);
+            return match ? { sitekey: match[1] } : null;
+        }
+        return null;
+    }).catch(() => null);
+
+    if (!hcaptchaData?.sitekey) {
+        log('  Could not find hCaptcha sitekey — trying page-level reCAPTCHA solve');
+        // Fallback: attempt the recaptcha plugin solve (it may pick it up)
+        try {
+            const { solved } = await page.solveRecaptchas();
+            if (solved?.length) {
+                log(`  reCAPTCHA plugin solved ${solved.length} challenge(s)`);
+                await sleep(3000);
+                return true;
+            }
+        } catch { /* ignore */ }
+        log('  WARNING: Imperva challenge could not be solved automatically');
+        return false;
+    }
+
+    log(`  hCaptcha sitekey: ${hcaptchaData.sitekey}`);
+
+    if (!config.captchaApiKey) {
+        log('  ERROR: hCaptcha detected but no captchaApiKey configured');
+        return false;
+    }
+
+    // Solve hCaptcha via 2captcha HTTP API (no extra dependency needed)
+    const https = require('https');
+    const querystring = require('querystring');
+    log('  Sending hCaptcha to 2captcha…');
+
+    function httpGet(url) {
+        return new Promise((resolve, reject) => {
+            https.get(url, (res) => {
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => resolve(data));
+            }).on('error', reject);
+        });
+    }
+
+    function httpPost(url, params) {
+        return new Promise((resolve, reject) => {
+            const body = querystring.stringify(params);
+            const reqUrl = new URL(url);
+            const options = { method: 'POST', hostname: reqUrl.hostname, path: reqUrl.pathname, headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body) } };
+            const req = https.request(options, (res) => {
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => resolve(data));
+            });
+            req.on('error', reject);
+            req.write(body);
+            req.end();
+        });
+    }
+
+    try {
+        // Step 1: Submit the hCaptcha task
+        const submitResp = await httpPost('https://2captcha.com/in.php', {
+            key: config.captchaApiKey,
+            method: 'hcaptcha',
+            sitekey: hcaptchaData.sitekey,
+            pageurl: page.url(),
+            json: 1,
+        });
+        const submitData = JSON.parse(submitResp);
+        if (submitData.status !== 1) {
+            throw new Error(`2captcha submit failed: ${submitData.request}`);
+        }
+        const taskId = submitData.request;
+        log(`  2captcha task submitted: ${taskId}`);
+
+        // Step 2: Poll for the result
+        let token = null;
+        for (let attempt = 0; attempt < 60; attempt++) {
+            await sleep(5000);
+            const pollResp = await httpGet(`https://2captcha.com/res.php?key=${encodeURIComponent(config.captchaApiKey)}&action=get&id=${taskId}&json=1`);
+            const pollData = JSON.parse(pollResp);
+            if (pollData.status === 1) {
+                token = pollData.request;
+                break;
+            }
+            if (pollData.request !== 'CAPCHA_NOT_READY') {
+                throw new Error(`2captcha poll failed: ${pollData.request}`);
+            }
+            log(`  Waiting for hCaptcha solution… (attempt ${attempt + 1})`);
+        }
+        if (!token) throw new Error('hCaptcha solve timed out after 5 minutes');
+        log(`  hCaptcha solved — token length: ${token.length}`);
+
+        // Inject the hCaptcha response token
+        await challengeFrame.evaluate((tkn) => {
+            // Set the response textarea
+            const textarea = document.querySelector('[name="h-captcha-response"], textarea[name="h-captcha-response"]');
+            if (textarea) textarea.value = tkn;
+            // Also set any g-recaptcha-response (some Imperva pages use this name)
+            const gTextarea = document.querySelector('[name="g-recaptcha-response"]');
+            if (gTextarea) gTextarea.value = tkn;
+            // Try to submit the form
+            const form = document.querySelector('form');
+            if (form) form.submit();
+        }, token);
+
+        await sleep(5000);
+        log(`  After hCaptcha submit — URL: ${page.url()}`);
+        await screenshot(page, '00_after_imperva');
+        return true;
+    } catch (err) {
+        log(`  hCaptcha solve failed: ${err.message}`);
+        return false;
+    }
+}
+
 // ── Login ─────────────────────────────────────────────────────────────────────
 async function login(page) {
     log('Navigating to login page…');
@@ -150,6 +301,24 @@ async function login(page) {
     log(`  HTTP status: ${response ? response.status() : 'no response'}`);
     log(`  Final URL: ${page.url()}`);
     log(`  Page title: ${await page.title()}`);
+
+    // Check for Imperva/hCaptcha WAF challenge before anything else
+    const impervaHandled = await handleImpervaChallenge(page);
+    if (impervaHandled) {
+        log('  Imperva challenge handled — reloading login page…');
+        await page.goto('https://www.menards.com/main/login.html', {
+            waitUntil: 'networkidle2',
+            timeout: 60000,
+        });
+        // Check again in case there's a second challenge
+        const secondChallenge = await handleImpervaChallenge(page);
+        if (secondChallenge) {
+            await page.goto('https://www.menards.com/main/login.html', {
+                waitUntil: 'networkidle2',
+                timeout: 60000,
+            });
+        }
+    }
 
     // Wait for Vue.js to render the login form
     await sleep(3000);
@@ -165,7 +334,6 @@ async function login(page) {
     // Click Sign In tab (try multiple selectors — Menards periodically changes their markup)
     const signInTab = await findFirst(page, [
         '[data-at-id="loginTab"]',
-        'button:has-text("Sign In")',
         '[role="tab"]:first-child',
         '.tab-signin',
     ]);
