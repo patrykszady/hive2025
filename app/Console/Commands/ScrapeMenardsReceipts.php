@@ -279,8 +279,17 @@ class ScrapeMenardsReceipts extends Command
                 $this->line("  <info>MATCH</info> Expense #{$expense->id} ← {$receipt['date']} — {$receipt['amount']}");
                 $matched++;
             } else {
-                $this->line("  <comment>NO MATCH</comment> {$receipt['date']} — {$receipt['amount']}  (receipt saved, no expense link)");
-                $expense = null;
+                // Create a new expense automatically (same as email receipt flow)
+                $expense = Expense::create([
+                    'amount'               => $amount,
+                    'date'                 => $date->format('Y-m-d'),
+                    'vendor_id'            => $vendorId,
+                    'belongs_to_vendor_id' => $belongsToVendorId,
+                    'created_by_user_id'   => 0,
+                ]);
+
+                $this->line("  <info>CREATED</info> Expense #{$expense->id} ← {$receipt['date']} — {$receipt['amount']}");
+                $matched++;
             }
 
             // Save receipt file to permanent storage

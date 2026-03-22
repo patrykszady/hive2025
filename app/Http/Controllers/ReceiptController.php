@@ -598,7 +598,7 @@ class ReceiptController extends Controller
         $rawContent = preg_replace('/<\/tr>\s*/i', "\n", $rawContent);
         $rawContent = strip_tags($rawContent);
         $rawContent = preg_replace('/\n{3,}/', "\n\n", $rawContent);
-        $content = htmlentities(trim($rawContent), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $content = htmlspecialchars(trim($rawContent), ENT_QUOTES, 'UTF-8');
         $styles  = $analyzeResult['analyzeResult']['styles'] ?? [];
 
         $keyValuePairs = null;
