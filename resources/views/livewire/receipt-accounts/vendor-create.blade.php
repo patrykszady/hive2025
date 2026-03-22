@@ -26,11 +26,9 @@
                                 <flux:input
                                     type="{{ $field['type'] ?? 'text' }}"
                                     wire:model="credential_values.{{ $field['key'] }}"
-                                    placeholder="{{ ($field['type'] ?? 'text') === 'password' && ($vendor->receipt_account?->options[$field['key']] ?? false) ? '••••••••  (saved)' : ($field['placeholder'] ?? '') }}"
+                                    placeholder="{{ $field['placeholder'] ?? '' }}"
+                                    autocomplete="off"
                                 />
-                                @if(($field['encrypted'] ?? false) || ($field['type'] ?? '') === 'password')
-                                    <flux:description>Encrypted before storage.</flux:description>
-                                @endif
                             </flux:field>
                         @endif
                     @endforeach
