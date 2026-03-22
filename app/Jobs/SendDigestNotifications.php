@@ -10,14 +10,13 @@ use App\Models\User;
 use App\Notifications\ClientScheduleSmsNotification;
 use App\Notifications\TeamTaskSmsNotification;
 use App\Services\TaskNotificationService;
+use App\Services\WebPushService;
 use App\Support\SmsChannel;
 use Carbon\Carbon;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
-use Minishlink\WebPush\Subscription;
-use Minishlink\WebPush\WebPush;
 
 /**
  * Unified digest job for morning/evening task notifications.
@@ -198,25 +197,14 @@ class SendDigestNotifications implements ShouldQueue
         Carbon $targetDate,
         string $dateStr,
     ): void {
-        $vapidPublicKey = config('services.vapid.public_key');
-        $vapidPrivateKey = config('services.vapid.private_key');
-
-        if (! $vapidPublicKey || ! $vapidPrivateKey) {
-            return;
-        }
-
-        $webPush = new WebPush([
-            'VAPID' => [
-                'subject' => config('app.url'),
-                'publicKey' => $vapidPublicKey,
-                'privateKey' => $vapidPrivateKey,
-            ],
-        ]);
-
+        $webPushService = app(WebPushService::class);
         $browserTiming = $this->timing === 'morning' ? 'morning' : 'evening';
         $pushTitle = $this->timing === 'morning' ? "Today's Tasks" : "Tomorrow's Tasks";
 
         $subscriptions = PushSubscription::with('user.notificationSetting')->get();
+
+        // Group eligible subscriptions with their per-user payloads
+        $eligible = collect();
 
         foreach ($subscriptions as $pushSub) {
             $user = $pushSub->user;
@@ -247,33 +235,24 @@ class SendDigestNotifications implements ShouldQueue
                 }
             }
 
-            $payload = json_encode([
-                'title' => $pushTitle,
-                'body' => $body,
-                'tag' => "task-digest-{$this->timing}-{$dateStr}",
-                'data' => ['url' => '/hub'],
+            $eligible->push([
+                'subscription' => $pushSub,
+                'payload' => [
+                    'title' => $pushTitle,
+                    'body' => $body,
+                    'tag' => "task-digest-{$this->timing}-{$dateStr}",
+                    'data' => ['url' => '/hub'],
+                ],
             ]);
-
-            $webPush->queueNotification(
-                Subscription::create([
-                    'endpoint' => $pushSub->endpoint,
-                    'keys' => [
-                        'p256dh' => $pushSub->p256dh,
-                        'auth' => $pushSub->auth,
-                    ],
-                ]),
-                $payload,
-            );
         }
 
-        foreach ($webPush->flush() as $report) {
-            if (! $report->isSuccess()) {
-                $endpoint = $report->getRequest()->getUri()->__toString();
-
-                if ($report->isSubscriptionExpired()) {
-                    PushSubscription::where('endpoint', $endpoint)->delete();
-                }
-            }
+        // Send each eligible subscription through WebPushService individually
+        // (different payloads per user require individual sends)
+        foreach ($eligible as $item) {
+            $webPushService->sendToSubscriptions(
+                collect([$item['subscription']]),
+                $item['payload'],
+            );
         }
     }
 }

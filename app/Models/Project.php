@@ -479,7 +479,10 @@ class Project extends Model
                     ->sum('amount');
 
                 $finances = [];
-                $bid_estimate_total = (float) $this->bids()->where('type', 1)->sum('amount');
+                $bid_estimate_total = (float) $this->bids()
+                    ->where('type', 1)
+                    ->where('vendor_id', $this->belongs_to_vendor_id)
+                    ->sum('amount');
                 
                 // If no finalized bids exist, calculate from estimate sections
                 if ($bid_estimate_total == 0) {

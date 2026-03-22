@@ -9,10 +9,13 @@
     </div>
 
     {{-- Call list --}}
-    @forelse ($this->calls as $call)
+    @forelse ($this->calls as $group)
         @php
+            $call = $group['call'];
+            $groupCount = $group['count'];
             $isIncoming = $call->direction === 'incoming';
             $isOutgoing = $call->direction === 'outgoing';
+            $effectiveStatus = $this->effectiveStatus($call);
 
             // Resolve the "other party" phone to a contact name
             $otherNumber = $isOutgoing ? $call->to_number : $call->from_number;
@@ -57,13 +60,13 @@
         >
             {{-- Status icon --}}
             <div class="shrink-0">
-                @if ($call->status === 'blocked')
+                @if ($effectiveStatus === 'blocked')
                     <flux:icon icon="shield-exclamation" variant="micro" class="size-4 text-amber-500" />
-                @elseif ($call->status === 'missed' && $call->has_voicemail)
+                @elseif ($effectiveStatus === 'missed' && $call->has_voicemail)
                     <flux:icon icon="microphone" variant="micro" class="size-4 text-indigo-500" />
-                @elseif ($call->status === 'missed')
+                @elseif ($effectiveStatus === 'missed')
                     <flux:icon icon="phone-x-mark" variant="micro" class="size-4 text-red-500" />
-                @elseif ($call->status === 'failed')
+                @elseif ($effectiveStatus === 'failed')
                     <flux:icon icon="x-circle" variant="micro" class="size-4 text-rose-500" />
                 @elseif ($call->direction === 'outgoing')
                     <flux:icon icon="phone-arrow-up-right" variant="micro" class="size-4 text-indigo-500" />
@@ -91,13 +94,19 @@
                             <span class="text-sm lg:text-xs text-zinc-400">{{ $secondaryNumber }}</span>
                         @endif
 
-                        @if ($call->status === 'missed' && $call->has_voicemail)
+                        @if ($effectiveStatus === 'blocked')
+                            <span class="text-sm lg:text-xs text-amber-500 font-medium">Blocked</span>
+                        @elseif ($effectiveStatus === 'missed' && $call->has_voicemail)
                             <span class="text-sm lg:text-xs text-red-400 font-medium">Missed</span>
                             <span class="text-sm lg:text-xs text-indigo-500 font-medium">Voicemail</span>
-                        @elseif ($call->status === 'missed')
+                        @elseif ($effectiveStatus === 'missed')
                             <span class="text-sm lg:text-xs text-red-400 font-medium">Missed</span>
-                        @elseif ($call->status === 'failed')
+                        @elseif ($effectiveStatus === 'failed')
                             <span class="text-sm lg:text-xs text-rose-500 font-medium">Failed</span>
+                        @endif
+
+                        @if ($groupCount > 1)
+                            <span class="text-sm lg:text-xs text-zinc-400 font-medium">({{ $groupCount }})</span>
                         @endif
                     </div>
 
@@ -155,7 +164,7 @@
     @endforelse
 
     {{-- Infinite scroll --}}
-    @if ($this->calls->count() >= $limit)
+    @if ($this->calls->sum('count') >= $limit)
         <div wire:intersect="loadMore" class="text-center py-2">
             <span wire:loading wire:target="loadMore" class="text-xs text-zinc-400">Loading...</span>
         </div>

@@ -13,6 +13,19 @@ if ('serviceWorker' in navigator) {
             window.location.href = event.data.url;
         }
     });
+
+    // Check for pending navigation stored by service worker (iOS notification click fallback)
+    caches.open('hive-pending-nav').then((cache) =>
+        cache.match('/__pending_nav').then((response) => {
+            if (!response) return;
+            cache.delete('/__pending_nav');
+            return response.text();
+        })
+    ).then((url) => {
+        if (url && !window.location.href.endsWith(new URL(url).pathname + new URL(url).search)) {
+            window.location.href = url;
+        }
+    }).catch(() => {});
 }
 
 window.Pusher = Pusher;

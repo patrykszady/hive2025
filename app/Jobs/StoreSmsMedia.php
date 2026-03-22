@@ -64,7 +64,7 @@ class StoreSmsMedia implements ShouldQueue
 
                 $filename = 'sms-media/' . now()->format('Y/m') . '/' . Str::uuid() . '.' . $extension;
 
-                Storage::disk('local')->put('public/' . $filename, $response->body());
+                Storage::disk('public')->put($filename, $response->body());
 
                 $storedUrls[] = '/storage/' . $filename;
             } catch (\Exception $e) {

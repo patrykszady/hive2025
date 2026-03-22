@@ -91,7 +91,7 @@ class WebPushService
      */
     protected function buildSubscription(PushSubscription $pushSubscription): Subscription
     {
-        $contentEncoding = $pushSubscription->content_encoding ?: $this->detectDefaultContentEncoding($pushSubscription->endpoint);
+        $contentEncoding = $pushSubscription->content_encoding ?: 'aes128gcm';
 
         return Subscription::create([
             'endpoint' => $pushSubscription->endpoint,
@@ -101,15 +101,6 @@ class WebPushService
             ],
             'contentEncoding' => $contentEncoding,
         ]);
-    }
-
-    protected function detectDefaultContentEncoding(string $endpoint): string
-    {
-        if (str_contains($endpoint, 'notify.windows.com')) {
-            return 'aesgcm';
-        }
-
-        return 'aes128gcm';
     }
 
     /**

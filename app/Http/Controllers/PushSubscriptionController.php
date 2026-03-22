@@ -40,7 +40,7 @@ class PushSubscriptionController extends Controller
             array_intersect_key($preferences, $defaultPreferences)
         );
 
-        $contentEncoding = $validated['contentEncoding'] ?? $this->defaultContentEncodingForEndpoint($validated['endpoint']);
+        $contentEncoding = $validated['contentEncoding'] ?? 'aes128gcm';
 
         PushSubscription::updateOrCreate(
             [

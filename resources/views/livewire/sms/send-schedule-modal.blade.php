@@ -12,7 +12,7 @@
                 <div class="space-y-1">
                     <flux:text class="text-sm font-medium">Tasks</flux:text>
 
-                    @if ($this->groupedUpcomingTasks->flatten(1)->isEmpty())
+                    @if ($this->groupedUpcomingTasks->flatten(1)->isEmpty() && $this->pendingTasks->isEmpty())
                         <div class="py-6 text-center">
                             <flux:icon name="calendar" class="mx-auto h-8 w-8 text-zinc-300 dark:text-zinc-600" />
                             <flux:text class="mt-2 text-sm text-zinc-400">No upcoming tasks in the next 3 days</flux:text>
@@ -108,12 +108,34 @@
                                     @endif
                                 </div>
                             @endforeach
+
+                            {{-- Pending tasks (no dates) --}}
+                            @if($this->pendingTasks->isNotEmpty())
+                                <div wire:key="day-pending" class="space-y-2">
+                                    <div class="flex items-center gap-2 min-h-6">
+                                        <flux:heading size="sm" class="text-zinc-700 dark:text-zinc-300">
+                                            Pending
+                                        </flux:heading>
+                                        <flux:badge color="amber" size="sm">{{ $this->pendingTasks->count() }}</flux:badge>
+                                    </div>
+
+                                    @include('components.upcoming-tasks-list-tasks', [
+                                        'tasks' => $this->pendingTasks,
+                                        'date' => null,
+                                        'carbonDate' => null,
+                                        'showAvatars' => true,
+                                        'clickable' => false,
+                                        'showProjectInfo' => count($this->clientProjectIds) > 1,
+                                        'showVendorInfo' => true,
+                                    ])
+                                </div>
+                            @endif
                         </div>
                     @endif
                 </div>
 
                 {{-- Editable message --}}
-                @if ($this->upcomingTasks->isNotEmpty())
+                @if ($this->upcomingTasks->isNotEmpty() || $this->pendingTasks->isNotEmpty())
                     <div>
                         <flux:textarea
                             wire:model="editableMessage"
@@ -133,7 +155,7 @@
                     icon="paper-airplane"
                     wire:click="send"
                     wire:loading.attr="disabled"
-                    :disabled="$this->upcomingTasks->isEmpty()"
+                    :disabled="$this->upcomingTasks->isEmpty() && $this->pendingTasks->isEmpty()"
                 >
                     Send Schedule
                 </flux:button>

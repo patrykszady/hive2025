@@ -779,6 +779,21 @@ class TelnyxWebhookController extends Controller
         $callLog = CallLog::findByCallControlId($callControlId);
 
         if ($callLog) {
+            // Don't overwrite blocked calls — the hangup is just cleanup after we rejected them
+            if ($callLog->status === CallLog::STATUS_BLOCKED) {
+                $callLog->update([
+                    'hangup_cause' => $hangupCause,
+                    'ended_at' => now(),
+                ]);
+
+                Log::channel('telnyx')->info('Blocked call hangup (status preserved)', [
+                    'call_control_id' => $callControlId,
+                    'hangup_cause' => $hangupCause,
+                ]);
+
+                return response()->json(['status' => 'ok']);
+            }
+
             $wasAnswered = $callLog->answered_at !== null;
             $duration = $callLog->answered_at
                 ? now()->diffInSeconds($callLog->answered_at)

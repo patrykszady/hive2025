@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Notifications\ClientScheduleSmsNotification;
 use App\Notifications\TeamTaskSmsNotification;
 use App\Services\TaskNotificationService;
+use App\Services\WebPushService;
 use App\Support\SmsChannel;
 use Carbon\Carbon;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -18,8 +19,6 @@ use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
-use Minishlink\WebPush\Subscription;
-use Minishlink\WebPush\WebPush;
 
 /**
  * Unified realtime notification job — dispatched when tasks change.
@@ -290,47 +289,13 @@ class SendRealtimeTaskNotification implements ShouldQueue, ShouldBeUnique
             return;
         }
 
-        $vapidPublicKey = config('services.vapid.public_key');
-        $vapidPrivateKey = config('services.vapid.private_key');
-
-        if (! $vapidPublicKey || ! $vapidPrivateKey) {
-            return;
-        }
-
-        $webPush = new WebPush([
-            'VAPID' => [
-                'subject' => config('app.url'),
-                'publicKey' => $vapidPublicKey,
-                'privateKey' => $vapidPrivateKey,
-            ],
-        ]);
-
         $count = $userTasks->count();
-        $payload = json_encode([
+
+        app(WebPushService::class)->sendToSubscriptions($subscriptions, [
             'title' => 'Schedule Updated',
             'body' => "Your schedule for today has been updated. You have {$count} " . ($count === 1 ? 'task' : 'tasks') . '.',
             'tag' => "task-update-{$dateStr}",
             'data' => ['url' => '/hub'],
         ]);
-
-        foreach ($subscriptions as $pushSub) {
-            $webPush->queueNotification(
-                Subscription::create([
-                    'endpoint' => $pushSub->endpoint,
-                    'keys' => [
-                        'p256dh' => $pushSub->p256dh,
-                        'auth' => $pushSub->auth,
-                    ],
-                ]),
-                $payload,
-            );
-        }
-
-        foreach ($webPush->flush() as $report) {
-            if (! $report->isSuccess() && $report->isSubscriptionExpired()) {
-                $endpoint = $report->getRequest()->getUri()->__toString();
-                PushSubscription::where('endpoint', $endpoint)->delete();
-            }
-        }
     }
 }

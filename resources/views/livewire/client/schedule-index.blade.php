@@ -10,6 +10,15 @@
     </div>
 
     <div class="max-w-lg mx-auto px-4 py-6">
+        {{-- Skeleton shown during Livewire refresh (e.g. browser timezone sync) --}}
+        <div wire:loading.delay.shortest class="animate-pulse">
+            <x-upcoming-tasks-list-skeleton
+                title="Tasks"
+                :show-project-info="false"
+            />
+        </div>
+
+        <div wire:loading.delay.shortest.remove>
         @if(!$valid)
             {{-- Invalid Token --}}
             <flux:card class="text-center">
@@ -34,7 +43,7 @@
                 :unscheduled-tasks="$this->unscheduledTasks"
                 :show-avatars="false"
                 :clickable="false"
-                :show-project-info="count($this->clientProjectIds) > 1"
+                :show-project-info="$this->hasMultipleProjects"
                 :show-notifications="false"
                 :public-view="true"
             />
@@ -68,6 +77,7 @@
                 <img src="{{ asset('favicon.svg') }}" alt="Hive" class="size-4" />
                 <span>Powered by Hive Contractors</span>
             </a>
+        </div>
         </div>
     </div>
 </div>

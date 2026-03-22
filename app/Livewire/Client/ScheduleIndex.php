@@ -134,12 +134,12 @@ class ScheduleIndex extends Component
     }
 
     /**
-     * Get the start of week (Monday) date string (Y-m-d) for the view.
+     * Get the start date string (Y-m-d) for the view (2 days before today).
      */
     #[Computed]
     public function startOfWeekDate(): string
     {
-        return $this->getToday()->startOfWeek(Carbon::MONDAY)->format('Y-m-d');
+        return $this->getToday()->subDays(2)->format('Y-m-d');
     }
 
     /**
@@ -162,51 +162,50 @@ class ScheduleIndex extends Component
         $grouped = collect();
         $todayCarbon = Carbon::parse($today);
 
-        // Show from start of week (Monday) through end of current week (Sunday)
-        $startOfWeek = $todayCarbon->copy()->startOfWeek(Carbon::MONDAY);
+        // Show from 2 days before today through end of current week (Sunday)
+        $startDate = $todayCarbon->copy()->subDays(2);
         $endOfWeek = $todayCarbon->copy()->endOfWeek(Carbon::SUNDAY);
-        $startOfWeekStr = $startOfWeek->format('Y-m-d');
-        $endOfWeekStr = $endOfWeek->format('Y-m-d');
+        // Ensure at least 5 days shown after today
+        $endDate = $endOfWeek->max($todayCarbon->copy()->addDays(5));
+        $startDateStr = $startDate->format('Y-m-d');
+        $endDateStr = $endDate->format('Y-m-d');
 
-        // Get tasks that have any date within the current week
-        // Don't filter by end_date >= today, as tasks earlier in the week should still appear
+        // Get tasks that have any date within the range
+        // Don't filter by end_date >= today, as tasks earlier in the range should still appear
         $tasks = Task::query()
             ->whereIn('project_id', $projectIds)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
-            ->where(function ($query) use ($startOfWeekStr, $endOfWeekStr) {
-                // Task overlaps with the current week
-                $query->whereDate('start_date', '<=', $endOfWeekStr)
-                      ->whereDate('end_date', '>=', $startOfWeekStr);
+            ->where(function ($query) use ($startDateStr, $endDateStr) {
+                // Task overlaps with the display range
+                $query->whereDate('start_date', '<=', $endDateStr)
+                      ->whereDate('end_date', '>=', $startDateStr);
             })
             ->orderBy('start_date')
             ->orderBy('end_date')
             ->get();
 
-        $startDate = $startOfWeek->copy();
-        $endDate = $endOfWeek->copy();
-
-        // Create all days in the range (Monday through Sunday)
+        // Create all days in the range
         $currentDate = $startDate->copy();
         while ($currentDate->lte($endDate)) {
             $grouped[$currentDate->format('Y-m-d')] = collect();
             $currentDate->addDay();
         }
 
-        // Add tasks to their specifically selected dates (only within the week)
+        // Add tasks to their specifically selected dates (only within the range)
         foreach ($tasks as $task) {
             $selectedDates = (array) data_get($task->options, 'dates', []);
             
             if (! empty($selectedDates)) {
                 foreach ($selectedDates as $dateStr) {
-                    if ($dateStr >= $startOfWeekStr && $dateStr <= $endOfWeekStr && $grouped->has($dateStr)) {
+                    if ($dateStr >= $startDateStr && $dateStr <= $endDateStr && $grouped->has($dateStr)) {
                         $grouped[$dateStr]->push($task);
                     }
                 }
             } else {
                 // Fallback: single-day task using start_date
                 $dateStr = $task->start_date->format('Y-m-d');
-                if ($dateStr >= $startOfWeekStr && $dateStr <= $endOfWeekStr && $grouped->has($dateStr)) {
+                if ($dateStr >= $startDateStr && $dateStr <= $endDateStr && $grouped->has($dateStr)) {
                     $grouped[$dateStr]->push($task);
                 }
             }
@@ -230,8 +229,9 @@ class ScheduleIndex extends Component
 
         $today = $this->getToday();
         $todayStr = $today->format('Y-m-d');
-        $weekEnd = $today->copy()->endOfWeek(Carbon::SUNDAY);
-        $weekEndStr = $weekEnd->format('Y-m-d');
+        $endOfWeek = $today->copy()->endOfWeek(Carbon::SUNDAY);
+        $displayEnd = $endOfWeek->max($today->copy()->addDays(5));
+        $displayEndStr = $displayEnd->format('Y-m-d');
 
         $tasks = Task::query()
             ->whereIn('project_id', $projectIds)
@@ -246,13 +246,13 @@ class ScheduleIndex extends Component
             $selectedDates = (array) data_get($task->options, 'dates', []);
             if (! empty($selectedDates)) {
                 foreach ($selectedDates as $dateStr) {
-                    if ($dateStr > $weekEndStr) {
+                    if ($dateStr > $displayEndStr) {
                         $futureDates->push($dateStr);
                     }
                 }
             } else {
                 $taskStartStr = $task->start_date->format('Y-m-d');
-                if ($taskStartStr > $weekEndStr) {
+                if ($taskStartStr > $displayEndStr) {
                     $futureDates->push($taskStartStr);
                 }
             }
@@ -266,9 +266,9 @@ class ScheduleIndex extends Component
         $nextDateStr = $futureDates->sort()->first();
         $nextDate = Carbon::parse($nextDateStr, $this->getProjectTimezone())->startOfDay();
         
-        // Calculate weekdays from the day after Sunday to the next task date (inclusive)
+        // Calculate weekdays from the day after the displayed range to the next task date (inclusive)
         $daysUntil = 0;
-        $current = $weekEnd->copy()->addDay()->startOfDay(); // Start from Monday after Sunday
+        $current = $displayEnd->copy()->addDay()->startOfDay(); // Start from Monday after Sunday
         while ($current->lte($nextDate)) {
             if (! $current->isWeekend()) {
                 $daysUntil++;
@@ -310,6 +310,21 @@ class ScheduleIndex extends Component
     }
 
     /**
+     * Whether the displayed tasks span multiple projects.
+     */
+    #[Computed]
+    public function hasMultipleProjects(): bool
+    {
+        $projectIds = $this->groupedTasks
+            ->flatten(1)
+            ->pluck('project_id')
+            ->merge($this->unscheduledTasks->pluck('project_id'))
+            ->unique();
+
+        return $projectIds->count() > 1;
+    }
+
+    /**
      * Get unscheduled tasks (tasks without dates selected).
      */
     #[Computed]
@@ -333,6 +348,7 @@ class ScheduleIndex extends Component
         return view('livewire.client.schedule-index')
             ->layout('components.layouts.guest', [
                 'title' => 'Schedule',
+                'bodyClass' => 'bg-zinc-100',
             ]);
     }
 }

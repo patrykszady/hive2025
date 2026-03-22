@@ -154,14 +154,42 @@ class SendScheduleModal extends Component
     }
 
     /**
-     * All task IDs from the upcoming tasks (always all included).
+     * Get tasks without dates (pending/unscheduled).
+     *
+     * @return \Illuminate\Support\Collection<int, Task>
+     */
+    #[Computed]
+    public function pendingTasks(): \Illuminate\Support\Collection
+    {
+        $projectIds = $this->clientProjectIds;
+
+        if (empty($projectIds)) {
+            return collect();
+        }
+
+        return Task::whereIn('project_id', $projectIds)
+            ->with(['vendor', 'project.client', 'project.latestStatus'])
+            ->where(function ($query) {
+                $query->whereNull('start_date')->orWhereNull('end_date');
+            })
+            ->orderBy('order')
+            ->get();
+    }
+
+    /**
+     * All task IDs from upcoming + pending tasks.
      *
      * @return array<int>
      */
     #[Computed]
     public function selectedTaskIds(): array
     {
-        return $this->upcomingTasks->pluck('id')->unique()->values()->all();
+        return $this->upcomingTasks
+            ->merge($this->pendingTasks)
+            ->pluck('id')
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /**
@@ -171,9 +199,10 @@ class SendScheduleModal extends Component
     public function previewMessage(): string
     {
         $grouped = $this->groupedUpcomingTasks;
+        $pendingTasks = $this->pendingTasks;
 
         // Flatten all tasks to check if there are any
-        $allTasks = $grouped->flatten(1)->unique('id');
+        $allTasks = $grouped->flatten(1)->merge($pendingTasks)->unique('id');
 
         if ($allTasks->isEmpty()) {
             return '';
@@ -228,6 +257,15 @@ class SendScheduleModal extends Component
             })->implode("\n");
 
             $daySections[] = "{$dateLabel}:\n{$taskLines}";
+        }
+
+        // Add pending tasks section
+        if ($pendingTasks->isNotEmpty()) {
+            $pendingLines = $pendingTasks->map(function (Task $task) {
+                return '- ' . trim($task->title ?? 'Task');
+            })->implode("\n");
+
+            $daySections[] = "Pending:\n{$pendingLines}";
         }
 
         $body = implode("\n\n", $daySections);

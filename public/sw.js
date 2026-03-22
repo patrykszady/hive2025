@@ -3,7 +3,7 @@
  * Cache version is stamped by `npm run build` so every deploy busts stale assets.
  */
 
-const DEPLOY_VERSION = 'mn2buk0y';
+const DEPLOY_VERSION = 'mn2exjbc';
 const PAGE_CACHE  = 'hive-pages-' + DEPLOY_VERSION;
 const ASSET_CACHE = 'hive-assets-' + DEPLOY_VERSION;
 
@@ -157,18 +157,24 @@ self.addEventListener('notificationclick', (event) => {
     const threadId = parsedUrl.searchParams.get('threadId');
 
     event.waitUntil(
-        clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+        // Persist the target URL so the page can pick it up even if postMessage is dropped
+        caches.open('hive-pending-nav').then((cache) =>
+            cache.put('/__pending_nav', new Response(targetUrl))
+        ).then(() =>
+            clients.matchAll({ type: 'window', includeUncontrolled: true })
+        ).then((clientList) => {
             // If targeting a messages thread, post a message to an existing /messages page
             if (threadId) {
                 for (const client of clientList) {
                     try {
                         const clientUrl = new URL(client.url);
                         if (clientUrl.origin === self.location.origin && clientUrl.pathname === '/messages') {
-                            client.postMessage({
-                                type: 'navigate-thread',
-                                threadId: parseInt(threadId, 10),
+                            return client.focus().then((focused) => {
+                                focused.postMessage({
+                                    type: 'navigate-thread',
+                                    threadId: parseInt(threadId, 10),
+                                });
                             });
-                            return client.focus();
                         }
                     } catch (e) { /* skip invalid client URLs */ }
                 }
@@ -177,12 +183,13 @@ self.addEventListener('notificationclick', (event) => {
             // No existing /messages page — try focusing any app window and navigating
             for (const client of clientList) {
                 if (client.url.startsWith(self.location.origin) && 'focus' in client) {
-                    // client.navigate() is not supported on iOS — use postMessage fallback
                     if ('navigate' in client) {
                         return client.focus().then((focused) => focused.navigate(targetUrl));
                     }
-                    client.postMessage({ type: 'navigate-url', url: targetUrl });
-                    return client.focus();
+                    // iOS: focus first, then send message so the page is awake to receive it
+                    return client.focus().then((focused) => {
+                        focused.postMessage({ type: 'navigate-url', url: targetUrl });
+                    });
                 }
             }
 

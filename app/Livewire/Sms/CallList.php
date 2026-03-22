@@ -78,14 +78,14 @@ class CallList extends Component
     }
 
     /**
-     * @return \Illuminate\Database\Eloquent\Collection<int, CallLog>
+     * @return \Illuminate\Support\Collection<int, array{call: CallLog, count: int}>
      */
     #[Computed]
     public function calls(): mixed
     {
         $telnyxFrom = config('services.telnyx.from');
 
-        return CallLog::query()
+        $rawCalls = CallLog::query()
             ->when($this->callFilter === 'missed', fn ($q) => $q->where('status', CallLog::STATUS_MISSED))
             ->when($this->callFilter === 'voicemail', fn ($q) => $q->where('has_voicemail', true))
             ->when($telnyxFrom, fn ($q) => $q->where(function ($q) use ($telnyxFrom) {
@@ -96,6 +96,55 @@ class CallList extends Component
             ->orderByDesc('created_at')
             ->limit($this->limit)
             ->get();
+
+        // Group consecutive calls from the same number with the same status
+        return $this->groupConsecutiveCalls($rawCalls);
+    }
+
+    /**
+     * Group consecutive calls from the same number with the same effective status.
+     *
+     * @return \Illuminate\Support\Collection<int, array{call: CallLog, count: int}>
+     */
+    protected function groupConsecutiveCalls(\Illuminate\Database\Eloquent\Collection $calls): \Illuminate\Support\Collection
+    {
+        $grouped = collect();
+        $prevKey = null;
+
+        foreach ($calls as $call) {
+            $otherNumber = $call->direction === 'outgoing' ? $call->to_number : $call->from_number;
+            $effectiveStatus = $this->effectiveStatus($call);
+            $key = $otherNumber . '|' . $call->direction . '|' . $effectiveStatus;
+
+            if ($key === $prevKey && $grouped->isNotEmpty()) {
+                $last = $grouped->last();
+                $last['count']++;
+                $grouped->put($grouped->count() - 1, $last);
+            } else {
+                $grouped->push(['call' => $call, 'count' => 1]);
+            }
+
+            $prevKey = $key;
+        }
+
+        return $grouped;
+    }
+
+    /**
+     * Determine effective display status, accounting for misclassified blocked calls.
+     */
+    public function effectiveStatus(CallLog $call): string
+    {
+        if ($call->status === CallLog::STATUS_BLOCKED) {
+            return 'blocked';
+        }
+
+        $metadata = is_array($call->metadata) ? $call->metadata : (is_string($call->metadata) ? json_decode($call->metadata, true) : []);
+        if (! empty($metadata['blocked_reason'])) {
+            return 'blocked';
+        }
+
+        return $call->status;
     }
 
     public function generateDemoCalls(): void
