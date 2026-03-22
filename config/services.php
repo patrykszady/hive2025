@@ -51,8 +51,8 @@ return [
         'secret' => env('MAILGUN_SECRET'),
     ],
 
-    'two_captcha' => [
-        'api_key' => env('TWOCAPTCHA_API_KEY'),
+    'anticaptcha' => [
+        'api_key' => env('ANTICAPTCHA_API_KEY'),
     ],
 
     'vapid' => [

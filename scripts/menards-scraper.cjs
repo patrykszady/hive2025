@@ -41,7 +41,7 @@ const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 
 if (config.captchaApiKey) {
     puppeteer.use(RecaptchaPlugin({
-        provider: { id: '2captcha', token: config.captchaApiKey },
+        provider: { id: 'anticaptcha', token: config.captchaApiKey },
         visualFeedback: true,
     }));
 }
@@ -217,71 +217,70 @@ async function handleImpervaChallenge(page) {
             if (hcaptchaData?.sitekey && config.captchaApiKey) {
                 log(`  hCaptcha sitekey: ${hcaptchaData.sitekey}`);
                 log(`  API key length: ${config.captchaApiKey.length}, starts with: ${config.captchaApiKey.substring(0, 4)}…`);
-                log('  Sending hCaptcha to 2captcha via JSON API v2…');
-
-                const https = require('https');
-
-                function httpJsonPost(url, body) {
-                    return new Promise((resolve, reject) => {
-                        const data = JSON.stringify(body);
-                        const urlObj = new URL(url);
-                        const options = {
-                            method: 'POST',
-                            hostname: urlObj.hostname,
-                            path: urlObj.pathname,
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'Content-Length': Buffer.byteLength(data),
-                            },
-                        };
-                        const req = https.request(options, (res) => {
-                            let resp = '';
-                            res.on('data', chunk => resp += chunk);
-                            res.on('end', () => resolve(resp));
-                        });
-                        req.on('error', reject);
-                        req.write(data);
-                        req.end();
-                    });
-                }
-
-                function httpGet(url) {
-                    return new Promise((resolve, reject) => {
-                        https.get(url, (res) => {
-                            let data = '';
-                            res.on('data', chunk => data += chunk);
-                            res.on('end', () => resolve(data));
-                        }).on('error', reject);
-                    });
-                }
 
                 try {
-                    // Submit via 2captcha JSON API v2 (createTask endpoint)
-                    const createTaskBody = {
+                    const https = require('https');
+
+                    function httpJsonPost(url, body) {
+                        return new Promise((resolve, reject) => {
+                            const data = JSON.stringify(body);
+                            const urlObj = new URL(url);
+                            const options = {
+                                method: 'POST',
+                                hostname: urlObj.hostname,
+                                path: urlObj.pathname,
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Content-Length': Buffer.byteLength(data),
+                                },
+                            };
+                            const req = https.request(options, (res) => {
+                                let resp = '';
+                                res.on('data', chunk => resp += chunk);
+                                res.on('end', () => resolve(resp));
+                            });
+                            req.on('error', reject);
+                            req.write(data);
+                            req.end();
+                        });
+                    }
+
+                    // ── Step 0: Validate API key by checking balance ──
+                    log('  Checking anti-captcha balance…');
+                    const balanceResp = await httpJsonPost('https://api.anti-captcha.com/getBalance', {
+                        clientKey: config.captchaApiKey,
+                    });
+                    const balanceData = JSON.parse(balanceResp);
+                    if (balanceData.errorId !== 0) {
+                        throw new Error(`API key invalid: ${balanceData.errorCode} — ${balanceData.errorDescription}`);
+                    }
+                    log(`  Anti-captcha balance: $${balanceData.balance}`);
+
+                    // ── Step 1: Submit hCaptcha via createTask ──
+                    const pageUrl = page.url() || 'https://www.menards.com/main/login.html';
+                    log('  Submitting hCaptcha to anti-captcha…');
+                    const createResp = await httpJsonPost('https://api.anti-captcha.com/createTask', {
                         clientKey: config.captchaApiKey,
                         task: {
                             type: 'HCaptchaTaskProxyless',
-                            websiteURL: 'https://www.menards.com/main/login.html',
+                            websiteURL: pageUrl,
                             websiteKey: hcaptchaData.sitekey,
                         },
-                    };
-                    log(`  createTask request: ${JSON.stringify({ ...createTaskBody, clientKey: '***' })}`);
-                    const createResp = await httpJsonPost('https://api.2captcha.com/createTask', createTaskBody);
+                    });
                     log(`  createTask response: ${createResp.trim()}`);
                     const createData = JSON.parse(createResp);
-
-                    if (createData.errorId && createData.errorId !== 0) {
-                        throw new Error(`createTask failed: ${createData.errorCode || 'unknown'} — ${createData.errorDescription || createResp}`);
+                    if (createData.errorId !== 0) {
+                        throw new Error(`createTask failed: ${createData.errorCode} — ${createData.errorDescription}`);
                     }
 
                     const taskId = createData.taskId;
                     log(`  Task ID: ${taskId}`);
 
-                    // Poll for result
+                    // ── Step 2: Poll for result via getTaskResult ──
                     let token = null;
                     for (let attempt = 0; attempt < 60; attempt++) {
                         await sleep(5000);
-                        const resultResp = await httpJsonPost('https://api.2captcha.com/getTaskResult', {
+                        const resultResp = await httpJsonPost('https://api.anti-captcha.com/getTaskResult', {
                             clientKey: config.captchaApiKey,
                             taskId: taskId,
                         });
@@ -291,7 +290,7 @@ async function handleImpervaChallenge(page) {
                             token = resultData.solution?.gRecaptchaResponse || resultData.solution?.token;
                             break;
                         }
-                        if (resultData.errorId && resultData.errorId !== 0) {
+                        if (resultData.errorId !== 0) {
                             throw new Error(`getTaskResult failed: ${resultData.errorCode}`);
                         }
                         log(`  Waiting for hCaptcha solution… (attempt ${attempt + 1})`);

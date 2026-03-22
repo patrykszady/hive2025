@@ -31,7 +31,7 @@ class ScrapeMenardsReceipts extends Command
 
     public function handle(): int
     {
-        $captchaKey  = config('services.two_captcha.api_key');
+        $captchaKey  = config('services.anticaptcha.api_key');
         $outputDir   = $this->option('output-dir') ?: storage_path('files/_temp_menards');
         $headless    = ! $this->option('visible');
         $dryRun      = $this->option('dry-run');
@@ -72,7 +72,7 @@ class ScrapeMenardsReceipts extends Command
         }
 
         if (! $skipScrape && ! $captchaKey) {
-            $this->warn('TWOCAPTCHA_API_KEY not set — will fail if login has a CAPTCHA.');
+            $this->warn('ANTICAPTCHA_API_KEY not set — will fail if login has a CAPTCHA.');
         }
 
         // ── Determine date cutoff ─────────────────────────────────────────
