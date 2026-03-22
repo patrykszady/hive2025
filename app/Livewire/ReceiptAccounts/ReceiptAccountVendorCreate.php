@@ -16,6 +16,7 @@ use App\Jobs\TransactionVendorBulkMatchJob;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 
 use Flux;
+use Illuminate\Support\Facades\Crypt;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 
@@ -29,6 +30,9 @@ class ReceiptAccountVendorCreate extends Component
 
     public $transactions_bulk_matches = []; //simple array, not models
     public $vendor_transactions = [];
+
+    public array $credential_fields = [];
+    public array $credential_values = [];
 
     public Vendor $vendor;
 
@@ -105,6 +109,21 @@ class ReceiptAccountVendorCreate extends Component
     public function editReceiptVendor(Vendor $vendor)
     {
         $this->vendor = $vendor->load(['transactions', 'receipts', 'receipt_account', 'transactions_bulk_match']);
+
+        // Load credential field definitions from the vendor's receipt config
+        $this->credential_fields = $this->vendor->receipts->first()?->options['credential_fields'] ?? [];
+
+        // Load existing credential values from options (passwords are never sent back)
+        $options = $this->vendor->receipt_account->options ?? [];
+        $this->credential_values = [];
+        foreach ($this->credential_fields as $field) {
+            $key = $field['key'];
+            if (($field['encrypted'] ?? false) || ($field['type'] ?? '') === 'password') {
+                $this->credential_values[$key] = '';
+            } else {
+                $this->credential_values[$key] = $options[$key] ?? '';
+            }
+        }
 
         // Convert models to plain arrays like BulkMatchCreate does
         $this->transactions_bulk_matches = $this->vendor->transactions_bulk_match->map(function($match) {
@@ -244,6 +263,23 @@ class ReceiptAccountVendorCreate extends Component
 
         $receipt_account->belongs_to_vendor_id = auth()->user()->vendor->id;
         $receipt_account->vendor_id = $this->vendor->id;
+
+        // Persist credential values into options
+        $existingOptions = $receipt_account->options ?? [];
+        foreach ($this->credential_fields as $field) {
+            $key = $field['key'];
+            $value = $this->credential_values[$key] ?? '';
+            if ($value === '') {
+                continue; // Skip empty — preserves existing saved value
+            }
+            if (($field['encrypted'] ?? false) || ($field['type'] ?? '') === 'password') {
+                $existingOptions[$key] = Crypt::encryptString($value);
+            } else {
+                $existingOptions[$key] = $value;
+            }
+        }
+        $receipt_account->options = $existingOptions;
+
         $receipt_account->save();
 
         $matches_not_removed = collect($this->transactions_bulk_matches)->pluck('id')->filter()->toArray();

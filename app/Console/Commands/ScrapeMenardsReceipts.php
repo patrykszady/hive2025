@@ -9,6 +9,7 @@ use App\Models\ReceiptAccount;
 use App\Models\Vendor;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
@@ -50,7 +51,15 @@ class ScrapeMenardsReceipts extends Command
         if ($receiptAccount) {
             $options  = $receiptAccount->options ?? [];
             $email    = $options['email'] ?? null;
-            $password = $options['password'] ?? null;
+            $rawPassword = $options['password'] ?? null;
+
+            try {
+                $password = $rawPassword ? Crypt::decryptString($rawPassword) : null;
+            } catch (\Illuminate\Contracts\Encryption\DecryptException $e) {
+                // Fallback for legacy plaintext passwords
+                $password = $rawPassword;
+            }
+
             $belongsToVendorId = $receiptAccount->belongs_to_vendor_id;
             $this->info("Using receipt account #{$receiptAccount->id} (belongs_to_vendor_id: {$belongsToVendorId})");
         }

@@ -14,6 +14,30 @@
     <flux:subheading class="mb-4">Create automatic receipt and transaction matches for {{ $vendor->name ?? 'this vendor' }}. Matched expenses will be assigned a distribution automatically.</flux:subheading>
 
     <form id="receipt_account_vendor_form_modal_form" wire:submit="store">
+        @if(count($credential_fields) > 0)
+            <x-island-card heading="{{ $vendor->name }} Login" class="mb-4">
+                <div class="space-y-3">
+                    @foreach($credential_fields as $fieldIndex => $field)
+                        @if(($field['type'] ?? 'text') === 'oauth')
+                            <flux:button wire:click="api_login" variant="primary" icon="arrow-top-right-on-square">{{ $field['label'] ?? 'Connect Account' }}</flux:button>
+                        @else
+                            <flux:field>
+                                <flux:label>{{ $field['label'] ?? ucfirst($field['key']) }}</flux:label>
+                                <flux:input
+                                    type="{{ $field['type'] ?? 'text' }}"
+                                    wire:model="credential_values.{{ $field['key'] }}"
+                                    placeholder="{{ ($field['type'] ?? 'text') === 'password' && ($vendor->receipt_account?->options[$field['key']] ?? false) ? '••••••••  (saved)' : ($field['placeholder'] ?? '') }}"
+                                />
+                                @if(($field['encrypted'] ?? false) || ($field['type'] ?? '') === 'password')
+                                    <flux:description>Encrypted before storage.</flux:description>
+                                @endif
+                            </flux:field>
+                        @endif
+                    @endforeach
+                </div>
+            </x-island-card>
+        @endif
+
         <x-island-card heading="Amount Match">
             <x-slot:actions>
                 <flux:button wire:click="addMatch" size="sm" icon="plus">Add Match</flux:button>
