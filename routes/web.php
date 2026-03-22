@@ -257,12 +257,12 @@ if(env('APP_ENV') === 'local') {
 
 Route::middleware(['auth', 'registered'])->group(function () {
     Route::get('/menards-scrape-receipts', function () {
-        \Illuminate\Support\Facades\Artisan::call('menards:scrape-receipts', [
+        \Illuminate\Support\Facades\Artisan::queue('menards:scrape-receipts', [
             '--match-expenses' => true,
             '--force' => true,
-        ]);
+        ])->onQueue('long-running');
 
-        return '<pre>' . \Illuminate\Support\Facades\Artisan::output() . '</pre>';
+        return redirect('/horizon/jobs/pending');
     })->name('menards.scrape');
 });
 

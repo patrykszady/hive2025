@@ -13,6 +13,11 @@ class Receipt extends Model
 
     protected $guarded = [];
 
+    protected $attributes = [
+        'from_type' => 0,
+        'receipt_type' => 0,
+    ];
+
     protected function casts(): array
     {
         return [

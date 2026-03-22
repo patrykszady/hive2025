@@ -13,7 +13,7 @@
     </x-slot:header>
     <flux:subheading class="mb-4">Create automatic receipt and transaction matches for {{ $vendor->name ?? 'this vendor' }}. Matched expenses will be assigned a distribution automatically.</flux:subheading>
 
-    <form id="receipt_account_vendor_form_modal_form" wire:submit="store">
+    <form id="receipt_account_vendor_form_modal_form" wire:submit="store" autocomplete="off" wire:key="vendor-form-{{ $vendor->id ?? 'new' }}">
         @if(count($credential_fields) > 0)
             <x-island-card heading="{{ $vendor->name }} Login" class="mb-4">
                 <div class="space-y-3">
@@ -23,12 +23,24 @@
                         @else
                             <flux:field>
                                 <flux:label>{{ $field['label'] ?? ucfirst($field['key']) }}</flux:label>
-                                <flux:input
-                                    type="{{ $field['type'] ?? 'text' }}"
-                                    wire:model="credential_values.{{ $field['key'] }}"
-                                    placeholder="{{ $field['placeholder'] ?? '' }}"
-                                    autocomplete="off"
-                                />
+                                @if(($field['type'] ?? 'text') === 'password')
+                                    <flux:input
+                                        type="text"
+                                        wire:model="credential_values.{{ $field['key'] }}"
+                                        placeholder="{{ $field['placeholder'] ?? '' }}"
+                                        autocomplete="one-time-code"
+                                        :name="'credential_' . $field['key'] . '_' . ($vendor->id ?? 'new')"
+                                        style="-webkit-text-security: disc; text-security: disc;"
+                                    />
+                                @else
+                                    <flux:input
+                                        type="text"
+                                        wire:model="credential_values.{{ $field['key'] }}"
+                                        placeholder="{{ $field['placeholder'] ?? '' }}"
+                                        autocomplete="one-time-code"
+                                        :name="'credential_' . $field['key'] . '_' . ($vendor->id ?? 'new')"
+                                    />
+                                @endif
                             </flux:field>
                         @endif
                     @endforeach

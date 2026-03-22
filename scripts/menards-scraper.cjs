@@ -143,13 +143,17 @@ function isWithinDateRange(txDate) {
 // ── Login ─────────────────────────────────────────────────────────────────────
 async function login(page) {
     log('Navigating to login page…');
-    await page.goto('https://www.menards.com/main/login.html', {
+    const response = await page.goto('https://www.menards.com/main/login.html', {
         waitUntil: 'networkidle2',
         timeout: 60000,
     });
+    log(`  HTTP status: ${response ? response.status() : 'no response'}`);
+    log(`  Final URL: ${page.url()}`);
+    log(`  Page title: ${await page.title()}`);
 
     // Wait for Vue.js to render the login form
     await sleep(3000);
+    log(`  URL after wait: ${page.url()}`);
     await screenshot(page, '01_login_page');
     await saveHtml(page, '01_login_page');
 
@@ -158,36 +162,133 @@ async function login(page) {
         return;
     }
 
-    const signInTab = await page.$('[data-at-id="loginTab"]');
+    // Click Sign In tab (try multiple selectors — Menards periodically changes their markup)
+    const signInTab = await findFirst(page, [
+        '[data-at-id="loginTab"]',
+        'button:has-text("Sign In")',
+        '[role="tab"]:first-child',
+        '.tab-signin',
+    ]);
     if (signInTab) {
-        await signInTab.click();
-        await sleep(1000);
+        await signInTab.el.click();
+        await sleep(1500);
         log('  Clicked Sign In tab');
+    } else {
+        // Try clicking tab via evaluate for text-based matching
+        const clickedTab = await page.evaluate(() => {
+            const tabs = document.querySelectorAll('button, [role="tab"], a');
+            for (const t of tabs) {
+                if (/^\s*sign\s*in\s*$/i.test(t.textContent)) {
+                    t.click();
+                    return true;
+                }
+            }
+            return false;
+        });
+        if (clickedTab) {
+            await sleep(1500);
+            log('  Clicked Sign In tab (text match)');
+        }
     }
 
     // Wait for an input field to appear (Vue rendering)
-    await page.waitForSelector('input[type="email"], input[type="text"], #username', { timeout: 15000 }).catch(() => {});
+    await page.waitForSelector('input[type="email"], input[type="text"], input[type="password"], #username', { timeout: 15000 }).catch(() => {});
     await sleep(500);
 
-    const emailResult = await findFirst(page, [
+    // Dump all visible inputs for debugging when field detection fails
+    const inputDebug = await page.evaluate(() => {
+        return Array.from(document.querySelectorAll('input')).map(el => ({
+            id: el.id, name: el.name, type: el.type,
+            placeholder: el.placeholder,
+            autocomplete: el.autocomplete,
+            ariaLabel: el.getAttribute('aria-label'),
+            dataAtId: el.getAttribute('data-at-id'),
+            className: el.className,
+            visible: el.offsetParent !== null,
+        }));
+    });
+    log(`  Found ${inputDebug.length} input(s): ${JSON.stringify(inputDebug)}`);
+
+    let emailResult = await findFirst(page, [
         '#username',
+        '#emailAddress',
+        '#email',
+        '#loginEmail',
         'input[type="email"]',
         '#loginForm input[name="username"]',
         'input[name="email"]',
+        'input[name="emailAddress"]',
         'input[name="logonId"]',
         'input[autocomplete="email"]',
         'input[autocomplete="username"]',
+        'input[data-at-id="emailAddress"]',
+        'input[data-at-id="email"]',
+        'input[aria-label*="mail" i]',
+        'input[aria-label*="Email" i]',
+        'input[placeholder*="mail" i]',
+        'input[placeholder*="Email" i]',
     ]);
-    if (!emailResult) throw new Error('Cannot find email/username field on login page');
+
+    // Fallback: find the input associated with an "Email" label
+    if (!emailResult) {
+        log('  Primary selectors failed — trying label-based fallback…');
+        const fallbackEl = await page.evaluateHandle(() => {
+            // Method 1: find label with "email" text, then the linked input
+            for (const label of document.querySelectorAll('label')) {
+                if (/email/i.test(label.textContent)) {
+                    const forId = label.getAttribute('for');
+                    if (forId) {
+                        const input = document.getElementById(forId);
+                        if (input) return input;
+                    }
+                    // label wraps the input
+                    const input = label.querySelector('input');
+                    if (input) return input;
+                    // next sibling
+                    const next = label.nextElementSibling;
+                    if (next && next.tagName === 'INPUT') return next;
+                }
+            }
+            // Method 2: first visible text/email input that isn't a password
+            const inputs = document.querySelectorAll('input[type="text"], input[type="email"], input:not([type])');
+            for (const inp of inputs) {
+                if (inp.offsetParent !== null && inp.type !== 'hidden') return inp;
+            }
+            return null;
+        });
+        if (fallbackEl && fallbackEl.asElement()) {
+            emailResult = { el: fallbackEl.asElement(), selector: '(label-based fallback)' };
+        }
+    }
+
+    if (!emailResult) {
+        // Extra debug: save page state right before failing
+        await screenshot(page, '01b_email_field_not_found');
+        await saveHtml(page, '01b_email_field_not_found');
+        const bodyText = await page.evaluate(() => document.body?.innerText?.substring(0, 2000) || '(empty)');
+        log(`  Page body text (first 2000 chars): ${bodyText}`);
+        log(`  Current URL: ${page.url()}`);
+        const cookies = await page.cookies();
+        log(`  Cookies: ${JSON.stringify(cookies.map(c => c.name))}`);
+        throw new Error('Cannot find email/username field on login page. Inputs found: ' + JSON.stringify(inputDebug));
+    }
     log(`  email field → ${emailResult.selector}`);
 
-    const passResult = await findFirst(page, [
+    let passResult = await findFirst(page, [
         '#login-password',
+        '#password',
+        '#loginPassword',
         'input[type="password"]',
         '#loginForm input[name="password"]',
         'input[name="logonPassword"]',
+        'input[name="password"]',
+        'input[data-at-id="password"]',
     ]);
-    if (!passResult) throw new Error('Cannot find password field on login page');
+    if (!passResult) {
+        await screenshot(page, '01c_password_field_not_found');
+        await saveHtml(page, '01c_password_field_not_found');
+        throw new Error('Cannot find password field on login page. Inputs found: ' + JSON.stringify(inputDebug));
+    }
     log(`  password field → ${passResult.selector}`);
 
     await emailResult.el.click({ clickCount: 3 });
@@ -197,7 +298,7 @@ async function login(page) {
     await passResult.el.type(config.password, { delay: 40 });
 
     await page.evaluate(() => {
-        for (const el of document.querySelectorAll('input[type="email"], input[type="text"], input[type="password"], #username, #login-password')) {
+        for (const el of document.querySelectorAll('input[type="email"], input[type="text"], input[type="password"], input:not([type="hidden"])')) {
             el.dispatchEvent(new Event('input', { bubbles: true }));
             el.dispatchEvent(new Event('change', { bubbles: true }));
         }
@@ -213,28 +314,42 @@ async function login(page) {
         await screenshot(page, '03_captcha_solved');
     }
 
-    const loginBtn = await page.$('[data-at-id="loginButton"]');
+    const loginBtn = await findFirst(page, [
+        '[data-at-id="loginButton"]',
+        'button[data-at-id="signInButton"]',
+    ]);
     if (loginBtn) {
         try {
-            await page.waitForSelector('[data-at-id="loginButton"]:not([disabled])', { timeout: 5000 });
+            await page.waitForSelector(`${loginBtn.selector}:not([disabled])`, { timeout: 5000 });
         } catch {
             log('  Login button still disabled — removing disabled attribute');
             await page.evaluate(() => {
-                const btn = document.querySelector('[data-at-id="loginButton"]');
+                const btn = document.querySelector('[data-at-id="loginButton"], [data-at-id="signInButton"]');
                 if (btn) btn.removeAttribute('disabled');
             });
         }
-        await loginBtn.click();
+        await loginBtn.el.click();
     } else {
         const submitResult = await findFirst(page, [
             '#loginForm button',
             'button[type="submit"]',
             'input[type="submit"]',
         ]);
-        if (submitResult) {
-            await submitResult.el.click();
+        if (!submitResult) {
+            // Last resort: find button with "Sign In" text
+            const signInBtn = await page.evaluateHandle(() => {
+                for (const btn of document.querySelectorAll('button')) {
+                    if (/sign\s*in/i.test(btn.textContent) && btn.offsetParent !== null) return btn;
+                }
+                return null;
+            });
+            if (signInBtn && signInBtn.asElement()) {
+                await signInBtn.asElement().click();
+            } else {
+                await passResult.el.press('Enter');
+            }
         } else {
-            await passResult.el.press('Enter');
+            await submitResult.el.click();
         }
     }
 
@@ -250,6 +365,11 @@ async function login(page) {
 
     if (errorText) {
         throw new Error(`Login failed: ${errorText}`);
+    }
+
+    if (page.url().includes('error=true') || page.url().includes('login')) {
+        await saveHtml(page, '04_login_failed');
+        throw new Error(`Login failed — still on login page (URL: ${page.url()}). Check credentials or CAPTCHA.`);
     }
 
     log(`  Login complete — URL: ${page.url()}`);
@@ -516,7 +636,21 @@ async function processCard(page, cardOption, cardIndex, downloadDir) {
         console.log(JSON.stringify(manifest));
         log(`\nDone — ${allReceipts.length} receipts scraped across ${cards.length} card(s).`);
     } catch (err) {
-        log(`FATAL: ${err.message}\n${err.stack}`);
+        log(`FATAL: ${err.message}`);
+        log(`Stack: ${err.stack}`);
+        // Try to capture final page state for debugging
+        try {
+            const pages = await browser.pages();
+            const activePage = pages[pages.length - 1];
+            if (activePage) {
+                await screenshot(activePage, 'XX_fatal_error');
+                await saveHtml(activePage, 'XX_fatal_error');
+                log(`  Error page URL: ${activePage.url()}`);
+                log(`  Error page title: ${await activePage.title()}`);
+            }
+        } catch (debugErr) {
+            log(`  (could not capture debug state: ${debugErr.message})`);
+        }
         console.log(JSON.stringify({ error: err.message }));
         process.exit(1);
     } finally {

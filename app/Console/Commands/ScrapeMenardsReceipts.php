@@ -25,14 +25,14 @@ class ScrapeMenardsReceipts extends Command
         {--force : Overwrite existing Menards receipts (re-run OCR)}
         {--vendor-id= : Menards vendor ID (auto-detected if omitted)}
         {--skip-scrape : Skip scraping, just import from existing output directory}
-        {--output-dir= : Custom output directory (default: storage/app/menards-receipts)}';
+        {--output-dir= : Custom output directory (default: storage/files/_temp_menards)}';
 
     protected $description = 'Scrape receipts from menards.com across all cards using Puppeteer + 2captcha and optionally import them';
 
     public function handle(): int
     {
         $captchaKey  = config('services.two_captcha.api_key');
-        $outputDir   = $this->option('output-dir') ?: storage_path('app/menards-receipts');
+        $outputDir   = $this->option('output-dir') ?: storage_path('files/_temp_menards');
         $headless    = ! $this->option('visible');
         $dryRun      = $this->option('dry-run');
         $matchExp    = $this->option('match-expenses');
@@ -126,6 +126,30 @@ class ScrapeMenardsReceipts extends Command
 
             if (! $result->successful()) {
                 $this->error('Scraper process failed (exit code ' . $result->exitCode() . ')');
+
+                // List debug files for diagnosis
+                $this->line('');
+                $this->line("  <info>Debug files location:</info> {$outputDir}");
+                if (is_dir($outputDir)) {
+                    $debugFiles = array_filter(scandir($outputDir), fn ($f) => str_starts_with($f, '_debug_'));
+                    if (count($debugFiles) > 0) {
+                        $this->line('  <info>Debug screenshots/HTML:</info>');
+                        foreach ($debugFiles as $f) {
+                            $size = filesize($outputDir . '/' . $f);
+                            $this->line("    • {$f} ({$size} bytes)");
+                        }
+                    } else {
+                        $this->warn('  No debug files found in output directory');
+                    }
+                } else {
+                    $this->warn("  Output directory does not exist: {$outputDir}");
+                }
+
+                Log::error('Menards scraper failed', [
+                    'exit_code' => $result->exitCode(),
+                    'output_dir' => $outputDir,
+                    'stderr_tail' => substr($result->errorOutput(), -2000),
+                ]);
 
                 return self::FAILURE;
             }
@@ -236,7 +260,7 @@ class ScrapeMenardsReceipts extends Command
 
                 // Skip if this expense already has a Menards receipt attached
                 $existingReceipt = ExpenseReceipts::where('expense_id', $expense->id)
-                    ->where('receipt_filename', 'LIKE', 'menards-%')
+                    ->where('receipt_filename', 'LIKE', '%menards-%')
                     ->first();
 
                 if ($existingReceipt && ! $force) {
@@ -266,7 +290,8 @@ class ScrapeMenardsReceipts extends Command
                 $safeDateStr = $date->format('Y-m-d');
                 $safeAmount  = str_replace(['.', '-'], ['_', 'neg'], (string) $amount);
                 $ext = pathinfo($receiptFile, PATHINFO_EXTENSION) ?: 'pdf';
-                $filename = "menards-{$safeDateStr}-{$safeAmount}.{$ext}";
+                $baseFilename = "menards-{$safeDateStr}-{$safeAmount}.{$ext}";
+                $filename = $expense ? $expense->id . '-' . $baseFilename : $baseFilename;
 
                 Storage::disk('files')->put('receipts/' . $filename, $receiptContent);
 

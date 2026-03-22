@@ -591,7 +591,14 @@ class ReceiptController extends Controller
         }
 
         $prefix  = $allFields;
-        $content = htmlentities($analyzeResult['analyzeResult']['content'] ?? '');
+        $rawContent = $analyzeResult['analyzeResult']['content'] ?? '';
+        // Convert any HTML table markup to plain text layout before encoding
+        $rawContent = preg_replace('/<br\s*\/?>/i', "\n", $rawContent);
+        $rawContent = preg_replace('/<\/td>\s*<td[^>]*>/i', "\t", $rawContent);
+        $rawContent = preg_replace('/<\/tr>\s*/i', "\n", $rawContent);
+        $rawContent = strip_tags($rawContent);
+        $rawContent = preg_replace('/\n{3,}/', "\n\n", $rawContent);
+        $content = htmlentities(trim($rawContent), ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $styles  = $analyzeResult['analyzeResult']['styles'] ?? [];
 
         $keyValuePairs = null;
@@ -600,7 +607,12 @@ class ReceiptController extends Controller
         }
 
         // ── 2. Tip ────────────────────────────────────────────────────
-        $tip = isset($prefix['Tip']) ? $this->extractCurrencyAmount($prefix['Tip']) : null;
+        $tip = null;
+        if (isset($prefix['Tip'])) {
+            $tipContent = $prefix['Tip']['content'] ?? $prefix['Tip']['valueString'] ?? '';
+            $isFee = preg_match('/\b(fee|surcharge|convenience|service\s*charge)\b/i', $tipContent);
+            $tip = $isFee ? null : $this->extractCurrencyAmount($prefix['Tip']);
+        }
 
         // ── 3. Handwritten notes ──────────────────────────────────────
         $handwrittenNotes = [];

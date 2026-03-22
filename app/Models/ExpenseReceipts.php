@@ -14,11 +14,10 @@ class ExpenseReceipts extends Model
 
     protected $table = 'expense_receipts_data';
 
-    protected $fillable = ['expense_id', 'receipt_filename', 'receipt_html', 'receipt_items', 'notes', 'belongs_to_vendor_id', 'date', 'created_at', 'updated_at'];
+    protected $fillable = ['expense_id', 'receipt_filename', 'receipt_html', 'receipt_items', 'created_at', 'updated_at'];
 
     protected $casts = [
         'receipt_items' => 'array',
-        'date' => 'date',
     ];
 
     public function expense(): BelongsTo

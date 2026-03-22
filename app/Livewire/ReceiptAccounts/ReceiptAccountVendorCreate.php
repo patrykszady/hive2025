@@ -108,6 +108,12 @@ class ReceiptAccountVendorCreate extends Component
 
     public function editReceiptVendor(Vendor $vendor)
     {
+        // Explicitly clear all state before loading new vendor
+        $this->transactions_bulk_matches = [];
+        $this->vendor_transactions = [];
+        $this->credential_fields = [];
+        $this->credential_values = [];
+
         $this->vendor = $vendor->load(['transactions', 'receipts', 'receipt_account', 'transactions_bulk_match']);
 
         // Load credential field definitions from the vendor's receipt config
@@ -118,10 +124,15 @@ class ReceiptAccountVendorCreate extends Component
         $this->credential_values = [];
         foreach ($this->credential_fields as $field) {
             $key = $field['key'];
-            if (($field['encrypted'] ?? false) || ($field['type'] ?? '') === 'password') {
-                $this->credential_values[$key] = '';
+            $raw = $options[$key] ?? '';
+            if ((($field['encrypted'] ?? false) || ($field['type'] ?? '') === 'password') && $raw) {
+                try {
+                    $this->credential_values[$key] = Crypt::decryptString($raw);
+                } catch (\Exception $e) {
+                    $this->credential_values[$key] = '';
+                }
             } else {
-                $this->credential_values[$key] = $options[$key] ?? '';
+                $this->credential_values[$key] = $raw;
             }
         }
 

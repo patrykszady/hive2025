@@ -15,6 +15,10 @@ class ReceiptAccountScope implements Scope
      */
     public function apply(Builder $builder, Model $model)
     {
-        $builder->where('belongs_to_vendor_id', auth()->user()->vendor->id);
+        $user = auth()->user();
+
+        if ($user && $user->vendor) {
+            $builder->where('belongs_to_vendor_id', $user->vendor->id);
+        }
     }
 }
