@@ -1,4 +1,4 @@
-<div>
+<div x-init="document.addEventListener('livewire:navigating', () => { if ($wire.showModal) $wire.showModal = false })">
     <flux:modal wire:model="showModal" name="new-sms-thread" class="max-w-lg">
         <div class="space-y-4">
             <flux:heading size="lg">New Group Message</flux:heading>

@@ -99,8 +99,10 @@
                 });
             }
 
-            {{-- Strip toasts BEFORE the page gets cached --}}
+            {{-- Strip toasts and close modals BEFORE the page gets cached --}}
             document.addEventListener('livewire:navigating', () => {
+                document.querySelectorAll('dialog[open]').forEach(d => d.close());
+                document.dispatchEvent(new CustomEvent('modal-close', { detail: {} }));
                 flushStaleToasts();
 
                 const sidebar = document.querySelector('ui-sidebar');
@@ -115,6 +117,14 @@
                 flushStaleToasts();
                 {{-- Delayed pass in case Livewire replays effects after navigated --}}
                 setTimeout(flushStaleToasts, 50);
+            });
+
+            {{-- Handle bfcache page restoration --}}
+            window.addEventListener('pageshow', (event) => {
+                if (event.persisted) {
+                    document.querySelectorAll('dialog[open]').forEach(d => d.close());
+                    flushStaleToasts();
+                }
             });
         </script>
     </body>
