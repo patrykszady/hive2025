@@ -514,6 +514,8 @@
                                                         :task-id="$task->id"
                                                         :day-format="$dayData->day->format('Y-m-d')"
                                                         :project-id="$projectColumn->id"
+                                                        :is-weekend="$isWeekend"
+                                                        :is-today="$dayData->isToday"
                                                         :key="'task-card-' . $task->id . '-' . $dayData->day->format('Y-m-d') . '-' . $projectColumn->id"
                                                     />
                                                 @endforeach

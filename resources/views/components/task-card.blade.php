@@ -12,6 +12,7 @@
     <flux:kanban.card
         as="button"
         class="min-w-0 w-full"
+        data-task-card="{{ $task->id }}"
         wire:key="upcoming-task-{{ $task->id }}-{{ $date }}"
         wire:click="$dispatchTo('tasks.task-create', 'editTask', { task: {{ $task->id }} })"
     >
@@ -27,6 +28,7 @@
 @else
     <flux:kanban.card
         class="min-w-0 w-full transition hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:shadow-sm hover:border-zinc-300 dark:hover:border-zinc-600"
+        data-task-card="{{ $task->id }}"
         wire:key="upcoming-task-{{ $task->id }}-{{ $date }}"
     >
         @include('components.upcoming-tasks-list-card-content', [

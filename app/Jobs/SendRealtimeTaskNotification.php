@@ -4,14 +4,14 @@ namespace App\Jobs;
 
 use App\Mail\TaskNotificationDigest;
 use App\Models\PushSubscription;
+use App\Models\SmsGroupThread;
 use App\Models\SmsLog;
 use App\Models\Task;
 use App\Models\User;
-use App\Notifications\ClientScheduleSmsNotification;
 use App\Notifications\TeamTaskSmsNotification;
+use App\Services\GroupSmsService;
 use App\Services\TaskNotificationService;
 use App\Services\WebPushService;
-use App\Support\SmsChannel;
 use Carbon\Carbon;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -19,6 +19,7 @@ use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Spatie\Activitylog\Models\Activity;
 
 /**
  * Unified realtime notification job — dispatched when tasks change.
@@ -110,6 +111,12 @@ class SendRealtimeTaskNotification implements ShouldQueue, ShouldBeUnique
             }
         }
 
+        // Detect today's changes once for reuse by both client thread and team SMS
+        $changes = $this->detectTodayChanges($tasks, $todayStr);
+
+        // Send update to the client's group SMS thread (replaces 1:1 client SMS)
+        $this->sendClientThreadMessage($today, $changes);
+
         $throttleMinutes = $service->getThrottleMinutes();
 
         foreach ($recipients as $recipientData) {
@@ -118,7 +125,7 @@ class SendRealtimeTaskNotification implements ShouldQueue, ShouldBeUnique
             $roles = $recipientData['roles'];
 
             try {
-                $this->sendSms($service, $user, $userTasks, $roles, $todayStr, $today, $vendorTimezone, $throttleMinutes);
+                $this->sendSms($service, $user, $userTasks, $roles, $todayStr, $today, $vendorTimezone, $throttleMinutes, $changes);
                 $this->sendEmail($service, $user);
                 $this->sendPush($service, $user, $userTasks, $todayStr);
             } catch (\Throwable $e) {
@@ -140,6 +147,7 @@ class SendRealtimeTaskNotification implements ShouldQueue, ShouldBeUnique
         Carbon $today,
         ?string $vendorTimezone,
         int $throttleMinutes,
+        array $changes = [],
     ): void {
         if (! $service->shouldNotify($user, 'sms', 'realtime')) {
             return;
@@ -170,10 +178,17 @@ class SendRealtimeTaskNotification implements ShouldQueue, ShouldBeUnique
                 return;
             }
 
+            // Build removed tasks list from change detection
+            $removedTasksList = collect($changes['removedTasks'] ?? [])
+                ->map(fn ($title) => (object) ['title' => $title])
+                ->all();
+
             $user->notify(new TeamTaskSmsNotification(
                 $userTasks->all(),
                 $today,
                 'update',
+                $removedTasksList,
+                $changes['timeChanges'] ?? [],
             ));
 
             SmsLog::logSent([
@@ -187,53 +202,238 @@ class SendRealtimeTaskNotification implements ShouldQueue, ShouldBeUnique
             return; // Don't also send client SMS to same user
         }
 
-        // Client SMS
-        if (in_array('client', $roles, true)) {
-            $tasksByProject = $userTasks->groupBy('project_id');
+        // Client SMS is now handled via sendClientThreadMessage() (group thread)
+        // Individual client users still receive email and push notifications below
+    }
 
-            foreach ($tasksByProject as $projectId => $projectTasks) {
-                $project = $projectTasks->first()?->project;
+    // ─── Client Thread SMS ────────────────────────────────────
 
-                if (! $project) {
-                    continue;
+    protected function sendClientThreadMessage(Carbon $today, array $changes = []): void
+    {
+        $thread = SmsGroupThread::where('project_id', $this->projectId)
+            ->whereNotNull('welcome_sent_at')
+            ->latest('last_activity_at')
+            ->first();
+
+        if (! $thread) {
+            return;
+        }
+
+        $message = $this->buildThreadUpdateMessage($thread, $today, $changes);
+
+        if (empty($message)) {
+            return;
+        }
+
+        // Content-hash dedup: skip if the last automated message in thread is identical
+        $lastAutoMessage = $thread->messages()
+            ->where('direction', 'outbound')
+            ->whereNull('sent_by_user_id')
+            ->latest()
+            ->first();
+
+        if ($lastAutoMessage && $lastAutoMessage->text === $message) {
+            return;
+        }
+
+        app(GroupSmsService::class)->sendToThread($thread, $message);
+
+        Log::channel('notification')->info('SendRealtimeTaskNotification: Sent client thread message', [
+            'project_id' => $this->projectId,
+            'thread_id' => $thread->id,
+        ]);
+    }
+
+    protected function buildThreadUpdateMessage(SmsGroupThread $thread, Carbon $today, array $changes = []): string
+    {
+        $todayStr = $today->format('Y-m-d');
+
+        // Fetch today's project tasks
+        $allTasks = Task::query()
+            ->with(['project'])
+            ->where('project_id', $this->projectId)
+            ->whereNotNull('start_date')
+            ->whereNotNull('end_date')
+            ->whereDate('start_date', '<=', $todayStr)
+            ->whereDate('end_date', '>=', $todayStr)
+            ->get()
+            ->filter(function (Task $task) use ($todayStr) {
+                $selectedDates = (array) data_get($task->options, 'dates', []);
+
+                if (! empty($selectedDates)) {
+                    return in_array($todayStr, $selectedDates, true);
                 }
 
-                if (SmsLog::wasRecentlyNotified(SmsLog::CHANNEL_CLIENT, $user->id, $throttleMinutes, $projectId)) {
-                    continue;
+                return $task->start_date->format('Y-m-d') === $todayStr;
+            });
+
+        // Sort tasks: tasks with time first, then by time
+        $todayTasks = $allTasks->sortBy(function ($task) use ($todayStr) {
+            $startTime = (string) data_get($task->options, "time_settings.$todayStr.start_time", '');
+            $usesTime = (bool) data_get($task->options, "time_settings.$todayStr.use_time", false);
+
+            return ($usesTime && $startTime !== '') ? '0_' . $startTime : '1';
+        })->values();
+
+        // Use pre-computed changes (or detect if not provided)
+        if (empty($changes)) {
+            $changes = $this->detectTodayChanges($todayTasks, $todayStr);
+        }
+
+        if ($todayTasks->isEmpty() && empty($changes['removedTasks'])) {
+            return '';
+        }
+
+        // Build greeting from client user first names
+        $names = $thread->client?->users?->pluck('first_name')->filter()->values()->all() ?? [];
+        $greeting = count($names) > 0
+            ? 'Hi ' . implode(' & ', $names) . ','
+            : 'Hi,';
+
+        $intro = "TASKS UPDATED TODAY!";
+
+        // Build today's section
+        $daySections = [];
+
+        if ($todayTasks->isNotEmpty()) {
+            $shortDate = $today->format('D n/j');
+            $dateLabel = "Today {$shortDate}";
+
+            $taskLines = $todayTasks->map(function (Task $task) use ($todayStr, $changes) {
+                $line = '- ' . trim($task->title ?? 'Task');
+
+                $arrivalTime = $task->getArrivalTimeLabel($todayStr);
+                if ($arrivalTime) {
+                    $line .= " @ {$arrivalTime}";
+
+                    $oldTime = $changes['timeChanges'][$task->id] ?? null;
+                    if ($oldTime) {
+                        $line .= " (was {$oldTime})";
+                    }
                 }
 
-                $currentHash = SmsLog::generateTasksHash($projectTasks);
-                $lastLog = SmsLog::where('channel', SmsLog::CHANNEL_CLIENT)
-                    ->where('project_id', $projectId)
-                    ->where('user_id', $user->id)
-                    ->where('target_date', $todayStr)
-                    ->latest()
-                    ->first();
+                return $line;
+            })->implode("\n");
 
-                if ($lastLog && $lastLog->content_hash === $currentHash) {
-                    continue;
+            $daySections[] = "{$dateLabel}:\n{$taskLines}";
+        }
+
+        // Removed tasks section
+        if (! empty($changes['removedTasks'])) {
+            $removedLines = collect($changes['removedTasks'])
+                ->map(fn ($title) => "- {$title}")
+                ->implode("\n");
+            $daySections[] = "Removed from today:\n{$removedLines}";
+        }
+
+        $body = implode("\n", $daySections);
+
+        $message = "{$greeting}\n{$intro}\n\n{$body}";
+
+        // Schedule link
+        $project = $allTasks->first()?->project;
+        if ($project) {
+            $baseUrl = config('app.dev_webhook_url') ?: rtrim((string) config('app.url'), '/');
+            $token = $project->getOrCreateScheduleToken();
+            $message .= "\n\nView Schedule: {$baseUrl}/s/{$token}";
+        }
+
+        $message .= "\n-GSC";
+
+        return $message;
+    }
+
+    /**
+     * Detect time changes and removed tasks from the activity log.
+     *
+     * @return array{timeChanges: array<int, string>, removedTasks: array<int, string>}
+     */
+    protected function detectTodayChanges(
+        \Illuminate\Support\Collection $currentTasks,
+        string $dateStr,
+    ): array {
+        $timeChanges = [];
+        $removedTasks = [];
+
+        $allProjectTaskIds = Task::withTrashed()
+            ->where('project_id', $this->projectId)
+            ->pluck('id')
+            ->all();
+
+        if (empty($allProjectTaskIds)) {
+            return ['timeChanges' => $timeChanges, 'removedTasks' => $removedTasks];
+        }
+
+        $currentTaskIds = $currentTasks->pluck('id')->all();
+
+        // Look back far enough to cover the 15-min consolidation window + buffer
+        $since = now()->subHours(2);
+
+        $activities = Activity::where('subject_type', Task::class)
+            ->whereIn('subject_id', $allProjectTaskIds)
+            ->where('created_at', '>=', $since)
+            ->orderBy('created_at', 'asc')
+            ->get();
+
+        foreach ($activities as $activity) {
+            $props = $activity->properties->toArray();
+            $taskId = $activity->subject_id;
+
+            if ($activity->description === 'deleted') {
+                $oldOptions = data_get($props, 'old.options', []);
+                $oldDates = (array) (is_object($oldOptions) ? ($oldOptions->dates ?? []) : ($oldOptions['dates'] ?? []));
+
+                if (in_array($dateStr, $oldDates)) {
+                    $removedTasks[$taskId] = data_get($props, 'old.title', 'Task');
                 }
 
-                $notification = new ClientScheduleSmsNotification(
-                    $project,
-                    $user->first_name ?? 'there',
-                    'changed',
-                    $projectTasks,
-                );
+                continue;
+            }
 
-                $channel = app(SmsChannel::get());
-                $channel->send($user, $notification);
+            if ($activity->description !== 'updated') {
+                continue;
+            }
 
-                SmsLog::logSent([
-                    'channel' => SmsLog::CHANNEL_CLIENT,
-                    'type' => 'changed',
-                    'user_id' => $user->id,
-                    'project_id' => $projectId,
-                    'target_date' => $todayStr,
-                    'content_hash' => $currentHash,
-                ]);
+            $oldOptions = data_get($props, 'old.options');
+            $newOptions = data_get($props, 'attributes.options');
+
+            if ($oldOptions === null && $newOptions === null) {
+                continue;
+            }
+
+            // Detect time changes for today
+            $oldTimeSetting = (array) data_get($oldOptions, "time_settings.{$dateStr}", []);
+            $newTimeSetting = (array) data_get($newOptions, "time_settings.{$dateStr}", []);
+
+            if ($oldTimeSetting != $newTimeSetting && ! isset($timeChanges[$taskId])) {
+                $oldLabel = Task::formatTimeSettingsLabel($oldTimeSetting);
+                if ($oldLabel) {
+                    $timeChanges[$taskId] = $oldLabel;
+                }
+            }
+
+            // Detect today removed from dates
+            $oldDates = (array) (is_object($oldOptions) ? ($oldOptions->dates ?? []) : ($oldOptions['dates'] ?? []));
+            $newDates = (array) (is_object($newOptions) ? ($newOptions->dates ?? []) : ($newOptions['dates'] ?? []));
+
+            if (in_array($dateStr, $oldDates) && ! in_array($dateStr, $newDates)) {
+                $title = data_get($props, 'old.title')
+                    ?? data_get($props, 'attributes.title')
+                    ?? Task::withTrashed()->find($taskId)?->title
+                    ?? 'Task';
+                $removedTasks[$taskId] = $title;
             }
         }
+
+        // Don't list tasks as removed if they're back in current tasks
+        foreach ($currentTaskIds as $id) {
+            unset($removedTasks[$id]);
+        }
+
+        return [
+            'timeChanges' => $timeChanges,
+            'removedTasks' => array_values($removedTasks),
+        ];
     }
 
     // ─── Email ───────────────────────────────────────────────

@@ -27,7 +27,11 @@
     <div class="grid max-w-2xl grid-cols-3 gap-6 sm:px-6 lg:max-w-5xl lg:grid-flow-col-dense lg:grid-cols-6">
         {{-- USER TASKS --}}
         <div class="space-y-6 col-span-3 lg:col-start-1 lg:col-span-3">
-            <livewire:dashboard.user-tasks lazy />
+            @if($user->vendor)
+                <livewire:dashboard.vendor-tasks :vendor="$user->vendor" lazy />
+            @else
+                <livewire:dashboard.user-tasks lazy />
+            @endif
         </div>
 
         <div class="space-y-6 col-span-3 lg:col-start-4 lg:col-span-3">

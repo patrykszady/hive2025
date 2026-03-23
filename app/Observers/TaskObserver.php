@@ -232,7 +232,7 @@ class TaskObserver
      */
     protected function queueNotificationIfNeeded(Task $task, array $originalUserIds = [], array $newUserIds = []): void
     {
-        if (! $this->taskIncludesToday($task)) {
+        if (! $this->taskIncludesToday($task) && ! $this->taskOriginallyIncludedToday($task)) {
             return;
         }
 
@@ -290,6 +290,26 @@ class TaskObserver
         }
 
         return false;
+    }
+
+    /**
+     * Check if a task originally included today before the current update.
+     * Used to detect when today is removed from a task's dates.
+     */
+    protected function taskOriginallyIncludedToday(Task $task): bool
+    {
+        $originalOptions = $task->getOriginal('options');
+
+        if (! $originalOptions) {
+            return false;
+        }
+
+        $todayStr = Carbon::today()->format('Y-m-d');
+        $originalDates = is_object($originalOptions)
+            ? (array) ($originalOptions->dates ?? [])
+            : (array) ($originalOptions['dates'] ?? []);
+
+        return in_array($todayStr, $originalDates);
     }
 
     private function smsEnabledForTask(Task $task, string $type): bool

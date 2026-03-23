@@ -26,6 +26,12 @@ class PlannerTaskCard extends Component
     /** Owning project id (used for structural context). */
     public int $projectId;
 
+    /** Whether this card is in a weekend column. */
+    public bool $isWeekend = false;
+
+    /** Whether this card is on today's column (browser-timezone-aware). */
+    public bool $isToday = false;
+
     /**
      * Explicitly clear computed caches so the next render
      * re-queries fresh data from the database.
@@ -33,7 +39,7 @@ class PlannerTaskCard extends Component
     #[On('refreshComponent')]
     public function refreshCard(): void
     {
-        unset($this->task, $this->taskUsers, $this->dayCounter, $this->arrivalTimeLabel);
+        unset($this->task, $this->taskUsers, $this->dayCounter, $this->arrivalTimeLabel, $this->previousArrivalTimeLabel);
     }
 
     // ─── Computed ────────────────────────────────────────────
@@ -83,6 +89,16 @@ class PlannerTaskCard extends Component
     public function arrivalTimeLabel(): ?string
     {
         return $this->task?->getArrivalTimeLabel($this->dayFormat);
+    }
+
+    #[Computed]
+    public function previousArrivalTimeLabel(): ?string
+    {
+        if (! $this->isToday) {
+            return null;
+        }
+
+        return $this->task?->getPreviousArrivalTimeLabel($this->dayFormat);
     }
 
     // ─── Actions ─────────────────────────────────────────────

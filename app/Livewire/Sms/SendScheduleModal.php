@@ -222,7 +222,7 @@ class SendScheduleModal extends Component
         $taskCount = $allTasks->count();
         $taskWord = $taskCount === 1 ? 'task' : 'tasks';
 
-        $intro = "Your project upcoming {$taskWord}:";
+        $intro = "Upcoming {$taskWord}:";
 
         // Build task lines grouped by day (matching digest format)
         $today = Carbon::today(browser_timezone());
@@ -313,6 +313,7 @@ class SendScheduleModal extends Component
 
         $this->showModal = false;
         $this->dispatch('messageSent');
+        $this->dispatch('refreshMessages');
     }
 
     public function render(): \Illuminate\View\View

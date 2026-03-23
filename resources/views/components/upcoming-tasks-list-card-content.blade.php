@@ -36,13 +36,16 @@
 @endphp
 
 <div class="flex items-start justify-between gap-2 min-w-0">
-    <div class="flex items-baseline gap-2 min-w-0">
+    <div class="{{ ($isWeekend ?? false) ? 'min-w-0' : 'flex items-baseline gap-2 min-w-0' }}">
         <flux:heading size="sm" class="min-w-0 truncate {{ $taskTypeTextClasses }}">
             {{ $task->title }}
         </flux:heading>
         @if ($arrivalTimeLabel)
-            <span class="shrink-0 text-xs text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
-                {{ $arrivalTimeLabel }}
+            <span class="shrink-0 text-xs whitespace-nowrap">
+                @if ($previousArrivalTimeLabel ?? null)
+                    <span class="line-through text-zinc-400 dark:text-zinc-500">{{ $previousArrivalTimeLabel }}</span>
+                @endif
+                <span class="text-zinc-500 dark:text-zinc-400">{{ $arrivalTimeLabel }}</span>
             </span>
         @endif
     </div>

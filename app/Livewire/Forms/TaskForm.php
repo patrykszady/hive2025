@@ -76,6 +76,7 @@ class TaskForm extends Form
         // Set dates - extract from options if stored there, otherwise try to recreate from start/end
         if (isset($task->options->dates) && is_array($task->options->dates)) {
             $this->dates = $task->options->dates;
+            sort($this->dates);
         } elseif ($task->start_date && $task->end_date) {
             // Legacy: try to recreate dates array from start/end and weekend flags
             $dates = [];

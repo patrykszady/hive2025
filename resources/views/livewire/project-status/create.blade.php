@@ -4,7 +4,7 @@
         <flux:accordion transition>
             <flux:accordion.item expanded>
                 <flux:accordion.heading>
-                    <flux:heading size="lg" class="mb-0">Project Lifespan</flux:heading>
+                    <flux:heading size="lg" class="mb-0">Project Timeline</flux:heading>
                 </flux:accordion.heading>
 
                 <flux:accordion.content>

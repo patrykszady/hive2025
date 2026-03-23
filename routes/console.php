@@ -220,14 +220,16 @@ Schedule::command('scout:sync-index-settings')
     ->onOneServer();
 
 // Menards receipt scraping — 4× daily
-foreach (['08:00', '12:00', '16:00', '20:00'] as $time) {
+$menardsLogPath = storage_path('logs/menards-scraper.log');
+foreach (['08:05', '12:05', '16:05', '20:05'] as $time) {
     Schedule::command('menards:scrape-receipts --match-expenses --force')->runInBackground()
         ->dailyAt($time)
         ->timezone('America/Chicago')
         ->name("menards-scrape-{$time}")
         ->environments(['production'])
         ->withoutOverlapping()
-        ->onOneServer();
+        ->onOneServer()
+        ->appendOutputTo($menardsLogPath);
 }
 
 // System maintenance

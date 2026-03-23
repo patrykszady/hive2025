@@ -31,6 +31,10 @@ class ScrapeMenardsReceipts extends Command
 
     public function handle(): int
     {
+        $this->line(str_repeat('═', 60));
+        $this->info('menards:scrape-receipts — ' . now()->format('Y-m-d H:i:s T'));
+        $this->line(str_repeat('═', 60));
+
         $captchaKey  = config('services.anticaptcha.api_key');
         $outputDir   = $this->option('output-dir') ?: storage_path('files/_temp_menards');
         $headless    = ! $this->option('visible');

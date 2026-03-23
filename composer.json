@@ -51,6 +51,7 @@
         "setasign/fpdi": "^2.3",
         "spatie/browsershot": "^5.0",
         "spatie/image": "^3.0",
+        "spatie/laravel-activitylog": "^4.12",
         "spatie/simple-excel": "^3.6",
         "symfony/dom-crawler": "^7.0",
         "symfony/http-client": "*",

@@ -11,7 +11,12 @@ use Livewire\Component;
 
 class UserTasks extends Component
 {
-    protected $listeners = ['refreshComponent' => '$refresh'];
+    protected $listeners = ['refreshComponent' => 'refreshTasks'];
+
+    public function refreshTasks(): void
+    {
+        unset($this->groupedTasks, $this->taskCount);
+    }
 
     /**
      * Get tasks grouped by date, matching the format expected by upcoming-tasks-list component.

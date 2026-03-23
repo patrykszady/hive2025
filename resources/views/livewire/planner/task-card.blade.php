@@ -16,6 +16,8 @@
             'date' => $this->dayFormat,
             'taskUsers' => $this->taskUsers,
             'arrivalTimeLabel' => $this->arrivalTimeLabel,
+            'previousArrivalTimeLabel' => $this->previousArrivalTimeLabel,
+            'isWeekend' => $this->isWeekend,
         ])
     </flux:kanban.card>
 @endif

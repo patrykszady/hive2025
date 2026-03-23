@@ -71,10 +71,10 @@ class ClientScheduleSmsNotification extends Notification implements ShouldQueue
 
         // Determine the intro line based on type
         $introLine = match ($this->type) {
-            'today' => "Your project upcoming {$taskWord} for today:",
-            'tomorrow' => "Your project upcoming {$taskWord} for tomorrow:",
+            'today' => "Upcoming {$taskWord} for today:",
+            'tomorrow' => "Upcoming {$taskWord} for tomorrow:",
             'changed' => "Your project schedule for today has been updated:",
-            default => "Your project upcoming {$taskWord}:",
+            default => "Upcoming {$taskWord}:",
         };
 
         $taskLines = $this->tasks->map(function ($task) {

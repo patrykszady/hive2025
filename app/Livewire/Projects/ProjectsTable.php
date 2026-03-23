@@ -25,6 +25,8 @@ class ProjectsTable extends Component
     #[Reactive]
     public $view = null;
 
+    public array $statusChangedProjectIds = [];
+
     public function updating($field): void
     {
         $this->resetPage();
@@ -90,11 +92,21 @@ class ProjectsTable extends Component
             }
         }
 
-        return Project::scopedSearch($projectSearch, $filters, 'latest_status_date', 'desc')
+        $results = Project::scopedSearch($projectSearch, $filters, 'latest_status_date', 'desc')
             ->query(function ($query) {
                 $query->with(['latestStatus', 'client.users', 'createdByVendor']);
             })
             ->paginate(20, pageName: $this->getPageName());
+
+        // Filter out projects whose status just changed (Meilisearch may not have indexed yet)
+        if (! empty($this->statusChangedProjectIds) && ! empty($statusCodes)) {
+            $removed = $this->statusChangedProjectIds;
+            $results->setCollection(
+                $results->getCollection()->reject(fn ($p) => in_array($p->id, $removed))
+            );
+        }
+
+        return $results;
     }
 
     public function updateProjectStatus(int $projectId, int $statusCode): void
@@ -121,6 +133,11 @@ class ProjectsTable extends Component
         if ($statusCode === 10) {
             $project->estimates()->delete();
         }
+
+        $project->searchable();
+
+        $this->statusChangedProjectIds[] = $projectId;
+        unset($this->projects);
 
         Flux::toast('Status updated.');
     }

@@ -110,13 +110,13 @@
         :client-vendor-id="$client?->vendor_id"
         :project-status-title="$project_status_title"
         :view="$view"
-        lazy
+        lazy.bundle
     />
 
     @if(!auth()->user()->is_client_user)
         <livewire:projects.email-tracking-table
             :client-id="$client_id"
-            lazy
+            lazy.bundle
         />
     @endif
 </div>

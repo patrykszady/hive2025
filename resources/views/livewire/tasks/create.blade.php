@@ -57,6 +57,14 @@
                     >
                         Notes
                     </button>
+                    <button
+                        type="button"
+                        @click="activeTab = 'history'"
+                        :class="activeTab === 'history' ? activeClasses : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                        class="py-2 px-1 border-b-2 font-medium text-sm"
+                    >
+                        History
+                    </button>
                 @endif
             </nav>
         </div>
@@ -371,6 +379,82 @@
                             </flux:kanban>
                         </div>
                     </div>
+                </div>
+            </div>
+        @endif
+
+        <!-- History Panel -->
+        @if($view_text['form_submit'] === 'edit' && $form->task)
+            <div x-show="activeTab === 'history'" x-cloak>
+                <div class="max-h-96 scrollbar-gutter overflow-x-visible">
+                    @if($this->taskHistory->isEmpty())
+                        <div class="text-center text-sm text-zinc-400 dark:text-zinc-500 py-8">
+                            No history yet
+                        </div>
+                    @else
+                        <flux:timeline align="start" style="--flux-timeline-indicator-size: 1.5rem;">
+                            @foreach($this->taskHistory as $entry)
+                                <flux:timeline.item wire:key="history-{{ $entry['id'] }}">
+                                    @if($loop->first)
+                                        @php
+                                            $colorMap = ['sky' => '#0ea5e9', 'indigo' => '#6366f1', 'orange' => '#f97316', 'rose' => '#f43f5e'];
+                                            $hex = $colorMap[$this->taskTypeUi['flux']] ?? '#0ea5e9';
+                                        @endphp
+                                        <flux:timeline.indicator variant="bare">
+                                            <div class="size-5 rounded-full flex items-center justify-center" style="background-color: {{ $hex }}15; border: 2px solid {{ $hex }}40;">
+                                                <div class="size-2.5 rounded-full" style="background-color: {{ $hex }}90;"></div>
+                                            </div>
+                                        </flux:timeline.indicator>
+                                    @else
+                                        <flux:timeline.indicator variant="bare">
+                                            <div class="size-1.5 rounded-full bg-gray-100 ring-1 ring-gray-300"></div>
+                                        </flux:timeline.indicator>
+                                    @endif
+
+                                    <flux:timeline.content>
+                                        <div class="space-y-2">
+                                            @foreach($entry['changes'] as $change)
+                                                <div>
+                                                    <div class="flex items-baseline justify-between gap-2">
+                                                        <flux:text class="text-sm italic !text-zinc-400 dark:!text-zinc-500">{{ $change['label'] }}</flux:text>
+                                                        @if($loop->first)
+                                                            <span class="text-[10px] text-zinc-300 dark:text-zinc-600 whitespace-nowrap">{{ $entry['causer'] }} · {{ $entry['created_at']->diffForHumans() }}</span>
+                                                        @endif
+                                                    </div>
+                                                    @if($change['old'] || $change['new'])
+                                                        <div class="flex items-baseline gap-2 leading-snug">
+                                                            @if($change['old'])
+                                                                @if(is_array($change['old']))
+                                                                    <div class="flex flex-col">
+                                                                        @foreach($change['old'] as $oldItem)
+                                                                            <flux:text class="!text-xs line-through">{{ $oldItem }}</flux:text>
+                                                                        @endforeach
+                                                                    </div>
+                                                                @else
+                                                                    <flux:text class="!text-xs line-through">{{ $change['old'] }}</flux:text>
+                                                                @endif
+                                                            @endif
+                                                            @if($change['new'])
+                                                                @if(is_array($change['new']))
+                                                                    <div class="flex flex-col">
+                                                                        @foreach($change['new'] as $newItem)
+                                                                            <flux:text class="!text-xs font-medium text-zinc-800 dark:text-zinc-200">{{ $newItem }}</flux:text>
+                                                                        @endforeach
+                                                                    </div>
+                                                                @else
+                                                                    <flux:text class="!text-xs font-medium text-zinc-800 dark:text-zinc-200">{{ $change['new'] }}</flux:text>
+                                                                @endif
+                                                            @endif
+                                                        </div>
+                                                    @endif
+                                                </div>
+                                            @endforeach
+                                        </div>
+                                    </flux:timeline.content>
+                                </flux:timeline.item>
+                            @endforeach
+                        </flux:timeline>
+                    @endif
                 </div>
             </div>
         @endif

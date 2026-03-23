@@ -14,11 +14,14 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Spatie\Activitylog\LogOptions;
+use Spatie\Activitylog\Models\Activity;
+use Spatie\Activitylog\Traits\LogsActivity;
 
 #[ObservedBy([TaskObserver::class])]
 class Task extends Model
 {
-    use HasFactory, SoftDeletes, Sortable;
+    use HasFactory, LogsActivity, SoftDeletes, Sortable;
 
     protected $fillable = [
         'title', 'project_id', 'start_date', 'end_date', 'order', 'options',
@@ -81,11 +84,79 @@ class Task extends Model
     public function getArrivalTimeLabel(string $date): ?string
     {
         $dayTimeSettings = data_get($this->options, "time_settings.$date");
-        $dayUsesTime = (bool) data_get($dayTimeSettings, 'use_time', false);
-        $dayStartTime = (string) data_get($dayTimeSettings, 'start_time', '');
-        $dayEndTime = (string) data_get($dayTimeSettings, 'end_time', '');
 
-        if (! $dayUsesTime || $dayStartTime === '') {
+        return self::formatTimeSettingsLabel(
+            is_object($dayTimeSettings) ? (array) $dayTimeSettings : ($dayTimeSettings ?? [])
+        );
+    }
+
+    /**
+     * Get the original arrival time label before today's changes.
+     *
+     * Queries the activity log for the earliest time change today
+     * and returns the old time formatted identically to getArrivalTimeLabel.
+     */
+    public function getPreviousArrivalTimeLabel(string $date): ?string
+    {
+        $tz = function_exists('browser_timezone') ? browser_timezone() : config('app.timezone');
+        $todayStart = Carbon::today($tz)->utc();
+        $todayEnd = Carbon::tomorrow($tz)->utc();
+
+        $activities = Activity::query()
+            ->where('subject_type', self::class)
+            ->where('subject_id', $this->id)
+            ->where('event', 'updated')
+            ->where('created_at', '>=', $todayStart)
+            ->where('created_at', '<', $todayEnd)
+            ->oldest()
+            ->get();
+
+        $firstOldLabel = null;
+
+        foreach ($activities as $activity) {
+            $oldOptions = data_get($activity->properties, 'old.options');
+            $newOptions = data_get($activity->properties, 'attributes.options');
+
+            if ($oldOptions === null || $newOptions === null) {
+                continue;
+            }
+
+            $oldOptions = is_string($oldOptions) ? json_decode($oldOptions, true) : (array) $oldOptions;
+            $newOptions = is_string($newOptions) ? json_decode($newOptions, true) : (array) $newOptions;
+
+            $oldTimeSetting = (array) ($oldOptions['time_settings'][$date] ?? []);
+            $newTimeSetting = (array) ($newOptions['time_settings'][$date] ?? []);
+
+            if ($oldTimeSetting == $newTimeSetting) {
+                continue;
+            }
+
+            $oldLabel = self::formatTimeSettingsLabel($oldTimeSetting);
+
+            // Capture the earliest non-null old time
+            if ($oldLabel && $firstOldLabel === null) {
+                $firstOldLabel = $oldLabel;
+            }
+        }
+
+        // Only show if the original time differs from the current time
+        if ($firstOldLabel && $firstOldLabel !== $this->getArrivalTimeLabel($date)) {
+            return $firstOldLabel;
+        }
+
+        return null;
+    }
+
+    /**
+     * Format a time_settings array into a human-readable label.
+     */
+    public static function formatTimeSettingsLabel(array $settings): ?string
+    {
+        $useTime = (bool) ($settings['use_time'] ?? false);
+        $startTime = (string) ($settings['start_time'] ?? '');
+        $endTime = (string) ($settings['end_time'] ?? '');
+
+        if (! $useTime || $startTime === '') {
             return null;
         }
 
@@ -98,18 +169,17 @@ class Task extends Model
                 ? $c->format('g')
                 : $c->format('g:i');
 
-            $startLabel = $formatTime($dayStartTime);
+            $startLabel = $formatTime($startTime);
 
-            if ($dayEndTime !== '' && $dayEndTime !== $dayStartTime) {
-                $startCarbon = Carbon::createFromFormat('H:i', $dayStartTime);
-                $endCarbon = Carbon::createFromFormat('H:i', $dayEndTime);
+            if ($endTime !== '' && $endTime !== $startTime) {
+                $startCarbon = Carbon::createFromFormat('H:i', $startTime);
+                $endCarbon = Carbon::createFromFormat('H:i', $endTime);
 
-                // When both times share the same AM/PM, omit it from the start time
                 if ($startCarbon->format('A') === $endCarbon->format('A')) {
-                    return $formatTimeShort($dayStartTime) . '-' . $formatTime($dayEndTime);
+                    return $formatTimeShort($startTime) . '-' . $formatTime($endTime);
                 }
 
-                return $startLabel . '-' . $formatTime($dayEndTime);
+                return $startLabel . '-' . $formatTime($endTime);
             }
 
             return $startLabel;
@@ -159,6 +229,27 @@ class Task extends Model
             'start_date' => 'date',
             'end_date' => 'date',
         ];
+    }
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->logOnly([
+                'title',
+                'start_date',
+                'end_date',
+                'type',
+                'vendor_id',
+                'user_ids',
+                'progress',
+                'options',
+                'order',
+                'parent_task_id',
+                'vendor_status',
+            ])
+            ->logOnlyDirty()
+            ->dontSubmitEmptyLogs()
+            ->useLogName('tasks');
     }
 
     /**

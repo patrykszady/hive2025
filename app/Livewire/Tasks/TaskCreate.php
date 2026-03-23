@@ -4,6 +4,7 @@ namespace App\Livewire\Tasks;
 
 use App\Models\Project;
 use App\Models\Task;
+use App\Models\User;
 use App\Models\Vendor;
 use App\Models\TaskDependency;
 use App\Livewire\Forms\TaskForm;
@@ -12,6 +13,7 @@ use App\Livewire\Planner\CardsIndex;
 use App\Livewire\Planner\PlannerTaskCard;
 use App\Livewire\Projects\UpcomingTasks;
 use App\Livewire\Dashboard\UserTasks;
+use App\Livewire\Dashboard\VendorTasks;
 use App\Livewire\Clients\UpcomingClientTasks;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
@@ -126,6 +128,228 @@ class TaskCreate extends Component
         return count($this->form->dates);
     }
 
+    #[Computed]
+    public function taskHistory(): \Illuminate\Support\Collection
+    {
+        if (! $this->form->task) {
+            return collect();
+        }
+
+        $task = $this->form->task;
+
+        $history = $task->activities()
+            ->with('causer')
+            ->latest()
+            ->limit(50)
+            ->get()
+            ->map(function ($activity) {
+                return [
+                    'id' => $activity->id,
+                    'event' => $activity->event,
+                    'causer' => $activity->causer?->first_name ?? 'System',
+                    'created_at' => $activity->created_at,
+                    'changes' => $this->formatActivityChanges($activity),
+                ];
+            });
+
+        // Add synthetic "created" entry if no logged created event exists
+        $hasCreatedEvent = $history->contains('event', 'created');
+        if (! $hasCreatedEvent) {
+            $creator = $task->created_by_user_id ? User::find($task->created_by_user_id) : null;
+            $history->push([
+                'id' => 'created',
+                'event' => 'created',
+                'causer' => $creator?->first_name ?? 'System',
+                'created_at' => $task->created_at,
+                'changes' => $this->formatSyntheticCreated($task),
+            ]);
+        }
+
+        return $history;
+    }
+
+    /**
+     * Format activity log changes into human-readable items.
+     *
+     * Each item is ['label' => string, 'old' => ?string, 'new' => ?string].
+     *
+     * @return array<array{label: string, old: ?string, new: ?string}>
+     */
+    private function formatActivityChanges(\Spatie\Activitylog\Models\Activity $activity): array
+    {
+        if ($activity->event === 'deleted') {
+            return [['label' => 'Deleted this task', 'old' => null, 'new' => null]];
+        }
+
+        if ($activity->event === 'created') {
+            return $this->formatCreatedChanges($activity);
+        }
+
+        $changes = [];
+        $new = $activity->properties['attributes'] ?? [];
+        $old = $activity->properties['old'] ?? [];
+
+        $labels = [
+            'title' => 'Title',
+            'type' => 'Type',
+            'start_date' => 'Start Date',
+            'end_date' => 'End Date',
+            'progress' => 'Progress',
+            'vendor_id' => 'Vendor',
+            'vendor_status' => 'Vendor Status',
+            'order' => 'Order',
+            'parent_task_id' => 'Parent Task',
+        ];
+
+        foreach ($new as $field => $newValue) {
+            $oldValue = $old[$field] ?? null;
+
+            if ($field === 'options') {
+                $optionChanges = $this->formatOptionsChanges($oldValue, $newValue);
+                $changes = array_merge($changes, $optionChanges);
+                continue;
+            }
+
+            if ($field === 'notes') {
+                continue;
+            }
+
+            if ($field === 'user_ids') {
+                $changes[] = ['label' => 'Team members updated', 'old' => null, 'new' => null];
+                continue;
+            }
+
+            if ($field === 'vendor_id') {
+                $oldVendor = $oldValue ? Vendor::find($oldValue)?->name : null;
+                $newVendor = $newValue ? Vendor::find($newValue)?->name : null;
+                $changes[] = ['label' => 'Vendor', 'old' => $oldVendor, 'new' => $newVendor];
+                continue;
+            }
+
+            if (in_array($field, ['start_date', 'end_date'])) {
+                continue;
+            }
+
+            if ($field === 'progress') {
+                $changes[] = ['label' => 'Progress', 'old' => $oldValue !== null ? "{$oldValue}%" : null, 'new' => "{$newValue}%"];
+                continue;
+            }
+
+            $label = $labels[$field] ?? ucfirst(str_replace('_', ' ', $field));
+            $changes[] = ['label' => $label, 'old' => $oldValue, 'new' => $newValue];
+        }
+
+        if (empty($changes)) {
+            return [['label' => 'Task updated', 'old' => null, 'new' => null]];
+        }
+
+        return $changes;
+    }
+
+    /**
+     * Format changes to the options JSON field.
+     *
+     * @return array<array{label: string, old: ?string, new: ?string}>
+     */
+    private function formatOptionsChanges(mixed $old, mixed $new): array
+    {
+        $changes = [];
+        $old = is_string($old) ? json_decode($old, true) : (array) ($old ?? []);
+        $new = is_string($new) ? json_decode($new, true) : (array) ($new ?? []);
+
+        // Schedule dates + times
+        $oldDates = (array) ($old['dates'] ?? []);
+        $newDates = (array) ($new['dates'] ?? []);
+        $oldTimes = (array) ($old['time_settings'] ?? []);
+        $newTimes = (array) ($new['time_settings'] ?? []);
+        $datesChanged = $oldDates != $newDates;
+
+        $formatDateWithTime = function (string $date, array $timeSettings): string {
+            $formatted = Carbon::parse($date)->format('D, M j, Y');
+            $setting = (array) ($timeSettings[$date] ?? []);
+            $time = $this->formatTimeSetting($setting);
+
+            return $time ? "{$formatted} · {$time}" : $formatted;
+        };
+
+        if ($datesChanged) {
+            // Only show dates that were actually removed or added
+            $removed = array_diff($oldDates, $newDates);
+            $added = array_diff($newDates, $oldDates);
+
+            $oldLines = collect($removed)->map(fn ($d) => $formatDateWithTime($d, (array) $oldTimes))->values()->all();
+            $newLines = collect($added)->map(fn ($d) => $formatDateWithTime($d, (array) $newTimes))->values()->all();
+
+            $changes[] = [
+                'label' => 'Date',
+                'old' => $oldLines ?: null,
+                'new' => $newLines ?: null,
+            ];
+        } elseif ($oldTimes != $newTimes) {
+            // Only times changed — show per-date time diffs
+            $allDateKeys = array_unique(array_merge(array_keys((array) $oldTimes), array_keys((array) $newTimes)));
+            sort($allDateKeys);
+
+            foreach ($allDateKeys as $dateKey) {
+                $oldSetting = (array) (((array) $oldTimes)[$dateKey] ?? []);
+                $newSetting = (array) (((array) $newTimes)[$dateKey] ?? []);
+
+                if ($oldSetting == $newSetting) {
+                    continue;
+                }
+
+                $dateLabel = Carbon::parse($dateKey)->format('D, M j');
+                $oldTime = $this->formatTimeSetting($oldSetting);
+                $newTime = $this->formatTimeSetting($newSetting);
+
+                $changes[] = ['label' => "Time ({$dateLabel})", 'old' => $oldTime, 'new' => $newTime];
+            }
+        }
+
+        // Checklist changes
+        $oldChecklist = $old['checklist'] ?? [];
+        $newChecklist = $new['checklist'] ?? [];
+        if ($oldChecklist != $newChecklist) {
+            $changes[] = ['label' => 'Checklist updated', 'old' => null, 'new' => null];
+        }
+
+        return $changes;
+    }
+
+    private function formatCreatedChanges(\Spatie\Activitylog\Models\Activity $activity): array
+    {
+        return [['label' => 'Task created', 'old' => null, 'new' => null]];
+    }
+
+    private function formatSyntheticCreated(Task $task): array
+    {
+        return [['label' => 'Task created', 'old' => null, 'new' => null]];
+    }
+
+    private function formatTimeSetting(array $setting): ?string
+    {
+        $start = $setting['start_time'] ?? null;
+        $end = $setting['end_time'] ?? null;
+
+        if (! $start && ! $end) {
+            return null;
+        }
+
+        $format = fn ($t) => Carbon::parse($t)->minute === 0
+            ? Carbon::parse($t)->format('gA')
+            : Carbon::parse($t)->format('g:iA');
+
+        if ($start && $end) {
+            if ($start === $end) {
+                return $format($start);
+            }
+
+            return $format($start) . '–' . $format($end);
+        }
+
+        return $start ? $format($start) : $format($end);
+    }
+
     /**
      * Reset form and dependency fields to initial state
      */
@@ -144,6 +368,41 @@ class TaskCreate extends Component
     public function clearAllTimes()
     {
         $this->form->time_settings = [];
+    }
+
+    /**
+     * When dates change, auto-enable arrival time for newly added dates
+     * if the main arrival time toggle is already on.
+     */
+    public function updatedFormDates(): void
+    {
+        sort($this->form->dates);
+
+        $hasArrivalTimeOn = collect($this->form->time_settings)->contains('use_time', true);
+
+        if (! $hasArrivalTimeOn) {
+            return;
+        }
+
+        // Find source time settings from the last configured date
+        $sourceSettings = null;
+        foreach (array_reverse($this->form->dates) as $date) {
+            $s = $this->form->time_settings[$date] ?? [];
+            if (! empty($s['use_time']) && ! empty($s['start_time'])) {
+                $sourceSettings = $s;
+                break;
+            }
+        }
+
+        foreach ($this->form->dates as $date) {
+            if (! isset($this->form->time_settings[$date])) {
+                $this->form->time_settings[$date] = [
+                    'use_time' => true,
+                    'start_time' => $sourceSettings['start_time'] ?? null,
+                    'end_time' => $sourceSettings['end_time'] ?? null,
+                ];
+            }
+        }
     }
 
     /**
@@ -357,6 +616,7 @@ class TaskCreate extends Component
         $this->dispatch('refreshComponent')->to(PlannerTaskCard::class);
         $this->dispatch('refreshComponent')->to(UpcomingTasks::class);
         $this->dispatch('refreshComponent')->to(UserTasks::class);
+        $this->dispatch('refreshComponent')->to(VendorTasks::class);
         $this->dispatch('refreshComponent')->to(UpcomingClientTasks::class);
     }
 
@@ -449,8 +709,10 @@ class TaskCreate extends Component
             return;
         }
 
+        $taskId = $task->id;
         $task->delete();
-        
+
+        $this->js('window.dispatchEvent(new CustomEvent("remove-task-card", { detail: { id: ' . $taskId . ' } }))');
         $this->handleTaskOperation('complete');
         $this->showNotification('removed');
     }

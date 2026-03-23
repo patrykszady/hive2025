@@ -12,9 +12,21 @@
     'title' => 'Tasks',
     'emptyMessage' => 'No tasks upcoming for this project.',
     'projectId' => null,
+    'showAddTask' => false,
 ])
 
-<x-island-card heading="{{ $title }}">
+<x-island-card heading="{{ $title }}" x-data="{
+    init() {
+        window.addEventListener('remove-task-card', (event) => {
+            const taskId = event.detail.id;
+            document.querySelectorAll(`[data-task-card='${taskId}']`).forEach(card => {
+                card.style.transition = 'opacity 0.3s ease-out';
+                card.style.opacity = '0';
+                setTimeout(() => card.remove(), 300);
+            });
+        });
+    }
+}">
     <x-slot:badge>
         <flux:badge size="sm" color="zinc">{{ $taskCount }}</flux:badge>
     </x-slot:badge>
@@ -26,6 +38,13 @@
                     variant="ghost"
                     icon="plus"
                     wire:click="$dispatchTo('tasks.task-create', 'addTask', { project_id: {{ $projectId }} })"
+                />
+            @elseif($showAddTask && $clickable)
+                <flux:button
+                    size="sm"
+                    variant="ghost"
+                    icon="plus"
+                    wire:click="$dispatchTo('tasks.task-create', 'addTask', { user_ids: [{{ auth()->id() }}] })"
                 />
             @endif
             @if($showNotifications)
@@ -50,7 +69,7 @@
         <div class="space-y-4">
             @if($unscheduledTasks && $unscheduledTasks->isNotEmpty())
                 <flux:accordion transition>
-                    <flux:accordion.item>
+                    <flux:accordion.item expanded>
                         <flux:accordion.heading>
                             <div class="flex items-center gap-2">
                                 <span class="text-orange-600 dark:text-orange-400">Pending Tasks</span>
@@ -59,72 +78,162 @@
                         </flux:accordion.heading>
                         <flux:accordion.content>
                             <div class="space-y-2">
-                                @foreach($unscheduledTasks as $task)
+                                @if($showProjectInfo)
                                     @php
-                                        $typeUi = $task->type_ui ?? [];
-                                        $taskTypeTextClasses = data_get($typeUi, 'text', '');
-                                        $taskVendor = $task->vendor ?? null;
+                                        $unscheduledByProject = $unscheduledTasks->groupBy(fn ($task) => $task->project_id ?? 0);
+                                        $isPublicView = $publicView ?? false;
                                     @endphp
-                                    @if($clickable)
-                                        <flux:kanban.card
-                                            as="button"
-                                            class="min-w-0 w-full"
-                                            wire:key="unscheduled-task-{{ $task->id }}"
-                                            wire:click="$dispatchTo('tasks.task-create', 'editTask', { task: {{ $task->id }} })"
-                                        >
-                                            <div class="flex items-start justify-between gap-2 min-w-0">
-                                                <div class="flex items-center gap-2 min-w-0">
-                                                    <flux:heading size="sm" class="min-w-0 truncate {{ $taskTypeTextClasses }}">
-                                                        {{ $task->title }}
+                                    @foreach($unscheduledByProject as $uProjectId => $projectTasks)
+                                        @php
+                                            $project = $projectTasks->first()->project;
+                                            $latestStatus = $project?->latestStatus;
+                                        @endphp
+                                        <flux:kanban class="w-full [&>div]:w-full [&>div]:min-w-0 [&>div]:flex-1">
+                                            <flux:kanban.column class="!w-full !max-w-full bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700">
+                                                <flux:kanban.column.header
+                                                    class="min-w-0 w-full [&>div:first-child>div:first-child]:!min-w-0 [&>div:first-child>div:first-child]:!flex-1 [&>div:first-child>div:first-child]:truncate [&>div:first-child>div:last-child]:!shrink-0 [&_[data-flux-subheading]]:!min-w-0 [&_[data-flux-subheading]]:truncate"
+                                                >
+                                                    <flux:heading class="min-w-0 truncate flex items-center gap-2">
+                                                        @if($isPublicView)
+                                                            <span class="truncate">{{ $project->project_name ?? 'Project' }}</span>
+                                                        @else
+                                                            <a
+                                                                href="{{ $project ? route('projects.show', $project) : '#' }}"
+                                                                wire:click.stop
+                                                                class="truncate hover:underline underline-offset-2"
+                                                            >
+                                                                {{ $project->short_address ?? 'No project' }}
+                                                            </a>
+                                                        @endif
+                                                        @if($latestStatus)
+                                                            <flux:tooltip content="{{ $latestStatus->title }}">
+                                                                <flux:badge :color="$latestStatus->badge_color" size="sm" class="!px-0 !size-2 !min-w-0 rounded-full shrink-0" />
+                                                            </flux:tooltip>
+                                                        @endif
                                                     </flux:heading>
-                                                </div>
-                                            </div>
-                                            @if($showAvatars && $taskVendor)
-                                                <div class="flex items-center gap-2 mt-2 min-w-0">
-                                                    <flux:avatar
-                                                        circle
-                                                        size="xs"
-                                                        name="{{ $taskVendor->name }}"
-                                                        color="auto"
-                                                        color:seed="{{ $taskVendor->id }}"
-                                                        :title="($showVendorInfo ?? true) ? $taskVendor->name : null"
-                                                    />
-                                                    @if($showVendorInfo ?? true)
-                                                        <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">{{ $taskVendor->name }}</span>
+                                                    @if(!$isPublicView && ($project?->client || $project?->project_name))
+                                                        <x-slot name="subheading">
+                                                            <span class="block min-w-0 truncate">
+                                                                {{ $project->client?->last_names }}{{ $project->client?->last_names && $project->project_name ? ' | ' : '' }}{{ $project->project_name }}
+                                                            </span>
+                                                        </x-slot>
                                                     @endif
+                                                </flux:kanban.column.header>
+                                                <flux:kanban.column.cards>
+                                                    @foreach($projectTasks as $task)
+                                                        @php
+                                                            $typeUi = $task->type_ui ?? [];
+                                                            $taskTypeTextClasses = data_get($typeUi, 'text', '');
+                                                            $taskVendor = $task->vendor ?? null;
+                                                        @endphp
+                                                        @if($clickable)
+                                                            <flux:kanban.card
+                                                                as="button"
+                                                                class="min-w-0 w-full"
+                                                                data-task-card="{{ $task->id }}"
+                                                                wire:key="unscheduled-task-{{ $task->id }}"
+                                                                wire:click="$dispatchTo('tasks.task-create', 'editTask', { task: {{ $task->id }} })"
+                                                            >
+                                                                <div class="flex items-start justify-between gap-2 min-w-0">
+                                                                    <div class="flex items-center gap-2 min-w-0">
+                                                                        <flux:heading size="sm" class="min-w-0 truncate {{ $taskTypeTextClasses }}">
+                                                                            {{ $task->title }}
+                                                                        </flux:heading>
+                                                                    </div>
+                                                                </div>
+                                                                @if($showAvatars && $taskVendor)
+                                                                    <div class="flex items-center gap-2 mt-2 min-w-0">
+                                                                        <flux:avatar circle size="xs" name="{{ $taskVendor->name }}" color="auto" color:seed="{{ $taskVendor->id }}" :title="($showVendorInfo ?? true) ? $taskVendor->name : null" />
+                                                                        @if($showVendorInfo ?? true)
+                                                                            <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">{{ $taskVendor->name }}</span>
+                                                                        @endif
+                                                                    </div>
+                                                                @endif
+                                                            </flux:kanban.card>
+                                                        @else
+                                                            <flux:kanban.card
+                                                                class="min-w-0 w-full transition hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:shadow-sm hover:border-zinc-300 dark:hover:border-zinc-600"
+                                                                data-task-card="{{ $task->id }}"
+                                                                wire:key="unscheduled-task-{{ $task->id }}"
+                                                            >
+                                                                <div class="flex items-start justify-between gap-2 min-w-0">
+                                                                    <div class="flex items-center gap-2 min-w-0">
+                                                                        <flux:heading size="sm" class="min-w-0 truncate {{ $taskTypeTextClasses }}">
+                                                                            {{ $task->title }}
+                                                                        </flux:heading>
+                                                                    </div>
+                                                                </div>
+                                                                @if($showAvatars && $taskVendor)
+                                                                    <div class="flex items-center gap-2 mt-2 min-w-0">
+                                                                        <flux:avatar circle size="xs" name="{{ $taskVendor->name }}" color="auto" color:seed="{{ $taskVendor->id }}" :title="($showVendorInfo ?? true) ? $taskVendor->name : null" />
+                                                                        @if($showVendorInfo ?? true)
+                                                                            <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">{{ $taskVendor->name }}</span>
+                                                                        @endif
+                                                                    </div>
+                                                                @endif
+                                                            </flux:kanban.card>
+                                                        @endif
+                                                    @endforeach
+                                                </flux:kanban.column.cards>
+                                            </flux:kanban.column>
+                                        </flux:kanban>
+                                    @endforeach
+                                @else
+                                    @foreach($unscheduledTasks as $task)
+                                        @php
+                                            $typeUi = $task->type_ui ?? [];
+                                            $taskTypeTextClasses = data_get($typeUi, 'text', '');
+                                            $taskVendor = $task->vendor ?? null;
+                                        @endphp
+                                        @if($clickable)
+                                            <flux:kanban.card
+                                                as="button"
+                                                class="min-w-0 w-full"
+                                                data-task-card="{{ $task->id }}"
+                                                wire:key="unscheduled-task-{{ $task->id }}"
+                                                wire:click="$dispatchTo('tasks.task-create', 'editTask', { task: {{ $task->id }} })"
+                                            >
+                                                <div class="flex items-start justify-between gap-2 min-w-0">
+                                                    <div class="flex items-center gap-2 min-w-0">
+                                                        <flux:heading size="sm" class="min-w-0 truncate {{ $taskTypeTextClasses }}">
+                                                            {{ $task->title }}
+                                                        </flux:heading>
+                                                    </div>
                                                 </div>
-                                            @endif
-                                        </flux:kanban.card>
-                                    @else
-                                        <flux:kanban.card
-                                            class="min-w-0 w-full transition hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:shadow-sm hover:border-zinc-300 dark:hover:border-zinc-600"
-                                            wire:key="unscheduled-task-{{ $task->id }}"
-                                        >
-                                            <div class="flex items-start justify-between gap-2 min-w-0">
-                                                <div class="flex items-center gap-2 min-w-0">
-                                                    <flux:heading size="sm" class="min-w-0 truncate {{ $taskTypeTextClasses }}">
-                                                        {{ $task->title }}
-                                                    </flux:heading>
+                                                @if($showAvatars && $taskVendor)
+                                                    <div class="flex items-center gap-2 mt-2 min-w-0">
+                                                        <flux:avatar circle size="xs" name="{{ $taskVendor->name }}" color="auto" color:seed="{{ $taskVendor->id }}" :title="($showVendorInfo ?? true) ? $taskVendor->name : null" />
+                                                        @if($showVendorInfo ?? true)
+                                                            <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">{{ $taskVendor->name }}</span>
+                                                        @endif
+                                                    </div>
+                                                @endif
+                                            </flux:kanban.card>
+                                        @else
+                                            <flux:kanban.card
+                                                class="min-w-0 w-full transition hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:shadow-sm hover:border-zinc-300 dark:hover:border-zinc-600"
+                                                data-task-card="{{ $task->id }}"
+                                                wire:key="unscheduled-task-{{ $task->id }}"
+                                            >
+                                                <div class="flex items-start justify-between gap-2 min-w-0">
+                                                    <div class="flex items-center gap-2 min-w-0">
+                                                        <flux:heading size="sm" class="min-w-0 truncate {{ $taskTypeTextClasses }}">
+                                                            {{ $task->title }}
+                                                        </flux:heading>
+                                                    </div>
                                                 </div>
-                                            </div>
-                                            @if($showAvatars && $taskVendor)
-                                                <div class="flex items-center gap-2 mt-2 min-w-0">
-                                                    <flux:avatar
-                                                        circle
-                                                        size="xs"
-                                                        name="{{ $taskVendor->name }}"
-                                                        color="auto"
-                                                        color:seed="{{ $taskVendor->id }}"
-                                                        :title="($showVendorInfo ?? true) ? $taskVendor->name : null"
-                                                    />
-                                                    @if($showVendorInfo ?? true)
-                                                        <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">{{ $taskVendor->name }}</span>
-                                                    @endif
-                                                </div>
-                                            @endif
-                                        </flux:kanban.card>
-                                    @endif
-                                @endforeach
+                                                @if($showAvatars && $taskVendor)
+                                                    <div class="flex items-center gap-2 mt-2 min-w-0">
+                                                        <flux:avatar circle size="xs" name="{{ $taskVendor->name }}" color="auto" color:seed="{{ $taskVendor->id }}" :title="($showVendorInfo ?? true) ? $taskVendor->name : null" />
+                                                        @if($showVendorInfo ?? true)
+                                                            <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">{{ $taskVendor->name }}</span>
+                                                        @endif
+                                                    </div>
+                                                @endif
+                                            </flux:kanban.card>
+                                        @endif
+                                    @endforeach
+                                @endif
                             </div>
                         </flux:accordion.content>
                     </flux:accordion.item>

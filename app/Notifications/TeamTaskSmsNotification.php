@@ -20,6 +20,9 @@ class TeamTaskSmsNotification extends Notification implements ShouldQueue
     protected $date;
     protected $type; // 'reminder' or 'update'
 
+    /** @var array<int, string> Task ID => old time label for change annotations */
+    protected array $timeChanges;
+
     /**
      * Create a new notification instance.
      *
@@ -28,12 +31,13 @@ class TeamTaskSmsNotification extends Notification implements ShouldQueue
      * @param  Carbon  $date  The date these tasks are for
      * @param  string  $type  'reminder' (tomorrow) or 'update' (today changed)
      */
-    public function __construct($tasks, Carbon $date, string $type = 'reminder', $removedTasks = [])
+    public function __construct($tasks, Carbon $date, string $type = 'reminder', $removedTasks = [], array $timeChanges = [])
     {
         $this->tasks = $tasks;
         $this->removedTasks = $removedTasks;
         $this->date = $date;
         $this->type = $type;
+        $this->timeChanges = $timeChanges;
     }
 
     /**
@@ -107,7 +111,7 @@ class TeamTaskSmsNotification extends Notification implements ShouldQueue
         $currentTasks = $this->sortTasksByStartTime($this->tasks, $this->date);
         $removedTasks = $this->sortTasksByStartTime($this->removedTasks, $this->date);
 
-        $message = "UPDATED TASKS for TODAY:\n";
+        $message = "TASKS UPDATED TODAY!\n";
         $message .= "{$this->date->format('l, M j, Y')}\n\n";
 
         // Check if there are no current tasks but there are removed tasks
@@ -125,6 +129,12 @@ class TeamTaskSmsNotification extends Notification implements ShouldQueue
             $startTime = $this->formatTaskStartTime($task, $this->date);
             if ($startTime) {
                 $message .= " @ {$startTime}";
+
+                // Annotate with previous time if changed
+                $oldTime = $this->timeChanges[$task->id] ?? null;
+                if ($oldTime) {
+                    $message .= " (was {$oldTime})";
+                }
             }
 
             $message .= "\n";
@@ -134,11 +144,12 @@ class TeamTaskSmsNotification extends Notification implements ShouldQueue
             $message .= "{$fullAddress}\n";
         }
 
-        // Removed tasks - uncomment to show removed tasks in the notification
-        foreach ($removedTasks as $task) {
-            // $message .= "❌ {$task->title} (Removed)\n";
-            // $fullAddress = strip_tags(str_replace('<br>', "\n", $task->project->full_address));
-            // $message .= "{$fullAddress}\n";
+        // Removed tasks
+        if (count($removedTasks) > 0) {
+            $message .= "\nRemoved from today:\n";
+            foreach ($removedTasks as $task) {
+                $message .= "- {$task->title}\n";
+            }
         }
 
         return $message;
