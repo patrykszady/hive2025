@@ -3,10 +3,11 @@
     'href' => null,
     'subheading' => null,
     'separator' => false,
+    'clickable' => false,
 ])
 
 <div class="flex justify-between items-start gap-4">
-    <div class="min-w-0 flex-1">
+    <div class="min-w-0 flex-1" @if($clickable) @click="open = !open" role="button" @endif @class(['cursor-pointer' => $clickable])>
         <div class="flex items-center gap-2 min-h-[2.25rem]">
             <flux:heading size="lg" class="mb-0 truncate">
                 @if($href)

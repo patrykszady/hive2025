@@ -16,12 +16,15 @@ use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
 use Livewire\Component;
+use OpenSpout\Common\Entity\Cell;
+use OpenSpout\Common\Entity\Row;
 use OpenSpout\Common\Entity\Style\Border;
 use OpenSpout\Common\Entity\Style\BorderPart;
+use OpenSpout\Common\Entity\Style\CellAlignment;
 use OpenSpout\Common\Entity\Style\Color;
 use OpenSpout\Common\Entity\Style\Style;
 use OpenSpout\Writer\XLSX\Writer as XLSXWriter;
-use OpenSpout\Common\Entity\Row;
+use Spatie\Browsershot\Browsershot;
 
 class SheetShow extends Component
 {
@@ -38,6 +41,54 @@ class SheetShow extends Component
 
     #[Url(except: '')]
     public $cash = 'include';
+
+    #[Url(except: 'accrual')]
+    public $basis = 'accrual';
+
+    /**
+     * Apply cash-basis filtering to an Expense query builder.
+     * Only includes expenses that have been paid through bank (direct transaction or check→transaction).
+     */
+    private ?array $cashBasisExpenseIds = null;
+
+    private function getCashBasisExpenseIds(): array
+    {
+        if ($this->cashBasisExpenseIds === null) {
+            // Get expense IDs that have direct transactions in selected bank accounts
+            $directIds = \DB::table('transactions')
+                ->whereIn('bank_account_id', $this->bank_account_ids)
+                ->whereNotNull('expense_id')
+                ->pluck('expense_id')
+                ->toArray();
+
+            // Get expense IDs linked via checks that have transactions in selected bank accounts
+            $checkIds = \DB::table('transactions')
+                ->whereIn('bank_account_id', $this->bank_account_ids)
+                ->whereNotNull('check_id')
+                ->pluck('check_id')
+                ->toArray();
+
+            $checkExpenseIds = $checkIds
+                ? \DB::table('expenses')
+                    ->whereIn('check_id', $checkIds)
+                    ->pluck('id')
+                    ->toArray()
+                : [];
+
+            $this->cashBasisExpenseIds = array_unique(array_merge($directIds, $checkExpenseIds));
+        }
+
+        return $this->cashBasisExpenseIds;
+    }
+
+    private function applyCashBasisFilter($query)
+    {
+        if ($this->basis !== 'cash') {
+            return $query;
+        }
+
+        return $query->whereIn('expenses.id', $this->getCashBasisExpenseIds());
+    }
 
     #[Computed]
     public function transactions_no_associations()
@@ -271,13 +322,11 @@ class SheetShow extends Component
     #[Computed]
     public function costOfMaterialsVendors()
     {
-        $vendors = Expense::whereBetween('date', [$this->start_date, $this->end_date])
-            ->whereIn('vendor_id', $this->materialVendorIds())
-            ->with(['vendor'])
-            ->whereHas('transactions', function ($query) {
-                $query->whereIn('bank_account_id', $this->bank_account_ids);
-            })
-            ->get()
+        $vendors = $this->applyCashBasisFilter(
+            Expense::whereBetween('date', [$this->start_date, $this->end_date])
+                ->whereIn('vendor_id', $this->materialVendorIds())
+                ->with(['vendor'])
+        )->get()
             ->groupBy('vendor.business_name')
             ->toBase();
             
@@ -290,37 +339,31 @@ class SheetShow extends Component
     #[Computed]
     public function costOfMaterialsSum()
     {
-        return Expense::whereBetween('date', [$this->start_date, $this->end_date])
-            ->whereHas('transactions', function ($query) {
-                $query->whereIn('bank_account_id', $this->bank_account_ids);
-            })
-            ->whereIn('vendor_id', $this->materialVendorIds())
-            ->sum('amount');
+        return $this->applyCashBasisFilter(
+            Expense::whereBetween('date', [$this->start_date, $this->end_date])
+                ->whereIn('vendor_id', $this->materialVendorIds())
+        )->sum('amount');
     }
 
     #[Computed]
     public function generalExpenses()
     {
-        return Expense::whereBetween('date', [$this->start_date, $this->end_date])
-            ->whereHas('transactions', function ($query) {
-                $query->whereIn('bank_account_id', $this->bank_account_ids);
-            })
-            ->whereNotIn('vendor_id', array_merge($this->materialVendorIds()->toArray(), $this->subVendorIds()->toArray()))
-            ->whereNotIn('category_id', [123, 124, 125, 126, 127, 128])
-            ->sum('amount');
+        return $this->applyCashBasisFilter(
+            Expense::whereBetween('date', [$this->start_date, $this->end_date])
+                ->whereNotIn('vendor_id', array_merge($this->materialVendorIds()->toArray(), $this->subVendorIds()->toArray()))
+                ->whereNotIn('category_id', [112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128])
+        )->sum('amount');
     }
 
     #[Computed]
     public function generalExpenseCategories()
     {
-        return Expense::whereBetween('date', [$this->start_date, $this->end_date])
-            ->whereNotIn('category_id', [112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128])
-            ->whereNotIn('vendor_id', array_merge($this->materialVendorIds()->toArray(), $this->subVendorIds()->toArray()))
-            ->with(['category', 'vendor'])
-            ->whereHas('transactions', function ($query) {
-                $query->whereIn('bank_account_id', $this->bank_account_ids);
-            })
-            ->get()
+        return $this->applyCashBasisFilter(
+            Expense::whereBetween('date', [$this->start_date, $this->end_date])
+                ->whereNotIn('category_id', [112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128])
+                ->whereNotIn('vendor_id', array_merge($this->materialVendorIds()->toArray(), $this->subVendorIds()->toArray()))
+                ->with(['category', 'vendor'])
+        )->get()
             ->groupBy('category.friendly_primary')
             ->toBase();
     }
@@ -379,18 +422,16 @@ class SheetShow extends Component
     #[Computed]
     public function uncategorizedExpenses()
     {
-        if (!$this->end_date || empty($this->bank_account_ids)) {
+        if (!$this->end_date) {
             return collect();
         }
 
-        return Expense::whereBetween('date', [$this->start_date, $this->end_date])
-            ->whereNull('category_id')
-            ->whereHas('transactions', function ($query) {
-                $query->whereIn('bank_account_id', $this->bank_account_ids);
-            })
-            ->with(['vendor'])
-            ->orderByDesc('amount')
-            ->get();
+        return $this->applyCashBasisFilter(
+            Expense::whereBetween('date', [$this->start_date, $this->end_date])
+                ->whereNull('category_id')
+                ->with(['vendor'])
+                ->orderByDesc('amount')
+        )->get();
     }
 
     #[Computed]
@@ -428,136 +469,213 @@ class SheetShow extends Component
 
     public function export_csv()
     {
-        // Create filename
-        $filename = 'financial-report-' . date('Y-m-d', strtotime($this->start_date)) . '-to-' . 
+        $filename = 'GS Construction and Remodeling - profit-and-loss-' . date('Y-m-d', strtotime($this->start_date)) . '-to-' . 
                     date('Y-m-d', strtotime($this->end_date)) . '.xlsx';
                     
         return response()->streamDownload(function() {
-            // Format money values correctly
-            $formatMoney = function($amount) {
-                return money($amount);
+            $fmt = function($amount) {
+                return round((float) $amount, 2);
             };
-            
-            // Treat very small amounts as zero if they round to $0.00
+
             $isZero = function($amount) {
                 return round((float)$amount, 2) == 0.0;
             };
 
+            // Indent helper — QuickBooks uses spaces for hierarchy depth
+            $indent = function(string $label, int $depth = 0): string {
+                return str_repeat('    ', $depth) . $label;
+            };
+
             // Styles
             $border = new Border(
-                new BorderPart(Border::BOTTOM, Color::BLACK, Border::WIDTH_THICK, Border::STYLE_SOLID)
+                new BorderPart(Border::BOTTOM, Color::BLACK, Border::WIDTH_THIN, Border::STYLE_SOLID)
             );
-            $headerStyle = (new Style())->setBorder($border)->setFontBold();
+            $doubleBorder = new Border(
+                new BorderPart(Border::BOTTOM, Color::BLACK, Border::WIDTH_THIN, Border::STYLE_DOUBLE)
+            );
+            $topBorder = new Border(
+                new BorderPart(Border::TOP, Color::BLACK, Border::WIDTH_THIN, Border::STYLE_SOLID)
+            );
             $boldStyle = (new Style())->setFontBold();
-            $italicStyle = (new Style())->setFontItalic();
+            $subheaderStyle = (new Style())->setFontBold()->setFontItalic();
+            $normalStyle = new Style();
+            $totalStyle = (new Style())->setFontBold()->setBorder($border);
+            $categoryTotalStyle = (new Style())->setFontBold()->setBorder($topBorder);
+            $grandTotalStyle = (new Style())->setFontBold()->setBorder($doubleBorder);
+            $emptyRow = Row::fromValues(['']);
             
-            // OpenSpout writer
             $writer = new XLSXWriter();
             $writer->openToFile('php://output');
-            
-            // Name the sheet
-            $writer->getCurrentSheet()->setName('Financial Report');
-            
-            // REVENUE
+            $sheet = $writer->getCurrentSheet();
+            $sheet->setName('Profit and Loss');
+            $sheet->setColumnWidth(50, 1);  // Column A — labels
+            $sheet->setColumnWidth(18, 2);  // Column B — amounts
+
+            // QuickBooks header block
+            $companyName = auth()->user()->vendor->business_name ?? config('app.name');
+            $headerStyle = (new Style())->setFontBold()->setFontSize(11);
+            $writer->addRow(Row::fromValues([$companyName], $headerStyle));
+            $writer->addRow(Row::fromValues(['Profit and Loss'], $boldStyle));
             $writer->addRow(Row::fromValues([
-                'REVENUE', '', '', '', $formatMoney($this->revenue())
-            ], $headerStyle));
-            $writer->addRow(Row::fromValues(['', '', '', '', ''])); // spacer
-            
-            // COST OF REVENUE
-            $writer->addRow(Row::fromValues([
-                'COST OF REVENUE', '', '', '', $formatMoney($this->costOfMaterialsSum() + $this->costOfLaborSum())
-            ], $headerStyle));
-            $writer->addRow(Row::fromValues(['', '', '', '', ''])); // spacer
-            
-            // COST OF MATERIALS
-            $writer->addRow(Row::fromValues([
-                '', 'COST OF MATERIALS', '', '', $formatMoney($this->costOfMaterialsSum())
-            ], $boldStyle));
-            
-            // Materials vendors (skip zero-sum vendors)
+                date('F j', strtotime($this->start_date)) . ' - ' . date('F j, Y', strtotime($this->end_date))
+            ]));
+            $basisLabel = $this->basis === 'cash' ? 'Cash Basis' : 'Accrual Basis';
+            $writer->addRow(Row::fromValues([$basisLabel]));
+            $writer->addRow(Row::fromValues([''])); // spacer
+
+            // Column headers with underline
+            $colHeaderLeftStyle = (new Style())->setFontBold()->setBorder($border);
+            $colHeaderRightStyle = (new Style())->setFontBold()->setBorder($border)->setCellAlignment(CellAlignment::RIGHT);
+            $writer->addRow(new Row([
+                Cell::fromValue('', $colHeaderLeftStyle),
+                Cell::fromValue('Total', $colHeaderRightStyle),
+            ]));
+
+            // ── INCOME ──
+            $writer->addRow(Row::fromValues(['Income'], $boldStyle));
+            $writer->addRow(Row::fromValues([$indent('Revenue', 1), $fmt($this->revenue())]));
+            $writer->addRow(Row::fromValues([$indent('Total Income', 0), $fmt($this->revenue())], $totalStyle));
+            $writer->addRow(Row::fromValues([''])); // spacer
+
+            // ── COST OF GOODS SOLD ──
+            $writer->addRow(Row::fromValues(['Cost of Goods Sold'], $boldStyle));
+
+            // Materials
+            $writer->addRow(Row::fromValues([$indent('Cost of Materials', 1)], $subheaderStyle));
             foreach ($this->costOfMaterialsVendors() as $vendorName => $costOfMaterialsVendor) {
                 $vendorSum = (float) $costOfMaterialsVendor->sum('amount');
                 if ($isZero($vendorSum)) { continue; }
-                $writer->addRow(Row::fromValues([
-                    '', '', $vendorName, '', $formatMoney($vendorSum)
-                ]));
+                $writer->addRow(Row::fromValues([$indent($vendorName, 2), $fmt($vendorSum)]));
             }
-            
-            $writer->addRow(Row::fromValues(['', '', '', '', ''])); // spacer
-            
-            // COST OF LABOR
-            $writer->addRow(Row::fromValues([
-                '', 'COST OF LABOR', '', '', $formatMoney($this->costOfLaborSum())
-            ], $boldStyle));
-            
-            // Labor vendors (skip zero-sum vendors)
+            $writer->addRow(Row::fromValues([$indent('Total Cost of Materials', 1), $fmt($this->costOfMaterialsSum())], $categoryTotalStyle));
+            $writer->addRow($emptyRow);
+
+            // Labor
+            $writer->addRow(Row::fromValues([$indent('Cost of Labor', 1)], $subheaderStyle));
             foreach ($this->costOfLaborVendors() as $vendorName => $costOfLaborVendor) {
                 $vendorSum = (float) $costOfLaborVendor->sum('amount');
                 if ($isZero($vendorSum)) { continue; }
-                $writer->addRow(Row::fromValues([
-                    '', '', $vendorName, '', $formatMoney($vendorSum)
-                ]));
+                $writer->addRow(Row::fromValues([$indent($vendorName, 2), $fmt($vendorSum)]));
             }
-            
-            $writer->addRow(Row::fromValues(['', '', '', '', ''])); // spacer
-            
-            // GROSS PROFIT
-            $writer->addRow(Row::fromValues([
-                'GROSS PROFIT', '', '', '', $formatMoney($this->revenue() - $this->costOfLaborSum() - $this->costOfMaterialsSum())
-            ], $headerStyle));
-            $writer->addRow(Row::fromValues(['', '', '', '', ''])); // spacer
-            
-            // GENERAL & ADMINISTRATIVE EXPENSES
-            $writer->addRow(Row::fromValues([
-                'GENERAL & ADMINISTRATIVE EXPENSES', '', '', '', $formatMoney($this->generalExpenses())
-            ], $headerStyle));
-            $writer->addRow(Row::fromValues(['', '', '', '', ''])); // spacer
-            
-            // Export categories following sort order (skip zero-sum groups)
+            $writer->addRow(Row::fromValues([$indent('Total Cost of Labor', 1), $fmt($this->costOfLaborSum())], $categoryTotalStyle));
+            $writer->addRow($emptyRow);
+
+            $cogsTotal = $this->costOfMaterialsSum() + $this->costOfLaborSum();
+            $writer->addRow(Row::fromValues([$indent('Total Cost of Goods Sold', 0), $fmt($cogsTotal)], $grandTotalStyle));
+            $writer->addRow($emptyRow); // spacer
+
+            // ── GROSS PROFIT ──
+            $grossProfit = $this->revenue() - $cogsTotal;
+            $writer->addRow(Row::fromValues(['Gross Profit', $fmt($grossProfit)], $grandTotalStyle));
+            $writer->addRow(Row::fromValues([''])); // spacer
+
+            // ── EXPENSES ──
+            $writer->addRow(Row::fromValues(['Expenses'], $boldStyle));
+
             foreach ($this->sortedExpenseCategories() as $categoryName => $categoryData) {
                 $categorySum = (float) $categoryData['sum'];
                 if ($isZero($categorySum)) { continue; }
 
-                $writer->addRow(Row::fromValues([
-                    $categoryName, '', '', '', $formatMoney($categorySum)
-                ], $boldStyle));
-                
+                $writer->addRow(Row::fromValues([$indent($categoryName, 1)], $boldStyle));
+
                 foreach ($categoryData['subcategories'] as $subcategory) {
                     $subSum = (float) $subcategory['sum'];
                     if ($isZero($subSum)) { continue; }
 
-                    $writer->addRow(Row::fromValuesWithStyles([
-                        '', '', $subcategory['name'], '', $formatMoney($subSum)
-                    ], null, [4 => $italicStyle]));
-                    
-                    foreach ($subcategory['vendors'] as $vendor) {
-                        $vendSum = (float) $vendor['sum'];
-                        if ($isZero($vendSum)) { continue; }
+                    // If only one vendor in subcategory, just show on one line
+                    $nonZeroVendors = array_filter($subcategory['vendors'], fn($v) => !$isZero($v['sum']));
+                    if (count($nonZeroVendors) === 1) {
+                        $writer->addRow(Row::fromValues([$indent($subcategory['name'], 2), $fmt($subSum)]));
+                    } else {
+                        $writer->addRow(Row::fromValues([$indent($subcategory['name'], 2)], $subheaderStyle));
 
-                        $writer->addRow(Row::fromValues([
-                            '', '', '', $vendor['name'], $formatMoney($vendSum)
-                        ]));
+                        foreach ($subcategory['vendors'] as $vendor) {
+                            $vendSum = (float) $vendor['sum'];
+                            if ($isZero($vendSum)) { continue; }
+                            $writer->addRow(Row::fromValues([$indent($vendor['name'], 3), $fmt($vendSum)]));
+                        }
+
+                        $writer->addRow(Row::fromValues([$indent('Total ' . $subcategory['name'], 2), $fmt($subSum)], $totalStyle));
+                        $writer->addRow($emptyRow);
                     }
-                    
-                    // Add empty row after each subcategory
-                    $writer->addRow(Row::fromValues(['', '', '', '', '']));
                 }
-                
-                // Add empty row after each category
-                $writer->addRow(Row::fromValues(['', '', '', '', '']));
+
+                $writer->addRow(Row::fromValues([$indent('Total ' . $categoryName, 1), $fmt($categorySum)], $categoryTotalStyle));
+                $writer->addRow($emptyRow);
             }
-            
-            $writer->addRow(Row::fromValues(['', '', '', '', ''])); // spacer
-            
-            // NET INCOME
-            $writer->addRow(Row::fromValues([
-                'NET INCOME', '', '', '', $formatMoney($this->revenue() - $this->costOfLaborSum() - $this->costOfMaterialsSum() - $this->generalExpenses())
-            ], $headerStyle));
+
+            $writer->addRow(Row::fromValues([$indent('Total Expenses', 0), $fmt($this->generalExpenses())], $grandTotalStyle));
+            $writer->addRow($emptyRow); // spacer
+
+            // ── NET OPERATING INCOME ──
+            $netOperatingIncome = $grossProfit - $this->generalExpenses();
+            $writer->addRow(Row::fromValues(['Net Operating Income', $fmt($netOperatingIncome)], $grandTotalStyle));
+            $writer->addRow(Row::fromValues([''])); // spacer
+
+            // ── NET INCOME ──
+            $writer->addRow(Row::fromValues(['Net Income', $fmt($netOperatingIncome)], $grandTotalStyle));
             
             $writer->close();
         }, $filename, [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ]);
+    }
+
+    public function export_pdf()
+    {
+        $companyName = auth()->user()->vendor->business_name ?? config('app.name');
+        $startFormatted = date('F j', strtotime($this->start_date));
+        $endFormatted = date('F j, Y', strtotime($this->end_date));
+        $dateRange = $startFormatted . ' - ' . $endFormatted;
+
+        $cogsTotal = $this->costOfMaterialsSum() + $this->costOfLaborSum();
+        $grossProfit = $this->revenue() - $cogsTotal;
+        $netOperatingIncome = $grossProfit - $this->generalExpenses();
+
+        $html = view('pdf.profit-and-loss', [
+            'companyName' => $companyName,
+            'dateRange' => $dateRange,
+            'basisLabel' => $this->basis === 'cash' ? 'Cash' : 'Accrual',
+            'revenue' => $this->revenue(),
+            'materialsVendors' => $this->costOfMaterialsVendors(),
+            'materialsTotal' => $this->costOfMaterialsSum(),
+            'laborVendors' => $this->costOfLaborVendors(),
+            'laborTotal' => $this->costOfLaborSum(),
+            'cogsTotal' => $cogsTotal,
+            'grossProfit' => $grossProfit,
+            'expenseCategories' => $this->sortedExpenseCategories(),
+            'expensesTotal' => $this->generalExpenses(),
+            'netOperatingIncome' => $netOperatingIncome,
+            'netIncome' => $netOperatingIncome,
+        ])->render();
+
+        $browsershot = Browsershot::html($html)
+            ->newHeadless()
+            ->addChromiumArguments([
+                'no-sandbox',
+                'disable-setuid-sandbox',
+                'disable-dev-shm-usage',
+                'disable-gpu',
+                'single-process',
+            ])
+            ->timeout(60)
+            ->showBackground()
+            ->format('Letter')
+            ->margins(10, 10, 10, 10);
+
+        if ($chromePath = env('CHROME_PATH')) {
+            $browsershot->setChromePath($chromePath);
+        }
+
+        $binary = $browsershot->pdf();
+
+        $filename = 'GS Construction and Remodeling - profit-and-loss-' . date('Y-m-d', strtotime($this->start_date)) . '-to-' .
+                    date('Y-m-d', strtotime($this->end_date)) . '.pdf';
+
+        return response()->streamDownload(function () use ($binary) {
+            echo $binary;
+        }, $filename, [
+            'Content-Type' => 'application/pdf',
         ]);
     }
 

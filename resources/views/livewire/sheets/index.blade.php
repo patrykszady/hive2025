@@ -2,7 +2,7 @@
     <x-details.card title="Sheet Filters" :accordion="false">
         <x-slot name="details">
             <form id="sheets-form" wire:submit="run">
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 items-end gap-4">
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 items-end gap-4">
                     {{-- START DATE --}}
                     <div class="col-span-1 sm:col-span-1 lg:col-span-1 min-w-0" wire:key="sheets-start-date">
                         <flux:input
@@ -26,6 +26,14 @@
                         <flux:radio.group wire:model="cash" label="Cash" variant="segmented" class="w-full">
                             <flux:radio value="include" label="Include" />
                             <flux:radio value="hide" label="Hide" />
+                        </flux:radio.group>
+                    </div>
+
+                    {{-- BASIS --}}
+                    <div class="col-span-1 sm:col-span-1 lg:col-span-1 min-w-0">
+                        <flux:radio.group wire:model="basis" label="Basis" variant="segmented" class="w-full">
+                            <flux:radio value="accrual" label="Accrual" />
+                            <flux:radio value="cash" label="Cash" />
                         </flux:radio.group>
                     </div>
 

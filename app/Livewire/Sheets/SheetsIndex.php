@@ -18,6 +18,7 @@ class SheetsIndex extends Component
     public $start_date = '2024-01-01';
     public $end_date = '2024-12-31';
     public $cash = 'include';
+    public $basis = 'accrual';
 
     public $banks = []; // Keep track of selected banks
     protected function rules()
@@ -111,6 +112,7 @@ class SheetsIndex extends Component
             'start_date' => $this->start_date,
             'end_date' => $this->end_date,
             'cash' => $this->cash,
+            'basis' => $this->basis,
         ]);
 
         // $this->dispatch('sheet_info')->to(SheetShow::class);

@@ -219,10 +219,11 @@ Schedule::command('scout:sync-index-settings')
     ->withoutOverlapping()
     ->onOneServer();
 
-// Menards receipt scraping — 4× daily
+// Menards receipt scraping — 4× daily (2-day lookback to catch delayed postings)
 $menardsLogPath = storage_path('logs/menards-scraper.log');
+$menardsSince = now()->subDays(2)->format('Y-m-d');
 foreach (['08:05', '12:05', '16:05', '20:05'] as $time) {
-    Schedule::command('menards:scrape-receipts --match-expenses --force')->runInBackground()
+    Schedule::command("menards:scrape-receipts --match-expenses --force --since={$menardsSince}")->runInBackground()
         ->dailyAt($time)
         ->timezone('America/Chicago')
         ->name("menards-scrape-{$time}")
