@@ -85,6 +85,16 @@ class FixGroupMmsThread extends Command
 
         $this->info("Moved {$moved} message(s) to thread #{$thread->id}.");
 
+        // Update last_activity_at so the thread appears in the sidebar.
+        $latestMessage = SmsMessage::where('thread_id', $thread->id)
+            ->orderByDesc('created_at')
+            ->first();
+
+        if ($latestMessage) {
+            $thread->update(['last_activity_at' => $latestMessage->created_at]);
+            $this->info("Set last_activity_at to {$latestMessage->created_at}.");
+        }
+
         return self::SUCCESS;
     }
 }
