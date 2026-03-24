@@ -150,7 +150,7 @@ class SmsMessage extends Model
      */
     public const REACTION_KEYWORDS = [
         '👍' => [
-            'liked', 'like', "j'aime", 'aime',
+            'liked', 'like', "j'aime", 'aime', 'aimé',
             'gustó', 'gusta',                        // Spanish
             'gefällt', 'daumen hoch',                 // German
             'curtiu', 'gostou',                       // Portuguese
@@ -170,7 +170,7 @@ class SmsMessage extends Model
             'beğen',                                  // Turkish
         ],
         '❤️' => [
-            'loved', 'love', 'cœur', 'coeur',
+            'loved', 'love', 'cœur', 'coeur', 'adoré',
             'encantó',                                // Spanish
             'herz',                                   // German
             'amou', 'adorou',                         // Portuguese
@@ -208,6 +208,7 @@ class SmsMessage extends Model
         ],
         '‼️' => [
             'emphasized', 'emphasis',
+            'exclamation',                            // French
             'enfatiz',                                // Spanish/Italian
             'betont',                                 // German
             'выделил',                                // Russian

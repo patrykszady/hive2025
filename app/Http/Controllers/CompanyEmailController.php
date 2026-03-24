@@ -12,7 +12,6 @@ use App\Models\TransactionBulkMatch;
 use App\Models\Vendor;
 
 use App\Services\NylasService;
-use App\Services\AzureDocumentService;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -29,15 +28,10 @@ use App\Support\ApiErrorFormatter;
 class CompanyEmailController extends Controller
 {
     private $nylasService;
-    protected $azureDocumentService;
 
-    /**
-     * Inject the NylasService into the controller.
-     */
-    public function __construct(NylasService $nylasService, AzureDocumentService $azureDocumentService)
+    public function __construct(NylasService $nylasService)
     {
         $this->nylasService = $nylasService;
-        $this->azureDocumentService = $azureDocumentService;
     }
 
     /**
