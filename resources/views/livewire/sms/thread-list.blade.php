@@ -75,6 +75,8 @@
                     <p class="text-base lg:text-sm font-medium truncate text-zinc-900 dark:text-zinc-100">
                         @if ($isClientUser)
                             GS Construciton
+                        @elseif ($thread->name)
+                            {{ $thread->name }}
                         @elseif ($thread->client)
                             {{ $thread->client->name }}
                         @elseif ($thread->project)
@@ -100,9 +102,9 @@
                                 $previewPrefix = $sender ? $sender . ':' : null;
                             }
 
-                            // For tapback reactions, show clean "Liked" / "Loved" etc. instead of full quoted text
+                            // For tapback reactions, show clean emoji only
                             if ($tapback) {
-                                $previewText = ($tapback['emoji'] ? $tapback['emoji'] . ' ' : '') . $tapback['reaction'];
+                                $previewText = $tapback['emoji'] ?? $tapback['reaction'];
                             }
                         @endphp
                         <p class="text-sm lg:text-xs text-zinc-400 dark:text-zinc-500 truncate mt-0.5">

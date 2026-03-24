@@ -682,19 +682,23 @@ class SmsConversation extends Component
             }
 
             $quotedNormalized = mb_strtolower(trim($tapback['quoted']));
-            $matched = $allMessages->first(function ($candidate) use ($quotedNormalized, $msg) {
-                if ($candidate->id === $msg->id) {
-                    return false;
-                }
-                $candidateText = $candidate->display_text;
-                if (! $candidateText) {
-                    return false;
-                }
-                $candidateNormalized = mb_strtolower(trim($candidateText));
+            $quotedLen = mb_strlen($quotedNormalized);
+            $matched = $allMessages
+                ->filter(function ($candidate) use ($quotedNormalized, $msg) {
+                    if ($candidate->id === $msg->id) {
+                        return false;
+                    }
+                    $candidateText = $candidate->display_text;
+                    if (! $candidateText) {
+                        return false;
+                    }
+                    $candidateNormalized = mb_strtolower(trim($candidateText));
 
-                return str_contains($candidateNormalized, $quotedNormalized)
-                    || str_contains($quotedNormalized, $candidateNormalized);
-            });
+                    return str_contains($candidateNormalized, $quotedNormalized)
+                        || str_contains($quotedNormalized, $candidateNormalized);
+                })
+                ->sortBy(fn ($c) => abs(mb_strlen(mb_strtolower(trim($c->display_text))) - $quotedLen))
+                ->first();
 
             // Generic (strict) tapbacks are only processed when the quoted text
             // actually matches a message in the thread — avoids hiding normal messages.

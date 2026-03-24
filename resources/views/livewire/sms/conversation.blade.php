@@ -61,7 +61,9 @@
         {{-- Header --}}
         @php
             $headerTitle = 'Group Message';
-            if ($this->thread->client) {
+            if ($this->thread->name) {
+                $headerTitle = $this->thread->name;
+            } elseif ($this->thread->client) {
                 $headerTitle = $this->thread->client->name;
             } elseif ($this->thread->project) {
                 $headerTitle = $this->thread->project->address;
@@ -93,7 +95,18 @@
                     wire:click="$parent.clearThread()"
                     aria-label="Back to conversations"
                 ></flux:button>
-                @if ($this->thread->client)
+                @if (! empty($this->thread->name_data))
+                    <flux:heading size="lg" class="mb-0 flex-1">
+                        @foreach ($this->thread->name_data as $i => $part)
+                            @if ($i > 0)<span class="text-zinc-400">,</span> @endif
+                            @if (! empty($part['client_id']))
+                                <a href="{{ route('clients.show', $part['client_id']) }}" wire:navigate.hover class="hover:underline">{{ $part['label'] }}</a>
+                            @else
+                                {{ $part['label'] }}
+                            @endif
+                        @endforeach
+                    </flux:heading>
+                @elseif ($this->thread->client)
                     <flux:heading size="lg" class="mb-0 truncate flex-1">
                         <a href="{{ route('clients.show', $this->thread->client_id) }}" wire:navigate.hover class="hover:underline">{{ $headerTitle }}</a>
                     </flux:heading>
@@ -131,13 +144,17 @@
                 @php
                     $callableContacts = collect();
                     $ownTelnyxNumber = config('services.telnyx.from');
+                    $seenE164 = [];
 
+                    // Collect users from the thread's primary client
                     if ($this->thread->client && $this->thread->client->users->isNotEmpty()) {
                         foreach ($this->thread->client->users as $user) {
                             $raw = $user->getRawOriginal('cell_phone');
                             if (! $raw) continue;
                             $e164 = $user->routeNotificationForTelnyx();
                             if ($e164 === $ownTelnyxNumber) continue;
+                            if (isset($seenE164[$e164])) continue;
+                            $seenE164[$e164] = true;
                             $digits = preg_replace('/[^0-9]/', '', $raw);
                             if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
                                 $digits = substr($digits, 1);
@@ -151,7 +168,44 @@
                                 'display' => $display,
                             ]);
                         }
-                    } else {
+                    }
+
+                    // Also pull users from additional clients listed in name_data
+                    if (! empty($this->thread->name_data)) {
+                        $extraClientIds = collect($this->thread->name_data)
+                            ->pluck('client_id')
+                            ->filter()
+                            ->reject(fn ($id) => $id == $this->thread->client_id)
+                            ->unique();
+
+                        foreach ($extraClientIds as $clientId) {
+                            $extraClient = \App\Models\Client::with('users')->find($clientId);
+                            if (! $extraClient) continue;
+                            foreach ($extraClient->users as $user) {
+                                $raw = $user->getRawOriginal('cell_phone');
+                                if (! $raw) continue;
+                                $e164 = $user->routeNotificationForTelnyx();
+                                if ($e164 === $ownTelnyxNumber) continue;
+                                if (isset($seenE164[$e164])) continue;
+                                $seenE164[$e164] = true;
+                                $digits = preg_replace('/[^0-9]/', '', $raw);
+                                if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+                                    $digits = substr($digits, 1);
+                                }
+                                $display = strlen($digits) === 10
+                                    ? '(' . substr($digits, 0, 3) . ') ' . substr($digits, 3, 3) . '-' . substr($digits, 6)
+                                    : $raw;
+                                $callableContacts->push([
+                                    'name' => $user->first_name,
+                                    'e164' => $e164,
+                                    'display' => $display,
+                                ]);
+                            }
+                        }
+                    }
+
+                    // Fallback: if still no contacts, use raw participants
+                    if ($callableContacts->isEmpty()) {
                         $participants = $this->thread->participants ?? [];
                         foreach ($participants as $phone) {
                             if ($phone === $ownTelnyxNumber) continue;

@@ -10,6 +10,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class SmsGroupThread extends Model
 {
     protected $fillable = [
+        'name',
+        'name_data',
         'from_number',
         'participants',
         'project_id',
@@ -24,6 +26,7 @@ class SmsGroupThread extends Model
     {
         return [
             'participants' => 'array',
+            'name_data' => 'array',
             'last_activity_at' => 'datetime',
             'opt_in_prompt_sent_at' => 'datetime',
             'welcome_sent_at' => 'datetime',
@@ -153,6 +156,31 @@ class SmsGroupThread extends Model
     {
         return static::where('from_number', $fromNumber)
             ->whereJsonContains('participants', $participantPhone)
+            ->orderByDesc('last_activity_at')
+            ->first();
+    }
+
+    /**
+     * Find a thread whose participants match the given set exactly.
+     *
+     * Used for multi-party group MMS where the full participant list
+     * (all external phones) is known from the Telnyx all_to + sender.
+     *
+     * @param  array<string>  $participantPhones  E.164 phones (excluding our number)
+     */
+    public static function findByParticipantGroup(string $fromNumber, array $participantPhones): ?self
+    {
+        $sorted = collect($participantPhones)->sort()->values()->all();
+
+        $query = static::where('from_number', $fromNumber);
+
+        // Every participant must be present
+        foreach ($sorted as $phone) {
+            $query->whereJsonContains('participants', $phone);
+        }
+
+        // And the count must match (no extra participants)
+        return $query->whereJsonLength('participants', count($sorted))
             ->orderByDesc('last_activity_at')
             ->first();
     }

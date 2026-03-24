@@ -2211,10 +2211,31 @@ class TelnyxWebhookController extends Controller
             ]);
         }
 
+        // Build the full set of external participants for group MMS detection.
+        // allTo includes our number + other external recipients; add the sender too.
+        $externalPhones = collect($allTo)
+            ->reject(fn ($phone) => $phone === $ourNumber)
+            ->push($from)
+            ->map(fn ($p) => GroupSmsService::formatE164($p))
+            ->unique()
+            ->sort()
+            ->values()
+            ->all();
+
+        $isGroupMms = count($externalPhones) > 1;
+
         // Find the group thread this message belongs to
         $thread = null;
         if ($from && $to) {
-            $thread = SmsGroupThread::findByParticipant($to, $from);
+            if ($isGroupMms) {
+                // For multi-party group MMS, match by exact participant set.
+                // Do NOT fall back to 1:1 threads — a new group thread will be
+                // created below if none exists.
+                $thread = SmsGroupThread::findByParticipantGroup($to, $externalPhones);
+            } else {
+                // Single-participant lookup for 1:1 threads
+                $thread = SmsGroupThread::findByParticipant($to, $from);
+            }
 
             // In dev, outbound SMS is redirected to TELNYX_DEV_TO so replies come
             // from that number instead of the real participant. Fall back to the
@@ -2294,7 +2315,9 @@ class TelnyxWebhookController extends Controller
             }
         } else {
             // Auto-create a new thread for this inbound message
-            $thread = $this->createThreadForInboundMessage($from, $to);
+            $thread = $isGroupMms
+                ? $this->createThreadForInboundGroupMessage($externalPhones, $to)
+                : $this->createThreadForInboundMessage($from, $to);
 
             if ($thread) {
                 $message->update(['thread_id' => $thread->id]);
@@ -2343,6 +2366,46 @@ class TelnyxWebhookController extends Controller
         Log::channel('telnyx')->info('Auto-created new thread for inbound message', [
             'thread_id' => $thread->id,
             'from' => $senderPhone,
+            'to' => $ourNumber,
+            'client_id' => $clientId,
+        ]);
+
+        return $thread;
+    }
+
+    /**
+     * Create a new thread for a multi-party group MMS.
+     *
+     * @param  array<string>  $participantPhones  All external E.164 phones
+     */
+    protected function createThreadForInboundGroupMessage(array $participantPhones, string $ourNumber): ?SmsGroupThread
+    {
+        // Try to resolve a client from any of the participant phones
+        $clientId = null;
+        foreach ($participantPhones as $phone) {
+            $clientId = $this->resolveClientIdByPhone($phone);
+            if ($clientId) {
+                break;
+            }
+        }
+
+        $thread = SmsGroupThread::create([
+            'from_number' => $ourNumber,
+            'participants' => array_values($participantPhones),
+            'client_id' => $clientId,
+            'last_activity_at' => now(),
+        ]);
+
+        foreach ($participantPhones as $phone) {
+            SmsThreadParticipant::create([
+                'thread_id' => $thread->id,
+                'phone_number' => $phone,
+            ]);
+        }
+
+        Log::channel('telnyx')->info('Auto-created new group thread for inbound MMS', [
+            'thread_id' => $thread->id,
+            'participants' => $participantPhones,
             'to' => $ourNumber,
             'client_id' => $clientId,
         ]);
