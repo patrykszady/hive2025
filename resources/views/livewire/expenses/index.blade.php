@@ -60,6 +60,9 @@
                                     label="Date Range"
                                 />
                             </div>
+                            <div class="min-w-0 w-full">
+                                <flux:input wire:model.live.debounce.400ms="receipt_search" label="Receipt Items" icon="magnifying-glass" placeholder="Search items, SKU, barcode..." clearable />
+                            </div>
                             @can('create', App\Models\Expense::class)
                                 @if($amount && $view == NULL)
                                     <flux:button wire:click="$dispatchTo('expenses.expense-create', 'newExpense', { amount: {{$amount}}})">Add New Expense</flux:button>
@@ -138,6 +141,12 @@
                         placeholder="All time"
                         label="Date Range"
                     />
+                </div>
+            </div>
+
+            <div class="flex flex-col sm:flex-row items-end gap-4 mt-4">
+                <div class="flex-1 min-w-0 w-full sm:max-w-xs">
+                    <flux:input wire:model.live.debounce.400ms="receipt_search" label="Receipt Items" icon="magnifying-glass" placeholder="Search items, SKU, barcode..." clearable />
                 </div>
             </div>
         </x-island-card>
@@ -283,6 +292,45 @@
                                         <flux:badge size="sm" variant="outline" color="gray">Split</flux:badge>
                                     </flux:table.cell>
                                 </flux:table.row>
+                            @endforeach
+                        @endif
+
+                        {{-- Show matched receipt items when receipt search is active --}}
+                        @if($receipt_search && isset($matchedReceiptItems[$expense->id]))
+                            @foreach($matchedReceiptItems[$expense->id] as $receiptItem)
+                                @php
+                                    $descs = explode(' | ', $receiptItem['descriptions']);
+                                    $codes = explode(' ', $receiptItem['product_codes']);
+                                @endphp
+                                @foreach($descs as $di => $desc)
+                                    @php
+                                        $code = $codes[$di] ?? '';
+                                        $descMatches = str_contains($desc, '<mark>');
+                                        $codeMatches = $code && str_contains($code, '<mark>');
+                                    @endphp
+                                    @if($descMatches || $codeMatches)
+                                        <flux:table.row :key="'receipt-' . $expense->id . '-' . $loop->parent->index . '-' . $di" class="bg-amber-50/50 dark:bg-amber-900/10 [&_td]:!py-1 !border-none">
+                                            @php
+                                                $totalCols = 2
+                                                    + (!in_array($view, ['checks.show', 'vendors.show']) ? 1 : 0)
+                                                    + ($view != 'projects.show' ? 1 : 0)
+                                                    + 1;
+                                            @endphp
+                                            <flux:table.cell :colspan="$totalCols" class="!pl-10 !pr-5 !pb-0">
+                                                <div class="truncate text-xs text-gray-600 dark:text-gray-400" title="{{ strip_tags($desc) }}">{!! strip_tags($desc, '<mark>') !!}</div>
+                                                @if($code)
+                                                    <div class="text-xs text-gray-400 dark:text-gray-500 italic" title="{{ strip_tags($code) }}">
+                                                        @if(isset($expense->vendor) && $expense->vendor->sku_search_url)
+                                                            <flux:link href="{{ $expense->vendor->sku_search_url . strip_tags($code) }}" external variant="subtle">{!! strip_tags($code, '<mark>') !!}</flux:link>
+                                                        @else
+                                                            {!! strip_tags($code, '<mark>') !!}
+                                                        @endif
+                                                    </div>
+                                                @endif
+                                            </flux:table.cell>
+                                        </flux:table.row>
+                                    @endif
+                                @endforeach
                             @endforeach
                         @endif
                     @endforeach

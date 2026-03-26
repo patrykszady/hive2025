@@ -4,6 +4,7 @@ namespace App\Livewire\Expenses;
 
 use App\Models\Distribution;
 use App\Models\Expense;
+use App\Models\ExpenseReceipts;
 use App\Models\ExpenseSplits;
 use Carbon\Carbon;
 use App\Models\Project;
@@ -38,6 +39,9 @@ class ExpenseIndex extends Component
     #[Url(except: [])]
     public $expense_statuses = [];
 
+    #[Url(except: '')]
+    public string $receipt_search = '';
+
     public ?DateRange $date_range = null;
 
     public $check = '';
@@ -54,6 +58,7 @@ class ExpenseIndex extends Component
     public string $transaction_search = '';
     public bool $transactionsReady = false;
     public array $removedTransactionIds = [];
+    public array $matchedReceiptItems = [];
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 
@@ -538,6 +543,18 @@ class ExpenseIndex extends Component
         if ($dateFilter) {
             $filterConditions[] = $dateFilter;
         }
+
+        // Apply receipt item search filter
+        $receiptExpenseIds = $this->searchReceiptItems();
+        if ($receiptExpenseIds !== null) {
+            if ($receiptExpenseIds->isEmpty()) {
+                // No matching receipts — force empty result
+                $filterConditions[] = 'id = -1';
+            } else {
+                $idList = $receiptExpenseIds->implode(', ');
+                $filterConditions[] = "id IN [{$idList}]";
+            }
+        }
         
         return $filterConditions;
     }
@@ -574,7 +591,54 @@ class ExpenseIndex extends Component
 
         return [$start->copy()->startOfDay()->timestamp, $end->copy()->endOfDay()->timestamp];
     }
-    
+
+    /**
+     * Search the receipt items Meilisearch index for matching expense IDs.
+     *
+     * @return \Illuminate\Support\Collection<int, int>|null  Collection of expense IDs, or null if no search active
+     */
+    private function searchReceiptItems(): ?\Illuminate\Support\Collection
+    {
+        $query = trim($this->receipt_search);
+        if ($query === '') {
+            $this->matchedReceiptItems = [];
+            return null;
+        }
+
+        $vendorId = (int) auth()->user()->vendor->id;
+
+        $results = ExpenseReceipts::search($query, function ($meilisearch, $searchQuery, $options) use ($vendorId) {
+            $options['filter'] = "belongs_to_vendor_id = {$vendorId}";
+            $options['limit'] = 10000;
+            $options['attributesToRetrieve'] = ['expense_id', 'descriptions', 'product_codes', 'purchase_order', 'merchant_name'];
+            $options['attributesToHighlight'] = ['descriptions', 'product_codes'];
+            $options['highlightPreTag'] = '<mark>';
+            $options['highlightPostTag'] = '</mark>';
+
+            return $meilisearch->search($searchQuery, $options);
+        })->raw();
+
+        $hits = collect($results['hits'] ?? []);
+
+        // Group matched items by expense_id for display in the view
+        $this->matchedReceiptItems = $hits
+            ->filter(fn ($hit) => ! empty($hit['expense_id']))
+            ->groupBy('expense_id')
+            ->map(fn ($group) => $group->map(fn ($hit) => [
+                'descriptions' => $hit['_formatted']['descriptions'] ?? $hit['descriptions'] ?? '',
+                'product_codes' => $hit['_formatted']['product_codes'] ?? $hit['product_codes'] ?? '',
+                'purchase_order' => $hit['purchase_order'] ?? '',
+                'merchant_name' => $hit['merchant_name'] ?? '',
+            ])->values()->all())
+            ->all();
+
+        return $hits
+            ->pluck('expense_id')
+            ->filter()
+            ->unique()
+            ->values();
+    }
+
     #[Title('Expenses')]
     public function render()
     {        

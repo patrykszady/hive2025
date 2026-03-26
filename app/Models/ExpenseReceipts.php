@@ -3,14 +3,16 @@
 namespace App\Models;
 
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Casts\Attribute;
+use Laravel\Scout\Searchable;
 
 class ExpenseReceipts extends Model
 {
-    use HasFactory;
+    use HasFactory, Searchable;
 
     protected $table = 'expense_receipts_data';
 
@@ -19,6 +21,74 @@ class ExpenseReceipts extends Model
     protected $casts = [
         'receipt_items' => 'array',
     ];
+
+    public function searchableAs(): string
+    {
+        return app()->environment('local') ? 'expense_receipts_index_dev' : 'expense_receipts_index';
+    }
+
+    public function toSearchableArray(): array
+    {
+        $items = $this->receipt_items ?? [];
+
+        $descriptions = [];
+        $productCodes = [];
+        $purchaseOrder = null;
+        $invoiceNumber = null;
+        $merchantName = null;
+
+        // Handle both flat ({purchase_order: "..."}) and nested ([{items: [...], purchase_order: "..."}]) formats
+        if (isset($items['items']) || isset($items['purchase_order'])) {
+            // Single receipt object (flat)
+            $this->extractFromReceiptObject($items, $descriptions, $productCodes, $purchaseOrder, $invoiceNumber, $merchantName);
+        } else {
+            // Array of receipt objects
+            foreach ($items as $receipt) {
+                if (is_array($receipt)) {
+                    $this->extractFromReceiptObject($receipt, $descriptions, $productCodes, $purchaseOrder, $invoiceNumber, $merchantName);
+                }
+            }
+        }
+
+        return [
+            'id' => $this->id,
+            'expense_id' => (int) $this->expense_id,
+            'belongs_to_vendor_id' => (int) ($this->expense?->belongs_to_vendor_id ?? 0),
+            'descriptions' => implode(' | ', array_filter($descriptions)),
+            'product_codes' => implode(' ', array_filter($productCodes)),
+            'purchase_order' => $purchaseOrder,
+            'invoice_number' => $invoiceNumber,
+            'merchant_name' => $merchantName,
+        ];
+    }
+
+    protected function makeAllSearchableUsing(Builder $query): Builder
+    {
+        return $query->with('expense:id,belongs_to_vendor_id');
+    }
+
+    /**
+     * @param  array<string>  $descriptions
+     * @param  array<string>  $productCodes
+     */
+    private function extractFromReceiptObject(array $receipt, array &$descriptions, array &$productCodes, ?string &$purchaseOrder, ?string &$invoiceNumber, ?string &$merchantName): void
+    {
+        $purchaseOrder ??= $receipt['purchase_order'] ?? null;
+        $invoiceNumber ??= $receipt['invoice_number'] ?? null;
+        $merchantName ??= $receipt['merchant_name'] ?? null;
+
+        foreach ($receipt['items'] ?? [] as $lineItem) {
+            if (! is_array($lineItem)) {
+                continue;
+            }
+            if (! empty($lineItem['Description'])) {
+                $descriptions[] = $lineItem['Description'];
+            }
+            if (! empty($lineItem['ProductCode'])) {
+                $productCodes[] = $lineItem['ProductCode'];
+            }
+        }
+    }
 
     public function expense(): BelongsTo
     {

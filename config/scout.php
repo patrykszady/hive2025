@@ -2,6 +2,7 @@
 
 use App\Models\Client;
 use App\Models\Expense;
+use App\Models\ExpenseReceipts;
 use App\Models\Project;
 use App\Models\Transaction;
 use App\Models\Vendor;
@@ -145,7 +146,7 @@ return [
         'index-settings' => [
             Expense::class => [
                 'filterableAttributes'=> [
-                    'vendor_id', 'project_id', 'distribution_id', 'check_id', 
+                    'id', 'vendor_id', 'project_id', 'distribution_id', 'check_id', 
                     'has_splits', 'belongs_to_vendor_id', 'expense_status',
                     'paid_by', '__soft_deleted', 'amount', 'split_project_ids', 'split_amounts',
                     'date'
@@ -202,6 +203,12 @@ return [
                     'client_user_first_names', 'client_user_last_names', 'client_user_full_names',
                     'vendor_business_name'
                 ],
+                'typoTolerance' => ['enabled' => true],
+            ],
+
+            ExpenseReceipts::class => [
+                'filterableAttributes' => ['expense_id', 'belongs_to_vendor_id'],
+                'searchableAttributes' => ['descriptions', 'product_codes', 'purchase_order', 'invoice_number', 'merchant_name'],
                 'typoTolerance' => ['enabled' => true],
             ],
         ],
