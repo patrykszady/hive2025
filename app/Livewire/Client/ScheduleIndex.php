@@ -172,7 +172,7 @@ class ScheduleIndex extends Component
 
         // Get tasks that have any date within the range
         // Don't filter by end_date >= today, as tasks earlier in the range should still appear
-        $tasks = Task::query()
+        $tasks = Task::withTrashed()
             ->whereIn('project_id', $projectIds)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
@@ -233,7 +233,7 @@ class ScheduleIndex extends Component
         $displayEnd = $endOfWeek->max($today->copy()->addDays(5));
         $displayEndStr = $displayEnd->format('Y-m-d');
 
-        $tasks = Task::query()
+        $tasks = Task::withTrashed()
             ->whereIn('project_id', $projectIds)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
@@ -301,7 +301,7 @@ class ScheduleIndex extends Component
 
         $today = $this->getToday();
 
-        return Task::query()
+        return Task::withTrashed()
             ->whereIn('project_id', $projectIds)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
@@ -336,7 +336,7 @@ class ScheduleIndex extends Component
             return collect();
         }
 
-        return Task::query()
+        return Task::withTrashed()
             ->whereIn('project_id', $projectIds)
             ->whereNull('start_date')
             ->orderBy('created_at')

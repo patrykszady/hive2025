@@ -116,14 +116,19 @@
                     @endif
                 </div>
 
-                {{-- Timestamp --}}
+                {{-- Timestamp & line indicator --}}
                 <div class="shrink-0 text-right">
-                    <p class="text-xs lg:text-[10px] text-zinc-400 dark:text-zinc-500">
-                        @php
-                            $activityAt = $thread->last_activity_at ?? $thread->created_at;
-                        @endphp
-                        {{ $activityAt->year !== now()->year ? $activityAt->format('M j, Y') : $activityAt->diffForHumans(short: true) }}
-                    </p>
+                    <div class="flex items-center justify-end gap-1">
+                        @if (count(config('services.telnyx.numbers', [])) > 1 && $thread->from_number)
+                            <span class="text-[10px] font-medium text-zinc-400 dark:text-zinc-500 bg-zinc-100 dark:bg-zinc-700 rounded px-1 py-0.5">{{ \App\Services\GroupSmsService::numberLabel($thread->from_number) }}</span>
+                        @endif
+                        <p class="text-xs lg:text-[10px] text-zinc-400 dark:text-zinc-500">
+                            @php
+                                $activityAt = $thread->last_activity_at ?? $thread->created_at;
+                            @endphp
+                            {{ $activityAt->year !== now()->year ? $activityAt->format('M j, Y') : $activityAt->diffForHumans(short: true) }}
+                        </p>
+                    </div>
                     @if (in_array($thread->id, $this->unreadThreadIds, true))
                         <div class="mt-1 flex justify-end">
                             <span class="inline-block w-2 h-2 bg-indigo-500 rounded-full"></span>

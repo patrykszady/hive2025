@@ -130,14 +130,14 @@
                                                         @if($clickable)
                                                             <flux:kanban.card
                                                                 as="button"
-                                                                class="min-w-0 w-full"
+                                                                class="min-w-0 w-full {{ $task->trashed() ? 'opacity-50' : '' }}"
                                                                 data-task-card="{{ $task->id }}"
                                                                 wire:key="unscheduled-task-{{ $task->id }}"
                                                                 wire:click="$dispatchTo('tasks.task-create', 'editTask', { task: {{ $task->id }} })"
                                                             >
                                                                 <div class="flex items-start justify-between gap-2 min-w-0">
                                                                     <div class="flex items-center gap-2 min-w-0">
-                                                                        <flux:heading size="sm" class="min-w-0 truncate {{ $taskTypeTextClasses }}">
+                                                                        <flux:heading size="sm" class="min-w-0 truncate {{ $taskTypeTextClasses }} {{ $task->trashed() ? 'line-through' : '' }}">
                                                                             {{ $task->title }}
                                                                         </flux:heading>
                                                                     </div>
@@ -153,13 +153,13 @@
                                                             </flux:kanban.card>
                                                         @else
                                                             <flux:kanban.card
-                                                                class="min-w-0 w-full transition hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:shadow-sm hover:border-zinc-300 dark:hover:border-zinc-600"
+                                                                class="min-w-0 w-full transition hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:shadow-sm hover:border-zinc-300 dark:hover:border-zinc-600 {{ $task->trashed() ? 'opacity-50' : '' }}"
                                                                 data-task-card="{{ $task->id }}"
                                                                 wire:key="unscheduled-task-{{ $task->id }}"
                                                             >
                                                                 <div class="flex items-start justify-between gap-2 min-w-0">
                                                                     <div class="flex items-center gap-2 min-w-0">
-                                                                        <flux:heading size="sm" class="min-w-0 truncate {{ $taskTypeTextClasses }}">
+                                                                        <flux:heading size="sm" class="min-w-0 truncate {{ $taskTypeTextClasses }} {{ $task->trashed() ? 'line-through' : '' }}">
                                                                             {{ $task->title }}
                                                                         </flux:heading>
                                                                     </div>
@@ -189,14 +189,14 @@
                                         @if($clickable)
                                             <flux:kanban.card
                                                 as="button"
-                                                class="min-w-0 w-full"
+                                                class="min-w-0 w-full {{ $task->trashed() ? 'opacity-50' : '' }}"
                                                 data-task-card="{{ $task->id }}"
                                                 wire:key="unscheduled-task-{{ $task->id }}"
                                                 wire:click="$dispatchTo('tasks.task-create', 'editTask', { task: {{ $task->id }} })"
                                             >
                                                 <div class="flex items-start justify-between gap-2 min-w-0">
                                                     <div class="flex items-center gap-2 min-w-0">
-                                                        <flux:heading size="sm" class="min-w-0 truncate {{ $taskTypeTextClasses }}">
+                                                        <flux:heading size="sm" class="min-w-0 truncate {{ $taskTypeTextClasses }} {{ $task->trashed() ? 'line-through' : '' }}">
                                                             {{ $task->title }}
                                                         </flux:heading>
                                                     </div>
@@ -212,13 +212,13 @@
                                             </flux:kanban.card>
                                         @else
                                             <flux:kanban.card
-                                                class="min-w-0 w-full transition hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:shadow-sm hover:border-zinc-300 dark:hover:border-zinc-600"
+                                                class="min-w-0 w-full transition hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:shadow-sm hover:border-zinc-300 dark:hover:border-zinc-600 {{ $task->trashed() ? 'opacity-50' : '' }}"
                                                 data-task-card="{{ $task->id }}"
                                                 wire:key="unscheduled-task-{{ $task->id }}"
                                             >
                                                 <div class="flex items-start justify-between gap-2 min-w-0">
                                                     <div class="flex items-center gap-2 min-w-0">
-                                                        <flux:heading size="sm" class="min-w-0 truncate {{ $taskTypeTextClasses }}">
+                                                        <flux:heading size="sm" class="min-w-0 truncate {{ $taskTypeTextClasses }} {{ $task->trashed() ? 'line-through' : '' }}">
                                                             {{ $task->title }}
                                                         </flux:heading>
                                                     </div>

@@ -76,7 +76,7 @@ class UpcomingTasks extends Component
         $cutoffStr = $cutoff->format('Y-m-d');
         $windowEndStr = $windowEnd->format('Y-m-d');
 
-        $tasks = Task::query()
+        $tasks = Task::withTrashed()
             ->where('project_id', $this->project->id)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
@@ -176,7 +176,7 @@ class UpcomingTasks extends Component
         $windowEndStr = $windowEnd->format('Y-m-d');
 
         // Get all tasks for this project beyond the displayed window
-        $tasks = Task::query()
+        $tasks = Task::withTrashed()
             ->where('project_id', $this->project->id)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
@@ -240,7 +240,7 @@ class UpcomingTasks extends Component
         $cutoff = $today->copy()->subDay();
         $windowEnd = $today->copy()->addDays(4);
 
-        return Task::query()
+        return Task::withTrashed()
             ->where('project_id', $this->project->id)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
@@ -257,7 +257,7 @@ class UpcomingTasks extends Component
     #[Computed]
     public function unscheduledTasks(): Collection
     {
-        return Task::query()
+        return Task::withTrashed()
             ->where('project_id', $this->project->id)
             ->whereNull('start_date')
             ->with('vendor')

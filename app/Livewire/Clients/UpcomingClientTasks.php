@@ -73,7 +73,7 @@ class UpcomingClientTasks extends Component
             return collect();
         }
 
-        $tasks = Task::query()
+        $tasks = Task::withTrashed()
             ->whereIn('project_id', $projectIds)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
@@ -174,7 +174,7 @@ class UpcomingClientTasks extends Component
             return null;
         }
 
-        $tasks = Task::query()
+        $tasks = Task::withTrashed()
             ->whereIn('project_id', $projectIds)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
@@ -241,7 +241,7 @@ class UpcomingClientTasks extends Component
             return 0;
         }
 
-        return Task::query()
+        return Task::withTrashed()
             ->whereIn('project_id', $projectIds)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
@@ -264,7 +264,7 @@ class UpcomingClientTasks extends Component
             return collect();
         }
 
-        return Task::query()
+        return Task::withTrashed()
             ->whereIn('project_id', $projectIds)
             ->whereNull('start_date')
             ->with(['vendor', 'project.client', 'project.latestStatus'])

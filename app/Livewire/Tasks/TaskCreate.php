@@ -678,8 +678,10 @@ class TaskCreate extends Component
         $this->modal('task_create_form_modal')->show();
     }
 
-    public function editTask(Task $task)
+    public function editTask(int $task)
     {
+        $task = Task::withTrashed()->findOrFail($task);
+
         $this->handleTaskOperation('start', $task);
         $this->resetFormFields();
         $this->setupViewText('edit');

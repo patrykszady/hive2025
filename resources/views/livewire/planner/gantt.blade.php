@@ -104,6 +104,7 @@
                                                         wire:loading.class="opacity-50 pointer-events-none"
                                                         wire:loading.attr="disabled"
                                                         wire:target="editTask({{ $unscheduledTask->id }})"
+                                                        class="{{ $unscheduledTask->trashed() ? 'opacity-50 line-through' : '' }}"
                                                     >
                                                         {{ $unscheduledTask->title }}
                                                     </flux:badge>
@@ -171,7 +172,8 @@
                                         text-md flex items-center shadow select-none overflow-visible transition-all duration-200
                                         {{ $isTruncatedLeft ? 'border-r border-t border-b rounded-r' : '' }}
                                         {{ !$isTruncatedLeft && $taskEndDate->isAfter($this->days->last()) ? 'border-l border-t border-b rounded-l' : '' }}
-                                        {{ !$isTruncatedLeft && !$taskEndDate->isAfter($this->days->last()) ? 'border rounded' : '' }}"
+                                        {{ !$isTruncatedLeft && !$taskEndDate->isAfter($this->days->last()) ? 'border rounded' : '' }}
+                                        {{ $task->trashed() ? 'opacity-50' : '' }}"
                                     {{-- @php $leftBorderPx = $isTruncatedLeft ? 0 : 0; @endphp --}}
                                     style="left: {{ $leftPosition + 2 }}px; width: {{ $barWidth - 4 }}px; --bar-left: {{ $leftPosition + 2 }}px; --bar-grid-left: {{ $leftPosition }}px; --left-border: 0px;"
                                     data-task-id="{{ $task->id }}"
@@ -392,7 +394,7 @@
                                                     <div class="flex flex-col flex-1 min-w-0">
                                                         <div class="min-w-0">
                                                             <flux:heading
-                                                                class="leading-tight min-w-0 whitespace-nowrap"
+                                                                class="leading-tight min-w-0 whitespace-nowrap {{ $task->trashed() ? 'line-through' : '' }}"
                                                                 title="{{ $task->title }}"
                                                                 x-bind:class="{ 'text-right': shouldStickRight }"
                                                                 x-bind:style="shouldStickRight ? 'direction: rtl; text-align: right;' : ''"

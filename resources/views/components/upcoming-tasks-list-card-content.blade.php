@@ -16,6 +16,16 @@
         $arrivalTimeLabel = $dayFormat ? $task->getArrivalTimeLabel($dayFormat) : null;
     }
 
+    // Previous arrival time — auto-compute if not explicitly passed
+    if (! isset($previousArrivalTimeLabel)) {
+        if (! isset($dayFormat)) {
+            $dayFormat = isset($date)
+                ? ($date instanceof \Carbon\Carbon ? $date->format('Y-m-d') : $date)
+                : null;
+        }
+        $previousArrivalTimeLabel = $dayFormat ? $task->getPreviousArrivalTimeLabel($dayFormat) : null;
+    }
+
     // Day counter — compute from task options if not pre-set
     if (! isset($showDayCounter)) {
         $selectedDates = data_get($task->options, 'dates', []);
@@ -37,15 +47,15 @@
 
 <div class="flex items-start justify-between gap-2 min-w-0">
     <div class="{{ ($isWeekend ?? false) ? 'min-w-0' : 'flex items-baseline gap-2 min-w-0' }}">
-        <flux:heading size="sm" class="min-w-0 truncate {{ $taskTypeTextClasses }}">
+        <flux:heading size="sm" class="min-w-0 truncate {{ $taskTypeTextClasses }} {{ $task->trashed() ? 'line-through' : '' }}">
             {{ $task->title }}
         </flux:heading>
         @if ($arrivalTimeLabel)
             <span class="shrink-0 text-xs whitespace-nowrap">
+                <span class="text-zinc-500 dark:text-zinc-400">{{ $arrivalTimeLabel }}</span>
                 @if ($previousArrivalTimeLabel ?? null)
                     <span class="line-through text-zinc-400 dark:text-zinc-500">{{ $previousArrivalTimeLabel }}</span>
                 @endif
-                <span class="text-zinc-500 dark:text-zinc-400">{{ $arrivalTimeLabel }}</span>
             </span>
         @endif
     </div>

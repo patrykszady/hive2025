@@ -131,8 +131,7 @@ class TelnyxWebhookController extends Controller
         // Telnyx creates a phantom "incoming" leg (from == our number). Also ignore
         // any incoming call that originates from our own number to prevent loops.
         $incomingFrom = $payload['from'] ?? null;
-        $telnyxFrom = config('services.telnyx.from');
-        if ($incomingFrom && $telnyxFrom && $incomingFrom === $telnyxFrom) {
+        if ($incomingFrom && GroupSmsService::isOurNumber($incomingFrom)) {
             Log::channel('telnyx')->info('Ignoring loopback/self-call — "from" is our own number', [
                 'call_control_id' => $callControlId,
                 'from' => $incomingFrom,
@@ -670,8 +669,9 @@ class TelnyxWebhookController extends Controller
     // joinCallerToConference removed — using bridge mode instead of conferences.
 
     /**
-     * Handle an admin answering the simultaneous ring — play connect message then bridge.
-     * First admin to answer gets bridged with the incoming caller; other legs are hung up.
+     * Handle an admin answering the simultaneous ring.
+     * AMD is enabled on admin ring legs, so we defer bridging until AMD confirms human.
+     * Store the answered admin info in cache so handleAmdEnded can bridge.
      */
     protected function handleAdminRingAnswered(string $callControlId, array $clientState): JsonResponse
     {
@@ -691,8 +691,37 @@ class TelnyxWebhookController extends Controller
 
         $adminUser = $adminUserId ? User::find($adminUserId) : null;
 
-        Log::channel('telnyx')->info('Admin answered — bridging with caller immediately', [
+        Log::channel('telnyx')->info('Admin answered — waiting for AMD result before bridging', [
             'admin_call_control_id' => $callControlId,
+            'incoming_call_control_id' => $incomingCallControlId,
+            'admin_user_id' => $adminUserId,
+            'admin_name' => $adminUser?->full_name,
+        ]);
+
+        // Store answered admin info in cache so AMD handler can bridge after confirming human
+        Cache::put("telnyx_admin_answered:{$callControlId}", [
+            'call_log_id' => $callLogId,
+            'incoming_call_control_id' => $incomingCallControlId,
+            'admin_user_id' => $adminUserId,
+        ], now()->addMinutes(5));
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Bridge an admin with the incoming caller after AMD confirms human.
+     */
+    protected function bridgeAdminWithCaller(string $adminCallControlId, int $callLogId, string $incomingCallControlId, ?int $adminUserId): void
+    {
+        $callLog = CallLog::find($callLogId);
+        if (! $callLog) {
+            return;
+        }
+
+        $adminUser = $adminUserId ? User::find($adminUserId) : null;
+
+        Log::channel('telnyx')->info('AMD confirmed human — bridging admin with caller', [
+            'admin_call_control_id' => $adminCallControlId,
             'incoming_call_control_id' => $incomingCallControlId,
             'admin_user_id' => $adminUserId,
             'admin_name' => $adminUser?->full_name,
@@ -710,13 +739,14 @@ class TelnyxWebhookController extends Controller
             'metadata' => $metadata,
         ]);
 
-        // Bridge admin with the incoming caller immediately (no TTS)
-        $this->bridgeCalls($callControlId, $incomingCallControlId);
+        // Stop any active TTS/ringback on the caller's leg before bridging
+        $this->sendCallCommand($incomingCallControlId, 'playback_stop');
+
+        // Bridge admin with the incoming caller
+        $this->bridgeCalls($adminCallControlId, $incomingCallControlId);
 
         // Hang up other ringing admin legs
-        $this->hangupOtherAdminLegs($callLogId, $callControlId);
-
-        return response()->json(['status' => 'ok']);
+        $this->hangupOtherAdminLegs($callLogId, $adminCallControlId);
     }
 
     /**
@@ -1068,12 +1098,20 @@ class TelnyxWebhookController extends Controller
             $metadata = $callLog ? ($callLog->fresh()->metadata ?? []) : [];
             $allAdminsFailed = ($metadata['all_admins_failed'] ?? false);
 
+            $adminAlreadyJoined = ! empty($metadata['joined_admin_ids'] ?? []);
+
             if ($allAdminsFailed) {
                 Log::channel('telnyx')->info('TTS completed but all admins already failed — triggering voicemail', [
                     'call_control_id' => $callControlId,
                     'call_log_id' => $callLogId,
                 ]);
                 $this->triggerVoicemail($callControlId, $callLogId);
+            } elseif ($adminAlreadyJoined) {
+                // Admin answered and bridged during TTS — don't play ringback
+                Log::channel('telnyx')->info('TTS completed but admin already bridged — skipping ringback', [
+                    'call_control_id' => $callControlId,
+                    'call_log_id' => $callLogId,
+                ]);
             } else {
                 Log::channel('telnyx')->info('TTS completed — playing ringback while waiting for admin', [
                     'call_control_id' => $callControlId,
@@ -1240,8 +1278,8 @@ class TelnyxWebhookController extends Controller
 
     /**
      * Handle answering machine detection result.
-     * If a machine/voicemail is detected on an admin ring leg, hang it up
-     * so the caller doesn't get bridged to the admin's carrier voicemail.
+     * If a machine/voicemail is detected on an admin ring leg, hang it up.
+     * If a human is detected, proceed with bridging the admin to the caller.
      */
     protected function handleAmdEnded(array $data): JsonResponse
     {
@@ -1263,28 +1301,46 @@ class TelnyxWebhookController extends Controller
         ]);
 
         $isMachine = in_array($result, ['machine', 'machine_start', 'machine_end_beep', 'machine_end_silence', 'machine_end_other'], true);
+        $isHuman = in_array($result, ['human', 'human_residence', 'human_business'], true);
 
-        // If this is an admin ring leg and AMD detected a machine, hang it up
-        // BUT only if the call hasn't been bridged yet (otherwise hanging up kills both sides).
-        if ($action === 'admin_ring' && $isMachine) {
-            $callLogId = $clientState['call_log_id'] ?? null;
-            $callLog = $callLogId ? CallLog::find($callLogId) : null;
-            $alreadyBridged = $callLog && $callLog->status === CallLog::STATUS_TRANSFERRED;
+        // ── Admin ring leg ──
+        if ($action === 'admin_ring') {
+            $cachedData = Cache::pull("telnyx_admin_answered:{$callControlId}");
 
-            if ($alreadyBridged) {
-                Log::channel('telnyx')->info('AMD detected machine on admin leg but call already bridged — ignoring', [
-                    'call_control_id' => $callControlId,
-                    'result' => $result,
-                    'call_log_id' => $callLogId,
-                ]);
-            } else {
+            if ($isMachine) {
                 Log::channel('telnyx')->info('AMD detected voicemail on admin leg — hanging up', [
                     'call_control_id' => $callControlId,
                     'result' => $result,
-                    'call_log_id' => $callLogId,
+                    'call_log_id' => $clientState['call_log_id'] ?? null,
                 ]);
                 $this->sendCallCommand($callControlId, 'hangup');
+            } elseif ($isHuman && $cachedData) {
+                // AMD confirmed human — bridge the admin with the caller
+                $callLogId = $cachedData['call_log_id'];
+                $incomingCallControlId = $cachedData['incoming_call_control_id'];
+                $adminUserId = $cachedData['admin_user_id'];
+
+                $callLog = CallLog::find($callLogId);
+                $alreadyBridged = $callLog && $callLog->status === CallLog::STATUS_TRANSFERRED;
+
+                if ($alreadyBridged) {
+                    Log::channel('telnyx')->info('AMD confirmed human but call already bridged to another admin — hanging up', [
+                        'call_control_id' => $callControlId,
+                        'call_log_id' => $callLogId,
+                    ]);
+                    $this->sendCallCommand($callControlId, 'hangup');
+                } else {
+                    $this->bridgeAdminWithCaller($callControlId, $callLogId, $incomingCallControlId, $adminUserId);
+                }
+            } elseif ($isHuman) {
+                // Human detected but no cached answer data — log and ignore
+                Log::channel('telnyx')->warning('AMD confirmed human but no cached answer data found', [
+                    'call_control_id' => $callControlId,
+                    'result' => $result,
+                ]);
             }
+
+            return response()->json(['status' => 'ok']);
         }
 
         // If this is a click-to-call target and AMD detected a machine, hang it up
@@ -1498,6 +1554,9 @@ class TelnyxWebhookController extends Controller
     {
         // Stop the ringback re-loop immediately so gather_using_speak isn't overridden
         Cache::put("telnyx_bridged:{$callControlId}", true, now()->addMinutes(10));
+
+        // Stop any active playback/ringback before starting the IVR gather
+        $this->sendCallCommand($callControlId, 'playback_stop');
 
         // Check if voicemail is enabled
         $vendor = Vendor::find(1);
@@ -2171,7 +2230,9 @@ class TelnyxWebhookController extends Controller
             ->filter()
             ->values()
             ->all();
-        $ourNumber = config('services.telnyx.from');
+        // Find which of our Telnyx numbers is in the recipient list
+        $ourNumber = collect($allTo)->first(fn ($phone) => GroupSmsService::isOurNumber($phone))
+            ?? config('services.telnyx.from');
         $to = in_array($ourNumber, $allTo) ? $ourNumber : ($allTo[0] ?? null);
 
         $text = $data['text'] ?? '';
@@ -2214,7 +2275,7 @@ class TelnyxWebhookController extends Controller
         // Build the full set of external participants for group MMS detection.
         // allTo includes our number + other external recipients; add the sender too.
         $externalPhones = collect($allTo)
-            ->reject(fn ($phone) => $phone === $ourNumber)
+            ->reject(fn ($phone) => GroupSmsService::isOurNumber($phone))
             ->push($from)
             ->map(fn ($p) => GroupSmsService::formatE164($p))
             ->unique()

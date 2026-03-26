@@ -359,7 +359,7 @@ class SmsConversation extends Component
         $from = config('services.telnyx.from');
 
         // Prevent calling our own Telnyx number (loopback)
-        if ($targetPhone === $from) {
+        if (GroupSmsService::isOurNumber($targetPhone)) {
             Log::channel('telnyx')->warning('Click-to-call blocked: target is own Telnyx number', [
                 'target_phone' => $targetPhone,
             ]);

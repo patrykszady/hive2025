@@ -166,6 +166,7 @@ class CardsIndex extends Component
             })
             ->with(['tasks' => function ($query) {
                 $taskQuery = $query
+                    ->withTrashed()
                     ->with(['vendor'])
                     ->orderByRaw('start_date is null')
                     ->orderBy('start_date');
@@ -464,7 +465,7 @@ class CardsIndex extends Component
         
         // Get all tasks for this project (unfiltered - we need ALL tasks to calculate gaps correctly)
         // The $project->tasks relationship may be filtered by vendor/user, so we query directly
-        $allTasks = \App\Models\Task::where('project_id', $project->id)->get();
+        $allTasks = \App\Models\Task::withTrashed()->where('project_id', $project->id)->get();
         
         // Collect all task dates from all tasks
         $allTaskDates = collect();

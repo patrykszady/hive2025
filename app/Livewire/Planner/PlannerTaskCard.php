@@ -47,7 +47,7 @@ class PlannerTaskCard extends Component
     #[Computed]
     public function task(): ?Task
     {
-        return Task::with('vendor')->find($this->taskId);
+        return Task::withTrashed()->with('vendor')->find($this->taskId);
     }
 
     #[Computed]
@@ -94,10 +94,6 @@ class PlannerTaskCard extends Component
     #[Computed]
     public function previousArrivalTimeLabel(): ?string
     {
-        if (! $this->isToday) {
-            return null;
-        }
-
         return $this->task?->getPreviousArrivalTimeLabel($this->dayFormat);
     }
 

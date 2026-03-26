@@ -91,27 +91,20 @@ class Task extends Model
     }
 
     /**
-     * Get the original arrival time label before today's changes.
+     * Get the previous arrival time label before the most recent change.
      *
-     * Queries the activity log for the earliest time change today
-     * and returns the old time formatted identically to getArrivalTimeLabel.
+     * Queries the activity log for the most recent time_settings change
+     * for the given date and returns the old time if it differs from current.
      */
     public function getPreviousArrivalTimeLabel(string $date): ?string
     {
-        $tz = function_exists('browser_timezone') ? browser_timezone() : config('app.timezone');
-        $todayStart = Carbon::today($tz)->utc();
-        $todayEnd = Carbon::tomorrow($tz)->utc();
-
         $activities = Activity::query()
             ->where('subject_type', self::class)
             ->where('subject_id', $this->id)
             ->where('event', 'updated')
-            ->where('created_at', '>=', $todayStart)
-            ->where('created_at', '<', $todayEnd)
-            ->oldest()
+            ->latest()
+            ->limit(50)
             ->get();
-
-        $firstOldLabel = null;
 
         foreach ($activities as $activity) {
             $oldOptions = data_get($activity->properties, 'old.options');
@@ -133,15 +126,11 @@ class Task extends Model
 
             $oldLabel = self::formatTimeSettingsLabel($oldTimeSetting);
 
-            // Capture the earliest non-null old time
-            if ($oldLabel && $firstOldLabel === null) {
-                $firstOldLabel = $oldLabel;
+            if ($oldLabel && $oldLabel !== $this->getArrivalTimeLabel($date)) {
+                return $oldLabel;
             }
-        }
 
-        // Only show if the original time differs from the current time
-        if ($firstOldLabel && $firstOldLabel !== $this->getArrivalTimeLabel($date)) {
-            return $firstOldLabel;
+            return null;
         }
 
         return null;

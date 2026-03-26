@@ -6,6 +6,7 @@ use App\Models\CallLog;
 use App\Models\SmsGroupThread;
 use App\Models\User;
 use App\Models\Vendor;
+use App\Services\GroupSmsService;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -83,15 +84,15 @@ class CallList extends Component
     #[Computed]
     public function calls(): mixed
     {
-        $telnyxFrom = config('services.telnyx.from');
+        $ourNumbers = config('services.telnyx.numbers', []);
 
         $rawCalls = CallLog::query()
             ->when($this->callFilter === 'missed', fn ($q) => $q->where('status', CallLog::STATUS_MISSED))
             ->when($this->callFilter === 'voicemail', fn ($q) => $q->where('has_voicemail', true))
-            ->when($telnyxFrom, fn ($q) => $q->where(function ($q) use ($telnyxFrom) {
-                // Exclude phantom/loopback legs where from_number is our own Telnyx number
+            ->when(! empty($ourNumbers), fn ($q) => $q->where(function ($q) use ($ourNumbers) {
+                // Exclude phantom/loopback legs where from_number is one of our own Telnyx numbers
                 $q->where('direction', '!=', 'incoming')
-                    ->orWhere('from_number', '!=', $telnyxFrom);
+                    ->orWhereNotIn('from_number', $ourNumbers);
             }))
             ->orderByDesc('created_at')
             ->limit($this->limit)
@@ -287,7 +288,7 @@ class CallList extends Component
         $from = config('services.telnyx.from');
 
         // Prevent calling our own Telnyx number (loopback)
-        if ($phone === $from) {
+        if (GroupSmsService::isOurNumber($phone)) {
             Log::channel('telnyx')->warning('Click-to-call blocked: target is own Telnyx number', [
                 'target_phone' => $phone,
             ]);

@@ -22,11 +22,10 @@
 
             // If otherNumber is our own Telnyx number (phantom leg), try finding the
             // original caller from a sibling call log in the same session.
-            $telnyxFrom = config('services.telnyx.from');
-            if ($otherNumber && $telnyxFrom && $otherNumber === $telnyxFrom && $call->call_session_id) {
+            if ($otherNumber && \App\Services\GroupSmsService::isOurNumber($otherNumber) && $call->call_session_id) {
                 $originalLeg = \App\Models\CallLog::where('call_session_id', $call->call_session_id)
                     ->where('direction', 'incoming')
-                    ->where('from_number', '!=', $telnyxFrom)
+                    ->where(fn ($q) => $q->whereNotIn('from_number', config('services.telnyx.numbers', [])))
                     ->first();
                 if ($originalLeg) {
                     $otherNumber = $originalLeg->from_number;
@@ -50,6 +49,11 @@
             if ($secondaryNumber === $displayName) {
                 $secondaryNumber = null;
             }
+
+            // Determine which of our lines this call was on
+            $callLine = $isIncoming ? $call->to_number : $call->from_number;
+            $lineLabel = \App\Services\GroupSmsService::numberLabel($callLine);
+            $showLineLabel = $lineLabel && count(config('services.telnyx.numbers', [])) > 1;
         @endphp
 
         <div
@@ -92,6 +96,10 @@
                     <div class="flex items-center gap-2">
                         @if ($secondaryNumber)
                             <span class="text-sm lg:text-xs text-zinc-400">{{ $secondaryNumber }}</span>
+                        @endif
+
+                        @if ($showLineLabel)
+                            <span class="text-[10px] font-medium text-zinc-400 dark:text-zinc-500 bg-zinc-100 dark:bg-zinc-700 rounded px-1 py-0.5">{{ $lineLabel }}</span>
                         @endif
 
                         @if ($effectiveStatus === 'blocked')

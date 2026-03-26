@@ -56,7 +56,8 @@ class GanttIndex extends Component
 
         $projects = Project::query()
         ->with(['tasks' => function ($query) use ($startDate, $endDate) {
-            $query->where('start_date', '<=', $endDate->format('Y-m-d'))
+            $query->withTrashed()
+                ->where('start_date', '<=', $endDate->format('Y-m-d'))
                 ->where('end_date', '>=', $startDate->format('Y-m-d'))
                 ->orderBy('start_date');
         }, 'latestStatus'])
@@ -88,7 +89,7 @@ class GanttIndex extends Component
         return $this->projects->map(function ($project) {
             $projectTasks = $project->tasks;
 
-            $unscheduledTasks = Task::where('project_id', $project->id)
+            $unscheduledTasks = Task::withTrashed()->where('project_id', $project->id)
                 ->where(function ($query) {
                     $query->whereNull('start_date')
                         ->orWhereNull('end_date');
@@ -124,7 +125,7 @@ class GanttIndex extends Component
             // Calculate last task date if no tasks are visible in timeline
             $lastTaskInfo = null;
             if ($allRenderedTasks->isEmpty()) {
-                $lastTask = Task::where('project_id', $project->id)
+                $lastTask = Task::withTrashed()->where('project_id', $project->id)
                     ->whereNotNull('start_date')
                     ->whereNotNull('end_date')
                     ->orderBy('end_date', 'desc')

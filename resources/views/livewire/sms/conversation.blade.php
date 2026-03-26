@@ -113,6 +113,9 @@
                 @else
                     <flux:heading size="lg" class="mb-0 truncate flex-1">{{ $headerTitle }}</flux:heading>
                 @endif
+                @if (count(config('services.telnyx.numbers', [])) > 1 && $this->thread->from_number)
+                    <span class="text-[10px] font-medium text-zinc-400 dark:text-zinc-500 bg-zinc-100 dark:bg-zinc-700 rounded px-1.5 py-0.5 shrink-0">{{ \App\Services\GroupSmsService::numberLabel($this->thread->from_number) }}</span>
+                @endif
                 @if ($this->thread->project)
                     <flux:button size="sm" variant="ghost" href="{{ route('projects.show', $this->thread->project_id) }}" wire:navigate.hover icon="arrow-top-right-on-square">
                         Project
@@ -143,7 +146,6 @@
             @if (! $isClientUser)
                 @php
                     $callableContacts = collect();
-                    $ownTelnyxNumber = config('services.telnyx.from');
                     $seenE164 = [];
 
                     // Collect users from the thread's primary client
@@ -152,7 +154,7 @@
                             $raw = $user->getRawOriginal('cell_phone');
                             if (! $raw) continue;
                             $e164 = $user->routeNotificationForTelnyx();
-                            if ($e164 === $ownTelnyxNumber) continue;
+                            if (\App\Services\GroupSmsService::isOurNumber($e164)) continue;
                             if (isset($seenE164[$e164])) continue;
                             $seenE164[$e164] = true;
                             $digits = preg_replace('/[^0-9]/', '', $raw);

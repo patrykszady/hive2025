@@ -211,6 +211,34 @@ class GroupSmsService
     }
 
     /**
+     * Check if a phone number belongs to us (any of our Telnyx numbers).
+     */
+    public static function isOurNumber(?string $phone): bool
+    {
+        if (! $phone) {
+            return false;
+        }
+
+        $numbers = config('services.telnyx.numbers', []);
+
+        return in_array($phone, $numbers, true);
+    }
+
+    /**
+     * Get a short label for one of our Telnyx numbers (last 4 digits).
+     */
+    public static function numberLabel(?string $phone): ?string
+    {
+        if (! $phone) {
+            return null;
+        }
+
+        $digits = preg_replace('/[^0-9]/', '', $phone);
+
+        return strlen($digits) >= 4 ? substr($digits, -4) : $digits;
+    }
+
+    /**
      * Format a phone number to E.164.
      */
     public static function formatE164(string $phone): string

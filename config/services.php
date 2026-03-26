@@ -26,6 +26,7 @@ return [
         'api_key' => env('TELNYX_API_KEY'),
         'messaging_profile_id' => env('TELNYX_MESSAGING_PROFILE_ID'),
         'from' => env('TELNYX_FROM'),
+        'numbers' => array_values(array_unique(array_filter(array_map('trim', explode(',', env('TELNYX_NUMBERS', env('TELNYX_FROM', ''))))))),
         'dev_to' => env('TELNYX_DEV_TO'),
         'connection_id' => env('TELNYX_CONNECTION_ID'),
         'voice_forward_to' => env('TELNYX_VOICE_FORWARD_TO'),
