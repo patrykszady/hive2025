@@ -714,14 +714,19 @@ class TaskCreate extends Component
 
     public function removeTask()
     {
-        $task = $this->form->task;
+        $task = $this->form->task ?? Task::withTrashed()->find($this->form->task_id);
 
         if (!$task) {
             return;
         }
 
         $taskId = $task->id;
-        $task->delete();
+
+        if ($task->trashed()) {
+            $task->forceDelete();
+        } else {
+            $task->delete();
+        }
 
         $this->js('window.dispatchEvent(new CustomEvent("remove-task-card", { detail: { id: ' . $taskId . ' } }))');
         $this->handleTaskOperation('complete');

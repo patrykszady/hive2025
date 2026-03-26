@@ -371,13 +371,34 @@
                     </div>
 
                     @if($this->signingEmailEvents->isNotEmpty())
+                        @php
+                            // Group consecutive events of the same type + recipient
+                            $grouped = collect();
+                            foreach ($this->signingEmailEvents as $event) {
+                                $key = $event->event_type . '|' . json_encode($event->recipient_emails);
+                                $last = $grouped->last();
+                                if ($last && $last['key'] === $key) {
+                                    $last['count']++;
+                                    $last['latest_at'] = $last['latest_at'] ?? $event->event_at;
+                                    $grouped->pop();
+                                    $grouped->push($last);
+                                } else {
+                                    $grouped->push([
+                                        'key' => $key,
+                                        'event' => $event,
+                                        'count' => 1,
+                                        'latest_at' => $event->event_at,
+                                    ]);
+                                }
+                            }
+                        @endphp
                         <div class="divide-y divide-zinc-200 dark:divide-zinc-700">
-                            @foreach($this->signingEmailEvents as $event)
+                            @foreach($grouped as $group)
                                 <div class="flex items-center justify-between py-2.5">
                                     <div class="flex items-center gap-3">
                                         <flux:badge
                                             size="sm"
-                                            :color="match($event->event_type) {
+                                            :color="match($group['event']->event_type) {
                                                 'sent' => 'zinc',
                                                 'delivered' => 'sky',
                                                 'opened' => 'blue',
@@ -385,16 +406,16 @@
                                                 'bounced' => 'red',
                                                 default => 'zinc',
                                             }">
-                                            {{ ucfirst($event->event_type) }}
+                                            {{ ucfirst($group['event']->event_type) }}@if($group['count'] > 1) &times;{{ $group['count'] }}@endif
                                         </flux:badge>
                                         <flux:text class="text-sm">
-                                            @if(is_array($event->recipient_emails))
-                                                {{ implode(', ', $event->recipient_emails) }}
+                                            @if(is_array($group['event']->recipient_emails))
+                                                {{ implode(', ', $group['event']->recipient_emails) }}
                                             @endif
                                         </flux:text>
                                     </div>
                                     <flux:text class="text-xs text-zinc-500 shrink-0 ml-4">
-                                        {{ $event->event_at?->diffForHumans() }}
+                                        {{ $group['latest_at']?->diffForHumans() }}
                                     </flux:text>
                                 </div>
                             @endforeach

@@ -11,6 +11,8 @@ class TaskForm extends Form
 {
     public ?Task $task = null;
 
+    public ?int $task_id = null;
+
     #[Validate('required')]
     public $title = null;
 
@@ -47,6 +49,7 @@ class TaskForm extends Form
     public function setTask(Task $task)
     {
         $this->task = $task;
+        $this->task_id = $task->id;
         
         // Load existing task data
         $this->title = $task->title;

@@ -4,7 +4,8 @@
         <flux:tabs wire:model.live="callFilter" variant="segmented" size="sm" class="w-full !flex [&>button]:flex-1">
             <flux:tab name="all">All</flux:tab>
             <flux:tab name="missed">Missed</flux:tab>
-            <flux:tab name="voicemail">Voicemail</flux:tab>
+            <flux:tab name="voicemail">Voice</flux:tab>
+            <flux:tab name="blocked">Blocked</flux:tab>
         </flux:tabs>
     </div>
 
@@ -68,6 +69,8 @@
                     <flux:icon icon="shield-exclamation" variant="micro" class="size-4 text-amber-500" />
                 @elseif ($effectiveStatus === 'missed' && $call->has_voicemail)
                     <flux:icon icon="microphone" variant="micro" class="size-4 text-indigo-500" />
+                @elseif ($effectiveStatus === 'missed' && $call->direction === 'outgoing')
+                    <flux:icon icon="phone-arrow-up-right" variant="micro" class="size-4 text-orange-500" />
                 @elseif ($effectiveStatus === 'missed')
                     <flux:icon icon="phone-x-mark" variant="micro" class="size-4 text-red-500" />
                 @elseif ($effectiveStatus === 'failed')
@@ -107,6 +110,8 @@
                         @elseif ($effectiveStatus === 'missed' && $call->has_voicemail)
                             <span class="text-sm lg:text-xs text-red-400 font-medium">Missed</span>
                             <span class="text-sm lg:text-xs text-indigo-500 font-medium">Voicemail</span>
+                        @elseif ($effectiveStatus === 'missed' && $call->direction === 'outgoing')
+                            <span class="text-sm lg:text-xs text-orange-500 font-medium">No Answer</span>
                         @elseif ($effectiveStatus === 'missed')
                             <span class="text-sm lg:text-xs text-red-400 font-medium">Missed</span>
                         @elseif ($effectiveStatus === 'failed')

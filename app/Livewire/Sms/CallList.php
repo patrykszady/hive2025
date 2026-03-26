@@ -89,6 +89,8 @@ class CallList extends Component
         $rawCalls = CallLog::query()
             ->when($this->callFilter === 'missed', fn ($q) => $q->where('status', CallLog::STATUS_MISSED))
             ->when($this->callFilter === 'voicemail', fn ($q) => $q->where('has_voicemail', true))
+            ->when($this->callFilter === 'blocked', fn ($q) => $q->where('status', CallLog::STATUS_BLOCKED))
+            ->when(! in_array($this->callFilter, ['blocked']), fn ($q) => $q->where('status', '!=', CallLog::STATUS_BLOCKED))
             ->when(! empty($ourNumbers), fn ($q) => $q->where(function ($q) use ($ourNumbers) {
                 // Exclude phantom/loopback legs where from_number is one of our own Telnyx numbers
                 $q->where('direction', '!=', 'incoming')
@@ -232,7 +234,7 @@ class CallList extends Component
 
     private function normalizeCallFilter(): void
     {
-        if (! in_array($this->callFilter, ['all', 'missed', 'voicemail'], true)) {
+        if (! in_array($this->callFilter, ['all', 'missed', 'voicemail', 'blocked'], true)) {
             $this->callFilter = 'all';
         }
     }

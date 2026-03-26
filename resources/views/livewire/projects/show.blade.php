@@ -79,7 +79,7 @@
                 </x-slot:footer>
             </x-details.card>
 
-            @if(in_array($project->latestStatus?->status_code, [4, 5, 6, 8, 11]))
+            @if(in_array($project->latestStatus?->status_code, [4, 5, 6, 7, 8, 11]))
                 <livewire:projects.upcoming-tasks :project="$project" lazy />
             @endif
 

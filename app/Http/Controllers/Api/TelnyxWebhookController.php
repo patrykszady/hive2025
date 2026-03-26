@@ -519,6 +519,31 @@ class TelnyxWebhookController extends Controller
         $userCallControlId = $clientState['user_call_control_id'] ?? null;
         $callLog = $callLogId ? CallLog::find($callLogId) : null;
 
+        // If the call was already answered/bridged, this is a normal hangup after a connected call
+        $wasConnected = $callLog && in_array($callLog->status, [CallLog::STATUS_TRANSFERRED, CallLog::STATUS_ANSWERED]);
+
+        if ($wasConnected) {
+            $duration = $callLog->answered_at
+                ? abs(now()->diffInSeconds($callLog->answered_at))
+                : null;
+
+            $callLog->update([
+                'status' => CallLog::STATUS_COMPLETED,
+                'hangup_cause' => $hangupCause,
+                'duration_seconds' => $duration,
+                'ended_at' => now(),
+            ]);
+
+            Log::channel('telnyx')->info('Click-to-call: target hung up after connected call', [
+                'call_control_id' => $callControlId,
+                'hangup_cause' => $hangupCause,
+                'call_log_id' => $callLogId,
+                'duration' => $duration,
+            ]);
+
+            return response()->json(['status' => 'ok']);
+        }
+
         Log::channel('telnyx')->info('Click-to-call: target did not answer', [
             'call_control_id' => $callControlId,
             'hangup_cause' => $hangupCause,
@@ -792,7 +817,7 @@ class TelnyxWebhookController extends Controller
                     'hangup_cause' => $hangupCause,
                     'ended_at' => now(),
                     'duration_seconds' => $callLog->answered_at
-                        ? now()->diffInSeconds($callLog->answered_at)
+                        ? abs(now()->diffInSeconds($callLog->answered_at))
                         : null,
                 ]);
             }
@@ -826,7 +851,7 @@ class TelnyxWebhookController extends Controller
 
             $wasAnswered = $callLog->answered_at !== null;
             $duration = $callLog->answered_at
-                ? now()->diffInSeconds($callLog->answered_at)
+                ? abs(now()->diffInSeconds($callLog->answered_at))
                 : null;
 
             $status = match (true) {

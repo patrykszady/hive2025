@@ -464,12 +464,12 @@
     <x-slot name="footer">
         <flux:spacer />
 
-        @if($view_text['form_submit'] === 'edit')
-            <flux:button type="button" wire:click="duplicateTask">Duplicate</flux:button>
+        @if($view_text['form_submit'] === 'edit' && $form->task_id)
+            <flux:button type="button" wire:click="removeTask" variant="danger">Remove</flux:button>
         @endif
 
-        @if($view_text['form_submit'] === 'edit' && $form->task)
-            <flux:button type="button" wire:click="removeTask" variant="danger">Remove</flux:button>
+        @if($view_text['form_submit'] === 'edit')
+            <flux:button type="button" wire:click="duplicateTask">Duplicate</flux:button>
         @endif
 
         <flux:button type="submit" form="task_create_form_modal_form" variant="primary">{{$view_text['button_text']}}</flux:button>
