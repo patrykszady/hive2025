@@ -11,7 +11,6 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Session;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
-use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
 
@@ -19,17 +18,28 @@ class ProjectsIndex extends Component
 {
     use AuthorizesRequests, WithPagination;
 
-    #[Url(except: '')]
     public $project_name_search = '';
     public $clients = [];
-    #[Url(except: null)]
     public $client_id = null;
 
     public $client = null;
 
     // Store selected status code from filter (as int); default to Active (6)
-    #[Url(except: 6)]
     public $project_status_title = 6;
+
+    protected function queryString(): array
+    {
+        $params = [
+            'project_name_search' => ['except' => ''],
+            'client_id' => ['except' => null],
+        ];
+
+        if (! $this->view) {
+            $params['project_status_title'] = ['except' => 6];
+        }
+
+        return $params;
+    }
 
     public $view = null;
     public $skipProjectSearchReset = false;

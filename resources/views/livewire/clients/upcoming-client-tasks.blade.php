@@ -12,6 +12,8 @@
         :clickable="!$isClientUser"
         :show-project-info="$showProjectInfo"
         :show-vendor-info="!$isClientUser"
+        :show-add-task="!$isClientUser"
+        :client-id="$this->client->id"
         title="Tasks"
         empty-message="No tasks upcoming for this client."
     />

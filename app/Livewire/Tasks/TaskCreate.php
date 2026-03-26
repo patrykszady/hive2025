@@ -645,7 +645,7 @@ class TaskCreate extends Component
         $this->form->dates = [];
     }
 
-    public function addTask($project_id = null, $date = null, $vendor_id = null, $user_ids = [])
+    public function addTask($project_id = null, $date = null, $vendor_id = null, $user_ids = [], $client_id = null)
     {
         $this->resetFormFields();
         $this->setupViewText('create');
@@ -656,6 +656,15 @@ class TaskCreate extends Component
         if ($project_id) {
             $this->form->project_id = $project_id;
             $this->ensureProjectOptionLoaded((int) $project_id);
+        }
+
+        if ($client_id) {
+            $this->projects = Project::query()
+                ->where('client_id', $client_id)
+                ->with('latestStatus')
+                ->orderByDesc('created_at')
+                ->get()
+                ->all();
         }
 
         if ($vendor_id) {

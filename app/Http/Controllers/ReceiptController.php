@@ -343,8 +343,14 @@ class ReceiptController extends Controller
                             $receipt->save();
 
                             // Download OrderSummary PDF if this receipt doesn't have one yet
-                            // Only download when order is shipped/delivered so we get the "Final Details" PDF
-                            if (empty($receipt->receipt_filename) && in_array($order['orderStatus'], ['SHIPPED', 'DELIVERED'])) {
+                            // Skip only PENDING (no invoice yet) and CANCELLED orders
+                            $orderStatus = strtoupper($order['orderStatus'] ?? '');
+                            if (empty($receipt->receipt_filename) && ! in_array($orderStatus, ['PENDING', 'CANCELLED'])) {
+                                Log::channel('amazon_orders')->info('Attempting PDF download for existing expense', [
+                                    'order_id' => $order['orderId'],
+                                    'expense_id' => $expense->id,
+                                    'order_status' => $order['orderStatus'],
+                                ]);
                                 $this->downloadAmazonOrderDocument($client, $s4, $credentials, $order['orderId'], $expense, $receipt);
                             }
                         }
@@ -383,8 +389,9 @@ class ReceiptController extends Controller
                         'receipt_filename' => null,
                     ]);
 
-                    // Download OrderSummary PDF via Document API — only when shipped/delivered for "Final Details" PDF
-                    if (in_array($order['orderStatus'], ['SHIPPED', 'DELIVERED'])) {
+                    // Download OrderSummary PDF via Document API — skip PENDING (no invoice yet) and CANCELLED
+                    $newOrderStatus = strtoupper($order['orderStatus'] ?? '');
+                    if (! in_array($newOrderStatus, ['PENDING', 'CANCELLED'])) {
                         $this->downloadAmazonOrderDocument($client, $s4, $credentials, $order['orderId'], $expense, $expenseReceipt);
                     }
                 }

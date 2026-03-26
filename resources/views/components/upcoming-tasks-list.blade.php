@@ -12,6 +12,7 @@
     'title' => 'Tasks',
     'emptyMessage' => 'No tasks upcoming for this project.',
     'projectId' => null,
+    'clientId' => null,
     'showAddTask' => false,
 ])
 
@@ -44,7 +45,7 @@
                     size="sm"
                     variant="ghost"
                     icon="plus"
-                    wire:click="$dispatchTo('tasks.task-create', 'addTask', { user_ids: [{{ auth()->id() }}] })"
+                    wire:click="$dispatchTo('tasks.task-create', 'addTask', { {{ $clientId ? 'client_id: ' . $clientId . ', ' : '' }}user_ids: [{{ auth()->id() }}] })"
                 />
             @endif
             @if($showNotifications)

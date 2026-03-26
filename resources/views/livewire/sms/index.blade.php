@@ -125,6 +125,7 @@
                     localStorage.setItem('hive-sms-calls-scroll', scrollable.scrollTop);
                 }
                 localStorage.setItem('hive-sms-active-tab', $wire.activeTab || 'messages');
+                localStorage.setItem('hive-sms-thread-id', ($wire.threadId || '').toString());
                 localStorage.setItem('hive-sms-cached-at', Date.now().toString());
             } catch (e) { /* storage full */ }
         },
@@ -218,6 +219,9 @@
                     try {
                         var ts = parseInt(localStorage.getItem('hive-sms-cached-at') || '0');
                         if (Date.now() - ts > 30 * 86400 * 1000) return;
+                        var cachedThread = localStorage.getItem('hive-sms-thread-id') || '';
+                        var urlThread = new URLSearchParams(window.location.search).get('threadId') || '';
+                        if (cachedThread && urlThread && cachedThread !== urlThread) return;
                         var cached = localStorage.getItem('hive-sms-threads');
                         if (cached && cached.length > 200) {
                             var overlay = document.getElementById('sms-threads-cache');
@@ -277,7 +281,10 @@
     </div>
 
     {{-- Conversation - Hidden on mobile when no thread selected, fully hidden on calls tab --}}
-    <div id="sms-convo-wrap" class="flex-1 min-w-0 flex flex-col min-h-0 max-w-md mx-auto lg:mx-0 lg:max-w-none {{ $activeTab === 'calls' ? 'hidden' : (!$threadId ? 'hidden lg:block' : '') }}">
+    <div id="sms-convo-wrap" class="relative flex-1 min-w-0 flex flex-col min-h-0 max-w-md mx-auto lg:mx-0 lg:max-w-none {{ $activeTab === 'calls' ? 'hidden' : (!$threadId ? 'hidden lg:block' : '') }}">
+        {{-- Cached conversation overlay: shown instantly, hidden when Livewire boots --}}
+        <div id="sms-convo-cache" class="absolute inset-0 z-10 bg-white dark:bg-zinc-900 overflow-hidden" style="display:none"></div>
+
         {{-- Initial load skeleton (only while auto-selecting first thread) --}}
         <div x-show="showConversationSkeleton" x-cloak class="flex-1 min-h-0">
             @include('livewire.sms.conversation_placeholder')
@@ -295,11 +302,21 @@
         try {
             var ts = parseInt(localStorage.getItem('hive-sms-cached-at') || '0');
             if (Date.now() - ts > 30 * 86400 * 1000) return;
+            var cachedThread = localStorage.getItem('hive-sms-thread-id') || '';
+            var urlThread = new URLSearchParams(window.location.search).get('threadId') || '';
+            if (cachedThread && urlThread && cachedThread !== urlThread) return;
             var cached = localStorage.getItem('hive-sms-convo');
             if (cached && cached.length > 200) {
-                var wrap = document.getElementById('sms-convo-wrap');
-                if (wrap) wrap.innerHTML = cached;
+                var overlay = document.getElementById('sms-convo-cache');
+                if (overlay) {
+                    overlay.innerHTML = cached;
+                    overlay.style.display = '';
+                }
             }
+            document.addEventListener('livewire:init', function() {
+                var o = document.getElementById('sms-convo-cache');
+                if (o) o.style.display = 'none';
+            });
         } catch(e) {}
     })();
     </script>

@@ -55,6 +55,10 @@ return [
         'api_key' => env('ANTICAPTCHA_API_KEY'),
     ],
 
+    'twocaptcha' => [
+        'api_key' => env('TWOCAPTCHA_API_KEY'),
+    ],
+
     'vapid' => [
         'subject' => env('VAPID_SUBJECT', env('APP_URL', 'http://localhost')),
         'public_key' => env('VAPID_PUBLIC_KEY'),

@@ -195,8 +195,10 @@ Schedule::call(function () {
 Schedule::call(function () {
     app(\App\Http\Controllers\ReceiptController::class)->amazon_orders_api();
     })
-    ->everyTenMinutes() // TODO: revert to ->everyTwoHours()->between('6:00', '22:00') after testing
+    ->everyTwoHours()
+    ->between('6:00', '22:00')
     ->name('amazon-orders-api')
+    ->environments(['production'])
     ->withoutOverlapping()
     ->onOneServer();
 

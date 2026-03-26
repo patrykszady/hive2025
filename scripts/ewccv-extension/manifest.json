@@ -1,0 +1,19 @@
+{
+    "manifest_version": 3,
+    "name": "EWCCV Helper",
+    "version": "1.0",
+    "description": "Automates EWCCV reCAPTCHA verification without CDP",
+    "content_scripts": [
+        {
+            "matches": ["https://www.ewccv.com/*"],
+            "js": ["content.js"],
+            "run_at": "document_idle"
+        }
+    ],
+    "web_accessible_resources": [
+        {
+            "resources": ["injected.js"],
+            "matches": ["https://www.ewccv.com/*"]
+        }
+    ]
+}
