@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Title;
@@ -59,6 +60,7 @@ class ExpenseIndex extends Component
     public bool $transactionsReady = false;
     public array $removedTransactionIds = [];
     public array $matchedReceiptItems = [];
+    public string $upcProductName = '';
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 
@@ -600,6 +602,10 @@ class ExpenseIndex extends Component
     /**
      * Run the receipt search once per request, populating both the matched items
      * for display and the expense IDs for filtering.
+     *
+     * If the query looks like a UPC barcode and yields no Meilisearch results,
+     * it falls back to a UPC database API lookup, extracts SKU/product name,
+     * then re-searches by SKU (which matches receipt ProductCodes) or product name.
      */
     private function executeReceiptSearch(): void
     {
@@ -608,6 +614,7 @@ class ExpenseIndex extends Component
         }
 
         $this->receiptSearchExecuted = true;
+        $this->upcProductName = '';
 
         $query = trim($this->receipt_search);
         if ($query === '') {
@@ -619,6 +626,83 @@ class ExpenseIndex extends Component
 
         $vendorId = (int) auth()->user()->vendor->id;
 
+        $hits = $this->searchReceipts($query, $vendorId);
+
+        // If no results and the query looks like a UPC barcode, try UPC API lookup
+        $resolvedSku = null;
+        if ($hits->isEmpty() && $this->looksLikeBarcode($query)) {
+            $upcData = $this->lookupUpc($query);
+
+            if ($upcData) {
+                $this->upcProductName = $upcData['label'];
+                $resolvedSku = $upcData['sku'];
+
+                // Try SKU first (matches receipt ProductCodes directly)
+                if ($upcData['sku']) {
+                    $hits = $this->searchReceipts($upcData['sku'], $vendorId);
+                }
+
+                // Fall back to product title if SKU search found nothing
+                if ($hits->isEmpty() && $upcData['title']) {
+                    $hits = $this->searchReceipts($upcData['title'], $vendorId);
+                }
+            }
+        }
+
+        // Group matched items by expense_id, filtering to only matching items
+        $this->matchedReceiptItems = $hits
+            ->filter(fn ($hit) => ! empty($hit['expense_id']))
+            ->groupBy('expense_id')
+            ->map(function ($group) use ($resolvedSku) {
+                $best = $group->sortByDesc(fn ($hit) => strlen($hit['_formatted']['descriptions'] ?? $hit['descriptions'] ?? ''))->first();
+
+                $descriptions = $best['_formatted']['descriptions'] ?? $best['descriptions'] ?? '';
+                $productCodes = $best['_formatted']['product_codes'] ?? $best['product_codes'] ?? '';
+                $rawProductCodes = $best['product_codes'] ?? '';
+
+                // When we have a resolved SKU from UPC lookup, filter to only the matching item
+                if ($resolvedSku) {
+                    $descs = explode(' | ', $best['descriptions'] ?? '');
+                    $codes = explode(' ', $rawProductCodes);
+                    $filteredDescs = [];
+                    $filteredCodes = [];
+
+                    foreach ($codes as $i => $code) {
+                        if (trim($code) === $resolvedSku) {
+                            $filteredDescs[] = $descs[$i] ?? '';
+                            $filteredCodes[] = '<mark>' . $code . '</mark>';
+                        }
+                    }
+
+                    // If this receipt doesn't contain the exact SKU, exclude it entirely
+                    if (empty($filteredDescs)) {
+                        return null;
+                    }
+
+                    $descriptions = implode(' | ', $filteredDescs);
+                    $productCodes = implode(' ', $filteredCodes);
+                }
+
+                return [[
+                    'descriptions' => $descriptions,
+                    'product_codes' => $productCodes,
+                    'purchase_order' => $best['purchase_order'] ?? '',
+                    'merchant_name' => $best['merchant_name'] ?? '',
+                ]];
+            })
+            ->filter() // Remove null entries (receipts without the exact SKU)
+            ->all();
+
+        $this->receiptExpenseIds = collect($this->matchedReceiptItems)
+            ->keys()
+            ->values();
+    }
+
+    /**
+     * Run a Meilisearch query against the receipt index.
+     */
+    private function searchReceipts(string $query, int $vendorId): \Illuminate\Support\Collection
+    {
         $results = ExpenseReceipts::search($query, function ($meilisearch, $searchQuery, $options) use ($vendorId) {
             $options['filter'] = "belongs_to_vendor_id = {$vendorId}";
             $options['limit'] = 10000;
@@ -630,29 +714,113 @@ class ExpenseIndex extends Component
             return $meilisearch->search($searchQuery, $options);
         })->raw();
 
-        $hits = collect($results['hits'] ?? []);
+        return collect($results['hits'] ?? []);
+    }
 
-        // Group matched items by expense_id, keeping only the best (most detailed) receipt per expense
-        $this->matchedReceiptItems = $hits
-            ->filter(fn ($hit) => ! empty($hit['expense_id']))
-            ->groupBy('expense_id')
-            ->map(function ($group) {
-                $best = $group->sortByDesc(fn ($hit) => strlen($hit['_formatted']['descriptions'] ?? $hit['descriptions'] ?? ''))->first();
+    /**
+     * Check if a query string looks like a scanned barcode (UPC/EAN).
+     */
+    private function looksLikeBarcode(string $query): bool
+    {
+        $digits = preg_replace('/\D/', '', $query);
 
-                return [[
-                    'descriptions' => $best['_formatted']['descriptions'] ?? $best['descriptions'] ?? '',
-                    'product_codes' => $best['_formatted']['product_codes'] ?? $best['product_codes'] ?? '',
-                    'purchase_order' => $best['purchase_order'] ?? '',
-                    'merchant_name' => $best['merchant_name'] ?? '',
-                ]];
-            })
-            ->all();
+        return strlen($digits) >= 8 && strlen($digits) <= 14 && $digits === $query;
+    }
 
-        $this->receiptExpenseIds = $hits
-            ->pluck('expense_id')
-            ->filter()
-            ->unique()
-            ->values();
+    /**
+     * Look up a UPC/EAN barcode via the UPCitemdb API.
+     * Returns structured data with SKU and product title for searching.
+     * Results are cached for 30 days to avoid hitting rate limits.
+     *
+     * If the API response doesn't contain a SKU, falls back to scraping
+     * the upcitemdb.com product page which lists merchant-specific product
+     * name variations that often include "Sku XXX-XXXX" patterns.
+     *
+     * @return array{sku: ?string, title: ?string, label: string}|null
+     */
+    private function lookupUpc(string $upc): ?array
+    {
+        return Cache::remember("upc_lookup_v3:{$upc}", now()->addDays(30), function () use ($upc) {
+            try {
+                $response = Http::timeout(5)
+                    ->acceptJson()
+                    ->get('https://api.upcitemdb.com/prod/trial/lookup', ['upc' => $upc]);
+
+                if (! $response->successful()) {
+                    return null;
+                }
+
+                $items = $response->json('items', []);
+
+                if (empty($items)) {
+                    return null;
+                }
+
+                $item = $items[0];
+                $title = $item['title'] ?? $item['description'] ?? null;
+                $model = $item['model'] ?? null;
+
+                // Extract SKU from title/description (e.g., "Sku 639-8554" or "SKU: 639-8554")
+                $sku = null;
+                $searchText = ($title ?? '') . ' ' . ($item['description'] ?? '');
+                if (preg_match('/\bsku[:\s#]*(\d[\d-]+\d)/i', $searchText, $m)) {
+                    $sku = str_replace('-', '', $m[1]);
+                } elseif ($model) {
+                    $sku = str_replace('-', '', $model);
+                }
+
+                // If no SKU found from API, try scraping the website page
+                // which lists product name variations with merchant SKUs
+                if (! $sku) {
+                    $sku = $this->scrapeUpcWebsiteSku($upc);
+                }
+
+                // Build display label
+                $label = $title ?? 'Unknown product';
+                if ($sku) {
+                    $label .= " (SKU: {$sku})";
+                }
+
+                return [
+                    'sku' => $sku,
+                    'title' => $title,
+                    'label' => $label,
+                ];
+            } catch (\Exception $e) {
+                return null;
+            }
+        });
+    }
+
+    /**
+     * Scrape the upcitemdb.com product page to extract SKU from product name variations.
+     *
+     * The website lists merchant-specific product names that often include
+     * "Sku XXX-XXXX" patterns not available via the free API.
+     */
+    private function scrapeUpcWebsiteSku(string $upc): ?string
+    {
+        try {
+            $response = Http::timeout(5)
+                ->withHeaders(['User-Agent' => 'Mozilla/5.0'])
+                ->get("https://www.upcitemdb.com/upc/{$upc}");
+
+            if (! $response->successful()) {
+                return null;
+            }
+
+            $html = $response->body();
+
+            // Look for SKU pattern anywhere in the page text
+            // Matches "Sku 639-8554", "SKU: 123-4567", "Sku #639-8554", etc.
+            if (preg_match('/\bsku[:\s#]*(\d[\d-]+\d)/i', $html, $m)) {
+                return str_replace('-', '', $m[1]);
+            }
+
+            return null;
+        } catch (\Exception $e) {
+            return null;
+        }
     }
 
     /**

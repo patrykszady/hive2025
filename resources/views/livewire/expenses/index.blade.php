@@ -66,6 +66,11 @@
                                         <flux:button size="sm" variant="subtle" icon="scan-barcode" class="-mr-1" x-on:click="$flux.modal('barcode-scanner').show()" title="Scan barcode" />
                                     </x-slot>
                                 </flux:input>
+                                @if($upcProductName)
+                                    <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                                        <flux:icon.scan-barcode variant="micro" class="inline size-3" /> UPC resolved to: <span class="font-medium text-zinc-700 dark:text-zinc-300">{{ $upcProductName }}</span>
+                                    </p>
+                                @endif
                             </div>
                             @can('create', App\Models\Expense::class)
                                 @if($amount && $view == NULL)
@@ -155,6 +160,11 @@
                             <flux:button size="sm" variant="subtle" icon="scan-barcode" class="-mr-1" x-on:click="$flux.modal('barcode-scanner').show()" title="Scan barcode" />
                         </x-slot>
                     </flux:input>
+                    @if($upcProductName)
+                        <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                            <flux:icon.scan-barcode variant="micro" class="inline size-3" /> UPC resolved to: <span class="font-medium text-zinc-700 dark:text-zinc-300">{{ $upcProductName }}</span>
+                        </p>
+                    @endif
                 </div>
             </div>
         </x-island-card>
@@ -183,10 +193,10 @@
         }
     }">
         <div class="space-y-4">
-            <div class="-mx-5 -mb-2 overflow-x-hidden">
+            <div class="-mx-5 -mb-2 overflow-x-auto">
                 <flux:table
                     wire:loading.class="opacity-50 text-opacity-50"
-                    class="table-fixed w-full [:where(&)]:p-0 [:where(&)]:space-y-0 [&_th]:!px-4 [&_td]:!px-3 [&_th:first-child]:!ps-6 [&_th:last-child]:!pe-6 [&_td:first-child]:!ps-6 [&_td:last-child]:!pe-6"
+                    class="table-fixed min-w-[640px] w-full [:where(&)]:p-0 [:where(&)]:space-y-0 [&_th]:!px-4 [&_td]:!px-3 [&_th:first-child]:!ps-6 [&_th:last-child]:!pe-6 [&_td:first-child]:!ps-6 [&_td:last-child]:!pe-6"
                 >
                 <flux:table.columns>
                     <flux:table.column class="w-[14%] min-w-[5.5rem] !pe-8">
