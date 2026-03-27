@@ -438,42 +438,114 @@
         <div x-data="{
             scanning: false,
             scanner: null,
+            stream: null,
+            useNative: false,
             error: null,
+            _raf: null,
+            init() {
+                this.useNative = 'BarcodeDetector' in window;
+                this._handler = (e) => {
+                    if (e.detail === 'barcode-scanner' || e.detail?.name === 'barcode-scanner') {
+                        setTimeout(() => this.startScanning(), 400);
+                    }
+                };
+                document.addEventListener('modal-show', this._handler);
+            },
+            destroy() {
+                this.stopScanning();
+                if (this._handler) document.removeEventListener('modal-show', this._handler);
+            },
             async startScanning() {
                 this.error = null;
+                this.scanning = false;
+
+                const readerEl = document.getElementById('barcode-reader');
+                if (!readerEl) {
+                    this.error = 'Scanner element not found. Please try again.';
+                    return;
+                }
+                readerEl.innerHTML = '';
+
                 try {
-                    this.scanner = new Html5Qrcode('barcode-reader');
-                    await this.scanner.start(
-                        { facingMode: 'environment' },
-                        { fps: 10, qrbox: { width: 280, height: 150 } },
-                        (decodedText) => {
-                            this.stopScanning();
-                            $wire.set('receipt_search', decodedText);
-                            $flux.modal('barcode-scanner').close();
-                        },
-                        (errorMessage) => { }
-                    );
+                    if (this.useNative) {
+                        await this.startNativeScanner(readerEl);
+                    } else {
+                        await this.startFallbackScanner();
+                    }
                     this.scanning = true;
                 } catch (e) {
-                    this.error = 'Could not access camera. Please allow camera permissions.';
+                    console.error('Barcode scanner error:', e);
+                    let msg = e?.message || e?.toString?.() || '';
+                    if (msg.includes('NotAllowedError') || msg.includes('Permission')) {
+                        this.error = 'Camera permission was denied. Please allow camera access in your browser settings and try again.';
+                    } else if (msg.includes('NotFoundError') || msg.includes('not found')) {
+                        this.error = 'No camera found on this device.';
+                    } else {
+                        this.error = msg || 'Could not start camera. Please try again.';
+                    }
                 }
+            },
+            async startNativeScanner(container) {
+                const detector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code'] });
+                this.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+                const video = document.createElement('video');
+                video.srcObject = this.stream;
+                video.setAttribute('playsinline', '');
+                video.style.cssText = 'width:100%;border-radius:0.5rem;';
+                container.appendChild(video);
+                await video.play();
+
+                const scan = async () => {
+                    if (!this.scanning && !this._raf) return;
+                    try {
+                        const barcodes = await detector.detect(video);
+                        if (barcodes.length > 0) {
+                            const value = barcodes[0].rawValue;
+                            this.stopScanning();
+                            $wire.set('receipt_search', value);
+                            $flux.modal('barcode-scanner').close();
+                            return;
+                        }
+                    } catch (e) { }
+                    this._raf = requestAnimationFrame(scan);
+                };
+                this._raf = requestAnimationFrame(scan);
+            },
+            async startFallbackScanner() {
+                if (typeof Html5Qrcode === 'undefined') {
+                    throw new Error('Scanner library not loaded. Please refresh and try again.');
+                }
+                this.scanner = new Html5Qrcode('barcode-reader');
+                await this.scanner.start(
+                    { facingMode: 'environment' },
+                    { fps: 10, qrbox: { width: 250, height: 150 } },
+                    (decodedText) => {
+                        this.stopScanning();
+                        $wire.set('receipt_search', decodedText);
+                        $flux.modal('barcode-scanner').close();
+                    },
+                    () => { }
+                );
             },
             async stopScanning() {
                 this.scanning = false;
+                if (this._raf) { cancelAnimationFrame(this._raf); this._raf = null; }
+                if (this.stream) {
+                    this.stream.getTracks().forEach(t => t.stop());
+                    this.stream = null;
+                }
                 if (this.scanner) {
-                    try {
-                        await this.scanner.stop();
-                        this.scanner.clear();
-                    } catch (e) { }
+                    try { await this.scanner.stop(); } catch (e) { }
+                    try { this.scanner.clear(); } catch (e) { }
                     this.scanner = null;
                 }
             }
-        }" x-on:modal-show.window="if ($event.detail.name === 'barcode-scanner') $nextTick(() => startScanning())" x-on:close="stopScanning()" class="space-y-4">
+        }" x-on:close="stopScanning()" class="space-y-4">
             <flux:heading size="lg">Scan Barcode</flux:heading>
 
             <div x-show="error" class="text-sm text-red-600 dark:text-red-400" x-text="error"></div>
 
-            <div x-show="!error" id="barcode-reader" class="overflow-hidden rounded-lg"></div>
+            <div id="barcode-reader" class="overflow-hidden rounded-lg" style="min-height: 280px;"></div>
 
             <flux:text class="text-xs text-center">Point the camera at a barcode or SKU number</flux:text>
 
