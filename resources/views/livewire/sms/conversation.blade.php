@@ -187,7 +187,7 @@
                                 $raw = $user->getRawOriginal('cell_phone');
                                 if (! $raw) continue;
                                 $e164 = $user->routeNotificationForTelnyx();
-                                if ($e164 === $ownTelnyxNumber) continue;
+                                if (\App\Services\GroupSmsService::isOurNumber($e164)) continue;
                                 if (isset($seenE164[$e164])) continue;
                                 $seenE164[$e164] = true;
                                 $digits = preg_replace('/[^0-9]/', '', $raw);
@@ -210,7 +210,7 @@
                     if ($callableContacts->isEmpty()) {
                         $participants = $this->thread->participants ?? [];
                         foreach ($participants as $phone) {
-                            if ($phone === $ownTelnyxNumber) continue;
+                            if (\App\Services\GroupSmsService::isOurNumber($phone)) continue;
                             $name = $this->resolvePhoneDisplay($phone);
                             $digits = preg_replace('/[^0-9]/', '', $phone);
                             if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
