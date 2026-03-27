@@ -545,7 +545,7 @@ class ExpenseIndex extends Component
         }
 
         // Apply receipt item search filter
-        $receiptExpenseIds = $this->searchReceiptItems();
+        $receiptExpenseIds = $this->getReceiptExpenseIds();
         if ($receiptExpenseIds !== null) {
             if ($receiptExpenseIds->isEmpty()) {
                 // No matching receipts — force empty result
@@ -592,17 +592,29 @@ class ExpenseIndex extends Component
         return [$start->copy()->startOfDay()->timestamp, $end->copy()->endOfDay()->timestamp];
     }
 
+    /** @var \Illuminate\Support\Collection|null Cached receipt search expense IDs for the current request */
+    private ?\Illuminate\Support\Collection $receiptExpenseIds = null;
+
+    private bool $receiptSearchExecuted = false;
+
     /**
-     * Search the receipt items Meilisearch index for matching expense IDs.
-     *
-     * @return \Illuminate\Support\Collection<int, int>|null  Collection of expense IDs, or null if no search active
+     * Run the receipt search once per request, populating both the matched items
+     * for display and the expense IDs for filtering.
      */
-    private function searchReceiptItems(): ?\Illuminate\Support\Collection
+    private function executeReceiptSearch(): void
     {
+        if ($this->receiptSearchExecuted) {
+            return;
+        }
+
+        $this->receiptSearchExecuted = true;
+
         $query = trim($this->receipt_search);
         if ($query === '') {
             $this->matchedReceiptItems = [];
-            return null;
+            $this->receiptExpenseIds = null;
+
+            return;
         }
 
         $vendorId = (int) auth()->user()->vendor->id;
@@ -620,29 +632,48 @@ class ExpenseIndex extends Component
 
         $hits = collect($results['hits'] ?? []);
 
-        // Group matched items by expense_id for display in the view
+        // Group matched items by expense_id, keeping only the best (most detailed) receipt per expense
         $this->matchedReceiptItems = $hits
             ->filter(fn ($hit) => ! empty($hit['expense_id']))
             ->groupBy('expense_id')
-            ->map(fn ($group) => $group->map(fn ($hit) => [
-                'descriptions' => $hit['_formatted']['descriptions'] ?? $hit['descriptions'] ?? '',
-                'product_codes' => $hit['_formatted']['product_codes'] ?? $hit['product_codes'] ?? '',
-                'purchase_order' => $hit['purchase_order'] ?? '',
-                'merchant_name' => $hit['merchant_name'] ?? '',
-            ])->values()->all())
+            ->map(function ($group) {
+                $best = $group->sortByDesc(fn ($hit) => strlen($hit['_formatted']['descriptions'] ?? $hit['descriptions'] ?? ''))->first();
+
+                return [[
+                    'descriptions' => $best['_formatted']['descriptions'] ?? $best['descriptions'] ?? '',
+                    'product_codes' => $best['_formatted']['product_codes'] ?? $best['product_codes'] ?? '',
+                    'purchase_order' => $best['purchase_order'] ?? '',
+                    'merchant_name' => $best['merchant_name'] ?? '',
+                ]];
+            })
             ->all();
 
-        return $hits
+        $this->receiptExpenseIds = $hits
             ->pluck('expense_id')
             ->filter()
             ->unique()
             ->values();
     }
 
+    /**
+     * Get the receipt search expense IDs for filtering (called from buildFilterConditions).
+     */
+    private function getReceiptExpenseIds(): ?\Illuminate\Support\Collection
+    {
+        $this->executeReceiptSearch();
+
+        return $this->receiptExpenseIds;
+    }
+
     #[Title('Expenses')]
     public function render()
-    {        
+    {
         $this->authorize('viewAny', Expense::class);
+
+        // Run receipt search BEFORE the view renders so $matchedReceiptItems
+        // is populated before the template accesses it.
+        $this->executeReceiptSearch();
+
         return view('livewire.expenses.index');
     }
 

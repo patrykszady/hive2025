@@ -61,7 +61,11 @@
                                 />
                             </div>
                             <div class="min-w-0 w-full">
-                                <flux:input wire:model.live.debounce.400ms="receipt_search" label="Receipt Items" icon="magnifying-glass" placeholder="Search items, SKU, barcode..." clearable />
+                                <flux:input wire:model.live.debounce.400ms="receipt_search" icon="magnifying-glass" placeholder="Search items, SKU, barcode..." clearable label="Receipt Items">
+                                    <x-slot name="iconTrailing">
+                                        <flux:button size="sm" variant="subtle" icon="scan-barcode" class="-mr-1" x-on:click="$flux.modal('barcode-scanner').show()" title="Scan barcode" />
+                                    </x-slot>
+                                </flux:input>
                             </div>
                             @can('create', App\Models\Expense::class)
                                 @if($amount && $view == NULL)
@@ -146,7 +150,11 @@
 
             <div class="flex flex-col sm:flex-row items-end gap-4 mt-4">
                 <div class="flex-1 min-w-0 w-full sm:max-w-xs">
-                    <flux:input wire:model.live.debounce.400ms="receipt_search" label="Receipt Items" icon="magnifying-glass" placeholder="Search items, SKU, barcode..." clearable />
+                    <flux:input wire:model.live.debounce.400ms="receipt_search" icon="magnifying-glass" placeholder="Search items, SKU, barcode..." clearable label="Receipt Items">
+                        <x-slot name="iconTrailing">
+                            <flux:button size="sm" variant="subtle" icon="scan-barcode" class="-mr-1" x-on:click="$flux.modal('barcode-scanner').show()" title="Scan barcode" />
+                        </x-slot>
+                    </flux:input>
                 </div>
             </div>
         </x-island-card>
@@ -207,16 +215,15 @@
                 <flux:table.rows>
                     @foreach ($this->expenses as $expense)
                         <flux:table.row :key="$expense->id" data-expense-row="{{ $expense->id }}">
-                            <flux:table.cell
-                                x-data="{
-                                    canEdit: {{ auth()->user()->can('create', App\Models\Expense::class) ? 'true' : 'false' }},
-                                    showUrl: '{{ route('expenses.show', $expense->id) }}'
-                                }"
-                                @click="canEdit ? $wire.dispatchTo('expenses.expense-create', 'editExpense', { expense: {{ $expense->id }} }) : window.location.href = showUrl"
-                                variant="strong"
-                                class="cursor-pointer w-[14%] min-w-[5.5rem] !pe-8"
-                                >
-                                <div class="pe-4">{{ display_money($expense->amount) }}</div>
+                            <flux:table.cell variant="strong" class="w-[14%] min-w-[5.5rem] !pe-8">
+                                <div class="pe-4 flex items-center gap-1">
+                                    <a href="{{ route('expenses.show', $expense->id) }}" class="hover:underline" wire:navigate>{{ display_money($expense->amount) }}</a>
+                                    @can('create', App\Models\Expense::class)
+                                        <button type="button" wire:click="$dispatchTo('expenses.expense-create', 'editExpense', { expense: {{ $expense->id }} })" class="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200" title="Edit expense">
+                                            <flux:icon.pencil-square variant="micro" />
+                                        </button>
+                                    @endcan
+                                </div>
                             </flux:table.cell>
                             <flux:table.cell class="w-[14%] min-w-[6rem] !ps-8 !pe-3">
                                 <div class="ps-4">{{ $expense->date->format('m/d/y') }}</div>
@@ -234,7 +241,11 @@
                                     @if($expense->splits->count() > 0)
                                         SPLIT
                                     @else
-                                        <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis font-semibold" title="{{ $expense->project?->name ?? 'No Project' }}">{{ $expense->project?->name ?? 'No Project' }}</div>
+                                        @if($expense->project?->id)
+                                            <a href="{{ route('projects.show', $expense->project->id) }}" class="truncate whitespace-nowrap overflow-hidden text-ellipsis font-semibold block hover:underline" title="{{ $expense->project->name }}" wire:navigate>{{ $expense->project->name }}</a>
+                                        @else
+                                            <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis font-semibold" title="No Project">No Project</div>
+                                        @endif
                                         @php
                                             $po = $expense->receipts->first()?->receipt_items['purchase_order'] ?? null;
                                         @endphp
@@ -285,7 +296,11 @@
                                                     $splitProjectName = 'No Project';
                                                 }
                                             @endphp
-                                            <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $splitProjectName }}">{{ $splitProjectName }}</div>
+                                            @if(isset($split->project->id))
+                                                <a href="{{ route('projects.show', $split->project->id) }}" class="truncate whitespace-nowrap overflow-hidden text-ellipsis block hover:underline" title="{{ $splitProjectName }}" wire:navigate>{{ $splitProjectName }}</a>
+                                            @else
+                                                <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $splitProjectName }}">{{ $splitProjectName }}</div>
+                                            @endif
                                         </flux:table.cell>
                                     @endif
                                     <flux:table.cell align="end" class="text-sm text-gray-600 dark:text-gray-400 w-[17%] min-w-[5rem] shrink-0">
@@ -417,4 +432,54 @@
     @endif
 
     <livewire:expenses.expense-create />
+
+    {{-- Barcode Scanner Modal --}}
+    <flux:modal name="barcode-scanner" class="sm:max-w-md">
+        <div x-data="{
+            scanning: false,
+            scanner: null,
+            error: null,
+            async startScanning() {
+                this.error = null;
+                try {
+                    this.scanner = new Html5Qrcode('barcode-reader');
+                    await this.scanner.start(
+                        { facingMode: 'environment' },
+                        { fps: 10, qrbox: { width: 280, height: 150 } },
+                        (decodedText) => {
+                            this.stopScanning();
+                            $wire.set('receipt_search', decodedText);
+                            $flux.modal('barcode-scanner').close();
+                        },
+                        (errorMessage) => { }
+                    );
+                    this.scanning = true;
+                } catch (e) {
+                    this.error = 'Could not access camera. Please allow camera permissions.';
+                }
+            },
+            async stopScanning() {
+                this.scanning = false;
+                if (this.scanner) {
+                    try {
+                        await this.scanner.stop();
+                        this.scanner.clear();
+                    } catch (e) { }
+                    this.scanner = null;
+                }
+            }
+        }" x-on:modal-show.window="if ($event.detail.name === 'barcode-scanner') $nextTick(() => startScanning())" x-on:close="stopScanning()" class="space-y-4">
+            <flux:heading size="lg">Scan Barcode</flux:heading>
+
+            <div x-show="error" class="text-sm text-red-600 dark:text-red-400" x-text="error"></div>
+
+            <div x-show="!error" id="barcode-reader" class="overflow-hidden rounded-lg"></div>
+
+            <flux:text class="text-xs text-center">Point the camera at a barcode or SKU number</flux:text>
+
+            <div class="flex justify-end">
+                <flux:button variant="ghost" x-on:click="stopScanning(); $flux.modal('barcode-scanner').close()">Cancel</flux:button>
+            </div>
+        </div>
+    </flux:modal>
 </div>

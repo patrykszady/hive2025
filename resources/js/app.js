@@ -2,6 +2,9 @@ import './plaid-link';
 import './timezone';
 import Echo from 'laravel-echo';
 import Pusher from 'pusher-js';
+import { Html5Qrcode } from 'html5-qrcode';
+
+window.Html5Qrcode = Html5Qrcode;
 
 // Register/update service worker on every page load to replace stale versions
 if ('serviceWorker' in navigator) {
