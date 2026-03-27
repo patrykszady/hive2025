@@ -3,7 +3,7 @@
  * Cache version is stamped by `npm run build` so every deploy busts stale assets.
  */
 
-const DEPLOY_VERSION = 'mn88fbp8';
+const DEPLOY_VERSION = 'mn8b1ubh';
 const PAGE_CACHE  = 'hive-pages-' + DEPLOY_VERSION;
 const ASSET_CACHE = 'hive-assets-' + DEPLOY_VERSION;
 
@@ -127,6 +127,14 @@ self.addEventListener('push', (event) => {
             requireInteraction: payload.requireInteraction || false,
         };
 
+        // Set app badge count on the home-screen icon (iOS 16.4+ PWA)
+        if ('setAppBadge' in self.registration) {
+            const badgeCount = payload.badgeCount;
+            if (typeof badgeCount === 'number' && badgeCount > 0) {
+                self.registration.setAppBadge(badgeCount).catch(() => {});
+            }
+        }
+
         try {
             await self.registration.showNotification(title, options);
         } catch (error) {
@@ -150,6 +158,11 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
     event.notification.close();
+
+    // Clear home-screen badge when user acts on a notification
+    if ('clearAppBadge' in self.registration) {
+        self.registration.clearAppBadge().catch(() => {});
+    }
 
     const path = event.notification.data?.url || '/dashboard';
     const targetUrl = new URL(path, self.location.origin).href;

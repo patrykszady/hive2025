@@ -196,7 +196,7 @@
             <div class="-mx-5 -mb-2 overflow-x-auto">
                 <flux:table
                     wire:loading.class="opacity-50 text-opacity-50"
-                    class="table-fixed min-w-[640px] w-full [:where(&)]:p-0 [:where(&)]:space-y-0 [&_th]:!px-4 [&_td]:!px-3 [&_th:first-child]:!ps-6 [&_th:last-child]:!pe-6 [&_td:first-child]:!ps-6 [&_td:last-child]:!pe-6"
+                    class="table-fixed {{ $view === 'projects.show' ? 'min-w-0' : 'min-w-[640px]' }} w-full [:where(&)]:p-0 [:where(&)]:space-y-0 [&_th]:!px-4 [&_td]:!px-3 [&_th:first-child]:!ps-6 [&_th:last-child]:!pe-6 [&_td:first-child]:!ps-6 [&_td:last-child]:!pe-6"
                 >
                 <flux:table.columns>
                     <flux:table.column class="w-[14%] min-w-[5.5rem] !pe-8">
@@ -362,9 +362,11 @@
                 </flux:table.rows>
                 </flux:table>
 
+                @if($this->expenses->hasPages())
                 <div class="px-6 pb-6 pt-4">
                     <flux:pagination :paginator="$this->expenses" />
                 </div>
+                @endif
             </div>
         </div>
     </x-island-card>
@@ -449,6 +451,8 @@
             scanning: false,
             scanner: null,
             stream: null,
+            video: null,
+            detector: null,
             useNative: false,
             error: null,
             _raf: null,
@@ -462,25 +466,23 @@
                 document.addEventListener('modal-show', this._handler);
             },
             destroy() {
-                this.stopScanning();
+                this.releaseCamera();
                 if (this._handler) document.removeEventListener('modal-show', this._handler);
             },
             async startScanning() {
                 this.error = null;
-                this.scanning = false;
 
                 const readerEl = document.getElementById('barcode-reader');
                 if (!readerEl) {
                     this.error = 'Scanner element not found. Please try again.';
                     return;
                 }
-                readerEl.innerHTML = '';
 
                 try {
                     if (this.useNative) {
                         await this.startNativeScanner(readerEl);
                     } else {
-                        await this.startFallbackScanner();
+                        await this.startFallbackScanner(readerEl);
                     }
                     this.scanning = true;
                 } catch (e) {
@@ -496,22 +498,36 @@
                 }
             },
             async startNativeScanner(container) {
-                const detector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code'] });
-                this.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
-                const video = document.createElement('video');
-                video.srcObject = this.stream;
-                video.setAttribute('playsinline', '');
-                video.style.cssText = 'width:100%;border-radius:0.5rem;';
-                container.appendChild(video);
-                await video.play();
+                if (!this.detector) {
+                    this.detector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code'] });
+                }
+
+                // Reuse existing stream if still active
+                if (this.stream && this.stream.active && this.video) {
+                    if (!this.video.parentElement) {
+                        container.innerHTML = '';
+                        container.appendChild(this.video);
+                    }
+                    await this.video.play();
+                } else {
+                    // Request camera (triggers permission prompt only on first call per session)
+                    this.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+                    this.video = document.createElement('video');
+                    this.video.srcObject = this.stream;
+                    this.video.setAttribute('playsinline', '');
+                    this.video.style.cssText = 'width:100%;border-radius:0.5rem;';
+                    container.innerHTML = '';
+                    container.appendChild(this.video);
+                    await this.video.play();
+                }
 
                 const scan = async () => {
                     if (!this.scanning && !this._raf) return;
                     try {
-                        const barcodes = await detector.detect(video);
+                        const barcodes = await this.detector.detect(this.video);
                         if (barcodes.length > 0) {
                             const value = barcodes[0].rawValue;
-                            this.stopScanning();
+                            this.pauseScanning();
                             $wire.set('receipt_search', value);
                             $flux.modal('barcode-scanner').close();
                             return;
@@ -521,36 +537,56 @@
                 };
                 this._raf = requestAnimationFrame(scan);
             },
-            async startFallbackScanner() {
+            async startFallbackScanner(container) {
                 if (typeof Html5Qrcode === 'undefined') {
                     throw new Error('Scanner library not loaded. Please refresh and try again.');
                 }
+                // Html5Qrcode manages its own stream, so stop previous instance first
+                if (this.scanner) {
+                    try { await this.scanner.stop(); } catch (e) { }
+                    try { this.scanner.clear(); } catch (e) { }
+                }
+                container.innerHTML = '';
                 this.scanner = new Html5Qrcode('barcode-reader');
                 await this.scanner.start(
                     { facingMode: 'environment' },
                     { fps: 10, qrbox: { width: 250, height: 150 } },
                     (decodedText) => {
-                        this.stopScanning();
+                        this.pauseScanning();
                         $wire.set('receipt_search', decodedText);
                         $flux.modal('barcode-scanner').close();
                     },
                     () => { }
                 );
             },
-            async stopScanning() {
+            pauseScanning() {
+                this.scanning = false;
+                if (this._raf) { cancelAnimationFrame(this._raf); this._raf = null; }
+                // Pause video but keep stream alive (no permission re-prompt)
+                if (this.video) {
+                    try { this.video.pause(); } catch (e) { }
+                }
+                // For fallback scanner, stop it (it manages its own stream)
+                if (this.scanner) {
+                    try { this.scanner.stop(); } catch (e) { }
+                }
+            },
+            releaseCamera() {
                 this.scanning = false;
                 if (this._raf) { cancelAnimationFrame(this._raf); this._raf = null; }
                 if (this.stream) {
                     this.stream.getTracks().forEach(t => t.stop());
                     this.stream = null;
                 }
+                this.video = null;
+                this.detector = null;
                 if (this.scanner) {
-                    try { await this.scanner.stop(); } catch (e) { }
+                    try { this.scanner.stop(); } catch (e) { }
                     try { this.scanner.clear(); } catch (e) { }
                     this.scanner = null;
                 }
             }
-        }" x-on:close="stopScanning()" class="space-y-4">
+        }" x-on:close="pauseScanning()" class="space-y-4">
             <flux:heading size="lg">Scan Barcode</flux:heading>
 
             <div x-show="error" class="text-sm text-red-600 dark:text-red-400" x-text="error"></div>
@@ -560,7 +596,7 @@
             <flux:text class="text-xs text-center">Point the camera at a barcode or SKU number</flux:text>
 
             <div class="flex justify-end">
-                <flux:button variant="ghost" x-on:click="stopScanning(); $flux.modal('barcode-scanner').close()">Cancel</flux:button>
+                <flux:button variant="ghost" x-on:click="pauseScanning(); $flux.modal('barcode-scanner').close()">Cancel</flux:button>
             </div>
         </div>
     </flux:modal>

@@ -10,6 +10,16 @@ window.Html5Qrcode = Html5Qrcode;
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
 
+    // Clear home-screen badge when the app is opened / resumed
+    if ('clearAppBadge' in navigator) {
+        navigator.clearAppBadge().catch(() => {});
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                navigator.clearAppBadge().catch(() => {});
+            }
+        });
+    }
+
     // Handle navigation requests from notification clicks (iOS fallback)
     navigator.serviceWorker.addEventListener('message', (event) => {
         if (event.data?.type === 'navigate-url' && event.data?.url) {

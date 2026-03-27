@@ -1,58 +1,45 @@
 <div wire:transition>
     {{-- PROJECT LIFESPAN / STATUS --}}
-    <flux:card class="space-y-6">
-        <flux:accordion transition>
-            <flux:accordion.item expanded>
-                <flux:accordion.heading>
-                    <flux:heading size="lg" class="mb-0">Project Timeline</flux:heading>
-                </flux:accordion.heading>
+    <x-island-card>
+        <div x-data="{ expanded: false }">
+            {{-- Header with toggle --}}
+            <button type="button" @click="expanded = !expanded" class="flex w-full items-center justify-between">
+                <flux:heading size="lg" class="mb-0">Project Timeline</flux:heading>
+                <flux:icon.chevron-down variant="mini" class="text-gray-400 transition-transform duration-200" ::class="expanded && 'rotate-180'" />
+            </button>
 
-                <flux:accordion.content>
-                    <flux:timeline class="mt-6" align="start" style="--flux-timeline-indicator-size: 1.5rem;">
+            @if($statuses->isNotEmpty())
+                <flux:timeline class="mt-4" align="start" style="--flux-timeline-indicator-size: 1.5rem;">
+                    {{-- Collapsible history (previous statuses) --}}
+                    @if($statuses->count() > 1)
                         @foreach($statuses as $status)
-                            <flux:timeline.item class="group">
-                                @if($loop->last)
-                                    <flux:timeline.indicator variant="bare">
-                                        <div class="size-5 rounded-full flex items-center justify-center opacity-40" style="border: 2px solid {{ $status->dotColor }}">
-                                            <div class="size-2.5 rounded-full opacity-100" style="background-color: {{ $status->dotColor }}"></div>
-                                        </div>
-                                    </flux:timeline.indicator>
-                                @else
+                            @if(!$loop->last)
+                                <flux:timeline.item x-show="expanded" x-collapse x-cloak class="group">
                                     <flux:timeline.indicator variant="bare">
                                         <div class="size-1.5 rounded-full bg-gray-100 ring-1 ring-gray-300"></div>
                                     </flux:timeline.indicator>
-                                @endif
 
-                                <flux:timeline.content>
-                                    <div class="flex items-center gap-2">
-                                        <flux:badge size="sm" :color="$status->badgeColor">{{ $status->title }}</flux:badge>
-                                        <span class="text-xs text-gray-500">{{ $status->start_date->format('m/d/y') }}</span>
+                                    <flux:timeline.content>
+                                        <div class="flex items-center gap-2">
+                                            <flux:badge size="sm" :color="$status->badgeColor">{{ $status->title }}</flux:badge>
+                                            <span class="text-xs text-gray-500">{{ $status->start_date->format('m/d/y') }}</span>
 
-                                        @can('update', $project)
-                                            <button
-                                                wire:click="editStatus({{ $status->id }})"
-                                                type="button"
-                                                class="hidden md:group-hover:inline-flex text-gray-400 hover:text-indigo-600 transition-colors"
-                                                title="Edit status"
-                                            >
-                                                <flux:icon.pencil variant="micro" />
-                                            </button>
-                                        @endcan
+                                            @can('update', $project)
+                                                <button
+                                                    wire:click="editStatus({{ $status->id }})"
+                                                    type="button"
+                                                    class="hidden md:group-hover:inline-flex text-gray-400 hover:text-indigo-600 transition-colors"
+                                                    title="Edit status"
+                                                >
+                                                    <flux:icon.pencil variant="micro" />
+                                                </button>
+                                            @endcan
 
-                                        <time datetime="{{ $status->start_date }}" class="ml-auto text-xs text-gray-500">
-                                            {{ $status->start_date->diffForHumans() }}
-                                        </time>
-                                    </div>
+                                            <time datetime="{{ $status->start_date }}" class="ml-auto text-xs text-gray-500">
+                                                {{ $status->start_date->diffForHumans() }}
+                                            </time>
+                                        </div>
 
-                                    @if($loop->last)
-                                        @php
-                                            $daysSince = floor(abs(now()->diffInDays($status->start_date)));
-                                            $sinceText = $daysSince > 0
-                                                ? $daysSince . ' day' . ($daysSince === 1 ? '' : 's') . ' since'
-                                                : 'today';
-                                        @endphp
-                                        <div class="text-xs italic text-gray-400">{{ $sinceText }}</div>
-                                    @elseif($loop->index < count($statuses) - 1)
                                         @php
                                             $nextStatus = $statuses[$loop->index + 1];
                                             $diffInDays = floor(abs($nextStatus->start_date->diffInDays($status->start_date)));
@@ -61,26 +48,58 @@
                                                 : 'same day';
                                         @endphp
                                         <div class="text-xs italic text-gray-400">{{ $timeText }}</div>
-                                    @endif
-                                </flux:timeline.content>
-                            </flux:timeline.item>
+                                    </flux:timeline.content>
+                                </flux:timeline.item>
+                            @endif
                         @endforeach
+                    @endif
 
-                        @can('update', $project)
-                            <flux:timeline.item>
-                                <flux:timeline.indicator variant="bare">
-                                    <div class="size-1.5 rounded-full bg-gray-100 ring-1 ring-gray-300"></div>
-                                </flux:timeline.indicator>
-                                <flux:timeline.content>
-                                    @include('livewire.project-status._status_controls')
-                                </flux:timeline.content>
-                            </flux:timeline.item>
-                        @endcan
-                    </flux:timeline>
-                </flux:accordion.content>
-            </flux:accordion.item>
-        </flux:accordion>
-    </flux:card>
+                    {{-- Current status (always visible) --}}
+                    <flux:timeline.item>
+                        <flux:timeline.indicator variant="bare">
+                            <div class="size-5 rounded-full flex items-center justify-center opacity-40" style="border: 2px solid {{ $statuses->last()->dotColor }}">
+                                <div class="size-2.5 rounded-full opacity-100" style="background-color: {{ $statuses->last()->dotColor }}"></div>
+                            </div>
+                        </flux:timeline.indicator>
+                        <flux:timeline.content>
+                            <div class="flex items-center gap-2">
+                                <flux:badge size="sm" :color="$statuses->last()->badgeColor">{{ $statuses->last()->title }}</flux:badge>
+                                <span class="text-xs text-gray-500">{{ $statuses->last()->start_date->format('m/d/y') }}</span>
+                                <time datetime="{{ $statuses->last()->start_date }}" class="ml-auto text-xs text-gray-500">
+                                    {{ $statuses->last()->start_date->diffForHumans() }}
+                                </time>
+                            </div>
+                            @php
+                                $daysSince = floor(abs(now()->diffInDays($statuses->last()->start_date)));
+                                $sinceText = $daysSince > 0
+                                    ? $daysSince . ' day' . ($daysSince === 1 ? '' : 's') . ' since'
+                                    : 'today';
+                            @endphp
+                            <div class="text-xs italic text-gray-400">{{ $sinceText }}</div>
+                        </flux:timeline.content>
+                    </flux:timeline.item>
+
+                    {{-- Status change controls --}}
+                    @can('update', $project)
+                        <flux:timeline.item>
+                            <flux:timeline.indicator variant="bare">
+                                <div class="size-1.5 rounded-full bg-gray-100 ring-1 ring-gray-300"></div>
+                            </flux:timeline.indicator>
+                            <flux:timeline.content>
+                                @include('livewire.project-status._status_controls')
+                            </flux:timeline.content>
+                        </flux:timeline.item>
+                    @endcan
+                </flux:timeline>
+            @else
+                @can('update', $project)
+                    <div class="mt-3">
+                        @include('livewire.project-status._status_controls')
+                    </div>
+                @endcan
+            @endif
+        </div>
+    </x-island-card>
 
     @can('update', $project)
     {{-- Edit Status Modal --}}

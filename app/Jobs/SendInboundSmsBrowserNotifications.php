@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\PushSubscription;
+use App\Models\SmsGroupThread;
 use App\Models\SmsMessage;
 use App\Models\User;
 use App\Models\Vendor;
@@ -43,7 +44,7 @@ class SendInboundSmsBrowserNotifications implements ShouldQueue
         $fromLabel = $this->resolveSenderDisplayName($message);
         $body = trim($message->display_text ?: 'New message received');
 
-        $webPush->sendToSubscriptions($enabledSubscriptions, [
+        $basePayload = [
             'title' => "New Text from {$fromLabel}",
             'body' => mb_substr($body, 0, 180),
             'icon' => '/favicons/icon-192x192.png',
@@ -55,7 +56,18 @@ class SendInboundSmsBrowserNotifications implements ShouldQueue
                     : '/messages',
             ],
             'requireInteraction' => false,
-        ], 'telnyx');
+        ];
+
+        // Group by user so we can include a per-user unread badge count
+        $grouped = $enabledSubscriptions->groupBy('user_id');
+
+        foreach ($grouped as $userId => $userSubscriptions) {
+            $badgeCount = SmsGroupThread::unreadCountForUser((int) $userId);
+
+            $webPush->sendToSubscriptions($userSubscriptions, array_merge($basePayload, [
+                'badgeCount' => $badgeCount,
+            ]), 'telnyx');
+        }
     }
 
     protected function resolveSenderDisplayName(SmsMessage $message): string

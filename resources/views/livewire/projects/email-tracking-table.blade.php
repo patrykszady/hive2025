@@ -7,7 +7,9 @@
             <flux:table.columns>
                 <flux:table.column>Event</flux:table.column>
                 <flux:table.column>Template</flux:table.column>
-                <flux:table.column>Project</flux:table.column>
+                @if(!$projectId)
+                    <flux:table.column>Project</flux:table.column>
+                @endif
                 <flux:table.column class="w-48">Recipients</flux:table.column>
                 <flux:table.column>Date</flux:table.column>
             </flux:table.columns>
@@ -41,6 +43,7 @@
                                 <span class="text-gray-400">-</span>
                             @endif
                         </flux:table.cell>
+                        @if(!$projectId)
                         <flux:table.cell>
                             @if($event->project)
                                 <a wire:navigate.hover href="{{ route('projects.show', $event->project_id) }}" class="font-semibold text-zinc-900 dark:text-zinc-100 hover:text-indigo-600 dark:hover:text-indigo-400">
@@ -50,6 +53,7 @@
                                 <span class="text-gray-400">-</span>
                             @endif
                         </flux:table.cell>
+                        @endif
                         <flux:table.cell class="w-48">
                             @php
                                 $recipientUsers = $event->recipient_users ?? collect();
@@ -98,7 +102,7 @@
                     </flux:table.row>
                 @empty
                     <flux:table.row>
-                        <flux:table.cell colspan="5" class="text-center text-gray-500">No tracking events found.</flux:table.cell>
+                        <flux:table.cell :colspan="$projectId ? 4 : 5" class="text-center text-gray-500">No tracking events found.</flux:table.cell>
                     </flux:table.row>
                 @endforelse
             </flux:table.rows>

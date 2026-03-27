@@ -13,6 +13,7 @@
         @endif
         </x-slot:actions>
 
+        @if($this->payments->isNotEmpty())
         <div class="space-y-2">
             <flux:table :paginate="$view !== 'estimate.pdf' && $this->payments->hasPages() ? $this->payments : null">
                 <flux:table.columns>
@@ -77,12 +78,13 @@
                             @endif
                             <flux:table.cell>{{ $payment->reference }}</flux:table.cell>
                             <flux:table.cell>
-                                <flux:badge size="sm" :color="$payment->transaction_id != NULL ? 'green' : 'red'" inset="top bottom">{{ $payment->transaction_id != NULL ? 'Complete' : 'Missing Transaction' }}</flux:badge>
+                                <flux:badge size="sm" :color="$payment->transaction_id != NULL ? 'green' : 'red'" inset="top bottom">{{ $payment->transaction_id != NULL ? 'Complete' : 'Missing' }}</flux:badge>
                             </flux:table.cell>
                         </flux:table.row>
                     @endforeach
                 </flux:table.rows>
             </flux:table>
         </div>
+        @endif
     </x-island-card>
 </div>
