@@ -1,6 +1,8 @@
 <div>
     <x-upcoming-tasks-list-skeleton
-        title="Tasks"
+        title="Your Tasks"
         :show-project-info="true"
+        :count="2"
+        :show-header-skeleton="false"
     />
 </div>

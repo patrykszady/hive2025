@@ -292,6 +292,9 @@ class UpcomingClientTasks extends Component
 
     public function placeholder()
     {
-        return view('livewire.clients.upcoming-client-tasks-placeholder');
+        return view('livewire.partials.tasks-placeholder', [
+            'showProjectInfo' => true,
+            'actionsWidth' => 'w-44',
+        ]);
     }
 }

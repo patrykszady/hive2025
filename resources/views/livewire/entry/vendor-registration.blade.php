@@ -36,7 +36,7 @@
         {{-- REGISTRATION CONTENT --}}
         <div class="space-y-4 lg:col-start-3 lg:col-span-3 xl:col-span-2">
             {{-- VENDOR DETAILS --}}
-            <livewire:vendors.vendor-details :vendor="$vendor" :view="$view" />
+            <livewire:vendors.vendor-details :vendor="$vendor" :view="$view" :expanded="true" />
 
             @if($vendor->business_type !== '1099')
                 {{-- TEAM MEMBERS SECTION (non-1099 only) --}}

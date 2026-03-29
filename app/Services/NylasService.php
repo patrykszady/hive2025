@@ -210,6 +210,96 @@ class NylasService
     }
 
     /**
+     * Fetch calendars for a given grant.
+     */
+    public function getCalendars(string $grantId): array
+    {
+        return $this->makeNylasRequest('GET', "/grants/{$grantId}/calendars");
+    }
+
+    /**
+     * Create a calendar event for a given grant.
+     */
+    public function createEvent(string $grantId, array $payload): array
+    {
+        $calendarId = (string) ($payload['calendar_id'] ?? '');
+
+        if ($calendarId === '') {
+            return [
+                'status' => 422,
+                'success' => false,
+                'error' => 'calendar_id is required',
+            ];
+        }
+
+        $body = $payload;
+        unset($body['calendar_id']);
+
+        return $this->retryWithBackoff(function () use ($grantId, $calendarId, $body) {
+            $url = $this->baseUrl . "/grants/{$grantId}/events";
+
+            try {
+                $response = Http::withHeaders([
+                    'Authorization' => "Bearer {$this->apiKey}",
+                    'Accept' => 'application/json',
+                    'Content-Type' => 'application/json',
+                ])
+                    ->withQueryParameters(['calendar_id' => $calendarId])
+                    ->post($url, $body);
+
+                return [
+                    'status' => $response->status(),
+                    'success' => $response->successful(),
+                    'data' => $response->json(),
+                    'body' => $response->body(),
+                ];
+            } catch (\Throwable $e) {
+                return [
+                    'status' => 500,
+                    'success' => false,
+                    'error' => $e->getMessage(),
+                ];
+            }
+        });
+    }
+
+    /**
+     * Delete a calendar event for a given grant.
+     */
+    public function deleteEvent(string $grantId, string $eventId, ?string $calendarId = null): array
+    {
+        return $this->retryWithBackoff(function () use ($grantId, $eventId, $calendarId) {
+            $url = $this->baseUrl . "/grants/{$grantId}/events/{$eventId}";
+
+            try {
+                $request = Http::withHeaders([
+                    'Authorization' => "Bearer {$this->apiKey}",
+                    'Accept' => 'application/json',
+                ]);
+
+                if (is_string($calendarId) && $calendarId !== '') {
+                    $request = $request->withQueryParameters(['calendar_id' => $calendarId]);
+                }
+
+                $response = $request->delete($url);
+
+                return [
+                    'status' => $response->status(),
+                    'success' => $response->successful(),
+                    'data' => $response->json(),
+                    'body' => $response->body(),
+                ];
+            } catch (\Throwable $e) {
+                return [
+                    'status' => 500,
+                    'success' => false,
+                    'error' => $e->getMessage(),
+                ];
+            }
+        });
+    }
+
+    /**
      * Move or delete a message
      */
     public function moveOrDeleteMessage(string $messageId, string $grantId, ?int $companyEmailId = null, ?string $folderId = null): bool

@@ -272,6 +272,8 @@ class UpcomingTasks extends Component
 
     public function placeholder()
     {
-        return view('livewire.projects.upcoming-tasks-placeholder');
+        return view('livewire.partials.tasks-placeholder', [
+            'actionsWidth' => 'w-44',
+        ]);
     }
 }

@@ -8,6 +8,8 @@
                 :subheading="$project->client->name"
                 :canEdit="auth()->user()->can('update', $project)"
                 :expanded="false"
+                :details_text="false"
+                :separator="false"
                 >
                 <x-slot:header_buttons>
                     <flux:button
@@ -81,16 +83,14 @@
             </x-details.card>
             </div>
 
-            @if(in_array($project->latestStatus?->status_code, [4, 5, 6, 7, 8, 11]))
-                <div class="col-span-4 order-2">
-                    <livewire:projects.upcoming-tasks :project="$project" lazy />
-                </div>
-            @endif
+            <div class="col-span-4 order-2">
+                <livewire:projects.upcoming-tasks :project="$project" lazy />
+            </div>
 
             @can('viewFinancials', $project)
                 @can('update', $project)
-                    @if($project->expenses()->exists())
-                        <div class="col-span-4 order-7">
+                    @if(in_array($this->project->latestStatus->title, ['Active', 'Complete', 'Service Call', 'VIEW ONLY']) && $project->expenses()->exists())
+                        <div class="col-span-4 order-7 lg:order-3">
                             <livewire:expenses.expense-index :project_id="$project->id" :view="'projects.show'" lazy />
                         </div>
                     @endif

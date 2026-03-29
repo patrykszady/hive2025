@@ -2,6 +2,7 @@
 
 namespace App\Observers;
 
+use App\Jobs\DeleteMeetTaskCalendarEvent;
 use App\Jobs\SendBatchVendorAvailabilitySms;
 use App\Jobs\SendPendingTaskReminderToClients;
 use App\Jobs\SendRealtimeTaskNotification;
@@ -132,6 +133,8 @@ class TaskObserver
      */
     public function deleted(Task $task): void
     {
+        $this->dispatchMeetEventDeletion($task);
+
         // Queue realtime notifications for affected users
         $this->queueNotificationIfNeeded($task, $task->user_ids ?? [], []);
     }
@@ -152,6 +155,25 @@ class TaskObserver
     {
         // Queue realtime notifications for affected users
         $this->queueNotificationIfNeeded($task, $task->user_ids ?? [], []);
+    }
+
+    private function dispatchMeetEventDeletion(Task $task): void
+    {
+        if ($task->type !== 'Meet') {
+            return;
+        }
+
+        $eventMeta = (array) data_get($task->options, 'nylas_meet_event', []);
+
+        if (empty($eventMeta['event_id']) || empty($eventMeta['grant_id'])) {
+            Log::channel('nylas')->info('Skipping Meet calendar event deletion dispatch: no metadata in task options', [
+                'task_id' => $task->id,
+            ]);
+
+            return;
+        }
+
+        DeleteMeetTaskCalendarEvent::dispatch($task->id, $eventMeta);
     }
 
     /**

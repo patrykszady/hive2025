@@ -52,17 +52,21 @@ class Expense extends Model
         // Gather split metadata once to avoid N+1 later; lightweight fields only
         $splitProjectIds = [];
         $splitAmounts = [];
+        $splitReimbursments = [];
         if ($this->relationLoaded('splits')) {
             $splits = $this->splits;
         } else {
             // Select minimal columns to reduce query cost when indexing
-            $splits = $this->splits()->select('id','project_id','amount')->get();
+            $splits = $this->splits()->select('id','project_id','amount','reimbursment')->get();
         }
         foreach ($splits as $split) {
             if (! is_null($split->project_id)) {
                 $splitProjectIds[] = (int) $split->project_id;
             }
             $splitAmounts[] = (float) $split->amount; // keep raw float for range / prefix strategies client-side later
+            if (! is_null($split->reimbursment) && $split->reimbursment !== '' && $split->reimbursment !== 'None') {
+                $splitReimbursments[] = $split->reimbursment;
+            }
         }
 
         // Index only the fields we actually use for search, filtering, and sorting
@@ -78,9 +82,11 @@ class Expense extends Model
             'expense_status' => $status,
             'belongs_to_vendor_id' => (int) $this->belongs_to_vendor_id,
             'paid_by' => $this->paid_by,
+            'reimbursment' => $this->getRawOriginal('reimbursment'),
             // Denormalized split metadata
             'split_project_ids' => $splitProjectIds,
             'split_amounts' => $splitAmounts,
+            'split_reimbursments' => array_values(array_unique($splitReimbursments)),
         ];
     }
 

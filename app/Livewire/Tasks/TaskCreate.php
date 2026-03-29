@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Tasks;
 
+use App\Jobs\CreateMeetTaskCalendarEvent;
 use App\Models\Project;
 use App\Models\Task;
 use App\Models\User;
@@ -667,6 +668,15 @@ class TaskCreate extends Component
                 ->all();
         }
 
+        if (!$project_id && !$client_id && auth()->user()?->primary_vendor_id) {
+            $this->projects = Project::query()
+                ->where('belongs_to_vendor_id', auth()->user()->primary_vendor_id)
+                ->with('latestStatus')
+                ->orderByDesc('created_at')
+                ->get()
+                ->all();
+        }
+
         if ($vendor_id) {
             $this->form->vendor_id = $vendor_id;
         }
@@ -720,21 +730,22 @@ class TaskCreate extends Component
             return;
         }
 
-        $taskId = $task->id;
-
         if ($task->trashed()) {
             $task->forceDelete();
         } else {
             $task->delete();
         }
 
-        $this->js('window.dispatchEvent(new CustomEvent("remove-task-card", { detail: { id: ' . $taskId . ' } }))');
         $this->handleTaskOperation('complete');
         $this->showNotification('removed');
     }
 
     public function edit()
     {
+        $existingTask = $this->form->task;
+        $previousType = $existingTask?->type;
+        $existingMeetEventId = data_get($existingTask?->options, 'nylas_meet_event.event_id');
+
         $this->authorize('update', $this->form->task);
         $result = $this->form->update();
 
@@ -751,13 +762,27 @@ class TaskCreate extends Component
             return; // Don't close modal
         }
 
+        if ($this->form->task instanceof Task && $this->form->task->type === 'Meet') {
+            $wasConvertedToMeet = $previousType !== 'Meet';
+            $isMissingMeetEvent = ! is_string($existingMeetEventId) || trim($existingMeetEventId) === '';
+
+            if (($wasConvertedToMeet || $isMissingMeetEvent) && $this->form->task->start_date) {
+                CreateMeetTaskCalendarEvent::dispatch($this->form->task->id, auth()->id());
+            }
+        }
+
         $this->handleTaskOperation('complete');
         $this->showNotification('updated');
     }
 
     public function save()
     {
-        $this->form->store();
+        $task = $this->form->store();
+
+        if ($task instanceof Task && $task->type === 'Meet' && $task->start_date) {
+            CreateMeetTaskCalendarEvent::dispatch($task->id, auth()->id());
+        }
+
         $this->handleTaskOperation('complete');
         $this->showNotification('created');
     }

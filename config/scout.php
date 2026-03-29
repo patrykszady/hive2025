@@ -148,8 +148,8 @@ return [
                 'filterableAttributes'=> [
                     'id', 'vendor_id', 'project_id', 'distribution_id', 'check_id', 
                     'has_splits', 'belongs_to_vendor_id', 'expense_status',
-                    'paid_by', '__soft_deleted', 'amount', 'split_project_ids', 'split_amounts',
-                    'date'
+                    'paid_by', 'reimbursment', '__soft_deleted', 'amount', 'split_project_ids', 'split_amounts',
+                    'split_reimbursments', 'date'
                 ],
                 'sortableAttributes' => ['date', 'amount', 'expense_status'],
                 'searchableAttributes' => ['amount'],

@@ -6,7 +6,7 @@
 
             {{-- VENDOR DETAILS --}}
             {{-- @if($user->this_vendor)
-                 <livewire:vendors.vendor-details :vendor="$user->vendor">
+                 <livewire:vendors.vendor-details :vendor="$user->vendor" :expanded="true">
             @endif --}}
         </div>
 

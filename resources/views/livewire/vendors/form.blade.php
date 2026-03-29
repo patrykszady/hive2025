@@ -221,6 +221,13 @@
                                     x-mask="(999) 999-9999"
                                     placeholder="Business Phone"
                                 />
+
+                                <flux:input
+                                    wire:model.live.debounce.500ms="form.business_website"
+                                    label="Business Website"
+                                    type="url"
+                                    placeholder="https://example.com"
+                                />
                             </div>
                         </div>
                     </div>

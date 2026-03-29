@@ -51,9 +51,9 @@ class VendorTasks extends Component
             return collect();
         }
 
-        $tasks = Task::query()
+        $tasks = Task::withTrashed()
             ->whereIn('project_id', $projectIds)
-            ->whereJsonContains('user_ids', (string) auth()->id())
+            ->where(fn ($q) => $q->whereJsonContains('user_ids', (string) auth()->id())->orWhereJsonContains('user_ids', (int) auth()->id()))
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
             ->whereDate('start_date', '<=', $windowEndStr)
@@ -151,8 +151,10 @@ class VendorTasks extends Component
             return null;
         }
 
-        $tasks = Task::query()
-            ->whereIn('project_id', $projectIds)            ->whereJsonContains('user_ids', (string) auth()->id())            ->whereNotNull('start_date')
+        $tasks = Task::withTrashed()
+            ->whereIn('project_id', $projectIds)
+            ->where(fn ($q) => $q->whereJsonContains('user_ids', (string) auth()->id())->orWhereJsonContains('user_ids', (int) auth()->id()))
+            ->whereNotNull('start_date')
             ->whereNotNull('end_date')
             ->whereDate('start_date', '>', $windowEndStr)
             ->get();
@@ -217,9 +219,9 @@ class VendorTasks extends Component
             return 0;
         }
 
-        return Task::query()
+        return Task::withTrashed()
             ->whereIn('project_id', $projectIds)
-            ->whereJsonContains('user_ids', (string) auth()->id())
+            ->where(fn ($q) => $q->whereJsonContains('user_ids', (string) auth()->id())->orWhereJsonContains('user_ids', (int) auth()->id()))
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
             ->whereDate('start_date', '<=', $endOfWindow)
@@ -241,9 +243,9 @@ class VendorTasks extends Component
             return collect();
         }
 
-        return Task::query()
+        return Task::withTrashed()
             ->whereIn('project_id', $projectIds)
-            ->whereJsonContains('user_ids', (string) auth()->id())
+            ->where(fn ($q) => $q->whereJsonContains('user_ids', (string) auth()->id())->orWhereJsonContains('user_ids', (int) auth()->id()))
             ->whereNull('start_date')
             ->with(['vendor', 'project.client', 'project.latestStatus'])
             ->orderBy('created_at')
@@ -270,6 +272,11 @@ class VendorTasks extends Component
 
     public function placeholder()
     {
-        return view('livewire.dashboard.vendor-tasks-placeholder');
+        return view('livewire.partials.tasks-placeholder', [
+            'title' => 'Your Tasks',
+            'showProjectInfo' => true,
+            'count' => 2,
+            'showHeaderSkeleton' => false,
+        ]);
     }
 }

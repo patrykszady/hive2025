@@ -14,14 +14,12 @@
     </x-slot:actions>
 
         @if($accordion ?? false)
-            <flux:accordion transition>
-                <flux:accordion.item :expanded="$accordionExpanded ?? true">
-                    <flux:accordion.heading>
-                        <div class="flex justify-between items-center">
-                            <div class="font-medium text-gray-700 dark:text-gray-300">Details</div>
-                        </div>
-                    </flux:accordion.heading>
-                    <flux:accordion.content>
+            <div x-data="{ open: @js($accordionExpanded ?? true) }">
+                <button type="button" @click="open = !open" class="flex w-full items-center justify-between py-2">
+                    <div class="font-medium text-gray-700 dark:text-gray-300">Details</div>
+                    <flux:icon.chevron-down variant="mini" class="text-gray-400 transition-transform duration-200" ::class="open && 'rotate-180'" />
+                </button>
+                <div x-show="open" x-collapse x-cloak>
         @endif
 
         <flux:table class="{{ ($nonLivewire ?? false) ? 'whitespace-normal' : '' }}">
@@ -149,8 +147,7 @@
     </div>
 
     @if($accordion ?? false)
-                </flux:accordion.content>
-            </flux:accordion.item>
-        </flux:accordion>
+                </div>
+            </div>
     @endif
 </x-island-card>

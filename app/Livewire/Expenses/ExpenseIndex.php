@@ -43,6 +43,9 @@ class ExpenseIndex extends Component
     #[Url(except: '')]
     public string $receipt_search = '';
 
+    #[Url(except: '')]
+    public $reimbursement_filter = '';
+
     public ?DateRange $date_range = null;
 
     public $check = '';
@@ -68,6 +71,13 @@ class ExpenseIndex extends Component
     {
         $this->resetPage('expenses-page');
         $this->resetPage('transactions-page');
+    }
+
+    public function updatedReimbursementFilter($value): void
+    {
+        if ($value === null) {
+            $this->reimbursement_filter = '';
+        }
     }
 
     public function detachExpenseFromCheck(int $expenseId): void
@@ -117,11 +127,23 @@ class ExpenseIndex extends Component
                 ->get(['id', 'business_name', 'business_type']);
         });
 
+        if ($this->view === 'projects.show' && $this->project_id) {
+            $this->vendors = Vendor::whereHas('expenses', function ($q) {
+                $q->where('project_id', $this->project_id);
+            })->orderBy('business_name')->get(['id', 'business_name', 'business_type']);
+        }
+
         $this->projects = Cache::remember("filters:v{$vendorId}:projects", 600, function () {
             return Project::whereHas('expenses')
                 ->orderBy('created_at', 'DESC')
                 ->get(['id', 'project_name', 'address']);
         });
+
+        if ($this->view === 'vendors.show' && $this->expense_vendor) {
+            $this->projects = Project::whereHas('expenses', function ($q) {
+                $q->where('vendor_id', $this->expense_vendor);
+            })->orderBy('created_at', 'DESC')->get(['id', 'project_name', 'address']);
+        }
 
         $this->distributions = Cache::remember("filters:v{$vendorId}:distributions", 600, function () {
             return Distribution::all(['id', 'name']);
@@ -153,6 +175,12 @@ class ExpenseIndex extends Component
     {
         $this->removedTransactionIds[] = $transactionId;
         unset($this->transactions);
+    }
+
+    #[Computed]
+    public function via_vendor_employees()
+    {
+        return auth()->user()->vendor->users()->employed()->wherePivotNotNull('via_vendor_id')->get();
     }
 
     #[Computed]
@@ -247,6 +275,13 @@ class ExpenseIndex extends Component
                     ]);
                 }
 
+                // Reimbursement filter (Eloquent path)
+                if ($this->reimbursement_filter !== null && $this->reimbursement_filter !== '') {
+                    $filterVal = $this->reimbursement_filter;
+                    $baseQuery->where(fn ($q) => $q->where('reimbursment', $filterVal)
+                        ->orWhereHas('splits', fn ($sq) => $sq->where('reimbursment', $filterVal)));
+                }
+
                 $baseExpenses = $baseQuery->get();
 
                 $splitParentsQuery = Expense::query()
@@ -278,6 +313,13 @@ class ExpenseIndex extends Component
                 $splitParentsQuery->where('distribution_id', $distributionId);
             }
 
+            // Apply reimbursement filter to split parents
+            if ($this->reimbursement_filter !== null && $this->reimbursement_filter !== '') {
+                $filterVal = $this->reimbursement_filter;
+                $splitParentsQuery->where(fn ($q) => $q->where('reimbursment', $filterVal)
+                    ->orWhereHas('splits', fn ($sq) => $sq->where('reimbursment', $filterVal)));
+            }
+
             $splitParents = $splitParentsQuery->get();
 
             // Apply status filters in-memory (like unified path)
@@ -307,7 +349,7 @@ class ExpenseIndex extends Component
                     $relations['distribution'] = fn ($q) => $q->select('id','name');
                 }
                 $relations['splits'] = function ($q) {
-                    $q->select('id','expense_id','amount','project_id','distribution_id')
+                    $q->select('id','expense_id','amount','project_id','distribution_id','reimbursment')
                       ->with([
                           'project:id,project_name,address',
                           'distribution:id,name'
@@ -370,7 +412,7 @@ class ExpenseIndex extends Component
                 $relations['distribution'] = fn ($q) => $q->select('id','name');
             }
             $relations['splits'] = function ($q) {
-                $q->select('id','expense_id','amount','project_id','distribution_id')
+                $q->select('id','expense_id','amount','project_id','distribution_id','reimbursment')
                   ->with([
                       'project:id,project_name,address',
                       'distribution:id,name'
@@ -544,6 +586,12 @@ class ExpenseIndex extends Component
         $dateFilter = $this->buildDateFilter();
         if ($dateFilter) {
             $filterConditions[] = $dateFilter;
+        }
+
+        // Apply reimbursement filter
+        if ($this->reimbursement_filter !== null && $this->reimbursement_filter !== '') {
+            $safeValue = addslashes($this->reimbursement_filter);
+            $filterConditions[] = "(reimbursment = '{$safeValue}' OR split_reimbursments = '{$safeValue}')";
         }
 
         // Apply receipt item search filter

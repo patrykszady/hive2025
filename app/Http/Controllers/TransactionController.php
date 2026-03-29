@@ -444,7 +444,8 @@ class TransactionController extends Controller
         
         // Auto-assign vendor based on Plaid merchant data if available and not already set
         // Only do this for new transactions or when updating without a vendor
-        if (empty($transaction->vendor_id) && !empty($transaction->plaid_merchant_name)) {
+        // Skip checks - they should not be auto-matched to vendors
+        if (empty($transaction->vendor_id) && !empty($transaction->plaid_merchant_name) && empty($transaction->check_number)) {
             $vendors = Vendor::withoutGlobalScopes()->where('business_type', 'Retail')->get();
             $vendor_match = app(\App\Http\Controllers\CompanyEmailController::class)->fuzzyMatchVendor($transaction->plaid_merchant_name, $vendors);
             

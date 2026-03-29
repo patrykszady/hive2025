@@ -1,112 +1,79 @@
 <div>
 @if(!$projectId || $this->emailTrackingEvents->isNotEmpty())
-<x-island-card heading="Email Tracking" :separator="true" wire:loading.class="opacity-50 text-opacity-50" wire:transition>
+@php
+    $projectEvents = $projectId ? collect($this->emailTrackingEvents->items()) : collect();
+    $latestEvent = $projectId ? $projectEvents->first() : null;
+    $olderEvents = $projectId ? $projectEvents->slice(1)->values() : collect();
+@endphp
+
+<x-island-card :separator="false" wire:loading.class="opacity-50 text-opacity-50" wire:transition x-data="{ expanded: false }">
+    <div class="flex w-full items-center justify-between">
+        <button type="button" @click="expanded = !expanded" class="flex items-center gap-2">
+            <flux:heading size="lg" class="mb-0">Email Tracking</flux:heading>
+        </button>
+        @if($projectId && $olderEvents->isNotEmpty())
+            <button type="button" @click="expanded = !expanded" class="flex items-center gap-2 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200">
+                <flux:badge color="zinc" size="sm">{{ $olderEvents->count() }}</flux:badge>
+                <flux:icon.chevron-down variant="mini" class="transition-transform duration-200" ::class="expanded && 'rotate-180'" />
+            </button>
+        @endif
+    </div>
 
     <div class="space-y-2">
-        <flux:table :paginate="$this->emailTrackingEvents->hasPages() ? $this->emailTrackingEvents : null">
-            <flux:table.columns>
-                <flux:table.column>Event</flux:table.column>
-                <flux:table.column>Template</flux:table.column>
-                @if(!$projectId)
-                    <flux:table.column>Project</flux:table.column>
-                @endif
-                <flux:table.column class="w-48">Recipients</flux:table.column>
-                <flux:table.column>Date</flux:table.column>
-            </flux:table.columns>
+        @if($projectId)
+            @if($latestEvent)
+                <flux:table :paginate="$this->emailTrackingEvents->hasPages() ? $this->emailTrackingEvents : null">
+                    <flux:table.columns>
+                        <flux:table.column>Event</flux:table.column>
+                        <flux:table.column>Template</flux:table.column>
+                        <flux:table.column class="w-48">Recipients</flux:table.column>
+                        <flux:table.column>Date</flux:table.column>
+                    </flux:table.columns>
 
-            <flux:table.rows>
-                @forelse ($this->emailTrackingEvents as $event)
-                    <flux:table.row :key="$event->id">
-                        <flux:table.cell>
-                            <flux:badge
-                                size="sm"
-                                :color="match($event->event_type) {
-                                    'opened' => 'blue',
-                                    'clicked' => 'green',
-                                    'replied' => 'purple',
-                                    'bounced' => 'red',
-                                    default => 'zinc'
-                                }"
-                                inset="top bottom">
-                                {{ ucfirst($event->event_type) }}
-                                @if(isset($event->event_count) && $event->event_count > 1)
-                                    <span class="ml-1">x{{ $event->event_count }}</span>
-                                @endif
-                            </flux:badge>
-                        </flux:table.cell>
-                        <flux:table.cell>
-                            @if($event->email_template_name)
-                                <flux:badge size="sm" color="zinc" variant="outline">
-                                    {{ $event->email_template_name }}
-                                </flux:badge>
-                            @else
-                                <span class="text-gray-400">-</span>
-                            @endif
-                        </flux:table.cell>
-                        @if(!$projectId)
-                        <flux:table.cell>
-                            @if($event->project)
-                                <a wire:navigate.hover href="{{ route('projects.show', $event->project_id) }}" class="font-semibold text-zinc-900 dark:text-zinc-100 hover:text-indigo-600 dark:hover:text-indigo-400">
-                                    {{ $event->project?->address ?? '-' }}
-                                </a>
-                            @else
-                                <span class="text-gray-400">-</span>
-                            @endif
-                        </flux:table.cell>
+                    <flux:table.rows>
+                        @include('livewire.projects.partials.email-tracking-row', [
+                            'event' => $latestEvent,
+                            'projectId' => $projectId,
+                        ])
+
+                        @if($olderEvents->isNotEmpty())
+                            @foreach($olderEvents as $event)
+                                @include('livewire.projects.partials.email-tracking-row', [
+                                    'event' => $event,
+                                    'projectId' => $projectId,
+                                    'attributes' => new \Illuminate\View\ComponentAttributeBag(['x-show' => 'expanded', 'x-cloak' => true]),
+                                ])
+                            @endforeach
                         @endif
-                        <flux:table.cell class="w-48">
-                            @php
-                                $recipientUsers = $event->recipient_users ?? collect();
-                                $recipientCount = $recipientUsers instanceof \Illuminate\Support\Collection ? $recipientUsers->count() : 0;
-                                $firstRecipient = $recipientCount > 0 ? $recipientUsers->first() : null;
-                                $firstName = $firstRecipient?->first_name ?? null;
+                    </flux:table.rows>
+                </flux:table>
+            @else
+                <flux:text class="text-gray-500">No tracking events found.</flux:text>
+            @endif
+        @else
+            <flux:table :paginate="$this->emailTrackingEvents->hasPages() ? $this->emailTrackingEvents : null">
+                <flux:table.columns>
+                    <flux:table.column>Event</flux:table.column>
+                    <flux:table.column>Template</flux:table.column>
+                    <flux:table.column>Project</flux:table.column>
+                    <flux:table.column class="w-48">Recipients</flux:table.column>
+                    <flux:table.column>Date</flux:table.column>
+                </flux:table.columns>
 
-                                if (! $firstName && $firstRecipient?->full_name) {
-                                    $nameParts = explode(' ', trim((string) $firstRecipient->full_name));
-                                    $firstName = $nameParts[0] ?? null;
-                                }
-
-                                $emails = is_array($event->all_recipient_emails ?? null) ? $event->all_recipient_emails : [];
-                                $emailCount = count($emails);
-                                $fallbackEmail = $emailCount > 0 ? $emails[0] : null;
-                                $displayName = $firstName ?: $fallbackEmail;
-                                $extraCount = $recipientCount > 0
-                                    ? max($recipientCount - 1, 0)
-                                    : max($emailCount - 1, 0);
-                                    $recipientFullNames = $recipientUsers instanceof \Illuminate\Support\Collection
-                                        ? $recipientUsers->pluck('full_name')->filter()->values()->all()
-                                        : [];
-                                    $recipientTitle = ! empty($recipientFullNames) ? implode(', ', $recipientFullNames) : null;
-                            @endphp
-                            @if($displayName)
-                                    <div class="text-sm text-zinc-700 dark:text-zinc-300" @if($recipientTitle) title="{{ $recipientTitle }}" @endif>
-                                    {{ $displayName }}@if($extraCount > 0) <span class="text-xs text-zinc-500 dark:text-zinc-400">+{{ $extraCount }}</span>@endif
-                                </div>
-                            @else
-                                <span class="text-gray-400">-</span>
-                            @endif
-                        </flux:table.cell>
-                        <flux:table.cell>
-                            @if($event->event_at)
-                                @php
-                                    $daysAgo = $event->event_at->diffInDays(now());
-                                    $dateLabel = $daysAgo > 14
-                                        ? $event->event_at->format('m/d/y')
-                                        : $event->event_at->diffForHumans();
-                                @endphp
-                                <div class="text-sm text-zinc-700 dark:text-zinc-300">{{ $dateLabel }}</div>
-                            @else
-                                <span class="text-gray-400">-</span>
-                            @endif
-                        </flux:table.cell>
-                    </flux:table.row>
-                @empty
-                    <flux:table.row>
-                        <flux:table.cell :colspan="$projectId ? 4 : 5" class="text-center text-gray-500">No tracking events found.</flux:table.cell>
-                    </flux:table.row>
-                @endforelse
-            </flux:table.rows>
-        </flux:table>
+                <flux:table.rows>
+                    @forelse ($this->emailTrackingEvents as $event)
+                        @include('livewire.projects.partials.email-tracking-row', [
+                            'event' => $event,
+                            'projectId' => $projectId,
+                        ])
+                    @empty
+                        <flux:table.row>
+                            <flux:table.cell :colspan="5" class="text-center text-gray-500">No tracking events found.</flux:table.cell>
+                        </flux:table.row>
+                    @endforelse
+                </flux:table.rows>
+            </flux:table>
+        @endif
     </div>
 </x-island-card>
 @endif

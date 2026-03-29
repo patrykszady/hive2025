@@ -4,80 +4,16 @@
         <flux:card class="!px-5 !py-2 sm:hidden">
             <flux:accordion transition>
                 <flux:accordion.item>
-                    <flux:accordion.heading>
-                        <flux:heading size="lg">Filters</flux:heading>
-                    </flux:accordion.heading>
-                    <flux:accordion.content>
-                        <div class="flex flex-col gap-4">
-                            <div class="min-w-0 w-full">
-                                <flux:input wire:model.live.debounce.300ms="amount" label="Amount" icon="magnifying-glass" placeholder="Search Amount" />
-                            </div>
-                            <div class="min-w-0 w-full">
-                                <flux:select wire:model.live="expense_vendor" label="Vendor" variant="listbox" searchable clearable placeholder="Choose Vendor...">
-                                    <x-slot name="search">
-                                        <flux:select.search placeholder="Search..." />
-                                    </x-slot>
-                                    <flux:select.option value="0">NO VENDOR</flux:select.option>
-                                    <flux:select.option disabled>---------</flux:select.option>
-                                    @foreach ($vendors as $vendor)
-                                        <flux:select.option value="{{$vendor->id}}">{{ $vendor->name }}</flux:select.option>
-                                    @endforeach
-                                </flux:select>
-                            </div>
-                            <div class="min-w-0 w-full">
-                                <flux:select wire:model.live="project_id" label="Project" variant="listbox" searchable clearable placeholder="Choose Project...">
-                                    <x-slot name="search">
-                                        <flux:select.search placeholder="Search..." />
-                                    </x-slot>
-                                    <flux:select.option value="NO_PROJECT">NO PROJECT</flux:select.option>
-                                    <flux:select.option value="SPLIT">SPLIT</flux:select.option>
-                                    <flux:select.option disabled>---------</flux:select.option>
-                                    @foreach ($distributions as $distribution)
-                                        <flux:select.option value="D:{{$distribution->id}}">{{ $distribution->name }}</flux:select.option>
-                                    @endforeach
-                                    <flux:select.option disabled>---------</flux:select.option>
-                                    @foreach ($projects as $project)
-                                        <flux:select.option value="{{$project->id}}"><div>{{ $project->short_address }} <br> <i class="font-normal">{{$project->project_name}}</i></div></flux:select.option>
-                                    @endforeach
-                                </flux:select>
-                            </div>
-                            <div class="min-w-0 w-full">
-                                <flux:select variant="listbox" label="Status" multiple placeholder="Choose status..." wire:model.live="expense_statuses">
-                                    <flux:select.option value="Complete"><flux:badge size="md" inset="top bottom" color="green">Complete</flux:badge></flux:select.option>
-                                    <flux:select.option value="No Transaction"><flux:badge size="md" inset="top bottom" color="yellow">No Transaction</flux:badge></flux:select.option>
-                                    <flux:select.option value="No Project"><flux:badge size="md" inset="top bottom" color="red">No Project</flux:badge></flux:select.option>
-                                    <flux:select.option value="Missing Info"><flux:badge size="md" inset="top bottom" color="amber">Missing Info</flux:badge></flux:select.option>
-                                </flux:select>
-                            </div>
-                            <div class="min-w-0 w-full">
-                                <flux:date-picker
-                                    wire:model.live="date_range"
-                                    mode="range"
-                                    with-presets
-                                    presets="last30Days last3Months last6Months thisMonth lastMonth thisYear lastYear custom"
-                                    clearable
-                                    placeholder="All time"
-                                    label="Date Range"
-                                />
-                            </div>
-                            <div class="min-w-0 w-full">
-                                <flux:input wire:model.live.debounce.400ms="receipt_search" icon="magnifying-glass" placeholder="Search items, SKU, barcode..." clearable label="Receipt Items">
-                                    <x-slot name="iconTrailing">
-                                        <flux:button size="sm" variant="subtle" icon="scan-barcode" class="-mr-1" x-on:click="$flux.modal('barcode-scanner').show()" title="Scan barcode" />
-                                    </x-slot>
-                                </flux:input>
-                                @if($upcProductName)
-                                    <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                                        <flux:icon.scan-barcode variant="micro" class="inline size-3" /> UPC resolved to: <span class="font-medium text-zinc-700 dark:text-zinc-300">{{ $upcProductName }}</span>
-                                    </p>
-                                @endif
-                            </div>
-                            @can('create', App\Models\Expense::class)
-                                @if($amount && $view == NULL)
-                                    <flux:button wire:click="$dispatchTo('expenses.expense-create', 'newExpense', { amount: {{$amount}}})">Add New Expense</flux:button>
-                                @endif
-                            @endcan
+                    <div class="flex items-center">
+                        <div class="flex-1 min-w-0">
+                            <flux:accordion.heading>
+                                <flux:heading size="lg">Filters</flux:heading>
+                            </flux:accordion.heading>
                         </div>
+                        <flux:button size="sm" variant="ghost" icon="scan-barcode" x-on:click.stop="$flux.modal('barcode-scanner').show()" title="Scan barcode" class="shrink-0 text-zinc-400" />
+                    </div>
+                    <flux:accordion.content>
+                        @include('livewire.expenses.partials.filter-fields', ['layout' => 'stacked'])
                     </flux:accordion.content>
                 </flux:accordion.item>
             </flux:accordion>
@@ -93,86 +29,14 @@
                 @endcan
             </x-slot:actions>
 
-            <div class="flex flex-col sm:flex-row items-end gap-4">
-                <div class="flex-1 min-w-0 w-full">
-                    <flux:input wire:model.live.debounce.300ms="amount" label="Amount" icon="magnifying-glass" placeholder="Search Amount" />
-                </div>
-
-                <div class="flex-1 min-w-0 w-full">
-                    <flux:select wire:model.live="expense_vendor" label="Vendor" variant="listbox" searchable clearable placeholder="Choose Vendor...">
-                        <x-slot name="search">
-                            <flux:select.search placeholder="Search..." />
-                        </x-slot>
-
-                        <flux:select.option value="0">NO VENDOR</flux:select.option>
-                        <flux:select.option disabled>---------</flux:select.option>
-                        @foreach ($vendors as $vendor)
-                            <flux:select.option value="{{$vendor->id}}">{{ $vendor->name }}</flux:select.option>
-                        @endforeach
-                    </flux:select>
-                </div>
-
-                <div class="flex-1 min-w-0 w-full">
-                    <flux:select wire:model.live="project_id" label="Project" variant="listbox" searchable clearable placeholder="Choose Project...">
-                        <x-slot name="search">
-                            <flux:select.search placeholder="Search..." />
-                        </x-slot>
-
-                        <flux:select.option value="NO_PROJECT">NO PROJECT</flux:select.option>
-                        <flux:select.option value="SPLIT">SPLIT</flux:select.option>
-                        <flux:select.option disabled>---------</flux:select.option>
-                        @foreach ($distributions as $distribution)
-                            <flux:select.option value="D:{{$distribution->id}}">{{ $distribution->name }}</flux:select.option>
-                        @endforeach
-                        <flux:select.option disabled>---------</flux:select.option>
-                        @foreach ($projects as $project)
-                            <flux:select.option value="{{$project->id}}"><div>{{ $project->short_address }} <br> <i class="font-normal">{{$project->project_name}}</i></div></flux:select.option>
-                        @endforeach
-                    </flux:select>
-                </div>
-
-                <div class="flex-1 min-w-0 w-full">
-                    <flux:select variant="listbox" label="Status" multiple placeholder="Choose status..." wire:model.live="expense_statuses">
-                        <flux:select.option value="Complete"><flux:badge size="md" inset="top bottom" color="green">Complete</flux:badge></flux:select.option>
-                        <flux:select.option value="No Transaction"><flux:badge size="md" inset="top bottom" color="yellow">No Transaction</flux:badge></flux:select.option>
-                        <flux:select.option value="No Project"><flux:badge size="md" inset="top bottom" color="red">No Project</flux:badge></flux:select.option>
-                        <flux:select.option value="Missing Info"><flux:badge size="md" inset="top bottom" color="amber">Missing Info</flux:badge></flux:select.option>
-                    </flux:select>
-                </div>
-
-                <div class="flex-1 min-w-0 w-full">
-                    <flux:date-picker
-                        wire:model.live="date_range"
-                        mode="range"
-                        with-presets
-                        presets="last30Days last3Months last6Months thisMonth lastMonth thisYear lastYear custom"
-                        clearable
-                        placeholder="All time"
-                        label="Date Range"
-                    />
-                </div>
-            </div>
-
-            <div class="flex flex-col sm:flex-row items-end gap-4 mt-4">
-                <div class="flex-1 min-w-0 w-full sm:max-w-xs">
-                    <flux:input wire:model.live.debounce.400ms="receipt_search" icon="magnifying-glass" placeholder="Search items, SKU, barcode..." clearable label="Receipt Items">
-                        <x-slot name="iconTrailing">
-                            <flux:button size="sm" variant="subtle" icon="scan-barcode" class="-mr-1" x-on:click="$flux.modal('barcode-scanner').show()" title="Scan barcode" />
-                        </x-slot>
-                    </flux:input>
-                    @if($upcProductName)
-                        <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                            <flux:icon.scan-barcode variant="micro" class="inline size-3" /> UPC resolved to: <span class="font-medium text-zinc-700 dark:text-zinc-300">{{ $upcProductName }}</span>
-                        </p>
-                    @endif
-                </div>
-            </div>
+            @include('livewire.expenses.partials.filter-fields', ['layout' => 'inline'])
         </x-island-card>
     @endif
 
     {{-- Hide expenses card on project page when there are no expenses --}}
     @if($view !== 'projects.show' || $this->expenses->isNotEmpty())
-    <x-island-card heading="Expenses" class="overflow-hidden" x-data="{
+    <x-island-card :heading="!in_array($view, ['projects.show', 'vendors.show']) ? 'Expenses' : null" class="overflow-hidden" x-data="{
+        filtersOpen: false,
         init() {
             window.addEventListener('remove-expense-row', (event) => {
                 const expenseId = event.detail.id;
@@ -192,11 +56,25 @@
             });
         }
     }">
+        @if(in_array($view, ['projects.show', 'vendors.show']))
+            <button type="button" @click="filtersOpen = !filtersOpen" class="flex w-full items-center justify-between">
+                <flux:heading size="lg" class="mb-0">Expenses</flux:heading>
+                <div class="flex items-center gap-2">
+                    <span class="text-sm text-zinc-500 dark:text-zinc-400">Filters</span>
+                    <flux:icon.chevron-down variant="mini" class="text-gray-400 transition-transform duration-200" ::class="filtersOpen && 'rotate-180'" />
+                </div>
+            </button>
+
+            <div x-show="filtersOpen" x-collapse x-cloak class="mt-4">
+                @include('livewire.expenses.partials.filter-fields', ['layout' => 'stacked'])
+            </div>
+        @endif
+
         <div class="space-y-4">
             <div class="-mx-5 -mb-2 overflow-x-auto">
                 <flux:table
                     wire:loading.class="opacity-50 text-opacity-50"
-                    class="table-fixed {{ $view === 'projects.show' ? 'min-w-0' : 'min-w-[640px]' }} w-full [:where(&)]:p-0 [:where(&)]:space-y-0 [&_th]:!px-4 [&_td]:!px-3 [&_th:first-child]:!ps-6 [&_th:last-child]:!pe-6 [&_td:first-child]:!ps-6 [&_td:last-child]:!pe-6"
+                    class="table-fixed {{ in_array($view, ['projects.show', 'vendors.show']) ? 'min-w-0' : 'min-w-[640px]' }} w-full [:where(&)]:p-0 [:where(&)]:space-y-0 [&_th]:!px-4 [&_td]:!px-3 [&_th:first-child]:!ps-6 [&_th:last-child]:!pe-6 [&_td:first-child]:!ps-6 [&_td:last-child]:!pe-6"
                 >
                 <flux:table.columns>
                     <flux:table.column class="w-[14%] min-w-[5.5rem] !pe-8">
@@ -227,7 +105,10 @@
                         <flux:table.row :key="$expense->id" data-expense-row="{{ $expense->id }}">
                             <flux:table.cell variant="strong" class="w-[14%] min-w-[5.5rem] !pe-8">
                                 <div class="pe-4 flex items-center gap-1">
-                                    <a href="{{ route('expenses.show', $expense->id) }}" class="hover:underline" wire:navigate>{{ display_money($expense->amount) }}</a>
+                                    <a href="{{ route('expenses.show', $expense->id) }}" wire:navigate.hover>{{ display_money($expense->amount) }}</a>
+                                    @if($expense->reimbursment)
+                                        <flux:badge size="sm" variant="outline" inset="top bottom" color="zinc" title="{{ $expense->reimbursment }}">R</flux:badge>
+                                    @endif
                                     @can('create', App\Models\Expense::class)
                                         <button type="button" wire:click="$dispatchTo('expenses.expense-create', 'editExpense', { expense: {{ $expense->id }} })" class="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200" title="Edit expense">
                                             <flux:icon.pencil-square variant="micro" />
@@ -240,7 +121,7 @@
                             </flux:table.cell>
                             @if(!in_array($view, ['checks.show', 'vendors.show']))
                                 <flux:table.cell class="w-[25%] min-w-0 !ps-3">
-                                    <a href="{{isset($expense->vendor->id) ? route('vendors.show', $expense->vendor->id) : ''}}">
+                                    <a href="{{isset($expense->vendor->id) ? route('vendors.show', $expense->vendor->id) : ''}}" wire:navigate.hover>
                                         <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{$expense->vendor->name}}">{{$expense->vendor->name}}</div>
                                     </a>
                                 </flux:table.cell>
@@ -252,7 +133,7 @@
                                         SPLIT
                                     @else
                                         @if($expense->project?->id)
-                                            <a href="{{ route('projects.show', $expense->project->id) }}" class="truncate whitespace-nowrap overflow-hidden text-ellipsis font-semibold block hover:underline" title="{{ $expense->project->name }}" wire:navigate>{{ $expense->project->name }}</a>
+                                            <a href="{{ route('projects.show', $expense->project->id) }}" class="truncate whitespace-nowrap overflow-hidden text-ellipsis font-semibold block" title="{{ $expense->project->name }}" wire:navigate.hover>{{ $expense->project->name }}</a>
                                         @else
                                             <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis font-semibold" title="No Project">No Project</div>
                                         @endif
@@ -277,13 +158,24 @@
 
                         {{-- Show split rows if expense has splits --}}
                         @if($expense->splits->count() > 0)
-                            @foreach($expense->splits as $split)
-                                @if($view === 'projects.show' && (string)$split->project_id !== (string)$project_id)
-                                    @continue
-                                @endif
+                            @php
+                                $filteredSplits = $expense->splits;
+                                if ($view === 'projects.show') {
+                                    $filteredSplits = $filteredSplits->where('project_id', $project_id);
+                                }
+                                if ($reimbursement_filter) {
+                                    $filteredSplits = $filteredSplits->filter(fn ($s) => ($s->reimbursment ?? 'None') === $reimbursement_filter);
+                                }
+                            @endphp
+                            @foreach($filteredSplits as $split)
                                 <flux:table.row :key="'split-' . $split->id" class="bg-gray-50 dark:bg-gray-800/50 [&_td]:!py-2" data-expense-split-parent="{{ $expense->id }}">
                                     <flux:table.cell class="text-sm text-gray-600 dark:text-gray-400 tabular-nums w-[14%] min-w-[5.5rem] !pl-10 !pe-8">
-                                        <div class="pe-4">{{ display_money($split->amount) }}</div>
+                                        <div class="pe-4 flex items-center gap-1">
+                                            {{ display_money($split->amount) }}
+                                            @if($split->reimbursment && $split->reimbursment !== 'None')
+                                                <flux:badge size="sm" variant="outline" inset="top bottom" color="zinc" title="{{ $split->reimbursment }}">R</flux:badge>
+                                            @endif
+                                        </div>
                                     </flux:table.cell>
                                     {{-- Preserve column alignment: empty date cell --}}
                                     <flux:table.cell class="w-[14%] min-w-[6rem] !ps-8 !pe-3">
@@ -307,7 +199,7 @@
                                                 }
                                             @endphp
                                             @if(isset($split->project->id))
-                                                <a href="{{ route('projects.show', $split->project->id) }}" class="truncate whitespace-nowrap overflow-hidden text-ellipsis block hover:underline" title="{{ $splitProjectName }}" wire:navigate>{{ $splitProjectName }}</a>
+                                                <a href="{{ route('projects.show', $split->project->id) }}" class="truncate whitespace-nowrap overflow-hidden text-ellipsis block" title="{{ $splitProjectName }}" wire:navigate.hover>{{ $splitProjectName }}</a>
                                             @else
                                                 <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $splitProjectName }}">{{ $splitProjectName }}</div>
                                             @endif
@@ -600,4 +492,5 @@
             </div>
         </div>
     </flux:modal>
+
 </div>

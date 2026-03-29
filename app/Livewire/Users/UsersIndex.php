@@ -15,7 +15,7 @@ class UsersIndex extends Component
     public $view = false;
 
     public bool $accordion = false;
-    public bool $accordionExpanded = true;
+    public ?bool $accordionExpanded = null;
 
     protected $listeners = ['refreshComponent' => 'loadUsers'];
     
@@ -31,7 +31,7 @@ class UsersIndex extends Component
         // Both vendor and client member cards use an accordion
         if (in_array($this->view, ['vendors.show', 'clients.show'])) {
             $this->accordion = true;
-            $this->accordionExpanded = ! auth()->user()->is_client_user;
+            $this->accordionExpanded ??= ! auth()->user()->is_client_user;
         }
     }
     

@@ -22,6 +22,9 @@ class VendorForm extends Form
     #[Rule('nullable|email|min:5', as: 'business email')]
     public $business_email = null;
 
+    #[Rule('nullable|url|max:255', as: 'business website')]
+    public $business_website = null;
+
     // No Rule attribute for business_phone, we'll use rules() method instead
     public $business_phone = null;
 
@@ -70,6 +73,7 @@ class VendorForm extends Form
         $this->component->zip_code = $this->vendor->zip_code;
         $this->business_phone = $this->vendor->business_phone;
         $this->business_email = $this->vendor->business_email;
+        $this->business_website = $this->vendor->business_website;
     }
 
     public function update()
@@ -86,6 +90,7 @@ class VendorForm extends Form
             'zip_code' => $this->component->zip_code,
             'business_phone' => $this->business_phone,
             'business_email' => $this->business_email,
+            'business_website' => $this->business_website,
         ]);
         
         return $this->vendor;
@@ -107,6 +112,7 @@ class VendorForm extends Form
             'zip_code' => $this->component->zip_code,
             'business_phone' => $this->business_phone,
             'business_email' => $this->business_email,
+            'business_website' => $this->business_website,
         ]);
     }
 }

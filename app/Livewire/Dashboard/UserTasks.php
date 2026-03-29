@@ -30,7 +30,8 @@ class UserTasks extends Component
         $today = browser_today();
         $cutoff = $today->copy()->subDay();
 
-        $tasks = Task::whereJsonContains('user_ids', $userId)
+        $tasks = Task::withTrashed()
+            ->whereJsonContains('user_ids', $userId)
             ->where(function ($query) use ($cutoff) {
                 $query->whereDate('end_date', '>=', $cutoff);
             })
@@ -131,7 +132,8 @@ class UserTasks extends Component
         $cutoff = $today->copy()->subDay();
         $windowEnd = $today->copy()->addDays(6)->format('Y-m-d');
 
-        return Task::whereJsonContains('user_ids', $userId)
+        return Task::withTrashed()
+            ->whereJsonContains('user_ids', $userId)
             ->whereDate('end_date', '>=', $cutoff)
             ->whereDate('start_date', '<=', $windowEnd)
             ->whereNotNull('start_date')
@@ -146,6 +148,8 @@ class UserTasks extends Component
 
     public function placeholder(): \Illuminate\Contracts\View\View
     {
-        return view('livewire.dashboard.user-tasks-placeholder');
+        return view('livewire.partials.tasks-placeholder', [
+            'showProjectInfo' => true,
+        ]);
     }
 }

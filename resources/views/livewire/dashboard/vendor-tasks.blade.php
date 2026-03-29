@@ -9,7 +9,7 @@
         :show-project-info="true"
         :show-vendor-info="false"
         :show-add-task="true"
-        title="Tasks"
+        title="Your Tasks"
         empty-message="No tasks upcoming for your projects."
     />
 </div>

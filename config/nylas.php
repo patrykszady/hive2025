@@ -45,4 +45,12 @@ return [
         // so you can compare them against Nylas webhook opens.
         'compare_opens' => (bool) env('NYLAS_COMPARE_OPENS', env('APP_ENV') === 'production'),
     ],
+
+    // Calendar events for Meet tasks
+    'meet' => [
+        'enabled' => (bool) env('NYLAS_MEET_ENABLED', true),
+        'conferencing_provider' => env('NYLAS_MEET_CONFERENCING_PROVIDER', 'Microsoft Teams'),
+        // In local/dev/test, all Meet invites are redirected to this address.
+        'dev_recipient' => env('NYLAS_MEET_DEV_RECIPIENT', 'patryk.szady@live.com'),
+    ],
 ];

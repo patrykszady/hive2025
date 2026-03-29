@@ -16,18 +16,7 @@
     'showAddTask' => false,
 ])
 
-<x-island-card heading="{{ $title }}" x-data="{
-    init() {
-        window.addEventListener('remove-task-card', (event) => {
-            const taskId = event.detail.id;
-            document.querySelectorAll(`[data-task-card='${taskId}']`).forEach(card => {
-                card.style.transition = 'opacity 0.3s ease-out';
-                card.style.opacity = '0';
-                setTimeout(() => card.remove(), 300);
-            });
-        });
-    }
-}">
+<x-island-card heading="{{ $title }}">
     <x-slot:badge>
         <flux:badge size="sm" color="zinc">{{ $taskCount }}</flux:badge>
     </x-slot:badge>

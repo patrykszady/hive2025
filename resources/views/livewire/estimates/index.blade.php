@@ -20,13 +20,13 @@
 
         <div class="space-y-2">
             <flux:table :paginate="$this->estimates->hasPages() ? $this->estimates : null">
-                <flux:table.columns>
-                    <flux:table.column>Estimate</flux:table.column>
-                    <flux:table.column>Date</flux:table.column>
-                    @if($view === 'estimates.index')
+                @if($view === 'estimates.index')
+                    <flux:table.columns>
+                        <flux:table.column>Estimate</flux:table.column>
+                        <flux:table.column>Date</flux:table.column>
                         <flux:table.column>Client</flux:table.column>
-                    @endif
-                </flux:table.columns>
+                    </flux:table.columns>
+                @endif
 
                 <flux:table.rows>
                     @foreach($this->estimates as $estimate)

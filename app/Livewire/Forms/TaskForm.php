@@ -144,7 +144,7 @@ class TaskForm extends Form
             'project_id' => $this->project_id,
             'vendor_id' => $this->vendor_id,
             'type' => $this->type,
-            'user_ids' => $this->user_ids,
+            'user_ids' => collect($this->user_ids)->map(fn ($id) => (string) $id)->values()->all(),
             'title' => $this->title,
             'notes' => $this->notes,
             'order' => $this->order ?? $this->task->order ?? 0, // Preserve existing order or default to 0
@@ -195,7 +195,7 @@ class TaskForm extends Form
             'project_id' => $this->project_id,
             'vendor_id' => $this->vendor_id,
             'type' => $this->type,
-            'user_ids' => $this->user_ids,
+            'user_ids' => collect($this->user_ids)->map(fn ($id) => (string) $id)->values()->all(),
             'title' => $this->title,
             'notes' => $this->notes,
             'order' => 0,

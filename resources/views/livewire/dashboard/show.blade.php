@@ -39,7 +39,7 @@
                 {{-- VENDOR DETAILS --}}
                 <livewire:vendors.vendor-details :vendor="$user->vendor" :expanded="false" />
                 {{-- VENDOR TEAM MEMBERS --}}
-                <livewire:users.users-index :vendor="$user->vendor" :view="'vendors.show'"/>
+                <livewire:users.users-index :vendor="$user->vendor" :view="'vendors.show'" :accordionExpanded="false" />
             @endif
         </div>
 
