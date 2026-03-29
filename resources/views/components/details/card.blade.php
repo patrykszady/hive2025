@@ -59,7 +59,7 @@
             </div>
         @elseif($details_text === false)
             {{-- Inline toggle: chevron is in header actions --}}
-            <div x-show="open" x-collapse x-cloak>
+            <div x-show="open" x-collapse @unless($expanded) x-cloak @endunless>
                 {{ $details }}
             </div>
         @else
@@ -70,7 +70,7 @@
                     <flux:icon.chevron-down variant="mini" class="text-gray-400 transition-transform duration-200" ::class="open && 'rotate-180'" />
                 </button>
 
-                <div x-show="open" x-collapse x-cloak>
+                <div x-show="open" x-collapse @unless($expanded) x-cloak @endunless>
                     {{ $details }}
                 </div>
             </div>

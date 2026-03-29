@@ -138,9 +138,9 @@
                                             <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis font-semibold" title="No Project">No Project</div>
                                         @endif
                                         @php
-                                            $po = $expense->receipts->first()?->receipt_items['purchase_order'] ?? null;
+                                            $po = $expense->receipts->first()?->notes;
                                         @endphp
-                                        @if($po && $po !== 'null')
+                                        @if($po)
                                             <div class="text-xs italic text-zinc-500 dark:text-zinc-400 truncate" title="{{ $po }}">{{ $po }}</div>
                                         @endif
                                     @endif

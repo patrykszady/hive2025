@@ -159,7 +159,6 @@
                                         <flux:table.column class="!pl-5 pr-5">Amount</flux:table.column>
                                     @endif
                                     <flux:table.column class="w-[35%]">Project</flux:table.column>
-                                    <flux:table.column title="Reimbursement">Reimb.</flux:table.column>
                                 </flux:table.columns>
                                 
                                 <flux:table.rows>
@@ -179,20 +178,35 @@
                                                         {{ $selectedSplitId == $split->id ? 'Selected' : 'Select' }}
                                                     </flux:button>
                                                 </flux:table.cell>
-                                                <flux:table.cell variant="strong">{{money($split->amount)}}</flux:table.cell>
+                                                <flux:table.cell variant="strong">
+                                                    <div class="flex items-center gap-1">
+                                                        {{money($split->amount)}}
+                                                        @if($split->reimbursment && $split->reimbursment !== 'None')
+                                                            <flux:badge size="sm" variant="outline" inset="top bottom" color="zinc" title="{{ $split->reimbursment }}">R</flux:badge>
+                                                        @endif
+                                                    </div>
+                                                </flux:table.cell>
                                             @else
-                                                <flux:table.cell variant="strong" class="!pl-5 pr-5">{{money($split->amount)}}</flux:table.cell>
+                                                <flux:table.cell variant="strong" class="!pl-5 pr-5">
+                                                    <div class="flex items-center gap-1">
+                                                        {{money($split->amount)}}
+                                                        @if($split->reimbursment && $split->reimbursment !== 'None')
+                                                            <flux:badge size="sm" variant="outline" inset="top bottom" color="zinc" title="{{ $split->reimbursment }}">R</flux:badge>
+                                                        @endif
+                                                    </div>
+                                                </flux:table.cell>
                                             @endif
                                             
                                             <flux:table.cell class="truncate">
                                                 @if($split->distribution)
                                                     {{$split->distribution->name }}
+                                                @elseif($split->project)
+                                                    <a wire:navigate.hover href="{{route('projects.show', $split->project->id)}}" title="{{ $split->project->name }}">{{ $split->project->name }}</a>
                                                 @else
-                                                    <a wire:navigate.hover href="{{route('projects.show', $split->project->id)}}">{{ $split->project->address }}</a>
+                                                    No Project
                                                 @endif
                                             </flux:table.cell>
 
-                                            <flux:table.cell>{{$split->reimbursment}}</flux:table.cell>
                                         </flux:table.row>
                                     @endforeach
                                 </flux:table.rows>
