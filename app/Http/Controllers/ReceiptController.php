@@ -756,6 +756,23 @@ class ReceiptController extends Controller
                 } else {
                     $formattedItems[$key]['Price'] = $formattedItems[$key]['TotalPrice'];
                 }
+
+                // If quantity defaulted to 1 but we have both unit price and total price,
+                // calculate the actual quantity from TotalPrice / Price.
+                if (
+                    $formattedItems[$key]['Quantity'] == 1
+                    && $formattedItems[$key]['Price']
+                    && $formattedItems[$key]['TotalPrice']
+                    && $formattedItems[$key]['Price'] > 0
+                    && $formattedItems[$key]['TotalPrice'] > $formattedItems[$key]['Price']
+                ) {
+                    $calculatedQty = $formattedItems[$key]['TotalPrice'] / $formattedItems[$key]['Price'];
+                    $roundedQty = round($calculatedQty);
+
+                    if ($roundedQty > 1 && abs($calculatedQty - $roundedQty) < 0.01) {
+                        $formattedItems[$key]['Quantity'] = (int) $roundedQty;
+                    }
+                }
             }
         }
 
@@ -841,6 +858,7 @@ class ReceiptController extends Controller
 
         if (is_array($formattedItems) && !empty($formattedItems)) {
             $formattedItems = $this->supplementLineItemsFromContent($formattedItems, (string) ($content ?? ''), $subtotal);
+            $formattedItems = $this->supplementQuantitiesFromContent($formattedItems, (string) ($content ?? ''));
             $formattedItems = $this->deduplicateLineItems($formattedItems);
         }
 
@@ -1282,6 +1300,106 @@ class ReceiptController extends Controller
         }
 
         return array_values($items);
+    }
+
+    /**
+     * Attempt to fix Quantity=1 defaults by finding the line item's TotalPrice
+     * in the raw OCR content and reading the actual quantity from adjacent numbers.
+     *
+     * Handles invoice-style layouts where quantities appear as columns:
+     *   23    0    0    23    3.29    75.67T
+     */
+    private function supplementQuantitiesFromContent(array $items, string $content): array
+    {
+        if ($content === '') {
+            return $items;
+        }
+
+        $hasQuantityOne = false;
+        foreach ($items as $item) {
+            if (($item['Quantity'] ?? 1) == 1 && ($item['TotalPrice'] ?? 0) > ($item['Price'] ?? 0)) {
+                $hasQuantityOne = true;
+                break;
+            }
+        }
+
+        if (! $hasQuantityOne) {
+            return $items;
+        }
+
+        $decoded = html_entity_decode($content, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $lines = preg_split('/\n/', $decoded);
+
+        foreach ($items as $key => &$item) {
+            if (($item['Quantity'] ?? 1) != 1 || ! isset($item['TotalPrice']) || ! isset($item['Price'])) {
+                continue;
+            }
+
+            if ($item['Price'] <= 0 || $item['TotalPrice'] <= $item['Price']) {
+                continue;
+            }
+
+            $totalStr = number_format($item['TotalPrice'], 2, '.', ',');
+            $totalStrNoComma = number_format($item['TotalPrice'], 2, '.', '');
+
+            foreach ($lines as $line) {
+                // Look for lines containing the total price (with optional trailing letter like "T")
+                if (strpos($line, $totalStr) === false && strpos($line, $totalStrNoComma) === false) {
+                    continue;
+                }
+
+                // Extract all numbers from the line
+                preg_match_all('/(\d+(?:,\d{3})*(?:\.\d+)?)/', $line, $nums);
+                if (empty($nums[1]) || count($nums[1]) < 3) {
+                    continue;
+                }
+
+                $numbers = array_map(fn ($n) => (float) str_replace(',', '', $n), $nums[1]);
+
+                // Find the total price in the number list
+                $totalIdx = null;
+                foreach ($numbers as $i => $num) {
+                    if (abs($num - $item['TotalPrice']) < 0.01) {
+                        $totalIdx = $i;
+                        break;
+                    }
+                }
+
+                if ($totalIdx === null) {
+                    continue;
+                }
+
+                // Find the unit price position
+                $priceIdx = null;
+                foreach ($numbers as $i => $num) {
+                    if ($i === $totalIdx) {
+                        continue;
+                    }
+                    if (abs($num - $item['Price']) < 0.01) {
+                        $priceIdx = $i;
+                    }
+                }
+
+                // Look for a quantity number that, when multiplied by unit price, equals total
+                foreach ($numbers as $i => $num) {
+                    if ($i === $totalIdx || $i === $priceIdx) {
+                        continue;
+                    }
+                    if ($num < 1 || $num != floor($num)) {
+                        continue;
+                    }
+
+                    $expectedTotal = $num * $item['Price'];
+                    if (abs($expectedTotal - $item['TotalPrice']) < 0.01) {
+                        $item['Quantity'] = (int) $num;
+                        break 2;
+                    }
+                }
+            }
+        }
+        unset($item);
+
+        return $items;
     }
 
     private function deduplicateLineItems(array $items): array
