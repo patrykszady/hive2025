@@ -2486,8 +2486,11 @@ class TelnyxWebhookController extends Controller
         // TODO: Multi-vendor support — resolve vendor by $ourNumber
         $vendorId = \App\Models\Vendor::find(1)?->id;
 
+        // Always use the primary Telnyx number so all outbound goes from one number
+        $primaryFrom = config('services.telnyx.from');
+
         $thread = SmsGroupThread::create([
-            'from_number' => $ourNumber,
+            'from_number' => $primaryFrom,
             'participants' => [$normalizedSender],
             'client_id' => $clientId,
             'vendor_id' => $vendorId,
@@ -2528,8 +2531,11 @@ class TelnyxWebhookController extends Controller
         // TODO: Multi-vendor support — resolve vendor by $ourNumber
         $vendorId = \App\Models\Vendor::find(1)?->id;
 
+        // Always use the primary Telnyx number so all outbound goes from one number
+        $primaryFrom = config('services.telnyx.from');
+
         $thread = SmsGroupThread::create([
-            'from_number' => $ourNumber,
+            'from_number' => $primaryFrom,
             'participants' => array_values($participantPhones),
             'client_id' => $clientId,
             'vendor_id' => $vendorId,

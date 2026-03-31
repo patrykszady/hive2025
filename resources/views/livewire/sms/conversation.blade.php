@@ -113,7 +113,7 @@
                 @else
                     <flux:heading size="lg" class="mb-0 truncate flex-1">{{ $headerTitle }}</flux:heading>
                 @endif
-                @if (count(config('services.telnyx.numbers', [])) > 1 && $this->thread->from_number)
+                @if (count(config('services.telnyx.numbers', [])) > 1 && $this->thread->from_number && $this->thread->from_number !== config('services.telnyx.from'))
                     <span class="text-[10px] font-medium text-zinc-400 dark:text-zinc-500 bg-zinc-100 dark:bg-zinc-700 rounded px-1.5 py-0.5 shrink-0">{{ \App\Services\GroupSmsService::numberLabel($this->thread->from_number) }}</span>
                 @endif
                 @if ($this->thread->project)
@@ -427,7 +427,21 @@
                             @endif
                         </div>
 
-                        <p class="text-xs lg:text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5 {{ $msg->isOutbound() ? 'text-right' : '' }} px-1">{{ $timeLabel }}</p>
+                        <p class="text-xs lg:text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5 {{ $msg->isOutbound() ? 'text-right' : '' }} px-1">
+                            {{ $timeLabel }}
+                            @if ($this->threadHasMixedNumbers)
+                                @php
+                                    $numbers = config('services.telnyx.numbers', []);
+                                    $primaryNumber = config('services.telnyx.from');
+                                    $msgNumber = $msg->isOutbound()
+                                        ? $msg->from_number
+                                        : collect($msg->to_numbers)->first(fn ($n) => in_array($n, $numbers));
+                                @endphp
+                                @if ($msgNumber && $msgNumber !== $primaryNumber)
+                                    <span class="text-zinc-400/70 dark:text-zinc-500/70">&middot; {{ substr($msgNumber, -4) }}</span>
+                                @endif
+                            @endif
+                        </p>
                     </div>
                 </div>
             @empty

@@ -103,7 +103,7 @@ class SmsGroupThread extends Model
 
     public function hasPendingOptIn(): bool
     {
-        return $this->opt_in_prompt_sent_at !== null && $this->welcome_sent_at === null;
+        return ! $this->allParticipantsOptedIn();
     }
 
     public function allParticipantsOptedIn(): bool
@@ -185,11 +185,14 @@ class SmsGroupThread extends Model
     }
 
     /**
-     * Find a thread by the from number and a participant phone.
+     * Find a thread by a participant phone.
+     *
+     * Matches any of our Telnyx numbers so inbound replies to a
+     * previous number still route to the correct thread.
      */
     public static function findByParticipant(string $fromNumber, string $participantPhone): ?self
     {
-        return static::where('from_number', $fromNumber)
+        return static::whereIn('from_number', config('services.telnyx.numbers'))
             ->whereJsonContains('participants', $participantPhone)
             ->orderByDesc('last_activity_at')
             ->first();
@@ -207,7 +210,7 @@ class SmsGroupThread extends Model
     {
         $sorted = collect($participantPhones)->sort()->values()->all();
 
-        $query = static::where('from_number', $fromNumber);
+        $query = static::whereIn('from_number', config('services.telnyx.numbers'));
 
         // Every participant must be present
         foreach ($sorted as $phone) {

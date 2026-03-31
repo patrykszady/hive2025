@@ -647,7 +647,7 @@ class SmsConversation extends Component
         }
 
         return SmsMessage::where('thread_id', $this->threadId)
-            ->select(['id', 'thread_id', 'direction', 'from_number', 'text', 'media_urls', 'created_at', 'sent_by_user_id'])
+            ->select(['id', 'thread_id', 'direction', 'from_number', 'to_numbers', 'text', 'media_urls', 'created_at', 'sent_by_user_id'])
             ->with('sentByUser:id,first_name,last_name')
             ->orderByDesc('created_at')
             ->limit($this->messageLimit)
@@ -691,6 +691,31 @@ class SmsConversation extends Component
         }
 
         return $map;
+    }
+
+    /**
+     * Whether the loaded messages involve both phone numbers (4439 and 4200).
+     * When true, we show a small badge on each message indicating which number was used.
+     */
+    #[Computed]
+    public function threadHasMixedNumbers(): bool
+    {
+        $numbers = config('services.telnyx.numbers', []);
+
+        if (count($numbers) < 2) {
+            return false;
+        }
+
+        $found = $this->smsMessages
+            ->map(fn (SmsMessage $msg) => $msg->isOutbound()
+                ? $msg->from_number
+                : collect($msg->to_numbers)->first(fn ($n) => in_array($n, $numbers))
+            )
+            ->filter()
+            ->unique()
+            ->values();
+
+        return $found->count() > 1;
     }
 
     /**
