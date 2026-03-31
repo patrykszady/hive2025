@@ -116,14 +116,20 @@
                                 </thead>
                                 <tbody>
                                     @foreach($estimate->estimate_line_items()->with('allowances')->where('section_id', $section->id)->orderBy('order', 'ASC')->get() as $key => $estimate_line_item)
+                                        @php $liChanged = $recentChanges['line_items'][$estimate_line_item->id] ?? null; @endphp
                                         <tbody style="break-inside: avoid;">
-                                        <tr class="sm:border-b sm:border-gray-400 bg-gray-50">
+                                        <tr class="sm:border-b sm:border-gray-400 bg-gray-50" style="{{ $liChanged ? 'background-color: #fef9c3;' : '' }}">
                                             <td class="hidden px-3 py-5 text-right text-gray-500 align-text-top text-md sm:table-cell">{{$index + 1}}.{{$key + 1}}</td>
                                             {{-- first td --}}
 
                                             <td class="py-5 pl-4 pr-3 text-md max-w-0 sm:pl-6 align-top">
                                                 <div class="flex flex-col leading-5">
-                                                    <div class="text-lg font-medium text-gray-900">{{$estimate_line_item->name}}</div>
+                                                    <div class="text-lg font-medium text-gray-900">
+                                                        {{$estimate_line_item->name}}
+                                                        @if($liChanged)
+                                                            <span style="display: inline-block; font-size: 9px; color: #fff; background-color: #f59e0b; padding: 1px 6px; border-radius: 4px; margin-left: 6px; font-weight: 600; vertical-align: middle;">{{ ucfirst($liChanged['event']) }}</span>
+                                                        @endif
+                                                    </div>
                                                     <div class="text-xs font-bold text-indigo-900">{{$estimate_line_item->category}}/{{$estimate_line_item->sub_category}}</div>
                                                     @foreach($estimate_line_item->allowances as $allowance)
                                                         <div class="text-xs italic text-gray-400">Allowance: {{ $allowance->description }}</div>

@@ -9,10 +9,16 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\Pivot;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Spatie\Activitylog\LogOptions;
+use Spatie\Activitylog\Traits\LogsActivity;
 
 class EstimateLineItem extends Pivot
 {
-    use HasFactory, SoftDeletes, Sortable;
+    use HasFactory, LogsActivity, SoftDeletes, Sortable;
+
+    protected $primaryKey = 'id';
+
+    public $incrementing = true;
 
     //via_vendor
     // public function via_vendor()
@@ -42,5 +48,24 @@ class EstimateLineItem extends Pivot
     public function allowances(): HasMany
     {
         return $this->hasMany(EstimateLineItemAllowance::class, 'estimate_line_item_id', 'id');
+    }
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->logOnly([
+                'name',
+                'category',
+                'sub_category',
+                'unit_type',
+                'quantity',
+                'cost',
+                'total',
+                'desc',
+                'notes',
+            ])
+            ->logOnlyDirty()
+            ->dontSubmitEmptyLogs()
+            ->useLogName('estimates');
     }
 }

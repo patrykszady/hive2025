@@ -8,10 +8,12 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Spatie\Activitylog\LogOptions;
+use Spatie\Activitylog\Traits\LogsActivity;
 
 class EstimateSection extends Model
 {
-    use HasFactory, SoftDeletes, Sortable;
+    use HasFactory, LogsActivity, SoftDeletes, Sortable;
 
     protected $fillable = ['estimate_id', 'order', 'name', 'total', 'bid_id', 'created_at', 'updated_at', 'deleted_at'];
 
@@ -33,5 +35,14 @@ class EstimateSection extends Model
     public function bid(): BelongsTo
     {
         return $this->belongsTo(Bid::class);
+    }
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->logOnly(['name', 'total'])
+            ->logOnlyDirty()
+            ->dontSubmitEmptyLogs()
+            ->useLogName('estimates');
     }
 }

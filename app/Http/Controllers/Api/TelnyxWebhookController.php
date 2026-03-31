@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Jobs\SendInboundSmsBrowserNotifications;
+use App\Jobs\SendCallAnsweredBrowserNotifications;
 use App\Jobs\SendIncomingCallBrowserNotifications;
 use App\Jobs\StoreCallRecording;
 use App\Jobs\StoreSmsMedia;
@@ -771,6 +772,11 @@ class TelnyxWebhookController extends Controller
 
         // Bridge admin with the incoming caller
         $this->bridgeCalls($adminCallControlId, $incomingCallControlId);
+
+        // Notify other admins that the call was answered
+        if ($adminUserId) {
+            SendCallAnsweredBrowserNotifications::dispatch($callLogId, $adminUserId);
+        }
 
         // Hang up other ringing admin legs
         $this->hangupOtherAdminLegs($callLogId, $adminCallControlId);

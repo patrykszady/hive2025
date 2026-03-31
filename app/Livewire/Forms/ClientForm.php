@@ -72,9 +72,8 @@ class ClientForm extends Form
     {
         $this->validate();
 
-        if (! $this->user) {
-            $this->user = auth()->user();
-        }
+        // Capture user before reset() clears it
+        $user = $this->user ?? auth()->user();
 
         $client = Client::create([
             'business_name' => $this->business_name,
@@ -86,7 +85,7 @@ class ClientForm extends Form
         ]);
 
         //ADD USER TO CLIENT
-        $this->user->clients()->attach($client->id);
+        $user->clients()->attach($client->id);
         
         //Add new Client to the logged-in-vendor
         //with pivot Source
@@ -95,7 +94,7 @@ class ClientForm extends Form
         $client->vendors()->updateExistingPivot(auth()->user()->vendor->id, ['source' => $this->source]);
 
         // Sync to Nylas contacts (after vendor is attached)
-        app(\App\Services\NylasContactSyncService::class)->syncUserContactsForClient($this->user, $client);
+        app(\App\Services\NylasContactSyncService::class)->syncUserContactsForClient($user, $client);
 
         $this->reset();
 

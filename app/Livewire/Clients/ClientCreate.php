@@ -40,6 +40,8 @@ class ClientCreate extends Component
 
     public $team_member = false;
 
+    public bool $saving = false;
+
     protected $listeners = ['addUser', 'editClient', 'newClient'];
     protected $googlePlacesService;
 
@@ -155,6 +157,11 @@ class ClientCreate extends Component
 
     public function save()
     {
+        if ($this->saving) {
+            return;
+        }
+        $this->saving = true;
+
         //if existing Client ... redirect to that with Livewire.navigate
         if (is_numeric($this->user_client_id)) {
             $this->modal('client_form_modal')->close();

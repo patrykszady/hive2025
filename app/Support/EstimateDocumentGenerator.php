@@ -4,6 +4,8 @@ namespace App\Support;
 
 use App\Models\EmailTemplate;
 use App\Models\Estimate;
+use App\Models\EstimateLineItem;
+use App\Models\EstimateSection;
 use App\Models\Vendor;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Number;
@@ -135,7 +137,11 @@ class EstimateDocumentGenerator
             $signatureDate = $signature->signed_at->setTimezone($timezone)->format('m/d/Y g:i A');
         }
 
-        $view = view('misc.estimate', compact('estimate', 'vendor', 'client', 'clientContacts', 'project', 'sections', 'payments', 'title', 'estimate_total', 'estimate_total_words', 'type', 'reimbursements', 'contractBody', 'vendorLogoDataUrl', 'projectStatusTitle', 'projectFinances', 'signatureData', 'signatureName', 'signatureDate', 'allSignatures'))->render();
+        // Collect recent activity log entries for this estimate's sections & line items
+        // so the PDF can highlight what changed since the last export.
+        $recentChanges = static::collectRecentChanges($estimate);
+
+        $view = view('misc.estimate', compact('estimate', 'vendor', 'client', 'clientContacts', 'project', 'sections', 'payments', 'title', 'estimate_total', 'estimate_total_words', 'type', 'reimbursements', 'contractBody', 'vendorLogoDataUrl', 'projectStatusTitle', 'projectFinances', 'signatureData', 'signatureName', 'signatureDate', 'allSignatures', 'recentChanges'))->render();
 
         // Browsershot's setHtml() has aggressive SSRF protection that rejects HTML
         // containing file://, 127.x, localhost, etc. In queue-worker context (Horizon),
@@ -491,5 +497,77 @@ class EstimateDocumentGenerator
     protected static function paymentScheduleFallbackHtml(): string
     {
         return '<p><b><i>PAYMENT SCHEDULE HERE. Available when this Contract is ready to sign.</i></b></p>';
+    }
+
+    /**
+     * Collect recent activity log changes for this estimate's sections and line items.
+     *
+     * Returns keyed arrays so the PDF template can easily check if a given
+     * section or line item was recently modified/created/deleted.
+     *
+     * @return array{line_items: array<int, array>, sections: array<int, array>, since: \Carbon\Carbon|null}
+     */
+    protected static function collectRecentChanges(Estimate $estimate): array
+    {
+        $sectionIds = $estimate->estimate_sections->pluck('id')->all();
+        $lineItemIds = $estimate->estimate_line_items()->withTrashed()->pluck('id')->all();
+
+        if (empty($sectionIds) && empty($lineItemIds)) {
+            return ['line_items' => [], 'sections' => [], 'since' => null];
+        }
+
+        // Find the most recent PDF generation for this estimate to determine "since when"
+        // Fall back to 7 days ago if no prior generation exists.
+        $since = now()->subDays(7);
+
+        $activities = \Spatie\Activitylog\Models\Activity::query()
+            ->where('log_name', 'estimates')
+            ->where(function ($q) use ($sectionIds, $lineItemIds) {
+                $q->where(function ($q2) use ($sectionIds) {
+                    $q2->where('subject_type', EstimateSection::class)
+                        ->whereIn('subject_id', $sectionIds);
+                })->orWhere(function ($q2) use ($lineItemIds) {
+                    $q2->where('subject_type', EstimateLineItem::class)
+                        ->whereIn('subject_id', $lineItemIds);
+                });
+            })
+            ->where('created_at', '>=', $since)
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        $lineItemChanges = [];
+        $sectionChanges = [];
+
+        foreach ($activities as $activity) {
+            $id = $activity->subject_id;
+
+            if ($activity->subject_type === EstimateLineItem::class) {
+                if (! isset($lineItemChanges[$id])) {
+                    $lineItemChanges[$id] = [
+                        'event' => $activity->event,
+                        'changed_at' => $activity->created_at,
+                        'causer' => $activity->causer?->full_name ?? $activity->causer?->name ?? 'System',
+                        'old' => $activity->properties['old'] ?? [],
+                        'new' => $activity->properties['attributes'] ?? [],
+                    ];
+                }
+            } elseif ($activity->subject_type === EstimateSection::class) {
+                if (! isset($sectionChanges[$id])) {
+                    $sectionChanges[$id] = [
+                        'event' => $activity->event,
+                        'changed_at' => $activity->created_at,
+                        'causer' => $activity->causer?->full_name ?? $activity->causer?->name ?? 'System',
+                        'old' => $activity->properties['old'] ?? [],
+                        'new' => $activity->properties['attributes'] ?? [],
+                    ];
+                }
+            }
+        }
+
+        return [
+            'line_items' => $lineItemChanges,
+            'sections' => $sectionChanges,
+            'since' => $since,
+        ];
     }
 }
