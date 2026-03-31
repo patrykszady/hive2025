@@ -97,10 +97,16 @@ class ChecksIndex extends Component
             Check::orderBy('date', 'DESC')
                 //distributions
                 ->with(['expenses', 'bank_account', 'transactions'])
-                ->whereIn('bank_account_id', $bank_accounts)
+                ->where(function ($query) use ($bank_accounts) {
+                    $query->whereIn('bank_account_id', $bank_accounts)
+                        ->orWhereNull('bank_account_id');
+                })
                 ->where('check_type', 'like', "%{$this->check_type}%")
                 ->when($check_number, function ($query) {
-                    return $query->where('check_number', 'like', "%{$this->check_number}%");
+                    return $query->where(function ($q) {
+                        $q->where('check_number', 'like', "%{$this->check_number}%")
+                            ->orWhere('check_type', 'like', "%{$this->check_number}%");
+                    });
                 })
                 ->when($this->expense_check_id, function ($query) {
                     return $query->where('id', $this->expense_check_id);

@@ -8,7 +8,7 @@
     'isLast' => false
 ])
 
-<li class="relative flex gap-x-4">
+<li {{ $attributes->class('relative flex gap-x-4') }}>
     {{-- Vertical Line --}}
     <div class="absolute {{ $isLast ? 'top-0 h-6' : 'top-0 -bottom-6' }} left-0 flex w-6 justify-center">
         <div class="w-px bg-zinc-200"></div>

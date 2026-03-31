@@ -38,7 +38,7 @@ class UpdateVendorSearchIndex implements ShouldQueue
         // Calculate YTD expense sum for this vendor
         $ytdSum = DB::table('expenses')
             ->where('vendor_id', $this->vendorId)
-            ->where('created_at', '>=', today()->subYear())
+            ->where('date', '>=', today()->subYear())
             ->whereNull('deleted_at')
             ->sum('amount');
 

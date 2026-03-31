@@ -270,7 +270,7 @@ class SmsNewThread extends Component
             return;
         }
 
-        $thread = $smsService->sendNewGroup($phones, $this->message, null, $this->clientId, auth()->id());
+        $thread = $smsService->sendNewGroup($phones, $this->message, null, $this->clientId, auth()->id(), auth()->user()->vendor?->id);
 
         $this->showModal = false;
         $this->dispatch('threadCreated', threadId: $thread->id);

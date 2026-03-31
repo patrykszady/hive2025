@@ -93,12 +93,18 @@
                                         <flux:table.cell>{{ $paymentItem->date->format('m/d/Y') }}</flux:table.cell>
                                         <flux:table.cell>{{ $paymentItem->reference }}</flux:table.cell>
                                         <flux:table.cell>
-                                            <a 
-                                                href="{{ route('projects.show', $paymentItem->project->id) }}" 
-                                                wire:navigate.hover
-                                                >
-                                                {{ $paymentItem->project->project_name }}
-                                            </a>
+                                            @if($paymentItem->project)
+                                                <a 
+                                                    href="{{ route('projects.show', $paymentItem->project->id) }}" 
+                                                    wire:navigate.hover
+                                                    >
+                                                    {{ $paymentItem->project->project_name }}
+                                                </a>
+                                            @elseif($paymentItem->distribution)
+                                                {{ $paymentItem->distribution->name }}
+                                            @else
+                                                —
+                                            @endif
                                         </flux:table.cell>                                    
                                     </flux:table.row>
                                 @endforeach

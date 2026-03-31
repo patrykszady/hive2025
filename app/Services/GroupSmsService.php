@@ -68,7 +68,7 @@ class GroupSmsService
      *
      * @param  array<string>  $phoneNumbers  E.164 format
      */
-    public function sendNewGroup(array $phoneNumbers, string $text, ?int $projectId = null, ?int $clientId = null, ?int $sentByUserId = null): SmsGroupThread
+    public function sendNewGroup(array $phoneNumbers, string $text, ?int $projectId = null, ?int $clientId = null, ?int $sentByUserId = null, ?int $vendorId = null): SmsGroupThread
     {
         $normalizedPhoneNumbers = collect($phoneNumbers)
             ->map(fn (string $phone): string => self::formatE164($phone))
@@ -81,6 +81,7 @@ class GroupSmsService
             'participants' => $normalizedPhoneNumbers,
             'project_id' => $projectId,
             'client_id' => $clientId,
+            'vendor_id' => $vendorId,
             'last_activity_at' => now(),
         ]);
 

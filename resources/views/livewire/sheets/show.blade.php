@@ -157,9 +157,10 @@
     </x-details.card>
 
     {{-- EXPENSES --}}
+    @php $totalExpenses = $this->generalExpenses() + $this->uncategorizedTransactionsSum(); @endphp
     <x-details.card title="Expenses" :expanded="true" :details_text="false" :separator="false">
         <x-slot:header_buttons>
-            <flux:badge color="red" size="sm">{{ money($this->generalExpenses()) }}</flux:badge>
+            <flux:badge color="red" size="sm">{{ money($totalExpenses) }}</flux:badge>
         </x-slot:header_buttons>
 
         <x-slot:details>
@@ -210,12 +211,41 @@
                         </x-slot:details>
                     </x-details.card>
                 @endforeach
+
+                {{-- UNCATEGORIZED TRANSACTIONS --}}
+                @php $uncatTransSum = $this->uncategorizedTransactionsSum(); @endphp
+                @if($uncatTransSum != 0)
+                    <x-details.card title="Uncategorized" :expanded="false" :details_text="false" :separator="false">
+                        <x-slot:header_buttons>
+                            <flux:badge size="sm" color="amber">{{ money($uncatTransSum) }}</flux:badge>
+                        </x-slot:header_buttons>
+                        <x-slot:details>
+                            <div class="-mx-2">
+                                <flux:table>
+                                    <flux:table.rows>
+                                        @foreach($this->transactions_no_associations as $txn)
+                                            <flux:table.row :key="'uncat-txn-' . $txn->id">
+                                                <flux:table.cell>
+                                                    <div>
+                                                        <span class="text-sm">{{ $txn->plaid_merchant_name ?: (is_array($txn->details) ? ($txn->details['name'] ?? 'Unknown') : ($txn->details ?: 'Unknown')) }}</span>
+                                                        <span class="text-xs text-zinc-500 dark:text-zinc-400 ml-2">{{ date('m/d/Y', strtotime($txn->transaction_date)) }}</span>
+                                                    </div>
+                                                </flux:table.cell>
+                                                <flux:table.cell variant="strong" class="text-right">{{ money($txn->amount) }}</flux:table.cell>
+                                            </flux:table.row>
+                                        @endforeach
+                                    </flux:table.rows>
+                                </flux:table>
+                            </div>
+                        </x-slot:details>
+                    </x-details.card>
+                @endif
             </div>
         </x-slot:details>
     </x-details.card>
 
     {{-- NET INCOME --}}
-    @php $netIncome = $this->revenue() - $this->costOfLaborSum() - $this->costOfMaterialsSum() - $this->generalExpenses(); @endphp
+    @php $netIncome = $this->revenue() - $this->costOfLaborSum() - $this->costOfMaterialsSum() - $totalExpenses; @endphp
     <x-details.card title="Net Income">
         <x-slot:header_buttons>
             <flux:badge color="{{ $netIncome >= 0 ? 'green' : 'red' }}">

@@ -73,7 +73,8 @@
                     <flux:button
                         variant="primary"
                         x-show="!isConfirmed"
-                        wire:click="$dispatchTo('entry.vendor-registration', 'confirmProcess', { process_step: 'vendor_info' }); $nextTick(() => { isConfirmed = true })"
+                        wire:click="$dispatchTo('entry.vendor-registration', 'confirmProcess', { process_step: 'vendor_info' })"
+                        x-on:click="$nextTick(() => { isConfirmed = true })"
                     >
                         Confirm Vendor Details
                     </flux:button>

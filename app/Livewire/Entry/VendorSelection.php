@@ -5,6 +5,7 @@ namespace App\Livewire\Entry;
 use App\Models\Client;
 use App\Models\User;
 use App\Models\Vendor;
+use Illuminate\Support\Facades\Cache;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
@@ -26,51 +27,20 @@ class VendorSelection extends Component
             $this->user->update(['primary_vendor_id' => null]);
         }
 
-        $firstVendor = $this->vendors->first();
-        if ($firstVendor) {
-            $this->vendor_id = $firstVendor->id;
-            $this->vendor = $firstVendor;
-        }
-        
-        // Pre-select first client for client users
-        $firstClient = $this->clients->first();
-        if ($firstClient) {
-            $this->client_id = $firstClient->id;
-        }
-        
-        // Auto-skip if user has only one account and didn't explicitly navigate here
-        if (!request()->has('explicit')) {
-            $this->autoSelectSingleAccount();
+        $totalOptions = $this->vendors->count() + $this->clients->count();
+
+        if ($totalOptions === 1) {
+            $firstVendor = $this->vendors->first();
+            if ($firstVendor) {
+                $this->vendor_id = $firstVendor->id;
+                $this->vendor = $firstVendor;
+            } elseif ($firstClient = $this->clients->first()) {
+                $this->client_id = $firstClient->id;
+            }
         }
     }
     
-    /**
-     * Auto-select and redirect if user has only one account.
-     */
-    protected function autoSelectSingleAccount(): void
-    {
-        $vendorCount = $this->vendors->count();
-        $clientCount = $this->clients->count();
-        
-        // Client-only user with single client
-        if ($this->user->is_client_user && $clientCount === 1 && $vendorCount === 0) {
-            $this->redirect(route('clients.show', $this->clients->first()), navigate: true);
-            return;
-        }
-        
-        // Vendor user with single vendor
-        if (!$this->user->is_client_user && $vendorCount === 1 && $clientCount === 0) {
-            $vendor = $this->vendors->first();
-            $this->user->update(['primary_vendor_id' => $vendor->id]);
-            
-            if (isset($vendor->registration['registered'])) {
-                $this->redirect(route('dashboard'), navigate: true);
-            } else {
-                $this->redirect(route('vendor_registration', $vendor->id), navigate: true);
-            }
-            return;
-        }
-    }
+
 
     #[Computed]
     public function vendors()
@@ -87,7 +57,20 @@ class VendorSelection extends Component
     #[Computed]
     public function clients()
     {
-        return $this->user->clients()->get();
+        // Exclude clients whose vendor_id matches a vendor the user belongs to,
+        // since those are accessible via the vendor account, not as a client account.
+        $userVendorIds = $this->user->vendors()
+            ->withoutGlobalScopes()
+            ->pluck('vendors.id')
+            ->toArray();
+
+        return $this->user->clients()
+            ->withoutGlobalScopes()
+            ->where(function ($query) use ($userVendorIds) {
+                $query->whereNull('clients.vendor_id')
+                    ->orWhereNotIn('clients.vendor_id', $userVendorIds);
+            })
+            ->get();
     }
 
     #[Computed]
@@ -98,27 +81,39 @@ class VendorSelection extends Component
         });
     }
 
-    public function updatedVendorId($vendor_id)
+    public function updatedVendorId($vendor_id): void
     {
         $this->vendor = $this->vendors->where('id', $vendor_id)->first();
+        $this->client_id = null;
     }
 
-    public function save()
+    public function updatedClientId(): void
     {
-        // Handle client selection
-        if ($this->client_id && $this->user->is_client_user) {
-            $client = $this->clients->where('id', $this->client_id)->first();
-            if ($client) {
-                return $this->redirect(route('clients.show', $client), navigate: true);
-            }
-        }
-        
-        // Handle vendor selection
+        $this->vendor_id = null;
+        $this->vendor = null;
+    }
+
+    public function saveVendor()
+    {
         $this->user->update(['primary_vendor_id' => $this->vendor->id]);
+
+        Cache::forget('sidebar:nav:' . $this->user->id . ':' . $this->vendor->id);
+
         if (isset($this->vendor->registration['registered'])) {
-            return $this->redirect(route('dashboard'), navigate: true);
+            return $this->redirect(route('dashboard'));
         } else {
-            return $this->redirect(route('vendor_registration', $this->vendor->id), navigate: true);
+            return $this->redirect(route('vendor_registration', $this->vendor->id));
+        }
+    }
+
+    public function saveClient()
+    {
+        $client = $this->clients->where('id', $this->client_id)->first();
+
+        if ($client) {
+            Cache::forget('sidebar:nav:' . $this->user->id . ':client');
+
+            return $this->redirect(route('clients.show', $client));
         }
     }
 

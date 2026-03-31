@@ -18,13 +18,18 @@ class CheckScope implements Scope
 
             //if Check has Paid Employee Timesheets...they shoud show in the Employees Checks?
             if ($user->vendor_role == 'Admin') {
-                $builder->where('belongs_to_vendor_id', $user->vendor->id);
+                $builder->where(function ($query) use ($user) {
+                    $query->where('belongs_to_vendor_id', $user->vendor->id)
+                        ->orWhere('vendor_id', $user->vendor->id);
+                });
             } elseif ($user->vendor_role == 'Member') {
-                $builder->where('belongs_to_vendor_id', $user->vendor->id)
-                    ->where(function ($query) use ($user) {
-                        //->where('vendor_id', $user->vendor->via_vendor)
-                        $query->where('user_id', $user->id);
-                    });
+                $builder->where(function ($query) use ($user) {
+                    $query->where('belongs_to_vendor_id', $user->vendor->id)
+                        ->orWhere('vendor_id', $user->vendor->id);
+                })->where(function ($query) use ($user) {
+                    $query->where('user_id', $user->id)
+                        ->orWhereNull('user_id');
+                });
             }
         }
     }

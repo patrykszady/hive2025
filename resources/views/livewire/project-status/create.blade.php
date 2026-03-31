@@ -3,10 +3,16 @@
     <x-island-card>
         <div x-data="{ expanded: false }">
             {{-- Header with toggle --}}
-            <button type="button" @click="expanded = !expanded" class="flex w-full items-center justify-between">
-                <flux:heading size="lg" class="mb-0">Project Timeline</flux:heading>
-                <flux:icon.chevron-down variant="mini" class="text-gray-400 transition-transform duration-200" ::class="expanded && 'rotate-180'" />
-            </button>
+            @if($statuses->count() > 1)
+                <button type="button" @click="expanded = !expanded" class="flex w-full items-center justify-between">
+                    <flux:heading size="lg" class="mb-0">Project Timeline</flux:heading>
+                    <flux:icon.chevron-down variant="mini" class="text-gray-400 transition-transform duration-200" ::class="expanded && 'rotate-180'" />
+                </button>
+            @else
+                <div class="flex w-full items-center justify-between">
+                    <flux:heading size="lg" class="mb-0">Project Timeline</flux:heading>
+                </div>
+            @endif
 
             @if($statuses->isNotEmpty())
                 <flux:timeline class="mt-4" align="start" style="--flux-timeline-indicator-size: 1.5rem;">
@@ -62,9 +68,21 @@
                             </div>
                         </flux:timeline.indicator>
                         <flux:timeline.content>
-                            <div class="flex items-center gap-2">
+                            <div class="flex items-center gap-2 group">
                                 <flux:badge size="sm" :color="$statuses->last()->badgeColor">{{ $statuses->last()->title }}</flux:badge>
                                 <span class="text-xs text-gray-500">{{ $statuses->last()->start_date->format('m/d/y') }}</span>
+
+                                @can('update', $project)
+                                    <button
+                                        wire:click="editStatus({{ $statuses->last()->id }})"
+                                        type="button"
+                                        class="hidden md:group-hover:inline-flex text-gray-400 hover:text-indigo-600 transition-colors"
+                                        title="Edit status"
+                                    >
+                                        <flux:icon.pencil variant="micro" />
+                                    </button>
+                                @endcan
+
                                 <time datetime="{{ $statuses->last()->start_date }}" class="ml-auto text-xs text-gray-500">
                                     {{ $statuses->last()->start_date->diffForHumans() }}
                                 </time>

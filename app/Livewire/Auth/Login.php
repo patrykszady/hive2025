@@ -105,7 +105,7 @@ class Login extends Component
         ]);
 
         if ($this->email === '') {
-            $this->addError('identifier', __('auth.failed'));
+            $this->addError('password', __('auth.failed'));
             return;
         }
 
@@ -138,7 +138,7 @@ class Login extends Component
             return;
         }
 
-        $this->addError('identifier', __('auth.failed'));
+        $this->addError('password', __('auth.failed'));
     }
 
     public function startOneTimeLogin(): void

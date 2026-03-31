@@ -3,7 +3,6 @@
         <div>
             <div class="flex w-full items-center justify-between">
                 <flux:heading size="lg" class="mb-0">Project Timeline</flux:heading>
-                <flux:icon.chevron-down variant="mini" class="text-gray-400" />
             </div>
 
             <flux:skeleton.group animate="shimmer">

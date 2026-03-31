@@ -45,7 +45,7 @@ class Vendor extends Model
     {
         // Only calculate if not already loaded
         $ytdExpenseSum = $this->ytd_expense_sum ?? $this->expenses()
-            ->where('created_at', '>=', today()->subYear())
+            ->where('date', '>=', today()->subYear())
             ->sum('amount');
 
         return array_merge($this->toArray(), [
@@ -339,7 +339,7 @@ class Vendor extends Model
                 
                 // Fallback calculation for non-search queries
                 return $this->expenses()
-                    ->where('created_at', '>=', today()->subYear())
+                    ->where('date', '>=', today()->subYear())
                     ->sum('amount');
             }
         );

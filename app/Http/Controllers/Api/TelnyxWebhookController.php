@@ -2437,10 +2437,14 @@ class TelnyxWebhookController extends Controller
         // Attempt to match to an existing client
         $clientId = $this->resolveClientIdByPhone($normalizedSender);
 
+        // TODO: Multi-vendor support — resolve vendor by $ourNumber
+        $vendorId = \App\Models\Vendor::find(1)?->id;
+
         $thread = SmsGroupThread::create([
             'from_number' => $ourNumber,
             'participants' => [$normalizedSender],
             'client_id' => $clientId,
+            'vendor_id' => $vendorId,
             'last_activity_at' => now(),
         ]);
 
@@ -2475,10 +2479,14 @@ class TelnyxWebhookController extends Controller
             }
         }
 
+        // TODO: Multi-vendor support — resolve vendor by $ourNumber
+        $vendorId = \App\Models\Vendor::find(1)?->id;
+
         $thread = SmsGroupThread::create([
             'from_number' => $ourNumber,
             'participants' => array_values($participantPhones),
             'client_id' => $clientId,
+            'vendor_id' => $vendorId,
             'last_activity_at' => now(),
         ]);
 

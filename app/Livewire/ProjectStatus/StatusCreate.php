@@ -38,7 +38,7 @@ class StatusCreate extends Component
 
     public function update_project()
     {
-        if (auth()->user()?->is_client_user) {
+        if (auth()->user()?->is_browsing_as_client) {
             abort(403);
         }
 
@@ -103,7 +103,7 @@ class StatusCreate extends Component
 
     public function editStatus($statusId)
     {
-        if (auth()->user()?->is_client_user) {
+        if (auth()->user()?->is_browsing_as_client) {
             abort(403);
         }
 
@@ -130,7 +130,7 @@ class StatusCreate extends Component
 
     public function updateStatus()
     {
-        if (auth()->user()?->is_client_user) {
+        if (auth()->user()?->is_browsing_as_client) {
             abort(403);
         }
 
@@ -165,7 +165,7 @@ class StatusCreate extends Component
 
     public function deleteStatus()
     {
-        if (auth()->user()?->is_client_user) {
+        if (auth()->user()?->is_browsing_as_client) {
             abort(403);
         }
 

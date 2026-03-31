@@ -15,7 +15,6 @@ class VendorOptions extends Component
     use AuthorizesRequests, WithFileUploads;
 
     public Vendor $vendor;
-    public string $timezone = '';
     public string $short_name = '';
     public $logo = null;
     public ?string $existing_logo = null;
@@ -48,6 +47,26 @@ class VendorOptions extends Component
     /** @var \Illuminate\Support\Collection<\App\Models\User> Available admin users with cell phones */
     public $adminUsersWithPhones;
 
+    /**
+     * Derive a PHP timezone identifier from a US state abbreviation.
+     */
+    public static function timezoneFromState(?string $state): string
+    {
+        return match (strtoupper((string) $state)) {
+            'CT', 'DC', 'DE', 'FL', 'GA', 'IN', 'KY', 'MA', 'MD', 'ME',
+            'MI', 'NC', 'NH', 'NJ', 'NY', 'OH', 'PA', 'RI', 'SC', 'VA',
+            'VT', 'WV' => 'America/New_York',
+            'AL', 'AR', 'IA', 'IL', 'KS', 'LA', 'MN', 'MO', 'MS', 'ND',
+            'NE', 'OK', 'SD', 'TN', 'TX', 'WI' => 'America/Chicago',
+            'AZ' => 'America/Phoenix',
+            'CO', 'ID', 'MT', 'NM', 'UT', 'WY' => 'America/Denver',
+            'CA', 'NV', 'OR', 'WA' => 'America/Los_Angeles',
+            'AK' => 'America/Anchorage',
+            'HI' => 'Pacific/Honolulu',
+            default => 'America/Chicago',
+        };
+    }
+
     #[Title('Options')]
 
     public function mount(): void
@@ -55,7 +74,6 @@ class VendorOptions extends Component
         $this->authorize('viewOptions', Vendor::class);
         
         $this->vendor = auth()->user()->vendor;
-        $this->timezone = $this->vendor->timezone ?? '';
         $this->short_name = $this->vendor->options?->short_name ?? '';
         $this->existing_logo = $this->vendor->options?->logo ?? null;
         $baseSmsEnabled = (bool) data_get($this->vendor->options, 'sms_enabled', true);
@@ -80,7 +98,6 @@ class VendorOptions extends Component
     protected function rules(): array
     {
         return [
-            'timezone' => 'nullable|string|max:50',
             'short_name' => 'nullable|string|max:100',
             'logo' => 'nullable|image|max:10240', // 10MB max
             'sms_team_enabled' => 'boolean',
@@ -106,8 +123,8 @@ class VendorOptions extends Component
         $this->authorize('viewOptions', Vendor::class);
         $this->validate();
 
-        // Update timezone on vendor directly
-        $this->vendor->timezone = $this->timezone ?: null;
+        // Update timezone derived from vendor address state
+        $this->vendor->timezone = self::timezoneFromState($this->vendor->state) ?: null;
 
         // Build options object
         $options = (array) ($this->vendor->options ?? []);

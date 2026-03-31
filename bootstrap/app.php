@@ -21,7 +21,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->redirectUsersTo(function () {
             $user = auth()->user();
 
-            if ($user?->is_client_user) {
+            if ($user?->is_browsing_as_client) {
                 $client = $user->primary_client;
 
                 return $client
@@ -50,6 +50,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->appendToGroup('web', \App\Http\Middleware\NoIndexSubdomains::class);
         $middleware->appendToGroup('web', \App\Http\Middleware\NoIndexNonPublic::class);
+        $middleware->appendToGroup('web', \App\Http\Middleware\LoadAuthVendor::class);
 
         $middleware->alias([
             'admin.access' => \App\Http\Middleware\AdminAccess::class,

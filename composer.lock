@@ -8,16 +8,16 @@
     "packages": [
         {
             "name": "2captcha/2captcha",
-            "version": "v1.2.2",
+            "version": "v1.2.3",
             "source": {
                 "type": "git",
                 "url": "https://github.com/2captcha/2captcha-php.git",
-                "reference": "75dbb12449c0247fa396f7056453bc42002580c5"
+                "reference": "d6e184df2289c9fa1b7d79ed83b963d1641cab13"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/2captcha/2captcha-php/zipball/75dbb12449c0247fa396f7056453bc42002580c5",
-                "reference": "75dbb12449c0247fa396f7056453bc42002580c5",
+                "url": "https://api.github.com/repos/2captcha/2captcha-php/zipball/d6e184df2289c9fa1b7d79ed83b963d1641cab13",
+                "reference": "d6e184df2289c9fa1b7d79ed83b963d1641cab13",
                 "shasum": ""
             },
             "require": {
@@ -50,8 +50,10 @@
             "keywords": [
                 "2captcha",
                 "2captcha.com",
+                "Captchafox",
                 "Cutcaptcha",
                 "MTCaptcha",
+                "Prosopo",
                 "amazon waf",
                 "anticaptcha",
                 "atbCAPTCHA",
@@ -71,13 +73,16 @@
                 "recaptcha",
                 "recaptcha v3",
                 "solve captcha",
-                "tencent"
+                "temu",
+                "tencent",
+                "vkCaptcha",
+                "vkImage"
             ],
             "support": {
                 "issues": "https://github.com/2captcha/2captcha-php/issues",
-                "source": "https://github.com/2captcha/2captcha-php/tree/v1.2.2"
+                "source": "https://github.com/2captcha/2captcha-php/tree/v1.2.3"
             },
-            "time": "2025-12-17T15:26:14+00:00"
+            "time": "2026-03-30T12:14:37+00:00"
         },
         {
             "name": "aws/aws-crt-php",
@@ -135,16 +140,16 @@
         },
         {
             "name": "aws/aws-sdk-php",
-            "version": "3.374.2",
+            "version": "3.375.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/aws/aws-sdk-php.git",
-                "reference": "67b6b6210af47319c74c5666388d71bc1bc58276"
+                "reference": "6cfa1798c3fa0182d902eda9419dca48c86d74a1"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/aws/aws-sdk-php/zipball/67b6b6210af47319c74c5666388d71bc1bc58276",
-                "reference": "67b6b6210af47319c74c5666388d71bc1bc58276",
+                "url": "https://api.github.com/repos/aws/aws-sdk-php/zipball/6cfa1798c3fa0182d902eda9419dca48c86d74a1",
+                "reference": "6cfa1798c3fa0182d902eda9419dca48c86d74a1",
                 "shasum": ""
             },
             "require": {
@@ -226,9 +231,9 @@
             "support": {
                 "forum": "https://github.com/aws/aws-sdk-php/discussions",
                 "issues": "https://github.com/aws/aws-sdk-php/issues",
-                "source": "https://github.com/aws/aws-sdk-php/tree/3.374.2"
+                "source": "https://github.com/aws/aws-sdk-php/tree/3.375.0"
             },
-            "time": "2026-03-27T18:05:55+00:00"
+            "time": "2026-03-30T19:30:55+00:00"
         },
         {
             "name": "barryvdh/laravel-snappy",
@@ -3378,16 +3383,16 @@
         },
         {
             "name": "laravel/nightwatch",
-            "version": "v1.24.4",
+            "version": "v1.25.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/laravel/nightwatch.git",
-                "reference": "127e9bb9928f0fcf69b52b244053b393c90347c8"
+                "reference": "a195bd54f36218b95330599758af182e4b505294"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/laravel/nightwatch/zipball/127e9bb9928f0fcf69b52b244053b393c90347c8",
-                "reference": "127e9bb9928f0fcf69b52b244053b393c90347c8",
+                "url": "https://api.github.com/repos/laravel/nightwatch/zipball/a195bd54f36218b95330599758af182e4b505294",
+                "reference": "a195bd54f36218b95330599758af182e4b505294",
                 "shasum": ""
             },
             "require": {
@@ -3416,9 +3421,9 @@
                 "livewire/livewire": "^2.0|^3.0",
                 "mockery/mockery": "^1.0",
                 "mongodb/laravel-mongodb": "^4.0|^5.0",
-                "orchestra/testbench": "^8.0|^9.0|^10.0",
-                "orchestra/testbench-core": "^8.0|^9.0|^10.0",
-                "orchestra/workbench": "^8.0|^9.0|^10.0",
+                "orchestra/testbench": "^8.0|^9.0|^10.0|^11.0",
+                "orchestra/testbench-core": "^8.0|^9.0|^10.0|^11.0",
+                "orchestra/workbench": "^8.0|^9.0|^10.0|^11.0",
                 "phpstan/phpstan": "^1.0",
                 "phpunit/phpunit": "^10.0|^11.0|^12.0",
                 "singlestoredb/singlestoredb-laravel": "^1.0|^2.0",
@@ -3468,7 +3473,7 @@
                 "issues": "https://github.com/laravel/nightwatch/issues",
                 "source": "https://github.com/laravel/nightwatch"
             },
-            "time": "2026-03-18T23:25:05+00:00"
+            "time": "2026-03-31T05:51:44+00:00"
         },
         {
             "name": "laravel/prompts",
@@ -3753,16 +3758,16 @@
         },
         {
             "name": "laravel/sentinel",
-            "version": "v1.0.1",
+            "version": "v1.1.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/laravel/sentinel.git",
-                "reference": "7a98db53e0d9d6f61387f3141c07477f97425603"
+                "reference": "972d9885d9d14312a118e9565c4e6ecc5e751ea1"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/laravel/sentinel/zipball/7a98db53e0d9d6f61387f3141c07477f97425603",
-                "reference": "7a98db53e0d9d6f61387f3141c07477f97425603",
+                "url": "https://api.github.com/repos/laravel/sentinel/zipball/972d9885d9d14312a118e9565c4e6ecc5e751ea1",
+                "reference": "972d9885d9d14312a118e9565c4e6ecc5e751ea1",
                 "shasum": ""
             },
             "require": {
@@ -3781,9 +3786,6 @@
                     "providers": [
                         "Laravel\\Sentinel\\SentinelServiceProvider"
                     ]
-                },
-                "branch-alias": {
-                    "dev-main": "1.x-dev"
                 }
             },
             "autoload": {
@@ -3806,9 +3808,9 @@
                 }
             ],
             "support": {
-                "source": "https://github.com/laravel/sentinel/tree/v1.0.1"
+                "source": "https://github.com/laravel/sentinel/tree/v1.1.0"
             },
-            "time": "2026-02-12T13:32:54+00:00"
+            "time": "2026-03-24T14:03:38+00:00"
         },
         {
             "name": "laravel/serializable-closure",
@@ -4695,16 +4697,16 @@
         },
         {
             "name": "livewire/livewire",
-            "version": "v4.2.2",
+            "version": "v4.2.3",
             "source": {
                 "type": "git",
                 "url": "https://github.com/livewire/livewire.git",
-                "reference": "71c28888f99b4bfdaad89a07a104adbc3f98c04b"
+                "reference": "d07bcb6fd04037a90ca5187b7857c7349a8e6d1e"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/livewire/livewire/zipball/71c28888f99b4bfdaad89a07a104adbc3f98c04b",
-                "reference": "71c28888f99b4bfdaad89a07a104adbc3f98c04b",
+                "url": "https://api.github.com/repos/livewire/livewire/zipball/d07bcb6fd04037a90ca5187b7857c7349a8e6d1e",
+                "reference": "d07bcb6fd04037a90ca5187b7857c7349a8e6d1e",
                 "shasum": ""
             },
             "require": {
@@ -4759,7 +4761,7 @@
             "description": "A front-end framework for Laravel.",
             "support": {
                 "issues": "https://github.com/livewire/livewire/issues",
-                "source": "https://github.com/livewire/livewire/tree/v4.2.2"
+                "source": "https://github.com/livewire/livewire/tree/v4.2.3"
             },
             "funding": [
                 {
@@ -4767,7 +4769,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-03-25T23:19:23+00:00"
+            "time": "2026-03-30T22:17:37+00:00"
         },
         {
             "name": "log1x/laravel-webfonts",
@@ -8882,16 +8884,16 @@
         },
         {
             "name": "railsware/mailtrap-php",
-            "version": "3.10.0",
+            "version": "3.11.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/mailtrap/mailtrap-php.git",
-                "reference": "306d117ddbcbea1ae69cc8302f20e24b2cd7addd"
+                "reference": "788c164430bd74b79f4c6a0d83258e8be45340e4"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/mailtrap/mailtrap-php/zipball/306d117ddbcbea1ae69cc8302f20e24b2cd7addd",
-                "reference": "306d117ddbcbea1ae69cc8302f20e24b2cd7addd",
+                "url": "https://api.github.com/repos/mailtrap/mailtrap-php/zipball/788c164430bd74b79f4c6a0d83258e8be45340e4",
+                "reference": "788c164430bd74b79f4c6a0d83258e8be45340e4",
                 "shasum": ""
             },
             "require": {
@@ -8950,9 +8952,9 @@
             ],
             "support": {
                 "issues": "https://github.com/mailtrap/mailtrap-php/issues",
-                "source": "https://github.com/mailtrap/mailtrap-php/tree/3.10.0"
+                "source": "https://github.com/mailtrap/mailtrap-php/tree/3.11.0"
             },
-            "time": "2026-01-15T16:08:19+00:00"
+            "time": "2026-03-31T07:13:44+00:00"
         },
         {
             "name": "ralouphie/getallheaders",
@@ -15283,7 +15285,7 @@
         },
         {
             "name": "web-token/jwt-library",
-            "version": "4.1.3",
+            "version": "4.1.4",
             "source": {
                 "type": "git",
                 "url": "https://github.com/web-token/jwt-library.git",
@@ -15356,7 +15358,7 @@
             ],
             "support": {
                 "issues": "https://github.com/web-token/jwt-library/issues",
-                "source": "https://github.com/web-token/jwt-library/tree/4.1.3"
+                "source": "https://github.com/web-token/jwt-library/tree/4.1.4"
             },
             "funding": [
                 {

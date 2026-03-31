@@ -89,9 +89,9 @@ class VendorsIndex extends Component
     #[Computed]
     public function vendors()
     {
-        // Special-case: sorting by attached_at (pivot created_at) can't be sourced from the global search index
-        // because it's tenant-specific. Fall back to an Eloquent query that joins the pivot for ordering.
-        if ($this->sortBy === 'attached_at') {
+        // Special-case: sorting by attached_at (pivot created_at) and ytd_expense_sum (tenant-scoped expenses)
+        // can't be reliably sourced from the global search index. Fall back to Eloquent.
+        if (in_array($this->sortBy, ['attached_at', 'ytd_expense_sum'], true)) {
             $companyId = auth()->user()->vendor->id;
 
             $q = Vendor::query()
@@ -99,7 +99,12 @@ class VendorsIndex extends Component
                     $join->on('vv.vendor_id', '=', 'vendors.id')
                         ->where('vv.belongs_to_vendor_id', '=', $companyId);
                 })
-                ->select('vendors.*');
+                ->select('vendors.*')
+                ->withSum([
+                    'expenses as ytd_expense_sum' => function ($query) {
+                        $query->where('date', '>=', today()->subYear());
+                    },
+                ], 'amount');
 
             if (!empty($this->business_name)) {
                 $q->where('vendors.business_name', 'like', "%{$this->business_name}%");
@@ -109,7 +114,11 @@ class VendorsIndex extends Component
                 $q->where('vendors.business_type', $this->vendor_type);
             }
 
-            $q->orderBy('vv.created_at', $this->sortDirection);
+            if ($this->sortBy === 'attached_at') {
+                $q->orderBy('vv.created_at', $this->sortDirection);
+            } else {
+                $q->orderBy('ytd_expense_sum', $this->sortDirection);
+            }
 
             return $q->paginate(10);
         }

@@ -54,15 +54,23 @@ class SmsThreadList extends Component
     #[Computed]
     public function threads()
     {
+        $user = auth()->user();
+
         return SmsGroupThread::query()
             ->with([
                 'project:id,address',
                 'client',
                 'latestMessage',
             ])
-            ->when($this->isClientUser, function ($query) {
-                $clientIds = auth()->user()->clients()->pluck('clients.id');
+            ->when($user->is_browsing_as_client, function ($query) use ($user) {
+                $clientIds = $user->clients()->pluck('clients.id');
                 $query->whereIn('client_id', $clientIds);
+            })
+            ->when(! $user->is_browsing_as_client, function ($query) use ($user) {
+                $vendorId = $user->vendor?->id;
+                if ($vendorId) {
+                    $query->where('vendor_id', $vendorId);
+                }
             })
             ->when(trim($this->search), function ($query, $search) {
                 $query->where(function ($q) use ($search) {

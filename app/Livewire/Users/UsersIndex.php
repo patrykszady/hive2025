@@ -31,7 +31,7 @@ class UsersIndex extends Component
         // Both vendor and client member cards use an accordion
         if (in_array($this->view, ['vendors.show', 'clients.show'])) {
             $this->accordion = true;
-            $this->accordionExpanded ??= ! auth()->user()->is_client_user;
+            $this->accordionExpanded ??= ! auth()->user()->is_browsing_as_client;
         }
     }
     

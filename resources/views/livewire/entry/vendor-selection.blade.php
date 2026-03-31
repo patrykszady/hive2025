@@ -1,11 +1,11 @@
-<div class="max-w-3xl" wire:cloak>
+<div class="max-w-3xl">
     <x-island-card heading="Select Account" subheading="{{$user->first_name}}, select one of your accounts to access your hub." class="space-y-6">
         
         @if($this->vendors->count() > 0)
             {{-- Vendor Selection --}}
-            <flux:radio.group wire:model.live="vendor_id" label="Your Hive Accounts" variant="cards" class="flex-col" :indicator="false">
+            <flux:radio.group wire:model.live="vendor_id" label="Hive Accounts" variant="cards" class="flex-col" :indicator="false">
                 @foreach($this->vendors as $vendor)
-                    <flux:radio value="{{$vendor->id}}">
+                    <flux:radio value="{{$vendor->id}}" :disabled="app()->isProduction() && $vendor->id !== 1">
                         <div class="flex-1">
                             <!-- Company and Badges Row -->
                             <div class="flex justify-between items-center">
@@ -27,9 +27,9 @@
                 @endforeach
             </flux:radio.group>
 
-            <div x-show="$wire.vendor_id" x-transition x-cloak>
+            <div x-cloak x-show="$wire.vendor_id" x-transition>
                 <div class="flex justify-end">
-                    <flux:button variant="primary" wire:click="save">
+                    <flux:button variant="primary" wire:click="saveVendor">
                         @if($vendor_id && $this->vendors->find($vendor_id))
                             @php
                                 $selectedVendor = $this->vendors->find($vendor_id);
@@ -46,7 +46,7 @@
 
         @if($this->clients->count() > 0)
             {{-- Client Selection for client-only users --}}
-            <flux:radio.group wire:model.live="client_id" label="Your Client Accounts" variant="cards" class="flex-col" :indicator="false">
+            <flux:radio.group wire:model.live="client_id" label="Homeowner Accounts" variant="cards" class="flex-col" :indicator="false">
                 @foreach($this->clients as $client)
                     <flux:radio value="{{$client->id}}">
                         <div class="flex-1">
@@ -54,7 +54,7 @@
                                 <flux:heading class="truncate">
                                     {{ $client->name }}
                                 </flux:heading>
-                                <flux:badge size="sm" color="emerald">Client</flux:badge>
+                                <flux:badge size="sm" color="emerald">Homeowner</flux:badge>
                             </div>
                             @if($client->address)
                                 <flux:text size="sm" class="truncate">{{ $client->one_line_address ?? $client->address }}</flux:text>
@@ -64,9 +64,9 @@
                 @endforeach
             </flux:radio.group>
 
-            <div x-show="$wire.client_id" x-transition x-cloak>
+            <div x-cloak x-show="$wire.client_id" x-transition>
                 <div class="flex justify-end">
-                    <flux:button variant="primary" wire:click="save">
+                    <flux:button variant="primary" wire:click="saveClient">
                         Continue to Hub
                     </flux:button>
                 </div>
@@ -81,10 +81,8 @@
         @endif
     </x-island-card>
 
-    @if(!$user->is_client_user)
-        <flux:separator text="+" class="my-8"/>
-      
-        <x-island-card heading="Create a Hive" subheading="Contact us to get started for free. Cell: 224-999-3880 Email: patryk@hive.contractors" class="space-y-6">
-        </x-island-card>
-    @endif
+    <flux:separator text="+" class="my-8"/>
+  
+    <x-island-card heading="Create a Hive" subheading="Contact us to get started for free. Cell: 224-999-3880 Email: patryk@hive.contractors" class="space-y-6">
+    </x-island-card>
 </div>

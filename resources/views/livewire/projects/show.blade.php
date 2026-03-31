@@ -83,13 +83,15 @@
             </x-details.card>
             </div>
 
-            <div class="col-span-4 order-2">
-                <livewire:projects.upcoming-tasks :project="$project" lazy />
-            </div>
+            @if($this->project->latestStatus?->title !== 'VIEW ONLY')
+                <div class="col-span-4 order-2">
+                    <livewire:projects.upcoming-tasks :project="$project" lazy />
+                </div>
+            @endif
 
             @can('viewFinancials', $project)
                 @can('update', $project)
-                    @if(in_array($this->project->latestStatus->title, ['Active', 'Complete', 'Service Call', 'VIEW ONLY']) && $project->expenses()->exists())
+                    @if(in_array($this->project->latestStatus?->title, ['Active', 'Complete', 'Service Call', 'VIEW ONLY']) && $project->expenses()->exists())
                         <div class="col-span-4 order-7 lg:order-3">
                             <livewire:expenses.expense-index :project_id="$project->id" :view="'projects.show'" lazy />
                         </div>
@@ -130,7 +132,7 @@
                 </div>
 
                 @can('update', $project)
-                    @if(in_array($this->project->latestStatus->title, ['Active', 'Complete', 'Service Call', 'VIEW ONLY']))
+                    @if(in_array($this->project->latestStatus?->title, ['Active', 'Complete', 'Service Call', 'VIEW ONLY']))
                         {{-- PROJECT PAYMENTS --}}
                         <div class="col-span-4 order-6">
                             <livewire:payments.payments-index :project="$project" :view="'projects.show'" lazy />
@@ -149,7 +151,7 @@
                 @endcan
 
                 @cannot('update', $project)
-                    @if(in_array($this->project->latestStatus->title, ['Active', 'Complete', 'Service Call', 'VIEW ONLY']))
+                    @if(in_array($this->project->latestStatus?->title, ['Active', 'Complete', 'Service Call', 'VIEW ONLY']))
                         {{-- CLIENT PAYMENTS (read-only) --}}
                         <div class="col-span-4 order-6">
                             <livewire:payments.payments-index :project="$project" :view="'estimate.pdf'" lazy />

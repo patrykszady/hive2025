@@ -132,7 +132,8 @@
                     <flux:button
                         variant="primary"
                         x-show="!isConfirmed"
-                        wire:click="$dispatchTo('entry.vendor-registration', 'confirmProcess', { process_step: 'team_members' }); $nextTick(() => { isConfirmed = true })"
+                        wire:click="$dispatchTo('entry.vendor-registration', 'confirmProcess', { process_step: 'team_members' })"
+                        x-on:click="$nextTick(() => { isConfirmed = true })"
                         >
                         Skip Team Members
                     </flux:button>

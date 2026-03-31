@@ -91,6 +91,7 @@ class VendorForm extends Form
             'business_phone' => $this->business_phone,
             'business_email' => $this->business_email,
             'business_website' => $this->business_website,
+            'timezone' => \App\Livewire\Vendors\VendorOptions::timezoneFromState($this->component->state),
         ]);
         
         return $this->vendor;
@@ -113,6 +114,7 @@ class VendorForm extends Form
             'business_phone' => $this->business_phone,
             'business_email' => $this->business_email,
             'business_website' => $this->business_website,
+            'timezone' => \App\Livewire\Vendors\VendorOptions::timezoneFromState($this->component->state),
         ]);
     }
 }

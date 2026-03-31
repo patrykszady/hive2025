@@ -13,23 +13,6 @@
     <x-island-card heading="Options" subheading="Configure your company settings" :separator="true">
 
         <form wire:submit="save" class="space-y-6">
-            {{-- Timezone --}}
-            <flux:field>
-                <flux:label>Timezone</flux:label>
-                <flux:description>Used for PDF generation and server-side date formatting</flux:description>
-                <flux:select wire:model="timezone" placeholder="Select timezone...">
-                    <flux:select.option value="">Use system default</flux:select.option>
-                    <flux:select.option value="America/New_York">Eastern Time (America/New_York)</flux:select.option>
-                    <flux:select.option value="America/Chicago">Central Time (America/Chicago)</flux:select.option>
-                    <flux:select.option value="America/Denver">Mountain Time (America/Denver)</flux:select.option>
-                    <flux:select.option value="America/Phoenix">Arizona (America/Phoenix)</flux:select.option>
-                    <flux:select.option value="America/Los_Angeles">Pacific Time (America/Los_Angeles)</flux:select.option>
-                    <flux:select.option value="America/Anchorage">Alaska (America/Anchorage)</flux:select.option>
-                    <flux:select.option value="Pacific/Honolulu">Hawaii (Pacific/Honolulu)</flux:select.option>
-                </flux:select>
-                <flux:error name="timezone" />
-            </flux:field>
-
             {{-- Short Name --}}
             <flux:field>
                 <flux:label>Short Business Name</flux:label>
@@ -128,6 +111,7 @@
             </div>
 
             {{-- Phone System --}}
+            @if($vendor->id === 1)
             <flux:field>
                 <flux:label>Phone System</flux:label>
                 <flux:description>Configure inbound call routing, welcome messages, and voicemail.</flux:description>
@@ -245,6 +229,7 @@
                     </div>
                 </div>
             </flux:field>
+            @endif
 
             {{-- Contract Signing --}}
             <flux:field>

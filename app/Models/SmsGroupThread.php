@@ -16,6 +16,7 @@ class SmsGroupThread extends Model
         'participants',
         'project_id',
         'client_id',
+        'vendor_id',
         'telnyx_message_id',
         'last_activity_at',
         'opt_in_prompt_sent_at',
@@ -41,6 +42,11 @@ class SmsGroupThread extends Model
     public function client(): BelongsTo
     {
         return $this->belongsTo(Client::class);
+    }
+
+    public function vendor(): BelongsTo
+    {
+        return $this->belongsTo(Vendor::class);
     }
 
     public function messages(): HasMany

@@ -389,6 +389,17 @@ class User extends Authenticatable implements WebAuthnAuthenticatable
     }
 
     /**
+     * Check if this user is currently browsing as a client.
+     * True when: client-only user, OR vendor user without a primary vendor selected who has clients.
+     */
+    protected function isBrowsingAsClient(): Attribute
+    {
+        return Attribute::make(
+            get: fn () => $this->is_client_user || (!$this->primary_vendor_id && $this->clients()->exists())
+        );
+    }
+
+    /**
      * Check if this user has any vendor relationships.
      */
     protected function isVendorUser(): Attribute

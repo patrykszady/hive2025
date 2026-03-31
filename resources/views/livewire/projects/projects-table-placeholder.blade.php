@@ -4,11 +4,11 @@
         <flux:table class="table-fixed w-full">
             <flux:table.columns>
                 <flux:table.column class="w-[30%] min-w-0">Address</flux:table.column>
-                @if(!auth()->user()->is_client_user)
+                @if(!auth()->user()->is_browsing_as_client)
                     <flux:table.column class="w-[25%] min-w-0">Client</flux:table.column>
                 @endif
                 <flux:table.column class="w-[25%] min-w-0">Name</flux:table.column>
-                @if(auth()->user()->is_client_user)
+                @if(auth()->user()->is_browsing_as_client)
                     <flux:table.column class="w-[25%] min-w-0">Contractor</flux:table.column>
                 @endif
                 <flux:table.column align="end" class="w-[30%] min-w-[5rem] shrink-0">Status</flux:table.column>
@@ -20,7 +20,7 @@
                             <flux:table.cell>
                                 <flux:skeleton.line class="w-32" />
                             </flux:table.cell>
-                            @if(!auth()->user()->is_client_user)
+                            @if(!auth()->user()->is_browsing_as_client)
                                 <flux:table.cell>
                                     <flux:skeleton.line class="w-24" />
                                 </flux:table.cell>
@@ -28,7 +28,7 @@
                             <flux:table.cell>
                                 <flux:skeleton.line class="w-28" />
                             </flux:table.cell>
-                            @if(auth()->user()->is_client_user)
+                            @if(auth()->user()->is_browsing_as_client)
                                 <flux:table.cell>
                                     <flux:skeleton.line class="w-24" />
                                 </flux:table.cell>

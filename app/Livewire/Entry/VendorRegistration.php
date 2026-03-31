@@ -45,6 +45,11 @@ class VendorRegistration extends Component
         $this->registration = $registration;
         $this->matchingStatus = data_get($this->registration, 'matching.status');
 
+        if (in_array($this->matchingStatus, ['queued', 'processing'], true)) {
+            $this->registrationSubmitted = true;
+            $this->registrationSubmittedAtMs = now()->valueOf();
+        }
+
         $registrationSteps = $this->vendor->business_type === '1099'
             ? ['vendor_info', 'registered']
             : ['vendor_info', 'team_members', 'emails_registered', 'banks_registered', 'registered'];
@@ -105,7 +110,7 @@ class VendorRegistration extends Component
     public function getStepStatus(string $stepName): string
     {
         if (! empty($this->registration[$stepName])) {
-            return 'completed';
+            return 'complete';
         }
 
         $previousStep = $this->getPreviousStep($stepName);
@@ -113,7 +118,22 @@ class VendorRegistration extends Component
             return 'current';
         }
 
-        return 'upcoming';
+        return 'incomplete';
+    }
+
+    public function getProgressValue(): int
+    {
+        $steps = $this->getRegistrationSteps();
+        $total = count($steps) + 1; // +1 for owner step
+        $completed = 1; // owner step always complete
+
+        foreach ($steps as $step) {
+            if (! empty($this->registration[$step['name']])) {
+                $completed++;
+            }
+        }
+
+        return (int) round(($completed / $total) * 100);
     }
 
     public function getPreviousStep(string $step): ?string
@@ -201,7 +221,7 @@ class VendorRegistration extends Component
             if ($this->registrationSubmitted && ! $this->dashboardRedirectDispatched) {
                 $this->dashboardRedirectDispatched = true;
 
-                $minDwellMs = 600;
+                $minDwellMs = 10_000;
                 $elapsedMs = $this->registrationSubmittedAtMs > 0
                     ? (now()->valueOf() - $this->registrationSubmittedAtMs)
                     : $minDwellMs;
@@ -214,6 +234,12 @@ class VendorRegistration extends Component
                     fadeMs: 250,
                 );
 
+                return;
+            }
+
+            // JS redirect already dispatched — don't issue a server-side redirect
+            // that would race against the client-side delay
+            if ($this->dashboardRedirectDispatched) {
                 return;
             }
 

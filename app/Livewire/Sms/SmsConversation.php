@@ -55,6 +55,8 @@ class SmsConversation extends Component
 
     public function mount(): void
     {
+        $this->isClientUser = (bool) auth()->user()->is_browsing_as_client;
+        $this->authorizeThread();
         $this->markThreadAsRead();
     }
 
@@ -74,6 +76,7 @@ class SmsConversation extends Component
         }
 
         $this->threadId = $threadId;
+        $this->authorizeThread();
         $this->messageLimit = 30;
         $this->newMessage = '';
         $this->attachment = null;
@@ -99,6 +102,36 @@ class SmsConversation extends Component
         }
 
         return $listeners;
+    }
+
+    /**
+     * Ensure the current user is allowed to view the selected thread.
+     * Client users may only access threads belonging to their client(s).
+     * Vendor users may only access threads belonging to their vendor.
+     */
+    private function authorizeThread(): void
+    {
+        if (! $this->threadId) {
+            return;
+        }
+
+        $user = auth()->user();
+
+        if ($this->isClientUser) {
+            $clientIds = $user->clients()->pluck('clients.id');
+            $allowed = SmsGroupThread::where('id', $this->threadId)
+                ->whereIn('client_id', $clientIds)
+                ->exists();
+        } else {
+            $vendorId = $user->vendor?->id;
+            $allowed = $vendorId && SmsGroupThread::where('id', $this->threadId)
+                ->where('vendor_id', $vendorId)
+                ->exists();
+        }
+
+        if (! $allowed) {
+            $this->threadId = null;
+        }
     }
 
     public function handleIncomingMessage(): void

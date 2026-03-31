@@ -172,9 +172,6 @@ class SheetShow extends Component
             ->whereHas('vendor', function ($query) {
                 $query->where('business_type', '!=', 'Retail')
                       ->where('id', '!=', auth()->user()->vendor->id);
-            })
-            ->whereHas('transactions', function ($query) {
-                $query->whereIn('bank_account_id', $this->bank_account_ids);
             });
 
         $checkVendors = $checksQuery
@@ -322,11 +319,10 @@ class SheetShow extends Component
     #[Computed]
     public function costOfMaterialsVendors()
     {
-        $vendors = $this->applyCashBasisFilter(
-            Expense::whereBetween('date', [$this->start_date, $this->end_date])
+        $vendors = Expense::whereBetween('date', [$this->start_date, $this->end_date])
                 ->whereIn('vendor_id', $this->materialVendorIds())
                 ->with(['vendor'])
-        )->get()
+                ->get()
             ->groupBy('vendor.business_name')
             ->toBase();
             
@@ -339,31 +335,28 @@ class SheetShow extends Component
     #[Computed]
     public function costOfMaterialsSum()
     {
-        return $this->applyCashBasisFilter(
-            Expense::whereBetween('date', [$this->start_date, $this->end_date])
+        return Expense::whereBetween('date', [$this->start_date, $this->end_date])
                 ->whereIn('vendor_id', $this->materialVendorIds())
-        )->sum('amount');
+                ->sum('amount');
     }
 
     #[Computed]
     public function generalExpenses()
     {
-        return $this->applyCashBasisFilter(
-            Expense::whereBetween('date', [$this->start_date, $this->end_date])
+        return Expense::whereBetween('date', [$this->start_date, $this->end_date])
                 ->whereNotIn('vendor_id', array_merge($this->materialVendorIds()->toArray(), $this->subVendorIds()->toArray()))
                 ->whereNotIn('category_id', [112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128])
-        )->sum('amount');
+                ->sum('amount');
     }
 
     #[Computed]
     public function generalExpenseCategories()
     {
-        return $this->applyCashBasisFilter(
-            Expense::whereBetween('date', [$this->start_date, $this->end_date])
+        return Expense::whereBetween('date', [$this->start_date, $this->end_date])
                 ->whereNotIn('category_id', [112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128])
                 ->whereNotIn('vendor_id', array_merge($this->materialVendorIds()->toArray(), $this->subVendorIds()->toArray()))
                 ->with(['category', 'vendor'])
-        )->get()
+                ->get()
             ->groupBy('category.friendly_primary')
             ->toBase();
     }
@@ -426,12 +419,17 @@ class SheetShow extends Component
             return collect();
         }
 
-        return $this->applyCashBasisFilter(
-            Expense::whereBetween('date', [$this->start_date, $this->end_date])
+        return Expense::whereBetween('date', [$this->start_date, $this->end_date])
                 ->whereNull('category_id')
                 ->with(['vendor'])
                 ->orderByDesc('amount')
-        )->get();
+                ->get();
+    }
+
+    #[Computed]
+    public function uncategorizedTransactionsSum(): float
+    {
+        return round((float) $this->transactions_no_associations->sum('amount'), 2);
     }
 
     #[Computed]

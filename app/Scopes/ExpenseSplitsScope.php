@@ -20,7 +20,7 @@ class ExpenseSplitsScope implements Scope
         if (is_null($user)) {
 
         } else {
-            if ($user->is_client_user || ! $user->vendor) {
+            if ($user->is_browsing_as_client || ! $user->vendor) {
                 $builder->whereRaw('1 = 0');
                 return;
             }

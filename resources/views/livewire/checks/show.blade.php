@@ -221,7 +221,11 @@
                                             <a wire:navigate.hover href="{{route('expenses.show', $user_distribution_expense->id)}}">{{ money($user_distribution_expense->amount) }}</a>
                                         </flux:table.cell>
                                         <flux:table.cell>
-                                            <a wire:navigate.hover href="{{route('distributions.show', $user_distribution_expense->distribution->id)}}">{{ $user_distribution_expense->distribution->name }}</a>
+                                            @if($user_distribution_expense->distribution)
+                                                <a wire:navigate.hover href="{{route('distributions.show', $user_distribution_expense->distribution->id)}}">{{ $user_distribution_expense->distribution->name }}</a>
+                                            @else
+                                                —
+                                            @endif
                                         </flux:table.cell>
                                     </flux:table.row>
                                 @endforeach

@@ -17,7 +17,7 @@ class BidScope implements Scope
             $user = auth()->user();
 
             // Client users or users without a vendor should see all bids for the project
-            if ($user->is_client_user || !$user->vendor) {
+            if ($user->is_browsing_as_client || !$user->vendor) {
                 return;
             }
 

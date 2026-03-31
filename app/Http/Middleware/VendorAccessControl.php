@@ -16,8 +16,8 @@ class VendorAccessControl
         $user = auth()->user();
         $routeName = $request->route()->getName();
         
-        // Client-only users: allow access to client routes, forbid elsewhere
-        if ($user->is_client_user) {
+        // Client-browsing users: allow access to client routes, forbid elsewhere
+        if ($user->is_browsing_as_client) {
             if (session()->get('is_admin_login_as') && $routeName === 'users.show') {
                 return $next($request);
             }
@@ -76,6 +76,10 @@ class VendorAccessControl
             if ($routeName === 'account_selection') {
                 return $next($request);
             }
+
+            if ($routeName === 'notifications.index') {
+                return $next($request);
+            }
             
             // Forbid access to all other routes
             abort(403);
@@ -102,6 +106,35 @@ class VendorAccessControl
         
         // Handle regular routes
         if (!$user->vendor?->id) {
+            // No primary vendor selected — allow client-related routes if user has client accounts
+            if ($user->clients()->exists()) {
+                $clientRoutes = [
+                    'clients.', 'projects.', 'estimates.', 'payments.',
+                    'client.schedule.', 'push.',
+                ];
+
+                foreach ($clientRoutes as $prefix) {
+                    if (str_starts_with($routeName, $prefix)) {
+                        return $next($request);
+                    }
+                }
+
+                if ($routeName === 'sms.index') {
+                    return $next($request);
+                }
+
+                if ($routeName === 'users.show') {
+                    $routeUser = $request->route('user');
+                    if ($routeUser && (int) $routeUser->id === (int) $user->id) {
+                        return $next($request);
+                    }
+                }
+
+                if ($routeName === 'account_selection' || $routeName === 'notifications.index') {
+                    return $next($request);
+                }
+            }
+
             // No primary vendor selected
             return redirect(route('account_selection'));
         }

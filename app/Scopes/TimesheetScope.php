@@ -15,7 +15,7 @@ class TimesheetScope implements Scope
         } else {
             $user = auth()->user();
 
-            if ($user->is_client_user || ! $user->vendor) {
+            if ($user->is_browsing_as_client || ! $user->vendor) {
                 $builder->whereRaw('1 = 0');
                 return;
             }

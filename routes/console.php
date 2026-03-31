@@ -1,5 +1,7 @@
 <?php
 
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schedule;
 
 Schedule::timezone('America/Chicago');
@@ -57,6 +59,14 @@ Schedule::command('nylas:sync-contacts')
     ->environments(['production'])
     ->withoutOverlapping()
     ->onOneServer();
+
+Schedule::call(function () {
+    Artisan::call('queue:prune-failed', ['--hours' => 4320]);
+    DB::statement('OPTIMIZE TABLE failed_jobs');
+})->weeklyOn(0, '03:00')
+  ->name('prune-failed-jobs')
+  ->withoutOverlapping()
+  ->onOneServer();
 
 // ─── Unified Task Notifications ─────────────────────────
 // Shared notification schedule config

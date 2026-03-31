@@ -1,4 +1,35 @@
-<div>
+<script>
+(() => {
+    if (sessionStorage.getItem('hub-unblur-transition') !== '1') {
+        return;
+    }
+
+    document.documentElement.classList.add('hub-entering');
+
+    window.addEventListener('DOMContentLoaded', () => {
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                document.documentElement.classList.remove('hub-entering');
+                sessionStorage.removeItem('hub-unblur-transition');
+            });
+        });
+    }, { once: true });
+})();
+</script>
+
+<style>
+    .hub-enter-target {
+        filter: none;
+        opacity: 1;
+    }
+
+    .hub-entering .hub-enter-target {
+        filter: blur(12px);
+        opacity: .7;
+    }
+</style>
+
+<div class="hub-enter-target transition-[filter,opacity] duration-[1800ms] ease-out">
     @if($showPasskeyPrompt)
         <div x-data x-init="$nextTick(() => $flux.modal('passkey-setup-reminder').show())"></div>
 

@@ -3,7 +3,7 @@
 @endphp
 
 <div class="max-w-3xl space-y-2">
-    @if($view === NULL && !auth()->user()->is_client_user)
+    @if($view === NULL && !auth()->user()->is_browsing_as_client)
         {{-- Mobile: flux:accordion collapsed by default --}}
         <flux:card class="!px-5 !py-2 mb-4 sm:hidden">
             <flux:accordion transition>
@@ -113,7 +113,7 @@
         lazy.bundle
     />
 
-    @if(!auth()->user()->is_client_user)
+    @if(!auth()->user()->is_browsing_as_client)
         <livewire:projects.email-tracking-table
             :client-id="$client_id"
             lazy.bundle

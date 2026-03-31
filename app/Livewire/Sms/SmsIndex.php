@@ -33,7 +33,7 @@ class SmsIndex extends Component
     public function mount(): void
     {
         $user = auth()->user();
-        $this->isClientUser = (bool) $user->is_client_user;
+        $this->isClientUser = (bool) $user->is_browsing_as_client;
 
         // Client users must have a client with a thread; non-admin non-client users cannot access
         if (! $this->isClientUser && $user->vendor_role !== 'Admin') {
@@ -137,6 +137,13 @@ class SmsIndex extends Component
                 $clientIds = auth()->user()->clients()->pluck('clients.id');
 
                 $query->whereIn('client_id', $clientIds);
+            })
+            ->when(! $this->isClientUser, function ($query) {
+                $vendorId = auth()->user()->vendor?->id;
+
+                if ($vendorId) {
+                    $query->where('vendor_id', $vendorId);
+                }
             });
     }
 

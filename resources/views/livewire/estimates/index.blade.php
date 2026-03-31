@@ -64,7 +64,7 @@
                                             {{$estimate->status}}
                                         </flux:badge>
 
-                                        @unless(auth()->user()->is_client_user)
+                                        @unless(auth()->user()->is_browsing_as_client)
                                             <flux:dropdown position="bottom" align="start">
                                                 <flux:button
                                                     variant="ghost"

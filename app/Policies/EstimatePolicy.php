@@ -13,8 +13,8 @@ class EstimatePolicy
      */
     public function viewAny(User $user): bool
     {
-        // Client users can view estimates for their projects
-        if ($user->is_client_user) {
+        // Client-browsing users can view estimates for their projects
+        if ($user->is_browsing_as_client) {
             return true;
         }
 
@@ -36,8 +36,8 @@ class EstimatePolicy
      */
     public function view(User $user, Estimate $estimate): bool
     {
-        // Client users can view estimates for their client projects
-        if ($user->is_client_user) {
+        // Client-browsing users can view estimates for their client projects
+        if ($user->is_browsing_as_client) {
             $clientId = $estimate->project?->client?->id;
 
             return $clientId !== null
@@ -63,7 +63,7 @@ class EstimatePolicy
     public function create(User $user, Project $project): bool
     {
         //can create if project->latestStatus is NOT X Y and Z
-        if ($user->vendor_role === 'Admin' && ! in_array($project->latestStatus->status_code, [7, 8, 10, 11])) { // Not Complete, Service Call, Cancelled, VIEW_ONLY
+        if ($user->vendor_role === 'Admin' && ! in_array($project->latestStatus?->status_code, [7, 8, 10, 11])) { // Not Complete, Service Call, Cancelled, VIEW_ONLY
             return true;
         } else {
             return false;
@@ -104,7 +104,7 @@ class EstimatePolicy
         }
         
         // Check if the estimate's project is in a state that allows deletion
-        if (in_array($estimate->project->latestStatus->status_code, [7, 8, 10, 11])) { // Complete, Service Call, Cancelled, VIEW_ONLY
+        if (in_array($estimate->project->latestStatus?->status_code, [7, 8, 10, 11])) { // Complete, Service Call, Cancelled, VIEW_ONLY
             return false;
         }
         

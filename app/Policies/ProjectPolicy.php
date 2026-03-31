@@ -22,12 +22,21 @@ class ProjectPolicy
      */
     public function view(User $user, Project $project): bool
     {
-        // Client users can only view projects belonging to their clients
-        if ($user->is_client_user) {
-            $clientIds = $user->clients()->pluck('clients.id');
+        // Client-browsing users can only view projects belonging to their personal clients
+        // Exclude vendor-owned clients (where client.vendor_id matches a vendor the user belongs to)
+        if ($user->is_browsing_as_client) {
+            $userVendorIds = $user->vendors()->withoutGlobalScopes()->pluck('vendors.id');
+
+            $clientIds = $user->clients()
+                ->where(function ($query) use ($userVendorIds) {
+                    $query->whereNull('clients.vendor_id')
+                        ->orWhereNotIn('clients.vendor_id', $userVendorIds);
+                })
+                ->pluck('clients.id');
+
             return $project->client_id && $clientIds->contains($project->client_id);
         }
-        
+
         return true;
     }
 
@@ -121,8 +130,8 @@ class ProjectPolicy
             return true;
         }
 
-        // Client users can view financials for their own projects
-        if ($user->is_client_user) {
+        // Client-browsing users can view financials for their own projects
+        if ($user->is_browsing_as_client) {
             $clientIds = $user->clients()->pluck('clients.id');
             return $project->client_id && $clientIds->contains($project->client_id);
         }

@@ -129,8 +129,8 @@ class UserPolicy
      */
     public function update_client_member(User $user, User $model): bool
     {
-        // Client users can only edit their own profile
-        return $user->is_client_user && $user->id === $model->id;
+        // Client-browsing users can only edit their own profile
+        return $user->is_browsing_as_client && $user->id === $model->id;
     }
 
     /**

@@ -12,8 +12,8 @@ class PaymentPolicy
 
     public function viewAny(User $user): bool
     {
-        // Client users can view payments for their projects
-        if ($user->is_client_user) {
+        // Client-browsing users can view payments for their projects
+        if ($user->is_browsing_as_client) {
             return true;
         }
 
@@ -26,8 +26,8 @@ class PaymentPolicy
     
     public function view(User $user, Payment $payment): bool
     {
-        // Client users can view payments for their projects
-        if ($user->is_client_user) {
+        // Client-browsing users can view payments for their projects
+        if ($user->is_browsing_as_client) {
             $clientIds = $user->clients->pluck('id')->toArray();
             return in_array($payment->project?->client_id, $clientIds);
         }

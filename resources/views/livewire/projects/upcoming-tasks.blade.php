@@ -1,4 +1,4 @@
-@php $isClientUser = auth()->user()->is_client_user; @endphp
+@php $isClientUser = auth()->user()->is_browsing_as_client; @endphp
 <div wire:transition>
     <x-upcoming-tasks-list
         title="Tasks"

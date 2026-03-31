@@ -1500,14 +1500,17 @@ class TransactionController extends Controller
 
             //if amount matches and is only one, that's the one
             if ($transactions->count() === 1) {
-                $transactions->first()->check()->associate($check)->save();
+                $matchedTransaction = $transactions->first();
+                $matchedTransaction->check()->associate($check)->save();
             } elseif ($transactions->count() > 1) {
                 // Pick the closest-by-days without mutating attributes
                 $closest = $transactions
                     ->sortBy(fn ($t) => $t->transaction_date->diffInDays($check->date))
                     ->first();
 
-                $closest?->check()->associate($check)->save();
+                if ($closest) {
+                    $closest->check()->associate($check)->save();
+                }
                 continue; // done with this check
             } else {
                 // No exact match found - try subset sum matching

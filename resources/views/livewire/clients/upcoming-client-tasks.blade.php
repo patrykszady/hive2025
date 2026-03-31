@@ -1,5 +1,5 @@
 @php
-    $isClientUser = auth()->user()->is_client_user;
+    $isClientUser = auth()->user()->is_browsing_as_client;
     $showProjectInfo = $this->distinctProjectCount > 1;
 @endphp
 <div wire:transition>

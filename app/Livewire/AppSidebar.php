@@ -15,21 +15,15 @@ use App\Models\User;
 use App\Models\Vendor;
 use App\Models\VendorDoc;
 use Illuminate\Support\Facades\Cache;
-use Livewire\Attributes\Lazy;
 use Livewire\Component;
 
-#[Lazy]
 class AppSidebar extends Component
 {
-    public function placeholder(): string
-    {
-        return view('livewire.app-sidebar-placeholder')->render();
-    }
 
     public function render()
     {
         $user = auth()->user();
-        $cacheKey = 'sidebar:nav:' . $user->id . ':' . $user->vendor_id;
+        $cacheKey = 'sidebar:nav:' . $user->id . ':' . ($user->primary_vendor_id ?? 'client');
         $cacheTtl = now()->addMinutes(5);
 
         $sidebarData = Cache::remember($cacheKey, $cacheTtl, function () use ($user) {
@@ -42,6 +36,8 @@ class AppSidebar extends Component
         $sidebarData['globalActionsExpanded'] = request()->is('transactions/match_vendor');
         $sidebarData['settingsExpanded'] = request()->is('email_templates*', 'company_emails*', 'vendor_docs*', 'vendor_options*')
             || request()->routeIs('email_templates*', 'company_emails*', 'vendor_docs*', 'vendor_options*');
+        // Always set outside cache to handle stale cached entries missing this key.
+        $sidebarData['primaryVendorId'] = $user->primary_vendor_id;
 
         return view('livewire.app-sidebar', $sidebarData);
     }
@@ -51,14 +47,21 @@ class AppSidebar extends Component
      */
     private function buildSidebarData(User $user): array
     {
-        $isClientUser = $user->is_client_user;
+        $isClientUser = $user->is_browsing_as_client;
         $isAdmin = $user->vendor_role === 'Admin';
 
         $hasBankErrors = false;
         $clientHome = null;
 
         if ($isClientUser) {
-            $client = $user->clients()->first();
+            $userVendorIds = $user->vendors()->withoutGlobalScopes()->pluck('vendors.id')->toArray();
+
+            $client = $user->clients()->withoutGlobalScopes()
+                ->where(function ($query) use ($userVendorIds) {
+                    $query->whereNull('clients.vendor_id')
+                        ->orWhereNotIn('clients.vendor_id', $userVendorIds);
+                })
+                ->first();
             $clientHome = $client ? route('clients.show', $client) : route('account_selection');
         } elseif ($user->can('viewAny', Bank::class) && $user->vendor) {
             $hasBankErrors = $user->vendor->banks()

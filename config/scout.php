@@ -193,7 +193,7 @@ return [
 
             Project::class => [
                 'filterableAttributes'=> [
-                    'client_id', 'belongs_to_vendor_id', 'latest_status_code', 'created_at', '__soft_deleted'
+                    'client_id', 'belongs_to_vendor_id', 'vendor_ids', 'latest_status_code', 'vendor_status_codes', 'created_at', '__soft_deleted'
                 ],
                 'sortableAttributes' => ['latest_status_date', 'created_at', 'project_name'],
                 'searchableAttributes' => [

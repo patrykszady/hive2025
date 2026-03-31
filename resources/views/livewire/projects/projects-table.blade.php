@@ -15,16 +15,16 @@
                 @if($view == 'clients.index')
                     <flux:table.column class="w-[30%] min-w-0">Name</flux:table.column>
                     <flux:table.column class="w-[30%] min-w-0">Address</flux:table.column>
-                    @if(auth()->user()->is_client_user)
+                    @if(auth()->user()->is_browsing_as_client)
                         <flux:table.column class="w-[25%] min-w-0">Contractor</flux:table.column>
                     @endif
                 @else
                     <flux:table.column class="w-[30%] min-w-0">Address</flux:table.column>
-                    @if($view != 'clients.index' && !auth()->user()->is_client_user)
+                    @if($view != 'clients.index' && !auth()->user()->is_browsing_as_client)
                         <flux:table.column class="w-[25%] min-w-0">Client</flux:table.column>
                     @endif
                     <flux:table.column class="w-[25%] min-w-0">Name</flux:table.column>
-                    @if(auth()->user()->is_client_user)
+                    @if(auth()->user()->is_browsing_as_client)
                         <flux:table.column class="w-[25%] min-w-0">Contractor</flux:table.column>
                     @endif
                 @endif
@@ -49,7 +49,7 @@
                                 class="cursor-pointer w-[35%] min-w-0 hover:text-indigo-600 dark:hover:text-indigo-400">
                                 <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->address }}">{{ $project->short_address }}</div>
                             </flux:table.cell>
-                            @if(auth()->user()->is_client_user)
+                            @if(auth()->user()->is_browsing_as_client)
                                 <flux:table.cell class="w-[25%] min-w-0">
                                     <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->createdByVendor?->business_name ?? $project->createdByVendor?->name }}">
                                         {{ $project->createdByVendor?->business_name ?? $project->createdByVendor?->name ?? '—' }}
@@ -65,7 +65,7 @@
                                 >
                                 <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->address }}">{{ $project->short_address }}</div>
                             </flux:table.cell>
-                            @if($view != 'clients.index' && !auth()->user()->is_client_user)
+                            @if($view != 'clients.index' && !auth()->user()->is_browsing_as_client)
                                 <flux:table.cell
                                     wire:navigate.hover
                                     href="{{route('clients.show', $project->client->id)}}"
@@ -80,7 +80,7 @@
                                 class="cursor-pointer w-[25%] min-w-0 hover:text-indigo-600 dark:hover:text-indigo-400">
                                 <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->project_name }}">{{ $project->project_name }}</div>
                             </flux:table.cell>
-                            @if(auth()->user()->is_client_user)
+                            @if(auth()->user()->is_browsing_as_client)
                                 <flux:table.cell class="w-[25%] min-w-0">
                                     <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->createdByVendor?->business_name ?? $project->createdByVendor?->name }}">
                                         {{ $project->createdByVendor?->business_name ?? $project->createdByVendor?->name ?? '—' }}
@@ -89,10 +89,11 @@
                             @endif
                         @endif
                         <flux:table.cell align="end" class="w-[30%] min-w-[5rem] shrink-0">
-                            @if(auth()->user()->is_client_user)
-                                <flux:badge size="sm" :color="$project->latestStatus->badge_color" inset="top bottom">{{ $project->latestStatus->title }}</flux:badge>
+                            @php($vendorStatus = $project->latestVendorStatus())
+                            @if(auth()->user()->is_browsing_as_client)
+                                <flux:badge size="sm" :color="$vendorStatus->badge_color" inset="top bottom">{{ $vendorStatus->title }}</flux:badge>
                             @else
-                                <div x-data="{ status: {{ $project->latestStatus->status_code }} }" x-init="$watch('status', value => $wire.updateProjectStatus({{ $project->id }}, value))">
+                                <div x-data="{ status: {{ $vendorStatus->status_code }} }" x-init="$watch('status', value => $wire.updateProjectStatus({{ $project->id }}, value))">
                                     <flux:select
                                         x-model="status"
                                         variant="listbox"

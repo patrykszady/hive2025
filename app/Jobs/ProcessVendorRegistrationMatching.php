@@ -13,10 +13,13 @@ use App\Models\Timesheet;
 use App\Models\User;
 use App\Models\Vendor;
 use Illuminate\Bus\Queueable;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class ProcessVendorRegistrationMatching implements ShouldQueue
@@ -32,6 +35,11 @@ class ProcessVendorRegistrationMatching implements ShouldQueue
         $vendor = Vendor::withoutGlobalScopes()->findOrFail($this->vendorId);
         $user = User::find($this->userId);
 
+        Log::info('[VendorRegistration] Job started', [
+            'vendor_id' => $this->vendorId,
+            'user_id' => $this->userId,
+        ]);
+
         $this->updateMatchingStatus($vendor, 'processing');
 
         try {
@@ -41,6 +49,9 @@ class ProcessVendorRegistrationMatching implements ShouldQueue
 
             $projectIds = $this->determineRelatedProjectIds($registeredVendorId, $timesheetUserIds);
             if (empty($projectIds)) {
+                Log::info('[VendorRegistration] No related projects found, completing early', [
+                    'vendor_id' => $this->vendorId,
+                ]);
                 $this->updateMatchingStatus($vendor, 'completed');
 
                 return;
@@ -50,10 +61,42 @@ class ProcessVendorRegistrationMatching implements ShouldQueue
                 ->whereIn('id', $projectIds)
                 ->get();
 
+            Log::info('[VendorRegistration] Found projects to process', [
+                'vendor_id' => $this->vendorId,
+                'project_count' => $projects->count(),
+                'project_ids' => $projectIds,
+            ]);
+
             foreach ($projects as $project) {
-                $client = $this->ensureClientForProjectOwner($project);
-                if (! $client) {
+                // Skip if vendor is already linked to this project with a client
+                $existingClientId = DB::table('project_vendor')
+                    ->where('project_id', $project->id)
+                    ->where('vendor_id', $registeredVendorId)
+                    ->whereNotNull('client_id')
+                    ->value('client_id');
+
+                if ($existingClientId) {
+                    $this->ensureViewOnlyProjectStatus($project->id, $registeredVendorId, $project->created_at?->format('Y-m-d'));
+
                     continue;
+                }
+
+                // Check if the registering vendor IS the project's client
+                // (e.g., DK is client on GS-owned projects — DK hired GS)
+                $selfClient = $project->client_id
+                    ? Client::withoutGlobalScopes()
+                        ->where('id', $project->client_id)
+                        ->where('vendor_id', $registeredVendorId)
+                        ->first()
+                    : null;
+
+                if ($selfClient) {
+                    $client = $selfClient;
+                } else {
+                    $client = $this->ensureClientForProjectOwner($project);
+                    if (! $client) {
+                        continue;
+                    }
                 }
 
                 $client->vendors()->syncWithoutDetaching([
@@ -68,10 +111,39 @@ class ProcessVendorRegistrationMatching implements ShouldQueue
             }
 
             $affectedProjectIds = $this->createPaymentsFromChecks($registeredVendorId, $projectIds);
+            Log::info('[VendorRegistration] Payments from checks created', [
+                'vendor_id' => $this->vendorId,
+                'affected_projects' => count($affectedProjectIds),
+            ]);
+
             $this->createBidAdjustmentsIfNeeded($registeredVendorId, $affectedProjectIds);
 
+            $this->createExpensesFromOwnerPayments($registeredVendorId, $projects);
+            Log::info('[VendorRegistration] Expenses from owner payments created', [
+                'vendor_id' => $this->vendorId,
+            ]);
+            $this->syncVendorsVendor($vendor, $projects);
+
+            Log::info('[VendorRegistration] Data matching done, syncing scout index settings', [
+                'vendor_id' => $this->vendorId,
+            ]);
+
+            Artisan::call('scout:reindex');
+
+            Log::info('[VendorRegistration] Scout index settings synced', [
+                'vendor_id' => $this->vendorId,
+            ]);
+
             $this->updateMatchingStatus($vendor, 'completed');
+
+            Log::info('[VendorRegistration] Job marked completed', [
+                'vendor_id' => $this->vendorId,
+            ]);
         } catch (Throwable $e) {
+            Log::error('[VendorRegistration] Job failed', [
+                'vendor_id' => $this->vendorId,
+                'error' => $e->getMessage(),
+            ]);
             $this->updateMatchingStatus($vendor, 'failed', $e->getMessage());
 
             throw $e;
@@ -149,7 +221,15 @@ class ProcessVendorRegistrationMatching implements ShouldQueue
             ->pluck('project_id')
             ->all();
 
-        $projectIds = array_merge($expenseProjectIds, $timesheetProjectIds);
+        $clientLinkedProjectIds = Project::withoutGlobalScopes()
+            ->whereHas('client', function ($query) use ($registeredVendorId) {
+                $query->withoutGlobalScopes()->where('clients.vendor_id', $registeredVendorId);
+            })
+            ->whereNull('deleted_at')
+            ->pluck('id')
+            ->all();
+
+        $projectIds = array_merge($expenseProjectIds, $timesheetProjectIds, $clientLinkedProjectIds);
         $projectIds = array_map('intval', $projectIds);
 
         return array_values(array_unique(array_filter($projectIds)));
@@ -264,19 +344,28 @@ class ProcessVendorRegistrationMatching implements ShouldQueue
                 if ($projectId && in_array($projectId, $projectIds, true)) {
                     $affectedProjectIds[] = $projectId;
 
-                    $project = Project::withoutGlobalScopes()->find($projectId);
-                    if ($project) {
-                        $client = $this->ensureClientForProjectOwner($project);
-                        if ($client) {
-                            $client->vendors()->syncWithoutDetaching([
-                                $registeredVendorId => ['source' => 'belongs_to_vendor'],
-                            ]);
+                    // Only ensure client/project link if not already established
+                    $existingClientId = DB::table('project_vendor')
+                        ->where('project_id', $projectId)
+                        ->where('vendor_id', $registeredVendorId)
+                        ->whereNotNull('client_id')
+                        ->value('client_id');
 
-                            $project->vendors()->syncWithoutDetaching([
-                                $registeredVendorId => ['client_id' => $client->id],
-                            ]);
+                    if (! $existingClientId) {
+                        $project = Project::withoutGlobalScopes()->find($projectId);
+                        if ($project) {
+                            $client = $this->ensureClientForProjectOwner($project);
+                            if ($client) {
+                                $client->vendors()->syncWithoutDetaching([
+                                    $registeredVendorId => ['source' => 'belongs_to_vendor'],
+                                ]);
 
-                            $this->ensureViewOnlyProjectStatus($project->id, $registeredVendorId, $project->created_at?->format('Y-m-d'));
+                                $project->vendors()->syncWithoutDetaching([
+                                    $registeredVendorId => ['client_id' => $client->id],
+                                ]);
+
+                                $this->ensureViewOnlyProjectStatus($project->id, $registeredVendorId, $project->created_at?->format('Y-m-d'));
+                            }
                         }
                     }
                 }
@@ -297,6 +386,67 @@ class ProcessVendorRegistrationMatching implements ShouldQueue
                     $parentPaymentId = $payment->id;
                 }
             }
+        }
+
+        // Handle expenses with no check_id (orphan expenses)
+        $orphanExpenses = Expense::withoutGlobalScopes()
+            ->where('vendor_id', $registeredVendorId)
+            ->whereNull('check_id')
+            ->whereIn('project_id', $projectIds)
+            ->whereNull('deleted_at')
+            ->get();
+
+        foreach ($orphanExpenses as $expense) {
+            $alreadyCreated = Payment::withoutGlobalScopes()
+                ->where('belongs_to_vendor_id', $registeredVendorId)
+                ->where('project_id', $expense->project_id)
+                ->where('amount', $expense->amount)
+                ->where('date', $expense->date?->format('Y-m-d'))
+                ->whereNull('check_id')
+                ->exists();
+
+            if ($alreadyCreated) {
+                continue;
+            }
+
+            $projectId = (int) $expense->project_id;
+            $affectedProjectIds[] = $projectId;
+
+            $existingClientId = DB::table('project_vendor')
+                ->where('project_id', $projectId)
+                ->where('vendor_id', $registeredVendorId)
+                ->whereNotNull('client_id')
+                ->value('client_id');
+
+            if (! $existingClientId) {
+                $project = Project::withoutGlobalScopes()->find($projectId);
+                if ($project) {
+                    $client = $this->ensureClientForProjectOwner($project);
+                    if ($client) {
+                        $client->vendors()->syncWithoutDetaching([
+                            $registeredVendorId => ['source' => 'belongs_to_vendor'],
+                        ]);
+
+                        $project->vendors()->syncWithoutDetaching([
+                            $registeredVendorId => ['client_id' => $client->id],
+                        ]);
+
+                        $this->ensureViewOnlyProjectStatus($project->id, $registeredVendorId, $project->created_at?->format('Y-m-d'));
+                    }
+                }
+            }
+
+            Payment::create([
+                'amount' => $expense->amount,
+                'project_id' => $projectId,
+                'distribution_id' => null,
+                'date' => $expense->date?->format('Y-m-d') ?? today()->format('Y-m-d'),
+                'reference' => $expense->invoice ?? 'Expense',
+                'belongs_to_vendor_id' => $registeredVendorId,
+                'created_by_user_id' => 0,
+                'parent_client_payment_id' => null,
+                'check_id' => null,
+            ]);
         }
 
         $affectedProjectIds = array_values(array_unique(array_filter(array_map('intval', $affectedProjectIds))));
@@ -346,6 +496,138 @@ class ProcessVendorRegistrationMatching implements ShouldQueue
                 'amount' => $totalPayments - $totalBids,
                 'type' => $nextType,
             ]);
+        }
+    }
+
+    /**
+     * Create expense records for the registering vendor from the project owner's payments.
+     *
+     * From the registering vendor's perspective, payments the project owner made
+     * to them are expenses (money they received for work performed).
+     *
+     * @param  \Illuminate\Database\Eloquent\Collection<int, Project>  $projects
+     */
+    private function createExpensesFromOwnerPayments(int $registeredVendorId, $projects): void
+    {
+        foreach ($projects as $project) {
+            $ownerVendorId = (int) ($project->belongs_to_vendor_id ?? 0);
+            if ($ownerVendorId <= 0) {
+                continue;
+            }
+
+            // Only mirror payments for projects where the registering vendor
+            // was the client (i.e. they paid the project owner). Skip projects
+            // where the registering vendor was just a sub.
+            $originalClient = Client::withoutGlobalScopes()->find($project->client_id);
+            if (! $originalClient || (int) $originalClient->vendor_id !== $registeredVendorId) {
+                continue;
+            }
+
+            $ownerPayments = Payment::withoutGlobalScopes()
+                ->where('project_id', $project->id)
+                ->where('belongs_to_vendor_id', $ownerVendorId)
+                ->get();
+
+            foreach ($ownerPayments as $payment) {
+                $alreadyExists = Expense::withoutGlobalScopes()
+                    ->where('project_id', $project->id)
+                    ->where('belongs_to_vendor_id', $registeredVendorId)
+                    ->where('vendor_id', $ownerVendorId)
+                    ->where('amount', $payment->amount)
+                    ->where('date', $payment->date)
+                    ->when(! blank($payment->reference), function ($q) use ($payment) {
+                        $q->where('invoice', $payment->reference);
+                    }, function ($q) {
+                        $q->whereNull('invoice');
+                    })
+                    ->whereNull('deleted_at')
+                    ->exists();
+
+                if ($alreadyExists) {
+                    continue;
+                }
+
+                $isCheck = is_numeric($payment->reference);
+                $checkNumber = $isCheck ? (int) $payment->reference : null;
+                $checkType = $isCheck ? 'Check' : ($payment->reference ?? 'Other');
+
+                // If no reference but the transaction has a REF number (mobile deposit),
+                // extract it and treat as a Check
+                if (! $isCheck && blank($payment->reference) && $payment->transaction_id) {
+                    $merchantName = \App\Models\Transaction::withoutGlobalScopes()
+                        ->where('id', $payment->transaction_id)
+                        ->value('plaid_merchant_name');
+
+                    if ($merchantName && preg_match('/REF[:#\s]+(\d+)/i', $merchantName, $matches)) {
+                        $isCheck = true;
+                        $checkNumber = $matches[1];
+                        $checkType = 'Check';
+                    }
+                }
+
+                // Group expenses under a single check when they share the same check number.
+                // Non-numeric references (Other, HD Gift Card, etc.) each get their own check.
+                $check = null;
+                if ($isCheck && $checkNumber) {
+                    $check = Check::withoutGlobalScopes()
+                        ->where('check_number', $checkNumber)
+                        ->where('vendor_id', $ownerVendorId)
+                        ->where('belongs_to_vendor_id', $registeredVendorId)
+                        ->whereNull('deleted_at')
+                        ->first();
+
+                    if ($check) {
+                        $check->update(['amount' => $check->amount + $payment->amount]);
+                    }
+                }
+
+                if (! $check) {
+                    $check = Check::create([
+                        'check_type' => $checkType,
+                        'check_number' => $checkNumber,
+                        'date' => $payment->date,
+                        'amount' => $payment->amount,
+                        'vendor_id' => $ownerVendorId,
+                        'belongs_to_vendor_id' => $registeredVendorId,
+                        'created_by_user_id' => 0,
+                    ]);
+                }
+
+                Expense::create([
+                    'date' => $payment->date,
+                    'amount' => $payment->amount,
+                    'project_id' => $project->id,
+                    'vendor_id' => $ownerVendorId,
+                    'invoice' => $payment->reference,
+                    'check_id' => $check->id,
+                    'belongs_to_vendor_id' => $registeredVendorId,
+                    'created_by_user_id' => 0,
+                ]);
+            }
+        }
+    }
+
+    /**
+     * Add project owners to the registering vendor's vendors_vendor so they
+     * appear in the vendor's vendor list.
+     *
+     * @param  \Illuminate\Database\Eloquent\Collection<int, Project>  $projects
+     */
+    private function syncVendorsVendor(Vendor $vendor, $projects): void
+    {
+        // Self-entry so the vendor appears in its own vendor list
+        $vendor->vendors()->syncWithoutDetaching([$vendor->id]);
+
+        $ownerVendorIds = $projects
+            ->pluck('belongs_to_vendor_id')
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        if (! empty($ownerVendorIds)) {
+            $vendor->vendors()->syncWithoutDetaching($ownerVendorIds);
         }
     }
 }

@@ -24,7 +24,7 @@ class ProjectsIndex extends Component
 
     public $client = null;
 
-    // Store selected status code from filter (as int); default to Active (6)
+    // Store selected status code from filter (as int); null = all
     public $project_status_title = 6;
 
     protected function queryString(): array
@@ -35,7 +35,7 @@ class ProjectsIndex extends Component
         ];
 
         if (! $this->view) {
-            $params['project_status_title'] = ['except' => 6];
+            $params['project_status_title'] = ['except' => null];
         }
 
         return $params;
@@ -70,7 +70,7 @@ class ProjectsIndex extends Component
             $this->client_id = $this->client->id;
         } else {
             // Client users only see their own clients
-            if (auth()->user()->is_client_user) {
+            if (auth()->user()->is_browsing_as_client) {
                 $this->clients = auth()->user()->clients()->get();
             } else {
                 $this->clients = Client::orderBy('created_at', 'DESC')->get();
@@ -89,10 +89,14 @@ class ProjectsIndex extends Component
             $code = (int) $this->project_status_title;
             $this->project_status_title = in_array($code, $validCodes) ? $code : null;
             Session::put('projects.status', $this->project_status_title);
-        } elseif (auth()->user()->is_client_user) {
+        } elseif (auth()->user()->is_browsing_as_client) {
             $this->project_status_title = null;
         } else {
-            $this->project_status_title = 6;
+            $hasActiveProjects = ProjectStatus::where('status_code', 6)
+                ->whereHas('project')
+                ->exists();
+
+            $this->project_status_title = $hasActiveProjects ? 6 : null;
         }
 
         if ($hasFilterParams && ! $hasStatusParam) {
@@ -146,13 +150,23 @@ class ProjectsIndex extends Component
         $baseQuery = Project::query();
         
         if (! is_null($this->client)) {
-            if (isset($this->client->vendor_id)) {
+            $currentVendorId = auth()->user()->vendor?->id;
+
+            // If viewing the current vendor's own client record, scope to project_vendor
+            if ($currentVendorId && isset($this->client->vendor_id) && (int) $this->client->vendor_id === $currentVendorId) {
+                $projectIds = \Illuminate\Support\Facades\DB::table('project_vendor')
+                    ->where('vendor_id', $currentVendorId)
+                    ->where('client_id', $this->client->id)
+                    ->pluck('project_id');
+                $baseQuery->whereIn('id', $projectIds);
+            } elseif (isset($this->client->vendor_id)) {
                 $client_ids = Project::where('belongs_to_vendor_id', $this->client->vendor_id)->pluck('client_id')->toArray();
+                $baseQuery->whereIn('client_id', $client_ids);
             } else {
                 $client_ids = [$this->client->id];
+                $baseQuery->whereIn('client_id', $client_ids);
             }
-            $baseQuery->whereIn('client_id', $client_ids);
-        } elseif (auth()->user()->is_client_user) {
+        } elseif (auth()->user()->is_browsing_as_client) {
             // Client users only see stats for their client's projects
             $userClientIds = auth()->user()->clients()->pluck('clients.id')->toArray();
             $baseQuery->whereIn('client_id', $userClientIds);

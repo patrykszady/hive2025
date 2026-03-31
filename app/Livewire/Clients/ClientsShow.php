@@ -22,7 +22,7 @@ class ClientsShow extends Component
     #[Computed]
     public function isClientUser(): bool
     {
-        return auth()->user()->is_client_user;
+        return auth()->user()->is_browsing_as_client;
     }
 
     #[Title('Client')]

@@ -3,7 +3,7 @@
         <x-slot:actions>
         @if($view !== 'estimate.pdf')
             @can('create', App\Models\Payment::class)
-                @if($view === 'projects.show' && $project->finances['balance'] > 0)
+                @if($view === 'projects.show' && $project->finances['balance'] > 0 && $project->latestStatus?->title !== 'VIEW ONLY')
                     <flux:button size="sm" wire:click="$dispatchTo('payments.payment-create', 'addProject', { client: {{$project->client->id}}})">Create Payment</flux:button>
                 @elseif($view !== 'projects.show' && $this->hasClientsWithProjects)
                     <flux:button size="sm" wire:click="$dispatchTo('payments.payment-create', 'addProject')">Add Payment</flux:button>
@@ -45,7 +45,11 @@
                 <flux:table.rows>
                     @foreach ($this->payments as $payment)
                         <flux:table.row :key="$payment->id">
-                            @if(auth()->user()->is_client_user)
+                            @if(auth()->user()->is_browsing_as_client)
+                                <flux:table.cell variant="strong">
+                                    {{ money($payment->amount) }}
+                                </flux:table.cell>
+                            @elseif($view === 'projects.show' && $project->latestStatus?->title === 'VIEW ONLY')
                                 <flux:table.cell variant="strong">
                                     {{ money($payment->amount) }}
                                 </flux:table.cell>
@@ -61,20 +65,29 @@
                             @endif
                             <flux:table.cell>{{ $payment->date->format('m/d/Y') }}</flux:table.cell>
                             @if(!in_array($view, ['projects.show', 'estimate.pdf']))
-                                <flux:table.cell
-                                    wire:navigate.hover
-                                    href="{{route('projects.show', $payment->project->id)}}"
-                                    class="cursor-pointer"
-                                    >
-                                    {{ $payment->project->name }}
-                                </flux:table.cell>
-                                <flux:table.cell
-                                    wire:navigate.hover
-                                    href="{{route('clients.show', $payment->project->client->id)}}"
-                                    class="cursor-pointer"
-                                    >
-                                    {{ $payment->project->client->last_names }}
-                                </flux:table.cell>
+                                @if($payment->project)
+                                    <flux:table.cell
+                                        wire:navigate.hover
+                                        href="{{route('projects.show', $payment->project->id)}}"
+                                        class="cursor-pointer"
+                                        >
+                                        {{ $payment->project->name }}
+                                    </flux:table.cell>
+                                @else
+                                    <flux:table.cell>—</flux:table.cell>
+                                @endif
+
+                                @if($payment->project?->client)
+                                    <flux:table.cell
+                                        wire:navigate.hover
+                                        href="{{route('clients.show', $payment->project->client->id)}}"
+                                        class="cursor-pointer"
+                                        >
+                                        {{ $payment->project->client->last_names }}
+                                    </flux:table.cell>
+                                @else
+                                    <flux:table.cell>—</flux:table.cell>
+                                @endif
                             @endif
                             <flux:table.cell>{{ $payment->reference }}</flux:table.cell>
                             <flux:table.cell>

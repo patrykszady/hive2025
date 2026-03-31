@@ -74,7 +74,7 @@
                             </flux:table.cell>
                             <flux:table.cell>{{ $check->date->format('m/d/Y') }}</flux:table.cell>
                             <flux:table.cell>{{$check->check_type != 'Check' ? $check->check_type : $check->check_number}}</flux:table.cell>
-                            <flux:table.cell>{{$check->bank_account->bank->name}}</flux:table.cell>
+                            <flux:table.cell>{{$check->bank_account?->bank?->name}}</flux:table.cell>
                             @if($view === NULL)
                                 <flux:table.cell>{{$check->owner}}</flux:table.cell>
                             @endif

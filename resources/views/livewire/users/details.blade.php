@@ -50,7 +50,7 @@
             @can('update', $user)
                 <x-details.row 
                     title="Start Date" 
-                    :content="$user->vendor_pivot->start_date->format('m/d/Y')" 
+                    :content="$user->vendor_pivot?->start_date?->format('m/d/Y') ?? '—'" 
                 />
 
                 <x-details.row 

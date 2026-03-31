@@ -134,6 +134,8 @@
                                     @else
                                         @if($expense->project?->id)
                                             <a href="{{ route('projects.show', $expense->project->id) }}" class="truncate whitespace-nowrap overflow-hidden text-ellipsis font-semibold block" title="{{ $expense->project->name }}" wire:navigate.hover>{{ $expense->project->name }}</a>
+                                        @elseif($expense->distribution_id && $expense->distribution?->name)
+                                            <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis font-semibold" title="{{ $expense->distribution->name }}">{{ $expense->distribution->name }}</div>
                                         @else
                                             <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis font-semibold" title="No Project">No Project</div>
                                         @endif

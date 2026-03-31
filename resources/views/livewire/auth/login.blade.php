@@ -177,6 +177,7 @@
                                             autofocus
                                             required
                                         />
+                                        <flux:error name="password" />
                                     </flux:field>
 
                                     <flux:switch wire:model.live="remember" label="Remember Me" align="left" />

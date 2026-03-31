@@ -196,9 +196,21 @@ class Project extends Model
             'client_user_last_names' => $clientUserLastNames,
             'client_user_full_names' => $clientUserFullNames,
             'belongs_to_vendor_id' => (int) $this->belongs_to_vendor_id,
+            'vendor_ids' => $this->relationLoaded('vendors')
+                ? $this->vendors->pluck('id')->map(fn ($id) => (int) $id)->all()
+                : $this->vendors()->pluck('vendors.id')->map(fn ($id) => (int) $id)->all(),
             'vendor_business_name' => $vendorBusinessName,
             'latest_status_code' => $latestStatusCode,
             'latest_status_date' => $latestStatusDate,
+            'vendor_status_codes' => $this->statuses()
+                ->select('belongs_to_vendor_id', 'status_code', 'start_date')
+                ->orderByDesc('start_date')
+                ->orderByDesc('id')
+                ->get()
+                ->unique('belongs_to_vendor_id')
+                ->map(fn ($s) => $s->belongs_to_vendor_id . '_' . $s->status_code)
+                ->values()
+                ->all(),
             'created_at' => $this->created_at?->timestamp ?? 0,
         ];
     }
@@ -209,6 +221,7 @@ class Project extends Model
             'client.users:id,first_name,last_name',
             'createdByVendor:id,business_name',
             'latestStatus:project_status.id,project_status.project_id,project_status.status_code,project_status.start_date',
+            'vendors:id',
         ]);
     }
 
@@ -234,7 +247,7 @@ class Project extends Model
 
         if ($user->vendor) {
             $belongsToVendorId = (int) $user->vendor->id;
-            $filters[] = 'belongs_to_vendor_id = '.$belongsToVendorId;
+            $filters[] = 'vendor_ids IN ['.$belongsToVendorId.']';
 
             if ($user->vendor_role === 'Member' && isset($user->vendor_pivot->start_date)) {
                 $projectsStartDate = \Carbon\Carbon::parse($user->vendor_pivot->start_date)
@@ -310,11 +323,16 @@ class Project extends Model
     // }
 
     /**
-     * Get the client for the project through the project_vendor pivot table
+     * Get the client for the project through the project_vendor pivot table,
+     * scoped to the authenticated user's vendor so each vendor sees their own client.
      */
     public function client(): HasOneThrough
     {
-        return $this->hasOneThrough(
+        $vendorId = auth()->check() && auth()->user()->vendor
+            ? auth()->user()->vendor->id
+            : null;
+
+        $query = $this->hasOneThrough(
             Client::class,
             ProjectVendor::class,
             'project_id', // Foreign key on project_vendor table
@@ -322,6 +340,12 @@ class Project extends Model
             'id',         // Local key on projects table
             'client_id'   // Local key on project_vendor table
         );
+
+        if ($vendorId) {
+            $query->where('project_vendor.vendor_id', $vendorId);
+        }
+
+        return $query;
     }
 
     // public function clients(): BelongsToMany
@@ -376,6 +400,21 @@ class Project extends Model
     public function latestStatus(): HasOne
     {
         return $this->hasOne(ProjectStatus::class)->latestOfMany('start_date'); // Automatically picks the latest
+    }
+
+    public function latestVendorStatus(?int $vendorId = null): ?ProjectStatus
+    {
+        $vendorId ??= auth()->user()?->vendor?->id;
+
+        if (! $vendorId) {
+            return $this->latestStatus;
+        }
+
+        return $this->statuses()
+            ->where('belongs_to_vendor_id', $vendorId)
+            ->orderByDesc('start_date')
+            ->orderByDesc('id')
+            ->first() ?? $this->latestStatus;
     }
 
     public function scopeStatus($query, $status)
@@ -466,22 +505,26 @@ class Project extends Model
     {
         return Attribute::make(
             get: function ($value, array $attributes) {
+                $vendorId = auth()->user()?->vendor?->id ?? $this->belongs_to_vendor_id;
+
                 $expenses_sum = \App\Models\Expense::query()
                     ->withoutGlobalScope(\App\Scopes\ExpenseScope::class)
                     ->where('project_id', $this->id)
+                    ->where('belongs_to_vendor_id', $vendorId)
                     ->where('reimbursment', 'Client')
                     ->sum('amount');
 
                 $splits_sum = \App\Models\ExpenseSplits::query()
                     ->withoutGlobalScope(\App\Scopes\ExpenseSplitsScope::class)
                     ->where('project_id', $this->id)
+                    ->where('belongs_to_vendor_id', $vendorId)
                     ->where('reimbursment', 'Client')
                     ->sum('amount');
 
                 $finances = [];
                 $bid_estimate_total = (float) $this->bids()
                     ->where('type', 1)
-                    ->where('vendor_id', $this->belongs_to_vendor_id)
+                    ->where('vendor_id', $vendorId)
                     ->sum('amount');
                 
                 // If no finalized bids exist, calculate from estimate sections

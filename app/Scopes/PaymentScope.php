@@ -16,7 +16,7 @@ class PaymentScope implements Scope
             $user = auth()->user();
 
             // Client users or users without a vendor see all payments (filtered by project elsewhere)
-            if ($user->is_client_user || !$user->vendor) {
+            if ($user->is_browsing_as_client || !$user->vendor) {
                 return;
             }
 

@@ -14,7 +14,7 @@ class ExpenseScope implements Scope
 
         if ($user) {
             // Client users should not see any expenses
-            if ($user->is_client_user || !$user->vendor) {
+            if ($user->is_browsing_as_client || !$user->vendor) {
                 $builder->whereRaw('1 = 0'); // Return no results
                 return;
             }
