@@ -125,7 +125,7 @@ class SmsConversation extends Component
         } else {
             $vendorId = $user->vendor?->id;
             $allowed = $vendorId && SmsGroupThread::where('id', $this->threadId)
-                ->where('vendor_id', $vendorId)
+                ->visibleToVendor($vendorId)
                 ->exists();
         }
 

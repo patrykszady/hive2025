@@ -63,6 +63,15 @@ class SmsIndex extends Component
             if (! $allowed) {
                 return;
             }
+        } elseif (! $this->isClientUser && $threadId !== null) {
+            $vendorId = auth()->user()->vendor?->id;
+            $allowed = $vendorId && SmsGroupThread::where('id', $threadId)
+                ->visibleToVendor($vendorId)
+                ->exists();
+
+            if (! $allowed) {
+                return;
+            }
         }
 
         $this->threadId = $threadId;
@@ -142,7 +151,7 @@ class SmsIndex extends Component
                 $vendorId = auth()->user()->vendor?->id;
 
                 if ($vendorId) {
-                    $query->where('vendor_id', $vendorId);
+                    $query->visibleToVendor($vendorId);
                 }
             });
     }

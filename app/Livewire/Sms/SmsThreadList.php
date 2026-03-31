@@ -69,7 +69,7 @@ class SmsThreadList extends Component
             ->when(! $user->is_browsing_as_client, function ($query) use ($user) {
                 $vendorId = $user->vendor?->id;
                 if ($vendorId) {
-                    $query->where('vendor_id', $vendorId);
+                    $query->visibleToVendor($vendorId);
                 }
             })
             ->when(trim($this->search), function ($query, $search) {

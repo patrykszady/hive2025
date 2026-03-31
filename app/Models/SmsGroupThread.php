@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
@@ -47,6 +48,34 @@ class SmsGroupThread extends Model
     public function vendor(): BelongsTo
     {
         return $this->belongsTo(Vendor::class);
+    }
+
+    /**
+     * Scope threads visible to a vendor.
+     *
+     * Includes:
+     * - Threads explicitly assigned via sms_group_threads.vendor_id
+     * - Legacy threads without vendor_id that can be tied to this vendor
+     *   via project ownership or client-vendor linkage.
+     */
+    public function scopeVisibleToVendor(Builder $query, int $vendorId): Builder
+    {
+        return $query->where(function (Builder $scope) use ($vendorId): void {
+            $scope->where('vendor_id', $vendorId)
+                ->orWhere(function (Builder $legacyScope) use ($vendorId): void {
+                    $legacyScope->whereNull('vendor_id')
+                        ->where(function (Builder $legacyRelationScope) use ($vendorId): void {
+                            $legacyRelationScope->whereHas('project', function (Builder $projectQuery) use ($vendorId): void {
+                                $projectQuery->where('belongs_to_vendor_id', $vendorId);
+                            })->orWhereHas('client', function (Builder $clientQuery) use ($vendorId): void {
+                                $clientQuery->where('vendor_id', $vendorId)
+                                    ->orWhereHas('vendors', function (Builder $vendorQuery) use ($vendorId): void {
+                                        $vendorQuery->where('vendors.id', $vendorId);
+                                    });
+                            });
+                        });
+                });
+        });
     }
 
     public function messages(): HasMany
