@@ -18,25 +18,25 @@ class EstimateLineItemForm extends Form
     public ?EstimateLineItem $estimate_line_item;
 
     #[Rule('required|min:3')]
-    public $category = null;
+    public $category = '';
 
     #[Rule('nullable|min:3', as: 'sub category')]
-    public $sub_category = null;
+    public $sub_category = '';
 
     #[Rule('required')]
-    public $unit_type = null;
+    public $unit_type = '';
 
     #[Rule('required|numeric|min:0.1')]
     public $quantity = 1;
 
     #[Rule('required|numeric', as: 'amount')]
-    public $cost = null;
+    public $cost = '';
 
     #[Rule('required|min:3', as: 'description')]
-    public $desc = null;
+    public $desc = '';
 
     #[Rule('nullable|min:3')]
-    public $notes = null;
+    public $notes = '';
 
     #[Rule('required')]
     public $total = '';

@@ -24,9 +24,9 @@ class EstimateAccept extends Component
 
     public $payments_outstanding = 0;
 
-    public $start_date = null;
+    public $start_date = '';
 
-    public $end_date = null;
+    public $end_date = '';
 
     public bool $showSignWarning = false;
 
@@ -77,11 +77,11 @@ class EstimateAccept extends Component
         $bids = $this->bids;
 
         if (isset($this->estimate->options['start_date'])) {
-            $this->start_date = $estimate->options['start_date'];
+            $this->start_date = $estimate->options['start_date'] ?? '';
         }
 
         if (isset($this->estimate->options['end_date'])) {
-            $this->end_date = $estimate->options['end_date'];
+            $this->end_date = $estimate->options['end_date'] ?? '';
         }
 
         $sections = $this->estimate
@@ -106,12 +106,15 @@ class EstimateAccept extends Component
             return (object) $sectionArray;
         });
         if ($this->estimate->payments) {
-            $this->payments = collect($this->estimate->payments);
+            $this->payments = collect($this->estimate->payments)->map(fn ($p) => [
+                'amount' => $p['amount'] ?? '',
+                'description' => $p['description'] ?? '',
+            ]);
         } else {
             $this->payments = [
                 0 => [
-                    'amount' => null,
-                    'description' => null,
+                    'amount' => '',
+                    'description' => '',
                 ],
             ];
 
@@ -308,8 +311,8 @@ class EstimateAccept extends Component
     public function addPayment()
     {
         $payment = [
-            'amount' => null,
-            'description' => null,
+            'amount' => '',
+            'description' => '',
         ];
 
         $this->payments->push($payment);
