@@ -121,9 +121,10 @@ class SmsGroupThread extends Model
         return $participantCount === $optedInCount;
     }
 
-    public static function unreadCountForUser(int $userId): int
+    public static function unreadCountForUser(int $userId, ?int $vendorId = null): int
     {
-        return SmsMessage::query()
+        $query = SmsMessage::query()
+            ->join('sms_group_threads', 'sms_group_threads.id', '=', 'sms_messages.thread_id')
             ->leftJoin('sms_thread_reads as thread_reads', function ($join) use ($userId) {
                 $join->on('thread_reads.thread_id', '=', 'sms_messages.thread_id')
                     ->where('thread_reads.user_id', '=', $userId);
@@ -133,8 +134,29 @@ class SmsGroupThread extends Model
             ->where(function ($query) {
                 $query->whereNull('thread_reads.last_read_message_id')
                     ->orWhereColumn('sms_messages.id', '>', 'thread_reads.last_read_message_id');
-            })
-            ->count('sms_messages.id');
+            });
+
+        if ($vendorId) {
+            $query->where(function ($q) use ($vendorId) {
+                $q->where('sms_group_threads.vendor_id', $vendorId)
+                    ->orWhere(function ($legacyScope) use ($vendorId) {
+                        $legacyScope->whereNull('sms_group_threads.vendor_id')
+                            ->where(function ($rel) use ($vendorId) {
+                                $rel->whereIn('sms_group_threads.project_id', function ($sub) use ($vendorId) {
+                                    $sub->select('id')->from('projects')->where('belongs_to_vendor_id', $vendorId);
+                                })->orWhereIn('sms_group_threads.client_id', function ($sub) use ($vendorId) {
+                                    $sub->select('clients.id')->from('clients')
+                                        ->where('clients.vendor_id', $vendorId)
+                                        ->orWhereIn('clients.id', function ($pivot) use ($vendorId) {
+                                            $pivot->select('client_id')->from('client_vendor')->where('vendor_id', $vendorId);
+                                        });
+                                });
+                            });
+                    });
+            });
+        }
+
+        return $query->count('sms_messages.id');
     }
 
     /**

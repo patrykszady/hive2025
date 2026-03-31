@@ -31,7 +31,8 @@ class SmsSidebarBadge extends Component
                 $clientIds = $user->clients()->pluck('clients.id')->toArray();
                 $count = SmsGroupThread::unreadCountForUserInClients($user->id, $clientIds);
             } else {
-                $count = SmsGroupThread::unreadCountForUser($user->id);
+                $vendorId = $user->vendor?->id;
+                $count = SmsGroupThread::unreadCountForUser($user->id, $vendorId);
             }
         }
 

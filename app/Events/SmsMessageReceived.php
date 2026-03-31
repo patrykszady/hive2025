@@ -19,7 +19,6 @@ class SmsMessageReceived implements ShouldBroadcastNow
     public function broadcastOn(): array
     {
         return [
-            new PrivateChannel("sms.thread.{$this->threadId}"),
             new PrivateChannel('sms.notifications'),
         ];
     }

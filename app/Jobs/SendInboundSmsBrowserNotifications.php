@@ -62,7 +62,9 @@ class SendInboundSmsBrowserNotifications implements ShouldQueue
         $grouped = $enabledSubscriptions->groupBy('user_id');
 
         foreach ($grouped as $userId => $userSubscriptions) {
-            $badgeCount = SmsGroupThread::unreadCountForUser((int) $userId);
+            $user = User::find($userId);
+            $vendorId = $user?->vendor?->id;
+            $badgeCount = SmsGroupThread::unreadCountForUser((int) $userId, $vendorId);
 
             $webPush->sendToSubscriptions($userSubscriptions, array_merge($basePayload, [
                 'badgeCount' => $badgeCount,

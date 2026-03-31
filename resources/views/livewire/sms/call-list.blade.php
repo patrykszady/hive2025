@@ -51,10 +51,6 @@
                 $secondaryNumber = null;
             }
 
-            // Determine which of our lines this call was on
-            $callLine = $isIncoming ? $call->to_number : $call->from_number;
-            $lineLabel = \App\Services\GroupSmsService::numberLabel($callLine);
-            $showLineLabel = $lineLabel && count(config('services.telnyx.numbers', [])) > 1;
         @endphp
 
         <div
@@ -99,10 +95,6 @@
                     <div class="flex items-center gap-2">
                         @if ($secondaryNumber)
                             <span class="text-sm lg:text-xs text-zinc-400">{{ $secondaryNumber }}</span>
-                        @endif
-
-                        @if ($showLineLabel)
-                            <span class="text-[10px] font-medium text-zinc-400 dark:text-zinc-500 bg-zinc-100 dark:bg-zinc-700 rounded px-1 py-0.5">{{ $lineLabel }}</span>
                         @endif
 
                         @if ($effectiveStatus === 'blocked')

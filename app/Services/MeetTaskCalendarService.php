@@ -191,13 +191,20 @@ class MeetTaskCalendarService
     private function resolveGrantId(Task $task, ?int $actorUserId = null): ?string
     {
         $vendorId = $task->project?->belongs_to_vendor_id;
-        $resolvedUserId = is_int($actorUserId) && $actorUserId > 0
-            ? $actorUserId
-            : (is_numeric($task->created_by_user_id) ? (int) $task->created_by_user_id : null);
 
         if (! $vendorId) {
             return null;
         }
+
+        // Use the first selected team member as the organizer, not the person creating the event
+        $firstTeamMemberId = collect($task->user_ids ?? [])
+            ->map(fn ($id) => is_numeric($id) ? (int) $id : null)
+            ->filter(fn (?int $id) => is_int($id) && $id > 0)
+            ->first();
+
+        $resolvedUserId = $firstTeamMemberId
+            ?? (is_int($actorUserId) && $actorUserId > 0 ? $actorUserId : null)
+            ?? (is_numeric($task->created_by_user_id) ? (int) $task->created_by_user_id : null);
 
         if (is_int($resolvedUserId) && $resolvedUserId > 0) {
             $actor = User::query()->find($resolvedUserId);

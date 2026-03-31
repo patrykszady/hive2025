@@ -724,10 +724,10 @@ class ReceiptController extends Controller
                 $line = $lineItem['valueObject'];
 
                 $description = $line['Description']['valueString'] ?? null;
-                if ($description === null && isset($lineItem['content']) && is_string($lineItem['content'])) {
+                if (isset($lineItem['content']) && is_string($lineItem['content'])) {
                     $cleaned = preg_replace('/(?:Part\s*Number|Warranty|Quantity|Item\s*Total|Price|Unit\s*Price)\s*:.*$/is', '', trim($lineItem['content']));
                     $cleaned = trim($cleaned);
-                    if ($cleaned !== '') {
+                    if ($cleaned !== '' && ($description === null || str_starts_with($cleaned, $description))) {
                         $description = $cleaned;
                     }
                 }
@@ -755,6 +755,16 @@ class ReceiptController extends Controller
                     $formattedItems[$key]['Price'] = $this->extractCurrencyAmount($line['UnitPrice']);
                 } else {
                     $formattedItems[$key]['Price'] = $formattedItems[$key]['TotalPrice'];
+                }
+
+                // Backfill TotalPrice from Price × Quantity when OCR missed it
+                if ($formattedItems[$key]['TotalPrice'] === null && $formattedItems[$key]['Price'] !== null) {
+                    $formattedItems[$key]['TotalPrice'] = round($formattedItems[$key]['Price'] * ($formattedItems[$key]['Quantity'] ?? 1), 2);
+                }
+
+                // Backfill Price from TotalPrice / Quantity when OCR missed unit price
+                if ($formattedItems[$key]['Price'] === null && $formattedItems[$key]['TotalPrice'] !== null && ($formattedItems[$key]['Quantity'] ?? 1) > 0) {
+                    $formattedItems[$key]['Price'] = round($formattedItems[$key]['TotalPrice'] / $formattedItems[$key]['Quantity'], 2);
                 }
 
                 // If quantity defaulted to 1 but we have both unit price and total price,

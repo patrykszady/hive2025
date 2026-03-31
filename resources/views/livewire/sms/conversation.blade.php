@@ -113,9 +113,6 @@
                 @else
                     <flux:heading size="lg" class="mb-0 truncate flex-1">{{ $headerTitle }}</flux:heading>
                 @endif
-                @if (count(config('services.telnyx.numbers', [])) > 1 && $this->thread->from_number && $this->thread->from_number !== config('services.telnyx.from'))
-                    <span class="text-[10px] font-medium text-zinc-400 dark:text-zinc-500 bg-zinc-100 dark:bg-zinc-700 rounded px-1.5 py-0.5 shrink-0">{{ \App\Services\GroupSmsService::numberLabel($this->thread->from_number) }}</span>
-                @endif
                 @if ($this->thread->project)
                     <flux:button size="sm" variant="ghost" href="{{ route('projects.show', $this->thread->project_id) }}" wire:navigate.hover icon="arrow-top-right-on-square">
                         Project

@@ -119,9 +119,6 @@
                 {{-- Timestamp & line indicator --}}
                 <div class="shrink-0 text-right">
                     <div class="flex items-center justify-end gap-1">
-                        @if (count(config('services.telnyx.numbers', [])) > 1 && $thread->from_number && $thread->from_number !== config('services.telnyx.from'))
-                            <span class="text-[10px] font-medium text-zinc-400 dark:text-zinc-500 bg-zinc-100 dark:bg-zinc-700 rounded px-1 py-0.5">{{ \App\Services\GroupSmsService::numberLabel($thread->from_number) }}</span>
-                        @endif
                         <p class="text-xs lg:text-[10px] text-zinc-400 dark:text-zinc-500">
                             @php
                                 $activityAt = $thread->last_activity_at ?? $thread->created_at;

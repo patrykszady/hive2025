@@ -95,13 +95,9 @@ class SmsConversation extends Component
     /** @return array<string, string> */
     public function getListeners(): array
     {
-        $listeners = [];
-
-        if ($this->threadId) {
-            $listeners["echo-private:sms.thread.{$this->threadId},SmsMessageReceived"] = 'handleIncomingMessage';
-        }
-
-        return $listeners;
+        return [
+            'echo-private:sms.notifications,SmsMessageReceived' => 'handleIncomingMessage',
+        ];
     }
 
     /**
@@ -134,8 +130,12 @@ class SmsConversation extends Component
         }
     }
 
-    public function handleIncomingMessage(): void
+    public function handleIncomingMessage($threadId = null): void
     {
+        if ($threadId !== null && (int) $threadId !== $this->threadId) {
+            return;
+        }
+
         $this->markThreadAsRead();
         $this->dispatch('sms-new-message-received');
     }

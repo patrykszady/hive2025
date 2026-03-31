@@ -226,20 +226,6 @@ class GroupSmsService
     }
 
     /**
-     * Get a short label for one of our Telnyx numbers (last 4 digits).
-     */
-    public static function numberLabel(?string $phone): ?string
-    {
-        if (! $phone) {
-            return null;
-        }
-
-        $digits = preg_replace('/[^0-9]/', '', $phone);
-
-        return strlen($digits) >= 4 ? substr($digits, -4) : $digits;
-    }
-
-    /**
      * Format a phone number to E.164.
      */
     public static function formatE164(string $phone): string
