@@ -519,8 +519,10 @@ class TelnyxWebhookController extends Controller
         $userCallControlId = $clientState['user_call_control_id'] ?? null;
         $callLog = $callLogId ? CallLog::find($callLogId) : null;
 
-        // If the call was already answered/bridged, this is a normal hangup after a connected call
-        $wasConnected = $callLog && in_array($callLog->status, [CallLog::STATUS_TRANSFERRED, CallLog::STATUS_ANSWERED]);
+        // Only STATUS_TRANSFERRED means both parties were actually talking.
+        // STATUS_ANSWERED just means the initiating user picked up their phone,
+        // NOT that the target answered — so don't treat it as "was connected".
+        $wasConnected = $callLog && $callLog->status === CallLog::STATUS_TRANSFERRED;
 
         if ($wasConnected) {
             $duration = $callLog->answered_at
@@ -875,6 +877,25 @@ class TelnyxWebhookController extends Controller
                 'hangup_cause' => $hangupCause,
                 'duration' => $duration,
             ]);
+
+            // If an incoming caller hung up before any admin was bridged,
+            // proactively hang up all still-ringing admin legs so their
+            // phones stop ringing immediately.
+            if ($callLog->direction === 'incoming') {
+                $metadata = $callLog->metadata ?? [];
+                $adminCallControlIds = $metadata['admin_call_control_ids'] ?? [];
+
+                if (empty($metadata['joined_admin_ids']) && ! empty($adminCallControlIds)) {
+                    Log::channel('telnyx')->info('Caller hung up before admin answered — cleaning up admin ring legs', [
+                        'call_control_id' => $callControlId,
+                        'admin_legs_to_hangup' => count($adminCallControlIds),
+                    ]);
+
+                    foreach ($adminCallControlIds as $adminCcId) {
+                        $this->sendCallCommand($adminCcId, 'hangup');
+                    }
+                }
+            }
         }
 
         return response()->json(['status' => 'ok']);
@@ -916,6 +937,18 @@ class TelnyxWebhookController extends Controller
 
         // If all admin legs have ended and none joined → trigger voicemail (or defer if TTS still playing)
         if (empty($metadata['admin_call_control_ids'])) {
+            // If the caller already disconnected, skip voicemail — the call is dead
+            $callLog->refresh();
+            if (in_array($callLog->status, [CallLog::STATUS_COMPLETED, CallLog::STATUS_MISSED])) {
+                Log::channel('telnyx')->info('All admin legs failed but caller already disconnected — skipping voicemail', [
+                    'incoming_call_control_id' => $incomingCallControlId,
+                    'call_log_id' => $callLogId,
+                    'status' => $callLog->status,
+                ]);
+
+                return response()->json(['status' => 'ok']);
+            }
+
             $ttsComplete = $metadata['tts_complete'] ?? false;
 
             if ($ttsComplete) {
@@ -1326,7 +1359,7 @@ class TelnyxWebhookController extends Controller
         ]);
 
         $isMachine = in_array($result, ['machine', 'machine_start', 'machine_end_beep', 'machine_end_silence', 'machine_end_other'], true);
-        $isHuman = in_array($result, ['human', 'human_residence', 'human_business'], true);
+        $isHuman = in_array($result, ['human', 'human_residence', 'human_business', 'not_sure'], true);
 
         // ── Admin ring leg ──
         if ($action === 'admin_ring') {
@@ -1370,9 +1403,22 @@ class TelnyxWebhookController extends Controller
 
         // If this is a click-to-call target and AMD detected a machine, hang it up
         // and notify the user that the target didn't answer.
+        // But skip if the call is already bridged — AMD can fire late after a human answered.
         if ($action === 'click_to_call_target_ring' && $isMachine) {
             $callLogId = $clientState['call_log_id'] ?? null;
             $userCallControlId = $clientState['user_call_control_id'] ?? null;
+
+            // Check if call was already bridged (human answered, AMD fired late with wrong result)
+            $callLog = $callLogId ? CallLog::find($callLogId) : null;
+            if ($callLog && $callLog->status === CallLog::STATUS_TRANSFERRED) {
+                Log::channel('telnyx')->info('AMD detected machine on click-to-call target but call already bridged — ignoring', [
+                    'call_control_id' => $callControlId,
+                    'result' => $result,
+                    'call_log_id' => $callLogId,
+                ]);
+
+                return response()->json(['status' => 'ok']);
+            }
 
             Log::channel('telnyx')->info('AMD detected voicemail on click-to-call target — hanging up', [
                 'call_control_id' => $callControlId,
