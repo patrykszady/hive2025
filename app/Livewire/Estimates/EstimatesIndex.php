@@ -56,6 +56,11 @@ class EstimatesIndex extends Component
         
         // If already soft deleted (disabled), force delete permanently
         if ($estimate->trashed()) {
+            $estimate->estimate_line_items()->each(function ($lineItem) {
+                $lineItem->allowances()->delete();
+                $lineItem->forceDelete();
+            });
+            $estimate->estimate_sections()->forceDelete();
             $estimate->forceDelete();
             $message = 'Estimate permanently deleted';
         } else {

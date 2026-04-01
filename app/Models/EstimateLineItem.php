@@ -50,6 +50,21 @@ class EstimateLineItem extends Pivot
         return $this->hasMany(EstimateLineItemAllowance::class, 'estimate_line_item_id', 'id');
     }
 
+    /**
+     * Override displace to record the original order before it's wiped to 999999.
+     */
+    public function displace(): void
+    {
+        activity('estimates')
+            ->performedOn($this)
+            ->causedBy(auth()->user())
+            ->event('deleted')
+            ->withProperties(['old' => ['order' => $this->order]])
+            ->log('deleted');
+
+        $this->move(999999);
+    }
+
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()

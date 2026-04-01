@@ -516,9 +516,9 @@ class EstimateDocumentGenerator
             return ['line_items' => [], 'sections' => [], 'since' => null];
         }
 
-        // Find the most recent PDF generation for this estimate to determine "since when"
-        // Fall back to 7 days ago if no prior generation exists.
-        $since = now()->subDays(7);
+        // Only show changes made after this estimate was created/duplicated.
+        // Add a small buffer to skip the initial creation burst from duplication.
+        $since = $estimate->created_at->addMinutes(5);
 
         $activities = \Spatie\Activitylog\Models\Activity::query()
             ->where('log_name', 'estimates')
@@ -550,6 +550,11 @@ class EstimateDocumentGenerator
                         'old' => $activity->properties['old'] ?? [],
                         'new' => $activity->properties['attributes'] ?? [],
                     ];
+                }
+
+                // Capture original_order from the deleted event (logged before displace)
+                if ($activity->event === 'deleted' && isset($activity->properties['old']['order'])) {
+                    $lineItemChanges[$id]['original_order'] = $activity->properties['old']['order'];
                 }
             } elseif ($activity->subject_type === EstimateSection::class) {
                 if (! isset($sectionChanges[$id])) {

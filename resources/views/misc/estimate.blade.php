@@ -115,18 +115,67 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    @foreach($estimate->estimate_line_items()->with('allowances')->where('section_id', $section->id)->orderBy('order', 'ASC')->get() as $key => $estimate_line_item)
-                                        @php $liChanged = $recentChanges['line_items'][$estimate_line_item->id] ?? null; @endphp
+                                    @php
+                                        $activeLineItems = $estimate->estimate_line_items()
+                                            ->with('allowances')
+                                            ->where('section_id', $section->id)
+                                            ->orderBy('order', 'ASC')
+                                            ->get()
+                                            ->values();
+
+                                        $trashedLineItems = $estimate->estimate_line_items()
+                                            ->onlyTrashed()
+                                            ->with('allowances')
+                                            ->where('section_id', $section->id)
+                                            ->get();
+
+                                        // Build merged list: active items in order, trashed items
+                                        // inserted at their original position from the activity log.
+                                        $sectionLineItems = collect();
+                                        $activeNumber = 0;
+
+                                        // Index active items by their current position (0-based)
+                                        foreach ($activeLineItems as $pos => $item) {
+                                            $sectionLineItems->push($item);
+                                        }
+
+                                        // Insert trashed items at their original order position (after the active item at that slot)
+                                        $insertOffset = 0;
+                                        foreach ($trashedLineItems->sortBy(fn ($t) => $recentChanges['line_items'][$t->id]['original_order'] ?? PHP_INT_MAX) as $trashed) {
+                                            $originalOrder = $recentChanges['line_items'][$trashed->id]['original_order'] ?? null;
+                                            if ($originalOrder !== null) {
+                                                // Insert after the position where it originally was
+                                                $insertAt = min($originalOrder + 1 + $insertOffset, $sectionLineItems->count());
+                                                $sectionLineItems->splice($insertAt, 0, [$trashed]);
+                                                $insertOffset++;
+                                            } else {
+                                                // No original order recorded — append at the end
+                                                $sectionLineItems->push($trashed);
+                                            }
+                                        }
+
+                                        $activeNumber = 0;
+                                    @endphp
+                                    @foreach($sectionLineItems as $key => $estimate_line_item)
+                                        @php
+                                            $liChanged = $recentChanges['line_items'][$estimate_line_item->id] ?? null;
+                                            $isTrashed = $estimate_line_item->trashed();
+                                            if (! $isTrashed) {
+                                                $activeNumber++;
+                                            }
+                                        @endphp
                                         <tbody style="break-inside: avoid;">
-                                        <tr class="sm:border-b sm:border-gray-400 bg-gray-50" style="{{ $liChanged ? 'background-color: #fef9c3;' : '' }}">
-                                            <td class="hidden px-3 py-5 text-right text-gray-500 align-text-top text-md sm:table-cell">{{$index + 1}}.{{$key + 1}}</td>
+                                        <tr class="sm:border-b sm:border-gray-400 bg-gray-50" style="{{ $isTrashed ? 'opacity: 0.45; text-decoration: line-through;' : ($liChanged ? 'background-color: #fef9c3;' : '') }}">
+                                            <td class="hidden px-3 py-5 text-right text-gray-500 align-text-top text-md sm:table-cell">{{ $isTrashed ? '' : $index + 1 . '.' . $activeNumber }}</td>
                                             {{-- first td --}}
 
                                             <td class="py-5 pl-4 pr-3 text-md max-w-0 sm:pl-6 align-top">
                                                 <div class="flex flex-col leading-5">
                                                     <div class="text-lg font-medium text-gray-900">
                                                         {{$estimate_line_item->name}}
-                                                        @if($liChanged)
+                                                        @if($isTrashed)
+                                                            <span style="display: inline-block; font-size: 9px; color: #fff; background-color: #ef4444; padding: 1px 6px; border-radius: 4px; margin-left: 6px; font-weight: 600; vertical-align: middle; text-decoration: none;">Removed</span>
+                                                        @elseif($liChanged)
                                                             <span style="display: inline-block; font-size: 9px; color: #fff; background-color: #f59e0b; padding: 1px 6px; border-radius: 4px; margin-left: 6px; font-weight: 600; vertical-align: middle;">{{ ucfirst($liChanged['event']) }}</span>
                                                         @endif
                                                     </div>
@@ -160,7 +209,7 @@
                                             @endif
                                         </tr>
 
-                                        <tr class="border-b border-gray-400">
+                                        <tr class="border-b border-gray-400" style="{{ $isTrashed ? 'opacity: 0.45; text-decoration: line-through;' : '' }}">
                                             {{-- first td --}}
                                             <td class="hidden sm:table-cell"></td>
                                             <td class="pb-5 pl-4 pr-3 text-md max-w-0 sm:pl-6" colspan="5">
