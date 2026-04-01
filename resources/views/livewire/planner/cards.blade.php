@@ -104,7 +104,28 @@
     </div>
 
     {{-- Floating Filter Button --}}
-    <div class="fixed top-3 right-3 z-60">
+    <div class="fixed top-3 right-3 z-60 flex items-center gap-1">
+        {{-- View Toggle --}}
+        <div class="flex bg-white/60 dark:bg-zinc-900/50 backdrop-blur-[2px] border border-zinc-200/60 dark:border-zinc-700/60 shadow-sm rounded-lg overflow-hidden">
+            <flux:button
+                wire:click="$set('viewMode', 'cards')"
+                variant="subtle"
+                square
+                inset
+                icon="view-columns"
+                :class="$viewMode === 'cards' ? 'bg-zinc-200/80 dark:bg-zinc-700/80' : ''"
+                aria-label="Card view"
+            />
+            <flux:button
+                wire:click="$set('viewMode', 'table')"
+                variant="subtle"
+                square
+                inset
+                icon="table-cells"
+                :class="$viewMode === 'table' ? 'bg-zinc-200/80 dark:bg-zinc-700/80' : ''"
+                aria-label="Table view"
+            />
+        </div>
         <flux:button
             wire:click="$toggle('showMobileFilters')"
             variant="subtle"
@@ -221,6 +242,7 @@
     </flux:modal>
 
     <!-- Planner Cards - 14 Day Kanban View -->
+    @if ($viewMode === 'cards')
     <div
         x-data="plannerScroll()"
         x-init="init()"
@@ -530,6 +552,119 @@
             </div>
         </div>
     </div>
+    @endif
+
+    {{-- Table View --}}
+    @if ($viewMode === 'table')
+    @php
+        $weekdayCount = $dayHeaders->filter(fn($h) => !$h->isWeekend)->count();
+        $weekendCount = $dayHeaders->filter(fn($h) => $h->isWeekend)->count();
+        $tableWidth = 224 + ($weekdayCount * 200) + ($weekendCount * 80);
+    @endphp
+    <div class="flex-1 min-h-0 overflow-auto bg-white dark:bg-zinc-900">
+        <table class="border-collapse table-fixed" style="width: {{ $tableWidth }}px;">
+            <colgroup>
+                <col style="width: 224px;">
+                @foreach ($dayHeaders as $dayHeader)
+                    <col style="width: {{ $dayHeader->isWeekend ? '80' : '200' }}px;">
+                @endforeach
+            </colgroup>
+            <thead class="sticky top-0 z-20 bg-white dark:bg-zinc-900">
+                <tr>
+                    <th class="sticky left-0 z-30 bg-white dark:bg-zinc-900 px-4 py-3 text-left text-sm font-medium text-zinc-600 dark:text-zinc-300 border-b border-r border-zinc-200 dark:border-zinc-700">
+                        Project
+                    </th>
+                    @foreach ($dayHeaders as $dayHeader)
+                        <th
+                            wire:key="table-header-{{ $dayHeader->day->format('Y-m-d') }}"
+                            class="px-3 py-3 text-left text-sm font-medium border-b border-r border-zinc-200 dark:border-zinc-700
+                                {{ $dayHeader->isWeekend ? 'bg-zinc-50 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500' : 'text-zinc-600 dark:text-zinc-300' }}
+                                {{ $dayHeader->isToday ? '!text-indigo-600 dark:!text-indigo-400' : '' }}"
+                        >
+                            <div class="flex items-center gap-2">
+                                <span>{{ $dayHeader->title }}</span>
+                                @if ($dayHeader->isToday)
+                                    <flux:badge color="indigo" size="sm">Today</flux:badge>
+                                @endif
+                            </div>
+                        </th>
+                    @endforeach
+                </tr>
+            </thead>
+            <tbody>
+                @forelse ($projectRows as $row)
+                    <tr wire:key="table-row-{{ $row->id }}" class="group">
+                        {{-- Project name (sticky left) --}}
+                        <td class="sticky left-0 z-10 bg-white dark:bg-zinc-900 px-4 py-2 border-b border-r border-zinc-200 dark:border-zinc-700 align-top">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <a
+                                    href="{{ route('projects.show', $row->project) }}"
+                                    target="_blank"
+                                    class="font-medium text-sm text-zinc-900 dark:text-zinc-100 truncate hover:underline underline-offset-2"
+                                >
+                                    {{ $row->title }}
+                                </a>
+                                @if ($row->project->latestStatus)
+                                    <flux:tooltip content="{{ $row->project->latestStatus->title }}">
+                                        <flux:badge :color="$row->project->latestStatus->badge_color" size="sm" class="!px-0 !size-2 !min-w-0 rounded-full shrink-0" />
+                                    </flux:tooltip>
+                                @endif
+                            </div>
+                            <div class="text-xs text-zinc-500 dark:text-zinc-400 truncate">
+                                {{ $row->project->client->last_names ?? '' }}{{ $row->project->project_name ? ' | ' . $row->project->project_name : '' }}
+                            </div>
+                            @if ($row->undated_tasks_count > 0)
+                                <button
+                                    wire:click="openUndatedTasksModal({{ $row->id }})"
+                                    class="mt-1 text-xs text-orange-600 dark:text-orange-400 hover:underline"
+                                >
+                                    {{ $row->undated_tasks_count }} pending
+                                </button>
+                            @endif
+                        </td>
+
+                        {{-- Day cells --}}
+                        @foreach ($row->dayCells as $cell)
+                            <td
+                                wire:key="table-cell-{{ $row->id }}-{{ $cell->dayFormat }}"
+                                class="px-2 py-1.5 border-b border-r border-zinc-200 dark:border-zinc-700 align-top
+                                    {{ $cell->isWeekend ? 'bg-zinc-50 dark:bg-zinc-800' : '' }}
+                                    {{ $cell->isToday ? 'bg-indigo-50/50 dark:bg-indigo-900/10' : '' }}"
+                            >
+                                @if ($cell->cards->count() > 0)
+                                    <div class="space-y-1">
+                                        @foreach ($cell->cards as $task)
+                                            <flux:kanban.card
+                                                as="button"
+                                                class="min-w-0 w-full {{ $task->trashed() ? 'opacity-50' : '' }}"
+                                                wire:key="table-task-{{ $task->id }}-{{ $cell->dayFormat }}"
+                                                wire:click="editTask({{ $task->id }}, '{{ $cell->dayFormat }}', {{ $row->id }})"
+                                                wire:loading.attr="disabled"
+                                                wire:loading.class="opacity-60 cursor-wait"
+                                            >
+                                                @include('components.upcoming-tasks-list-card-content', [
+                                                    'task' => $task,
+                                                    'date' => $cell->dayFormat,
+                                                    'isWeekend' => $cell->isWeekend,
+                                                ])
+                                            </flux:kanban.card>
+                                        @endforeach
+                                    </div>
+                                @endif
+                            </td>
+                        @endforeach
+                    </tr>
+                @empty
+                    <tr>
+                        <td colspan="{{ $dayHeaders->count() + 1 }}" class="px-4 py-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
+                            No projects found
+                        </td>
+                    </tr>
+                @endforelse
+            </tbody>
+        </table>
+    </div>
+    @endif
 
     {{-- Task Create Modal --}}
     <livewire:tasks.task-create :projects="$projects" :employees="$employees" :vendors="$vendors"/>

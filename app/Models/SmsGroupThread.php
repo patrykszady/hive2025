@@ -216,6 +216,7 @@ class SmsGroupThread extends Model
     {
         return static::whereIn('from_number', config('services.telnyx.numbers'))
             ->whereJsonContains('participants', $participantPhone)
+            ->whereJsonLength('participants', 1)
             ->orderByDesc('last_activity_at')
             ->first();
     }

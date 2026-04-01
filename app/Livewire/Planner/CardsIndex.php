@@ -19,6 +19,9 @@ class CardsIndex extends Component
     public $employees = [];
     public $projects = [];
 
+    // View mode: 'cards' or 'table'
+    public string $viewMode = 'table';
+
     // Filter properties
     public array $filterProjectIds = [];
     public ?int $filterVendorId = null;
