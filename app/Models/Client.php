@@ -299,19 +299,11 @@ class Client extends Model
      *
      * 1 item:  "Carrie"
      * 2 items: "Carrie & Debra"
-     * 3 items: "Carrie, Debra, & Alan"
+     * 3 items: "Carrie, Debra & Alan"
      */
     private function oxfordJoin(array $items): string
     {
-        $count = count($items);
-
-        if ($count <= 2) {
-            return implode(' & ', $items);
-        }
-
-        $last = array_pop($items);
-
-        return implode(', ', $items) . ', & ' . $last;
+        return collect($items)->join(', ', ' & ');
     }
 
     /**

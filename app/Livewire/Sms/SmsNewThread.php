@@ -74,7 +74,7 @@ class SmsNewThread extends Component
             ->pluck('first_name')
             ->filter()
             ->unique()
-            ->implode(' & ');
+            ->join(', ', ' & ');
 
         if ($firstNames === '') {
             $firstNames = $client->name;

@@ -216,7 +216,7 @@ class SendScheduleModal extends Component
             ->all() ?? [];
 
         $greeting = count($names) > 0
-            ? 'Hi ' . implode(' & ', $names) . ','
+            ? 'Hi ' . collect($names)->join(', ', ' & ') . ','
             : 'Hi,';
 
         $taskCount = $allTasks->count();

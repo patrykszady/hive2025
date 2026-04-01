@@ -208,7 +208,7 @@ class GroupSmsService
             }
         }
 
-        return $names->filter()->unique()->implode(' & ');
+        return $names->filter()->unique()->join(', ', ' & ');
     }
 
     /**

@@ -1,5 +1,15 @@
 <x-form-modal name="estimate_duplicate_modal" :title="$this->view_text['card_title']">
     <form id="estimate_duplicate_modal_form" wire:submit="{{ $this->view_text['form_submit'] }}" class="space-y-4">
+        <flux:radio.group wire:model="cost_mode" label="Cost Mode" variant="segmented">
+            <flux:radio value="exact" label="Exact Costs" description="Keep original line item costs" />
+            <flux:radio value="current" label="Current Costs" description="Use current global line item costs" />
+        </flux:radio.group>
+
+        <flux:radio.group wire:model="include_allowances" label="Allowances" variant="segmented">
+            <flux:radio :value="true" label="Include" />
+            <flux:radio :value="false" label="Exclude" />
+        </flux:radio.group>
+
         <flux:select label="Client" wire:model.live="client_id" variant="listbox" searchable placeholder="Choose client...">
             @foreach($this->clients as $client)
                 <flux:select.option value="{{$client->id}}" wire:key="client-{{$client->id}}">{{ $client->name ?: $client->business_name ?: $client->address ?: ('Client #' . $client->id) }}</flux:select.option>
@@ -21,6 +31,7 @@
             x-transition
             >
             <flux:select label="Target Estimate" wire:model.live="estimate_id" variant="listbox" searchable placeholder="Choose estimate...">
+                <flux:select.option value="new" wire:key="new">+ New Estimate</flux:select.option>
                 @foreach($this->project_estimates as $estimate)
                     <flux:select.option value="{{$estimate->id}}" wire:key="{{$estimate->id}}">
                         Estimate #{{$estimate->id}}

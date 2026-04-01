@@ -48,7 +48,7 @@ class SendOutboundSmsBrowserNotifications implements ShouldQueue
             return;
         }
 
-        $senderName = trim($sender->first_name . ' ' . $sender->last_name) ?: 'A team member';
+        $senderName = trim($sender->first_name) ?: 'A team member';
         $threadLabel = $this->resolveThreadLabel($message);
         $body = trim($message->display_text ?: 'Sent a message');
 

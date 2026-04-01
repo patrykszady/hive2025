@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Sms;
 
+use App\Models\BlockedCaller;
 use App\Models\CallLog;
 use App\Models\SmsGroupThread;
 use App\Models\User;
@@ -76,6 +77,15 @@ class CallList extends Component
             ->where('cell_phone', '!=', '')
             ->orderBy('first_name')
             ->get();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    #[Computed]
+    public function blockedNumbers(): array
+    {
+        return BlockedCaller::pluck('phone_number')->all();
     }
 
     /**
@@ -387,8 +397,79 @@ class CallList extends Component
     }
 
     /**
+     * Mark a call's phone number as spam and add it to the blocked callers database.
+     */
+    public function markAsSpam(int $callId): void
+    {
+        $call = CallLog::find($callId);
+
+        if (! $call) {
+            return;
+        }
+
+        $phone = $call->direction === 'outgoing' ? $call->to_number : $call->from_number;
+
+        if (! $phone) {
+            Flux::toast(variant: 'danger', heading: 'Error', text: 'No phone number found for this call.', duration: 3000, position: 'top right');
+            return;
+        }
+
+        BlockedCaller::firstOrCreate(
+            ['phone_number' => $phone],
+            [
+                'reason' => 'Manually marked as spam',
+                'blocked_by_user_id' => auth()->id(),
+                'auto_blocked' => false,
+            ]
+        );
+
+        // Update all call logs from this number to blocked status
+        CallLog::where('from_number', $phone)
+            ->where('status', '!=', CallLog::STATUS_BLOCKED)
+            ->update(['status' => CallLog::STATUS_BLOCKED]);
+
+        Flux::toast(variant: 'success', heading: 'Marked as Spam', text: $this->formatPhone($phone) . ' has been blocked.', duration: 5000, position: 'top right');
+    }
+
+    /**
      * Resolve a phone number to a contact name (User → Vendor → formatted number).
      */
+    /**
+     * Check if a phone number belongs to a known User or Vendor.
+     */
+    public function isKnownContact(string $e164): bool
+    {
+        static $cache = [];
+
+        if (isset($cache[$e164])) {
+            return $cache[$e164];
+        }
+
+        $digits = preg_replace('/[^0-9]/', '', $e164);
+        $normalized = $digits;
+        if (strlen($normalized) === 11 && str_starts_with($normalized, '1')) {
+            $normalized = substr($normalized, 1);
+        }
+        $last10 = strlen($digits) > 10 ? substr($digits, -10) : $digits;
+
+        $userExists = User::where('cell_phone', $normalized)
+            ->orWhere('cell_phone', '1' . $normalized)
+            ->orWhere('cell_phone', $digits)
+            ->orWhere('cell_phone', $last10)
+            ->exists();
+
+        if ($userExists) {
+            return $cache[$e164] = true;
+        }
+
+        $vendorExists = Vendor::where('business_phone', $normalized)
+            ->orWhere('business_phone', $last10)
+            ->orWhere('business_phone', $digits)
+            ->exists();
+
+        return $cache[$e164] = $vendorExists;
+    }
+
     public function resolvePhoneDisplay(string $e164): string
     {
         static $cache = [];

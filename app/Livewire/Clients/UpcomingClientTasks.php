@@ -205,14 +205,7 @@ class UpcomingClientTasks extends Component
         $nextDateStr = $futureDates->sort()->first();
         $nextDate = Carbon::parse($nextDateStr, (string) config('app.timezone'))->startOfDay();
 
-        $daysUntil = 0;
-        $current = $windowEnd->copy()->addDay()->startOfDay();
-        while ($current->lte($nextDate)) {
-            if (! $current->isWeekend()) {
-                $daysUntil++;
-            }
-            $current->addDay();
-        }
+        $daysUntil = (int) $windowEnd->copy()->addDay()->startOfDay()->diffInDays($nextDate);
 
         if ($daysUntil <= 0) {
             return null;

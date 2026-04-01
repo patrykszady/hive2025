@@ -287,7 +287,7 @@ class SendRealtimeTaskNotification implements ShouldQueue, ShouldBeUnique
         // Build greeting from client user first names
         $names = $thread->client?->users?->pluck('first_name')->filter()->values()->all() ?? [];
         $greeting = count($names) > 0
-            ? 'Hi ' . implode(' & ', $names) . ','
+            ? 'Hi ' . collect($names)->join(', ', ' & ') . ','
             : 'Hi,';
 
         $intro = "TASKS UPDATED TODAY!";

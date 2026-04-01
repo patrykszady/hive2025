@@ -266,15 +266,7 @@ class ScheduleIndex extends Component
         $nextDateStr = $futureDates->sort()->first();
         $nextDate = Carbon::parse($nextDateStr, $this->getProjectTimezone())->startOfDay();
         
-        // Calculate weekdays from the day after the displayed range to the next task date (inclusive)
-        $daysUntil = 0;
-        $current = $displayEnd->copy()->addDay()->startOfDay(); // Start from Monday after Sunday
-        while ($current->lte($nextDate)) {
-            if (! $current->isWeekend()) {
-                $daysUntil++;
-            }
-            $current->addDay();
-        }
+        $daysUntil = (int) $displayEnd->copy()->addDay()->startOfDay()->diffInDays($nextDate);
 
         if ($daysUntil <= 0) {
             return null;
