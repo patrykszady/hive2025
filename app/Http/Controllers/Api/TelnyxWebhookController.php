@@ -1298,18 +1298,29 @@ class TelnyxWebhookController extends Controller
                     $this->triggerVoicemail($callControlId, $callLogId);
                 }
             } elseif ($waitingAdmin) {
-                // Admin answered during TTS and is on hold — bridge now
-                Log::channel('telnyx')->info('TTS completed — bridging with admin who answered during TTS', [
-                    'call_control_id' => $callControlId,
-                    'call_log_id' => $callLogId,
-                    'admin_call_control_id' => $waitingAdmin['admin_call_control_id'],
-                ]);
-                $this->bridgeAdminWithCaller(
-                    $waitingAdmin['admin_call_control_id'],
-                    $callLogId,
-                    $waitingAdmin['incoming_call_control_id'],
-                    $waitingAdmin['admin_user_id']
-                );
+                // Check if caller already disconnected (race with call.hangup)
+                $freshCallLog = $callLog ? $callLog->fresh() : null;
+                if ($freshCallLog && in_array($freshCallLog->status, [CallLog::STATUS_COMPLETED, CallLog::STATUS_MISSED])) {
+                    Log::channel('telnyx')->info('TTS completed but caller already disconnected — hanging up waiting admin', [
+                        'call_control_id' => $callControlId,
+                        'call_log_id' => $callLogId,
+                        'admin_call_control_id' => $waitingAdmin['admin_call_control_id'],
+                    ]);
+                    $this->sendCallCommand($waitingAdmin['admin_call_control_id'], 'hangup');
+                } else {
+                    // Admin answered during TTS and is on hold — bridge now
+                    Log::channel('telnyx')->info('TTS completed — bridging with admin who answered during TTS', [
+                        'call_control_id' => $callControlId,
+                        'call_log_id' => $callLogId,
+                        'admin_call_control_id' => $waitingAdmin['admin_call_control_id'],
+                    ]);
+                    $this->bridgeAdminWithCaller(
+                        $waitingAdmin['admin_call_control_id'],
+                        $callLogId,
+                        $waitingAdmin['incoming_call_control_id'],
+                        $waitingAdmin['admin_user_id']
+                    );
+                }
             } elseif ($adminAlreadyJoined) {
                 // Admin answered and bridged during TTS — don't play ringback
                 Log::channel('telnyx')->info('TTS completed but admin already bridged — skipping ringback', [
