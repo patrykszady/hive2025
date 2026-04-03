@@ -496,6 +496,10 @@ class TelnyxWebhookController extends Controller
         ]);
 
         if ($userCallControlId) {
+            // Set cache flag BEFORE bridging to prevent the playback re-loop
+            // (playback.ended can fire before call.bridged webhook arrives)
+            Cache::put("telnyx_bridged:{$userCallControlId}", true, now()->addMinutes(10));
+
             $this->bridgeCalls($callControlId, $userCallControlId);
 
             $callLog = $callLogId ? CallLog::find($callLogId) : null;
