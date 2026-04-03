@@ -10,68 +10,81 @@ use Livewire\Component;
 
 class ProjectVendors extends Component
 {
-    public $vendor_id;
-
     public Project $project;
 
-    public $vendors = [];
+    public ?int $vendor_id = null;
 
-    public $showModal = false;
+    public bool $showModal = false;
 
-    protected $listeners = ['addVendors'];
+    protected $listeners = ['refreshComponent' => '$refresh'];
 
-    public function rules()
+    public function rules(): array
     {
         return [
-            'vendor_id' => 'required',
+            'vendor_id' => 'required|exists:vendors,id',
         ];
     }
 
-    public function mount(Project $project)
+    public function messages(): array
     {
-        $this->vendors = auth()->user()->vendor->vendors()->whereJsonContains('registration', ['registered' => true])->whereNotIn('vendors.id', $project->vendors->pluck('id')->toArray())->get();
+        return [
+            'vendor_id.required' => 'Please select a vendor.',
+        ];
     }
 
-    public function addVendors()
+    public function openInviteModal(): void
     {
+        $this->reset('vendor_id');
+        $this->resetValidation();
         $this->showModal = true;
     }
 
-    public function save()
+    public function save(): void
     {
+        $this->validate();
+
         $vendor = Vendor::findOrFail($this->vendor_id);
-        $client = Client::withoutGlobalScopes()->where('vendor_id', auth()->user()->vendor->id)->first();
 
-        if (! $vendor->projects->contains($this->project->id)) {
-            $vendor->projects()->attach($this->project->id, ['client_id' => $client->id]);
+        if ($vendor->projects->contains($this->project->id)) {
+            $this->dispatch('notify', type: 'warning', content: 'Vendor is already part of this project.');
+            $this->showModal = false;
 
-            $statusCode = ProjectStatus::getCodeForLabel('Invited') ?? 1;
-            ProjectStatus::create([
-                'project_id' => $this->project->id,
-                'belongs_to_vendor_id' => $vendor->id,
-                'status_code' => $statusCode,
-                'start_date' => today()->format('Y-m-d'),
-            ]);
-
-            $this->dispatch('notify',
-                type: 'success',
-                content: 'Vendor invited to Project',
-                // route: 'clients/' . $client->id
-            );
-        } else {
-            $this->dispatch('notify',
-                type: 'success',
-                content: 'Vendor already part of Project',
-                // route: 'clients/' . $client->id
-            );
+            return;
         }
 
+        $client = Client::withoutGlobalScopes()
+            ->where('vendor_id', auth()->user()->vendor->id)
+            ->first();
+
+        $vendor->projects()->attach($this->project->id, ['client_id' => $client?->id]);
+
+        $statusCode = ProjectStatus::getCodeForLabel('Invited') ?? 1;
+        ProjectStatus::create([
+            'project_id' => $this->project->id,
+            'belongs_to_vendor_id' => $vendor->id,
+            'status_code' => $statusCode,
+            'start_date' => today()->format('Y-m-d'),
+        ]);
+
+        $this->dispatch('notify', type: 'success', content: $vendor->name . ' invited to project.');
         $this->showModal = false;
+        $this->dispatch('refreshComponent');
+    }
+
+    public function getAvailableVendorsProperty()
+    {
+        $existingVendorIds = $this->project->vendors->pluck('id')->toArray();
+
+        return auth()->user()->vendor
+            ->vendors()
+            ->whereJsonContains('registration', ['registered' => true])
+            ->whereNotIn('vendors.id', $existingVendorIds)
+            ->orderBy('business_name')
+            ->get();
     }
 
     public function render()
     {
-        // dd('here in livewire.projects.project-vendors');
         return view('livewire.projects.project-vendors');
     }
 }

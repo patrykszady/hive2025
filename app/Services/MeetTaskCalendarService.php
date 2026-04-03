@@ -86,6 +86,12 @@ class MeetTaskCalendarService
                 'start_timezone' => $timezone,
                 'end_timezone' => $timezone,
             ],
+            'reminders' => [
+                'use_default' => false,
+                'overrides' => [
+                    ['reminder_minutes' => 60, 'reminder_method' => 'popup'],
+                ],
+            ],
         ];
 
         $response = $this->nylasService->createEvent($grantId, $payload);

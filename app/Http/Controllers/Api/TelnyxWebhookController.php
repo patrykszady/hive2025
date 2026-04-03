@@ -2489,6 +2489,22 @@ class TelnyxWebhookController extends Controller
         // Attempt to match to an existing client
         $clientId = $this->resolveClientIdByPhone($normalizedSender);
 
+        // When the client has multiple users, set an explicit thread name
+        // so this 1-on-1 thread is visually distinct from group threads.
+        $threadName = null;
+        if ($clientId) {
+            $client = \App\Models\Client::with('users')->find($clientId);
+            if ($client && $client->users->count() > 1) {
+                $senderDigits = preg_replace('/\D/', '', $normalizedSender);
+                $senderUser = $client->users->first(function ($user) use ($senderDigits) {
+                    return preg_replace('/\D/', '', $user->cell_phone ?? '') === $senderDigits;
+                });
+                if ($senderUser) {
+                    $threadName = trim($senderUser->first_name . ' ' . $senderUser->last_name);
+                }
+            }
+        }
+
         // TODO: Multi-vendor support — resolve vendor by $ourNumber
         $vendorId = \App\Models\Vendor::find(1)?->id;
 
@@ -2498,6 +2514,7 @@ class TelnyxWebhookController extends Controller
         $thread = SmsGroupThread::create([
             'from_number' => $primaryFrom,
             'participants' => [$normalizedSender],
+            'name' => $threadName,
             'client_id' => $clientId,
             'vendor_id' => $vendorId,
             'last_activity_at' => now(),

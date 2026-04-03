@@ -1,72 +1,54 @@
-<x-modal wire:model="showModal">
-    <x-modal.panel>
-        <form wire:submit="save">
-            {{-- HEADER --}}
-            <x-cards.heading>
-                <x-slot name="left">
-                    <h1>Invite Contractors to Join Project</h1>
-                </x-slot>
-            </x-cards.heading>
-
-            {{-- ROWS --}}
-            <x-cards.body :class="'space-y-4 my-4'">
-                {{-- DURATION --}}
-                <x-forms.row
-                    wire:model.live="vendor_id"
-                    errorName="vendor_id"
-                    name="vendor_id"
-                    text="Vendor"
-                    type="dropdown"
-                    >
-                    <option value="">Choose Vendor</option>
-                    @foreach($vendors as $vendor)
-                        <option value="{{$vendor->id}}">{{$vendor->name}}</option>
-                    @endforeach
-                </x-forms.row>
-
-                {{-- PROJECT --}}
-                {{-- <x-forms.row
-                    wire:model.live="form.project_id"
-                    errorName="form.project_id"
-                    name="project_id"
-                    text="Project"
-                    type="dropdown"
-                    >
-                    <option value="" readonly>Select Project</option>
-                    @foreach ($projects as $project)
-                        <option value="{{$project->id}}">{{$project->name}}</option>
-                    @endforeach
-                </x-forms.row> --}}
-            </x-cards.body>
-
-            <x-cards.footer>
-                <button
-                    type="button"
-                    x-on:click="open = false"
-                    class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-xs hover:bg-gray-50 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                    >
-                    Cancel
-                </button>
-                <div
-                    {{-- x-data="{ estimate_line_item: @entangle('estimate_line_item') }"
-                    x-show="estimate_line_item" --}}
-                    >
-                    {{-- <button
-                        wire:click="removeTask"
-                        type="button"
-                        x-on:click="open = false"
-                        class="px-4 py-2 text-sm font-medium text-red-700 bg-white border border-red-300 rounded-md shadow-xs hover:bg-gray-50 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
-                        >
-                        Remove
-                    </button> --}}
-                </div>
-                <button
-                    type="submit"
-                    class="inline-flex items-center px-4 py-2 ml-3 text-sm text-white bg-indigo-600 border border-transparent rounded-md shadow-xs font-small disabled:opacity-50 hover:bg-indigo-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                    >
+<div>
+    <x-details.card
+        title="Subs / Vendors"
+        :expanded="true"
+        :details_text="false"
+        :separator="false"
+    >
+        <x-slot:header_buttons>
+            @can('update', $project)
+                <flux:button size="sm" icon="plus" wire:click="openInviteModal">
                     Invite
-                </button>
-            </x-cards.footer>
+                </flux:button>
+            @endcan
+        </x-slot:header_buttons>
+
+        <x-slot:details>
+            @forelse ($project->vendors as $vendor)
+                @php
+                    $vendorStatus = $project->latestVendorStatus($vendor->id);
+                @endphp
+                <x-details.row
+                    :title="$vendor->name"
+                    :content="$vendorStatus?->title ?? 'Invited'"
+                    :noCloak="true"
+                />
+            @empty
+                <flux:text class="py-2 text-zinc-400">No vendors invited yet.</flux:text>
+            @endforelse
+        </x-slot:details>
+    </x-details.card>
+
+    {{-- Invite Modal --}}
+    <flux:modal wire:model.self="showModal" class="min-w-[22rem]">
+        <form wire:submit="save">
+            <div class="space-y-6">
+                <flux:heading size="lg">Invite Vendor to Project</flux:heading>
+
+                <flux:select wire:model="vendor_id" placeholder="Choose vendor..." label="Vendor">
+                    @foreach ($this->availableVendors as $vendor)
+                        <flux:select.option :value="$vendor->id">{{ $vendor->name }}</flux:select.option>
+                    @endforeach
+                </flux:select>
+                <flux:error name="vendor_id" />
+
+                <div class="flex justify-end gap-2">
+                    <flux:modal.close>
+                        <flux:button variant="ghost">Cancel</flux:button>
+                    </flux:modal.close>
+                    <flux:button type="submit" variant="primary">Invite</flux:button>
+                </div>
+            </div>
         </form>
-    </x-modal.panel>
-</x-modal>
+    </flux:modal>
+</div>

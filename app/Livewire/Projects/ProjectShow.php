@@ -24,7 +24,7 @@ class ProjectShow extends Component
     public function mount()
     {
         // Only load critical relationships for initial render
-        $this->project->load(['latestStatus']);
+        $this->project->load(['latestStatus', 'vendors']);
         
         $this->estimates = [];
     }

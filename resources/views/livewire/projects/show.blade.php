@@ -7,7 +7,7 @@
                 :title="$project->short_address . ' | ' . $project->project_name"
                 :subheading="$project->client->name"
                 :canEdit="auth()->user()->can('update', $project)"
-                :expanded="false"
+                :expanded="true"
                 :details_text="false"
                 :separator="false"
                 >
@@ -83,8 +83,14 @@
             </x-details.card>
             </div>
 
-            @if($this->project->latestStatus?->title !== 'VIEW ONLY')
+            @can('update', $project)
                 <div class="col-span-4 order-2">
+                    <livewire:projects.project-vendors :project="$project" />
+                </div>
+            @endcan
+
+            @if($this->project->latestStatus?->title !== 'VIEW ONLY')
+                <div class="col-span-4 order-3">
                     <livewire:projects.upcoming-tasks :project="$project" lazy />
                 </div>
             @endif

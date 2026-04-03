@@ -146,12 +146,15 @@
                     $seenE164 = [];
 
                     // Collect users from the thread's primary client
+                    // Only show users whose phone is a thread participant
+                    $threadParticipants = collect($this->thread->participants ?? []);
                     if ($this->thread->client && $this->thread->client->users->isNotEmpty()) {
                         foreach ($this->thread->client->users as $user) {
                             $raw = $user->getRawOriginal('cell_phone');
                             if (! $raw) continue;
                             $e164 = $user->routeNotificationForTelnyx();
                             if (\App\Services\GroupSmsService::isOurNumber($e164)) continue;
+                            if (! $threadParticipants->contains($e164)) continue;
                             if (isset($seenE164[$e164])) continue;
                             $seenE164[$e164] = true;
                             $digits = preg_replace('/[^0-9]/', '', $raw);
