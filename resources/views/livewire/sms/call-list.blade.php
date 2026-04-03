@@ -115,7 +115,7 @@
                         @endif
                     </div>
 
-                    @if ($call->duration_seconds && abs($call->duration_seconds) > 0)
+                    @if ($call->duration_seconds && abs($call->duration_seconds) > 0 && !in_array($effectiveStatus, ['missed', 'failed']))
                         @php $dur = abs($call->duration_seconds); @endphp
                         <span class="text-sm lg:text-xs text-zinc-400 whitespace-nowrap italic">
                             @if ($dur < 60)
