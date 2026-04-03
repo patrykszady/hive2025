@@ -500,7 +500,21 @@ class TelnyxWebhookController extends Controller
             // (playback.ended can fire before call.bridged webhook arrives)
             Cache::put("telnyx_bridged:{$userCallControlId}", true, now()->addMinutes(10));
 
-            $this->bridgeCalls($callControlId, $userCallControlId);
+            $bridgeSuccess = $this->bridgeCalls($callControlId, $userCallControlId);
+
+            if (! $bridgeSuccess) {
+                // User likely hung up — hang up target and clean up
+                Log::channel('telnyx')->warning('Click-to-call bridge failed — cleaning up', [
+                    'target_call_control_id' => $callControlId,
+                    'user_call_control_id' => $userCallControlId,
+                    'call_log_id' => $callLogId,
+                ]);
+                $this->sendCallCommand($callControlId, 'hangup');
+                Cache::forget("telnyx_bridged:{$userCallControlId}");
+                $callLog = $callLogId ? CallLog::find($callLogId) : null;
+                $callLog?->update(['status' => CallLog::STATUS_FAILED]);
+                return response()->json(['status' => 'ok']);
+            }
 
             $callLog = $callLogId ? CallLog::find($callLogId) : null;
             $callLog?->update(['status' => CallLog::STATUS_TRANSFERRED]);
@@ -721,11 +735,12 @@ class TelnyxWebhookController extends Controller
             return response()->json(['status' => 'ok']);
         }
 
-        // If another admin already got bridged, hang up this leg
-        if ($callLog->status === CallLog::STATUS_TRANSFERRED) {
-            Log::channel('telnyx')->info('Admin answered but call already bridged to another admin — hanging up', [
+        // If another admin already got bridged or the caller disconnected, hang up this leg
+        if (in_array($callLog->status, [CallLog::STATUS_TRANSFERRED, CallLog::STATUS_COMPLETED, CallLog::STATUS_MISSED])) {
+            Log::channel('telnyx')->info('Admin answered but call already handled — hanging up', [
                 'call_control_id' => $callControlId,
                 'call_log_id' => $callLogId,
+                'call_status' => $callLog->status,
             ]);
             $this->sendCallCommand($callControlId, 'hangup');
             return response()->json(['status' => 'ok']);
@@ -791,6 +806,23 @@ class TelnyxWebhookController extends Controller
             'admin_name' => $adminUser?->full_name,
         ]);
 
+        // Stop any active TTS/ringback on the caller's leg before bridging
+        $this->sendCallCommand($incomingCallControlId, 'playback_stop');
+
+        // Bridge admin with the incoming caller
+        $bridgeSuccess = $this->bridgeCalls($adminCallControlId, $incomingCallControlId);
+
+        if (! $bridgeSuccess) {
+            // Bridge failed (caller likely hung up) — clean up the admin leg
+            Log::channel('telnyx')->warning('Bridge failed — hanging up admin leg', [
+                'admin_call_control_id' => $adminCallControlId,
+                'incoming_call_control_id' => $incomingCallControlId,
+                'call_log_id' => $callLogId,
+            ]);
+            $this->sendCallCommand($adminCallControlId, 'hangup');
+            return;
+        }
+
         // Track that at least one admin answered
         $metadata = $callLog->metadata ?? [];
         $joinedAdmins = $metadata['joined_admin_ids'] ?? [];
@@ -802,12 +834,6 @@ class TelnyxWebhookController extends Controller
             'forwarded_to' => $adminUser?->cell_phone,
             'metadata' => $metadata,
         ]);
-
-        // Stop any active TTS/ringback on the caller's leg before bridging
-        $this->sendCallCommand($incomingCallControlId, 'playback_stop');
-
-        // Bridge admin with the incoming caller
-        $this->bridgeCalls($adminCallControlId, $incomingCallControlId);
 
         // Notify other admins that the call was answered
         if ($adminUserId) {
@@ -1257,11 +1283,20 @@ class TelnyxWebhookController extends Controller
             $adminAlreadyJoined = ! empty($metadata['joined_admin_ids'] ?? []);
 
             if ($allAdminsFailed) {
-                Log::channel('telnyx')->info('TTS completed but all admins already failed — triggering voicemail', [
-                    'call_control_id' => $callControlId,
-                    'call_log_id' => $callLogId,
-                ]);
-                $this->triggerVoicemail($callControlId, $callLogId);
+                // Check if caller already disconnected (race with call.hangup)
+                $freshCallLog = $callLog ? $callLog->fresh() : null;
+                if ($freshCallLog && in_array($freshCallLog->status, [CallLog::STATUS_COMPLETED, CallLog::STATUS_MISSED])) {
+                    Log::channel('telnyx')->info('TTS completed but caller already disconnected — skipping voicemail', [
+                        'call_control_id' => $callControlId,
+                        'call_log_id' => $callLogId,
+                    ]);
+                } else {
+                    Log::channel('telnyx')->info('TTS completed but all admins already failed — triggering voicemail', [
+                        'call_control_id' => $callControlId,
+                        'call_log_id' => $callLogId,
+                    ]);
+                    $this->triggerVoicemail($callControlId, $callLogId);
+                }
             } elseif ($waitingAdmin) {
                 // Admin answered during TTS and is on hold — bridge now
                 Log::channel('telnyx')->info('TTS completed — bridging with admin who answered during TTS', [
@@ -1372,16 +1407,26 @@ class TelnyxWebhookController extends Controller
             ]);
 
             if ($userCallControlId) {
-                $this->bridgeCalls($callControlId, $userCallControlId);
+                $bridgeSuccess = $this->bridgeCalls($callControlId, $userCallControlId);
+
+                if ($bridgeSuccess) {
+                    $callLog = $callLogId ? CallLog::find($callLogId) : null;
+                    $callLog?->update(['status' => CallLog::STATUS_TRANSFERRED]);
+                } else {
+                    Log::channel('telnyx')->warning('Click-to-call intro bridge failed — cleaning up', [
+                        'target_call_control_id' => $callControlId,
+                        'user_call_control_id' => $userCallControlId,
+                        'call_log_id' => $callLogId,
+                    ]);
+                    $this->sendCallCommand($callControlId, 'hangup');
+                    $this->sendCallCommand($userCallControlId, 'hangup');
+                }
             } else {
                 Log::channel('telnyx')->error('No user call control ID for bridge', [
                     'call_log_id' => $callLogId,
                 ]);
                 $this->sendCallCommand($callControlId, 'hangup');
             }
-
-            $callLog = $callLogId ? CallLog::find($callLogId) : null;
-            $callLog?->update(['status' => CallLog::STATUS_TRANSFERRED]);
         } elseif ($action === 'conference_invite_intro_done') {
             // Conference invite is currently disabled (using bridge mode, not conferences)
             Log::channel('telnyx')->info('Conference invite disabled — hanging up invited participant', [
@@ -1692,6 +1737,18 @@ class TelnyxWebhookController extends Controller
      */
     protected function triggerVoicemail(string $callControlId, ?int $callLogId): void
     {
+        // Check if caller already disconnected before starting voicemail flow
+        if ($callLogId) {
+            $freshLog = CallLog::find($callLogId);
+            if ($freshLog && in_array($freshLog->status, [CallLog::STATUS_COMPLETED, CallLog::STATUS_MISSED])) {
+                Log::channel('telnyx')->info('Caller already disconnected — skipping voicemail', [
+                    'call_control_id' => $callControlId,
+                    'call_log_id' => $callLogId,
+                ]);
+                return;
+            }
+        }
+
         // Stop the ringback re-loop immediately so gather_using_speak isn't overridden
         Cache::put("telnyx_bridged:{$callControlId}", true, now()->addMinutes(10));
 
@@ -2184,14 +2241,16 @@ class TelnyxWebhookController extends Controller
     /**
      * Bridge two call legs together (1-on-1 connection).
      * This replaces conference-based routing with a simple direct bridge.
+     *
+     * @return bool Whether the bridge was successful.
      */
-    protected function bridgeCalls(string $callControlIdA, string $callControlIdB): void
+    protected function bridgeCalls(string $callControlIdA, string $callControlIdB): bool
     {
         $apiKey = config('services.telnyx.api_key');
 
         if (! $apiKey) {
             Log::channel('telnyx')->error('Telnyx API key not configured for bridge');
-            return;
+            return false;
         }
 
         try {
@@ -2205,6 +2264,7 @@ class TelnyxWebhookController extends Controller
                     'call_control_id_a' => $callControlIdA,
                     'call_control_id_b' => $callControlIdB,
                 ]);
+                return true;
             } else {
                 Log::channel('telnyx')->error('Bridge failed', [
                     'call_control_id_a' => $callControlIdA,
@@ -2212,6 +2272,7 @@ class TelnyxWebhookController extends Controller
                     'status' => $response->status(),
                     'error' => $response->json(),
                 ]);
+                return false;
             }
         } catch (\Exception $e) {
             Log::channel('telnyx')->error('Bridge exception', [
@@ -2219,6 +2280,7 @@ class TelnyxWebhookController extends Controller
                 'call_control_id_b' => $callControlIdB,
                 'error' => $e->getMessage(),
             ]);
+            return false;
         }
     }
 

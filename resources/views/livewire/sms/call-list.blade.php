@@ -46,7 +46,7 @@
     <div
         x-show="pullY > 0"
         x-bind:style="'height: ' + pullY + 'px'"
-        class="flex items-end justify-center overflow-hidden transition-none"
+        class="flex items-end justify-center overflow-hidden transition-none sticky top-0 z-20"
     >
         <div class="pb-2">
             <svg x-show="!refreshing" x-bind:style="'transform: rotate(' + (pullY * 3) + 'deg)'" class="size-5 text-zinc-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
