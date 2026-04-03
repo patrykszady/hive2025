@@ -77,6 +77,8 @@
                             GS Construciton
                         @elseif ($thread->name)
                             {{ $thread->name }}
+                        @elseif ($thread->client && count($thread->participants ?? []) < $thread->client->users->count())
+                            {{ collect($thread->participants)->map(fn ($p) => $this->resolvePhoneDisplay($p))->implode(', ') }}
                         @elseif ($thread->client)
                             {{ $thread->client->name }}
                         @elseif ($thread->project)

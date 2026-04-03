@@ -1603,7 +1603,10 @@ class TelnyxWebhookController extends Controller
         $apiKey = config('services.telnyx.api_key');
         $connectionId = config('services.telnyx.connection_id');
         $telnyxFrom = config('services.telnyx.from');
-        $timeout = (int) config('services.telnyx.voice_timeout', 30);
+        // Use a shorter timeout for admin ring legs so they hang up before
+        // the admin's carrier voicemail picks up (~25s). This ensures the
+        // app's Voicemail Menu triggers instead of personal voicemail.
+        $timeout = 20;
         $adminCallControlIds = [];
 
         foreach ($adminUsers as $adminUser) {

@@ -63,6 +63,10 @@
             $headerTitle = 'Group Message';
             if ($this->thread->name) {
                 $headerTitle = $this->thread->name;
+            } elseif ($this->thread->client && count($this->thread->participants ?? []) < $this->thread->client->users->count()) {
+                $headerTitle = collect($this->thread->participants)
+                    ->map(fn ($p) => $this->resolvePhoneDisplay($p))
+                    ->implode(', ');
             } elseif ($this->thread->client) {
                 $headerTitle = $this->thread->client->name;
             } elseif ($this->thread->project) {
