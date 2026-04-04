@@ -87,6 +87,8 @@ class TelnyxWebhookController extends Controller
                 'call.gather.ended' => $this->handleCallGatherEnded($data),
                 'call.recording.saved' => $this->handleCallRecordingSaved($data),
                 'call.machine.detection.ended' => $this->handleAmdEnded($data),
+                'call.machine.premium.detection.ended' => $this->handleAmdEnded($data),
+                'call.machine.premium.greeting.ended' => $this->handleAmdGreetingEnded($data),
                 default => $this->handleUnknownVoiceEvent($eventType, $data),
             };
         } catch (\Throwable $e) {
@@ -423,10 +425,10 @@ class TelnyxWebhookController extends Controller
                     'from' => $from,
                     'from_display_name' => 'GS Construction',
                     'timeout_secs' => (int) config('services.telnyx.voice_timeout', 30),
-                    'answering_machine_detection' => 'detect',
+                    'answering_machine_detection' => 'premium',
                     'answering_machine_detection_config' => [
                         'after_greeting_silence_millis' => 800,
-                        'total_analysis_time_millis' => 3500,
+                        'total_analysis_time_millis' => 5000,
                     ],
                     'client_state' => base64_encode(json_encode([
                         'action' => 'click_to_call_target_ring',
@@ -1263,22 +1265,35 @@ class TelnyxWebhookController extends Controller
             $originalCaller = $clientState['original_caller'] ?? null;
             $callLog = $callLogId ? CallLog::find($callLogId) : null;
 
-            // Mark TTS as complete
+            // Mark TTS as complete via cache (race-safe — can't be clobbered by metadata writes)
+            if ($callLogId) {
+                Cache::put("telnyx_tts_complete:{$callLogId}", true, now()->addMinutes(10));
+            }
+
+            // Mark TTS as complete in metadata — use fresh() to avoid clobbering
+            // pending_admin written concurrently by handleAmdEnded
             if ($callLog) {
+                $callLog->refresh();
                 $metadata = $callLog->metadata ?? [];
                 $metadata['tts_complete'] = true;
                 $callLog->update(['metadata' => $metadata]);
             }
 
-            // Check if caller already disconnected during TTS
-            $freshCallLog = $callLog ? $callLog->fresh() : null;
-            if ($freshCallLog && in_array($freshCallLog->status, [CallLog::STATUS_COMPLETED, CallLog::STATUS_MISSED])) {
+            // Check if voicemail or bridge already in progress (AMD machine detected
+            // and triggerVoicemail ran, or another handler already bridged)
+            if (Cache::has("telnyx_bridged:{$callControlId}")) {
+                Log::channel('telnyx')->info('TTS completed but call already handled (voicemail/bridge in progress)', [
+                    'call_control_id' => $callControlId,
+                    'call_log_id' => $callLogId,
+                ]);
+            } elseif ($callLog && in_array($callLog->fresh()?->status, [CallLog::STATUS_COMPLETED, CallLog::STATUS_MISSED])) {
                 Log::channel('telnyx')->info('TTS completed but caller already disconnected', [
                     'call_control_id' => $callControlId,
                     'call_log_id' => $callLogId,
                 ]);
             } else {
                 // Check if an admin already answered during TTS and is waiting to be bridged
+                $freshCallLog = $callLog ? $callLog->fresh() : null;
                 $freshMetadata = $freshCallLog ? ($freshCallLog->metadata ?? []) : ($callLog->metadata ?? []);
                 $pendingAdminCcId = $freshMetadata['pending_admin_call_control_id'] ?? null;
                 $pendingAdminUserId = $freshMetadata['pending_admin_user_id'] ?? null;
@@ -1530,9 +1545,22 @@ class TelnyxWebhookController extends Controller
                     return response()->json(['status' => 'ok']);
                 }
 
+                // Atomic bridge lock — only one admin can proceed to bridge
+                $bridgeLockKey = "telnyx_bridge_lock:{$callLogId}";
+                if (! Cache::add($bridgeLockKey, 'amd_human_admin', 60)) {
+                    Log::channel('telnyx')->info('AMD human but bridge lock already held — hanging up this admin leg', [
+                        'call_control_id' => $callControlId,
+                        'call_log_id' => $callLogId,
+                    ]);
+                    $this->sendCallCommand($callControlId, 'hangup');
+                    return response()->json(['status' => 'ok']);
+                }
+
                 // Human confirmed — now hang up other ringing admin legs
                 $this->hangupOtherAdminLegs($callLogId, $callControlId);
 
+                // Re-read to get latest metadata (don't clobber tts_complete set by welcome_done)
+                $callLog->refresh();
                 $metadata = $callLog->metadata ?? [];
 
                 // Store pending admin state
@@ -1540,11 +1568,22 @@ class TelnyxWebhookController extends Controller
                 $metadata['pending_admin_user_id'] = $adminUserId;
                 $callLog->update(['metadata' => $metadata]);
 
-                // Re-read to get latest state (TTS may have completed concurrently)
-                $callLog->refresh();
-                $freshMetadata = $callLog->metadata ?? [];
+                // Check cache flag for TTS completion (race-safe — set by welcome_done via cache)
+                $ttsComplete = ! empty($metadata['tts_complete'])
+                    || Cache::has("telnyx_tts_complete:{$callLogId}");
 
-                if (! empty($freshMetadata['tts_complete'])) {
+                if ($ttsComplete) {
+                    // Check if welcome_done already bridged (prevents double-bridge)
+                    if (Cache::has("telnyx_bridged:{$incomingCallControlId}")) {
+                        Log::channel('telnyx')->info('AMD human + TTS done but already bridged — skipping', [
+                            'admin_call_control_id' => $callControlId,
+                            'incoming_call_control_id' => $incomingCallControlId,
+                            'call_log_id' => $callLogId,
+                        ]);
+
+                        return response()->json(['status' => 'ok']);
+                    }
+
                     // TTS already done — bridge immediately
                     Log::channel('telnyx')->info('AMD human + TTS done — bridging now', [
                         'admin_call_control_id' => $callControlId,
@@ -1552,9 +1591,9 @@ class TelnyxWebhookController extends Controller
                         'call_log_id' => $callLogId,
                     ]);
 
-                    $freshMetadata['pending_admin_call_control_id'] = null;
-                    $freshMetadata['pending_admin_user_id'] = null;
-                    $callLog->update(['metadata' => $freshMetadata]);
+                    $metadata['pending_admin_call_control_id'] = null;
+                    $metadata['pending_admin_user_id'] = null;
+                    $callLog->update(['metadata' => $metadata]);
 
                     $this->bridgeAdminWithCaller($callControlId, $callLogId, $incomingCallControlId, $adminUserId);
                 } else {
@@ -1639,6 +1678,22 @@ class TelnyxWebhookController extends Controller
                 $this->sendCallCommand($callControlId, 'hangup');
             }
         }
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Handle premium AMD greeting ended event.
+     * Logs whether a beep was detected (useful for diagnostics).
+     */
+    protected function handleAmdGreetingEnded(array $data): JsonResponse
+    {
+        $payload = $data['payload'] ?? [];
+
+        Log::channel('telnyx')->info('AMD greeting ended (premium)', [
+            'call_control_id' => $payload['call_control_id'] ?? null,
+            'result' => $payload['result'] ?? null,
+        ]);
 
         return response()->json(['status' => 'ok']);
     }
@@ -1756,7 +1811,11 @@ class TelnyxWebhookController extends Controller
                         'from' => $telnyxFrom,
                         'from_display_name' => $callLog?->caller_name ?: ($originalCaller ?? 'Incoming Call'),
                         'timeout_secs' => $timeout,
-                        'answering_machine_detection' => 'detect',
+                        'answering_machine_detection' => 'premium',
+                        'answering_machine_detection_config' => [
+                            'after_greeting_silence_millis' => 800,
+                            'total_analysis_time_millis' => 5000,
+                        ],
                         'client_state' => base64_encode(json_encode([
                             'action' => 'admin_ring',
                             'call_log_id' => $callLogId,
@@ -2332,9 +2391,13 @@ class TelnyxWebhookController extends Controller
         }
 
         try {
+            // command_id deduplicates — Telnyx ignores duplicate bridge commands with the same ID
+            $commandId = 'bridge_' . md5($callControlIdA . $callControlIdB);
+
             $response = Http::withToken($apiKey)
                 ->post("https://api.telnyx.com/v2/calls/{$callControlIdA}/actions/bridge", [
                     'call_control_id' => $callControlIdB,
+                    'command_id' => $commandId,
                 ]);
 
             if ($response->successful()) {
