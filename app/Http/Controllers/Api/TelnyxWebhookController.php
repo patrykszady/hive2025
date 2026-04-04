@@ -793,7 +793,7 @@ class TelnyxWebhookController extends Controller
             $metadata['pending_admin_user_id'] = $adminUserId;
             $callLog->update(['metadata' => $metadata]);
 
-            // Play hold music to the admin while they wait
+            // Play ringback to the admin while they wait for TTS to finish
             $holdAudioUrl = config('services.telnyx.hold_audio_url')
                 ?: $this->telnyxBaseUrl() . '/telnyx-audio/ringback.wav';
             $this->sendCallCommand($callControlId, 'playback_start', [
@@ -1091,29 +1091,8 @@ class TelnyxWebhookController extends Controller
                 return response()->json(['status' => 'ok']);
             }
 
-            // If this is the first attempt and all admins failed quickly (e.g. busy/rejected),
-            // retry once silently instead of going straight to voicemail
-            $dialAttempts = (int) ($metadata['admin_dial_attempts'] ?? 0);
-            if ($dialAttempts < 1) {
-                $metadata['admin_dial_attempts'] = $dialAttempts + 1;
-                $metadata['admin_call_control_ids'] = [];
-                $metadata['joined_admin_ids'] = [];
-                $metadata['tts_complete'] = true;
-                $callLog->update(['metadata' => $metadata]);
-
-                Log::channel('telnyx')->info('All admin legs failed on first attempt — retrying immediately', [
-                    'incoming_call_control_id' => $incomingCallControlId,
-                    'call_log_id' => $callLogId,
-                    'attempt' => $dialAttempts + 1,
-                ]);
-
-                $this->dialAdmins($incomingCallControlId, $callLogId, $callLog->from_number);
-
-                return response()->json(['status' => 'ok']);
-            }
-
-            // Already retried — trigger voicemail
-            Log::channel('telnyx')->info('All admin legs failed after retry — triggering voicemail', [
+            // All admins failed — trigger voicemail
+            Log::channel('telnyx')->info('All admin legs failed — triggering voicemail', [
                 'incoming_call_control_id' => $incomingCallControlId,
                 'call_log_id' => $callLogId,
             ]);
@@ -1680,7 +1659,7 @@ class TelnyxWebhookController extends Controller
         // Use a short timeout so admin phones stop ringing well before
         // carrier voicemail picks up (~25s). This ensures callers always
         // reach our Telnyx Voicemail Menu instead of personal voicemail.
-        $timeout = 15;
+        $timeout = 20;
         $adminCallControlIds = [];
 
         foreach ($adminUsers as $adminUser) {
