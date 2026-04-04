@@ -47,6 +47,7 @@
     {{-- Pull-to-refresh indicator --}}
     <div
         x-show="pullY > 0"
+        x-cloak
         x-bind:style="'height: ' + pullY + 'px'"
         class="flex items-end justify-center overflow-hidden transition-none"
     >

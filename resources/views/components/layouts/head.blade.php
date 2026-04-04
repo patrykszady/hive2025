@@ -21,11 +21,7 @@
         } catch (e) {}
     </script>
     <style>
-        /* Desktop: hide sidebar content (keep frame for layout stability) */
-        ui-sidebar:not(:defined) {
-            visibility: hidden;
-        }
-        /* Mobile: fully hide (no space taken) */
+        /* Mobile: fully hide sidebar until Flux JS defines it (no space taken) */
         @media (max-width: 1023px) {
             ui-sidebar:not(:defined) {
                 display: none;

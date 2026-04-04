@@ -36,14 +36,14 @@
             }
         },
     }"
-    x-on:thread-switching.window="switching = true; $el.style.opacity = '0'"
-    x-on:thread-ready.window="$nextTick(() => { switching = false; $el.style.opacity = '1' })"
-    x-bind:style="switching ? 'transition: none' : 'transition: opacity 100ms'"
+    x-on:thread-switching.window="switching = true"
+    x-on:thread-ready.window="$nextTick(() => { switching = false })"
 >
     @if ($this->thread)
         {{-- Pull-to-refresh indicator (mobile only) --}}
         <div
             x-show="pullY > 0"
+            x-cloak
             x-bind:style="'height: ' + pullY + 'px'"
             class="flex items-end justify-center overflow-hidden transition-none lg:hidden"
         >
@@ -335,6 +335,11 @@
         @endphp
 
         <div class="relative flex-1 min-h-0">
+            {{-- Skeleton overlay during thread switching --}}
+            <div x-show="switching" x-cloak class="absolute inset-0 z-10 bg-zinc-100 dark:bg-zinc-800">
+                @include('livewire.sms.conversation_placeholder')
+            </div>
+
             <div class="sms-fade-overlay top"></div>
         <div
             class="sms-messages h-full overflow-y-auto flex flex-col-reverse gap-3 px-2 pt-6 pb-6"
