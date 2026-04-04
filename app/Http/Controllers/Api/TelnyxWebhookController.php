@@ -1039,9 +1039,15 @@ class TelnyxWebhookController extends Controller
             'admin_call_control_id' => $callControlId,
             'hangup_cause' => $hangupCause,
             'call_log_id' => $callLogId,
+            'incoming_call_control_id' => $incomingCallControlId,
         ]);
 
         if (! $callLog || ! $incomingCallControlId) {
+            Log::channel('telnyx')->warning('Admin ring hangup — missing call log or incoming ID, cannot trigger voicemail', [
+                'call_log_id' => $callLogId,
+                'has_call_log' => (bool) $callLog,
+                'has_incoming_id' => (bool) $incomingCallControlId,
+            ]);
             return response()->json(['status' => 'ok']);
         }
 
@@ -1057,6 +1063,13 @@ class TelnyxWebhookController extends Controller
         $metadata['admin_call_control_ids'] = array_values(
             array_filter($adminCallControlIds, fn ($id) => $id !== $callControlId)
         );
+
+        Log::channel('telnyx')->info('Admin removed from pending list', [
+            'removed_id' => $callControlId,
+            'was_in_list' => in_array($callControlId, $adminCallControlIds, true),
+            'remaining_count' => count($metadata['admin_call_control_ids']),
+            'call_log_id' => $callLogId,
+        ]);
 
         // Clear pending admin state if this was the pending admin
         if (($metadata['pending_admin_call_control_id'] ?? null) === $callControlId) {
@@ -1080,7 +1093,10 @@ class TelnyxWebhookController extends Controller
                 return response()->json(['status' => 'ok']);
             }
 
-            // All admins failed — trigger voicemail
+            // All admins failed — set cache flag (race-proof signal for
+            // caller_waiting re-loop safety net) then trigger voicemail
+            Cache::put("telnyx_all_admins_failed:{$callLogId}", true, now()->addMinutes(10));
+
             Log::channel('telnyx')->info('All admin legs failed — triggering voicemail', [
                 'incoming_call_control_id' => $incomingCallControlId,
                 'call_log_id' => $callLogId,
@@ -1212,6 +1228,19 @@ class TelnyxWebhookController extends Controller
             }
 
             if (! $bridgedViaCache) {
+                // Safety net: if all admin legs failed (tracked via atomic cache flag)
+                // but voicemail didn't start due to a metadata race condition, trigger it
+                // now instead of re-looping ringback (prevents stuck-caller scenario).
+                if ($action === 'caller_waiting' && $callLogId && Cache::has("telnyx_all_admins_failed:{$callLogId}")) {
+                    Log::channel('telnyx')->warning('Safety net: all admins failed but caller still on ringback — triggering voicemail', [
+                        'call_control_id' => $callControlId,
+                        'call_log_id' => $callLogId,
+                    ]);
+                    $this->triggerVoicemail($callControlId, $callLogId);
+
+                    return response()->json(['status' => 'ok']);
+                }
+
                 // Preserve all client_state fields from the original command
                 // so downstream handlers (like hangup) have full context
                 $reloopClientState = $clientState;
@@ -1270,13 +1299,13 @@ class TelnyxWebhookController extends Controller
                 Cache::put("telnyx_tts_complete:{$callLogId}", true, now()->addMinutes(10));
             }
 
-            // Mark TTS as complete in metadata — use fresh() to avoid clobbering
-            // pending_admin written concurrently by handleAmdEnded
-            if ($callLog) {
-                $callLog->refresh();
-                $metadata = $callLog->metadata ?? [];
-                $metadata['tts_complete'] = true;
-                $callLog->update(['metadata' => $metadata]);
+            // Mark TTS as complete in metadata — use atomic JSON path update
+            // so we don't overwrite admin_call_control_ids modified concurrently
+            // by handleAdminRingHangup (prevents race-condition metadata clobber)
+            if ($callLogId) {
+                CallLog::where('id', $callLogId)->update([
+                    'metadata->tts_complete' => true,
+                ]);
             }
 
             // Check if voicemail or bridge already in progress (AMD machine detected
@@ -1382,6 +1411,12 @@ class TelnyxWebhookController extends Controller
                 $metadata['pending_admin_user_id'] = null;
                 $metadata['pending_admin_amd_confirmed'] = null;
                 $callLog->update(['metadata' => $metadata]);
+            }
+
+            // Clear cache flags from previous attempt
+            if ($callLogId) {
+                Cache::forget("telnyx_all_admins_failed:{$callLogId}");
+                Cache::forget("telnyx_bridged:{$callControlId}");
             }
 
             $this->dialAdmins($callControlId, $callLogId, $originalCaller);
