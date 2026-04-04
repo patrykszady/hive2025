@@ -1374,6 +1374,17 @@ class TelnyxWebhookController extends Controller
                     'audio_url' => $holdAudioUrl,
                     'client_state' => base64_encode(json_encode($reloopClientState)),
                 ]);
+            } else {
+                // Bridged/voicemail active — check if a voicemail gather is
+                // waiting for this playback to finish before it starts.
+                $pendingVoicemail = Cache::pull("telnyx_pending_voicemail:{$callControlId}");
+                if ($pendingVoicemail) {
+                    Log::channel('telnyx')->info('Ringback stopped — starting voicemail IVR gather', [
+                        'call_control_id' => $callControlId,
+                        'call_log_id' => $pendingVoicemail['call_log_id'] ?? null,
+                    ]);
+                    $this->startVoicemailGather($callControlId, $pendingVoicemail);
+                }
             }
 
             return response()->json(['status' => 'ok']);
@@ -1934,11 +1945,7 @@ class TelnyxWebhookController extends Controller
             }
         }
 
-        // Stop the ringback re-loop immediately so gather_using_speak isn't overridden.
-        // The gather_using_speak command below will interrupt any active playback on its own.
-        // We intentionally do NOT call playback_stop here — sending it right before
-        // gather_using_speak can cause a race where the TTS audio fails to start,
-        // resulting in a silent gather that ends prematurely.
+        // Stop the ringback re-loop by setting the bridged flag.
         Cache::put("telnyx_bridged:{$callControlId}", true, now()->addMinutes(10));
 
         // Check if voicemail is enabled
@@ -1992,6 +1999,47 @@ class TelnyxWebhookController extends Controller
         $ivrPrompt = preg_replace('/\s+/', ' ', trim($ivrPrompt));
         $ivrPrompt = preg_replace('/\s+([!.?,])/', '$1', $ivrPrompt);
 
+        $voicemailContext = [
+            'call_log_id' => $callLogId,
+            'ivr_prompt' => $ivrPrompt,
+            'valid_digits' => $validDigits,
+            'is_known_caller' => $isKnownCaller,
+            'original_caller' => $callLog?->from_number,
+        ];
+
+        // We MUST stop the ringback audio before starting the IVR gather,
+        // otherwise the caller hears ringback over the IVR menu TTS and can't
+        // hear the "press 2" options. However, sending playback_stop and
+        // gather_using_speak back-to-back causes a race condition where the
+        // TTS sometimes fails to start. Instead, we stop the playback and
+        // wait for the call.playback.ended event to fire the gather.
+        $stopped = $this->sendCallCommand($callControlId, 'playback_stop');
+
+        if ($stopped) {
+            // Ringback is stopping — store context so handleCallPlaybackEnded
+            // can start the gather once the audio channel is clear.
+            Cache::put("telnyx_pending_voicemail:{$callControlId}", $voicemailContext, now()->addMinutes(5));
+            return;
+        }
+
+        // No active playback (e.g. called from safety net, or TTS was still
+        // playing) — start the IVR gather immediately.
+        $this->startVoicemailGather($callControlId, $voicemailContext);
+    }
+
+    /**
+     * Send the voicemail IVR gather_using_speak command.
+     * Called either directly (no active playback) or from handleCallPlaybackEnded
+     * after the ringback has been confirmed stopped.
+     */
+    protected function startVoicemailGather(string $callControlId, array $context): void
+    {
+        $callLogId = $context['call_log_id'] ?? null;
+        $ivrPrompt = $context['ivr_prompt'];
+        $validDigits = $context['valid_digits'];
+        $isKnownCaller = $context['is_known_caller'];
+        $originalCaller = $context['original_caller'] ?? null;
+
         Log::channel('telnyx')->info('Playing voicemail IVR menu', [
             'call_control_id' => $callControlId,
             'call_log_id' => $callLogId,
@@ -2010,7 +2058,7 @@ class TelnyxWebhookController extends Controller
             'client_state' => base64_encode(json_encode([
                 'action' => 'voicemail_ivr_menu',
                 'call_log_id' => $callLogId,
-                'original_caller' => $callLog?->from_number,
+                'original_caller' => $originalCaller,
                 'is_known_caller' => $isKnownCaller,
             ])),
         ]);
@@ -2396,13 +2444,13 @@ class TelnyxWebhookController extends Controller
     /**
      * Send a call control command to the Telnyx API.
      */
-    protected function sendCallCommand(string $callControlId, string $action, array $params = []): void
+    protected function sendCallCommand(string $callControlId, string $action, array $params = []): bool
     {
         $apiKey = config('services.telnyx.api_key');
 
         if (!$apiKey) {
             Log::channel('telnyx')->error('Telnyx API key not configured for call control');
-            return;
+            return false;
         }
 
         try {
@@ -2414,18 +2462,21 @@ class TelnyxWebhookController extends Controller
                     'call_control_id' => $callControlId,
                     'result' => $response->json('data.result'),
                 ]);
+                return true;
             } else {
                 Log::channel('telnyx')->error("Call command failed: {$action}", [
                     'call_control_id' => $callControlId,
                     'status' => $response->status(),
                     'error' => $response->json(),
                 ]);
+                return false;
             }
         } catch (\Exception $e) {
             Log::channel('telnyx')->error("Exception sending call command: {$action}", [
                 'call_control_id' => $callControlId,
                 'error' => $e->getMessage(),
             ]);
+            return false;
         }
     }
 
