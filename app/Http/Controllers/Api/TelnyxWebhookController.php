@@ -1778,8 +1778,8 @@ class TelnyxWebhookController extends Controller
         $hour = now($tz)->hour;
 
         return match (true) {
-            $hour < 12 => 'Good morning',
-            $hour < 17 => 'Good afternoon',
+            $hour >= 5 && $hour < 12 => 'Good morning',
+            $hour >= 12 && $hour < 17 => 'Good afternoon',
             default => 'Good evening',
         };
     }
@@ -1934,11 +1934,12 @@ class TelnyxWebhookController extends Controller
             }
         }
 
-        // Stop the ringback re-loop immediately so gather_using_speak isn't overridden
+        // Stop the ringback re-loop immediately so gather_using_speak isn't overridden.
+        // The gather_using_speak command below will interrupt any active playback on its own.
+        // We intentionally do NOT call playback_stop here — sending it right before
+        // gather_using_speak can cause a race where the TTS audio fails to start,
+        // resulting in a silent gather that ends prematurely.
         Cache::put("telnyx_bridged:{$callControlId}", true, now()->addMinutes(10));
-
-        // Stop any active playback/ringback before starting the IVR gather
-        $this->sendCallCommand($callControlId, 'playback_stop');
 
         // Check if voicemail is enabled
         $vendor = Vendor::find(1);
