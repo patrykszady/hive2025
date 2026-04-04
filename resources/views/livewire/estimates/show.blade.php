@@ -15,6 +15,7 @@
                 'estimate' => $this->estimate,
                 'client' => $this->estimate->client,
                 'project' => $this->estimate->project,
+                'showChanges' => $this->showChanges,
             ])
         @endisland
 
@@ -100,7 +101,7 @@
                                         <flux:table.rows>
                                             @foreach($estimate->estimate_sections->find($section['id'])->estimate_line_items->sortBy($sortBy, SORT_REGULAR, $sortDirection === 'desc') as $line_item_index => $line_item)
                                                 <flux:table.row wire:key="line-item-{{$line_item->id}}" wire:transition>
-                                                    <flux:table.cell>{{$index + 1}}.{{$line_item_index + 1}}</flux:table.cell>
+                                                    <flux:table.cell class="align-top">{{$index + 1}}.{{$line_item_index + 1}}</flux:table.cell>
                                                     <flux:table.cell variant="strong" class="align-top">
                                                         <div class="flex flex-col">
                                                             <div class="leading-5"><b>{{$line_item->name}}</b></div>
@@ -110,9 +111,9 @@
                                                             @endforeach
                                                         </div>
                                                     </flux:table.cell>
-                                                    <flux:table.cell>{{$line_item->unit_type !== 'no_unit' ? $line_item->quantity : ''}}</flux:table.cell>
-                                                    <flux:table.cell>{{$line_item->unit_type !== 'no_unit' ? $line_item->unit_type : ''}}</flux:table.cell>
-                                                    <flux:table.cell>{{$line_item->unit_type !== 'no_unit' ? money($line_item->cost) : ''}}</flux:table.cell>
+                                                    <flux:table.cell class="align-top">{{$line_item->unit_type !== 'no_unit' ? $line_item->quantity : ''}}</flux:table.cell>
+                                                    <flux:table.cell class="align-top">{{$line_item->unit_type !== 'no_unit' ? $line_item->unit_type : ''}}</flux:table.cell>
+                                                    <flux:table.cell class="align-top">{{$line_item->unit_type !== 'no_unit' ? money($line_item->cost) : ''}}</flux:table.cell>
                                                     <flux:table.cell variant="strong" class="align-top">
                                                         <div class="flex flex-col">
                                                             <div class="leading-5">{{money($line_item->total)}}</div>
@@ -161,78 +162,132 @@
         @can('update', $estimate)
             <div wire:sort="sort_sections" class="space-y-2">
                 @foreach($sections as $index => $section)
-                    <flux:card class="space-y-2" wire:sort:item="{{$section['id']}}" wire:key="section-{{$section['id']}}" wire:transition>
-                    {{-- HEADING --}}
-                    <flux:heading>
-                        <div class="flex justify-between group" x-data="{ editing: false }">
-                            <div class="flex items-center gap-2">
-                                {{-- Display mode: show name as text with dropdown --}}
-                                <template x-if="!editing">
-                                    <div class="flex items-center gap-2">
-                                        <span class="text-base font-semibold">{{ $section['name'] ?: 'Unnamed Section' }}</span>
-                                        <flux:dropdown>
-                                            <flux:button size="sm" icon="ellipsis-vertical" variant="ghost"></flux:button>
-
-                                            <flux:menu>
-                                                <flux:menu.item icon="pencil" x-on:click="editing = true; $nextTick(() => $refs.nameInput?.focus())">Edit Name</flux:menu.item>
-                                                <flux:menu.separator />
-                                                <flux:menu.item icon="document-duplicate" wire:click="sectionDuplicate({{$index}})">Duplicate Section</flux:menu.item>
-                                                <flux:menu.item icon="arrow-up-on-square" wire:click="$dispatchTo('estimates.estimate-duplicate', 'duplicateToEstimateModal', { section: {{$section['id']}} })">Duplicate to Estimate</flux:menu.item>
-                                                <flux:menu.separator />
-                                                <flux:menu.item icon="trash" wire:click="sectionDelete({{$index}})" variant="danger">Disable Section</flux:menu.item>
-                                            </flux:menu>
-                                        </flux:dropdown>
-                                    </div>
-                                </template>
-
-                                {{-- Edit mode: show input --}}
-                                <template x-if="editing">
-                                    <flux:input.group>
-                                        <flux:input
-                                            x-ref="nameInput"
-                                            wire:model="sections.{{$index}}.name"
-                                            x-on:keydown.enter="$wire.sectionUpdate({{$index}}); editing = false"
-                                            x-on:keydown.escape="editing = false"
-                                            type="text"
-                                            required
-                                            placeholder="Section Name"
-                                            kbd="Enter"
-                                        />
-                                        <flux:button icon="check" variant="primary" x-on:click="$wire.sectionUpdate({{$index}}); editing = false"></flux:button>
-                                        <flux:button icon="x-mark" variant="ghost" x-on:click="editing = false"></flux:button>
-                                    </flux:input.group>
-                                </template>
-                            </div>
-                            <flux:icon.chevron-up-down
-                                variant="solid"
-                                wire:sort:handle
-                                class="text-gray-400 opacity-40 group-hover:opacity-90 group-hover:text-gray-600 active:opacity-90 active:text-gray-600 cursor-grab active:cursor-grabbing"
-                            />
-                        </div>
-                    </flux:heading>
-
+                    <flux:card class="!py-3 !px-6" wire:sort:item="{{$section['id']}}" wire:key="section-{{$section['id']}}" wire:transition>
                     <flux:accordion transition>
-                        <flux:accordion.item>
+                        <flux:accordion.item class="!pt-0 !pb-0 !border-b-0">
                             <flux:accordion.heading>
-                                {{-- only when accordion closed --}}
+                                <div class="flex items-center gap-2 group" x-data="{ editing: false }" x-on:click.stop>
+                                    {{-- Display mode: show name as text with dropdown --}}
+                                    <template x-if="!editing">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-base font-semibold">{{ $section['name'] ?: 'Unnamed Section' }}</span>
+                                            <flux:dropdown>
+                                                <flux:button size="sm" icon="ellipsis-vertical" variant="ghost"></flux:button>
+
+                                                <flux:menu>
+                                                    <flux:menu.item icon="pencil" x-on:click="editing = true; $nextTick(() => $refs.nameInput?.focus())">Edit Name</flux:menu.item>
+                                                    <flux:menu.separator />
+                                                    <flux:menu.item icon="document-duplicate" wire:click="sectionDuplicate({{$index}})">Duplicate Section</flux:menu.item>
+                                                    <flux:menu.item icon="arrow-up-on-square" wire:click="$dispatchTo('estimates.estimate-duplicate', 'duplicateToEstimateModal', { section: {{$section['id']}} })">Duplicate to Estimate</flux:menu.item>
+                                                    <flux:menu.separator />
+                                                    <flux:menu.item icon="trash" wire:click="sectionDelete({{$index}})" variant="danger">Disable Section</flux:menu.item>
+                                                </flux:menu>
+                                            </flux:dropdown>
+                                        </div>
+                                    </template>
+
+                                    {{-- Edit mode: show input --}}
+                                    <template x-if="editing">
+                                        <flux:input.group>
+                                            <flux:input
+                                                x-ref="nameInput"
+                                                wire:model="sections.{{$index}}.name"
+                                                x-on:keydown.enter="$wire.sectionUpdate({{$index}}); editing = false"
+                                                x-on:keydown.escape="editing = false"
+                                                type="text"
+                                                required
+                                                placeholder="Section Name"
+                                                kbd="Enter"
+                                            />
+                                            <flux:button icon="check" variant="primary" x-on:click="$wire.sectionUpdate({{$index}}); editing = false"></flux:button>
+                                            <flux:button icon="x-mark" variant="ghost" x-on:click="editing = false"></flux:button>
+                                        </flux:input.group>
+                                    </template>
+
+                                    <flux:icon.chevron-up-down
+                                        variant="solid"
+                                        wire:sort:handle
+                                        class="size-4 shrink-0 text-gray-400 opacity-40 group-hover:opacity-90 group-hover:text-gray-600 active:opacity-90 active:text-gray-600 cursor-grab active:cursor-grabbing"
+                                    />
+                                </div>
                             </flux:accordion.heading>
 
                             <flux:accordion.content>
                                 <flux:separator variant="subtle"/>
+                                <div class="-mx-6">
                                     <flux:table>
                                         <flux:table.columns>
-                                            <flux:table.column class="w-6"></flux:table.column>
+                                            <flux:table.column class="w-6 !pl-6"></flux:table.column>
                                             <flux:table.column class="w-1/3">Item</flux:table.column>
                                             <flux:table.column>Quantity</flux:table.column>
                                             <flux:table.column>Unit</flux:table.column>
                                             <flux:table.column>Cost</flux:table.column>
-                                            <flux:table.column>Total</flux:table.column>
+                                            <flux:table.column class="!pr-6">Total</flux:table.column>
                                         </flux:table.columns>
 
                                         <flux:table.rows wire:sort="sort_line_item" wire:sort:group="line-items" wire:sort:group-id="{{ $section['id'] }}">
-                                            @foreach($estimate->estimate_sections->find($section['id'])->estimate_line_items->sortBy($sortBy, SORT_REGULAR, $sortDirection === 'desc') as $line_item_index => $line_item)
-                                                <flux:table.row wire:sort:item="{{$line_item->id}}" wire:key="line-item-{{$line_item->id}}" wire:transition>
-                                                    <flux:table.cell wire:sort:handle class="cursor-grab active:cursor-grabbing">{{$index + 1}}.{{$line_item_index + 1}}</flux:table.cell>
+                                            @php
+                                                $activeItems = $estimate->estimate_sections->find($section['id'])->estimate_line_items->sortBy($sortBy, SORT_REGULAR, $sortDirection === 'desc')->values();
+
+                                                if ($showChanges) {
+                                                    $trashedItems = \App\Models\EstimateLineItem::onlyTrashed()
+                                                        ->where('estimate_id', $estimate->id)
+                                                        ->where('section_id', $section['id'])
+                                                        ->get();
+
+                                                    // Build merged list: active items in order, trashed items
+                                                    // inserted at their original position from the activity log.
+                                                    $mergedItems = collect();
+                                                    foreach ($activeItems as $item) {
+                                                        $mergedItems->push($item);
+                                                    }
+
+                                                    $insertOffset = 0;
+                                                    foreach ($trashedItems->sortBy(fn ($t) => $recentChanges['line_items'][$t->id]['original_order'] ?? PHP_INT_MAX) as $trashed) {
+                                                        $originalOrder = $recentChanges['line_items'][$trashed->id]['original_order'] ?? null;
+                                                        if ($originalOrder !== null) {
+                                                            $insertAt = min($originalOrder + $insertOffset, $mergedItems->count());
+                                                            $mergedItems->splice($insertAt, 0, [$trashed]);
+                                                            $insertOffset++;
+                                                        } else {
+                                                            $mergedItems->push($trashed);
+                                                        }
+                                                    }
+                                                } else {
+                                                    $mergedItems = $activeItems;
+                                                }
+
+                                                $activeNumber = 0;
+                                            @endphp
+                                            @foreach($mergedItems as $line_item)
+                                                @php
+                                                    $isTrashed = $line_item->trashed();
+                                                    $liChanged = $showChanges ? ($recentChanges['line_items'][$line_item->id] ?? null) : null;
+                                                    if (! $isTrashed) {
+                                                        $activeNumber++;
+                                                    }
+                                                @endphp
+
+                                                @if($isTrashed)
+                                                    <flux:table.row wire:key="trashed-line-item-{{$line_item->id}}" class="opacity-45 line-through bg-red-50!">
+                                                        <flux:table.cell class="!pl-6"></flux:table.cell>
+                                                        <flux:table.cell variant="strong" class="align-top">
+                                                            <div class="flex flex-col">
+                                                                <div class="leading-5">
+                                                                    <b>{{$line_item->name}}</b>
+                                                                    <flux:badge size="sm" color="red" class="ml-1 no-underline!">Removed</flux:badge>
+                                                                </div>
+                                                                <div class="leading-5"><i>{{$line_item->category}}@if($line_item->sub_category)/@endif{{$line_item->sub_category}}</i></div>
+                                                            </div>
+                                                        </flux:table.cell>
+                                                        <flux:table.cell></flux:table.cell>
+                                                        <flux:table.cell></flux:table.cell>
+                                                        <flux:table.cell></flux:table.cell>
+                                                        <flux:table.cell variant="strong" class="align-top !pr-6">{{money($line_item->total)}}</flux:table.cell>
+                                                    </flux:table.row>
+                                                @else
+                                                <flux:table.row wire:sort:item="{{$line_item->id}}" wire:key="line-item-{{$line_item->id}}" wire:transition :class="$liChanged ? 'bg-yellow-50!' : ''">
+                                                    <flux:table.cell wire:sort:handle class="cursor-grab active:cursor-grabbing align-top !pl-6">{{$index + 1}}.{{$activeNumber}}</flux:table.cell>
                                                         <flux:table.cell variant="strong" class="align-top">
                                                             <div class="flex flex-col">
                                                                 <div class="leading-5">
@@ -242,6 +297,9 @@
                                                                         >
                                                                         <b>{{$line_item->name}}</b>
                                                                     </a>
+                                                                    @if($liChanged)
+                                                                        <flux:badge size="sm" color="amber" class="ml-1">{{ ucfirst($liChanged['event']) }}</flux:badge>
+                                                                    @endif
                                                                 </div>
                                                                 <div class="leading-5"><i>{{$line_item->category}}@if($line_item->sub_category)/@endif{{$line_item->sub_category}}</i></div>
                                                                 @foreach($line_item->allowances as $allowance)
@@ -249,10 +307,10 @@
                                                                 @endforeach
                                                             </div>
                                                         </flux:table.cell>
-                                                        <flux:table.cell>{{$line_item->unit_type !== 'no_unit' ? $line_item->quantity : ''}}</flux:table.cell>
-                                                        <flux:table.cell>{{$line_item->unit_type !== 'no_unit' ? $line_item->unit_type : ''}}</flux:table.cell>
-                                                        <flux:table.cell>{{$line_item->unit_type !== 'no_unit' ? money($line_item->cost) : ''}}</flux:table.cell>
-                                                    <flux:table.cell variant="strong" class="align-top">
+                                                        <flux:table.cell class="align-top">{{$line_item->unit_type !== 'no_unit' ? $line_item->quantity : ''}}</flux:table.cell>
+                                                        <flux:table.cell class="align-top">{{$line_item->unit_type !== 'no_unit' ? $line_item->unit_type : ''}}</flux:table.cell>
+                                                        <flux:table.cell class="align-top">{{$line_item->unit_type !== 'no_unit' ? money($line_item->cost) : ''}}</flux:table.cell>
+                                                    <flux:table.cell variant="strong" class="align-top !pr-6">
                                                         <div class="flex flex-col">
                                                             <div class="leading-5">{{money($line_item->total)}}</div>
                                                             @if($line_item->allowances->isNotEmpty())
@@ -265,17 +323,16 @@
                                                         </div>
                                                     </flux:table.cell>
                                                 </flux:table.row>
+                                                @endif
                                             @endforeach
                                         </flux:table.rows>
                                     </flux:table>
-                            </flux:accordion.content>
-                        </flux:accordion.item>
-                    </flux:accordion>
+                                </div>
 
-                    {{-- FOOTER --}}
-                    <flux:separator variant="subtle"/>
-                    <div class="relative">
-                        <div class="absolute left-0 top-0">
+                                {{-- FOOTER --}}
+                                <flux:separator variant="subtle"/>
+                                <div class="relative px-6">
+                                    <div class="absolute left-6 top-0">
                             <flux:button.group>
                                 <flux:button
                                     wire:click="$dispatchTo('line-items.estimate-line-item-create', 'addToEstimate', { section_id: {{$section['id']}} })"
@@ -319,7 +376,10 @@
                                 </tr>
                             @endif
                         </table>
-                    </div>
+                                </div>
+                            </flux:accordion.content>
+                        </flux:accordion.item>
+                    </flux:accordion>
                 </flux:card>
             @endforeach
         </div>

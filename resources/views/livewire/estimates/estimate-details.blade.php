@@ -11,6 +11,7 @@
 
                 <flux:menu>
                     @can('update', $estimate)
+                        <flux:menu.item icon="eye" wire:click="toggleChanges">{{ $showChanges ? 'Hide Changes' : 'Show Changes' }}</flux:menu.item>
                         <flux:menu.item icon="cog-6-tooth" wire:click="$dispatchTo('estimates.estimate-accept', 'accept')">Settings</flux:menu.item>
                         
                         <flux:menu.item icon="document-duplicate" wire:click="$dispatchTo('estimates.estimate-duplicate', 'duplicateModal', { estimate: {{$estimate->id}} })">Duplicate Estimate</flux:menu.item>

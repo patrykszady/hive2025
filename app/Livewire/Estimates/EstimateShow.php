@@ -40,6 +40,10 @@ class EstimateShow extends Component
 
     public string $sortDirection = 'asc';
 
+    public bool $showChanges = false;
+
+    public array $recentChanges = ['line_items' => [], 'sections' => [], 'since' => null];
+
     protected $listeners = ['refreshComponent' => 'handleExternalRefresh'];
 
     protected function rules()
@@ -105,6 +109,26 @@ class EstimateShow extends Component
     {
         $this->estimate_refresh();
         $this->refreshFinancialIslands();
+
+        if ($this->showChanges) {
+            $this->updatedShowChanges();
+        }
+    }
+
+    public function toggleChanges(): void
+    {
+        $this->showChanges = ! $this->showChanges;
+        $this->updatedShowChanges();
+        $this->forceRender();
+    }
+
+    public function updatedShowChanges(): void
+    {
+        if ($this->showChanges) {
+            $this->recentChanges = EstimateDocumentGenerator::collectRecentChanges($this->estimate);
+        } else {
+            $this->recentChanges = ['line_items' => [], 'sections' => [], 'since' => null];
+        }
     }
 
     public function estimate_refresh()
@@ -662,5 +686,10 @@ class EstimateShow extends Component
         $this->authorize('view', $this->estimate);
 
         return view('livewire.estimates.show');
+    }
+
+    public function placeholder(): \Illuminate\Contracts\View\View
+    {
+        return view('livewire.estimates.show-placeholder');
     }
 }

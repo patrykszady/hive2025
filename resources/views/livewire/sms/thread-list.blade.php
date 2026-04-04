@@ -99,7 +99,7 @@
                             if ($thread->latestMessage->isOutbound()) {
                                 $previewPrefix = $isClientUser
                                     ? 'GS Construciton:'
-                                    : ($thread->latestMessage->sent_by_user_id ? 'You:' : 'GS Crew:');
+                                    : ($thread->latestMessage->sent_by_user_id === auth()->id() ? 'You:' : ($thread->latestMessage->sentByUser?->first_name ?? 'GS Crew') . ':');
                             } elseif ($thread->latestMessage->isInbound()) {
                                 $sender = $this->resolvePreviewSender($thread->latestMessage->from_number, $thread);
                                 $previewPrefix = $sender ? $sender . ':' : null;

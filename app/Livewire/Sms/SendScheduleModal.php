@@ -184,12 +184,49 @@ class SendScheduleModal extends Component
     #[Computed]
     public function selectedTaskIds(): array
     {
-        return $this->upcomingTasks
+        $ids = $this->upcomingTasks
             ->merge($this->pendingTasks)
             ->pluck('id')
             ->unique()
-            ->values()
-            ->all();
+            ->values();
+
+        $nextTask = $this->nextUpcomingTask;
+        if ($nextTask) {
+            $ids->push($nextTask->id);
+        }
+
+        return $ids->unique()->values()->all();
+    }
+
+    /**
+     * When no tasks exist in the upcoming window, find the next future task.
+     */
+    #[Computed]
+    public function nextUpcomingTask(): ?Task
+    {
+        $hasTasks = $this->groupedUpcomingTasks->flatten(1)->isNotEmpty() || $this->pendingTasks->isNotEmpty();
+
+        if ($hasTasks) {
+            return null;
+        }
+
+        $projectIds = $this->clientProjectIds;
+
+        if (empty($projectIds)) {
+            return null;
+        }
+
+        $today = Carbon::today(browser_timezone());
+        $afterDate = $today->copy()->addDays($this->daysAhead)->format('Y-m-d');
+
+        return Task::whereIn('project_id', $projectIds)
+            ->with(['vendor', 'project.client', 'project.latestStatus'])
+            ->whereNotNull('start_date')
+            ->whereNotNull('end_date')
+            ->whereDate('start_date', '>=', $afterDate)
+            ->orderBy('start_date')
+            ->orderBy('order')
+            ->first();
     }
 
     /**
@@ -204,8 +241,14 @@ class SendScheduleModal extends Component
         // Flatten all tasks to check if there are any
         $allTasks = $grouped->flatten(1)->merge($pendingTasks)->unique('id');
 
+        // Include next upcoming task if the window is empty
+        $nextTask = $this->nextUpcomingTask;
+        if ($nextTask) {
+            $allTasks = $allTasks->push($nextTask)->unique('id');
+        }
+
         if ($allTasks->isEmpty()) {
-            return '';
+            return $this->buildScheduleLinkMessage();
         }
 
         // Build greeting from all client user first names (e.g. "Hi Katie & Jonathan,")
@@ -268,6 +311,20 @@ class SendScheduleModal extends Component
             $daySections[] = "Pending:\n{$pendingLines}";
         }
 
+        // Add next upcoming task when the 3-day window is empty
+        if ($nextTask && $grouped->flatten(1)->isEmpty()) {
+            $nextDate = Carbon::parse($nextTask->start_date);
+            $dateLabel = $nextDate->format('D n/j');
+            $line = '- ' . trim($nextTask->title ?? 'Task');
+
+            $arrivalTime = $nextTask->getArrivalTimeLabel($nextDate->format('Y-m-d'));
+            if ($arrivalTime) {
+                $line .= " @ {$arrivalTime}";
+            }
+
+            $daySections[] = "Next up {$dateLabel}:\n{$line}";
+        }
+
         $body = implode("\n\n", $daySections);
 
         // Single schedule link (use first project with tasks)
@@ -278,9 +335,62 @@ class SendScheduleModal extends Component
             $baseUrl = $devWebhookUrl ?: rtrim((string) config('app.url'), '/');
             $token = $firstProject->getOrCreateScheduleToken();
             $linksText = "\nView Schedule: {$baseUrl}/s/{$token}";
+        } else {
+            $link = $this->buildScheduleLink();
+            if ($link) {
+                $linksText = "\n{$link}";
+            }
         }
 
         return "{$greeting}\n{$intro}\n\n{$body}\n{$linksText}";
+    }
+
+    /**
+     * Build a message with just the greeting and schedule link (no tasks).
+     */
+    protected function buildScheduleLinkMessage(): string
+    {
+        $names = $this->thread?->client?->users
+            ?->pluck('first_name')
+            ->filter()
+            ->values()
+            ->all() ?? [];
+
+        $greeting = count($names) > 0
+            ? 'Hi ' . collect($names)->join(', ', ' & ') . ','
+            : 'Hi,';
+
+        $linksText = $this->buildScheduleLink();
+
+        if (! $linksText) {
+            return '';
+        }
+
+        return "{$greeting}\n{$linksText}";
+    }
+
+    /**
+     * Build the "View Schedule" link text from the first available project.
+     */
+    protected function buildScheduleLink(): string
+    {
+        $projectIds = $this->clientProjectIds;
+
+        if (empty($projectIds)) {
+            return '';
+        }
+
+        $project = Project::find($projectIds[0]);
+
+        if (! $project) {
+            return '';
+        }
+
+        $devWebhookUrl = config('app.dev_webhook_url');
+        $baseUrl = $devWebhookUrl ?: rtrim((string) config('app.url'), '/');
+        $token = $project->getOrCreateScheduleToken();
+
+        return "View Schedule: {$baseUrl}/s/{$token}";
     }
 
     /**
@@ -288,8 +398,8 @@ class SendScheduleModal extends Component
      */
     public function send(GroupSmsService $smsService): void
     {
-        if (empty($this->selectedTaskIds)) {
-            Flux::toast(variant: 'warning', heading: 'No Tasks', text: 'No upcoming tasks to send.', duration: 4000, position: 'top right');
+        if (empty($this->editableMessage)) {
+            Flux::toast(variant: 'warning', heading: 'No Message', text: 'No message to send.', duration: 4000, position: 'top right');
             return;
         }
 

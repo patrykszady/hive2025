@@ -507,7 +507,7 @@ class EstimateDocumentGenerator
      *
      * @return array{line_items: array<int, array>, sections: array<int, array>, since: \Carbon\Carbon|null}
      */
-    protected static function collectRecentChanges(Estimate $estimate): array
+    public static function collectRecentChanges(Estimate $estimate): array
     {
         $sectionIds = $estimate->estimate_sections->pluck('id')->all();
         $lineItemIds = $estimate->estimate_line_items()->withTrashed()->pluck('id')->all();

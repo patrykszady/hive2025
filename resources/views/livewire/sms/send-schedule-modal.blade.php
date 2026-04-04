@@ -12,10 +12,33 @@
                 <div class="space-y-1">
                     <flux:text class="text-sm font-medium">Tasks</flux:text>
 
-                    @if ($this->groupedUpcomingTasks->flatten(1)->isEmpty() && $this->pendingTasks->isEmpty())
+                    @if ($this->groupedUpcomingTasks->flatten(1)->isEmpty() && $this->pendingTasks->isEmpty() && !$this->nextUpcomingTask)
                         <div class="py-6 text-center">
                             <flux:icon name="calendar" class="mx-auto h-8 w-8 text-zinc-300 dark:text-zinc-600" />
-                            <flux:text class="mt-2 text-sm text-zinc-400">No upcoming tasks in the next 3 days</flux:text>
+                            <flux:text class="mt-2 text-sm text-zinc-400">No upcoming tasks</flux:text>
+                        </div>
+                    @elseif ($this->groupedUpcomingTasks->flatten(1)->isEmpty() && $this->pendingTasks->isEmpty() && $this->nextUpcomingTask)
+                        @php $nextTask = $this->nextUpcomingTask; @endphp
+                        <div class="py-4 text-center space-y-3">
+                            <flux:text class="text-sm text-zinc-400">No tasks in the next 3 days</flux:text>
+                            <flux:separator variant="subtle" />
+                            <div class="text-left space-y-2">
+                                <div class="flex items-center gap-2 min-h-6">
+                                    <flux:heading size="sm" class="text-zinc-700 dark:text-zinc-300">
+                                        {{ \Carbon\Carbon::parse($nextTask->start_date)->format('D, M j, Y') }}
+                                    </flux:heading>
+                                    <flux:badge color="sky" size="sm">Next Up</flux:badge>
+                                </div>
+                                @include('components.upcoming-tasks-list-tasks', [
+                                    'tasks' => collect([$nextTask]),
+                                    'date' => $nextTask->start_date->format('Y-m-d'),
+                                    'carbonDate' => \Carbon\Carbon::parse($nextTask->start_date),
+                                    'showAvatars' => true,
+                                    'clickable' => false,
+                                    'showProjectInfo' => count($this->clientProjectIds) > 1,
+                                    'showVendorInfo' => true,
+                                ])
+                            </div>
                         </div>
                     @else
                         <div class="max-h-96 overflow-y-auto space-y-4">
@@ -135,7 +158,7 @@
                 </div>
 
                 {{-- Editable message --}}
-                @if ($this->upcomingTasks->isNotEmpty() || $this->pendingTasks->isNotEmpty())
+                @if ($this->editableMessage)
                     <div>
                         <flux:textarea
                             wire:model="editableMessage"
@@ -155,7 +178,7 @@
                     icon="paper-airplane"
                     wire:click="send"
                     wire:loading.attr="disabled"
-                    :disabled="$this->upcomingTasks->isEmpty() && $this->pendingTasks->isEmpty()"
+                    :disabled="!$this->editableMessage"
                 >
                     Send Schedule
                 </flux:button>
