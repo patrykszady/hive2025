@@ -767,56 +767,15 @@ class TelnyxWebhookController extends Controller
             return response()->json(['status' => 'ok']);
         }
 
-        $metadata = $callLog->metadata ?? [];
-
-        // Detect fast-answer decline: if admin "answered" within 5 seconds of
-        // being dialed, it's almost certainly a decline → carrier voicemail.
-        // No real human can physically answer that quickly. Hang up only this
-        // leg so other admin legs keep ringing.
-        $dialedAt = $clientState['admin_dialed_at'] ?? null;
-        if ($dialedAt) {
-            $answerLatency = microtime(true) - (float) $dialedAt;
-            if ($answerLatency < 5.0) {
-                Log::channel('telnyx')->info('Admin answered too quickly (likely decline → carrier VM) — hanging up', [
-                    'call_control_id' => $callControlId,
-                    'answer_latency_seconds' => round($answerLatency, 2),
-                    'call_log_id' => $callLogId,
-                    'admin_user_id' => $adminUserId,
-                ]);
-                $this->sendCallCommand($callControlId, 'hangup');
-                return response()->json(['status' => 'ok']);
-            }
-        }
-
-        // Hang up other ringing admin legs since this one answered
-        $this->hangupOtherAdminLegs($callLogId, $callControlId);
-
-        // Always hold admin with ringback and wait for AMD to confirm human
-        // before bridging. This prevents carrier voicemail from being bridged.
-        Log::channel('telnyx')->info('Admin answered — holding for AMD confirmation', [
+        // AMD is enabled — don't bridge or play ringback yet.
+        // Wait for call.machine.detection.ended to confirm human before proceeding.
+        // NOT playing audio here is critical: ringback would confuse AMD into
+        // classifying real humans as "machine" (hearing our own audio).
+        Log::channel('telnyx')->info('Admin answered — waiting for AMD confirmation', [
             'admin_call_control_id' => $callControlId,
             'incoming_call_control_id' => $incomingCallControlId,
             'call_log_id' => $callLogId,
             'admin_user_id' => $adminUserId,
-        ]);
-
-        // Store admin as pending — bridge when AMD confirms human AND TTS is done
-        $metadata['pending_admin_call_control_id'] = $callControlId;
-        $metadata['pending_admin_user_id'] = $adminUserId;
-        $metadata['pending_admin_amd_confirmed'] = false;
-        $callLog->update(['metadata' => $metadata]);
-
-        // Play ringback to the admin while waiting for AMD result
-        $holdAudioUrl = config('services.telnyx.hold_audio_url')
-            ?: $this->telnyxBaseUrl() . '/telnyx-audio/ringback.wav';
-        $this->sendCallCommand($callControlId, 'playback_start', [
-            'audio_url' => $holdAudioUrl,
-            'client_state' => base64_encode(json_encode([
-                'action' => 'admin_waiting_for_amd',
-                'call_log_id' => $callLogId,
-                'incoming_call_control_id' => $incomingCallControlId,
-                'admin_user_id' => $adminUserId,
-            ])),
         ]);
 
         return response()->json(['status' => 'ok']);
@@ -905,8 +864,8 @@ class TelnyxWebhookController extends Controller
 
         $action = $clientState['action'] ?? null;
 
-        // ── Admin ring leg hung up (timeout/no answer/AMD rejected) ──
-        if (in_array($action, ['admin_ring', 'admin_waiting_for_amd'], true)) {
+        // ── Admin ring leg hung up (timeout/no answer) ──
+        if (in_array($action, ['admin_ring', 'admin_waiting_for_tts'], true)) {
             return $this->handleAdminRingHangup($callControlId, $clientState, $hangupCause);
         }
 
@@ -1101,7 +1060,6 @@ class TelnyxWebhookController extends Controller
         if (($metadata['pending_admin_call_control_id'] ?? null) === $callControlId) {
             $metadata['pending_admin_call_control_id'] = null;
             $metadata['pending_admin_user_id'] = null;
-            $metadata['pending_admin_amd_confirmed'] = null;
         }
 
         $callLog->update(['metadata' => $metadata]);
@@ -1236,8 +1194,8 @@ class TelnyxWebhookController extends Controller
         $action = $clientState['action'] ?? null;
 
         // Re-loop ringback audio while caller is waiting for admin, click-to-call target,
-        // or admin is waiting for AMD confirmation
-        if (in_array($action, ['caller_waiting', 'click_to_call_waiting', 'admin_waiting_for_amd'], true)) {
+        // or admin is waiting for TTS to finish
+        if (in_array($action, ['caller_waiting', 'click_to_call_waiting', 'admin_waiting_for_tts'], true)) {
             $callLogId = $clientState['call_log_id'] ?? null;
 
             // Check cache flag first (fastest, avoids DB race condition)
@@ -1252,14 +1210,17 @@ class TelnyxWebhookController extends Controller
             }
 
             if (! $bridgedViaCache) {
+                // Preserve all client_state fields from the original command
+                // so downstream handlers (like hangup) have full context
+                $reloopClientState = $clientState;
+                $reloopClientState['action'] = $action;
+                $reloopClientState['call_log_id'] = $callLogId;
+
                 $holdAudioUrl = config('services.telnyx.hold_audio_url')
                     ?: $this->telnyxBaseUrl() . '/telnyx-audio/ringback.wav';
                 $this->sendCallCommand($callControlId, 'playback_start', [
                     'audio_url' => $holdAudioUrl,
-                    'client_state' => base64_encode(json_encode([
-                        'action' => $action,
-                        'call_log_id' => $callLogId,
-                    ])),
+                    'client_state' => base64_encode(json_encode($reloopClientState)),
                 ]);
             }
 
@@ -1321,10 +1282,9 @@ class TelnyxWebhookController extends Controller
                 $freshMetadata = $freshCallLog ? ($freshCallLog->metadata ?? []) : ($callLog->metadata ?? []);
                 $pendingAdminCcId = $freshMetadata['pending_admin_call_control_id'] ?? null;
                 $pendingAdminUserId = $freshMetadata['pending_admin_user_id'] ?? null;
-                $amdConfirmed = ! empty($freshMetadata['pending_admin_amd_confirmed']);
 
-                if ($pendingAdminCcId && $amdConfirmed) {
-                    // Admin answered during TTS and AMD confirmed human — bridge now
+                if ($pendingAdminCcId) {
+                    // Admin answered during TTS — bridge now
                     Log::channel('telnyx')->info('TTS completed — admin already waiting, bridging now', [
                         'call_control_id' => $callControlId,
                         'call_log_id' => $callLogId,
@@ -1337,23 +1297,6 @@ class TelnyxWebhookController extends Controller
                     ($freshCallLog ?? $callLog)->update(['metadata' => $freshMetadata]);
 
                     $this->bridgeAdminWithCaller($pendingAdminCcId, $callLogId, $callControlId, $pendingAdminUserId);
-                } elseif ($pendingAdminCcId && ! $amdConfirmed) {
-                    // Admin answered but AMD hasn't confirmed human yet — play ringback and wait
-                    Log::channel('telnyx')->info('TTS completed — admin waiting but AMD pending, playing ringback', [
-                        'call_control_id' => $callControlId,
-                        'call_log_id' => $callLogId,
-                        'pending_admin_cc_id' => $pendingAdminCcId,
-                    ]);
-
-                    $holdAudioUrl = config('services.telnyx.hold_audio_url')
-                        ?: $this->telnyxBaseUrl() . '/telnyx-audio/ringback.wav';
-                    $this->sendCallCommand($callControlId, 'playback_start', [
-                        'audio_url' => $holdAudioUrl,
-                        'client_state' => base64_encode(json_encode([
-                            'action' => 'caller_waiting',
-                            'call_log_id' => $callLogId,
-                        ])),
-                    ]);
                 } else {
                     // No admin answered yet — play ringback while caller waits
                     Log::channel('telnyx')->info('TTS completed — no admin answered yet, playing ringback', [
@@ -1556,11 +1499,14 @@ class TelnyxWebhookController extends Controller
             'action' => $action,
         ]);
 
-        $isMachine = in_array($result, ['machine', 'machine_start', 'machine_end_beep', 'machine_end_silence', 'machine_end_other', 'not_sure'], true);
-        $isHuman = in_array($result, ['human', 'human_residence', 'human_business'], true);
+        $isMachine = in_array($result, ['machine', 'machine_start', 'machine_end_beep', 'machine_end_silence', 'machine_end_other'], true);
+        $isHuman = in_array($result, ['human', 'human_residence', 'human_business', 'not_sure'], true);
 
         // ── Admin ring leg: AMD confirmation ──
-        if (in_array($action, ['admin_waiting_for_amd', 'admin_ring'], true)) {
+        // AMD fires after call.answered — this is where we decide to bridge or hang up.
+        // handleAdminRingAnswered intentionally does nothing (no audio) so AMD
+        // can listen to the real answering party without hearing our own ringback.
+        if ($action === 'admin_ring') {
             $callLogId = $clientState['call_log_id'] ?? null;
             $incomingCallControlId = $clientState['incoming_call_control_id'] ?? null;
             $adminUserId = $clientState['admin_user_id'] ?? null;
@@ -1570,10 +1516,7 @@ class TelnyxWebhookController extends Controller
                 return response()->json(['status' => 'ok']);
             }
 
-            $metadata = $callLog->metadata ?? [];
-
             if ($isHuman) {
-                // AMD confirmed real human — update flag and try to bridge
                 Log::channel('telnyx')->info('AMD confirmed human on admin leg', [
                     'call_control_id' => $callControlId,
                     'result' => $result,
@@ -1581,7 +1524,20 @@ class TelnyxWebhookController extends Controller
                     'admin_user_id' => $adminUserId,
                 ]);
 
-                $metadata['pending_admin_amd_confirmed'] = true;
+                // If call already handled by another admin or caller disconnected, hang up
+                if (in_array($callLog->status, [CallLog::STATUS_TRANSFERRED, CallLog::STATUS_COMPLETED, CallLog::STATUS_MISSED])) {
+                    $this->sendCallCommand($callControlId, 'hangup');
+                    return response()->json(['status' => 'ok']);
+                }
+
+                // Human confirmed — now hang up other ringing admin legs
+                $this->hangupOtherAdminLegs($callLogId, $callControlId);
+
+                $metadata = $callLog->metadata ?? [];
+
+                // Store pending admin state
+                $metadata['pending_admin_call_control_id'] = $callControlId;
+                $metadata['pending_admin_user_id'] = $adminUserId;
                 $callLog->update(['metadata' => $metadata]);
 
                 // Re-read to get latest state (TTS may have completed concurrently)
@@ -1589,45 +1545,46 @@ class TelnyxWebhookController extends Controller
                 $freshMetadata = $callLog->metadata ?? [];
 
                 if (! empty($freshMetadata['tts_complete'])) {
-                    $pendingAdminCcId = $freshMetadata['pending_admin_call_control_id'] ?? null;
-                    $pendingAdminUserId = $freshMetadata['pending_admin_user_id'] ?? null;
-
-                    if ($pendingAdminCcId && $incomingCallControlId) {
-                        Log::channel('telnyx')->info('AMD confirmed human + TTS done — bridging now', [
-                            'admin_call_control_id' => $pendingAdminCcId,
-                            'incoming_call_control_id' => $incomingCallControlId,
-                            'call_log_id' => $callLogId,
-                        ]);
-
-                        $freshMetadata['pending_admin_call_control_id'] = null;
-                        $freshMetadata['pending_admin_user_id'] = null;
-                        $callLog->update(['metadata' => $freshMetadata]);
-
-                        $this->bridgeAdminWithCaller($pendingAdminCcId, $callLogId, $incomingCallControlId, $pendingAdminUserId);
-                    }
-                } else {
-                    Log::channel('telnyx')->info('AMD confirmed human but TTS still playing — waiting', [
-                        'call_control_id' => $callControlId,
+                    // TTS already done — bridge immediately
+                    Log::channel('telnyx')->info('AMD human + TTS done — bridging now', [
+                        'admin_call_control_id' => $callControlId,
+                        'incoming_call_control_id' => $incomingCallControlId,
                         'call_log_id' => $callLogId,
+                    ]);
+
+                    $freshMetadata['pending_admin_call_control_id'] = null;
+                    $freshMetadata['pending_admin_user_id'] = null;
+                    $callLog->update(['metadata' => $freshMetadata]);
+
+                    $this->bridgeAdminWithCaller($callControlId, $callLogId, $incomingCallControlId, $adminUserId);
+                } else {
+                    // TTS still playing — hold admin with ringback until TTS finishes
+                    Log::channel('telnyx')->info('AMD human but TTS still playing — holding admin', [
+                        'admin_call_control_id' => $callControlId,
+                        'call_log_id' => $callLogId,
+                    ]);
+
+                    $holdAudioUrl = config('services.telnyx.hold_audio_url')
+                        ?: $this->telnyxBaseUrl() . '/telnyx-audio/ringback.wav';
+                    $this->sendCallCommand($callControlId, 'playback_start', [
+                        'audio_url' => $holdAudioUrl,
+                        'client_state' => base64_encode(json_encode([
+                            'action' => 'admin_waiting_for_tts',
+                            'call_log_id' => $callLogId,
+                            'incoming_call_control_id' => $incomingCallControlId,
+                            'admin_user_id' => $adminUserId,
+                        ])),
                     ]);
                 }
             } elseif ($isMachine) {
-                // AMD detected carrier voicemail — hang up admin leg
-                // The hangup event will trigger handleAdminRingHangup which handles
-                // removing from admin list and triggering voicemail if all legs failed
+                // Carrier voicemail — hang up this admin leg.
+                // The hangup event fires handleAdminRingHangup which removes from
+                // admin list and triggers voicemail if all legs have failed.
                 Log::channel('telnyx')->info('AMD detected voicemail on admin leg — hanging up', [
                     'call_control_id' => $callControlId,
                     'result' => $result,
                     'call_log_id' => $callLogId,
                 ]);
-
-                // Clear pending admin state before hanging up
-                if (($metadata['pending_admin_call_control_id'] ?? null) === $callControlId) {
-                    $metadata['pending_admin_call_control_id'] = null;
-                    $metadata['pending_admin_user_id'] = null;
-                    $metadata['pending_admin_amd_confirmed'] = null;
-                    $callLog->update(['metadata' => $metadata]);
-                }
 
                 $this->sendCallCommand($callControlId, 'hangup');
             }
@@ -1805,7 +1762,6 @@ class TelnyxWebhookController extends Controller
                             'call_log_id' => $callLogId,
                             'incoming_call_control_id' => $incomingCallControlId,
                             'admin_user_id' => $adminUser->id,
-                            'admin_dialed_at' => microtime(true),
                         ])),
                         'webhook_url' => $this->telnyxBaseUrl() . '/webhooks/telnyx/voice',
                     ]);
