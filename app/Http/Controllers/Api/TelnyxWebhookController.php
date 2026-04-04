@@ -769,6 +769,25 @@ class TelnyxWebhookController extends Controller
 
         $metadata = $callLog->metadata ?? [];
 
+        // Detect fast-answer decline: if admin "answered" within 5 seconds of
+        // being dialed, it's almost certainly a decline → carrier voicemail.
+        // No real human can physically answer that quickly. Hang up only this
+        // leg so other admin legs keep ringing.
+        $dialedAt = $clientState['admin_dialed_at'] ?? null;
+        if ($dialedAt) {
+            $answerLatency = microtime(true) - (float) $dialedAt;
+            if ($answerLatency < 5.0) {
+                Log::channel('telnyx')->info('Admin answered too quickly (likely decline → carrier VM) — hanging up', [
+                    'call_control_id' => $callControlId,
+                    'answer_latency_seconds' => round($answerLatency, 2),
+                    'call_log_id' => $callLogId,
+                    'admin_user_id' => $adminUserId,
+                ]);
+                $this->sendCallCommand($callControlId, 'hangup');
+                return response()->json(['status' => 'ok']);
+            }
+        }
+
         // Hang up other ringing admin legs since this one answered
         $this->hangupOtherAdminLegs($callLogId, $callControlId);
 
@@ -1537,8 +1556,8 @@ class TelnyxWebhookController extends Controller
             'action' => $action,
         ]);
 
-        $isMachine = in_array($result, ['machine', 'machine_start', 'machine_end_beep', 'machine_end_silence', 'machine_end_other'], true);
-        $isHuman = in_array($result, ['human', 'human_residence', 'human_business', 'not_sure'], true);
+        $isMachine = in_array($result, ['machine', 'machine_start', 'machine_end_beep', 'machine_end_silence', 'machine_end_other', 'not_sure'], true);
+        $isHuman = in_array($result, ['human', 'human_residence', 'human_business'], true);
 
         // ── Admin ring leg: AMD confirmation ──
         if (in_array($action, ['admin_waiting_for_amd', 'admin_ring'], true)) {
@@ -1786,6 +1805,7 @@ class TelnyxWebhookController extends Controller
                             'call_log_id' => $callLogId,
                             'incoming_call_control_id' => $incomingCallControlId,
                             'admin_user_id' => $adminUser->id,
+                            'admin_dialed_at' => microtime(true),
                         ])),
                         'webhook_url' => $this->telnyxBaseUrl() . '/webhooks/telnyx/voice',
                     ]);
