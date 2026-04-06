@@ -2019,21 +2019,15 @@ class TelnyxWebhookController extends Controller
             'original_caller' => $callLog?->from_number,
         ];
 
-        // CRITICAL: Set pending_voicemail BEFORE bridged flag to prevent race condition.
-        // If a concurrent speak.ended/welcome_done webhook sees telnyx_bridged=true,
-        // we must guarantee telnyx_pending_voicemail is already available for Cache::pull.
-        Cache::put("telnyx_pending_voicemail:{$callControlId}", $voicemailContext, now()->addMinutes(5));
-
-        // Now set the bridged flag to stop ringback re-loop.
+        // Set the bridged flag to stop ringback re-loop and signal to
+        // speak.ended/playback.ended handlers that the call is handled.
         Cache::put("telnyx_bridged:{$callControlId}", true, now()->addMinutes(10));
 
-        // Stop any active ringback/TTS audio so the IVR menu can be heard.
-        $this->sendCallCommand($callControlId, 'playback_stop');
-
-        // The voicemail IVR will be started by either:
-        // - handleCallPlaybackEnded (if ringback was playing → playback.ended fires)
-        // - handleCallSpeakEnded/welcome_done (if TTS was playing → speak.ended fires)
-        //   Both handlers check telnyx_pending_voicemail via Cache::pull.
+        // Start the IVR directly — gather_using_speak will automatically interrupt
+        // any active audio (welcome TTS speak or ringback playback) on the call.
+        // This avoids the race condition where event handlers (speak.ended, playback.ended)
+        // might not find the pending_voicemail cache value due to concurrent webhook processing.
+        $this->startVoicemailGather($callControlId, $voicemailContext);
     }
 
     /**
