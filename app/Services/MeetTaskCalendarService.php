@@ -67,6 +67,8 @@ class MeetTaskCalendarService
         $meetConfig = (array) config('nylas.meet', []);
         $conferencingProvider = (string) ($meetConfig['conferencing_provider'] ?? 'Microsoft Teams');
 
+        $isMicrosoft = str_contains($conferencingProvider, 'Microsoft');
+
         $payload = [
             'calendar_id' => $calendarId,
             'title' => $task->title ?: 'Meet',
@@ -86,13 +88,21 @@ class MeetTaskCalendarService
                 'start_timezone' => $timezone,
                 'end_timezone' => $timezone,
             ],
-            'reminders' => [
+        ];
+
+        $payload['reminders'] = $isMicrosoft
+            ? [
+                'use_default' => false,
+                'overrides' => [
+                    ['reminder_minutes' => 60],
+                ],
+            ]
+            : [
                 'use_default' => false,
                 'overrides' => [
                     ['reminder_minutes' => 60, 'reminder_method' => 'popup'],
                 ],
-            ],
-        ];
+            ];
 
         $response = $this->nylasService->createEvent($grantId, $payload);
 
