@@ -1,0 +1,397 @@
+<?php
+
+namespace App\Console\Commands;
+
+use App\Http\Controllers\ReceiptController;
+use App\Models\Expense;
+use App\Models\ExpenseReceipts;
+use App\Models\Receipt;
+use App\Services\NylasService;
+use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+use Spatie\Browsershot\Browsershot;
+
+class ReOcrReceipts extends Command
+{
+    protected $signature = 'receipts:re-ocr
+                            {--receipt=18 : Receipt config ID to filter by (default: 18 = Home Depot)}
+                            {--days=30 : Number of days to look back}
+                            {--expense= : Re-OCR a single expense ID (skips email fetch, uses stored PDF)}
+                            {--dry-run : Show what would be processed without making changes}';
+
+    protected $description = 'Re-create PDFs from receipt emails in the Saved folder, re-run CU OCR, and update stored receipt data.';
+
+    public function handle(NylasService $nylasService, ReceiptController $receiptController): int
+    {
+        // Single-expense mode: re-OCR the stored PDF directly
+        if ($this->option('expense')) {
+            return $this->reOcrSingleExpense($receiptController);
+        }
+
+        $dryRun  = (bool) $this->option('dry-run');
+        $days    = (int) $this->option('days');
+        $since   = now()->subDays($days);
+
+        $receiptConfig = Receipt::find((int) $this->option('receipt'));
+        if (! $receiptConfig) {
+            $this->error('Receipt config not found.');
+            return self::FAILURE;
+        }
+
+        $this->info("Receipt config: [{$receiptConfig->id}] {$receiptConfig->from_address} — \"{$receiptConfig->from_subject}\"");
+
+        // Resolve the Saved folder ID
+        $grantId     = config('nylas.receipts_grant_id');
+        $savedFolder = config('nylas.hive_receipts_saved_folder_id');
+
+        if (empty($savedFolder)) {
+            $this->error('Saved folder ID not configured.');
+            return self::FAILURE;
+        }
+
+        $this->info("Fetching messages from Saved folder (last {$days} days)...");
+
+        $messages = $nylasService->fetchFolderMessages($grantId, $savedFolder, [
+            'full_fetch'      => true,
+            'received_after'  => $since,
+            'include_headers' => true,
+        ]);
+
+        $this->info("Fetched " . count($messages) . " total messages from Saved folder.");
+
+        // Filter to only messages matching this receipt config's from_address
+        // Saved folder emails are forwarded — original sender is in X-Hive-Metadata header
+        $fromAddress = strtolower($receiptConfig->from_address);
+        $subjectMatch = $receiptConfig->from_subject;
+
+        $filtered = collect($messages)->filter(function ($msg) use ($fromAddress, $subjectMatch) {
+            // Parse X-Hive-Metadata header for original sender
+            $metadata = $this->extractHiveMetadata($msg);
+            $msgFrom = strtolower($metadata['from_email'] ?? ($msg['from'][0]['email'] ?? ''));
+            $msgSubject = $metadata['subject'] ?? ($msg['subject'] ?? '');
+
+            // Support wildcard from_address like "@stripe.com"
+            if (str_starts_with($fromAddress, '@')) {
+                $fromMatch = str_ends_with($msgFrom, $fromAddress);
+            } else {
+                $fromMatch = $msgFrom === $fromAddress;
+            }
+
+            if (! $fromMatch) {
+                return false;
+            }
+
+            if ($subjectMatch) {
+                $cleanSubject = preg_replace('/^(fw:|fwd:|re:)\s*/i', '', $msgSubject);
+                return stripos($cleanSubject, $subjectMatch) !== false;
+            }
+
+            return true;
+        });
+
+        $this->info("Matched " . $filtered->count() . " messages for {$receiptConfig->from_address}.");
+
+        if ($filtered->isEmpty()) {
+            return self::SUCCESS;
+        }
+
+        $success = 0;
+        $skipped = 0;
+        $failed  = 0;
+
+        foreach ($filtered as $message) {
+            $messageId = $message['id'] ?? 'unknown';
+            $subject   = $message['subject'] ?? '';
+            $msgDate   = isset($message['date']) ? date('Y-m-d', $message['date']) : '?';
+
+            $this->line("  [{$messageId}] {$msgDate} — {$subject}");
+
+            if ($dryRun) {
+                $success++;
+                continue;
+            }
+
+            try {
+                // Extract HTML body → PDF → OCR (same pipeline as fetchReceiptMessages)
+                $result = $this->processEmailToOcr($message, $receiptConfig, $receiptController);
+
+                if (! $result) {
+                    $this->warn("    → Could not extract receipt HTML, skipping.");
+                    $skipped++;
+                    continue;
+                }
+
+                if (isset($result['error'])) {
+                    $this->error("    → OCR returned error, skipping.");
+                    $failed++;
+                    continue;
+                }
+
+                // Match to existing expense by vendor + invoice + date
+                $fields     = $result['fields'];
+                $invoice    = $fields['invoice_number'] ?? null;
+                $ocrDate    = $fields['transaction_date'] ?? $msgDate;
+                $vendorId   = $receiptConfig->vendor_id;
+
+                $expenseQuery = Expense::where('vendor_id', $vendorId)
+                    ->whereNull('deleted_at')
+                    ->where('created_at', '>=', $since->copy()->subDays(5));
+
+                if ($invoice) {
+                    $expenseQuery->where('invoice', trim($invoice));
+                }
+
+                if ($ocrDate && $ocrDate !== '?') {
+                    $expenseQuery->whereBetween('date', [
+                        \Carbon\Carbon::parse($ocrDate)->subDays(3)->format('Y-m-d'),
+                        \Carbon\Carbon::parse($ocrDate)->addDays(3)->format('Y-m-d'),
+                    ]);
+                }
+
+                $expense = $expenseQuery->first();
+
+                if (! $expense) {
+                    $this->warn("    → No matching expense found (invoice: {$invoice}, date: {$ocrDate}). Skipping.");
+                    $skipped++;
+                    continue;
+                }
+
+                // Find the ExpenseReceipts record to update
+                $receiptRecord = ExpenseReceipts::where('expense_id', $expense->id)->first();
+                if (! $receiptRecord) {
+                    $this->warn("    → Expense {$expense->id} has no receipt record. Skipping.");
+                    $skipped++;
+                    continue;
+                }
+
+                // Update receipt data
+                $data = $receiptRecord->receipt_items ?? [];
+                $oldItems = $data['items'] ?? [];
+                $data['items'] = $fields['items'];
+
+                foreach (['subtotal', 'total', 'total_tax', 'tip', 'misc_fees', 'transaction_date', 'merchant_name', 'invoice_number', 'purchase_order', 'handwritten_notes', 'payment_methods'] as $key) {
+                    if (array_key_exists($key, $fields) && $fields[$key] !== null) {
+                        $data[$key] = $fields[$key];
+                    }
+                }
+
+                $receiptRecord->receipt_items = $data;
+                $receiptRecord->receipt_html  = $result['content'] ?? $receiptRecord->receipt_html;
+                $receiptRecord->save();
+
+                $itemCount = is_array($fields['items']) ? count($fields['items']) : 0;
+                $this->info("    → Expense {$expense->id}: {$itemCount} items (was " . count($oldItems) . ")");
+                $success++;
+            } catch (\Throwable $e) {
+                $this->error("    → Failed: {$e->getMessage()}");
+                Log::channel('nylas')->error('receipts:re-ocr failed', [
+                    'message_id' => $messageId,
+                    'error'      => $e->getMessage(),
+                ]);
+                $failed++;
+            }
+        }
+
+        $this->newLine();
+        $this->info("Done. Success: {$success}, Skipped: {$skipped}, Failed: {$failed}");
+
+        return $failed > 0 ? self::FAILURE : self::SUCCESS;
+    }
+
+    /**
+     * Extract receipt HTML from email body, render to PDF via Browsershot, and OCR.
+     */
+    private function processEmailToOcr(array $message, Receipt $receiptConfig, ReceiptController $receiptController): ?array
+    {
+        $body = $message['body'] ?? '';
+        if (empty($body)) {
+            return null;
+        }
+
+        $bodyType = strip_tags($body) !== $body ? 'html' : 'text';
+
+        // Strip images
+        $body = preg_replace("/<img[^>]+\>/i", '', $body);
+
+        // Determine receipt start
+        $receiptStart = 0;
+        if (! empty($receiptConfig->options['receipt_start'])) {
+            $starts = is_array($receiptConfig->options['receipt_start'])
+                ? $receiptConfig->options['receipt_start']
+                : [$receiptConfig->options['receipt_start']];
+
+            $startOffset = isset($receiptConfig->options['receipt_start_offset'])
+                ? intval($receiptConfig->options['receipt_start_offset'])
+                : 0;
+
+            foreach ($starts as $startText) {
+                $pos = stripos($body, $startText);
+                if ($pos !== false) {
+                    $receiptStart = $pos + $startOffset + strlen($startText);
+                    break;
+                }
+            }
+        }
+
+        // Determine receipt end
+        $receiptEnd = strlen($body);
+        if (! empty($receiptConfig->options['receipt_end'])) {
+            $ends = is_array($receiptConfig->options['receipt_end'])
+                ? $receiptConfig->options['receipt_end']
+                : [$receiptConfig->options['receipt_end']];
+
+            foreach ($ends as $endText) {
+                $pos = strpos($body, $endText, $receiptStart);
+                if ($pos !== false) {
+                    $receiptEnd = $pos;
+                    break;
+                }
+            }
+        }
+
+        $receiptHtml = substr($body, $receiptStart, $receiptEnd - $receiptStart);
+
+        if (empty(trim(strip_tags($receiptHtml)))) {
+            return null;
+        }
+
+        // Remove middle text if specified
+        if (! empty($receiptConfig->options['receipt_middle_text'])) {
+            preg_match($receiptConfig->options['receipt_middle_text'], $body, $matches);
+            if (! empty($matches[1])) {
+                $receiptHtml = str_replace($matches[1], '', $receiptHtml);
+            }
+        }
+
+        // Remove embedded images
+        if (! empty($receiptConfig->options['remove_images'])) {
+            $receiptHtml = preg_replace('/<img\b[^>]*>/i', '', $receiptHtml) ?? $receiptHtml;
+            $receiptHtml = preg_replace('/<v:imagedata\b[^>]*\/?>(?:<\/v:imagedata>)?/i', '', $receiptHtml) ?? $receiptHtml;
+            $receiptHtml = preg_replace('/background-image\s*:\s*url\([^)]*\)\s*;?/i', '', $receiptHtml) ?? $receiptHtml;
+        }
+
+        // Strip HTML if configured
+        if (! empty($receiptConfig->options['strip_html'])) {
+            $receiptHtml = preg_replace('/<br\s*\/?>/i', "\n", $receiptHtml);
+            $receiptHtml = preg_replace('/<\/(?:td|tr|p|div|li|h[1-6])>/i', "\n", $receiptHtml);
+            $receiptHtml = strip_tags($receiptHtml);
+            $receiptHtml = html_entity_decode($receiptHtml, ENT_QUOTES, 'UTF-8');
+            $lines = array_map('trim', explode("\n", $receiptHtml));
+            $lines = array_filter($lines, fn ($line) => $line !== '');
+            $receiptHtml = implode("\n", $lines);
+            $bodyType = 'text';
+        }
+
+        // Render to PDF via Browsershot
+        $view = view('misc.create_pdf_receipt', [
+            'receipt_html_main' => $receiptHtml,
+            'message_type'      => $bodyType,
+        ])->render();
+
+        $tempFilename = 're-ocr-' . date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '.pdf';
+        $tempPath     = '_temp_ocr/' . $tempFilename;
+
+        if (! Storage::disk('files')->exists('_temp_ocr')) {
+            Storage::disk('files')->makeDirectory('_temp_ocr');
+        }
+
+        $location = Storage::disk('files')->path($tempPath);
+
+        Browsershot::html($view)
+            ->newHeadless()
+            ->addChromiumArguments([
+                'no-sandbox',
+                'disable-setuid-sandbox',
+                'disable-dev-shm-usage',
+                'disable-gpu',
+                'single-process',
+            ])
+            ->format('A4')
+            ->margins(20, 0, 20, 20)
+            ->save($location);
+
+        // OCR the PDF
+        try {
+            $result = $receiptController->extractReceipt($tempPath, 'receipt', null, null, $receiptConfig);
+        } finally {
+            Storage::disk('files')->delete($tempPath);
+        }
+
+        return $result;
+    }
+
+    /**
+     * Extract the original sender metadata from the X-Hive-Metadata header.
+     */
+    private function extractHiveMetadata(array $message): array
+    {
+        $headers = $message['headers'] ?? [];
+
+        foreach ($headers as $header) {
+            if (strcasecmp($header['name'] ?? '', 'X-Hive-Metadata') === 0) {
+                $decoded = json_decode($header['value'] ?? '', true);
+                if (is_array($decoded)) {
+                    return $decoded;
+                }
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * Re-OCR a single expense using its stored PDF file.
+     */
+    private function reOcrSingleExpense(ReceiptController $receiptController): int
+    {
+        $record = ExpenseReceipts::where('expense_id', (int) $this->option('expense'))
+            ->whereNotNull('receipt_filename')
+            ->first();
+
+        if (! $record) {
+            $this->warn('No receipt record with a file found for expense ' . $this->option('expense') . '.');
+            return self::SUCCESS;
+        }
+
+        $filePath = 'receipts/' . $record->receipt_filename;
+        if (! Storage::disk('files')->exists($filePath)) {
+            $this->error("File not found: {$filePath}");
+            return self::FAILURE;
+        }
+
+        if ($this->option('dry-run')) {
+            $this->line("Would re-OCR: {$record->receipt_filename}");
+            return self::SUCCESS;
+        }
+
+        $this->line("Re-OCR: {$record->receipt_filename}");
+
+        $result = $receiptController->extractReceipt($filePath, 'receipt');
+
+        if (isset($result['error'])) {
+            $this->error("OCR returned error.");
+            return self::FAILURE;
+        }
+
+        $fields   = $result['fields'];
+        $data     = $record->receipt_items ?? [];
+        $oldItems = $data['items'] ?? [];
+        $data['items'] = $fields['items'];
+
+        foreach (['subtotal', 'total', 'total_tax', 'tip', 'misc_fees', 'transaction_date', 'merchant_name', 'invoice_number', 'purchase_order', 'handwritten_notes', 'payment_methods'] as $key) {
+            if (array_key_exists($key, $fields) && $fields[$key] !== null) {
+                $data[$key] = $fields[$key];
+            }
+        }
+
+        $record->receipt_items = $data;
+        $record->receipt_html  = $result['content'] ?? $record->receipt_html;
+        $record->save();
+
+        $itemCount = is_array($fields['items']) ? count($fields['items']) : 0;
+        $this->info("Updated: {$itemCount} items (was " . count($oldItems) . ")");
+
+        return self::SUCCESS;
+    }
+}

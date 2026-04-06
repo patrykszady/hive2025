@@ -250,5 +250,3 @@ Schedule::command('horizon:snapshot')
     ->everyFiveMinutes()
     ->name('horizon-snapshot')
     ->withoutOverlapping();
-
-

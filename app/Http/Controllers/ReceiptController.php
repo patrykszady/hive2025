@@ -735,6 +735,14 @@ class ReceiptController extends Controller
                 $formattedItems[$key]['Description'] = $description;
                 $formattedItems[$key]['ProductCode']  = $this->sanitizeProductCode($line['ProductCode']['valueString'] ?? null);
 
+                // Strip product code and return-policy indicators (e.g. <A>) from description
+                if ($formattedItems[$key]['Description'] && $formattedItems[$key]['ProductCode']) {
+                    $formattedItems[$key]['Description'] = trim(str_replace($formattedItems[$key]['ProductCode'], '', $formattedItems[$key]['Description']));
+                }
+                if ($formattedItems[$key]['Description']) {
+                    $formattedItems[$key]['Description'] = trim(preg_replace('/\s*<[A-Z]>\s*/i', ' ', $formattedItems[$key]['Description']));
+                }
+
                 if (isset($line['TotalPrice'])) {
                     $formattedItems[$key]['TotalPrice'] = $this->extractCurrencyAmount($line['TotalPrice']);
                 } elseif (isset($line['TotalAmount'])) {

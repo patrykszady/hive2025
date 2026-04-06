@@ -146,13 +146,13 @@ class SyncContentUnderstandingAnalyzer extends Command
             // ── Line items ─────────────────────────────────────────────────
             'Items' => [
                 'type'        => 'array',
-                'description' => 'List of purchased line items on the receipt.',
+                'description' => 'List of purchased line items on the receipt. Each physical item should appear exactly once. Some retailers (e.g. Home Depot, Lowe\'s) print a barcode with an abbreviated name on one line and the full product description on the next line — these belong to the SAME item and must be merged into a single entry, not treated as two separate items. Only lines that have a price are actual items.',
                 'items'       => [
                     'type'       => 'object',
                     'properties' => [
                         'Description' => [
                             'type'        => 'string',
-                            'description' => 'Name or description of the item.',
+                            'description' => 'Full name or description of the item. If the receipt shows a short/abbreviated name on one line and a longer product description on the next line, concatenate both lines into a single description. Do NOT include the product code, barcode, UPC, or item number in the description — those belong in the ProductCode field. Also strip any single-letter return-policy indicators such as <A>, <B>, <C>, etc. Example: given lines "084305382269 1QT BUCKET <A>" and "1QT HDX ALL PURP MIXING CONTAINER", the Description should be "1QT BUCKET 1QT HDX ALL PURP MIXING CONTAINER".',
                             'method'      => 'extract',
                         ],
                         'ProductCode' => [
