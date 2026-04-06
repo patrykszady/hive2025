@@ -1957,14 +1957,14 @@ class TelnyxWebhookController extends Controller
             }
         }
 
-        // Stop the ringback re-loop by setting the bridged flag.
-        Cache::put("telnyx_bridged:{$callControlId}", true, now()->addMinutes(10));
-
         // Check if voicemail is enabled
         $vendor = Vendor::find(1);
         $voicemailEnabled = (bool) data_get($vendor?->options ?? [], 'voicemail_enabled', true);
 
         if (! $voicemailEnabled) {
+            // Set bridged flag to stop ringback re-loop, then hang up
+            Cache::put("telnyx_bridged:{$callControlId}", true, now()->addMinutes(10));
+
             Log::channel('telnyx')->info('Voicemail disabled — hanging up', [
                 'call_control_id' => $callControlId,
             ]);
@@ -2019,20 +2019,21 @@ class TelnyxWebhookController extends Controller
             'original_caller' => $callLog?->from_number,
         ];
 
-        // Store the voicemail context BEFORE stopping playback. This prevents
-        // a race condition where the speak.ended webhook (for welcome TTS)
-        // fires during the playback_stop HTTP round-trip — by the time
-        // speak.ended checks Cache::pull(), the context is already available.
-        // Whichever event fires first (playback.ended or speak.ended) will
-        // pick up the context via Cache::pull and start the IVR gather.
+        // CRITICAL: Set pending_voicemail BEFORE bridged flag to prevent race condition.
+        // If a concurrent speak.ended/welcome_done webhook sees telnyx_bridged=true,
+        // we must guarantee telnyx_pending_voicemail is already available for Cache::pull.
         Cache::put("telnyx_pending_voicemail:{$callControlId}", $voicemailContext, now()->addMinutes(5));
 
-        // Stop any active ringback audio so the IVR menu TTS can be heard.
+        // Now set the bridged flag to stop ringback re-loop.
+        Cache::put("telnyx_bridged:{$callControlId}", true, now()->addMinutes(10));
+
+        // Stop any active ringback/TTS audio so the IVR menu can be heard.
         $this->sendCallCommand($callControlId, 'playback_stop');
 
         // The voicemail IVR will be started by either:
         // - handleCallPlaybackEnded (if ringback was playing → playback.ended fires)
         // - handleCallSpeakEnded/welcome_done (if TTS was playing → speak.ended fires)
+        //   Both handlers check telnyx_pending_voicemail via Cache::pull.
     }
 
     /**
@@ -2582,6 +2583,8 @@ class TelnyxWebhookController extends Controller
 
         if (! $thread) {
             $thread = $this->createThreadForInboundMessage($normalizedCaller, $ourNumber);
+        } elseif (! $thread->vendor_id) {
+            $thread->update(['vendor_id' => Vendor::find(1)?->id]);
         }
 
         // Create the message in the app's SMS system so it appears in the messaging interface
