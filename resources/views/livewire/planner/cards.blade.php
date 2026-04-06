@@ -412,18 +412,18 @@
                     wire:key="day-header-{{ $dayData->day->format('Y-m-d') }}-idx{{ $loop->index }}"
                     data-day-index="{{ $loop->index }}"
                     @if($dayData->isToday) data-today="true" @endif
-                    class="shrink-0 relative z-20 sticky top-0 {{ $isWeekend ? 'w-40 bg-zinc-200 dark:bg-zinc-700' : 'w-80 bg-zinc-100 dark:bg-zinc-800' }}"
+                    class="shrink-0 relative z-20 sticky top-0 {{ $isWeekend ? 'w-52 bg-zinc-200 dark:bg-zinc-700' : 'w-80 bg-zinc-100 dark:bg-zinc-800' }}"
                     style="grid-column: {{ $dayColIndex }}; grid-row: 1;"
                 >
                     {{-- Day Header --}}
-                    <div class="flex items-center justify-between p-3 mb-3 {{ $isWeekend ? 'opacity-75' : '' }}">
-                        <flux:heading size="lg" class="{{ $dayData->isToday ? 'text-indigo-600 dark:text-indigo-400' : '' }}">
+                    <div class="p-3 mb-3 {{ $isWeekend ? 'opacity-75' : '' }}">
+                        <flux:heading size="lg" class="whitespace-nowrap {{ $dayData->isToday ? 'text-indigo-600 dark:text-indigo-400' : '' }}">
                             {{ $dayData->title }}
                         </flux:heading>
                         @if ($dayData->isToday)
-                            <flux:badge color="indigo" size="sm">Today</flux:badge>
+                            <flux:badge color="indigo" size="sm" class="mt-1">Today</flux:badge>
                         @elseif ($dayData->isTomorrow && ! $dayData->isWeekend)
-                            <flux:badge color="zinc" size="sm">Tomorrow</flux:badge>
+                            <flux:badge color="zinc" size="sm" class="mt-1">Tomorrow</flux:badge>
                         @endif
                     </div>
                 </div>
@@ -440,7 +440,7 @@
                     @endphp
                     <div
                         wire:key="project-{{ $projectColumn->id }}-{{ $dayData->day->format('Y-m-d') }}"
-                        class="min-w-0 pb-2 relative z-10 {{ $isWeekend ? 'w-40' : 'w-80' }}"
+                        class="min-w-0 pb-2 relative z-10 {{ $isWeekend ? 'w-52' : 'w-80' }}"
                         style="grid-column: {{ $dayColIndex }}; grid-row: {{ $projectRowIndex }};"
                     >
                         @php
@@ -460,14 +460,14 @@
                                                         href="{{ route('projects.show', $projectColumn->project) }}"
                                                         target="_blank"
                                                         rel="noopener noreferrer"
-                                                        class="truncate hover:underline underline-offset-2"
+                                                        class="truncate hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
                                                     >
                                                         {{ $projectColumn->title }}
                                                     </a>
                                                     @if($latestStatus)
-                                                        <flux:tooltip content="{{ $latestStatus->title }}">
-                                                            <flux:badge :color="$latestStatus->badge_color" size="sm" class="!px-0 !size-2 !min-w-0 rounded-full shrink-0" />
-                                                        </flux:tooltip>
+                                                        <flux:badge :color="$latestStatus->badge_color" size="sm" inset="top bottom left right" class="shrink-0">
+                                                            {{ $latestStatus->title }}
+                                                        </flux:badge>
                                                     @endif
                                                 </flux:heading>
                                                 <x-slot name="actions">
@@ -559,14 +559,14 @@
     @php
         $weekdayCount = $dayHeaders->filter(fn($h) => !$h->isWeekend)->count();
         $weekendCount = $dayHeaders->filter(fn($h) => $h->isWeekend)->count();
-        $tableWidth = 224 + ($weekdayCount * 200) + ($weekendCount * 80);
+        $tableWidth = 224 + ($weekdayCount * 200) + ($weekendCount * 140);
     @endphp
     <div class="flex-1 min-h-0 overflow-auto bg-white dark:bg-zinc-900">
         <table class="border-collapse table-fixed" style="width: {{ $tableWidth }}px;">
             <colgroup>
                 <col style="width: 224px;">
                 @foreach ($dayHeaders as $dayHeader)
-                    <col style="width: {{ $dayHeader->isWeekend ? '80' : '200' }}px;">
+                    <col style="width: {{ $dayHeader->isWeekend ? '140' : '200' }}px;">
                 @endforeach
             </colgroup>
             <thead class="sticky top-0 z-20 bg-white dark:bg-zinc-900">
@@ -581,10 +581,10 @@
                                 {{ $dayHeader->isWeekend ? 'bg-zinc-50 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500' : 'text-zinc-600 dark:text-zinc-300' }}
                                 {{ $dayHeader->isToday ? '!text-indigo-600 dark:!text-indigo-400' : '' }}"
                         >
-                            <div class="flex items-center gap-2">
-                                <span>{{ $dayHeader->title }}</span>
+                            <div>
+                                <span class="whitespace-nowrap">{{ $dayHeader->title }}</span>
                                 @if ($dayHeader->isToday)
-                                    <flux:badge color="indigo" size="sm">Today</flux:badge>
+                                    <flux:badge color="indigo" size="sm" class="mt-1">Today</flux:badge>
                                 @endif
                             </div>
                         </th>
@@ -600,14 +600,14 @@
                                 <a
                                     href="{{ route('projects.show', $row->project) }}"
                                     target="_blank"
-                                    class="font-medium text-sm text-zinc-900 dark:text-zinc-100 truncate hover:underline underline-offset-2"
+                                    class="font-medium text-sm text-zinc-900 dark:text-zinc-100 truncate hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
                                 >
                                     {{ $row->title }}
                                 </a>
                                 @if ($row->project->latestStatus)
-                                    <flux:tooltip content="{{ $row->project->latestStatus->title }}">
-                                        <flux:badge :color="$row->project->latestStatus->badge_color" size="sm" class="!px-0 !size-2 !min-w-0 rounded-full shrink-0" />
-                                    </flux:tooltip>
+                                    <flux:badge :color="$row->project->latestStatus->badge_color" size="sm" inset="top bottom" class="shrink-0">
+                                        {{ $row->project->latestStatus->title }}
+                                    </flux:badge>
                                 @endif
                             </div>
                             <div class="text-xs text-zinc-500 dark:text-zinc-400 truncate">
@@ -616,7 +616,7 @@
                             @if ($row->undated_tasks_count > 0)
                                 <button
                                     wire:click="openUndatedTasksModal({{ $row->id }})"
-                                    class="mt-1 text-xs text-orange-600 dark:text-orange-400 hover:underline"
+                                    class="mt-1 inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50 transition-colors"
                                 >
                                     {{ $row->undated_tasks_count }} pending
                                 </button>

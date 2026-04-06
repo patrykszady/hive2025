@@ -2028,6 +2028,42 @@ class TelnyxWebhookController extends Controller
     }
 
     /**
+     * Build the IVR prompt text for a given call log.
+     */
+    protected function buildIvrPrompt(?int $callLogId): string
+    {
+        $vendor = Vendor::find(1);
+        $shortName = data_get($vendor?->options ?? [], 'short_name') ?: ($vendor?->business_name ?? 'us');
+
+        $callLog = $callLogId ? CallLog::find($callLogId) : null;
+        $callerName = null;
+        $isKnownCaller = false;
+        if ($callLog?->user_id) {
+            $callerUser = User::find($callLog->user_id);
+            $callerName = $callerUser?->first_name;
+            $isKnownCaller = true;
+        }
+
+        if ($isKnownCaller) {
+            $ivrTemplate = data_get($vendor?->options ?? [], 'voicemail_message')
+                ?: "{company} is not available right now. {name}, if this is an emergency, press 1 to re-dial {company}. Press 2 to send a text on your behalf so {company} knows to call you back ASAP. Stay on the line to leave a voicemail.";
+        } else {
+            $ivrTemplate = data_get($vendor?->options ?? [], 'voicemail_message_unknown')
+                ?: "{company} is not available right now. Press 2 to send a text on your behalf so {company} knows to call you back ASAP. Stay on the line to leave a voicemail.";
+        }
+
+        $ivrPrompt = str_replace(
+            ['{name}', '{company}', '{greeting}'],
+            [$callerName ?? '', $shortName, $this->buildTimeGreeting()],
+            $ivrTemplate
+        );
+        $ivrPrompt = preg_replace('/\s+/', ' ', trim($ivrPrompt));
+        $ivrPrompt = preg_replace('/\s+([!.?,])/', '$1', $ivrPrompt);
+
+        return $ivrPrompt;
+    }
+
+    /**
      * Send the voicemail IVR gather_using_speak command.
      * Called either directly (no active playback) or from handleCallPlaybackEnded
      * after the ringback has been confirmed stopped.
@@ -2047,19 +2083,22 @@ class TelnyxWebhookController extends Controller
             'is_known_caller' => $isKnownCaller,
         ]);
 
+        $retryCount = $context['retry_count'] ?? 0;
+
         $this->sendCallCommand($callControlId, 'gather_using_speak', [
             'payload' => $ivrPrompt,
             ...$this->ttsVoiceParams(),
             'valid_digits' => $validDigits,
             'minimum_digits' => 1,
             'maximum_digits' => 1,
-            'timeout_millis' => 7000,
+            'timeout_millis' => 15000,
             'maximum_tries' => 1,
             'client_state' => base64_encode(json_encode([
                 'action' => 'voicemail_ivr_menu',
                 'call_log_id' => $callLogId,
                 'original_caller' => $originalCaller,
                 'is_known_caller' => $isKnownCaller,
+                'retry_count' => $retryCount,
             ])),
         ]);
     }
@@ -2177,7 +2216,28 @@ class TelnyxWebhookController extends Controller
                 ]);
             }
         } else {
-            // ── No digit / timeout: play voicemail greeting then record ──
+            // ── No digit / timeout: retry IVR once (TTS can fail due to Telnyx race condition), then voicemail ──
+            $retryCount = $clientState['retry_count'] ?? 0;
+
+            if ($retryCount < 1) {
+                Log::channel('telnyx')->info('IVR: no digit pressed — retrying IVR menu (TTS may not have played)', [
+                    'call_control_id' => $callControlId,
+                    'retry_count' => $retryCount,
+                    'call_log_id' => $callLogId,
+                ]);
+
+                $this->startVoicemailGather($callControlId, [
+                    'call_log_id' => $callLogId,
+                    'ivr_prompt' => $this->buildIvrPrompt($callLogId),
+                    'valid_digits' => $isKnownCaller ? '12' : '2',
+                    'is_known_caller' => $isKnownCaller,
+                    'original_caller' => $originalCaller,
+                    'retry_count' => $retryCount + 1,
+                ]);
+
+                return response()->json(['status' => 'ok']);
+            }
+
             Log::channel('telnyx')->info('IVR: no digit pressed — playing voicemail greeting', [
                 'call_control_id' => $callControlId,
             ]);
@@ -2324,18 +2384,15 @@ class TelnyxWebhookController extends Controller
     }
 
     /**
-     * Send SMS to admin call recipients on behalf of the caller (IVR Press 2).
+     * Send callback notification to the business SMS system on behalf of the caller (IVR Press 2).
+     * Creates a message in the app's SMS thread so it appears in the messaging interface
+     * and triggers push notifications to all admins.
      */
     protected function sendCallbackSms(?int $callLogId, ?string $callerNumber): void
     {
-        $vendor = Vendor::find(1);
-        $vendorOptions = $vendor ? (array) $vendor->options : [];
-        $recipientUserIds = (array) data_get($vendorOptions, 'call_recipients', []);
-
-        if (empty($recipientUserIds) || ! $callerNumber) {
-            Log::channel('telnyx')->warning('Cannot send callback SMS — no recipients or caller number', [
+        if (! $callerNumber) {
+            Log::channel('telnyx')->warning('Cannot send callback SMS — no caller number', [
                 'call_log_id' => $callLogId,
-                'caller_number' => $callerNumber,
             ]);
             return;
         }
@@ -2354,74 +2411,54 @@ class TelnyxWebhookController extends Controller
 
         $smsText = "Missed call from {$callerDisplay}. They requested a callback via the phone menu. Please call them back ASAP.";
 
-        $apiKey = config('services.telnyx.api_key');
-        $from = config('services.telnyx.from');
-        $messagingProfileId = config('services.telnyx.messaging_profile_id');
-
-        if (! $apiKey || ! $from) {
-            Log::channel('telnyx')->error('Cannot send callback SMS — Telnyx SMS not configured');
+        $ourNumber = config('services.telnyx.from');
+        if (! $ourNumber) {
+            Log::channel('telnyx')->error('Cannot send callback SMS — Telnyx from number not configured');
             return;
         }
 
-        $adminUsers = User::whereIn('id', $recipientUserIds)
-            ->whereNotNull('cell_phone')
-            ->where('cell_phone', '!=', '')
-            ->get();
+        $normalizedCaller = GroupSmsService::formatE164($callerNumber);
 
-        foreach ($adminUsers as $adminUser) {
-            $phone = $adminUser->cell_phone;
+        // Find or create the SMS thread for this caller
+        $thread = SmsGroupThread::findByParticipant($ourNumber, $normalizedCaller);
 
-            // Ensure E.164
-            if (! str_starts_with($phone, '+')) {
-                $digits = preg_replace('/\D/', '', $phone);
-                if (strlen($digits) === 10) {
-                    $phone = '+1' . $digits;
-                } elseif (strlen($digits) === 11 && str_starts_with($digits, '1')) {
-                    $phone = '+' . $digits;
-                }
-            }
+        if (! $thread) {
+            $thread = $this->createThreadForInboundMessage($normalizedCaller, $ourNumber);
+        }
 
-            // In dev, redirect to dev number
-            if (app()->environment(['local', 'development']) && ($devTo = config('services.telnyx.dev_to'))) {
-                Log::channel('telnyx')->info('Dev: redirecting callback SMS', ['original' => $phone, 'redirected_to' => $devTo]);
-                $phone = $devTo;
-            }
+        // Create the message in the app's SMS system so it appears in the messaging interface
+        $message = SmsMessage::create([
+            'thread_id' => $thread?->id,
+            'provider' => 'telnyx',
+            'provider_message_id' => 'callback_' . ($callLogId ?? uniqid()),
+            'direction' => SmsMessage::DIRECTION_INBOUND,
+            'from_number' => $normalizedCaller,
+            'to_numbers' => [$ourNumber],
+            'text' => $smsText,
+            'status' => 'received',
+        ]);
+
+        if ($thread) {
+            $thread->update(['last_activity_at' => now()]);
 
             try {
-                $payload = [
-                    'from' => $from,
-                    'to' => $phone,
-                    'text' => $smsText,
-                ];
-
-                if ($messagingProfileId) {
-                    $payload['messaging_profile_id'] = $messagingProfileId;
-                }
-
-                $response = Http::withToken($apiKey)
-                    ->post('https://api.telnyx.com/v2/messages', $payload);
-
-                if ($response->successful()) {
-                    Log::channel('telnyx')->info('Callback SMS sent to admin', [
-                        'admin_user_id' => $adminUser->id,
-                        'admin_name' => $adminUser->full_name,
-                        'phone' => $phone,
-                    ]);
-                } else {
-                    Log::channel('telnyx')->error('Failed to send callback SMS', [
-                        'admin_user_id' => $adminUser->id,
-                        'phone' => $phone,
-                        'error' => $response->json(),
-                    ]);
-                }
-            } catch (\Exception $e) {
-                Log::channel('telnyx')->error('Exception sending callback SMS', [
-                    'admin_user_id' => $adminUser->id,
-                    'phone' => $phone,
+                \App\Events\SmsMessageReceived::dispatch($thread->id);
+            } catch (\Throwable $e) {
+                Log::warning('SMS broadcast failed', [
+                    'thread_id' => $thread->id,
                     'error' => $e->getMessage(),
                 ]);
             }
         }
+
+        SendInboundSmsBrowserNotifications::dispatch($message->id);
+
+        Log::channel('telnyx')->info('Callback message created in SMS system', [
+            'call_log_id' => $callLogId,
+            'caller_number' => $normalizedCaller,
+            'thread_id' => $thread?->id,
+            'message_id' => $message->id,
+        ]);
     }
 
     /**
