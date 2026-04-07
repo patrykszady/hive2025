@@ -27,13 +27,17 @@
                 display: none;
             }
         }
-        /* Desktop collapsed: constrain to collapsed width */
+        /* Desktop collapsed: pre-apply collapsed state before Flux JS boots.
+           Uses html[data-sidebar-collapsed] set by the head <script> above from localStorage.
+           Removed after the sidebar body script sets the proper Flux attribute. */
         @media (min-width: 1024px) {
-            html[data-sidebar-collapsed] ui-sidebar:not(:defined) {
-                width: 3.5rem;
-                min-width: 3.5rem;
-                max-width: 3.5rem;
-                overflow: clip;
+            html[data-sidebar-collapsed] [data-flux-sidebar] {
+                width: 3.5rem !important;
+                min-width: 3.5rem !important;
+                overflow: clip !important;
+            }
+            html[data-sidebar-collapsed] [data-flux-main] {
+                margin-left: 3.5rem !important;
             }
         }
     </style>

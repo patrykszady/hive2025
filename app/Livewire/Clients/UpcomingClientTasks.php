@@ -2,16 +2,19 @@
 
 namespace App\Livewire\Clients;
 
+use App\Livewire\Concerns\HasLaterTasks;
 use App\Models\Client;
 use App\Models\Task;
 use App\Models\User;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 
 class UpcomingClientTasks extends Component
 {
+    use HasLaterTasks;
     protected $listeners = ['refreshComponent' => '$refresh'];
 
     public Client $client;
@@ -158,64 +161,19 @@ class UpcomingClientTasks extends Component
         return $grouped->sortKeys();
     }
 
-    /**
-     * Get info about the next task after the displayed week.
-     */
-    #[Computed]
-    public function nextTaskInfo(): ?object
+    protected function laterTasksBaseQuery(): Builder
     {
-        $today = browser_today();
-        $windowEnd = $today->copy()->addDays(6);
-        $windowEndStr = $windowEnd->format('Y-m-d');
-
         $projectIds = $this->getProjectIds();
 
-        if ($projectIds->isEmpty()) {
-            return null;
-        }
-
-        $tasks = Task::withTrashed()
+        return Task::withTrashed()
             ->whereIn('project_id', $projectIds)
             ->whereNotNull('start_date')
-            ->whereNotNull('end_date')
-            ->whereDate('start_date', '>', $windowEndStr)
-            ->get();
+            ->whereNotNull('end_date');
+    }
 
-        $futureDates = collect();
-        foreach ($tasks as $task) {
-            $selectedDates = (array) data_get($task->options, 'dates', []);
-            if (! empty($selectedDates)) {
-                foreach ($selectedDates as $dateStr) {
-                    if ($dateStr > $windowEndStr) {
-                        $futureDates->push($dateStr);
-                    }
-                }
-            } else {
-                $taskStartStr = $task->start_date->format('Y-m-d');
-                if ($taskStartStr > $windowEndStr) {
-                    $futureDates->push($taskStartStr);
-                }
-            }
-        }
-
-        if ($futureDates->isEmpty()) {
-            return null;
-        }
-
-        $nextDateStr = $futureDates->sort()->first();
-        $nextDate = Carbon::parse($nextDateStr, (string) config('app.timezone'))->startOfDay();
-
-        $daysUntil = (int) $windowEnd->copy()->addDay()->startOfDay()->diffInDays($nextDate);
-
-        if ($daysUntil <= 0) {
-            return null;
-        }
-
-        return (object) [
-            'days' => $daysUntil,
-            'label' => $daysUntil === 1 ? 'Next task in 1 day' : "Next task in {$daysUntil} days",
-            'date' => $nextDate->format('D, M j'),
-        ];
+    protected function laterTasksWindowEnd(): string
+    {
+        return browser_today()->addDays(6)->format('Y-m-d');
     }
 
     /**

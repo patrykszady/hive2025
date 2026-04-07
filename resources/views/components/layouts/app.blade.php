@@ -56,6 +56,18 @@
             </flux:dropdown>
         </flux:sidebar>
 
+        {{-- Sidebar FOUC prevention: set collapsed attribute before browser paints main content.
+             Runs synchronously after sidebar is parsed, before flux:main renders. --}}
+        <script>
+            try {
+                if (JSON.parse(localStorage.getItem('flux-sidebar-collapsed-desktop'))) {
+                    var sb = document.querySelector('[data-flux-sidebar]');
+                    if (sb) sb.setAttribute('data-flux-sidebar-collapsed-desktop', '');
+                }
+                document.documentElement.removeAttribute('data-sidebar-collapsed');
+            } catch(e) {}
+        </script>
+
         <flux:header class="lg:hidden lg:pointer-events-none print:hidden">
             <flux:button
                 class="lg:hidden bg-white/60 dark:bg-zinc-900/50 backdrop-blur-[2px] border border-zinc-200/60 dark:border-zinc-700/60 shadow-sm rounded-lg"

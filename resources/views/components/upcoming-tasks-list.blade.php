@@ -1,6 +1,6 @@
 @props([
     'groupedTasks',
-    'nextTaskInfo' => null,
+    'laterTasks' => null,
     'taskCount' => 0,
     'showAvatars' => true,
     'clickable' => true,
@@ -328,9 +328,6 @@
                         <span x-show="badge === 'yesterday'" @if($serverBadge !== 'yesterday') style="display:none" @endif>
                             <flux:badge color="zinc" size="sm">Yesterday</flux:badge>
                         </span>
-                        @if($tasks->isEmpty())
-                            <flux:badge color="zinc" size="sm">No Tasks</flux:badge>
-                        @endif
                     </div>
                     
                     @include('components.upcoming-tasks-list-tasks', [
@@ -346,14 +343,52 @@
                 </div>
             @endforeach
 
-            {{-- Next task beyond the displayed week --}}
-            @if($nextTaskInfo)
-                <div class="pt-2 border-t border-zinc-200 dark:border-zinc-700">
-                    <div class="flex items-center gap-1.5 text-sm text-amber-600 dark:text-amber-400 italic pl-1">
-                        <flux:icon.calendar-days class="size-3.5" />
-                        <span>{{ $nextTaskInfo->label }} ({{ $nextTaskInfo->date }})</span>
-                    </div>
-                </div>
+            {{-- Later tasks beyond the displayed week --}}
+            @if($laterTasks && $laterTasks->isNotEmpty())
+                <flux:accordion transition>
+                    <flux:accordion.item>
+                        <flux:accordion.heading>
+                            <div class="flex items-center gap-2">
+                                <span class="text-amber-600 dark:text-amber-400">Later</span>
+                                <flux:badge color="amber" size="sm">{{ $laterTasks->flatten()->count() }}</flux:badge>
+                                @php
+                                    $nextLaterDate = \Carbon\Carbon::parse($laterTasks->keys()->first());
+                                    $daysUntil = (int) now()->startOfDay()->diffInDays($nextLaterDate, false);
+                                @endphp
+                                <span class="text-xs text-zinc-400 dark:text-zinc-500 italic">
+                                    Next task in {{ $daysUntil }} {{ Str::plural('day', $daysUntil) }} ({{ $nextLaterDate->format('D, M j') }})
+                                </span>
+                            </div>
+                        </flux:accordion.heading>
+                        <flux:accordion.content>
+                            <div class="space-y-4">
+                                @foreach($laterTasks as $date => $tasks)
+                                    @php
+                                        $carbonDate = \Carbon\Carbon::parse($date);
+                                    @endphp
+                                    <div class="space-y-2">
+                                        <div class="flex items-center gap-2 min-h-6">
+                                            <flux:heading size="sm" class="text-zinc-500 dark:text-zinc-400">
+                                                {{ $carbonDate->format('D, M j, Y') }}
+                                            </flux:heading>
+                                        </div>
+
+                                        @include('components.upcoming-tasks-list-tasks', [
+                                            'tasks' => $tasks,
+                                            'date' => $date,
+                                            'carbonDate' => $carbonDate,
+                                            'showAvatars' => $showAvatars,
+                                            'clickable' => $clickable,
+                                            'showProjectInfo' => $showProjectInfo,
+                                            'showVendorInfo' => $showVendorInfo,
+                                            'publicView' => $publicView,
+                                        ])
+                                    </div>
+                                @endforeach
+                            </div>
+                        </flux:accordion.content>
+                    </flux:accordion.item>
+                </flux:accordion>
             @endif
         </div>
     @endif

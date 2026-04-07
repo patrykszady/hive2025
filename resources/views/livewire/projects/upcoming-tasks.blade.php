@@ -3,7 +3,7 @@
     <x-upcoming-tasks-list
         title="Tasks"
         :grouped-tasks="$this->groupedTasks"
-        :next-task-info="$this->nextTaskInfo"
+        :later-tasks="$this->laterTasks"
         :task-count="$this->taskCount"
         :unscheduled-tasks="$this->unscheduledTasks"
         :show-avatars="true"

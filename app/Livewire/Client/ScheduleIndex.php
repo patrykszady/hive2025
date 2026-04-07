@@ -2,9 +2,11 @@
 
 namespace App\Livewire\Client;
 
+use App\Livewire\Concerns\HasLaterTasks;
 use App\Models\Project;
 use App\Models\Task;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
@@ -12,6 +14,7 @@ use Livewire\Component;
 
 class ScheduleIndex extends Component
 {
+    use HasLaterTasks;
     protected $listeners = ['refreshComponent' => '$refresh'];
 
     #[Locked]
@@ -215,68 +218,21 @@ class ScheduleIndex extends Component
         return $grouped->sortKeys();
     }
 
-    /**
-     * Get info about the next task after the displayed week.
-     */
-    #[Computed]
-    public function nextTaskInfo(): ?object
+    protected function laterTasksBaseQuery(): Builder
     {
-        $projectIds = $this->clientProjectIds;
+        return Task::withTrashed()
+            ->whereIn('project_id', $this->clientProjectIds)
+            ->whereNotNull('start_date')
+            ->whereNotNull('end_date');
+    }
 
-        if (empty($projectIds)) {
-            return null;
-        }
-
+    protected function laterTasksWindowEnd(): string
+    {
         $today = $this->getToday();
-        $todayStr = $today->format('Y-m-d');
         $endOfWeek = $today->copy()->endOfWeek(Carbon::SUNDAY);
         $displayEnd = $endOfWeek->max($today->copy()->addDays(5));
-        $displayEndStr = $displayEnd->format('Y-m-d');
 
-        $tasks = Task::withTrashed()
-            ->whereIn('project_id', $projectIds)
-            ->whereNotNull('start_date')
-            ->whereNotNull('end_date')
-            ->whereDate('end_date', '>=', $today)
-            ->get();
-
-        // Collect all task dates beyond the displayed week
-        $futureDates = collect();
-        foreach ($tasks as $task) {
-            $selectedDates = (array) data_get($task->options, 'dates', []);
-            if (! empty($selectedDates)) {
-                foreach ($selectedDates as $dateStr) {
-                    if ($dateStr > $displayEndStr) {
-                        $futureDates->push($dateStr);
-                    }
-                }
-            } else {
-                $taskStartStr = $task->start_date->format('Y-m-d');
-                if ($taskStartStr > $displayEndStr) {
-                    $futureDates->push($taskStartStr);
-                }
-            }
-        }
-
-        if ($futureDates->isEmpty()) {
-            return null;
-        }
-
-        // Get the earliest future date
-        $nextDateStr = $futureDates->sort()->first();
-        $nextDate = Carbon::parse($nextDateStr, $this->getProjectTimezone())->startOfDay();
-        
-        $daysUntil = (int) $displayEnd->copy()->addDay()->startOfDay()->diffInDays($nextDate);
-
-        if ($daysUntil <= 0) {
-            return null;
-        }
-
-        return (object) [
-            'days' => $daysUntil,
-            'label' => $daysUntil === 1 ? 'Next task in 1 day' : "Next task in {$daysUntil} days",
-            'date' => $nextDate->format('D, M j'),
-        ];
+        return $displayEnd->format('Y-m-d');
     }
 
     /**

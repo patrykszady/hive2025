@@ -2,17 +2,20 @@
 
 namespace App\Livewire\Projects;
 
+use App\Livewire\Concerns\HasLaterTasks;
 use App\Livewire\Concerns\HasToJsonMethod;
 use App\Models\Project;
 use App\Models\Task;
 use App\Models\User;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 
 class UpcomingTasks extends Component
 {
+    use HasLaterTasks;
     use HasToJsonMethod;
 
     protected $listeners = ['refreshComponent' => '$refresh'];
@@ -165,61 +168,17 @@ class UpcomingTasks extends Component
         return $grouped->sortKeys();
     }
 
-    /**
-     * Get info about the next task after the displayed window
-     */
-    #[Computed]
-    public function nextTaskInfo(): ?object
+    protected function laterTasksBaseQuery(): Builder
     {
-        $today = browser_today();
-        $windowEnd = $today->copy()->addDays(6);
-        $windowEndStr = $windowEnd->format('Y-m-d');
-
-        // Get all tasks for this project beyond the displayed window
-        $tasks = Task::withTrashed()
+        return Task::withTrashed()
             ->where('project_id', $this->project->id)
             ->whereNotNull('start_date')
-            ->whereNotNull('end_date')
-            ->whereDate('start_date', '>', $windowEndStr)
-            ->get();
+            ->whereNotNull('end_date');
+    }
 
-        // Collect all task dates beyond the displayed window
-        $futureDates = collect();
-        foreach ($tasks as $task) {
-            $selectedDates = (array) data_get($task->options, 'dates', []);
-            if (! empty($selectedDates)) {
-                foreach ($selectedDates as $dateStr) {
-                    if ($dateStr > $windowEndStr) {
-                        $futureDates->push($dateStr);
-                    }
-                }
-            } else {
-                $taskStartStr = $task->start_date->format('Y-m-d');
-                if ($taskStartStr > $windowEndStr) {
-                    $futureDates->push($taskStartStr);
-                }
-            }
-        }
-
-        if ($futureDates->isEmpty()) {
-            return null;
-        }
-
-        // Get the earliest future date
-        $nextDateStr = $futureDates->sort()->first();
-        $nextDate = Carbon::parse($nextDateStr, $this->getProjectTimezone())->startOfDay();
-        
-        $daysUntil = (int) $windowEnd->copy()->addDay()->startOfDay()->diffInDays($nextDate);
-
-        if ($daysUntil <= 0) {
-            return null;
-        }
-
-        return (object) [
-            'days' => $daysUntil,
-            'label' => $daysUntil === 1 ? 'Next task in 1 day' : "Next task in {$daysUntil} days",
-            'date' => $nextDate->format('D, M j'),
-        ];
+    protected function laterTasksWindowEnd(): string
+    {
+        return browser_today()->addDays(6)->format('Y-m-d');
     }
 
     /**

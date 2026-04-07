@@ -615,7 +615,7 @@ class CardsIndex extends Component
             'projectRows' => $this->projectRows,
         ])->layout('components.layouts.app', [
             'title' => 'Planner',
-            'fullscreenClasses' => '!p-0 h-full overflow-hidden flex flex-col',
+            'fullscreenClasses' => 'h-full overflow-hidden flex flex-col',
         ]);
     }
 }

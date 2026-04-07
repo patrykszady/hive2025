@@ -7,6 +7,7 @@
 @source '../../vendor/livewire/flux-pro/stubs/**/*.blade.php';
 @source '../../vendor/livewire/flux/stubs/**/*.blade.php';
 @source '../../resources/views/**/*.blade.php';
+@source '../../app/Livewire/**/*.php';
 
 /* Re-assign Flux's gray of choice... */
 @theme {

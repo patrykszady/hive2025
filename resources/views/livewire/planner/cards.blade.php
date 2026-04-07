@@ -248,42 +248,26 @@
         x-init="init()"
         class="relative flex-1 min-h-0 flex flex-col bg-zinc-100 dark:bg-zinc-800"
     >
-        {{-- Load Previous Days Button (left edge overlay) --}}
+        {{-- Loading indicator (left edge) --}}
         <div
-            x-show="atLeftEdge"
+            x-show="isLoadingPrevious"
             x-cloak
-            class="absolute left-0 top-0 bottom-0 z-20 flex items-center pl-2 pointer-events-none"
+            class="absolute left-0 top-0 bottom-0 z-20 flex items-center pl-3 pointer-events-none"
         >
-            <flux:button
-                x-on:click="prepareForLoad('start'); $wire.loadPreviousDays()"
-                wire:loading.attr="disabled"
-                wire:target="loadPreviousDays"
-                variant="filled"
-                size="sm"
-                icon="chevron-left"
-                class="shadow-lg pointer-events-auto"
-            >
-                Previous
-            </flux:button>
+            <div class="bg-white/80 dark:bg-zinc-800/80 backdrop-blur-sm rounded-full p-2 shadow-lg">
+                <flux:icon.arrow-path class="size-5 text-zinc-500 animate-spin" />
+            </div>
         </div>
 
-        {{-- Load Future Days Button (right edge overlay) --}}
+        {{-- Loading indicator (right edge) --}}
         <div
-            x-show="atRightEdge"
+            x-show="isLoadingFuture"
             x-cloak
-            class="absolute right-0 top-0 bottom-0 z-20 flex items-center pr-2 pointer-events-none"
+            class="absolute right-0 top-0 bottom-0 z-20 flex items-center pr-3 pointer-events-none"
         >
-            <flux:button
-                x-on:click="prepareForLoad('end'); $wire.loadFutureDays()"
-                wire:loading.attr="disabled"
-                wire:target="loadFutureDays"
-                variant="filled"
-                size="sm"
-                icon-trailing="chevron-right"
-                class="shadow-lg pointer-events-auto"
-            >
-                Next
-            </flux:button>
+            <div class="bg-white/80 dark:bg-zinc-800/80 backdrop-blur-sm rounded-full p-2 shadow-lg">
+                <flux:icon.arrow-path class="size-5 text-zinc-500 animate-spin" />
+            </div>
         </div>
 
         {{-- Main scrollable area - x-cloak hides via CSS before Alpine loads, x-show + transition reveals after opacity classes are applied --}}
@@ -561,7 +545,35 @@
         $weekendCount = $dayHeaders->filter(fn($h) => $h->isWeekend)->count();
         $tableWidth = 224 + ($weekdayCount * 200) + ($weekendCount * 140);
     @endphp
-    <div class="flex-1 min-h-0 overflow-auto bg-white dark:bg-zinc-900">
+    <div
+        x-data="plannerTableScroll()"
+        x-init="init()"
+        class="relative flex-1 min-h-0"
+    >
+        {{-- Loading indicator (left edge) --}}
+        <div
+            x-show="isLoadingPrevious"
+            x-cloak
+            class="absolute left-0 top-0 bottom-0 z-30 flex items-center pl-3 pointer-events-none"
+            style="left: 224px;"
+        >
+            <div class="bg-white/80 dark:bg-zinc-800/80 backdrop-blur-sm rounded-full p-2 shadow-lg">
+                <flux:icon.arrow-path class="size-5 text-zinc-500 animate-spin" />
+            </div>
+        </div>
+
+        {{-- Loading indicator (right edge) --}}
+        <div
+            x-show="isLoadingFuture"
+            x-cloak
+            class="absolute right-0 top-0 bottom-0 z-30 flex items-center pr-3 pointer-events-none"
+        >
+            <div class="bg-white/80 dark:bg-zinc-800/80 backdrop-blur-sm rounded-full p-2 shadow-lg">
+                <flux:icon.arrow-path class="size-5 text-zinc-500 animate-spin" />
+            </div>
+        </div>
+
+    <div x-ref="tableScrollContainer" @scroll="onScroll($event)" class="h-full overflow-auto bg-white dark:bg-zinc-900">
         <table class="border-collapse table-fixed" style="width: {{ $tableWidth }}px;">
             <colgroup>
                 <col style="width: 224px;">
@@ -571,7 +583,7 @@
             </colgroup>
             <thead class="sticky top-0 z-20 bg-white dark:bg-zinc-900">
                 <tr>
-                    <th class="sticky left-0 z-30 bg-white dark:bg-zinc-900 px-4 py-3 text-left text-sm font-medium text-zinc-600 dark:text-zinc-300 border-b border-r border-zinc-200 dark:border-zinc-700">
+                    <th class="sticky left-0 z-30 bg-white dark:bg-zinc-900 px-4 py-3 text-left text-sm font-medium text-zinc-600 dark:text-zinc-300 border-b border-zinc-200 dark:border-zinc-700" style="box-shadow: inset -2px 0 0 0 #cbd5e1;">
                         Project
                     </th>
                     @foreach ($dayHeaders as $dayHeader)
@@ -595,7 +607,7 @@
                 @forelse ($projectRows as $row)
                     <tr wire:key="table-row-{{ $row->id }}" class="group">
                         {{-- Project name (sticky left) --}}
-                        <td class="sticky left-0 z-10 bg-white dark:bg-zinc-900 px-4 py-2 border-b border-r border-zinc-200 dark:border-zinc-700 align-top">
+                        <td class="sticky left-0 z-10 bg-white dark:bg-zinc-900 px-4 py-2 border-b border-zinc-200 dark:border-zinc-700 align-top" style="box-shadow: inset -2px 0 0 0 #cbd5e1;">
                             <div class="flex items-center gap-2 min-w-0">
                                 <a
                                     href="{{ route('projects.show', $row->project) }}"
@@ -682,6 +694,7 @@
                 @endforelse
             </tbody>
         </table>
+    </div>
     </div>
     @endif
 
@@ -774,13 +787,90 @@
 
 @script
 <script>
+Alpine.data('plannerTableScroll', () => ({
+    isLoadingPrevious: false,
+    isLoadingFuture: false,
+    loadCooldown: false,
+    pendingScroll: null,
+    
+    init() {
+        Livewire.on('planner-scroll-to', (data) => {
+            this.handleScrollAfterLoad(data.direction);
+        });
+    },
+    
+    handleScrollAfterLoad(direction) {
+        this.$nextTick(() => {
+            setTimeout(() => {
+                const container = this.$refs.tableScrollContainer;
+                if (!container || !this.pendingScroll) return;
+                
+                const oldScrollWidth = this.pendingScroll.scrollWidth;
+                const newScrollWidth = container.scrollWidth;
+                const deltaWidth = newScrollWidth - oldScrollWidth;
+                
+                if (direction === 'start' && deltaWidth > 0) {
+                    container.scrollLeft = this.pendingScroll.scrollLeft + deltaWidth;
+                }
+                
+                this.pendingScroll = null;
+                this.isLoadingPrevious = false;
+                this.isLoadingFuture = false;
+                
+                setTimeout(() => {
+                    this.loadCooldown = false;
+                }, 300);
+            }, 100);
+        });
+    },
+    
+    prepareForLoad(direction) {
+        const container = this.$refs.tableScrollContainer;
+        if (!container) return;
+        
+        this.pendingScroll = {
+            direction,
+            scrollLeft: container.scrollLeft,
+            scrollWidth: container.scrollWidth,
+        };
+    },
+    
+    onScroll(e) {
+        if (this.loadCooldown) return;
+        
+        const container = this.$refs.tableScrollContainer;
+        if (!container) return;
+        
+        const threshold = 50;
+        const maxScroll = container.scrollWidth - container.clientWidth;
+        const atLeft = container.scrollLeft <= threshold;
+        const atRight = container.scrollLeft >= maxScroll - threshold;
+        
+        if (atLeft && !this.isLoadingPrevious) {
+            this.isLoadingPrevious = true;
+            this.loadCooldown = true;
+            this.prepareForLoad('start');
+            this.$wire.loadPreviousDays();
+        }
+        
+        if (atRight && !this.isLoadingFuture) {
+            this.isLoadingFuture = true;
+            this.loadCooldown = true;
+            this.prepareForLoad('end');
+            this.$wire.loadFutureDays();
+        }
+    },
+}));
+
 Alpine.data('plannerScroll', () => ({
     firstVisibleDayIndex: 0,
     atLeftEdge: true,
     atRightEdge: false,
     ready: false,
     pendingScroll: null,
-    isAnimating: false,
+    isLoadingPrevious: false,
+    isLoadingFuture: false,
+    loadCooldown: false,
     
     // Axis locking state for touch scrolling
     touchStartX: null,
@@ -866,7 +956,6 @@ Alpine.data('plannerScroll', () => ({
     },
     
     handleScrollAfterLoad(direction) {
-        // Wait for Livewire to finish DOM update
         this.$nextTick(() => {
             setTimeout(() => {
                 const container = this.$refs.scrollContainer;
@@ -877,54 +966,24 @@ Alpine.data('plannerScroll', () => ({
                 const deltaWidth = newScrollWidth - oldScrollWidth;
                 
                 if (direction === 'start' && deltaWidth > 0) {
-                    // For "Previous": new columns added at start
-                    // First, instantly position so user sees same content
-                    container.scrollLeft = deltaWidth;
-                    
-                    // Then animate scroll to 0
-                    this.animateScroll(container, deltaWidth, 0, 100);
-                } else if (direction === 'end') {
-                    // For "Next": new columns added at end
-                    const targetScroll = newScrollWidth - container.clientWidth;
-                    const startScroll = container.scrollLeft;
-                    
-                    this.animateScroll(container, startScroll, targetScroll, 100);
+                    // Adjust scroll position to keep the same content visible
+                    container.scrollLeft = this.pendingScroll.scrollLeft + deltaWidth;
                 }
+                // For 'end': new columns added at end, no adjustment needed
                 
                 this.pendingScroll = null;
-            }, 100);
-        });
-    },
-    
-    animateScroll(container, from, to, duration) {
-        if (this.isAnimating) return;
-        this.isAnimating = true;
-        
-        const startTime = performance.now();
-        const distance = to - from;
-        
-        const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
-        
-        const step = (currentTime) => {
-            const elapsed = currentTime - startTime;
-            const progress = Math.min(elapsed / duration, 1);
-            const easedProgress = easeOutCubic(progress);
-            
-            container.scrollLeft = from + (distance * easedProgress);
-            
-            // Update first visible during animation too
-            this.updateFirstVisible();
-            
-            if (progress < 1) {
-                requestAnimationFrame(step);
-            } else {
-                this.isAnimating = false;
+                this.isLoadingPrevious = false;
+                this.isLoadingFuture = false;
+                
                 this.updateFirstVisible();
                 this.updateEdgeState();
-            }
-        };
-        
-        requestAnimationFrame(step);
+                
+                // Cooldown prevents immediate re-trigger
+                setTimeout(() => {
+                    this.loadCooldown = false;
+                }, 300);
+            }, 100);
+        });
     },
 
     prepareForLoad(direction) {
@@ -939,6 +998,24 @@ Alpine.data('plannerScroll', () => ({
             scrollLeft: container.scrollLeft,
             scrollWidth: container.scrollWidth,
         };
+    },
+    
+    autoLoadIfNeeded() {
+        if (this.loadCooldown) return;
+        
+        if (this.atLeftEdge && !this.isLoadingPrevious) {
+            this.isLoadingPrevious = true;
+            this.loadCooldown = true;
+            this.prepareForLoad('start');
+            this.$wire.loadPreviousDays();
+        }
+        
+        if (this.atRightEdge && !this.isLoadingFuture) {
+            this.isLoadingFuture = true;
+            this.loadCooldown = true;
+            this.prepareForLoad('end');
+            this.$wire.loadFutureDays();
+        }
     },
     
     updateFirstVisible() {
@@ -998,6 +1075,7 @@ Alpine.data('plannerScroll', () => ({
     onScroll(e) {
         this.updateFirstVisible();
         this.updateEdgeState();
+        this.autoLoadIfNeeded();
     },
     
     getOpacityClass(isWeekend, hasTasks, hasUndatedTasks, dayIndex) {
