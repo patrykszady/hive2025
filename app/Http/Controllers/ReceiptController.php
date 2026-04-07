@@ -771,8 +771,9 @@ class ReceiptController extends Controller
                 }
 
                 // Backfill Price from TotalPrice / Quantity when OCR missed unit price
-                if ($formattedItems[$key]['Price'] === null && $formattedItems[$key]['TotalPrice'] !== null && ($formattedItems[$key]['Quantity'] ?? 1) > 0) {
-                    $formattedItems[$key]['Price'] = round($formattedItems[$key]['TotalPrice'] / $formattedItems[$key]['Quantity'], 2);
+                $qty = $formattedItems[$key]['Quantity'] ?? 1;
+                if ($formattedItems[$key]['Price'] === null && $formattedItems[$key]['TotalPrice'] !== null && $qty > 0) {
+                    $formattedItems[$key]['Price'] = round($formattedItems[$key]['TotalPrice'] / $qty, 2);
                 }
 
                 // If quantity defaulted to 1 but we have both unit price and total price,

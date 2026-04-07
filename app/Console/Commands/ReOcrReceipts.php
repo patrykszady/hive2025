@@ -134,22 +134,31 @@ class ReOcrReceipts extends Command
                 $ocrDate    = $fields['transaction_date'] ?? $msgDate;
                 $vendorId   = $receiptConfig->vendor_id;
 
-                $expenseQuery = Expense::where('vendor_id', $vendorId)
+                $baseQuery = fn () => Expense::where('vendor_id', $vendorId)
                     ->whereNull('deleted_at')
-                    ->where('created_at', '>=', $since->copy()->subDays(5));
-
-                if ($invoice) {
-                    $expenseQuery->where('invoice', trim($invoice));
-                }
-
-                if ($ocrDate && $ocrDate !== '?') {
-                    $expenseQuery->whereBetween('date', [
+                    ->where('created_at', '>=', $since->copy()->subDays(5))
+                    ->when($ocrDate && $ocrDate !== '?', fn ($q) => $q->whereBetween('date', [
                         \Carbon\Carbon::parse($ocrDate)->subDays(3)->format('Y-m-d'),
                         \Carbon\Carbon::parse($ocrDate)->addDays(3)->format('Y-m-d'),
-                    ]);
-                }
+                    ]));
 
-                $expense = $expenseQuery->first();
+                $expense = null;
+                if ($invoice) {
+                    $trimmedInvoice = trim($invoice);
+                    // Try exact match first
+                    $expense = $baseQuery()->where('invoice', $trimmedInvoice)->first();
+
+                    // Fallback: stored invoice may contain or be contained by the OCR invoice
+                    // e.g. OCR returns "1913 00062 49221" but DB has "49221", or vice versa
+                    if (! $expense) {
+                        $expense = $baseQuery()
+                            ->where(function ($q) use ($trimmedInvoice) {
+                                $q->where('invoice', 'LIKE', '%' . $trimmedInvoice . '%')
+                                  ->orWhereRaw('? LIKE CONCAT(\'%\', invoice, \'%\')', [$trimmedInvoice]);
+                            })
+                            ->first();
+                    }
+                }
 
                 if (! $expense) {
                     $this->warn("    → No matching expense found (invoice: {$invoice}, date: {$ocrDate}). Skipping.");

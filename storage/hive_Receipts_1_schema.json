@@ -45,7 +45,7 @@
         "InvoiceId": {
             "type": "string",
             "method": "extract",
-            "description": "The primary transaction identifier on the document. Look for labels such as 'Transaction Number', 'Transaction #', 'Invoice Number', 'Invoice #', 'Receipt Number', 'Receipt #', 'Order Number', 'Order #', 'Confirmation Number', or 'Trans #'. Prefer the Transaction Number if multiple identifiers are present."
+            "description": "The primary transaction identifier on the document. Look for labels such as 'Transaction Number', 'Transaction #', 'Invoice Number', 'Invoice #', 'Receipt Number', 'Receipt #', 'Order Number', 'Order #', 'Confirmation Number', or 'Trans #'. Prefer the Transaction Number if multiple identifiers are present. When the receipt header contains a multi-part number like '1913  00062  49221' (store, register, and transaction), return the FULL string with spaces (e.g. '1913 00062 49221'), not just the last segment."
         },
         "PurchaseOrder": {
             "type": "string",
