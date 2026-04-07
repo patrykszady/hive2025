@@ -371,6 +371,7 @@ class SmsConversation extends Component
             'project:id,address',
             'client',
             'client.users:id,first_name,last_name,cell_phone',
+            'threadParticipants:id,thread_id,phone_number',
         ])->find($this->threadId);
     }
 

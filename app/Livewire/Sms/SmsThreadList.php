@@ -61,6 +61,7 @@ class SmsThreadList extends Component
                 'project:id,address',
                 'client',
                 'latestMessage.sentByUser:id,first_name',
+                'threadParticipants:id,thread_id,phone_number',
             ])
             ->when($user->is_browsing_as_client, function ($query) use ($user) {
                 $clientIds = $user->clients()->pluck('clients.id');

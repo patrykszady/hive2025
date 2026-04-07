@@ -78,14 +78,14 @@
                             GS Construciton
                         @elseif ($thread->name)
                             {{ $thread->name }}
-                        @elseif ($thread->client && count($thread->participants ?? []) < $thread->client->users->count())
-                            {{ collect($thread->participants)->map(fn ($p) => $this->resolvePhoneDisplay($p))->implode(', ') }}
+                        @elseif ($thread->client && $thread->threadParticipants->count() < $thread->client->users->count())
+                            {{ $thread->threadParticipants->pluck('phone_number')->map(fn ($p) => $this->resolvePhoneDisplay($p))->implode(', ') }}
                         @elseif ($thread->client)
                             {{ $thread->client->name }}
                         @elseif ($thread->project)
                             {{ $thread->project->address }}
                         @else
-                            {{ collect($thread->participants)->map(fn ($p) => $this->resolvePhoneDisplay($p))->implode(', ') }}
+                            {{ $thread->threadParticipants->pluck('phone_number')->map(fn ($p) => $this->resolvePhoneDisplay($p))->implode(', ') }}
                         @endif
                     </p>
 

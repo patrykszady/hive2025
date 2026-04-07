@@ -60,11 +60,12 @@
 
         {{-- Header --}}
         @php
+            $participantPhones = $this->thread->threadParticipants->pluck('phone_number');
             $headerTitle = 'Group Message';
             if ($this->thread->name) {
                 $headerTitle = $this->thread->name;
-            } elseif ($this->thread->client && count($this->thread->participants ?? []) < $this->thread->client->users->count()) {
-                $headerTitle = collect($this->thread->participants)
+            } elseif ($this->thread->client && $participantPhones->count() < $this->thread->client->users->count()) {
+                $headerTitle = $participantPhones
                     ->map(fn ($p) => $this->resolvePhoneDisplay($p))
                     ->implode(', ');
             } elseif ($this->thread->client) {
@@ -72,9 +73,8 @@
             } elseif ($this->thread->project) {
                 $headerTitle = $this->thread->project->address;
             } else {
-                $participants = $this->thread->participants ?? [];
-                if (count($participants) > 0) {
-                    $headerTitle = collect($participants)
+                if ($participantPhones->isNotEmpty()) {
+                    $headerTitle = $participantPhones
                         ->map(fn ($p) => $this->resolvePhoneDisplay($p))
                         ->implode(', ');
                 }
@@ -151,7 +151,7 @@
 
                     // Collect users from the thread's primary client
                     // Only show users whose phone is a thread participant
-                    $threadParticipants = collect($this->thread->participants ?? []);
+                    $threadParticipants = $participantPhones;
                     if ($this->thread->client && $this->thread->client->users->isNotEmpty()) {
                         foreach ($this->thread->client->users as $user) {
                             $raw = $user->getRawOriginal('cell_phone');
@@ -212,8 +212,7 @@
 
                     // Fallback: if still no contacts, use raw participants
                     if ($callableContacts->isEmpty()) {
-                        $participants = $this->thread->participants ?? [];
-                        foreach ($participants as $phone) {
+                        foreach ($participantPhones as $phone) {
                             if (\App\Services\GroupSmsService::isOurNumber($phone)) continue;
                             $name = $this->resolvePhoneDisplay($phone);
                             $digits = preg_replace('/[^0-9]/', '', $phone);

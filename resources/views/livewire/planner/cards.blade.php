@@ -440,7 +440,7 @@
                     @endphp
                     <div
                         wire:key="project-{{ $projectColumn->id }}-{{ $dayData->day->format('Y-m-d') }}"
-                        class="min-w-0 pb-2 relative z-10 {{ $isWeekend ? 'w-52' : 'w-80' }}"
+                        class="min-w-0 pb-2 relative z-10 group/cell {{ $isWeekend ? 'w-52' : 'w-80' }}"
                         style="grid-column: {{ $dayColIndex }}; grid-row: {{ $projectRowIndex }};"
                     >
                         @php
@@ -475,7 +475,7 @@
                                                         variant="subtle"
                                                         icon="plus"
                                                         size="sm"
-                                                        class="shrink-0"
+                                                        class="shrink-0 opacity-0 group-hover/cell:opacity-100 transition-opacity"
                                                         wire:key="add-task-{{ $projectColumn->id }}-{{ $dayData->day->format('Y-m-d') }}"
                                                         wire:click="addTask({{ $projectColumn->id }}, '{{ $dayData->day->format('Y-m-d') }}')"
                                                         wire:target="addTask({{ $projectColumn->id }}, '{{ $dayData->day->format('Y-m-d') }}')"
@@ -600,7 +600,7 @@
                                 <a
                                     href="{{ route('projects.show', $row->project) }}"
                                     target="_blank"
-                                    class="font-medium text-sm text-zinc-900 dark:text-zinc-100 truncate hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                                    class="flex-1 min-w-0 font-medium text-sm text-zinc-900 dark:text-zinc-100 truncate hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
                                 >
                                     {{ $row->title }}
                                 </a>
@@ -609,6 +609,13 @@
                                         {{ $row->project->latestStatus->title }}
                                     </flux:badge>
                                 @endif
+                                <flux:button
+                                    variant="subtle"
+                                    icon="plus"
+                                    size="xs"
+                                    class="shrink-0"
+                                    wire:click="addTask({{ $row->id }})"
+                                />
                             </div>
                             <div class="text-xs text-zinc-500 dark:text-zinc-400 truncate">
                                 {{ $row->project->client->last_names ?? '' }}{{ $row->project->project_name ? ' | ' . $row->project->project_name : '' }}
@@ -627,12 +634,16 @@
                         @foreach ($row->dayCells as $cell)
                             <td
                                 wire:key="table-cell-{{ $row->id }}-{{ $cell->dayFormat }}"
-                                class="px-2 py-1.5 border-b border-r border-zinc-200 dark:border-zinc-700 align-top
+                                x-data="{ hover: false }"
+                                x-on:mouseenter="hover = true"
+                                x-on:mouseleave="hover = false"
+                                class="px-2 py-1.5 border-b border-r border-zinc-200 dark:border-zinc-700 align-top cursor-pointer
                                     {{ $cell->isWeekend ? 'bg-zinc-50 dark:bg-zinc-800' : '' }}
                                     {{ $cell->isToday ? 'bg-indigo-50/50 dark:bg-indigo-900/10' : '' }}"
+                                wire:click="addTask({{ $row->id }}, '{{ $cell->dayFormat }}')"
                             >
                                 @if ($cell->cards->count() > 0)
-                                    <div class="space-y-1">
+                                    <div class="space-y-1" wire:click.stop>
                                         @foreach ($cell->cards as $task)
                                             <flux:kanban.card
                                                 as="button"
@@ -651,6 +662,14 @@
                                         @endforeach
                                     </div>
                                 @endif
+                                <div
+                                    x-show="hover"
+                                    x-cloak
+                                    x-transition.opacity.duration.150ms
+                                    class="flex justify-center pt-1"
+                                >
+                                    <flux:icon.plus class="size-4 text-zinc-300 dark:text-zinc-600" />
+                                </div>
                             </td>
                         @endforeach
                     </tr>
