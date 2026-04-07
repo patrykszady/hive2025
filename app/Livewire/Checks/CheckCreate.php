@@ -5,6 +5,7 @@ namespace App\Livewire\Checks;
 use App\Livewire\Forms\CheckForm;
 use App\Models\BankAccount;
 use App\Models\Check;
+use App\Models\Vendor;
 use Livewire\Component;
 
 class CheckCreate extends Component
@@ -16,6 +17,8 @@ class CheckCreate extends Component
     public $bank_accounts = [];
 
     public $employees = [];
+
+    public $vendors = [];
 
     public Check $check;
 
@@ -36,6 +39,12 @@ class CheckCreate extends Component
             })->get();
 
         $this->employees = auth()->user()->vendor->users()->where('is_employed', 1)->whereNot('users.id', auth()->user()->id)->get();
+
+        $this->vendors = Vendor::search('*')
+            ->where('business_type', 'Sub')
+            ->orderBy('ytd_expense_sum', 'desc')
+            ->take(1000)
+            ->get();
     }
 
     public function updated($field)

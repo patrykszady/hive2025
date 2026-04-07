@@ -1,6 +1,19 @@
 <x-form-modal name="check_form_modal" title="Check Details">
     <form id="check_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="space-y-4">
         <div x-data="{ transaction: @entangle('form.transaction') }">
+            @if($form->vendor_id && !$form->user_id)
+                <flux:select x-bind:disabled="transaction" label="Payee (Vendor)" wire:model.live="form.vendor_id" variant="listbox" searchable placeholder="Search vendor...">
+                    @foreach($vendors as $vendor)
+                        <flux:select.option wire:key="check-vendor-{{ $vendor->id }}" value="{{ $vendor->id }}">
+                            <div class="flex items-center gap-2 whitespace-nowrap">
+                                <flux:avatar size="xs" name="{{ $vendor->name }}" color="auto" color:seed="{{ $vendor->id }}" />
+                                {{ $vendor->name }}
+                            </div>
+                        </flux:select.option>
+                    @endforeach
+                </flux:select>
+            @endif
+
             <flux:select x-bind:disabled="transaction" label="Bank" wire:model.live="form.bank_account_id" placeholder="Choose Bank...">
                 @foreach($bank_accounts as $bank_account)
                     <flux:select.option value="{{$bank_account->id}}">{{$bank_account->getNameAndType()}}</flux:select.option>

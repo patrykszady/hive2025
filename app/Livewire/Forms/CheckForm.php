@@ -3,6 +3,7 @@
 namespace App\Livewire\Forms;
 
 use App\Models\Check;
+use App\Models\Expense;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Validate;
@@ -32,9 +33,10 @@ class CheckForm extends Form
     // #[Validate('required_if:check_type,Check')]
     public $check_number = null;
 
-    // required_with:check.paid_by
-    // #[Rule('nullable')]
-    // public $invoice = NULL;
+    public $vendor_id = null;
+
+    public $user_id = null;
+
     public $transaction = false;
     // protected $messages =
     // [
@@ -69,6 +71,8 @@ class CheckForm extends Form
         $this->bank_account_id = $this->check->bank_account_id;
         $this->check_type = $this->check->check_type;
         $this->check_number = $this->check->check_number;
+        $this->vendor_id = $this->check->vendor_id;
+        $this->user_id = $this->check->user_id;
 
         if ($this->check->transactions->sum('amount') == $this->check->amount) {
             $this->transaction = true;
@@ -81,11 +85,31 @@ class CheckForm extends Form
         // $this->authorize('create', Check::class);
         $this->validate();
 
+        $oldVendorId = $this->check->vendor_id;
+
         $this->check->update([
             'bank_account_id' => $this->bank_account_id,
             'check_type' => $this->check_type,
             'check_number' => $this->check_number,
+            'vendor_id' => $this->vendor_id,
+            'user_id' => $this->user_id,
         ]);
+
+        // Update expenses vendor when payee changes
+        if ($this->vendor_id && $oldVendorId !== (int) $this->vendor_id) {
+            // Direct FK expenses
+            Expense::where('check_id', $this->check->id)
+                ->where('vendor_id', $oldVendorId)
+                ->update(['vendor_id' => $this->vendor_id]);
+
+            // Pivot expenses
+            $pivotExpenseIds = $this->check->expensesMany()->pluck('expenses.id');
+            if ($pivotExpenseIds->isNotEmpty()) {
+                Expense::whereIn('id', $pivotExpenseIds)
+                    ->where('vendor_id', $oldVendorId)
+                    ->update(['vendor_id' => $this->vendor_id]);
+            }
+        }
 
         return $this->check;
     }
