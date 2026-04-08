@@ -59,26 +59,33 @@ class MergeDepositRefundExpenses extends Command
                 continue;
             }
 
-            // Only merge deposit+refund pairs (one positive, one negative)
+            // Determine merge strategy
             $positive = $expenses->filter(fn ($e) => $e->amount > 0);
             $negative = $expenses->filter(fn ($e) => $e->amount < 0);
 
-            if ($positive->count() !== 1 || $negative->count() !== 1) {
-                $this->warn("Skipping DEPOSIT NO# {$depositNo} — not a clean deposit+refund pair (pos:{$positive->count()}, neg:{$negative->count()})");
+            if ($positive->count() === 1 && $negative->count() === 1) {
+                // Pattern 1: one deposit + one refund → net amount
+                $keepExpense = $positive->first();
+                $removeExpense = $negative->first();
+                $finalAmount = round($keepExpense->amount + $removeExpense->amount, 2);
+            } elseif ($positive->count() === 2 && $negative->count() === 0) {
+                // Pattern 2: two positives — later receipt is the final amount (includes refund)
+                $sorted = $positive->sortBy('date')->values();
+                $removeExpense = $sorted->first(); // earlier deposit receipt
+                $keepExpense = $sorted->last();     // later final receipt with correct amount
+                $finalAmount = $keepExpense->amount;
+            } else {
+                $this->warn("Skipping DEPOSIT NO# {$depositNo} — unexpected pattern (pos:{$positive->count()}, neg:{$negative->count()})");
                 $skipped++;
 
                 continue;
             }
 
-            $depositExpense = $positive->first();
-            $refundExpense = $negative->first();
-            $netAmount = round($depositExpense->amount + $refundExpense->amount, 2);
-
             $this->line('');
             $this->info("DEPOSIT NO# {$depositNo}");
-            $this->line("  Keep:   E#{$depositExpense->id} \${$depositExpense->amount} {$depositExpense->date->format('Y-m-d')}");
-            $this->line("  Remove: E#{$refundExpense->id} \${$refundExpense->amount} {$refundExpense->date->format('Y-m-d')}");
-            $this->line("  Net amount: \${$netAmount}");
+            $this->line("  Keep:   E#{$keepExpense->id} \${$keepExpense->amount} {$keepExpense->date->format('Y-m-d')}");
+            $this->line("  Remove: E#{$removeExpense->id} \${$removeExpense->amount} {$removeExpense->date->format('Y-m-d')}");
+            $this->line("  Final amount: \${$finalAmount}");
 
             if ($dryRun) {
                 $merged++;
@@ -88,36 +95,36 @@ class MergeDepositRefundExpenses extends Command
 
             DB::beginTransaction();
             try {
-                // Move receipts from refund expense to deposit expense
-                ExpenseReceipts::where('expense_id', $refundExpense->id)
-                    ->update(['expense_id' => $depositExpense->id]);
+                // Move receipts from removed expense to kept expense
+                ExpenseReceipts::where('expense_id', $removeExpense->id)
+                    ->update(['expense_id' => $keepExpense->id]);
 
-                // Move transactions from refund expense to deposit expense
+                // Move transactions from removed expense to kept expense
                 Transaction::withoutGlobalScopes()
-                    ->where('expense_id', $refundExpense->id)
-                    ->update(['expense_id' => $depositExpense->id]);
+                    ->where('expense_id', $removeExpense->id)
+                    ->update(['expense_id' => $keepExpense->id]);
 
                 // Use direct DB updates to bypass observers that may revert changes
-                DB::table('expenses')->where('id', $depositExpense->id)->update([
-                    'amount' => $netAmount,
+                DB::table('expenses')->where('id', $keepExpense->id)->update([
+                    'amount' => $finalAmount,
                     'parent_expense_id' => null,
                 ]);
 
-                // Clear parent_expense_id on refund expense so it doesn't reference the kept one
-                DB::table('expenses')->where('id', $refundExpense->id)->update([
+                // Clear parent_expense_id on removed expense and soft-delete
+                DB::table('expenses')->where('id', $removeExpense->id)->update([
                     'parent_expense_id' => null,
                     'deleted_at' => now(),
                 ]);
 
                 DB::commit();
 
-                $this->line("  ✓ Merged → E#{$depositExpense->id} now \${$netAmount}");
+                $this->line("  ✓ Merged → E#{$keepExpense->id} now \${$finalAmount}");
 
                 Log::info('Merged deposit+refund expenses', [
                     'deposit_number' => $depositNo,
-                    'kept_expense_id' => $depositExpense->id,
-                    'removed_expense_id' => $refundExpense->id,
-                    'net_amount' => $netAmount,
+                    'kept_expense_id' => $keepExpense->id,
+                    'removed_expense_id' => $removeExpense->id,
+                    'final_amount' => $finalAmount,
                 ]);
 
                 $merged++;
