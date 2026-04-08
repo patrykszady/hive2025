@@ -93,6 +93,10 @@ class Expense extends Model
     // Add this private method to calculate status for indexing
     private function calculateStatus(): string
     {
+        if ($this->trashed()) {
+            return 'Deleted';
+        }
+
         // Determine "No Project" using DB fields to avoid relation hydration
         $noProject = (is_null($this->project_id) || (int) $this->project_id === 0)
             && is_null($this->distribution_id)
@@ -127,7 +131,7 @@ class Expense extends Model
     /**
      * Create a search builder that respects user access permissions
      */
-    public static function scopedSearch($query = '', $filterConditions = [], $sortBy = 'date', $sortDirection = 'desc', ?User $user = null): ScoutBuilder
+    public static function scopedSearch($query = '', $filterConditions = [], $sortBy = 'date', $sortDirection = 'desc', ?User $user = null, bool $onlyTrashed = false): ScoutBuilder
     {
         $user ??= Auth::user();
 
@@ -136,14 +140,15 @@ class Expense extends Model
         }
 
         $belongsToVendorId = (int) $user->vendor->id;
-        $baseFilter = "__soft_deleted = 0 AND belongs_to_vendor_id = {$belongsToVendorId}";
+        $softDeleteFilter = $onlyTrashed ? '__soft_deleted = 1' : '__soft_deleted = 0';
+        $baseFilter = "{$softDeleteFilter} AND belongs_to_vendor_id = {$belongsToVendorId}";
 
         if ($user->vendor_role === 'Member') {
             $paidByUserId = (int) $user->id;
             $baseFilter .= " AND paid_by = {$paidByUserId}";
         }
 
-        return self::scopedSearchWithBaseFilter($query, $filterConditions, $sortBy, $sortDirection, $baseFilter);
+        return self::scopedSearchWithBaseFilter($query, $filterConditions, $sortBy, $sortDirection, $baseFilter, $onlyTrashed);
     }
 
     /**
@@ -157,7 +162,7 @@ class Expense extends Model
         return self::scopedSearchWithBaseFilter($query, $filterConditions, $sortBy, $sortDirection, $baseFilter);
     }
 
-    protected static function scopedSearchWithBaseFilter($query, array $filterConditions, string $sortBy, string $sortDirection, string $baseFilter): ScoutBuilder
+    protected static function scopedSearchWithBaseFilter($query, array $filterConditions, string $sortBy, string $sortDirection, string $baseFilter, bool $onlyTrashed = false): ScoutBuilder
     {
         return self::search($query, function ($meilisearch, $searchQuery, $options) use ($filterConditions, $sortBy, $sortDirection, $baseFilter) {
             // Process numeric search queries using shared trait logic
@@ -169,8 +174,13 @@ class Expense extends Model
             return $meilisearch->search($actualQuery, $options);
         })
             // Narrow the columns fetched from the database when hydrating models
-            ->query(function ($eloquent) {
-                $eloquent->select(['id', 'amount', 'date', 'vendor_id', 'project_id', 'distribution_id', 'check_id', 'paid_by']);
+            ->query(function ($eloquent) use ($onlyTrashed) {
+                $columns = ['id', 'amount', 'date', 'vendor_id', 'project_id', 'distribution_id', 'check_id', 'paid_by'];
+                if ($onlyTrashed) {
+                    $columns[] = 'deleted_at';
+                    $eloquent->onlyTrashed();
+                }
+                $eloquent->select($columns);
             });
     }
 

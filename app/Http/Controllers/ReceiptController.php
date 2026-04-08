@@ -353,6 +353,39 @@ class ReceiptController extends Controller
                                 ]);
                                 $this->downloadAmazonOrderDocument($client, $s4, $credentials, $order['orderId'], $expense, $receipt);
                             }
+                        } else {
+                            // Create receipt data for existing expense that has none (e.g. restored after soft-delete)
+                            $receiptItems = [];
+                            foreach ($order['lineItems'] as $itemIdx => $item) {
+                                $receiptItems[$itemIdx]['Price'] = $item['purchasedPricePerUnit']['amount'];
+                                $receiptItems[$itemIdx]['Quantity'] = $item['itemQuantity'];
+                                $receiptItems[$itemIdx]['TotalPrice'] = $item['itemSubTotal']['amount'] ?? 0.00;
+                                $receiptItems[$itemIdx]['Description'] = $item['title'];
+                                $receiptItems[$itemIdx]['ProductCode'] = $item['asin'];
+                            }
+
+                            $receiptData = [
+                                'items' => $receiptItems,
+                                'total' => $order['orderNetTotal']['amount'],
+                                'subtotal' => $order['orderSubTotal']['amount'],
+                                'total_tax' => $order['orderTax']['amount'],
+                                'invoice_number' => $order['orderId'],
+                                'purchase_order' => $order['purchaseOrderNumber'],
+                                'transaction_date' => $order_date,
+                                'charges' => $charges,
+                            ];
+
+                            $newReceipt = ExpenseReceipts::create([
+                                'expense_id' => $expense->id,
+                                'receipt_html' => null,
+                                'receipt_items' => $receiptData,
+                                'receipt_filename' => null,
+                            ]);
+
+                            $orderStatus = strtoupper($order['orderStatus'] ?? '');
+                            if (! in_array($orderStatus, ['PENDING', 'CANCELLED'])) {
+                                $this->downloadAmazonOrderDocument($client, $s4, $credentials, $order['orderId'], $expense, $newReceipt);
+                            }
                         }
 
                         continue;

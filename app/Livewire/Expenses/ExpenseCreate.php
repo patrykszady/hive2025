@@ -466,6 +466,10 @@ class ExpenseCreate extends Component
 
     public function remove()
     {
+        if ($this->expense->transactions()->exists()) {
+            return;
+        }
+
         $expenseId = $this->expense->id;
         $this->form->delete();
         $this->modal('expenses_form_modal')->close();

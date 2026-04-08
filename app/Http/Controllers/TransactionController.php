@@ -1313,6 +1313,134 @@ class TransactionController extends Controller
                 }
             } //foreach $expenses
         }
+
+        // Second pass: match refund/return transactions to their parent expense.
+        // Negative transactions are excluded from the main pass's sign check,
+        // so unmatched refunds need a dedicated lookup by vendor + date proximity.
+        $this->matchRefundTransactions();
+    }
+
+    /**
+     * Match unmatched negative (refund/return) transactions to expenses
+     * whose receipt HTML contains the refund amount as a negative value.
+     *
+     * Also links related expenses via parent_expense_id when receipts
+     * share the same DEPOSIT NO# reference.
+     */
+    private function matchRefundTransactions(): void
+    {
+        $hiveVendors = Vendor::hiveVendors()->get();
+
+        foreach ($hiveVendors as $hiveVendor) {
+            $bankAccountIds = $hiveVendor->bank_accounts->pluck('id');
+
+            $refundTransactions = Transaction::whereIn('bank_account_id', $bankAccountIds)
+                ->whereNull('expense_id')
+                ->whereNull('deleted_at')
+                ->whereNotNull('vendor_id')
+                ->where('amount', '<', 0)
+                ->whereDate('transaction_date', '>=', Carbon::now()->subMonths(12))
+                ->doesntHave('payments')
+                ->whereNull('check_number')
+                ->where(function ($query) {
+                    $query->whereNull('plaid_merchant_description')
+                        ->orWhere(function ($sub) {
+                            $sub->where('plaid_merchant_description', 'NOT LIKE', '%ZELLE%')
+                                ->where('plaid_merchant_description', 'NOT LIKE', '%WIRE%')
+                                ->where('plaid_merchant_description', 'NOT LIKE', '%ACH%')
+                                ->where('plaid_merchant_description', 'NOT LIKE', '%TRANSFER%')
+                                ->where('plaid_merchant_description', 'NOT LIKE', '%PAYROLL%');
+                        });
+                })
+                ->get();
+
+            foreach ($refundTransactions as $refund) {
+                $absAmount = number_format(abs($refund->amount), 2, '.', '');
+
+                // Find an expense whose receipt HTML contains this negative amount
+                $matchingExpense = Expense::withoutGlobalScopes()
+                    ->where('belongs_to_vendor_id', $hiveVendor->id)
+                    ->where('vendor_id', $refund->vendor_id)
+                    ->where('amount', '>', 0)
+                    ->whereNull('deleted_at')
+                    ->whereBetween('date', [
+                        $refund->transaction_date->copy()->subDays(14)->format('Y-m-d'),
+                        $refund->transaction_date->copy()->addDays(7)->format('Y-m-d'),
+                    ])
+                    ->whereHas('receipts', function ($q) use ($absAmount) {
+                        $q->where('receipt_html', 'LIKE', '%-' . $absAmount . '%');
+                    })
+                    ->orderByRaw('ABS(DATEDIFF(date, ?))', [$refund->transaction_date->format('Y-m-d')])
+                    ->first();
+
+                if (! $matchingExpense) {
+                    continue;
+                }
+
+                $refund->expense()->associate($matchingExpense);
+                $refund->save();
+
+                Log::info('Refund transaction matched to expense via receipt HTML', [
+                    'transaction_id' => $refund->id,
+                    'expense_id' => $matchingExpense->id,
+                    'transaction_amount' => $refund->amount,
+                    'expense_amount' => $matchingExpense->amount,
+                ]);
+
+                // Link related expenses via shared DEPOSIT NO# in receipt HTML
+                $this->linkExpensesByDepositNumber($matchingExpense, $hiveVendor);
+            }
+        }
+    }
+
+    /**
+     * If this expense's receipt contains a DEPOSIT NO#, find the other expense
+     * with the same deposit number and set parent_expense_id to link them.
+     */
+    private function linkExpensesByDepositNumber(Expense $expense, Vendor $hiveVendor): void
+    {
+        if ($expense->parent_expense_id) {
+            return;
+        }
+
+        $receipt = $expense->receipts()->whereNotNull('receipt_html')->first();
+
+        if (! $receipt || ! preg_match('/DEPOSIT NO#\s*(\S+)/', $receipt->receipt_html, $matches)) {
+            return;
+        }
+
+        $depositNumber = $matches[1];
+
+        // Find another expense from the same vendor with the same DEPOSIT NO# in its receipt
+        $relatedExpense = Expense::withoutGlobalScopes()
+            ->where('belongs_to_vendor_id', $hiveVendor->id)
+            ->where('vendor_id', $expense->vendor_id)
+            ->where('id', '!=', $expense->id)
+            ->whereNull('deleted_at')
+            ->whereHas('receipts', function ($q) use ($depositNumber) {
+                $q->where('receipt_html', 'LIKE', '%' . $depositNumber . '%');
+            })
+            ->orderBy('date')
+            ->first();
+
+        if (! $relatedExpense) {
+            return;
+        }
+
+        // The earlier expense (deposit) is the parent
+        if ($relatedExpense->date <= $expense->date) {
+            $expense->parent_expense_id = $relatedExpense->id;
+            $expense->save();
+        } else {
+            $relatedExpense->parent_expense_id = $expense->id;
+            $relatedExpense->save();
+        }
+
+        Log::info('Linked expenses via shared DEPOSIT NO#', [
+            'deposit_number' => $depositNumber,
+            'parent_expense_id' => $relatedExpense->date <= $expense->date ? $relatedExpense->id : $expense->id,
+            'child_expense_id' => $relatedExpense->date <= $expense->date ? $expense->id : $relatedExpense->id,
+        ]);
     }
 
     public function add_transaction_to_multi_expenses()

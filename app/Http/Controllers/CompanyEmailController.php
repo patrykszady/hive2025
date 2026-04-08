@@ -1253,6 +1253,37 @@ class CompanyEmailController extends Controller
                             ]);
                         }
                     } else {
+                        // Check if this receipt shares a DEPOSIT NO# with an existing expense's receipt
+                        // (Home Depot sends separate deposit + final receipts for the same purchase)
+                        $depositMatchExpense = $this->findExpenseBySharedDepositNumber(
+                            $receipt_account->belongs_to_vendor_id,
+                            $receipt->vendor_id,
+                            $date,
+                            $ocr_receipt_data['content']
+                        );
+
+                        if ($depositMatchExpense) {
+                            // Same purchase — attach the new receipt and update amount to the final total
+                            $this->saveExpenseReceipt($depositMatchExpense->id, $ocr_receipt_data, $ocr_filename, !empty($receipt->options['html_to_pdf']) ? null : $message);
+
+                            $depositMatchExpense->amount = $amount;
+                            $depositMatchExpense->date = $date;
+                            if ($invoice !== '') {
+                                $depositMatchExpense->invoice = $invoice;
+                            }
+                            $depositMatchExpense->save();
+
+                            Log::channel('nylas')->info('Merged receipt into existing expense via shared DEPOSIT NO#', [
+                                'expense_id' => $depositMatchExpense->id,
+                                'old_amount' => $depositMatchExpense->getOriginal('amount'),
+                                'new_amount' => $amount,
+                                'receipt_id' => $receipt->id,
+                            ]);
+
+                            if (!empty($folderMap['Saved'])) {
+                                $this->nylasService->moveEmailToFolder($messageId, $folderMap['Saved'], $grantId, $companyEmail->id);
+                            }
+                        } else {
                         // Check if there are partial expenses that sum to this receipt total
                         $partialExpenses = $this->findPartialExpensesToConsolidate(
                             $receipt_account->belongs_to_vendor_id,
@@ -1342,6 +1373,7 @@ class CompanyEmailController extends Controller
                                 ]);
                             }
                         }
+                    }
                     }
                 }
             } else{
@@ -2688,6 +2720,36 @@ class CompanyEmailController extends Controller
         }
 
         return null;
+    }
+
+    /**
+     * Find an existing expense whose receipt shares the same DEPOSIT NO# as the current receipt content.
+     * Home Depot sends separate deposit and final receipts for the same purchase.
+     */
+    protected function findExpenseBySharedDepositNumber(
+        int $belongs_to_vendor_id,
+        int $vendor_id,
+        string $date,
+        string $receiptContent
+    ): ?Expense {
+        if (! preg_match('/DEPOSIT NO#\s*(\S+)/', $receiptContent, $matches)) {
+            return null;
+        }
+
+        $depositNumber = $matches[1];
+        $startDate = Carbon::parse($date)->subDays(10)->format('Y-m-d');
+        $endDate = Carbon::parse($date)->addDays(5)->format('Y-m-d');
+
+        return Expense::withoutGlobalScopes()
+            ->where('belongs_to_vendor_id', $belongs_to_vendor_id)
+            ->where('vendor_id', $vendor_id)
+            ->whereNull('deleted_at')
+            ->whereBetween('date', [$startDate, $endDate])
+            ->whereHas('receipts', function ($q) use ($depositNumber) {
+                $q->where('receipt_html', 'LIKE', '%' . $depositNumber . '%');
+            })
+            ->orderBy('date')
+            ->first();
     }
 
     /**

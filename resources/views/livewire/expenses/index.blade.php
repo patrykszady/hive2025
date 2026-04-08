@@ -109,7 +109,11 @@
                                     @if($expense->reimbursment)
                                         <flux:badge size="sm" variant="outline" inset="top bottom" color="zinc" title="{{ $expense->reimbursment }}">R</flux:badge>
                                     @endif
-                                    @can('create', App\Models\Expense::class)
+                                    @if($expense->trashed())
+                                        <button type="button" wire:click="restoreExpense({{ $expense->id }})" wire:confirm="Restore this expense?" class="text-emerald-500 hover:text-emerald-700 dark:hover:text-emerald-300" title="Restore expense">
+                                            <flux:icon.arrow-uturn-left variant="micro" />
+                                        </button>
+                                    @elsecan('create', App\Models\Expense::class)
                                         <button type="button" wire:click="$dispatchTo('expenses.expense-create', 'editExpense', { expense: {{ $expense->id }} })" class="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200" title="Edit expense">
                                             <flux:icon.pencil-square variant="micro" />
                                         </button>

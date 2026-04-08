@@ -89,7 +89,7 @@ class ExpensePolicy
      */
     public function restore(User $user, Expense $expense): bool
     {
-        return false;
+        return $user->vendor_role === 'Admin';
     }
 
     /**

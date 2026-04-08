@@ -45,6 +45,9 @@
                 <flux:select.option value="No Transaction"><flux:badge size="md" inset="top bottom" color="yellow">No Transaction</flux:badge></flux:select.option>
                 <flux:select.option value="No Project"><flux:badge size="md" inset="top bottom" color="red">No Project</flux:badge></flux:select.option>
                 <flux:select.option value="Missing Info"><flux:badge size="md" inset="top bottom" color="amber">Missing Info</flux:badge></flux:select.option>
+                @can('create', App\Models\Expense::class)
+                    <flux:select.option value="Deleted"><flux:badge size="md" inset="top bottom" color="zinc">Deleted</flux:badge></flux:select.option>
+                @endcan
             </flux:select>
         </div>
 
@@ -132,6 +135,9 @@
                 <flux:select.option value="No Transaction"><flux:badge size="md" inset="top bottom" color="yellow">No Transaction</flux:badge></flux:select.option>
                 <flux:select.option value="No Project"><flux:badge size="md" inset="top bottom" color="red">No Project</flux:badge></flux:select.option>
                 <flux:select.option value="Missing Info"><flux:badge size="md" inset="top bottom" color="amber">Missing Info</flux:badge></flux:select.option>
+                @can('create', App\Models\Expense::class)
+                    <flux:select.option value="Deleted"><flux:badge size="md" inset="top bottom" color="zinc">Deleted</flux:badge></flux:select.option>
+                @endcan
             </flux:select>
         </div>
         <div class="min-w-0 w-full">

@@ -277,10 +277,9 @@
     </form>
 
     <x-slot name="footer">
-        {{-- @if($form->amount == '0.00' || $form->transaction != NULL || ($form->expense_transactions_sum == FALSE && $form->transaction == NULL && $form->bank_account_id == NULL))
+        @if($expense->exists && !$expense->transactions()->exists())
             <flux:button wire:click="remove" variant="danger">Remove</flux:button>
-        @endif --}}
-        <flux:button wire:click="remove" variant="danger">Remove</flux:button>
+        @endif
 
         <flux:spacer />
 

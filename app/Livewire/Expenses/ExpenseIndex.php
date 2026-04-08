@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Expenses;
 
+use App\Jobs\FetchAmazonReceiptForExpense;
 use App\Models\Distribution;
 use App\Models\Expense;
 use App\Models\ExpenseReceipts;
@@ -165,6 +166,25 @@ class ExpenseIndex extends Component
         $this->resetPage('expenses-page');
     }
 
+    public function isShowingTrashed(): bool
+    {
+        return in_array('Deleted', $this->expense_statuses);
+    }
+
+    public function restoreExpense(int $expenseId): void
+    {
+        $expense = Expense::onlyTrashed()->findOrFail($expenseId);
+        $this->authorize('restore', $expense);
+
+        $expense->restore();
+
+        if ($expense->vendor_id === 54 && ! $expense->receipts()->exists()) {
+            FetchAmazonReceiptForExpense::dispatch($expense);
+        }
+
+        unset($this->expenses);
+    }
+
     public function loadTransactions()
     {
         $this->transactionsReady = true;
@@ -212,7 +232,9 @@ class ExpenseIndex extends Component
                     '',
                     $filterConditions,
                     $this->sortBy,
-                    $this->sortDirection
+                    $this->sortDirection,
+                    null,
+                    $this->isShowingTrashed()
                 )->take(10000)->get();
 
                 // Parent expenses whose split equals amount (positive or negative)
@@ -226,10 +248,19 @@ class ExpenseIndex extends Component
                 // Direct Eloquent range query to capture ALL matching amounts regardless of date order
                 // Include both positive and negative amounts in the range
                 $user = auth()->user();
+                $selectColumns = ['id','amount','date','vendor_id','project_id','distribution_id','check_id','paid_by'];
+                if ($this->isShowingTrashed()) {
+                    $selectColumns[] = 'deleted_at';
+                }
                 $baseQuery = Expense::query()
-                    ->select(['id','amount','date','vendor_id','project_id','distribution_id','check_id','paid_by'])
-                    ->where('belongs_to_vendor_id', $user->vendor->id)
-                    ->where(function ($q) use ($min, $upperExclusive) {
+                    ->select($selectColumns)
+                    ->where('belongs_to_vendor_id', $user->vendor->id);
+
+                if ($this->isShowingTrashed()) {
+                    $baseQuery->onlyTrashed();
+                }
+
+                $baseQuery->where(function ($q) use ($min, $upperExclusive) {
                         // Positive range
                         $q->where(function ($q2) use ($min, $upperExclusive) {
                             $q2->where('amount', '>=', $min)
@@ -376,7 +407,9 @@ class ExpenseIndex extends Component
             $this->amount,
             $this->buildFilterConditions(),
             $this->sortBy,
-            $this->sortDirection
+            $this->sortDirection,
+            null,
+            $this->isShowingTrashed()
         )->paginateWithSearchData($this->paginate_number, pageName: 'expenses-page');
 
         // When filtering by check, also include expenses from many-to-many relationship
@@ -548,10 +581,11 @@ class ExpenseIndex extends Component
         // Build filter conditions for non-search filters
         $filterConditions = [];
         
-        // Add status filters if any are selected
-        if (!empty($this->expense_statuses)) {
+        // Add status filters if any are selected (exclude "Deleted" — handled via __soft_deleted)
+        $realStatuses = array_filter($this->expense_statuses, fn ($s) => $s !== 'Deleted');
+        if (!empty($realStatuses)) {
             $statusFilter = [];
-            foreach ($this->expense_statuses as $status) {
+            foreach ($realStatuses as $status) {
                 $statusFilter[] = "expense_status = '{$status}'";
             }
             $filterConditions[] = '(' . implode(' OR ', $statusFilter) . ')';
