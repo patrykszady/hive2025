@@ -53,6 +53,12 @@ class MergeDepositRefundExpenses extends Command
             $expenseIds = $items->pluck('expense_id')->unique()->values();
             $expenses = $expenseIds->map(fn ($id) => Expense::withoutGlobalScopes()->find($id))->filter();
 
+            // Skip already-trashed expenses
+            $expenses = $expenses->filter(fn ($e) => ! $e->trashed());
+            if ($expenses->count() < 2) {
+                continue;
+            }
+
             // Only merge deposit+refund pairs (one positive, one negative)
             $positive = $expenses->filter(fn ($e) => $e->amount > 0);
             $negative = $expenses->filter(fn ($e) => $e->amount < 0);
@@ -91,12 +97,17 @@ class MergeDepositRefundExpenses extends Command
                     ->where('expense_id', $refundExpense->id)
                     ->update(['expense_id' => $depositExpense->id]);
 
-                // Update the kept expense amount to the net
-                $depositExpense->amount = $netAmount;
-                $depositExpense->save();
+                // Use direct DB updates to bypass observers that may revert changes
+                DB::table('expenses')->where('id', $depositExpense->id)->update([
+                    'amount' => $netAmount,
+                    'parent_expense_id' => null,
+                ]);
 
-                // Soft-delete the refund expense
-                $refundExpense->delete();
+                // Clear parent_expense_id on refund expense so it doesn't reference the kept one
+                DB::table('expenses')->where('id', $refundExpense->id)->update([
+                    'parent_expense_id' => null,
+                    'deleted_at' => now(),
+                ]);
 
                 DB::commit();
 
