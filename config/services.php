@@ -5,12 +5,18 @@ return [
         'api_key' => env('OPENAI_API_KEY'),
     ],
 
+    'google' => [
+        'custom_search_api_key' => env('GOOGLE_CSE_API_KEY'),
+        'custom_search_cx'     => env('GOOGLE_CSE_ID'),
+    ],
+
     'azure_cu' => [
         'endpoint'       => env('AZURE_CU_ENDPOINT'),
         'api_key'        => env('AZURE_CU_API_KEY'),
         'api_version'    => env('AZURE_CU_API_VERSION', '2025-11-01'),
         'analyzer_id'    => env('AZURE_CU_ANALYZER_ID', 'hive_Receipts_1'),
         'analyzer_id_coi' => env('AZURE_CU_ANALYZER_ID_COI', 'hive_COI_1'),
+        'analyzer_id_material_order' => env('AZURE_CU_ANALYZER_ID_MATERIAL_ORDER', 'hive_MaterialOrder_1'),
     ],
 
     'ocr_space' => [

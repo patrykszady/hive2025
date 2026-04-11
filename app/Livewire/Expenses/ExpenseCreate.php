@@ -8,13 +8,16 @@ use App\Models\BankAccount;
 use App\Models\Check;
 use App\Models\Distribution;
 use App\Models\Expense;
+use App\Models\ExpenseReceipts;
 use App\Models\Project;
 use App\Models\ProjectStatus;
 use App\Models\Transaction;
 use App\Models\Vendor;
 use App\Traits\HandlesChecks;
 use Flux;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 use Livewire\WithFileUploads;
@@ -32,13 +35,19 @@ class ExpenseCreate extends Component
     
     public $existing_check_id = null;
 
+    public $upload_file = null;
+
+    public bool $upload_is_material_order = false;
+
+    public $upload_belongs_to_vendor_id = null;
+
     public $view_text = [
         'card_title' => 'Create Expense',
         'button_text' => 'Create',
         'form_submit' => 'save',
     ];
 
-    protected $listeners = ['resetModal', 'editExpense', 'newExpense', 'createExpenseFromTransaction', 'hasSplits'];
+    protected $listeners = ['resetModal', 'editExpense', 'newExpense', 'createExpenseFromTransaction', 'hasSplits', 'openUploadReceipt'];
 
     protected function toastExpenseSuccess(Expense $expense, string $heading, ?string $text = null): void
     {
@@ -89,7 +98,9 @@ class ExpenseCreate extends Component
         return Project::with('latestStatus')
             ->notCancelled()
             ->orderByLatestStatusDateDesc()
-            ->get(['id', 'project_name', 'address']);
+            ->get(['id', 'project_name', 'address'])
+            ->sortBy(fn ($project) => $project->latestStatus?->status_code === 6 ? 0 : 1)
+            ->values();
     }
 
     #[Computed]
@@ -197,6 +208,15 @@ class ExpenseCreate extends Component
         ];
 
         $this->modal('expenses_form_modal')->show();
+    }
+
+    public function openUploadReceipt(): void
+    {
+        $this->upload_file = null;
+        $this->upload_is_material_order = false;
+        $this->upload_belongs_to_vendor_id = null;
+        $this->resetValidation('upload_file');
+        $this->modal('upload_receipt_modal')->show();
     }
 
     public function editExpense(Expense $expense)
@@ -520,6 +540,86 @@ class ExpenseCreate extends Component
         } else {
             $this->dispatch('refreshComponent')->to(ExpenseIndex::class);
         }
+    }
+
+    public function uploadReceipt(): void
+    {
+        $this->validate([
+            'upload_file' => 'required|mimes:pdf,jpg,jpeg,png|max:20480',
+        ], [
+            'upload_file.required' => 'Please select a file to upload.',
+            'upload_file.mimes' => 'File must be a PDF, JPG, or PNG.',
+            'upload_file.max' => 'File must be less than 20MB.',
+        ]);
+
+        $docType = $this->upload_file->getClientOriginalExtension();
+        $ocrFilename = date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '.' . $docType;
+        $ocrPath = '_temp_ocr/' . $ocrFilename;
+
+        Storage::disk('files')->put($ocrPath, file_get_contents($this->upload_file->getRealPath()));
+
+        $analyzerId = $this->upload_is_material_order
+            ? config('services.azure_cu.analyzer_id_material_order')
+            : null;
+
+        $ocrData = app(\App\Http\Controllers\ReceiptController::class)
+            ->extractReceipt($ocrPath, $docType, null, null, null, $analyzerId);
+
+        if (isset($ocrData['error']) && $ocrData['error'] === true) {
+            Storage::disk('files')->delete($ocrPath);
+            $this->addError('upload_file', 'Unable to process receipt. Please check the file and try again.');
+            return;
+        }
+
+        $fields = $ocrData['fields'] ?? [];
+
+        // Match vendor from OCR merchant name
+        $vendorId = null;
+        $merchantName = $fields['merchant_name'] ?? null;
+        if ($merchantName) {
+            $vendors = Vendor::orderBy('business_name')->get(['id', 'business_name']);
+            $matched = app(\App\Http\Controllers\CompanyEmailController::class)
+                ->fuzzyMatchVendor($merchantName, $vendors, 70.0);
+            if ($matched) {
+                $vendorId = $matched->id;
+            }
+        }
+
+        $hubVendorId = auth()->user()->vendor->id;
+
+        $expense = Expense::create([
+            'amount' => $fields['total'] ?? 0,
+            'date' => $fields['transaction_date'] ?? now()->format('Y-m-d'),
+            'invoice' => $fields['invoice_number'] ?? null,
+            'vendor_id' => $vendorId,
+            'belongs_to_vendor_id' => ($this->upload_is_material_order && $this->upload_belongs_to_vendor_id) ? $this->upload_belongs_to_vendor_id : $hubVendorId,
+            'created_by_user_id' => auth()->user()->id,
+        ]);
+
+        // Save the receipt data
+        app(\App\Http\Controllers\CompanyEmailController::class)
+            ->saveExpenseReceipt($expense->id, $ocrData, $ocrFilename, null, false, $this->upload_is_material_order);
+
+        // Clean up temp file
+        Storage::disk('files')->delete($ocrPath);
+
+        // Reset upload fields
+        $this->upload_file = null;
+        $this->upload_is_material_order = false;
+        $this->upload_belongs_to_vendor_id = null;
+        $this->modal('upload_receipt_modal')->close();
+
+        // Set up edit state directly (avoid resetModal which close+show same-request conflict)
+        $this->expense = $expense;
+        $this->form->setExpense($expense);
+        $this->view_text = [
+            'card_title' => 'Update Expense',
+            'button_text' => 'Update',
+            'form_submit' => 'edit',
+        ];
+        $this->modal('expenses_form_modal')->show();
+
+        $this->dispatch('refreshComponent')->to(ExpenseIndex::class);
     }
 
     public function render()

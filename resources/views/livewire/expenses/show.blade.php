@@ -52,6 +52,17 @@
                         content="{{ $expense->vendor->business_name }}"
                         href="{{ isset($expense->vendor->id) ? route('vendors.show', $expense->vendor->id) : null }}"
                     />
+
+                    @if($expense->belongs_to_vendor_id && $expense->belongs_to_vendor_id !== auth()->user()->vendor->id)
+                        @php $belongsToVendor = \App\Models\Vendor::find($expense->belongs_to_vendor_id); @endphp
+                        @if($belongsToVendor)
+                            <x-details.row 
+                                title="Belongs To" 
+                                content="{{ $belongsToVendor->business_name }}"
+                                href="{{ route('vendors.show', $belongsToVendor->id) }}"
+                            />
+                        @endif
+                    @endif
                     
                     <x-details.row 
                         title="Project" 
@@ -300,4 +311,9 @@
         <livewire:expenses.expense-create />
         <livewire:expenses.expenses-associated />
     @endif
+
+    {{-- Item Detail Modal --}}
+    <flux:modal wire:model.self="showItemModal" class="md:min-w-lg">
+        <x-expenses.item-detail-modal-content :item="$selectedItem" />
+    </flux:modal>
 </div>

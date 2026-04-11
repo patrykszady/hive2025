@@ -264,6 +264,12 @@ Route::middleware(['auth', 'registered'])->group(function () {
 
         return redirect('/horizon/jobs/pending');
     })->name('menards.scrape');
+
+    Route::get('/activate-scheduled-projects', function () {
+        \Illuminate\Support\Facades\Artisan::call('projects:activate-scheduled');
+
+        return back()->with('success', \Illuminate\Support\Facades\Artisan::output());
+    })->name('projects.activate-scheduled');
 });
 
 Route::get('/company-email/login', [CompanyEmailController::class, 'nylasLogin'])->name('company-email.login');

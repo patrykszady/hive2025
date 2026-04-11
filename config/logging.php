@@ -2,6 +2,13 @@
 
 return [
     'channels' => [
+        'horizon' => [
+            'driver' => 'daily',
+            'path'   => storage_path('logs/horizon.log'),
+            'level'  => 'debug',
+            'days'   => 14,
+        ],
+
         'schedule' => [
             'driver' => 'daily',
             'path'   => storage_path('logs/schedule.log'),

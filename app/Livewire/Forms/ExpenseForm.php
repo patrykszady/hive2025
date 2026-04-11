@@ -6,7 +6,11 @@ use App\Models\Check;
 use App\Models\Distribution;
 use App\Models\Expense;
 use App\Models\ExpenseSplits;
+use App\Models\Project;
+use App\Models\ProjectStatus;
+use App\Models\Vendor;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Validate;
 
@@ -53,6 +57,10 @@ class ExpenseForm extends Form
     #[Validate]
     public $paid_by = null;
 
+    public bool $is_material_order = false;
+
+    public $belongs_to_vendor_id = null;
+
     // // required_without:form.paid_by
     // #[Validate('nullable', as: 'bank account')]
     // public $bank_account_id = null;
@@ -90,9 +98,16 @@ class ExpenseForm extends Form
             : $this->expense->receipts()->latest()->first();
         if ($latestReceipt) {
             $this->receipts = true;
+            $this->is_material_order = (bool) $latestReceipt->is_material_order;
             if (is_array($latestReceipt->receipt_items) && isset($latestReceipt->receipt_items['merchant_name'])) {
                 $this->merchant_name = $latestReceipt->receipt_items['merchant_name'];
             }
+        }
+
+        // Load belongs_to_vendor_id for material orders (when it differs from the hub)
+        $hubVendorId = auth()->user()->vendor->id;
+        if ($this->is_material_order && $expense->belongs_to_vendor_id != $hubVendorId) {
+            $this->belongs_to_vendor_id = $expense->belongs_to_vendor_id;
         }
 
         $this->amount = $this->expense->amount;
@@ -283,6 +298,8 @@ class ExpenseForm extends Form
         // Save the original amount before updating
         $originalAmount = $this->expense->amount;
 
+        $hubVendorId = auth()->user()->vendor->id;
+
         $this->expense->update([
             'amount' => $this->amount,
             'date' => $this->date,
@@ -293,6 +310,7 @@ class ExpenseForm extends Form
             'vendor_id' => $this->vendor_id,
             'paid_by' => empty($this->paid_by) ? null : $this->paid_by,
             'reimbursment' => empty($this->reimbursment) ? null : $this->reimbursment,
+            'belongs_to_vendor_id' => ($this->is_material_order && $this->belongs_to_vendor_id) ? $this->belongs_to_vendor_id : $hubVendorId,
             'created_by_user_id' => auth()->user()->id,
         ]);
 
@@ -377,6 +395,8 @@ class ExpenseForm extends Form
         }
 
         $this->save_splits($this->expense);
+
+        $this->attachCrossVendorRelationships($this->expense);
 
         if ($this->receipt_file) {
             $receipt_success = $this->upload_receipt_file($this->expense->amount, $this->expense->id);
@@ -488,7 +508,7 @@ class ExpenseForm extends Form
             'check_id' => ! isset($check) ? null : $check->id,
             'paid_by' => empty($this->paid_by) ? null : $this->paid_by,
             'reimbursment' => empty($this->reimbursment) ? null : $this->reimbursment,
-            'belongs_to_vendor_id' => auth()->user()->vendor->id,
+            'belongs_to_vendor_id' => ($this->is_material_order && $this->belongs_to_vendor_id) ? $this->belongs_to_vendor_id : auth()->user()->vendor->id,
             'created_by_user_id' => auth()->user()->id,
         ]);
 
@@ -529,6 +549,8 @@ class ExpenseForm extends Form
             }
         }
 
+        $this->attachCrossVendorRelationships($expense);
+
         return $expense;
     }
 
@@ -543,7 +565,10 @@ class ExpenseForm extends Form
         Storage::disk('files')->put($ocr_path, file_get_contents($this->receipt_file->getRealPath()));
 
         // OCR via unified extractReceipt()
-        $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->extractReceipt($ocr_path, $doc_type, $expense_amount);
+        $analyzerId = $this->is_material_order
+            ? config('services.azure_cu.analyzer_id_material_order')
+            : null;
+        $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->extractReceipt($ocr_path, $doc_type, $expense_amount, null, null, $analyzerId);
 
         // Check if OCR extraction failed
         if (isset($ocr_receipt_data['error']) && $ocr_receipt_data['error'] === true) {
@@ -568,7 +593,7 @@ class ExpenseForm extends Form
         }
 
         //ATTACHMENT - only proceed if OCR was successful
-        app(\App\Http\Controllers\CompanyEmailController::class)->saveExpenseReceipt($expense_id, $ocr_receipt_data, $ocr_filename);
+        app(\App\Http\Controllers\CompanyEmailController::class)->saveExpenseReceipt($expense_id, $ocr_receipt_data, $ocr_filename, null, false, $this->is_material_order);
 
         // Clean up temp file
         Storage::disk('files')->delete($ocr_path);
@@ -576,5 +601,51 @@ class ExpenseForm extends Form
         $this->receipt_file = null;
 
         return true;
+    }
+
+    private function attachCrossVendorRelationships(Expense $expense): void
+    {
+        $hubVendorId = auth()->user()->vendor->id;
+        $ownerVendorId = $expense->belongs_to_vendor_id;
+
+        if ((int) $ownerVendorId === (int) $hubVendorId) {
+            return;
+        }
+
+        $ownerVendor = Vendor::withoutGlobalScopes()->find($ownerVendorId);
+        if (! $ownerVendor) {
+            return;
+        }
+
+        // Attach the expense vendor (e.g. Home Depot) to the owner's vendor list
+        if ($expense->vendor_id && ! $ownerVendor->vendors()->where('vendor_id', $expense->vendor_id)->exists()) {
+            $ownerVendor->vendors()->attach($expense->vendor_id);
+        }
+
+        // Attach the project to the owner vendor with Invited status
+        if ($expense->project_id) {
+            $project = Project::withoutGlobalScopes()->find($expense->project_id);
+
+            if ($project && ! $project->vendors()->withoutGlobalScopes()->where('vendor_id', $ownerVendorId)->exists()) {
+                $project->vendors()->withoutGlobalScopes()->attach($ownerVendorId, ['client_id' => $project->client_id]);
+
+                if ($project->client_id && ! DB::table('client_vendor')->where('client_id', $project->client_id)->where('vendor_id', $ownerVendorId)->exists()) {
+                    DB::table('client_vendor')->insert([
+                        'client_id' => $project->client_id,
+                        'vendor_id' => $ownerVendorId,
+                        'source' => 'auto-attach',
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                }
+
+                ProjectStatus::create([
+                    'project_id' => $project->id,
+                    'belongs_to_vendor_id' => $ownerVendorId,
+                    'status_code' => ProjectStatus::getCodeForLabel('Invited') ?? 1,
+                    'start_date' => today()->format('Y-m-d'),
+                ]);
+            }
+        }
     }
 }

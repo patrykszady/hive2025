@@ -325,6 +325,7 @@
             $phoneNameMap = $this->phoneNameMap;
             $processed = $this->processedMessages;
             $visibleMessages = $processed['visible'];
+            $scheduledMessages = $processed['scheduled'];
             $reactionsMap = $processed['reactions'];
 
             $tz = browser_timezone();
@@ -356,6 +357,44 @@
                 }
             "
         >
+            {{-- Scheduled messages always at bottom (first in DOM due to flex-col-reverse) --}}
+            @foreach ($scheduledMessages as $msg)
+                <div wire:key="msg-{{ $msg->id }}" class="flex justify-end">
+                    <div class="max-w-[85%] lg:max-w-[75%] order-last">
+                        <p class="text-xs lg:text-[10px] text-zinc-400 dark:text-zinc-500 mb-0.5 px-1 text-right">
+                            {{ $msg->sentByUser?->first_name ?? 'GS Crew' }}
+                        </p>
+
+                        <div class="relative">
+                            <div class="mb-1.5 flex items-center justify-end gap-1">
+                                <flux:badge color="amber" size="sm" icon="clock">Scheduled &middot; {{ $msg->scheduled_at->timezone('America/Chicago')->format('M j, g:i A') }}</flux:badge>
+                                <flux:button size="xs" variant="primary" square icon="paper-airplane" wire:click="sendScheduledNow({{ $msg->id }})" tooltip="Send now" aria-label="Send now"></flux:button>
+                                <flux:button size="xs" variant="danger" square icon="x-mark" wire:click="$set('cancelScheduledId', {{ $msg->id }}); $set('showCancelModal', true)" tooltip="Cancel" aria-label="Cancel scheduled message"></flux:button>
+                            </div>
+
+                            <div class="rounded-2xl px-3.5 py-2 text-base lg:text-sm break-words bg-indigo-600/50 text-white/80 rounded-br-md">
+                                @if ($msg->hasMedia())
+                                    <div class="space-y-2 {{ $msg->text ? 'mb-1.5' : '' }}">
+                                        @foreach ($msg->media_urls as $url)
+                                            <button type="button" class="block" wire:click="openImageLightbox('{{ $url }}')">
+                                                <img src="{{ $url }}" alt="MMS attachment" class="max-w-full rounded-lg max-h-64 object-cover" loading="lazy" />
+                                            </button>
+                                        @endforeach
+                                    </div>
+                                @endif
+                                @if ($msg->display_text)
+                                    {!! preg_replace(
+                                        '/(https?:\/\/[^\s<]+)/',
+                                        '<a href="$1" target="_blank" class="underline text-indigo-100 hover:text-white">$1</a>',
+                                        nl2br(e($msg->display_text))
+                                    ) !!}
+                                @endif
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            @endforeach
+
             @forelse ($visibleMessages->reverse() as $msg)
                 @if ($loop->last && $this->smsMessages->count() >= $messageLimit)
                     <div data-load-more class="text-center py-2">
@@ -478,16 +517,16 @@
                         const saved = localStorage.getItem(this.draftKey);
                         if (saved) {
                             $wire.set('newMessage', saved);
+                            this.$nextTick(() => {
+                                const ta = this.$el.querySelector('textarea');
+                                if (ta) ta.dispatchEvent(new Event('input', { bubbles: true }));
+                            });
                         }
                     },
                     saveDraft(e) {
                         localStorage.setItem(this.draftKey, e.target.value);
                     },
-                    clearDraft() {
-                        localStorage.removeItem(this.draftKey);
-                    }
                 }"
-                x-on:submit="clearDraft()"
             >
                 @if ($attachment && method_exists($attachment, 'temporaryUrl') && $attachment->getRealPath())
                     <div class="mb-2 px-1">
@@ -509,7 +548,6 @@
                     label:sr-only
                     rows="2"
                     max-rows="6"
-                    submit="enter"
                     x-on:input="saveDraft($event)"
                 >
                     <x-slot name="actionsLeading">
@@ -521,6 +559,19 @@
                     </x-slot>
 
                     <x-slot name="actionsTrailing">
+                        <flux:dropdown position="top end">
+                            <flux:button size="sm" variant="subtle" square icon="clock" aria-label="Schedule send" :disabled="$pendingOptIn"></flux:button>
+
+                            <flux:menu>
+                                <flux:heading size="xs" class="px-2 pb-1">Schedule send</flux:heading>
+                                <flux:menu.item wire:click="scheduleMessage('1hr')" icon="clock">In 1 hour</flux:menu.item>
+                                <flux:menu.item wire:click="scheduleMessage('2hr')" icon="clock">In 2 hours</flux:menu.item>
+                                <flux:separator />
+                                <flux:menu.item wire:click="scheduleMessage('tomorrow_8am')" icon="sun">Tomorrow 8:00 AM</flux:menu.item>
+                                <flux:menu.item wire:click="scheduleMessage('tomorrow_12pm')" icon="sun">Tomorrow 12:00 PM</flux:menu.item>
+                            </flux:menu>
+                        </flux:dropdown>
+
                         <flux:button type="submit" size="sm" variant="primary" square icon="paper-airplane" class="data-loading:opacity-50" :disabled="$pendingOptIn" aria-label="Send message"></flux:button>
                     </x-slot>
                 </flux:composer>
@@ -533,19 +584,12 @@
                 <p class="text-xs text-red-500 mt-1 px-1">{{ $message }}</p>
             @enderror
 
-            <div class="flex items-center justify-between gap-2 px-2 pt-1">
-                <div class="flex items-center gap-2 min-w-0">
-                    <flux:avatar size="xs" color="indigo" name="{{ auth()->user()->full_name }}" circle />
-                    <span class="text-xs text-zinc-500 dark:text-zinc-400 truncate">{{ auth()->user()->full_name }}</span>
-                </div>
-
-                @if ($pendingOptIn)
-                    <div class="ml-auto flex items-center gap-2 whitespace-nowrap">
-                        <flux:icon name="exclamation-triangle" class="size-4 text-amber-500" />
-                        <flux:text class="text-xs text-amber-600 dark:text-amber-400">Awaiting START reply</flux:text>
-                    </div>
-                @endif
+            @if ($pendingOptIn)
+            <div class="flex items-center justify-end gap-2 px-2 pt-1">
+                <flux:icon name="exclamation-triangle" class="size-4 text-amber-500" />
+                <flux:text class="text-xs text-amber-600 dark:text-amber-400">Awaiting START reply</flux:text>
             </div>
+            @endif
             @endif
         </div>
 
@@ -907,6 +951,22 @@
                         <flux:button variant="ghost">Cancel</flux:button>
                     </flux:modal.close>
                     <flux:button variant="danger" wire:click="deleteThread">Delete</flux:button>
+                </div>
+            </div>
+        </flux:modal>
+
+        <flux:modal wire:model="showCancelModal" class="min-w-[22rem]">
+            <div class="space-y-6">
+                <div>
+                    <flux:heading size="lg">Cancel scheduled message?</flux:heading>
+                    <flux:text class="mt-2">
+                        This message will not be sent. This action cannot be undone.
+                    </flux:text>
+                </div>
+                <div class="flex gap-2">
+                    <flux:spacer />
+                    <flux:button variant="ghost" wire:click="$set('showCancelModal', false)">Keep</flux:button>
+                    <flux:button variant="danger" wire:click="cancelScheduledMessage">Cancel message</flux:button>
                 </div>
             </div>
         </flux:modal>

@@ -5,6 +5,7 @@ namespace App\Livewire\Estimates;
 use App\Models\Bid;
 use App\Models\Estimate;
 use App\Models\Project;
+use App\Models\ProjectStatus;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
@@ -362,6 +363,20 @@ class EstimateAccept extends Component
 
             $estimate->options = $estimate_options;
             $estimate->save();
+
+            // Auto-transition to Scheduled when a start date is set and status is Response or Prep
+            if ($this->start_date) {
+                $latestStatus = $this->project->latestStatus;
+
+                if ($latestStatus && in_array($latestStatus->status_code, [3, 4], true)) {
+                    ProjectStatus::create([
+                        'project_id'           => $this->project->id,
+                        'belongs_to_vendor_id' => $latestStatus->belongs_to_vendor_id,
+                        'status_code'          => 5,
+                        'start_date'           => $this->start_date,
+                    ]);
+                }
+            }
 
             foreach ($this->bids as $bid_index => $bid) {
                 $bid_sections = $this->sections->where('bid_index', $bid_index);

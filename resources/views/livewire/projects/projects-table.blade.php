@@ -66,13 +66,19 @@
                                 <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->address }}">{{ $project->short_address }}</div>
                             </flux:table.cell>
                             @if($view != 'clients.index' && !auth()->user()->is_browsing_as_client)
-                                <flux:table.cell
-                                    wire:navigate.hover
-                                    href="{{route('clients.show', $project->client->id)}}"
-                                    class="cursor-pointer w-[25%] min-w-0 hover:text-indigo-600 dark:hover:text-indigo-400"
+                                @if($project->client)
+                                    <flux:table.cell
+                                        wire:navigate.hover
+                                        href="{{route('clients.show', $project->client->id)}}"
+                                        class="cursor-pointer w-[25%] min-w-0 hover:text-indigo-600 dark:hover:text-indigo-400"
                                     >
-                                    <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->client->last_names }}">{{ $project->client->last_names }}</div>
-                                </flux:table.cell>
+                                        <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis" title="{{ $project->client->last_names }}">{{ $project->client->last_names }}</div>
+                                    </flux:table.cell>
+                                @else
+                                    <flux:table.cell class="w-[25%] min-w-0">
+                                        <div class="truncate whitespace-nowrap overflow-hidden text-ellipsis">&mdash;</div>
+                                    </flux:table.cell>
+                                @endif
                             @endif
                             <flux:table.cell
                                 wire:navigate.hover

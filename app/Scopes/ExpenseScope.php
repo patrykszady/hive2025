@@ -28,7 +28,7 @@ class ExpenseScope implements Scope
             
             // if Admin: all vendor expenses
             if ($user->vendor_role == 'Admin') {
-                $builder->where(function ($query) use ($user, $viaVendorId) {
+                $builder->where(function ($query) use ($user) {
                     $query->where('belongs_to_vendor_id', $user->vendor->id);
                 });
             } 

@@ -18,20 +18,31 @@
                 @foreach($receipt->receipt_items['items'] as $index => $line_item)
                     <flux:table.row 
                         wire:key="receipt-desc-{{ $index }}"
-                        class="transition-colors duration-150 !border-none {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) === true)) ? 'bg-indigo-50 dark:bg-indigo-900/10 print:!bg-transparent' : '' }}"
+                        class="transition-colors duration-150 {{ $loop->first ? '!border-none' : 'border-t border-zinc-800/15 dark:border-white/20 !border-b-0' }} {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) === true)) ? 'bg-indigo-50 dark:bg-indigo-900/10 print:!bg-transparent' : '' }}"
                     >
-                        <flux:table.cell colspan="4" class="!pl-5 !pr-5 !pb-0" title="{{$line_item['Description'] ?? ''}}">
-                            <div class="truncate w-full transition-opacity transition-colors duration-150 {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) !== true)) ? 'text-gray-300 line-through opacity-50' : '' }}">
-                                {{$line_item['Description'] ?? ''}}
+                        <flux:table.cell colspan="4" class="!pl-5 !pr-5 !py-1" title="{{$line_item['Description'] ?? ''}}">
+                            <div class="flex items-center gap-2 transition-opacity transition-colors duration-150 {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) !== true)) ? 'text-gray-300 line-through opacity-50' : '' }}">
+                                @if(!empty($line_item['image_url']))
+                                    <button
+                                        type="button"
+                                        class="shrink-0 cursor-pointer"
+                                        wire:click="selectReceiptItem({{ $receipt->id }}, {{ $index }})"
+                                    >
+                                        <img src="{{ $line_item['image_url'] }}" alt="{{ $line_item['Description'] ?? '' }}" class="size-10 rounded object-cover bg-zinc-100 dark:bg-zinc-800" loading="lazy" />
+                                    </button>
+                                @endif
+                                <span class="min-w-0 truncate">{{$line_item['Description'] ?? ''}}</span>
                             </div>
                         </flux:table.cell>
                     </flux:table.row>
                     
                     <flux:table.row 
                         wire:key="receipt-data-{{ $index }}"
-                        class="transition-colors duration-150 !py-0 {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) === true)) ? 'bg-indigo-50 dark:bg-indigo-900/10 print:!bg-transparent' : '' }} {{ $loop->last ? '' : 'border-b border-zinc-800/15 dark:border-white/20' }}">
-                        <flux:table.cell class="!pl-5" align="end">
-                            <span class="transition-opacity transition-colors duration-150 {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) !== true)) ? 'text-gray-300 line-through opacity-50' : '' }}">
+                        class="receipt-row-data transition-colors duration-150 !py-0 !border-none {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) === true)) ? 'bg-indigo-50 dark:bg-indigo-900/10 print:!bg-transparent' : '' }}">
+                        <flux:table.cell class="!pl-5">
+                            <div class="flex items-center gap-2">
+                                @if(!empty($line_item['image_url']) || !$receipt->is_material_order)<div class="shrink-0 w-10"></div>@endif
+                                <span class="transition-opacity transition-colors duration-150 {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) !== true)) ? 'text-gray-300 line-through opacity-50' : '' }}">
                                 @if(isset($receipt->expense->vendor) && $receipt->expense->vendor->sku_search_url)
                                     <flux:link 
                                         href="{{ $receipt->expense->vendor->sku_search_url . ($line_item['ProductCode'] ?? '') }}" 
@@ -41,10 +52,20 @@
                                     >
                                         {{$line_item['ProductCode'] ?? ''}}
                                     </flux:link>
+                                @elseif(!empty($line_item['product_url']))
+                                    <flux:link 
+                                        href="{{ $line_item['product_url'] }}" 
+                                        external
+                                        class="italic {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) !== true)) ? '!text-gray-300' : '' }}"
+                                        variant="subtle"
+                                    >
+                                        {{$line_item['ProductCode'] ?? ''}}
+                                    </flux:link>
                                 @else
                                     <i>{{$line_item['ProductCode'] ?? ''}}</i>
                                 @endif
-                            </span>
+                                </span>
+                            </div>
                         </flux:table.cell>
                         
                         <flux:table.cell align="end">
@@ -55,7 +76,7 @@
                         
                         <flux:table.cell align="end">
                             <span class="transition-opacity transition-colors duration-150 {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) !== true)) ? 'text-gray-300 line-through opacity-50' : '' }}">
-                                {{$line_item['Quantity'] ?? 0}}
+                                {{$line_item['Quantity'] ?? 0}}{{ !empty($line_item['Unit']) ? ' ' . $line_item['Unit'] : '' }}
                             </span>
                         </flux:table.cell>
                         
@@ -65,6 +86,59 @@
                             </span>
                         </flux:table.cell>
                     </flux:table.row>
+
+                    @php($itemDate = $receipt->is_material_order ? ($line_item['ETA'] ?? null) : null)
+                    @php($itemStatus = $receipt->is_material_order ? ($line_item['Status'] ?? null) : null)
+                    @if($itemStatus)
+                        @php(
+                            $normalizedStatus = match (true) {
+                                in_array(strtolower(trim($itemStatus)), ['back ord', 'back order', 'bo', 'backorder', 'b/o'], true) => 'back order',
+                                str_starts_with(strtolower(trim($itemStatus)), 'availabl') || strtolower(trim($itemStatus)) === 'available' => 'available',
+                                in_array(strtolower(trim($itemStatus)), ['open', 'open item'], true) => 'open',
+                                in_array(strtolower(trim($itemStatus)), ['received', 'recv', 'rec', 'delivered'], true) => 'received',
+                                in_array(strtolower(trim($itemStatus)), ['shipped', 'ship'], true) => 'shipped',
+                                in_array(strtolower(trim($itemStatus)), ['partial', 'partially shipped'], true) => 'partial',
+                                in_array(strtolower(trim($itemStatus)), ['cancelled', 'cancel', 'canceled'], true) => 'cancelled',
+                                default => strtolower(trim($itemStatus)),
+                            }
+                        )
+                        @if($normalizedStatus === 'back order' && !empty($itemDate) && !\Carbon\Carbon::parse($itemDate)->isFuture())
+                            @php($normalizedStatus = 'available')
+                        @endif
+                    @endif
+                    @if(!empty($line_item['Area']) || !empty($itemDate) || !empty($itemStatus))
+                        <flux:table.row
+                            wire:key="receipt-meta-{{ $index }}"
+                            class="receipt-row-meta transition-colors duration-150 !border-none {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) === true)) ? 'bg-indigo-50 dark:bg-indigo-900/10 print:!bg-transparent' : '' }}"
+                        >
+                            <flux:table.cell colspan="4" class="!pl-5 !pr-5 !border-t-0">
+                                <div class="flex items-center gap-2 text-xs">
+                                    @if(!empty($line_item['image_url']) || !$receipt->is_material_order)<div class="shrink-0 w-10"></div>@endif
+                                    <div class="flex-1 min-w-0 flex items-center gap-1.5">
+                                    @if(!empty($line_item['Area']))
+                                        <span class="min-w-0 truncate text-zinc-500 dark:text-zinc-400">{{ is_array($line_item['Area']) ? implode(' / ', $line_item['Area']) : $line_item['Area'] }}</span>
+                                    @endif
+                                    <span class="shrink-0 ml-auto flex items-center gap-1.5">
+                                        @if(!empty($itemStatus))
+                                            @php($statusColor = match($normalizedStatus) {
+                                                'back order' => 'red',
+                                                'available', 'received', 'shipped' => 'green',
+                                                'open', 'partial' => 'amber',
+                                                'cancelled' => 'zinc',
+                                                default => 'zinc',
+                                            })
+                                            <flux:badge size="sm" :color="$statusColor" inset="top bottom">{{ ucfirst($normalizedStatus) }}</flux:badge>
+                                        @endif
+                                        @if(!empty($itemDate))
+                                            @php($txDate = \Carbon\Carbon::parse($itemDate))
+                                            <span class="{{ $txDate->isFuture() ? 'text-red-500 dark:text-red-400' : 'text-green-600 dark:text-green-400' }}">{{ $txDate->format('M j') }}</span>
+                                        @endif
+                                    </span>
+                                    </div>
+                                </div>
+                            </flux:table.cell>
+                        </flux:table.row>
+                    @endif
                 @endforeach
 
                 <flux:table.row>
@@ -72,10 +146,19 @@
                     <flux:table.cell class="!pr-5" align="end">{{money($receipt->receipt_items['subtotal'] ?? 0)}}</flux:table.cell>
                 </flux:table.row>
 
+                @if(!empty($receipt->receipt_items['taxes']) && is_array($receipt->receipt_items['taxes']))
+                    @foreach($receipt->receipt_items['taxes'] as $tax)
+                    <flux:table.row>
+                        <flux:table.cell colspan="3" align="end" class="font-medium">{{ $tax['type'] ?? 'Tax' }}</flux:table.cell>
+                        <flux:table.cell class="!pr-5" align="end">{{money($tax['amount'] ?? 0)}}</flux:table.cell>
+                    </flux:table.row>
+                    @endforeach
+                @else
                 <flux:table.row>
                     <flux:table.cell colspan="3" align="end" class="font-medium">Tax</flux:table.cell>
                     <flux:table.cell class="!pr-5" align="end">{{money($receipt->receipt_items['total_tax'] ?? 0)}}</flux:table.cell>
                 </flux:table.row>
+                @endif
 
                 @if(!empty($receipt->receipt_items['tip']))
                 <flux:table.row>
@@ -91,12 +174,33 @@
                 </flux:table.row>
                 @endif
 
+                @if(!empty($receipt->receipt_items['shipping']))
+                <flux:table.row>
+                    <flux:table.cell colspan="3" align="end" class="font-medium">Shipping</flux:table.cell>
+                    <flux:table.cell class="!pr-5" align="end">{{money($receipt->receipt_items['shipping'])}}</flux:table.cell>
+                </flux:table.row>
+                @endif
+
 
 
                 <flux:table.row>
                     <flux:table.cell colspan="3" align="end" class="font-medium {{ (($selectedSplit && isset($selectedSplit->amount)) || $expenseMismatch) ? '!text-gray-300 line-through' : '' }}">Total</flux:table.cell>
                     <flux:table.cell variant="strong" class="!pr-5 {{ (($selectedSplit && isset($selectedSplit->amount)) || $expenseMismatch) ? '!text-gray-300 line-through' : '' }}" align="end">{{money($receipt->receipt_items['total'] ?? 0)}}</flux:table.cell>
                 </flux:table.row>
+
+                @if(!empty($receipt->receipt_items['deposit']))
+                <flux:table.row>
+                    <flux:table.cell colspan="3" align="end" class="font-medium">Deposit</flux:table.cell>
+                    <flux:table.cell class="!pr-5" align="end">{{money($receipt->receipt_items['deposit'])}}</flux:table.cell>
+                </flux:table.row>
+                @endif
+
+                @if(!empty($receipt->receipt_items['balance_due']))
+                <flux:table.row>
+                    <flux:table.cell colspan="3" align="end" class="font-medium">Balance Due</flux:table.cell>
+                    <flux:table.cell variant="strong" class="!pr-5" align="end">{{money($receipt->receipt_items['balance_due'])}}</flux:table.cell>
+                </flux:table.row>
+                @endif
 
                 @if($selectedSplit && isset($selectedSplit->amount))
                     <flux:table.row>
@@ -111,5 +215,6 @@
                 @endif
             </flux:table.rows>
         </flux:table>
+
     </div>
 @endif

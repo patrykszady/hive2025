@@ -1,0 +1,116 @@
+@props(['item'])
+
+@if($item)
+    <div class="space-y-4">
+        {{-- Image --}}
+        @if(!empty($item['image_url']))
+            <div class="overflow-hidden rounded-lg bg-white dark:bg-zinc-800">
+                <img
+                    src="{{ $item['image_url'] }}"
+                    alt="{{ $item['Description'] ?? '' }}"
+                    class="w-full max-h-64 object-contain"
+                />
+            </div>
+        @endif
+
+        {{-- Heading --}}
+        <div class="flex items-center gap-2">
+            <flux:heading size="lg">{{ $item['Description'] ?? 'Unknown Item' }}</flux:heading>
+            @if(!empty($item['product_url']))
+                <a href="{{ $item['product_url'] }}" target="_blank" class="ml-auto shrink-0 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">
+                    <flux:icon.arrow-top-right-on-square class="size-5" />
+                </a>
+            @endif
+        </div>
+
+        {{-- Details Grid --}}
+        <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+            @if(!empty($item['ProductCode']))
+                <div>
+                    <flux:text class="text-zinc-400">SKU</flux:text>
+                    <flux:text class="font-medium">{{ $item['ProductCode'] }}</flux:text>
+                </div>
+            @endif
+
+            @if(!empty($item['Quantity']))
+                <div>
+                    <flux:text class="text-zinc-400">Quantity</flux:text>
+                    <flux:text class="font-medium">{{ $item['Quantity'] }} {{ $item['Unit'] ?? '' }}</flux:text>
+                </div>
+            @endif
+
+            @if(!auth()->user()?->is_browsing_as_client)
+                @if(!empty($item['Price']))
+                    <div>
+                        <flux:text class="text-zinc-400">Unit Price</flux:text>
+                        <flux:text class="font-medium">{{ money($item['Price']) }}</flux:text>
+                    </div>
+                @endif
+
+                @if(!empty($item['TotalPrice']))
+                    <div>
+                        <flux:text class="text-zinc-400">Total</flux:text>
+                        <flux:text class="font-medium">{{ money($item['TotalPrice']) }}</flux:text>
+                    </div>
+                @endif
+            @endif
+
+            @if(!empty($item['Status']))
+                @php(
+                    $modalNormalizedStatus = match (true) {
+                        in_array(strtolower(trim($item['Status'])), ['back ord', 'back order', 'bo', 'backorder', 'b/o'], true) => 'back order',
+                        str_starts_with(strtolower(trim($item['Status'])), 'availabl') || strtolower(trim($item['Status'])) === 'available' => 'available',
+                        in_array(strtolower(trim($item['Status'])), ['open', 'open item'], true) => 'open',
+                        in_array(strtolower(trim($item['Status'])), ['received', 'recv', 'rec', 'delivered'], true) => 'received',
+                        in_array(strtolower(trim($item['Status'])), ['shipped', 'ship'], true) => 'shipped',
+                        in_array(strtolower(trim($item['Status'])), ['partial', 'partially shipped'], true) => 'partial',
+                        in_array(strtolower(trim($item['Status'])), ['cancelled', 'cancel', 'canceled'], true) => 'cancelled',
+                        default => strtolower(trim($item['Status'])),
+                    }
+                )
+                @if($modalNormalizedStatus === 'back order' && !empty($item['ETA']) && !\Carbon\Carbon::parse($item['ETA'])->isFuture())
+                    @php($modalNormalizedStatus = 'available')
+                @endif
+                @php($modalStatusColor = match($modalNormalizedStatus) {
+                    'back order' => 'red',
+                    'available', 'received', 'shipped' => 'green',
+                    'open', 'partial' => 'amber',
+                    'cancelled' => 'zinc',
+                    default => 'zinc',
+                })
+                <div>
+                    <flux:text class="text-zinc-400">Status</flux:text>
+                    <div class="mt-0.5">
+                        <flux:badge size="sm" :color="$modalStatusColor">{{ ucfirst($modalNormalizedStatus) }}</flux:badge>
+                    </div>
+                </div>
+            @endif
+
+            @if(!empty($item['ETA'] ?? $item['_expense_date']))
+                <div>
+                    <flux:text class="text-zinc-400">ETA</flux:text>
+                    @php($modalDate = \Carbon\Carbon::parse($item['ETA'] ?? $item['_expense_date']))
+                    <flux:text class="font-medium {{ $modalDate->isFuture() ? 'text-red-500 dark:text-red-400' : 'text-green-600 dark:text-green-400' }}">{{ $modalDate->format('M j, Y') }}</flux:text>
+                </div>
+            @endif
+
+            @if(!empty($item['_vendor_name']))
+                <div>
+                    <flux:text class="text-zinc-400">Vendor</flux:text>
+                    <flux:text class="font-medium">{{ $item['_vendor_name'] }}</flux:text>
+                </div>
+            @endif
+        </div>
+
+        @if(!empty($item['Area']))
+            <div>
+                <flux:text class="text-zinc-400 text-sm mb-1">Area</flux:text>
+                <div class="flex flex-wrap gap-1.5">
+                    @foreach((is_array($item['Area']) ? $item['Area'] : [$item['Area']]) as $area)
+                        <flux:badge size="sm" color="zinc">{{ $area }}</flux:badge>
+                    @endforeach
+                </div>
+            </div>
+        @endif
+    </div>
+@endif

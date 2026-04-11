@@ -48,6 +48,19 @@
             {{-- VENDOR DETAILS --}}
             <livewire:vendors.vendor-details :vendor="$vendor" :view="$view" :expanded="true" />
 
+            @if($view === 'vendor_registration' && ! data_get($registration, 'vendor_info', false))
+                <div class="flex justify-end" x-data="{ isConfirmed: false }">
+                    <flux:button
+                        variant="primary"
+                        x-show="!isConfirmed"
+                        wire:click="confirmProcess('vendor_info')"
+                        x-on:click="$nextTick(() => { isConfirmed = true })"
+                    >
+                        Confirm Vendor Details
+                    </flux:button>
+                </div>
+            @endif
+
             @if($vendor->business_type !== '1099')
                 {{-- TEAM MEMBERS SECTION (non-1099 only) --}}
                 <div x-show="$wire.registration.vendor_info" x-transition class="space-y-4" @style(['display: none' => empty($registration['vendor_info'])])>
@@ -55,6 +68,19 @@
                         :vendor="$vendor" 
                         :view="$view"
                     />
+
+                    @if($view === 'vendor_registration' && ! data_get($registration, 'team_members', false))
+                        <div class="flex justify-end" x-data="{ isConfirmed: false }">
+                            <flux:button
+                                variant="primary"
+                                x-show="!isConfirmed"
+                                wire:click="confirmProcess('team_members')"
+                                x-on:click="$nextTick(() => { isConfirmed = true })"
+                            >
+                                Skip Team Members
+                            </flux:button>
+                        </div>
+                    @endif
 
                     {{-- DISTRIBUTIONS & COMPANY EMAILS SECTION --}}
                     <div x-show="$wire.registration.team_members" x-transition class="space-y-4" @style(['display: none' => empty($registration['team_members'])])>
@@ -68,12 +94,12 @@
                         @if($view === 'vendor_registration' && ! data_get($registration, 'emails_registered', false))
                             <div class="flex justify-end" x-data="{ isConfirmed: false }">
                                 <flux:button
-                                    variant="ghost"
+                                    variant="primary"
                                     x-show="!isConfirmed"
                                     wire:click="confirmProcess('emails_registered')"
                                     x-on:click="$nextTick(() => { isConfirmed = true })"
                                 >
-                                    Skip
+                                    Skip Receipt Accounts
                                 </flux:button>
                             </div>
                         @endif
@@ -86,12 +112,12 @@
                         @if($view === 'vendor_registration' && ! data_get($registration, 'banks_registered', false))
                             <div class="flex justify-end mt-4" x-data="{ isConfirmed: false }">
                                 <flux:button
-                                    variant="ghost"
+                                    variant="primary"
                                     x-show="!isConfirmed"
                                     wire:click="confirmProcess('banks_registered')"
                                     x-on:click="$nextTick(() => { isConfirmed = true })"
                                 >
-                                    Skip
+                                    Skip Transaction Accounts
                                 </flux:button>
                             </div>
                         @endif

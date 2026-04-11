@@ -376,7 +376,14 @@ class ReOcrReceipts extends Command
 
         $this->line("Re-OCR: {$record->receipt_filename}");
 
-        $result = $receiptController->extractReceipt($filePath, 'receipt');
+        // Use material order analyzer when the receipt is flagged as a material order
+        $analyzerId = $record->is_material_order
+            ? config('services.azure_cu.analyzer_id_material_order')
+            : null;
+
+        $docType = $record->is_material_order ? 'material_order' : 'receipt';
+
+        $result = $receiptController->extractReceipt($filePath, $docType, null, null, null, $analyzerId);
 
         if (isset($result['error'])) {
             $this->error("OCR returned error.");
@@ -386,7 +393,27 @@ class ReOcrReceipts extends Command
         $fields   = $result['fields'];
         $data     = $record->receipt_items ?? [];
         $oldItems = $data['items'] ?? [];
-        $data['items'] = $fields['items'];
+        $newItems = $fields['items'] ?? [];
+
+        // Preserve scraped image_url / product_url from old items by matching on ProductCode
+        $oldByCode = [];
+        foreach ($oldItems as $old) {
+            $code = $old['ProductCode'] ?? null;
+            if ($code && (!empty($old['image_url']) || !empty($old['product_url']))) {
+                $oldByCode[$code] = $old;
+            }
+        }
+
+        foreach ($newItems as &$newItem) {
+            $code = $newItem['ProductCode'] ?? null;
+            if ($code && isset($oldByCode[$code])) {
+                $newItem['image_url']   ??= $oldByCode[$code]['image_url'] ?? null;
+                $newItem['product_url'] ??= $oldByCode[$code]['product_url'] ?? null;
+            }
+        }
+        unset($newItem);
+
+        $data['items'] = $newItems;
 
         foreach (['subtotal', 'total', 'total_tax', 'tip', 'misc_fees', 'transaction_date', 'merchant_name', 'invoice_number', 'purchase_order', 'handwritten_notes', 'payment_methods'] as $key) {
             if (array_key_exists($key, $fields) && $fields[$key] !== null) {
@@ -396,6 +423,7 @@ class ReOcrReceipts extends Command
 
         $record->receipt_items = $data;
         $record->receipt_html  = $result['content'] ?? $record->receipt_html;
+
         $record->save();
 
         $itemCount = is_array($fields['items']) ? count($fields['items']) : 0;

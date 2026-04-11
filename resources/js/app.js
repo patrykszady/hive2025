@@ -188,30 +188,6 @@ document.addEventListener('click', (event) => {
 	smoothScrollTo(top, 800);
 }, true); // Use capture phase to get event before Flux components
 
-window.addEventListener('vendor-registration:complete', (event) => {
-	const detail = event?.detail ?? {};
-	const url = typeof detail.url === 'string' ? detail.url : null;
-	const delayMs = Number.isFinite(Number(detail.delayMs)) ? Number(detail.delayMs) : 0;
-	const fadeMs = Number.isFinite(Number(detail.fadeMs)) ? Number(detail.fadeMs) : 250;
-
-	if (!url) {
-		return;
-	}
-
-	setTimeout(() => {
-		setPageFadeHidden(true);
-
-		setTimeout(() => {
-			if (window.Livewire && typeof window.Livewire.navigate === 'function') {
-				window.Livewire.navigate(url);
-				return;
-			}
-
-			window.location.assign(url);
-		}, fadeMs);
-	}, Math.max(0, delayMs));
-});
-
 function isNotificationSupported() {
 	return typeof window !== 'undefined' && 'Notification' in window;
 }

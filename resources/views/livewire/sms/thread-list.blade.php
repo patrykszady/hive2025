@@ -73,7 +73,8 @@
             <div class="flex items-center justify-between gap-2">
                 <div class="min-w-0 flex-1">
                     {{-- Client name, project address, or phone numbers --}}
-                    <p class="text-base lg:text-sm font-medium truncate text-zinc-900 dark:text-zinc-100">
+                    <p class="text-base lg:text-sm font-medium truncate text-zinc-900 dark:text-zinc-100 flex items-center gap-1">
+                        <span class="truncate">
                         @if ($isClientUser)
                             GS Construciton
                         @elseif ($thread->name)
@@ -86,6 +87,12 @@
                             {{ $thread->project->address }}
                         @else
                             {{ $thread->threadParticipants->pluck('phone_number')->map(fn ($p) => $this->resolvePhoneDisplay($p))->implode(', ') }}
+                        @endif
+                        </span>
+                        @if ($thread->scheduled_messages_count > 0)
+                            <span class="shrink-0 inline-flex items-center justify-center size-5 rounded bg-amber-100 dark:bg-amber-900/40">
+                                <flux:icon name="clock" class="size-3.5 text-amber-600 dark:text-amber-400" />
+                            </span>
                         @endif
                     </p>
 

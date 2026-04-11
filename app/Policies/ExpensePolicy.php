@@ -22,9 +22,20 @@ class ExpensePolicy
      */
     public function view(User $user, Expense $expense): bool
     {
-        // Admin can see all expenses
+        // Admin can see all expenses belonging to their vendor
         if ($user->vendor_role === 'Admin') {
-            return true;
+            // Direct vendor match
+            if ($expense->belongs_to_vendor_id == $user->vendor->id) {
+                return true;
+            }
+
+            // Project-based access: expense is on a project belonging to this vendor
+            if ($expense->project_id) {
+                $project = \App\Models\Project::find($expense->project_id);
+                if ($project && $project->belongs_to_vendor_id == $user->vendor->id) {
+                    return true;
+                }
+            }
         }
         
         // Get the user's via_vendor_id from pivot

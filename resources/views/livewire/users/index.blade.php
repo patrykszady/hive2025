@@ -127,18 +127,7 @@
     
     <div class="flex justify-end">
         @unless($nonLivewire ?? false)
-            <div x-data="{ isConfirmed: false }">
-                @if($view === 'vendor_registration' && ! data_get($vendor->registration, 'team_members', false))
-                    <flux:button
-                        variant="primary"
-                        x-show="!isConfirmed"
-                        wire:click="$dispatchTo('entry.vendor-registration', 'confirmProcess', { process_step: 'team_members' })"
-                        x-on:click="$nextTick(() => { isConfirmed = true })"
-                        >
-                        Skip Team Members
-                    </flux:button>
-                @endif
-
+            <div>
                 <livewire:users.user-create />
                 {{-- @can('update', $vendor)
                     <livewire:users.user-create />

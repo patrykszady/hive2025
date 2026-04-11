@@ -613,12 +613,12 @@ class ReceiptController extends Controller
      * @param  Receipt|null $receipt        Receipt template for option overrides
      * @return array{content: string, fields: array}|array{error: true}
      */
-    public function extractReceipt(string $ocrPath, string $docType, ?float $expenseAmount = null, mixed $email = null, ?Receipt $receipt = null): array
+    public function extractReceipt(string $ocrPath, string $docType, ?float $expenseAmount = null, mixed $email = null, ?Receipt $receipt = null, ?string $analyzerId = null): array
     {
         // ── 1. Analyse via Content Understanding ──────────────────────
         /** @var ContentUnderstandingService $cu */
         $cu = app(ContentUnderstandingService::class);
-        $analyzeResult = $cu->analyze($ocrPath, $docType, 'nylas');
+        $analyzeResult = $cu->analyze($ocrPath, $docType, 'nylas', $analyzerId);
 
         // Merge all document field maps into a single flat map
         $allFields = [];
@@ -631,6 +631,7 @@ class ReceiptController extends Controller
         }
 
         $prefix  = $allFields;
+        $isMaterialOrderDoc = strtolower($docType) === 'material_order';
         $rawContent = $analyzeResult['analyzeResult']['content'] ?? '';
         // Convert any HTML table markup to plain text layout before encoding
         $rawContent = preg_replace('/<br\s*\/?>/i', "\n", $rawContent);
@@ -700,10 +701,41 @@ class ReceiptController extends Controller
                 ?? (isset($prefix['TotalTax']['valueNumber']) ? (float) $prefix['TotalTax']['valueNumber'] : null);
         }
 
+        // ── 7a. Individual tax line items (material orders) ──────────
+        $taxes = null;
+        $taxItems = $prefix['Taxes']['valueArray'] ?? null;
+        if (is_array($taxItems) && !empty($taxItems)) {
+            $taxes = [];
+            foreach ($taxItems as $item) {
+                $obj = $item['valueObject'] ?? $item;
+                $type = $obj['TaxType']['valueString'] ?? $obj['TaxType']['content'] ?? null;
+                $amount = isset($obj['Amount']['valueNumber'])
+                    ? (float) $obj['Amount']['valueNumber']
+                    : (isset($obj['Amount']['valueCurrency']['amount'])
+                        ? (float) $obj['Amount']['valueCurrency']['amount']
+                        : $this->extractCurrencyAmount($obj['Amount'] ?? null));
+                if ($amount !== null) {
+                    $taxes[] = ['type' => $type ? trim($type) : 'Tax', 'amount' => $amount];
+                }
+            }
+            $taxes = $taxes ?: null;
+
+            if ($taxes && empty($totalTax)) {
+                $totalTax = array_sum(array_column($taxes, 'amount'));
+            }
+        }
+
+        // ── 7b. Deposit / Shipping / Balance Due (material orders) ───
+        $deposit    = isset($prefix['Deposit']) ? $this->extractCurrencyAmount($prefix['Deposit']) : null;
+        $shipping   = isset($prefix['Shipping']) ? $this->extractCurrencyAmount($prefix['Shipping']) : null;
+        $balanceDue = isset($prefix['BalanceDue']) ? $this->extractCurrencyAmount($prefix['BalanceDue']) : null;
+
         // ── 8. Transaction Date ───────────────────────────────────────
         $transactionDate = null;
         if (isset($prefix['TransactionDate'])) {
             $transactionDate = $prefix['TransactionDate']['valueDate'] ?? $prefix['TransactionDate']['content'] ?? null;
+        } elseif (isset($prefix['OrderDate'])) {
+            $transactionDate = $prefix['OrderDate']['valueDate'] ?? $prefix['OrderDate']['valueString'] ?? $prefix['OrderDate']['content'] ?? null;
         } elseif (isset($prefix['DepartureDate'])) {
             $transactionDate = $prefix['DepartureDate']['valueDate'];
         } elseif (isset($prefix['InvoiceDate'])) {
@@ -766,7 +798,7 @@ class ReceiptController extends Controller
                 }
 
                 $formattedItems[$key]['Description'] = $description;
-                $formattedItems[$key]['ProductCode']  = $this->sanitizeProductCode($line['ProductCode']['valueString'] ?? null);
+                $formattedItems[$key]['ProductCode']  = $this->sanitizeProductCode($line['ProductCode']['valueString'] ?? $line['ItemNumber']['valueString'] ?? $line['ItemNumber']['content'] ?? null);
 
                 // Strip product code and return-policy indicators (e.g. <A>) from description
                 if ($formattedItems[$key]['Description'] && $formattedItems[$key]['ProductCode']) {
@@ -786,9 +818,68 @@ class ReceiptController extends Controller
                     $formattedItems[$key]['TotalPrice'] = null;
                 }
 
-                $formattedItems[$key]['Quantity'] = isset($line['Quantity'])
-                    ? ($line['Quantity']['valueNumber'] ?? $this->extractCurrencyAmount($line['Quantity']))
-                    : 1;
+                // Parse quantity — may be a number (valueNumber) or a string like "2ea", "lea"
+                $formattedItems[$key]['Quantity'] = 1;
+                $formattedItems[$key]['Unit'] = null;
+
+                if (isset($line['Quantity'])) {
+                    $qtyRaw = $line['Quantity']['valueString']
+                        ?? $line['Quantity']['content']
+                        ?? (isset($line['Quantity']['valueNumber']) ? (string) $line['Quantity']['valueNumber'] : null);
+
+                    if ($qtyRaw !== null) {
+                        $qtyRaw = trim($qtyRaw);
+
+                        // Parse strings like "2ea", "lea", "10sf", "5pc"
+                        if (preg_match('/^([lI1-9]\d*)\s*([a-zA-Z]{2,3})$/i', $qtyRaw, $qm)) {
+                            $numPart = $qm[1];
+                            // OCR misreads "1" as "l" or "I"
+                            if ($numPart === 'l' || $numPart === 'I') {
+                                $numPart = '1';
+                            }
+                            $formattedItems[$key]['Quantity'] = (int) $numPart;
+                            $formattedItems[$key]['Unit'] = strtoupper($qm[2]);
+                        } elseif (is_numeric($qtyRaw)) {
+                            $formattedItems[$key]['Quantity'] = (float) $qtyRaw;
+                        } else {
+                            $parsed = $this->extractCurrencyAmount($line['Quantity']);
+                            if ($parsed !== null) {
+                                $formattedItems[$key]['Quantity'] = $parsed;
+                            }
+                        }
+                    } elseif (isset($line['Quantity']['valueNumber'])) {
+                        $formattedItems[$key]['Quantity'] = $line['Quantity']['valueNumber'];
+                    }
+                }
+
+                // Fallback unit extraction if not parsed from quantity string
+                if ($formattedItems[$key]['Unit'] === null) {
+                    if (isset($line['Quantity']['content'])) {
+                        $qtyContent = trim($line['Quantity']['content']);
+                        if (preg_match('/[\d.,]+\s+([A-Za-z]+)/', $qtyContent, $unitMatch)) {
+                            $formattedItems[$key]['Unit'] = strtoupper($unitMatch[1]);
+                        }
+                    } elseif (isset($line['QuantityUnit']['valueString'])) {
+                        $formattedItems[$key]['Unit'] = strtoupper($line['QuantityUnit']['valueString']);
+                    } elseif (isset($line['Unit']['valueString'])) {
+                        $formattedItems[$key]['Unit'] = strtoupper($line['Unit']['valueString']);
+                    }
+                }
+
+                // Extract area/room designation from material order analyzer
+                $areaRaw = $line['Area']['valueString'] ?? $line['Area']['content'] ?? null;
+                $formattedItems[$key]['Area'] = $areaRaw
+                    ? array_values(array_filter(array_map('trim', preg_split('/\s*\/\s*/', $areaRaw))))
+                    : [];
+
+                // Persist per-item ETA and Status only for material-order OCR documents
+                if ($isMaterialOrderDoc) {
+                    $formattedItems[$key]['ETA'] = $line['ETA']['valueDate'] ?? $line['ETA']['content'] ?? null;
+
+                    $formattedItems[$key]['Status'] = $line['Status']['valueString'] ?? $line['Status']['content'] ?? null;
+                    $formattedItems[$key]['LineNumber'] = $line['LineNumber']['valueString'] ?? $line['LineNumber']['content'] ?? null;
+                    $formattedItems[$key]['Notes'] = $line['Notes']['valueString'] ?? $line['Notes']['content'] ?? null;
+                }
 
                 if (isset($line['Price'])) {
                     $formattedItems[$key]['Price'] = $this->extractCurrencyAmount($line['Price']);
@@ -809,20 +900,18 @@ class ReceiptController extends Controller
                     $formattedItems[$key]['Price'] = round($formattedItems[$key]['TotalPrice'] / $qty, 2);
                 }
 
-                // If quantity defaulted to 1 but we have both unit price and total price,
-                // calculate the actual quantity from TotalPrice / Price.
+                // Validate quantity using arithmetic: expectedQty = TotalPrice / UnitPrice.
+                // CU may read page numbers as quantities; prices are more reliable.
                 if (
-                    $formattedItems[$key]['Quantity'] == 1
-                    && $formattedItems[$key]['Price']
+                    $formattedItems[$key]['Price']
                     && $formattedItems[$key]['TotalPrice']
                     && $formattedItems[$key]['Price'] > 0
-                    && $formattedItems[$key]['TotalPrice'] > $formattedItems[$key]['Price']
                 ) {
                     $calculatedQty = $formattedItems[$key]['TotalPrice'] / $formattedItems[$key]['Price'];
-                    $roundedQty = round($calculatedQty);
+                    $roundedQty = (int) round($calculatedQty);
 
-                    if ($roundedQty > 1 && abs($calculatedQty - $roundedQty) < 0.01) {
-                        $formattedItems[$key]['Quantity'] = (int) $roundedQty;
+                    if ($roundedQty >= 1 && abs($calculatedQty - $roundedQty) < 0.02) {
+                        $formattedItems[$key]['Quantity'] = $roundedQty;
                     }
                 }
             }
@@ -909,15 +998,19 @@ class ReceiptController extends Controller
         }
 
         if (is_array($formattedItems) && !empty($formattedItems)) {
+            $formattedItems = $this->normalizeMaterialOrderOcr($formattedItems);
+            if ($isMaterialOrderDoc) {
+                $formattedItems = $this->fixMaterialOrderQuantities($formattedItems, (string) ($rawContent ?? ''));
+            }
             $formattedItems = $this->supplementLineItemsFromContent($formattedItems, (string) ($content ?? ''), $subtotal);
             $formattedItems = $this->supplementQuantitiesFromContent($formattedItems, (string) ($content ?? ''));
             $formattedItems = $this->deduplicateLineItems($formattedItems);
         }
 
-        // Misc fees = gap between total and (subtotal + tax + tip)
+        // Misc fees = gap between total and (subtotal + tax + tip + shipping + deposit)
         $miscFees = null;
         if ($amount !== null && $subtotal !== null) {
-            $knownSum = $subtotal + ($totalTax ?? 0) + ($tip ?? 0);
+            $knownSum = $subtotal + ($totalTax ?? 0) + ($tip ?? 0) + ($shipping ?? 0) + ($deposit ?? 0);
             $gap = round($amount - $knownSum, 2);
             if ($gap > 0.004) {
                 $miscFees = $gap;
@@ -931,8 +1024,12 @@ class ReceiptController extends Controller
                 'subtotal'          => $subtotal,
                 'total'             => $amount,
                 'total_tax'         => $totalTax,
+                'taxes'             => $taxes,
                 'tip'               => $tip,
                 'misc_fees'         => $miscFees,
+                'deposit'           => $deposit,
+                'shipping'          => $shipping,
+                'balance_due'       => $balanceDue,
                 'transaction_date'  => $transactionDate,
                 'merchant_name'     => $merchantName,
                 'invoice_number'    => $invoiceNumber,
@@ -1462,13 +1559,13 @@ class ReceiptController extends Controller
                 continue;
             }
 
-            $normalized[] = [
+            $normalized[] = array_merge($item, [
                 'Description' => $item['Description'] ?? null,
                 'ProductCode' => $item['ProductCode'] ?? null,
                 'TotalPrice' => $item['TotalPrice'] ?? null,
                 'Quantity' => $item['Quantity'] ?? 1,
                 'Price' => $item['Price'] ?? ($item['TotalPrice'] ?? null),
-            ];
+            ]);
         }
 
         // First pass: exact signature dedupe
@@ -1585,6 +1682,127 @@ class ReceiptController extends Controller
 
         $number = (float) $value;
         return $negative ? -$number : $number;
+    }
+
+    /**
+     * Normalize common OCR artifacts in material-order line items.
+     * Cleans unicode garbling, truncated words, misread characters, and ambiguous area tags.
+     */
+    private function normalizeMaterialOrderOcr(array $items): array
+    {
+        foreach ($items as &$item) {
+            if (isset($item['Description']) && is_string($item['Description'])) {
+                $item['Description'] = $this->cleanOcrText($item['Description']);
+            }
+
+            if (isset($item['Notes']) && is_string($item['Notes'])) {
+                $item['Notes'] = $this->cleanOcrText($item['Notes']);
+            }
+
+            // When CU returns multiple areas (e.g. ['PRIMARY BATH', 'HALL BATH']),
+            // keep only the first — the TAG that preceded the item is the correct section.
+            if (isset($item['Area']) && is_array($item['Area']) && count($item['Area']) > 1) {
+                $item['Area'] = [reset($item['Area'])];
+            }
+        }
+
+        return $items;
+    }
+
+    /**
+     * Fix material-order quantities by parsing actual table cells from the markdown content.
+     * CU frequently reads page numbers ("PASE NO: 1/2/3") as item quantities.
+     * The markdown table cells ("2ea", "lea", "1ea") contain the true values.
+     */
+    private function fixMaterialOrderQuantities(array $items, string $markdown): array
+    {
+        if ($markdown === '') {
+            return $items;
+        }
+
+        // Build a lookup: partNumber → quantity from markdown table rows.
+        // Match rows like: <td>2ea</td><td>3408127</td> or plain text "2ea  3408127"
+        $qtyByPart = [];
+
+        // Pattern for markdown table rows: | qty | partno | or <td>qty</td><td>partno</td>
+        if (preg_match_all('/(?:<td>|\|)\s*(\d+)\s*(?:ea|sf|pc|lf|bx|ct)\s*(?:<\/td>|\|)\s*(?:<td>|\|)\s*([A-Z0-9][A-Z0-9.\/-]{2,})\s*(?:<\/td>|\|)/i', $markdown, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $m) {
+                $qtyByPart[trim($m[2])] = (int) $m[1];
+            }
+        }
+
+        // Also match OCR where "l" is misread for "1": "lea" patterns
+        if (preg_match_all('/(?:<td>|\|)\s*[lI](ea|sf|pc|lf|bx|ct)\s*(?:<\/td>|\|)\s*(?:<td>|\|)\s*([A-Z0-9][A-Z0-9.\/-]{2,})\s*(?:<\/td>|\|)/i', $markdown, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $m) {
+                $part = trim($m[2]);
+                if (!isset($qtyByPart[$part])) {
+                    $qtyByPart[$part] = 1;
+                }
+            }
+        }
+
+        foreach ($items as &$item) {
+            $code = trim((string) ($item['ProductCode'] ?? ''));
+            $unitPrice = (float) ($item['Price'] ?? 0);
+            $totalPrice = (float) ($item['TotalPrice'] ?? 0);
+
+            // Method 1: Arithmetic validation (most reliable — prices have >0.9 confidence)
+            if ($unitPrice > 0 && $totalPrice > 0) {
+                $calcQty = $totalPrice / $unitPrice;
+                $roundedQty = (int) round($calcQty);
+
+                if ($roundedQty >= 1 && abs($calcQty - $roundedQty) < 0.02) {
+                    $item['Quantity'] = $roundedQty;
+
+                    // Derive unit from the markdown qty cell if available
+                    if (empty($item['Unit']) || $item['Unit'] === null) {
+                        $item['Unit'] = 'EA';
+                    }
+
+                    continue;
+                }
+            }
+
+            // Method 2: Markdown table cell lookup by part number
+            if ($code !== '' && isset($qtyByPart[$code])) {
+                $item['Quantity'] = $qtyByPart[$code];
+
+                if (empty($item['Unit']) || $item['Unit'] === null) {
+                    $item['Unit'] = 'EA';
+                }
+            }
+        }
+        unset($item);
+
+        return $items;
+    }
+
+    /**
+     * Clean common OCR artifacts from extracted text.
+     * Handles unicode garbling (Û from ®/™), pipe-as-inch misreads, and truncated words.
+     */
+    private function cleanOcrText(string $text): string
+    {
+        // Unicode Û artifact (garbled ®/™ symbols): "C3Û-455" → "C3-455", "AWAKENÛ" → "AWAKEN"
+        $text = str_replace('Û', '', $text);
+
+        // Pipe misread as inch mark in measurements: "24 | TRADITIONAL" → '24" TRADITIONAL'
+        $text = preg_replace('/(\d+)\s*\|\s*/', '$1" ', $text);
+
+        // Common truncated words from OCR cutting off at field boundaries
+        $text = preg_replace('/\bWHIT\b(?!E)/i', 'WHITE', $text);
+        $text = preg_replace('/\bVALV\b(?!E)/i', 'VALVE', $text);
+        $text = preg_replace('/\bCHROM\b(?!E)/i', 'CHROME', $text);
+        $text = preg_replace('/\bAPPLICABL\b(?!E)/i', 'APPLICABLE', $text);
+        $text = preg_replace('/\bSTAINLES\b(?!S)/i', 'STAINLESS', $text);
+        $text = preg_replace('/\bBRUSHE\b(?!D)/i', 'BRUSHED', $text);
+        $text = preg_replace('/\bPOLISHE\b(?!D)/i', 'POLISHED', $text);
+        $text = preg_replace('/\bMOUNTE\b(?!D)/i', 'MOUNTED', $text);
+
+        // Collapse multiple spaces
+        $text = preg_replace('/\s{2,}/', ' ', trim($text));
+
+        return $text;
     }
 
     /**

@@ -12,6 +12,7 @@ use App\Models\SmsThreadRead;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Services\GroupSmsService;
+use Carbon\Carbon;
 use Flux;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -44,6 +45,10 @@ class SmsConversation extends Component
     public bool $showOptInModal = false;
 
     public bool $showDeleteConfirm = false;
+
+    public ?int $cancelScheduledId = null;
+
+    public bool $showCancelModal = false;
 
     public string $manualOptInReason = '';
 
@@ -262,7 +267,133 @@ class SmsConversation extends Component
         // Clear memoized computed properties so the re-render fetches fresh data
         unset($this->smsMessages, $this->processedMessages, $this->phoneNameMap);
 
+        $this->js("localStorage.removeItem('sms-draft-' + {$this->threadId}); const ta = document.querySelector('ui-composer textarea'); if (ta) { ta.value = ''; ta.dispatchEvent(new Event('input', { bubbles: true })); }");
         $this->dispatch('messageSent');
+    }
+
+    public function scheduleMessage(string $preset, GroupSmsService $smsService): void
+    {
+        if ($this->isClientUser) {
+            abort(403, 'Client users cannot send messages.');
+        }
+
+        $this->validate([
+            'newMessage' => 'required_without:attachment|nullable|string|max:1600',
+            'attachment' => 'nullable|file|mimes:jpg,jpeg,png,gif,webp|max:15360',
+            'threadId' => 'required|exists:sms_group_threads,id',
+        ], [
+            'attachment.max' => 'The attachment must not be greater than 15MB.',
+        ]);
+
+        $thread = SmsGroupThread::findOrFail($this->threadId);
+
+        $now = now('America/Chicago');
+        $scheduledAt = match ($preset) {
+            '1hr' => $now->copy()->addHour()->utc(),
+            '2hr' => $now->copy()->addHours(2)->utc(),
+            'tomorrow_8am' => $now->copy()->addDay()->setTime(8, 0)->utc(),
+            'tomorrow_12pm' => $now->copy()->addDay()->setTime(12, 0)->utc(),
+            default => null,
+        };
+
+        if (! $scheduledAt) {
+            return;
+        }
+
+        $text = trim($this->newMessage);
+        $messageWithSig = $text ? $text . "\n" . SmsNewThread::getSignature() : SmsNewThread::getSignature();
+
+        $mediaUrls = [];
+        if ($this->attachment) {
+            $path = $this->attachment->store('sms-attachments', 'public');
+            $mediaUrls[] = '/storage/' . $path;
+        }
+
+        $smsService->sendToThread($thread, $messageWithSig, $mediaUrls, auth()->id(), $scheduledAt);
+
+        $this->newMessage = '';
+        $this->attachment = null;
+
+        unset($this->smsMessages, $this->processedMessages, $this->phoneNameMap);
+
+        Flux::toast(
+            variant: 'success',
+            heading: 'Message Scheduled',
+            text: 'Will send ' . $scheduledAt->timezone('America/Chicago')->format('M j, g:i A'),
+            duration: 4000,
+            position: 'top right'
+        );
+
+        $this->js("localStorage.removeItem('sms-draft-' + {$this->threadId}); const ta = document.querySelector('ui-composer textarea'); if (ta) { ta.value = ''; ta.dispatchEvent(new Event('input', { bubbles: true })); }");
+        $this->dispatch('messageSent');
+        $this->dispatch('sms-schedule-changed');
+    }
+
+    public function cancelScheduledMessage(): void
+    {
+        if ($this->isClientUser) {
+            abort(403);
+        }
+
+        $message = SmsMessage::where('id', $this->cancelScheduledId)
+            ->where('thread_id', $this->threadId)
+            ->where('status', 'scheduled')
+            ->firstOrFail();
+
+        $message->delete();
+
+        $this->cancelScheduledId = null;
+        $this->showCancelModal = false;
+
+        unset($this->smsMessages, $this->processedMessages, $this->phoneNameMap);
+
+        Flux::toast(
+            text: 'Scheduled message cancelled.',
+            variant: 'success',
+            duration: 3000,
+            position: 'top right'
+        );
+
+        $this->dispatch('sms-schedule-changed');
+    }
+
+    public function sendScheduledNow(int $messageId): void
+    {
+        if ($this->isClientUser) {
+            abort(403);
+        }
+
+        $message = SmsMessage::where('id', $messageId)
+            ->where('thread_id', $this->threadId)
+            ->where('status', 'scheduled')
+            ->firstOrFail();
+
+        $message->update(['status' => 'sending', 'scheduled_at' => null]);
+
+        \App\Jobs\SendGroupMms::dispatch($message->id);
+
+        $message->thread?->update(['last_activity_at' => now()]);
+
+        try {
+            \App\Events\SmsMessageReceived::dispatch($message->thread_id);
+        } catch (\Throwable $e) {
+            Log::warning('SMS broadcast failed', ['message_id' => $message->id, 'error' => $e->getMessage()]);
+        }
+
+        if ($message->sent_by_user_id) {
+            \App\Jobs\SendOutboundSmsBrowserNotifications::dispatch($message->id, $message->sent_by_user_id);
+        }
+
+        unset($this->smsMessages, $this->processedMessages, $this->phoneNameMap);
+
+        Flux::toast(
+            text: 'Message sent',
+            variant: 'success',
+            duration: 3000,
+            position: 'top right'
+        );
+
+        $this->dispatch('sms-schedule-changed');
     }
 
     public function resendOptInPrompt(GroupSmsService $smsService): void
@@ -648,7 +779,7 @@ class SmsConversation extends Component
         }
 
         return SmsMessage::where('thread_id', $this->threadId)
-            ->select(['id', 'thread_id', 'direction', 'from_number', 'to_numbers', 'text', 'media_urls', 'created_at', 'sent_by_user_id'])
+            ->select(['id', 'thread_id', 'direction', 'from_number', 'to_numbers', 'text', 'media_urls', 'status', 'scheduled_at', 'created_at', 'sent_by_user_id'])
             ->with('sentByUser:id,first_name,last_name')
             ->orderByDesc('created_at')
             ->limit($this->messageLimit)
@@ -773,8 +904,11 @@ class SmsConversation extends Component
             }
         }
 
+        $withoutTapbacks = $allMessages->reject(fn ($m) => $tapbackIds->contains($m->id));
+
         return [
-            'visible' => $allMessages->reject(fn ($m) => $tapbackIds->contains($m->id)),
+            'visible' => $withoutTapbacks->where('status', '!=', 'scheduled')->values(),
+            'scheduled' => $withoutTapbacks->where('status', 'scheduled')->values(),
             'reactions' => $reactionsMap,
         ];
     }

@@ -1749,7 +1749,7 @@ class CompanyEmailController extends Controller
         }
     }
 
-    public function saveExpenseReceipt($expense_id, $ocr_receipt_data, $ocr_filename, $message = NULL, bool $skipDuplicateCheck = false)
+    public function saveExpenseReceipt($expense_id, $ocr_receipt_data, $ocr_filename, $message = NULL, bool $skipDuplicateCheck = false, bool $isMaterialOrder = false)
     {
         if ($message) {
             if (!empty($message['attachments'])) {
@@ -1872,8 +1872,13 @@ class CompanyEmailController extends Controller
                         $expense_receipt->receipt_filename = $targetFilename;
                         $expense_receipt->receipt_html = $receipt_html;
                         $expense_receipt->receipt_items = $receipt_items;
+                        $expense_receipt->is_material_order = $isMaterialOrder;
 
                         $expense_receipt->save();
+
+                        if ($isMaterialOrder && !empty($receipt_items['items'])) {
+                            \App\Jobs\ScrapeReceiptItemImages::dispatch($expense_receipt);
+                        }
 
                         // Move the file to permanent storage
                         if (Storage::disk('files')->move($ocr_path, $destinationPath)) {
@@ -1930,7 +1935,12 @@ class CompanyEmailController extends Controller
         $expense_receipt->receipt_filename = $filename;
         $expense_receipt->receipt_html = $receiptContent;
         $expense_receipt->receipt_items = $receiptFields;
+        $expense_receipt->is_material_order = $isMaterialOrder;
         $expense_receipt->save();
+
+        if ($isMaterialOrder && !empty($receiptFields['items'])) {
+            \App\Jobs\ScrapeReceiptItemImages::dispatch($expense_receipt);
+        }
 
         // Perform the move operation with fallback to copy-delete
         if (Storage::disk('files')->move($sourcePath, $destinationPath)) {

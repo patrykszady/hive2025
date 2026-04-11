@@ -34,6 +34,13 @@ class Expense extends Model
         static::addGlobalScope(new ExpenseScope);
     }
 
+    public function resolveRouteBinding($value, $field = null): ?self
+    {
+        return static::withoutGlobalScope(ExpenseScope::class)
+            ->where($field ?? $this->getRouteKeyName(), $value)
+            ->first();
+    }
+
     /**
      * Get the name of the index associated with the model.
      */

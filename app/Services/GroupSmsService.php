@@ -6,6 +6,7 @@ use App\Events\SmsMessageReceived;
 use App\Models\SmsGroupThread;
 use App\Models\SmsMessage;
 use App\Models\SmsThreadParticipant;
+use Carbon\Carbon;
 
 class GroupSmsService
 {
@@ -23,7 +24,7 @@ class GroupSmsService
      *
      * @param  array<string>  $mediaUrls  Public URLs to media attachments
      */
-    public function sendToThread(SmsGroupThread $thread, string $text, array $mediaUrls = [], ?int $sentByUserId = null): SmsMessage
+    public function sendToThread(SmsGroupThread $thread, string $text, array $mediaUrls = [], ?int $sentByUserId = null, ?Carbon $scheduledAt = null): SmsMessage
     {
         $participants = $thread->participants ?? [];
 
@@ -35,9 +36,14 @@ class GroupSmsService
             'to_numbers' => $participants,
             'text' => $text,
             'media_urls' => $mediaUrls ?: null,
-            'status' => 'sending',
+            'status' => $scheduledAt ? 'scheduled' : 'sending',
             'sent_by_user_id' => $sentByUserId,
+            'scheduled_at' => $scheduledAt,
         ]);
+
+        if ($scheduledAt) {
+            return $message;
+        }
 
         // Dispatch to queue — job handles the Telnyx API call with rate limiting
         \App\Jobs\SendGroupMms::dispatch($message->id);

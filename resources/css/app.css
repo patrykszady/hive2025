@@ -73,6 +73,16 @@
     background: linear-gradient(to top, rgb(39 39 42 / 0.92) 0%, rgb(39 39 42 / 0) 100%);
   }
 
+  /* Receipt item rows: fine tune vertical spacing between SKU and area/ETA rows */
+  .receipt-row-data > td {
+    padding-block-start: 4px !important;
+    padding-block-end: 1px !important;
+  }
+  .receipt-row-meta > td {
+    padding-block-start: 3px !important;
+    padding-block-end: 2px !important;
+  }
+
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;

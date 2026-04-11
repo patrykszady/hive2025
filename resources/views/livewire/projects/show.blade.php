@@ -89,6 +89,12 @@
                 </div>
             @endcan
 
+            @can('viewMaterials', $project)
+                <div class="col-span-4 order-2">
+                    <livewire:projects.project-materials :project="$project" lazy />
+                </div>
+            @endcan
+
             @if($this->project->latestStatus?->title !== 'VIEW ONLY')
                 <div class="col-span-4 order-3">
                     <livewire:projects.upcoming-tasks :project="$project" lazy />

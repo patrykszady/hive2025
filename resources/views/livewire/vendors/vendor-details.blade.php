@@ -68,18 +68,7 @@
     
     @unless($nonLivewire ?? false)
         <x-slot:footer>
-            <div x-data="{ isConfirmed: false }">
-                @if($this->view == 'vendor_registration' && ! data_get($vendor->registration, 'vendor_info', false))
-                    <flux:button
-                        variant="primary"
-                        x-show="!isConfirmed"
-                        wire:click="$dispatchTo('entry.vendor-registration', 'confirmProcess', { process_step: 'vendor_info' })"
-                        x-on:click="$nextTick(() => { isConfirmed = true })"
-                    >
-                        Confirm Vendor Details
-                    </flux:button>
-                @endif
-
+            <div>
                 @can('update', $vendor)
                     <livewire:vendors.vendor-create :is-registration="$this->view == 'vendor_registration'" />
                 @endcan

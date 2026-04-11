@@ -60,6 +60,20 @@ Schedule::command('nylas:sync-contacts')
     ->withoutOverlapping()
     ->onOneServer();
 
+Schedule::command('projects:activate-scheduled')
+    ->dailyAt('04:00')
+    ->timezone('America/Chicago')
+    ->name('activate-scheduled-projects')
+    ->withoutOverlapping()
+    ->onOneServer();
+
+Schedule::command('sms:send-scheduled')
+    ->everyTenMinutes()
+    ->between('05:00', '22:00')
+    ->name('send-scheduled-sms')
+    ->withoutOverlapping()
+    ->onOneServer();
+
 Schedule::call(function () {
     Artisan::call('queue:prune-failed', ['--hours' => 4320]);
     DB::statement('OPTIMIZE TABLE failed_jobs');

@@ -123,6 +123,21 @@ class ProjectPolicy
      *
      * @return \Illuminate\Auth\Access\Response|bool
      */
+    public function viewMaterials(User $user, Project $project): bool
+    {
+        if ($user->vendor_role === 'Admin') {
+            return true;
+        }
+
+        if ($user->is_browsing_as_client) {
+            $clientIds = $user->clients()->pluck('clients.id');
+
+            return $project->client_id && $clientIds->contains($project->client_id);
+        }
+
+        return false;
+    }
+
     public function viewFinancials(User $user, Project $project): bool
     {
         // Vendors with admin role can view financials

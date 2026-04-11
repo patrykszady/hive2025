@@ -23,6 +23,7 @@ class SmsMessage extends Model
         'raw_payload',
         'status',
         'sent_by_user_id',
+        'scheduled_at',
     ];
 
     protected function casts(): array
@@ -31,6 +32,7 @@ class SmsMessage extends Model
             'to_numbers' => 'array',
             'media_urls' => 'array',
             'raw_payload' => 'array',
+            'scheduled_at' => 'datetime',
         ];
     }
 

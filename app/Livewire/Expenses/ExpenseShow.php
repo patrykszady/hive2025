@@ -4,6 +4,7 @@ namespace App\Livewire\Expenses;
 
 use App\Models\Check;
 use App\Models\Expense;
+use App\Models\ReceiptLineItemDesc;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Computed;
@@ -15,6 +16,8 @@ class ExpenseShow extends Component
 
     public Expense $expense;
     public $selectedSplitId = null;
+    public bool $showItemModal = false;
+    public ?array $selectedItem = null;
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 
@@ -67,6 +70,34 @@ class ExpenseShow extends Component
     {
         // If already selected, deselect it. Otherwise select the new one
         $this->selectedSplitId = ($this->selectedSplitId == $id) ? null : $id;
+    }
+
+    public function selectReceiptItem(int $receiptId, int $itemIndex): void
+    {
+        $receipt = $this->expense->orderedReceipts->firstWhere('id', $receiptId);
+        $items = $receipt?->receipt_items['items'] ?? [];
+        $item = $items[$itemIndex] ?? null;
+
+        if (! $item) {
+            return;
+        }
+
+        // Enrich with receipt_line_item_descs
+        $desc = ReceiptLineItemDesc::where('expense_receipt_id', $receiptId)
+            ->where('item_index', $itemIndex)
+            ->first();
+
+        if ($desc) {
+            $item['image_url'] = $item['image_url'] ?? $desc->product_image_url;
+            $item['product_url'] = $item['product_url'] ?? $desc->product_url;
+            $item['Area'] = $item['Area'] ?? $desc->area;
+        }
+
+        $item['_vendor_name'] = $this->expense->vendor?->business_name;
+        $item['_expense_date'] = $this->expense->date?->format('M j, Y');
+
+        $this->selectedItem = $item;
+        $this->showItemModal = true;
     }
 
     // Get the currently selected split

@@ -116,6 +116,11 @@ class ContentUnderstandingService
 
             if (! in_array($status, ['Running', 'NotStarted'], true)) {
                 if ($status !== 'Succeeded') {
+                    $errorDetail = json_encode($body['error'] ?? $body, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+                    Log::channel($logChannel)->error('CU: Analysis failed', [
+                        'status' => $status,
+                        'body'   => substr($errorDetail, 0, 3000),
+                    ]);
                     throw new \RuntimeException("ContentUnderstanding: analysis failed with status: {$status}");
                 }
 
@@ -142,31 +147,40 @@ class ContentUnderstandingService
     private function normalise(array $body): array
     {
         // CU returns: { status, result: { contents: [ { fields, markdown, ... } ] } }
+        // Multi-page PDFs may produce multiple contents entries — one per page.
+        // Map ALL of them into documents so consumers can merge as needed
+        // (similar to how receipt OCR merges all pages).
         $contents = $body['result']['contents'] ?? [];
-        $first    = $contents[0] ?? [];
 
-        $fields        = $first['fields'] ?? [];
-        $content       = $first['markdown'] ?? $first['content'] ?? '';
-        $keyValuePairs = $first['keyValuePairs'] ?? null;
-        $styles        = $first['styles'] ?? [];
+        $documents     = [];
+        $allMarkdown   = [];
+        $keyValuePairs = null;
+        $styles        = [];
 
-        // CU wraps field values differently to DI — flatten to DI-compatible shape.
-        // DI uses:  { "valueString": "...", "content": "...", "confidence": 0.9 }
-        // CU uses:  { "type": "string", "valueString": "...", "content": "...", "confidence": 0.9 }
-        // They're actually compatible already — CU just adds a "type" key.
-        // Arrays (Items, Payments) also use "valueArray" with "valueObject" items — same as DI.
-        // So no deep transformation needed; just move fields into the DI documents shape.
+        foreach ($contents as $page) {
+            $documents[] = ['fields' => $page['fields'] ?? []];
 
-        $documents = [
-            [
-                'fields' => $fields,
-            ],
-        ];
+            if ($md = $page['markdown'] ?? $page['content'] ?? '') {
+                $allMarkdown[] = $md;
+            }
+
+            // Take keyValuePairs / styles from the first page that has them
+            if (! $keyValuePairs && ! empty($page['keyValuePairs'])) {
+                $keyValuePairs = $page['keyValuePairs'];
+            }
+            if (empty($styles) && ! empty($page['styles'])) {
+                $styles = $page['styles'];
+            }
+        }
+
+        if (empty($documents)) {
+            $documents = [['fields' => []]];
+        }
 
         return [
             'analyzeResult' => [
                 'documents'     => $documents,
-                'content'       => $content,
+                'content'       => implode("\n\n", $allMarkdown),
                 'keyValuePairs' => $keyValuePairs ? (array) $keyValuePairs : [],
                 'styles'        => $styles,
             ],
@@ -248,6 +262,22 @@ class ContentUnderstandingService
         }
 
         return $response->json() ?? [];
+    }
+
+    /**
+     * Delete an existing analyzer by ID.
+     */
+    public function deleteAnalyzer(string $analyzerId): void
+    {
+        $url = "https://{$this->endpoint}/contentunderstanding/analyzers/{$analyzerId}?api-version={$this->apiVersion}";
+
+        $response = Http::withHeaders([
+            'Ocp-Apim-Subscription-Key' => $this->apiKey,
+        ])->delete($url);
+
+        if (! $response->successful() && $response->status() !== 404) {
+            throw new \RuntimeException("CU: deleteAnalyzer({$analyzerId}) returned HTTP {$response->status()}: " . $response->body());
+        }
     }
 
     /**

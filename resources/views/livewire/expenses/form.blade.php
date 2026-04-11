@@ -221,6 +221,18 @@
                 </div>
                 <flux:description wire:loading wire:target="form.receipt_file"><i>Uploading...</i></flux:description>
             </div>
+
+            <div class="mt-2">
+                <flux:switch wire:model.live="form.is_material_order" label="Material Order" />
+            </div>
+
+            <div x-data="{ isMaterialOrder: @entangle('form.is_material_order') }" x-show="isMaterialOrder" x-transition class="mt-2">
+                <flux:select wire:model="form.belongs_to_vendor_id" variant="listbox" placeholder="Belongs to vendor..." searchable label="Belongs To Vendor">
+                    @foreach($this->vendors as $vendor)
+                        <flux:select.option value="{{ $vendor->id }}">{{ $vendor->name }}</flux:select.option>
+                    @endforeach
+                </flux:select>
+            </div>
         </div>
 
         {{-- REIMBURSEMNT --}}
@@ -289,4 +301,38 @@
 
 {{-- SPLITS MODAL --}}
 <livewire:expenses.expense-splits-create :projects="$this->projects" :distributions="$this->distributions" />
+
+{{-- UPLOAD RECEIPT MODAL --}}
+<flux:modal name="upload_receipt_modal" class="sm:max-w-md space-y-4">
+    <flux:heading size="lg">Upload Receipt</flux:heading>
+
+    <form wire:submit="uploadReceipt" class="space-y-4">
+        <flux:input
+            wire:model="upload_file"
+            type="file"
+            label="Receipt / Material Order"
+        />
+        <flux:error name="upload_file" />
+
+        <div>
+            <flux:switch wire:model.live="upload_is_material_order" label="Material Order" />
+        </div>
+
+        <div x-data="{ isMaterialOrder: @entangle('upload_is_material_order') }" x-show="isMaterialOrder" x-transition>
+            <flux:select wire:model="upload_belongs_to_vendor_id" variant="listbox" placeholder="Belongs to vendor..." searchable label="Belongs To Vendor">
+                @foreach($this->vendors as $vendor)
+                    <flux:select.option value="{{ $vendor->id }}">{{ $vendor->name }}</flux:select.option>
+                @endforeach
+            </flux:select>
+        </div>
+
+        <div class="flex justify-end gap-2">
+            <flux:button variant="ghost" x-on:click="$flux.modal('upload_receipt_modal').close()">Cancel</flux:button>
+            <flux:button type="submit" variant="primary" wire:loading.attr="disabled" wire:target="uploadReceipt, upload_file">
+                <span wire:loading.remove wire:target="uploadReceipt">Process</span>
+                <span wire:loading wire:target="uploadReceipt">Processing...</span>
+            </flux:button>
+        </div>
+    </form>
+</flux:modal>
 </div>

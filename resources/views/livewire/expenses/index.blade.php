@@ -11,6 +11,7 @@
                             </flux:accordion.heading>
                         </div>
                         <flux:button size="sm" variant="ghost" icon="scan-barcode" x-on:click.stop="$flux.modal('barcode-scanner').show()" title="Scan barcode" class="shrink-0 text-zinc-400" />
+                        <flux:button size="sm" variant="ghost" icon="arrow-up-tray" wire:click="$dispatchTo('expenses.expense-create', 'openUploadReceipt')" title="Upload receipt" class="shrink-0 text-zinc-400" />
                     </div>
                     <flux:accordion.content>
                         @include('livewire.expenses.partials.filter-fields', ['layout' => 'stacked'])
@@ -23,6 +24,9 @@
         <x-island-card heading="Filters" :separator="true" class="hidden sm:block">
             <x-slot:actions>
                 @can('create', App\Models\Expense::class)
+                    @if($view == NULL)
+                        <flux:button size="sm" icon="arrow-up-tray" wire:click="$dispatchTo('expenses.expense-create', 'openUploadReceipt')">Upload Receipt</flux:button>
+                    @endif
                     @if($amount && $view == NULL)
                         <flux:button wire:click="$dispatchTo('expenses.expense-create', 'newExpense', { amount: {{$amount}}})">Add New Expense</flux:button>
                     @endif
@@ -74,6 +78,7 @@
             <div class="-mx-5 -mb-2 overflow-x-auto">
                 <flux:table
                     wire:loading.class="opacity-50 text-opacity-50"
+                    wire:target.except="loadTransactions"
                     class="table-fixed {{ in_array($view, ['projects.show', 'vendors.show']) ? 'min-w-0' : 'min-w-[640px]' }} w-full [:where(&)]:p-0 [:where(&)]:space-y-0 [&_th]:!px-4 [&_td]:!px-3 [&_th:first-child]:!ps-6 [&_th:last-child]:!pe-6 [&_td:first-child]:!ps-6 [&_td:last-child]:!pe-6"
                 >
                 <flux:table.columns>
@@ -271,7 +276,7 @@
     @endif
 
     @if($view === NULL && auth()->user()->can('create', App\Models\Expense::class))
-        <x-island-card heading="Transactions" wire:init="loadTransactions">
+        <x-island-card heading="Transactions" x-intersect.once="$wire.loadTransactions()">
             <x-slot:actions>
                 @if($this->transactionsReady && $this->transactions->total() > 0)
                     <flux:badge size="sm" color="yellow">{{ $this->transactions->total() }} unmatched</flux:badge>

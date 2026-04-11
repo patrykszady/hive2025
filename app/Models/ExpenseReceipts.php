@@ -7,19 +7,23 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Laravel\Scout\Searchable;
+use Spatie\Activitylog\LogOptions;
+use Spatie\Activitylog\Traits\LogsActivity;
 
 class ExpenseReceipts extends Model
 {
-    use HasFactory, Searchable;
+    use HasFactory, LogsActivity, Searchable;
 
     protected $table = 'expense_receipts_data';
 
-    protected $fillable = ['expense_id', 'receipt_filename', 'receipt_html', 'receipt_items', 'created_at', 'updated_at'];
+    protected $fillable = ['expense_id', 'receipt_filename', 'receipt_html', 'receipt_items', 'is_material_order', 'created_at', 'updated_at'];
 
     protected $casts = [
         'receipt_items' => 'array',
+        'is_material_order' => 'boolean',
     ];
 
     public function searchableAs(): string
@@ -90,9 +94,23 @@ class ExpenseReceipts extends Model
         }
     }
 
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->logOnly(['receipt_items'])
+            ->logOnlyDirty()
+            ->dontSubmitEmptyLogs()
+            ->useLogName('materials');
+    }
+
     public function expense(): BelongsTo
     {
         return $this->belongsTo(Expense::class);
+    }
+
+    public function lineItemDescs(): HasMany
+    {
+        return $this->hasMany(ReceiptLineItemDesc::class, 'expense_receipt_id');
     }
 
     public static function isDuplicateForExpense(int $expenseId, ?string $receiptHtml, array $receiptItems): bool

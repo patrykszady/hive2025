@@ -204,12 +204,6 @@ class SendScheduleModal extends Component
     #[Computed]
     public function nextUpcomingTask(): ?Task
     {
-        $hasTasks = $this->groupedUpcomingTasks->flatten(1)->isNotEmpty() || $this->pendingTasks->isNotEmpty();
-
-        if ($hasTasks) {
-            return null;
-        }
-
         $projectIds = $this->clientProjectIds;
 
         if (empty($projectIds)) {
@@ -302,17 +296,8 @@ class SendScheduleModal extends Component
             $daySections[] = "{$dateLabel}:\n{$taskLines}";
         }
 
-        // Add pending tasks section
-        if ($pendingTasks->isNotEmpty()) {
-            $pendingLines = $pendingTasks->map(function (Task $task) {
-                return '- ' . trim($task->title ?? 'Task');
-            })->implode("\n");
-
-            $daySections[] = "Pending:\n{$pendingLines}";
-        }
-
-        // Add next upcoming task when the 3-day window is empty
-        if ($nextTask && $grouped->flatten(1)->isEmpty()) {
+        // Add next upcoming task beyond the 3-day window
+        if ($nextTask) {
             $nextDate = Carbon::parse($nextTask->start_date);
             $dateLabel = $nextDate->format('D n/j');
             $line = '- ' . trim($nextTask->title ?? 'Task');
@@ -323,6 +308,15 @@ class SendScheduleModal extends Component
             }
 
             $daySections[] = "Next up {$dateLabel}:\n{$line}";
+        }
+
+        // Add pending tasks section
+        if ($pendingTasks->isNotEmpty()) {
+            $pendingLines = $pendingTasks->map(function (Task $task) {
+                return '- ' . trim($task->title ?? 'Task');
+            })->implode("\n");
+
+            $daySections[] = "Pending:\n{$pendingLines}";
         }
 
         $body = implode("\n\n", $daySections);
@@ -415,7 +409,7 @@ class SendScheduleModal extends Component
             return;
         }
 
-        $text = $this->editableMessage . "\n" . SmsNewThread::getSignature();
+        $text = $this->editableMessage . "\n-GSC";
 
         $smsService->sendToThread($thread, $text, [], null);
 

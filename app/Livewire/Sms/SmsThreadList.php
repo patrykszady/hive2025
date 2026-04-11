@@ -30,6 +30,7 @@ class SmsThreadList extends Component
         return [
             'echo-private:sms.notifications,SmsMessageReceived' => 'handleNewMessage',
             'sms-thread-read' => '$refresh',
+            'sms-schedule-changed' => '$refresh',
         ];
     }
 
@@ -63,6 +64,7 @@ class SmsThreadList extends Component
                 'latestMessage.sentByUser:id,first_name',
                 'threadParticipants:id,thread_id,phone_number',
             ])
+            ->withCount(['messages as scheduled_messages_count' => fn ($q) => $q->where('status', 'scheduled')])
             ->when($user->is_browsing_as_client, function ($query) use ($user) {
                 $clientIds = $user->clients()->pluck('clients.id');
                 $query->whereIn('client_id', $clientIds);
