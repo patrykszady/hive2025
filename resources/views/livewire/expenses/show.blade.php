@@ -286,7 +286,9 @@
                                                 :receipt="$receipt" 
                                                 :selectedSplit="$this->selectedSplit" 
                                                 :expenseMismatch="$this->expenseMismatch" 
-                                                :expenseAmount="$this->expenseAmount" 
+                                                :expenseAmount="$this->expenseAmount"
+                                                :compactNotes="false"
+                                                :showNotes="false"
                                             />
                                     </flux:tab.panel>
                                 @endforeach
@@ -297,7 +299,9 @@
                                     :receipt="$expense->receipts->first()" 
                                     :selectedSplit="$this->selectedSplit" 
                                     :expenseMismatch="$this->expenseMismatch" 
-                                    :expenseAmount="$this->expenseAmount" 
+                                    :expenseAmount="$this->expenseAmount"
+                                    :compactNotes="false"
+                                    :showNotes="false"
                                 />
                         @endif
                     </x-slot:details>

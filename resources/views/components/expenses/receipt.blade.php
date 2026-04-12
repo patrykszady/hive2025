@@ -1,4 +1,4 @@
-@props(['receipt', 'selectedSplit' => null, 'expenseMismatch' => false, 'expenseAmount' => null])
+@props(['receipt', 'selectedSplit' => null, 'expenseMismatch' => false, 'expenseAmount' => null, 'compactNotes' => true, 'showNotes' => true])
 
 @if(!$receipt->receipt_items || empty($receipt->receipt_items['items'] ?? []))
     <div class="flow-root">
@@ -31,7 +31,11 @@
                                         <img src="{{ $line_item['image_url'] }}" alt="{{ $line_item['Description'] ?? '' }}" class="size-10 rounded object-cover bg-zinc-100 dark:bg-zinc-800" loading="lazy" />
                                     </button>
                                 @endif
-                                <span class="min-w-0 truncate">{{$line_item['Description'] ?? ''}}</span>
+                                <button
+                                    type="button"
+                                    class="min-w-0 truncate text-left hover:underline"
+                                    wire:click="selectReceiptItem({{ $receipt->id }}, {{ $index }})"
+                                >{{$line_item['Description'] ?? ''}}</button>
                             </div>
                         </flux:table.cell>
                     </flux:table.row>
@@ -89,6 +93,7 @@
 
                     @php($itemDate = $receipt->is_material_order ? ($line_item['ETA'] ?? null) : null)
                     @php($itemStatus = $receipt->is_material_order ? ($line_item['Status'] ?? null) : null)
+                    @php($itemNotes = $receipt->is_material_order ? ($line_item['Notes'] ?? $line_item['notes'] ?? null) : null)
                     @if($itemStatus)
                         @php(
                             $normalizedStatus = match (true) {
@@ -106,7 +111,7 @@
                             @php($normalizedStatus = 'available')
                         @endif
                     @endif
-                    @if(!empty($line_item['Area']) || !empty($itemDate) || !empty($itemStatus))
+                    @if(!empty($line_item['Area']) || !empty($itemDate) || !empty($itemStatus) || !empty($itemNotes))
                         <flux:table.row
                             wire:key="receipt-meta-{{ $index }}"
                             class="receipt-row-meta transition-colors duration-150 !border-none {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) === true)) ? 'bg-indigo-50 dark:bg-indigo-900/10 print:!bg-transparent' : '' }}"
@@ -117,6 +122,13 @@
                                     <div class="flex-1 min-w-0 flex items-center gap-1.5">
                                     @if(!empty($line_item['Area']))
                                         <span class="min-w-0 truncate text-zinc-500 dark:text-zinc-400">{{ is_array($line_item['Area']) ? implode(' / ', $line_item['Area']) : $line_item['Area'] }}</span>
+                                    @endif
+                                    @if($showNotes && !empty($itemNotes))
+                                        @if($compactNotes)
+                                            <span class="min-w-0 truncate text-zinc-400 dark:text-zinc-500" title="{{ $itemNotes }}">{{ \Illuminate\Support\Str::limit(trim((string) $itemNotes), 140) }}</span>
+                                        @else
+                                            <span class="min-w-0 whitespace-pre-line text-zinc-400 dark:text-zinc-500">{{ trim((string) $itemNotes) }}</span>
+                                        @endif
                                     @endif
                                     <span class="shrink-0 ml-auto flex items-center gap-1.5">
                                         @if(!empty($itemStatus))

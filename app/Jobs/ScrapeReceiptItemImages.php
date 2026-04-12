@@ -46,6 +46,17 @@ class ScrapeReceiptItemImages implements ShouldQueue
 
         $updated = false;
 
+        // Snapshot existing image/url data so we never regress
+        $originalData = [];
+        foreach ($items as $index => $item) {
+            if (! empty($item['image_url']) || ! empty($item['product_url'])) {
+                $originalData[$index] = [
+                    'image_url'   => $item['image_url'] ?? null,
+                    'product_url' => $item['product_url'] ?? null,
+                ];
+            }
+        }
+
         foreach ($items as $index => &$item) {
             if (! empty($item['image_url'])) {
                 // Still sync to receipt_line_item_descs if not already there
@@ -147,6 +158,18 @@ class ScrapeReceiptItemImages implements ShouldQueue
 
         unset($item);
 
+        // Never regress: restore any image/url data that was present before but lost
+        foreach ($originalData as $index => $orig) {
+            if (empty($items[$index]['image_url']) && ! empty($orig['image_url'])) {
+                $items[$index]['image_url'] = $orig['image_url'];
+                $updated = true;
+            }
+            if (empty($items[$index]['product_url']) && ! empty($orig['product_url'])) {
+                $items[$index]['product_url'] = $orig['product_url'];
+                $updated = true;
+            }
+        }
+
         if ($updated) {
             $receiptItems = $this->receipt->receipt_items;
             $receiptItems['items'] = $items;
@@ -231,10 +254,11 @@ class ScrapeReceiptItemImages implements ShouldQueue
 
         // Priority 1: search the vendor's own website first
         if ($vendorSite) {
+            if ($sku) {
+                $queries[] = "{$sitePrefix}{$sku}";
+            }
             if ($sku && $name) {
                 $queries[] = "{$sitePrefix}{$sku} {$name}";
-            } elseif ($sku) {
-                $queries[] = "{$sitePrefix}{$sku}";
             }
             if ($name) {
                 $queries[] = "{$sitePrefix}{$name}";
@@ -242,23 +266,63 @@ class ScrapeReceiptItemImages implements ShouldQueue
         }
 
         // Priority 2: broader web search with vendor name
+        if ($sku) {
+            $queries[] = trim("{$vendor} {$sku}");
+        }
         if ($sku && $name) {
             $queries[] = trim("{$vendor} {$sku} {$name}");
-        } elseif ($sku) {
-            $queries[] = trim("{$vendor} {$sku}");
         }
         if ($name) {
             $queries[] = trim("{$vendor} {$name}");
         }
 
+        $fallbackResult = null;
+
         foreach ($queries as $searchTerm) {
             $result = $this->webSearch($searchTerm, $endpoint, $apiKey);
-            if ($result) {
-                return $result;
+            if ($result && $this->urlMatchesProduct($result['product_url'] ?? null, $name)) {
+                if (! empty($result['image_url'])) {
+                    return $result;
+                }
+                // URL matched but page had no extractable image (e.g. 404) — save as fallback
+                $fallbackResult ??= $result;
             }
         }
 
-        return null;
+        return $fallbackResult;
+    }
+
+    /**
+     * Verify the product URL slug contains key words from the product name.
+     * Rejects URLs like "portraits-newport" when the product is "PORTRAITS ERICE".
+     */
+    private function urlMatchesProduct(?string $url, ?string $name): bool
+    {
+        if (! $url || ! $name) {
+            return true; // Can't validate without both, let it through
+        }
+
+        $slug = strtolower(parse_url($url, PHP_URL_PATH) ?? '');
+
+        // Extract distinguishing words from the product name (skip short/generic words and dimensions)
+        $words = preg_split('/[\s\/]+/', strtolower($name));
+        $skipWords = ['the', 'and', 'for', 'new', 'pkg', 'rect', 'matte', 'honed', 'polished', 'field', 'tile', 'mosaic', 'bar', 'liner', 'round'];
+        $significantWords = array_filter($words, function ($w) use ($skipWords) {
+            return strlen($w) > 2 && ! is_numeric($w) && ! preg_match('/^\d+x\d+$/i', $w) && ! in_array($w, $skipWords);
+        });
+
+        if (empty($significantWords)) {
+            return true;
+        }
+
+        // All significant words from the name should appear in the URL slug
+        foreach ($significantWords as $word) {
+            if (! str_contains($slug, $word)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function webSearch(string $searchTerm, string $endpoint, string $apiKey): ?array
@@ -271,7 +335,7 @@ class ScrapeReceiptItemImages implements ShouldQueue
                 ])
                 ->post("https://{$endpoint}/openai/responses?api-version=2025-03-01-preview", [
                     'model'       => 'gpt-4o-mini',
-                    'input'       => "Search for: {$searchTerm}\n\nReturn the URL of the specific product detail page (PDP) for this exact SKU/item — the page that shows ONE product with its image, specs, and price. STRONGLY prefer the vendor's own website over third-party retailers or resellers. Do NOT return category pages, collection pages, product-line overview pages, or search result pages. The URL path should typically contain the product name or SKU slug. Return ONLY the URL or NONE if no specific product page is found.",
+                    'input'       => "Search for: {$searchTerm}\n\nReturn the URL of the specific product detail page (PDP) for this EXACT product — the page that shows ONE product with its image, specs, and price. The product name in the URL and page title MUST match the search term. For example, if searching for \"PORTRAITS ERICE\", do NOT return a page for \"PORTRAITS NEWPORT\" or any other variant — only the exact product name. STRONGLY prefer the vendor's own website over third-party retailers or resellers. Do NOT return category pages, collection pages, product-line overview pages, or search result pages. Return ONLY the URL or NONE if no specific product page is found.",
                     'tools'       => [['type' => 'web_search_preview']],
                     'tool_choice' => 'required',
                     'stream'      => false,
@@ -314,6 +378,11 @@ class ScrapeReceiptItemImages implements ShouldQueue
 
             $imageUrl = $this->extractImageFromProductPage($productUrl);
 
+            // false = page was unreachable (404/5xx) — discard the URL entirely
+            if ($imageUrl === false) {
+                return null;
+            }
+
             return array_filter([
                 'image_url'   => $imageUrl,
                 'product_url' => $productUrl,
@@ -328,14 +397,14 @@ class ScrapeReceiptItemImages implements ShouldQueue
         }
     }
 
-    private function extractImageFromProductPage(string $url): ?string
+    private function extractImageFromProductPage(string $url): string|false|null
     {
         $response = Http::timeout(15)->withHeaders([
             'User-Agent' => 'Mozilla/5.0 (compatible; HiveBot/1.0)',
         ])->get($url);
 
         if (! $response->successful()) {
-            return null;
+            return false; // Page unreachable — discard URL so caller tries next query
         }
 
         $html = $response->body();

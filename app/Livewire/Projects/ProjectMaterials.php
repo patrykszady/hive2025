@@ -89,9 +89,17 @@ class ProjectMaterials extends Component
             ->first();
 
         if ($desc) {
-            $item['image_url'] = $item['image_url'] ?? $desc->product_image_url;
-            $item['product_url'] = $item['product_url'] ?? $desc->product_url;
-            $item['Area'] = $item['Area'] ?? $desc->area;
+            if (empty($item['image_url']) && ! empty($desc->product_image_url)) {
+                $item['image_url'] = $desc->product_image_url;
+            }
+
+            if (empty($item['product_url']) && ! empty($desc->product_url)) {
+                $item['product_url'] = $desc->product_url;
+            }
+
+            if (empty($item['Area']) && ! empty($desc->area)) {
+                $item['Area'] = $desc->area;
+            }
         }
 
         $item['_vendor_name'] = $expense->vendor?->business_name;
@@ -114,7 +122,7 @@ class ProjectMaterials extends Component
         $analyzerId = config('services.azure_cu.analyzer_id_material_order');
 
         $ocrData = app(\App\Http\Controllers\ReceiptController::class)
-            ->extractReceipt($ocrPath, $docType, null, null, null, $analyzerId);
+            ->extractReceipt($ocrPath, 'material_order', null, null, null, $analyzerId);
 
         if (isset($ocrData['error']) && $ocrData['error'] === true) {
             Storage::disk('files')->delete($ocrPath);
@@ -228,9 +236,17 @@ class ProjectMaterials extends Component
                     ->first();
 
                 if ($desc) {
-                    $item['image_url'] = $item['image_url'] ?? $desc->product_image_url;
-                    $item['product_url'] = $item['product_url'] ?? $desc->product_url;
-                    $item['Area'] = $item['Area'] ?? $desc->area;
+                    if (empty($item['image_url']) && ! empty($desc->product_image_url)) {
+                        $item['image_url'] = $desc->product_image_url;
+                    }
+
+                    if (empty($item['product_url']) && ! empty($desc->product_url)) {
+                        $item['product_url'] = $desc->product_url;
+                    }
+
+                    if (empty($item['Area']) && ! empty($desc->area)) {
+                        $item['Area'] = $desc->area;
+                    }
                 }
 
                 $item['_expense_id'] = $expense->id;

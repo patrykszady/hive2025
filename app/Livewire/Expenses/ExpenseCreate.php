@@ -562,8 +562,10 @@ class ExpenseCreate extends Component
             ? config('services.azure_cu.analyzer_id_material_order')
             : null;
 
+        $effectiveDocType = $this->upload_is_material_order ? 'material_order' : $docType;
+
         $ocrData = app(\App\Http\Controllers\ReceiptController::class)
-            ->extractReceipt($ocrPath, $docType, null, null, null, $analyzerId);
+            ->extractReceipt($ocrPath, $effectiveDocType, null, null, null, $analyzerId);
 
         if (isset($ocrData['error']) && $ocrData['error'] === true) {
             Storage::disk('files')->delete($ocrPath);

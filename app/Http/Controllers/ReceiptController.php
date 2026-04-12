@@ -692,6 +692,11 @@ class ReceiptController extends Controller
         $values = array_filter([$purchaseOrder, $jobName], fn ($v) => $v !== '');
         $purchaseOrderNumber = count($values) > 1 ? implode(', ', $values) : implode('', $values);
 
+        // Fallback: material-order analyzer uses CustomerPO instead of PurchaseOrder/JobName
+        if ($purchaseOrderNumber === '' && isset($prefix['CustomerPO'])) {
+            $purchaseOrderNumber = trim($prefix['CustomerPO']['valueString'] ?? '');
+        }
+
         // ── 7. Total Tax ──────────────────────────────────────────────
         $totalTax = null;
         if (isset($prefix['TotalTaxAmount'])) {
@@ -868,9 +873,17 @@ class ReceiptController extends Controller
 
                 // Extract area/room designation from material order analyzer
                 $areaRaw = $line['Area']['valueString'] ?? $line['Area']['content'] ?? null;
-                $formattedItems[$key]['Area'] = $areaRaw
-                    ? array_values(array_filter(array_map('trim', preg_split('/\s*\/\s*/', $areaRaw))))
-                    : [];
+                if ($areaRaw) {
+                    // Remove newlines (sub-area text may be on next line) and split on "/"
+                    $areaRaw = preg_replace('/\r?\n/', ' / ', $areaRaw);
+                    $parts = preg_split('/\s*\/\s*/', $areaRaw);
+                    $formattedItems[$key]['Area'] = array_values(array_filter(array_map(function ($part) {
+                        // Strip "C*" or "C* " prefix
+                        return trim(preg_replace('/^C\*\s*/', '', trim($part)));
+                    }, $parts)));
+                } else {
+                    $formattedItems[$key]['Area'] = [];
+                }
 
                 // Persist per-item ETA and Status only for material-order OCR documents
                 if ($isMaterialOrderDoc) {
@@ -998,7 +1011,7 @@ class ReceiptController extends Controller
         }
 
         if (is_array($formattedItems) && !empty($formattedItems)) {
-            $formattedItems = $this->normalizeMaterialOrderOcr($formattedItems);
+            $formattedItems = $this->normalizeMaterialOrderOcr($formattedItems, (string) ($rawContent ?? ''));
             if ($isMaterialOrderDoc) {
                 $formattedItems = $this->fixMaterialOrderQuantities($formattedItems, (string) ($rawContent ?? ''));
             }
@@ -1036,6 +1049,7 @@ class ReceiptController extends Controller
                 'purchase_order'    => $purchaseOrderNumber,
                 'handwritten_notes' => $handwrittenNotes,
                 'payment_methods'   => $this->extractPaymentMethods($prefix),
+                'raw_content'       => $rawContent,
             ],
         ];
     }
@@ -1688,23 +1702,218 @@ class ReceiptController extends Controller
      * Normalize common OCR artifacts in material-order line items.
      * Cleans unicode garbling, truncated words, misread characters, and ambiguous area tags.
      */
-    private function normalizeMaterialOrderOcr(array $items): array
+    private function normalizeMaterialOrderOcr(array $items, string $rawContent = ''): array
     {
+        // ── A. Merge continuation rows ─────────────────────────────────
+        // The CU analyzer emits continuation entries (no ProductCode, no TotalPrice)
+        // that contain Description fragments, Area tags, and Notes for a parent item.
+        // Continuation entries may have a LineNumber matching the parent item (for cross-page)
+        // or appear immediately after the parent (for same-page).
+        // Stacked LINE numbers (e.g. 0040/0050 in one cell) produce phantom rows with
+        // LineNumbers but no real data — those LineNumbers are saved and reassigned to
+        // subsequent real items that are missing their LineNumber.
+        $merged = [];
+        $lineIndex = []; // LineNumber → index in $merged for targeted merging
+        $orphanedLineNumbers = []; // LineNumbers from continuation/phantom rows for reassignment
+
+        foreach ($items as $item) {
+            $hasCode  = isset($item['ProductCode']) && trim((string) $item['ProductCode']) !== '';
+            $hasPrice = isset($item['TotalPrice']) && $item['TotalPrice'] !== null && $item['TotalPrice'] > 0;
+            $hasDesc  = isset($item['Description']) && trim((string) $item['Description']) !== '';
+            $hasArea  = !empty($item['Area']);
+            $hasNotes = isset($item['Notes']) && trim((string) $item['Notes']) !== '';
+            $hasContent = $hasDesc || $hasArea || $hasNotes;
+
+            // Continuation row: no SKU, no price, but has some useful content
+            if (!$hasCode && !$hasPrice && $hasContent && !empty($merged)) {
+                // Determine which parent item to merge into.
+                // If the continuation has a LineNumber matching a real item, use that.
+                $contLine = isset($item['LineNumber']) ? trim((string) $item['LineNumber']) : '';
+                $parentIdx = ($contLine !== '' && isset($lineIndex[$contLine]))
+                    ? $lineIndex[$contLine]
+                    : array_key_last($merged);
+
+                // Save orphaned LineNumbers for reassignment to later real items
+                if ($contLine !== '' && !isset($lineIndex[$contLine])) {
+                    $orphanedLineNumbers[] = $contLine;
+                }
+
+                // Append description fragment
+                if ($hasDesc) {
+                    $parentDesc = trim((string) ($merged[$parentIdx]['Description'] ?? ''));
+                    $contDesc   = trim((string) $item['Description']);
+
+                    if ($parentDesc !== '' && !str_contains($parentDesc, $contDesc)) {
+                        $merged[$parentIdx]['Description'] = $parentDesc . ' ' . $contDesc;
+                    } elseif ($parentDesc === '') {
+                        $merged[$parentIdx]['Description'] = $contDesc;
+                    }
+                }
+
+                // Absorb any area tags from the continuation row
+                if ($hasArea) {
+                    $merged[$parentIdx]['Area'] = array_values(array_unique(
+                        array_merge($merged[$parentIdx]['Area'] ?? [], (array) $item['Area'])
+                    ));
+                }
+
+                // Absorb notes from the continuation row
+                if ($hasNotes) {
+                    $parentNotes = trim((string) ($merged[$parentIdx]['Notes'] ?? ''));
+                    $contNotes = trim((string) $item['Notes']);
+                    if ($parentNotes === '') {
+                        $merged[$parentIdx]['Notes'] = $contNotes;
+                    } elseif (!str_contains($parentNotes, $contNotes)) {
+                        $merged[$parentIdx]['Notes'] = $parentNotes . "\n" . $contNotes;
+                    }
+                }
+
+                continue;
+            }
+
+            // Skip completely empty phantom rows (no code, no price, no content)
+            if (!$hasCode && !$hasPrice && !$hasContent) {
+                // Save orphaned LineNumbers for reassignment
+                $ln = isset($item['LineNumber']) ? trim((string) $item['LineNumber']) : '';
+                if ($ln !== '') {
+                    $orphanedLineNumbers[] = $ln;
+                }
+                continue;
+            }
+
+            $idx = count($merged);
+            $merged[] = $item;
+
+            // Index by LineNumber for targeted continuation merging
+            $ln = isset($item['LineNumber']) ? trim((string) $item['LineNumber']) : '';
+            if ($ln !== '') {
+                $lineIndex[$ln] = $idx;
+            }
+        }
+
+        // Reassign orphaned LineNumbers to real items that are missing theirs.
+        // This handles stacked LINE numbers (e.g. 0040/0050 in one cell) where
+        // the model emits phantom rows for the LINE numbers and separate rows
+        // for the actual product data.
+        if (!empty($orphanedLineNumbers)) {
+            $orphanIdx = 0;
+            foreach ($merged as &$mItem) {
+                $ln = isset($mItem['LineNumber']) ? trim((string) $mItem['LineNumber']) : '';
+                if ($ln === '' && $orphanIdx < count($orphanedLineNumbers)) {
+                    $mItem['LineNumber'] = $orphanedLineNumbers[$orphanIdx];
+                    $orphanIdx++;
+                }
+            }
+            unset($mItem);
+        }
+
+        $items = array_values($merged);
+
+        // ── A2. Copy notes between stacked same-SKU items ────────────
+        // When consecutive items share the same ProductCode (e.g. two rows of
+        // CAEPOER1224R under LINE 0040/0050), they share the same notes
+        // (stock info, per-carton quantities, serial#, etc.). The CU model
+        // often assigns the full notes to only one of them. Copy the more
+        // complete notes to its sibling so both items display them.
+        for ($i = 0; $i < count($items) - 1; $i++) {
+            $curr = $items[$i];
+            $next = $items[$i + 1];
+
+            $currCode = trim((string) ($curr['ProductCode'] ?? ''));
+            $nextCode = trim((string) ($next['ProductCode'] ?? ''));
+
+            if ($currCode === '' || $currCode !== $nextCode) {
+                continue;
+            }
+
+            $currNotes = trim((string) ($curr['Notes'] ?? ''));
+            $nextNotes = trim((string) ($next['Notes'] ?? ''));
+
+            // Copy the more complete notes to the sibling with fewer notes
+            if (strlen($currNotes) > strlen($nextNotes)) {
+                $items[$i + 1]['Notes'] = $currNotes;
+            } elseif (strlen($nextNotes) > strlen($currNotes)) {
+                $items[$i]['Notes'] = $nextNotes;
+            }
+        }
+
+        // ── B. Clean text ──────────────────────────────────────────────
         foreach ($items as &$item) {
             if (isset($item['Description']) && is_string($item['Description'])) {
                 $item['Description'] = $this->cleanOcrText($item['Description']);
             }
 
             if (isset($item['Notes']) && is_string($item['Notes'])) {
-                $item['Notes'] = $this->cleanOcrText($item['Notes']);
+                $item['Notes'] = $this->cleanOcrText($item['Notes'], true);
             }
 
-            // When CU returns multiple areas (e.g. ['PRIMARY BATH', 'HALL BATH']),
-            // keep only the first — the TAG that preceded the item is the correct section.
-            if (isset($item['Area']) && is_array($item['Area']) && count($item['Area']) > 1) {
-                $item['Area'] = [reset($item['Area'])];
+            // Clean descriptions: strip Serial# references and C* area/note text that leaked in
+            if (isset($item['Description']) && is_string($item['Description'])) {
+                $item['Description'] = preg_replace('/\s*Serial#[^C\n]*/i', '', $item['Description']);
+                $item['Description'] = preg_replace('/\s*C\*\s*.*/s', '', $item['Description']);
+                $item['Description'] = trim($item['Description']);
+            }
+
+            // Extract areas from Notes when the model put "C* ROOM/C* SUB-AREA" into Notes
+            // instead of the Area field. Only process if Area has a single entry (room only).
+            if (isset($item['Notes']) && is_string($item['Notes'])) {
+                $currentAreas = $item['Area'] ?? [];
+                if (preg_match('/C\*\s*([^\/\*]+?)\/C\*\s*([^C\*\n]+)/i', $item['Notes'], $am)) {
+                    $room = trim($am[1]);
+                    $sub  = trim($am[2]);
+                    // If Area only has the room name, supplement with sub-area from Notes
+                    if (count($currentAreas) === 1 && strcasecmp($currentAreas[0], $room) === 0) {
+                        $item['Area'] = [$room, $sub];
+                    } elseif (empty($currentAreas)) {
+                        $item['Area'] = [$room, $sub];
+                    }
+                }
             }
         }
+        unset($item);
+
+        // ── C. Propagate areas between same-SKU items ───────────────
+        // When the same part number appears multiple times (e.g. split
+        // quantities), copy the most detailed area from a sibling.
+        $areaByCode = [];
+        foreach ($items as &$item) {
+            $code = trim((string) ($item['ProductCode'] ?? ''));
+            if ($code === '') continue;
+            if (!empty($item['Area'])) {
+                // Keep the most detailed area (most parts) across siblings
+                if (!isset($areaByCode[$code]) || count($item['Area']) > count($areaByCode[$code])) {
+                    $areaByCode[$code] = $item['Area'];
+                }
+            }
+        }
+        unset($item);
+        foreach ($items as &$item) {
+            $code = trim((string) ($item['ProductCode'] ?? ''));
+            if ($code !== '' && isset($areaByCode[$code])) {
+                // Use sibling's area when ours is empty or less detailed
+                if (empty($item['Area']) || count($item['Area']) < count($areaByCode[$code])) {
+                    $item['Area'] = $areaByCode[$code];
+                }
+            }
+        }
+        unset($item);
+
+        // ── E. Sort by LineNumber ──────────────────────────────────────
+        // Items with a LineNumber come first (sorted numerically),
+        // items without a LineNumber go to the end (preserving relative order).
+        usort($items, function ($a, $b) {
+            $aLn = trim((string) ($a['LineNumber'] ?? ''));
+            $bLn = trim((string) ($b['LineNumber'] ?? ''));
+            $aHas = $aLn !== '';
+            $bHas = $bLn !== '';
+
+            if ($aHas && $bHas) {
+                return (int) $aLn <=> (int) $bLn;
+            }
+            if ($aHas && !$bHas) return -1;
+            if (!$aHas && $bHas) return 1;
+            return 0;
+        });
 
         return $items;
     }
@@ -1781,7 +1990,7 @@ class ReceiptController extends Controller
      * Clean common OCR artifacts from extracted text.
      * Handles unicode garbling (Û from ®/™), pipe-as-inch misreads, and truncated words.
      */
-    private function cleanOcrText(string $text): string
+    private function cleanOcrText(string $text, bool $preserveLineBreaks = false): string
     {
         // Unicode Û artifact (garbled ®/™ symbols): "C3Û-455" → "C3-455", "AWAKENÛ" → "AWAKEN"
         $text = str_replace('Û', '', $text);
@@ -1799,11 +2008,26 @@ class ReceiptController extends Controller
         $text = preg_replace('/\bPOLISHE\b(?!D)/i', 'POLISHED', $text);
         $text = preg_replace('/\bMOUNTE\b(?!D)/i', 'MOUNTED', $text);
 
-        // Collapse multiple spaces
+        if ($preserveLineBreaks) {
+            $text = str_replace(["\r\n", "\r"], "\n", $text);
+            // Reintroduce line breaks for common note markers when OCR flattens text.
+            $text = preg_replace('/\s+\*(?=\s*[A-Za-z])/', "\n*", $text) ?? $text;
+            $text = preg_replace('/\s+(Serial#)/i', "\n$1", $text) ?? $text;
+            $text = preg_replace('/\s+(C\*)/i', "\n$1", $text) ?? $text;
+            $text = preg_replace('/[ \t]{2,}/', ' ', $text) ?? $text;
+            $text = preg_replace('/ *\n */', "\n", $text) ?? $text;
+            $text = preg_replace('/\n{3,}/', "\n\n", $text) ?? $text;
+
+            return trim($text);
+        }
+
+        // Collapse multiple spaces/newlines for single-line fields.
         $text = preg_replace('/\s{2,}/', ' ', trim($text));
 
         return $text;
     }
+
+
 
     /**
      * Sanitize a ProductCode extracted from OCR.

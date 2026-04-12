@@ -144,7 +144,8 @@
                                 @else
                                     <x-expenses.receipt 
                                         :receipt="$expense->receipt" 
-                                        :selectedSplit="$expense->selectedSplit ?? null" 
+                                        :selectedSplit="$expense->selectedSplit ?? null"
+                                        :compactNotes="false"
                                     />
                                 @endif
                             </x-slot:details>

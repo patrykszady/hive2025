@@ -568,7 +568,8 @@ class ExpenseForm extends Form
         $analyzerId = $this->is_material_order
             ? config('services.azure_cu.analyzer_id_material_order')
             : null;
-        $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->extractReceipt($ocr_path, $doc_type, $expense_amount, null, null, $analyzerId);
+        $effectiveDocType = $this->is_material_order ? 'material_order' : $doc_type;
+        $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->extractReceipt($ocr_path, $effectiveDocType, $expense_amount, null, null, $analyzerId);
 
         // Check if OCR extraction failed
         if (isset($ocr_receipt_data['error']) && $ocr_receipt_data['error'] === true) {

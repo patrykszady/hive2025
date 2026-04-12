@@ -179,7 +179,7 @@ class ReOcrReceipts extends Command
                 $oldItems = $data['items'] ?? [];
                 $data['items'] = $fields['items'];
 
-                foreach (['subtotal', 'total', 'total_tax', 'tip', 'misc_fees', 'transaction_date', 'merchant_name', 'invoice_number', 'purchase_order', 'handwritten_notes', 'payment_methods'] as $key) {
+                foreach (['subtotal', 'total', 'total_tax', 'taxes', 'tip', 'misc_fees', 'deposit', 'shipping', 'balance_due', 'transaction_date', 'merchant_name', 'invoice_number', 'purchase_order', 'handwritten_notes', 'payment_methods', 'raw_content'] as $key) {
                     if (array_key_exists($key, $fields) && $fields[$key] !== null) {
                         $data[$key] = $fields[$key];
                     }
@@ -415,7 +415,7 @@ class ReOcrReceipts extends Command
 
         $data['items'] = $newItems;
 
-        foreach (['subtotal', 'total', 'total_tax', 'tip', 'misc_fees', 'transaction_date', 'merchant_name', 'invoice_number', 'purchase_order', 'handwritten_notes', 'payment_methods'] as $key) {
+        foreach (['subtotal', 'total', 'total_tax', 'taxes', 'tip', 'misc_fees', 'deposit', 'shipping', 'balance_due', 'transaction_date', 'merchant_name', 'invoice_number', 'purchase_order', 'handwritten_notes', 'payment_methods', 'raw_content'] as $key) {
             if (array_key_exists($key, $fields) && $fields[$key] !== null) {
                 $data[$key] = $fields[$key];
             }

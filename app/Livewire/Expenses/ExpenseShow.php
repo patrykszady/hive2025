@@ -4,6 +4,7 @@ namespace App\Livewire\Expenses;
 
 use App\Models\Check;
 use App\Models\Expense;
+use App\Models\ExpenseReceipts;
 use App\Models\ReceiptLineItemDesc;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Title;
@@ -74,7 +75,15 @@ class ExpenseShow extends Component
 
     public function selectReceiptItem(int $receiptId, int $itemIndex): void
     {
-        $receipt = $this->expense->orderedReceipts->firstWhere('id', $receiptId);
+        // Always fetch the latest receipt row to avoid stale in-memory relation data.
+        $receipt = ExpenseReceipts::query()
+            ->where('expense_id', $this->expense->id)
+            ->find($receiptId);
+
+        if (! $receipt) {
+            $receipt = $this->expense->orderedReceipts->firstWhere('id', $receiptId);
+        }
+
         $items = $receipt?->receipt_items['items'] ?? [];
         $item = $items[$itemIndex] ?? null;
 
@@ -88,9 +97,17 @@ class ExpenseShow extends Component
             ->first();
 
         if ($desc) {
-            $item['image_url'] = $item['image_url'] ?? $desc->product_image_url;
-            $item['product_url'] = $item['product_url'] ?? $desc->product_url;
-            $item['Area'] = $item['Area'] ?? $desc->area;
+            if (empty($item['image_url']) && ! empty($desc->product_image_url)) {
+                $item['image_url'] = $desc->product_image_url;
+            }
+
+            if (empty($item['product_url']) && ! empty($desc->product_url)) {
+                $item['product_url'] = $desc->product_url;
+            }
+
+            if (empty($item['Area']) && ! empty($desc->area)) {
+                $item['Area'] = $desc->area;
+            }
         }
 
         $item['_vendor_name'] = $this->expense->vendor?->business_name;
