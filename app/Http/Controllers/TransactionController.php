@@ -918,11 +918,8 @@ class TransactionController extends Controller
                 // Try to find correct vendor using fuzzy match
                 $correctVendor = app(\App\Http\Controllers\CompanyEmailController::class)->fuzzyMatchVendor($transaction->plaid_merchant_name, $vendors);
 
-                // Only update if we found a different vendor match
                 if ($correctVendor && $correctVendor->id !== $transaction->vendor_id) {
-                    $transaction->vendor_id = $correctVendor->id;
-                    $transaction->save();
-
+                    // Found a better vendor match - update
                     Log::channel('plaid_adds')->info('Corrected vendor mismatch', [
                         'transaction_id' => $transaction->id,
                         'old_vendor_id' => $transaction->vendor_id,
@@ -931,6 +928,18 @@ class TransactionController extends Controller
                         'new_vendor_name' => $correctVendor->business_name,
                         'plaid_merchant_name' => $transaction->plaid_merchant_name,
                     ]);
+                    $transaction->vendor_id = $correctVendor->id;
+                    $transaction->save();
+                } elseif (!$correctVendor) {
+                    // No vendor matches at all - clear the wrong assignment so it shows on Match Vendor
+                    Log::channel('plaid_adds')->info('Cleared mismatched vendor (no better match found)', [
+                        'transaction_id' => $transaction->id,
+                        'old_vendor_id' => $transaction->vendor_id,
+                        'old_vendor_name' => $vendorName,
+                        'plaid_merchant_name' => $transaction->plaid_merchant_name,
+                    ]);
+                    $transaction->vendor_id = null;
+                    $transaction->save();
                 }
             }
         }

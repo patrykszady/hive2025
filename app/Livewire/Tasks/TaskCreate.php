@@ -589,6 +589,7 @@ class TaskCreate extends Component
             'created' => 'Task Created',
             'updated' => 'Task Updated',
             'removed' => 'Task Removed',
+            'restored' => 'Task Restored',
             'dependency_added' => 'Dependency Added',
             'dependency_removed' => 'Dependency Removed',
         ];
@@ -738,6 +739,20 @@ class TaskCreate extends Component
 
         $this->handleTaskOperation('complete');
         $this->showNotification('removed');
+    }
+
+    public function restoreTask()
+    {
+        $task = $this->form->task ?? Task::onlyTrashed()->find($this->form->task_id);
+
+        if (!$task || !$task->trashed()) {
+            return;
+        }
+
+        $task->restore();
+
+        $this->handleTaskOperation('complete');
+        $this->showNotification('restored');
     }
 
     public function edit()

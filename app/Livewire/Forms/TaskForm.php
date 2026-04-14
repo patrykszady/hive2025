@@ -46,10 +46,13 @@ class TaskForm extends Form
     #[Validate('nullable|exists:tasks,id')]
     public $parent_task_id = null;
 
+    public bool $is_trashed = false;
+
     public function setTask(Task $task)
     {
         $this->task = $task;
         $this->task_id = $task->id;
+        $this->is_trashed = $task->trashed();
         
         // Load existing task data
         $this->title = $task->title;

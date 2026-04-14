@@ -242,6 +242,12 @@ class ScrapeReceiptItemImages implements ShouldQueue
             return null;
         }
 
+        // Strip quotes, inch marks, and other special chars that confuse web search
+        if ($name) {
+            $name = preg_replace('/["\'"″″\'\'`]+/', '', $name);
+            $name = preg_replace('/\s{2,}/', ' ', trim($name));
+        }
+
         $vendorSite = null;
         if ($vendorWebsite) {
             $vendorSite = parse_url($vendorWebsite, PHP_URL_HOST) ?: $vendorWebsite;
@@ -305,10 +311,15 @@ class ScrapeReceiptItemImages implements ShouldQueue
         $slug = strtolower(parse_url($url, PHP_URL_PATH) ?? '');
 
         // Extract distinguishing words from the product name (skip short/generic words and dimensions)
-        $words = preg_split('/[\s\/]+/', strtolower($name));
+        $cleanName = preg_replace('/["\'"″″\'\'`]+/', '', $name);
+        $words = preg_split('/[\s\/]+/', strtolower($cleanName));
         $skipWords = ['the', 'and', 'for', 'new', 'pkg', 'rect', 'matte', 'honed', 'polished', 'field', 'tile', 'mosaic', 'bar', 'liner', 'round'];
         $significantWords = array_filter($words, function ($w) use ($skipWords) {
-            return strlen($w) > 2 && ! is_numeric($w) && ! preg_match('/^\d+x\d+$/i', $w) && ! in_array($w, $skipWords);
+            return strlen($w) > 2
+                && ! is_numeric($w)
+                && ! preg_match('/^\d+x\d+$/i', $w)
+                && ! preg_match('/^\d+-\d+/', $w) // fraction fragments like 1-1 from "1-1/4"
+                && ! in_array($w, $skipWords);
         });
 
         if (empty($significantWords)) {

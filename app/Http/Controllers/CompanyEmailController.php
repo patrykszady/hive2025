@@ -2153,14 +2153,13 @@ class CompanyEmailController extends Controller
                         }
                     }
                     
-                    // Find common words that appear in multiple aliases - these are likely filler/generic
+                    // Find common words that appear in aliases but NOT in the vendor name - these are likely filler/generic
+                    // Words that ARE part of the vendor's business_name are always significant for that vendor
                     $aliasCounts = array_count_values($aliasWords);
                     $vendorNameWords = explode(' ', $vendorNorm);
                     
-                    // If a word appears in aliases but not in the main vendor name,
-                    // or appears very frequently across aliases, it's likely filler
                     foreach ($aliasCounts as $word => $count) {
-                        if (!in_array($word, $vendorNameWords) || $count > 1) {
+                        if (!in_array($word, $vendorNameWords)) {
                             $fillerWords[] = $word;
                         }
                     }

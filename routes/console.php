@@ -259,6 +259,32 @@ foreach (['08:05', '12:05', '16:05', '20:05'] as $time) {
         ->appendOutputTo($menardsLogPath);
 }
 
+// Retry scraping product images for material-order receipt items that are missing them
+// Covers items where the initial scrape failed (API timeout, bad search query, etc.)
+Schedule::call(function () {
+    $receipts = \App\Models\ExpenseReceipts::where('is_material_order', true)
+        ->where('created_at', '>=', now()->subDays(14))
+        ->get()
+        ->filter(function ($receipt) {
+            $items = $receipt->receipt_items['items'] ?? [];
+            foreach ($items as $item) {
+                if (! empty($item['Description']) && empty($item['image_url'])) {
+                    return true;
+                }
+            }
+            return false;
+        });
+
+    foreach ($receipts as $receipt) {
+        \App\Jobs\ScrapeReceiptItemImages::dispatch($receipt);
+    }
+})->twiceDaily(10, 18)
+  ->timezone('America/Chicago')
+  ->name('retry-incomplete-receipt-images')
+  ->environments(['production'])
+  ->withoutOverlapping()
+  ->onOneServer();
+
 // System maintenance
 Schedule::command('horizon:snapshot')
     ->everyFiveMinutes()

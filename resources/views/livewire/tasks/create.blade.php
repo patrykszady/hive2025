@@ -465,7 +465,12 @@
         <flux:spacer />
 
         @if($view_text['form_submit'] === 'edit' && $form->task_id)
-            <flux:button type="button" wire:click="removeTask" variant="danger">Remove</flux:button>
+            <flux:button.group>
+                <flux:button type="button" wire:click="removeTask" variant="danger" icon="x-mark" />
+                @if($form->is_trashed)
+                    <flux:button type="button" wire:click="restoreTask" variant="primary">Restore</flux:button>
+                @endif
+            </flux:button.group>
         @endif
 
         @if($view_text['form_submit'] === 'edit')
