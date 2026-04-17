@@ -149,7 +149,7 @@
                     @endif
 
                     {{-- USERS --}}
-                    <flux:select wire:model="form.user_ids" multiple label="Team Members" variant="listbox" placeholder="Assign team members...">
+                    <flux:select wire:model.live="form.user_ids" multiple label="Team Members" variant="listbox" placeholder="Assign team members...">
                         @foreach($this->employees as $employee)
                             <flux:select.option wire:key="{{$employee->id}}" value="{{$employee->id}}">
                                 <div class="flex items-center gap-2 whitespace-nowrap">
@@ -159,6 +159,94 @@
                             </flux:select.option>
                         @endforeach
                     </flux:select>
+
+                    {{-- MEETING OPTIONS (visible only for Meet type) --}}
+                    @if($form->type === 'Meet')
+                        <div class="mt-4 space-y-4">
+                            {{-- MEETING LOCATION TYPE --}}
+                            <flux:radio.group wire:model.live="form.meeting_location_type" label="Meeting Type" variant="segmented">
+                                <flux:radio value="in_person">
+                                    <div class="flex items-center gap-1.5">
+                                        <flux:icon.map-pin variant="mini" class="size-4" />
+                                        <span>In Person</span>
+                                    </div>
+                                </flux:radio>
+                                <flux:radio value="virtual">
+                                    <div class="flex items-center gap-1.5">
+                                        <flux:icon.video-camera variant="mini" class="size-4" />
+                                        <span>Virtual</span>
+                                    </div>
+                                </flux:radio>
+                            </flux:radio.group>
+
+                            {{-- MEETING PARTICIPANTS --}}
+                            <flux:field>
+                                <flux:label>Participants</flux:label>
+
+                                {{-- Selected participants as removable pills with full names --}}
+                                @if(!empty($form->meeting_participants))
+                                    <div class="flex flex-wrap gap-1.5 mt-1">
+                                        @foreach($form->meeting_participants as $index => $email)
+                                            @php
+                                                $contact = collect($this->availableMeetingContacts)->firstWhere('email', $email);
+                                                $displayName = ($contact && $contact['name']) ? $contact['name'] : $email;
+                                            @endphp
+                                            <span wire:key="participant-{{ $index }}" class="inline-flex items-center gap-1 rounded-md bg-zinc-100 dark:bg-zinc-700 px-2 py-1 text-sm text-zinc-700 dark:text-zinc-200">
+                                                {{ $displayName }}
+                                                <button type="button" wire:click="removeMeetingParticipant({{ $index }})" class="ml-0.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">
+                                                    <flux:icon.x-mark variant="micro" class="size-3.5" />
+                                                </button>
+                                            </span>
+                                        @endforeach
+                                    </div>
+                                @endif
+
+                                {{-- Searchable dropdown to add participants --}}
+                                @php
+                                    $unselectedContacts = collect($this->availableMeetingContacts)
+                                        ->reject(fn ($c) => in_array($c['email'], $form->meeting_participants))
+                                        ->values();
+                                @endphp
+                                <div x-data="{ newEmail: '' }" class="flex gap-2 mt-2">
+                                    @if($unselectedContacts->isNotEmpty())
+                                        <div class="flex-1">
+                                            <flux:autocomplete placeholder="Add participant..." size="sm" class="w-full">
+                                                @foreach($unselectedContacts as $contact)
+                                                    <flux:autocomplete.item
+                                                        wire:key="contact-add-{{ $loop->index }}"
+                                                        value="{{ $contact['email'] }}"
+                                                        wire:click="addMeetingParticipant('{{ $contact['email'] }}')"
+                                                    >
+                                                        <div class="flex items-center justify-between w-full">
+                                                            <span>{{ $contact['name'] ?: $contact['email'] }}</span>
+                                                            <span class="text-xs text-zinc-400 ml-2">{{ $contact['email'] }}</span>
+                                                        </div>
+                                                    </flux:autocomplete.item>
+                                                @endforeach
+                                            </flux:autocomplete>
+                                        </div>
+                                    @else
+                                        <flux:input
+                                            x-model="newEmail"
+                                            type="email"
+                                            placeholder="Add email address..."
+                                            size="sm"
+                                            x-on:keydown.enter.prevent="$wire.addMeetingParticipant(newEmail).then(() => newEmail = '')"
+                                            class="flex-1"
+                                        />
+                                        <flux:button
+                                            type="button"
+                                            size="sm"
+                                            icon="plus"
+                                            x-on:click="$wire.addMeetingParticipant(newEmail).then(() => newEmail = '')"
+                                        >Add</flux:button>
+                                    @endif
+                                </div>
+
+                                <flux:error name="form.meeting_participants" />
+                            </flux:field>
+                        </div>
+                    @endif
                 </div>
             </div>
 

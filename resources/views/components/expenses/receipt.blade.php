@@ -33,7 +33,7 @@
                                 @endif
                                 <button
                                     type="button"
-                                    class="min-w-0 truncate text-left hover:underline"
+                                    class="min-w-0 truncate text-left"
                                     wire:click="selectReceiptItem({{ $receipt->id }}, {{ $index }})"
                                 >{{$line_item['Description'] ?? ''}}</button>
                             </div>

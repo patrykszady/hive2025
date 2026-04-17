@@ -43,6 +43,12 @@ class TaskForm extends Form
     #[Validate('nullable|array')]
     public $checklist = [];
 
+    #[Validate('nullable|in:virtual,in_person')]
+    public $meeting_location_type = 'in_person';
+
+    #[Validate('nullable|array')]
+    public $meeting_participants = [];
+
     #[Validate('nullable|exists:tasks,id')]
     public $parent_task_id = null;
 
@@ -78,6 +84,14 @@ class TaskForm extends Form
         
         $this->parent_task_id = $task->parent_task_id;
         $this->order = $task->order;
+
+        // Load meeting options
+        $this->meeting_location_type = $task->options->meeting_location_type ?? 'in_person';
+        $meetingParticipants = $task->options->meeting_participants ?? [];
+        if (is_object($meetingParticipants)) {
+            $meetingParticipants = (array) $meetingParticipants;
+        }
+        $this->meeting_participants = array_values(array_filter((array) $meetingParticipants));
 
         // Set dates - extract from options if stored there, otherwise try to recreate from start/end
         if (isset($task->options->dates) && is_array($task->options->dates)) {
@@ -140,6 +154,8 @@ class TaskForm extends Form
         $options['dates'] = $this->dates;
         $options['checklist'] = $this->checklist;
         $options['time_settings'] = $this->time_settings;
+        $options['meeting_location_type'] = $this->type === 'Meet' ? $this->meeting_location_type : null;
+        $options['meeting_participants'] = $this->type === 'Meet' ? array_values(array_filter($this->meeting_participants)) : [];
 
         $this->task->update([
             'start_date' => $startDate,
@@ -202,6 +218,8 @@ class TaskForm extends Form
             'dates' => $this->dates,
             'checklist' => $this->checklist,
             'time_settings' => $this->time_settings,
+            'meeting_location_type' => $this->type === 'Meet' ? $this->meeting_location_type : null,
+            'meeting_participants' => $this->type === 'Meet' ? array_values(array_filter($this->meeting_participants)) : [],
         ];
 
         $task = Task::create([

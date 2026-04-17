@@ -120,6 +120,94 @@ class TaskCreate extends Component
         return $vendor->users()->employed()->get();
     }
 
+    /**
+     * Build the available meeting contacts list (client users + team members + vendor).
+     *
+     * @return array<int, array{email: string, name: string, group: string}>
+     */
+    #[Computed]
+    public function availableMeetingContacts(): array
+    {
+        $contacts = collect();
+        $taggedEmails = collect();
+
+        // Client users from the selected project
+        if ($this->form->project_id) {
+            $project = \App\Models\Project::with('client.users')->find($this->form->project_id);
+            if ($project?->client) {
+                $clientContacts = collect($project->client->users)->map(fn ($user) => [
+                    'email' => strtolower(trim($user->email)),
+                    'name' => trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')),
+                    'group' => 'Client',
+                ])->filter(fn ($c) => $c['email'] !== '');
+
+                $contacts = $contacts->merge($clientContacts);
+                $taggedEmails = $taggedEmails->merge($clientContacts->pluck('email'));
+            }
+        }
+
+        // Team members (employees of the current vendor)
+        $vendor = auth()->user()?->vendor;
+        if ($vendor) {
+            $teamContacts = $vendor->users()->employed()->get()->map(fn ($user) => [
+                'email' => strtolower(trim($user->email)),
+                'name' => trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')),
+                'group' => 'Team',
+            ])->filter(fn ($c) => $c['email'] !== '');
+
+            $contacts = $contacts->merge($teamContacts);
+            $taggedEmails = $taggedEmails->merge($teamContacts->pluck('email'));
+        }
+
+        // Selected vendor contact
+        if ($this->form->vendor_id) {
+            $selectedVendor = Vendor::find($this->form->vendor_id);
+            $vendorEmail = strtolower(trim((string) ($selectedVendor->email ?? '')));
+            if ($vendorEmail !== '' && ! $taggedEmails->contains($vendorEmail)) {
+                $contacts->push([
+                    'email' => $vendorEmail,
+                    'name' => trim((string) ($selectedVendor->business_name ?? '')),
+                    'group' => 'Vendor',
+                ]);
+                $taggedEmails->push($vendorEmail);
+            }
+        }
+
+        // All other users not already tagged
+        $otherUsers = User::query()
+            ->whereNotIn('email', $taggedEmails->all())
+            ->whereNotNull('email')
+            ->where('email', '!=', '')
+            ->orderBy('first_name')
+            ->get()
+            ->map(fn ($user) => [
+                'email' => strtolower(trim($user->email)),
+                'name' => trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')),
+                'group' => '',
+            ])
+            ->filter(fn ($c) => $c['email'] !== '');
+
+        $contacts = $contacts->merge($otherUsers);
+
+        return $contacts->unique('email')->values()->all();
+    }
+
+    /**
+     * Toggle a contact in/out of the meeting participants list.
+     */
+    public function toggleMeetingContact(string $email): void
+    {
+        $email = strtolower(trim($email));
+
+        if (in_array($email, $this->form->meeting_participants, true)) {
+            $this->form->meeting_participants = array_values(
+                array_filter($this->form->meeting_participants, fn ($e) => $e !== $email)
+            );
+        } else {
+            $this->form->meeting_participants[] = $email;
+        }
+    }
+
     #[Computed]
     public function duration()
     {
@@ -353,6 +441,36 @@ class TaskCreate extends Component
     }
 
     /**
+     * Add a participant email to the meeting.
+     */
+    public function addMeetingParticipant(string $email): void
+    {
+        $email = strtolower(trim($email));
+
+        if ($email === '' || ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $this->addError('form.meeting_participants', 'Please enter a valid email address.');
+            return;
+        }
+
+        if (in_array($email, $this->form->meeting_participants, true)) {
+            $this->addError('form.meeting_participants', 'This participant has already been added.');
+            return;
+        }
+
+        $this->form->meeting_participants[] = $email;
+        $this->resetErrorBag('form.meeting_participants');
+    }
+
+    /**
+     * Remove a participant email from the meeting.
+     */
+    public function removeMeetingParticipant(int $index): void
+    {
+        unset($this->form->meeting_participants[$index]);
+        $this->form->meeting_participants = array_values($this->form->meeting_participants);
+    }
+
+    /**
      * Reset form and dependency fields to initial state
      */
     private function resetFormFields()
@@ -370,6 +488,111 @@ class TaskCreate extends Component
     public function clearAllTimes()
     {
         $this->form->time_settings = [];
+    }
+
+    /**
+     * When the task type changes to Meet, auto-populate meeting participants.
+     */
+    public function updatedFormType(): void
+    {
+        if ($this->form->type === 'Meet') {
+            $this->syncMeetingParticipants();
+        }
+    }
+
+    /**
+     * When the project changes and type is Meet, refresh meeting participants.
+     */
+    public function updatedFormProjectId(): void
+    {
+        if ($this->form->type === 'Meet') {
+            $this->syncMeetingParticipants();
+        }
+    }
+
+    /**
+     * When team members change and type is Meet, refresh meeting participants.
+     */
+    public function updatedFormUserIds(): void
+    {
+        if ($this->form->type === 'Meet') {
+            $this->syncMeetingParticipants();
+        }
+    }
+
+    /**
+     * When vendor changes and type is Meet, refresh meeting participants.
+     */
+    public function updatedFormVendorId(): void
+    {
+        if ($this->form->type === 'Meet') {
+            $this->syncMeetingParticipants();
+        }
+    }
+
+    /**
+     * Sync meeting participants: keep any manually-added emails and merge in resolved defaults.
+     */
+    private function syncMeetingParticipants(): void
+    {
+        $defaults = $this->resolveDefaultMeetingParticipants();
+        $current = $this->form->meeting_participants;
+
+        $this->form->meeting_participants = collect($defaults)
+            ->merge($current)
+            ->map(fn (string $email) => strtolower(trim($email)))
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Resolve default meeting participant emails from team members, client, and vendor.
+     *
+     * @return string[]
+     */
+    private function resolveDefaultMeetingParticipants(): array
+    {
+        $emails = collect();
+
+        // Team member emails from selected user_ids
+        $userIds = collect($this->form->user_ids ?? [])
+            ->filter(fn ($id) => is_numeric($id) && (int) $id > 0)
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        if ($userIds->isNotEmpty()) {
+            $emails = $emails->merge(
+                User::query()->whereIn('id', $userIds->all())->pluck('email')
+            );
+        }
+
+        // Client user emails from the selected project
+        if ($this->form->project_id) {
+            $project = \App\Models\Project::with('client.users')->find($this->form->project_id);
+            if ($project?->client) {
+                $emails = $emails->merge(
+                    collect($project->client->users)->pluck('email')
+                );
+            }
+        }
+
+        // Vendor email (primary contact) from selected vendor
+        if ($this->form->vendor_id) {
+            $vendor = Vendor::find($this->form->vendor_id);
+            $vendorEmail = trim((string) ($vendor->email ?? ''));
+            if ($vendorEmail !== '') {
+                $emails->push($vendorEmail);
+            }
+        }
+
+        return $emails
+            ->filter(fn ($email) => is_string($email) && $email !== '')
+            ->map(fn (string $email) => strtolower(trim($email)))
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /**
@@ -634,6 +857,9 @@ class TaskCreate extends Component
         $this->form->vendor_id = $task->vendor_id;
         $this->form->user_ids = $task->user_ids;
         $this->form->notes = $task->notes;
+        $this->form->meeting_location_type = $task->options->meeting_location_type ?? 'virtual';
+        $meetingParticipants = $task->options->meeting_participants ?? [];
+        $this->form->meeting_participants = is_array($meetingParticipants) ? $meetingParticipants : (array) $meetingParticipants;
         
         // Set up parent-child relationship
         if ($task->parent_task_id) {
@@ -702,6 +928,10 @@ class TaskCreate extends Component
         
         // Simply use the task as-is without reloading
         $this->form->setTask($task);
+
+        if ($this->form->type === 'Meet') {
+            $this->syncMeetingParticipants();
+        }
         
         $this->modal('task_create_form_modal')->show();
         $this->dispatch('task-modal-opened');

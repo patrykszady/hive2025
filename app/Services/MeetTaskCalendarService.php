@@ -74,10 +74,6 @@ class MeetTaskCalendarService
             'title' => $task->title ?: 'Meet',
             'description' => $this->buildDescription($task, $recipientEmails),
             'location' => $this->resolveProjectLocation($task),
-            'conferencing' => [
-                'provider' => $conferencingProvider,
-                'autocreate' => (object) [],
-            ],
             'participants' => $recipientEmails
                 ->map(fn (string $email) => ['email' => $email])
                 ->values()
@@ -87,6 +83,10 @@ class MeetTaskCalendarService
                 'end_time' => $endAt->timestamp,
                 'start_timezone' => $timezone,
                 'end_timezone' => $timezone,
+            ],
+            'conferencing' => [
+                'provider' => $conferencingProvider,
+                'autocreate' => (object) [],
             ],
         ];
 
@@ -386,8 +386,12 @@ class MeetTaskCalendarService
 
         $clientUserEmails = collect($task->project?->client?->users ?? [])->pluck('email');
 
+        // Include custom meeting participants from task options
+        $customParticipants = collect((array) ($task->options->meeting_participants ?? []));
+
         return $selectedTeamMemberEmails
             ->merge($clientUserEmails)
+            ->merge($customParticipants)
             ->filter(fn (?string $email) => is_string($email) && $email !== '')
             ->map(fn (string $email) => strtolower(trim($email)))
             ->unique()
@@ -436,9 +440,12 @@ class MeetTaskCalendarService
         $vendorHeaderName = $vendorShortName !== '' ? $vendorShortName : $vendorBusinessName;
         $vendorFooterName = $vendorShortName !== '' ? $vendorShortName : $vendorBusinessName;
 
-        $headerLabel = $vendorHeaderName !== '' ? "{$vendorHeaderName} Meeting" : 'Meeting';
+        $meetingLocationType = $task->options->meeting_location_type ?? 'in_person';
+        $meetingTypeLabel = $meetingLocationType === 'in_person' ? 'ONSITE' : 'VIRTUAL';
+
+        $headerLabel = $vendorHeaderName !== '' ? "{$vendorHeaderName} ({$meetingTypeLabel}) Meeting" : '(' . $meetingTypeLabel . ') Meeting';
         if ($vendorBusinessWebsite !== '' && $vendorHeaderName !== '') {
-            $headerLabel = "<a href=\"{$vendorBusinessWebsite}\">{$vendorHeaderName}</a> Meeting";
+            $headerLabel = "<a href=\"{$vendorBusinessWebsite}\">{$vendorHeaderName}</a> ({$meetingTypeLabel}) Meeting";
         }
 
         $lines = [
