@@ -477,7 +477,7 @@
             <flux:button type="button" wire:click="duplicateTask">Duplicate</flux:button>
         @endif
 
-        <flux:button type="submit" form="task_create_form_modal_form" variant="primary">{{$view_text['button_text']}}</flux:button>
+        <flux:button type="submit" form="task_create_form_modal_form" variant="primary" wire:loading.attr="disabled">{{$view_text['button_text']}}</flux:button>
     </x-slot>
 </x-form-modal>
 </div>

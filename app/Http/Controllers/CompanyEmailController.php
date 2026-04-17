@@ -24,6 +24,7 @@ use Intervention\Image\Facades\Image;
 
 use Exception;
 use App\Support\ApiErrorFormatter;
+use App\Support\MaterialOrderStatus;
  
 class CompanyEmailController extends Controller
 {
@@ -856,6 +857,7 @@ class CompanyEmailController extends Controller
                 }
 
                 $document_model = $receipt->options['document_model'] ?? null;
+                $isMaterialOrder = $document_model === config('services.azure_cu.analyzer_id_material_order');
 
                 if (!$document_model) {
                     $this->nylasService->moveEmailToFolder($messageId, $folderMap['Add'], $grantId, $companyEmail->id);
@@ -866,8 +868,11 @@ class CompanyEmailController extends Controller
                     continue;
                 }
 
+                // Use 'material_order' docType so extractReceipt extracts Status/ETA/Area fields
+                $effectiveDocType = $isMaterialOrder ? 'material_order' : $doc_type;
+
                 //ocr the file via unified extractReceipt()
-                $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->extractReceipt($ocr_path, $doc_type, null, 'email', $receipt);
+                $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->extractReceipt($ocr_path, $effectiveDocType, null, 'email', $receipt, $document_model);
 
                 // DEBUG: log OCR results
                 Log::channel('nylas')->info('Receipt OCR result', [
@@ -1013,13 +1018,18 @@ class CompanyEmailController extends Controller
                     if ($existingExpense) {
                         $oldAmount = $existingExpense->amount;
 
-                        // Update expense amount and date from the update email
-                        $existingExpense->amount = $amount;
-                        $existingExpense->date = $date;
-                        $existingExpense->save();
+                        // For material order updates, only merge item statuses — don't overwrite amount/date
+                        if ($isMaterialOrder) {
+                            $this->mergeMaterialOrderUpdate($existingExpense, $ocr_receipt_data, $date, $subject);
+                        } else {
+                            // Update expense amount and date from the update email
+                            $existingExpense->amount = $amount;
+                            $existingExpense->date = $date;
+                            $existingExpense->save();
+                        }
 
                         // Attach as a new receipt record (keeps the original intact)
-                        $this->saveExpenseReceipt($existingExpense->id, $ocr_receipt_data, $ocr_filename, !empty($receipt->options['html_to_pdf']) ? null : $message, true);
+                        $this->saveExpenseReceipt($existingExpense->id, $ocr_receipt_data, $ocr_filename, !empty($receipt->options['html_to_pdf']) ? null : $message, true, $isMaterialOrder);
 
                         Log::channel('nylas')->info('Updated existing expense via update_existing receipt', [
                             'expense_id' => $existingExpense->id,
@@ -1027,6 +1037,7 @@ class CompanyEmailController extends Controller
                             'invoice' => $invoice,
                             'old_amount' => $oldAmount,
                             'new_amount' => $amount,
+                            'is_material_order' => $isMaterialOrder,
                         ]);
 
                         // Move to Saved folder
@@ -1210,7 +1221,7 @@ class CompanyEmailController extends Controller
                     })->first();
 
                     //ATTACHMENTS
-                    $this->saveExpenseReceipt($duplicate_expense->id, $ocr_receipt_data, $ocr_filename, !empty($receipt->options['html_to_pdf']) ? null : $message);
+                    $this->saveExpenseReceipt($duplicate_expense->id, $ocr_receipt_data, $ocr_filename, !empty($receipt->options['html_to_pdf']) ? null : $message, false, $isMaterialOrder);
 
                     //add po and add invoice from ocr
                     // $duplicate_expense->invoice = $invoice;
@@ -1240,7 +1251,7 @@ class CompanyEmailController extends Controller
 
                     if ($existingExpenseWithDuplicate) {
                         // Found a duplicate - attach receipt to existing expense and move to Duplicate folder
-                        $this->saveExpenseReceipt($existingExpenseWithDuplicate->id, $ocr_receipt_data, $ocr_filename, !empty($receipt->options['html_to_pdf']) ? null : $message);
+                        $this->saveExpenseReceipt($existingExpenseWithDuplicate->id, $ocr_receipt_data, $ocr_filename, !empty($receipt->options['html_to_pdf']) ? null : $message, false, $isMaterialOrder);
                         
                         if (!empty($folderMap['Duplicate'])) {
                             $this->nylasService->moveEmailToFolder($messageId, $folderMap['Duplicate'], $grantId, $companyEmail->id);
@@ -1264,7 +1275,7 @@ class CompanyEmailController extends Controller
 
                         if ($depositMatchExpense) {
                             // Same purchase — attach the new receipt and update amount to the final total
-                            $this->saveExpenseReceipt($depositMatchExpense->id, $ocr_receipt_data, $ocr_filename, !empty($receipt->options['html_to_pdf']) ? null : $message);
+                            $this->saveExpenseReceipt($depositMatchExpense->id, $ocr_receipt_data, $ocr_filename, !empty($receipt->options['html_to_pdf']) ? null : $message, false, $isMaterialOrder);
 
                             $depositMatchExpense->amount = $amount;
                             $depositMatchExpense->date = $date;
@@ -1323,7 +1334,7 @@ class CompanyEmailController extends Controller
                             $bulkMatch?->applySplits($expense, (float) $amount);
 
                             //ATTACHMENTS
-                            $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, !empty($receipt->options['html_to_pdf']) ? null : $message);
+                            $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, !empty($receipt->options['html_to_pdf']) ? null : $message, false, $isMaterialOrder);
 
                             // Transfer transactions and checks from partial expenses using shared method
                             $this->consolidatePartialExpenses($expense, $partialExpenses);
@@ -1360,7 +1371,7 @@ class CompanyEmailController extends Controller
                             $bulkMatch?->applySplits($expense, (float) $amount);
 
                             //ATTACHMENTS
-                            $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, !empty($receipt->options['html_to_pdf']) ? null : $message);
+                            $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, !empty($receipt->options['html_to_pdf']) ? null : $message, false, $isMaterialOrder);
 
                             // Move to Saved folder
                             if (!empty($folderMap['Saved'])) {
@@ -1746,6 +1757,88 @@ class CompanyEmailController extends Controller
                     continue;
                 }
             }
+        }
+    }
+
+    /**
+     * Merge status/ETA from a new material-order OCR into the existing receipt items.
+     * Only items that were previously pending (BO, open, partial) are updated.
+     */
+    protected function mergeMaterialOrderUpdate(Expense $expense, array $ocrData, string $emailDate, string $emailSubject = ''): void
+    {
+        $existingReceipt = $expense->orderedReceipts->first(fn ($r) => $r->is_material_order)
+            ?? ExpenseReceipts::where('expense_id', $expense->id)->where('is_material_order', true)->first();
+
+        if (! $existingReceipt) {
+            return;
+        }
+
+        $newFields = $ocrData['fields'] ?? [];
+        $oldItems = $existingReceipt->receipt_items;
+
+        // Build a lookup of new items by ProductCode
+        $newByCode = [];
+        foreach (($newFields['items'] ?? []) as $newItem) {
+            $code = $newItem['ProductCode'] ?? null;
+            if ($code) {
+                $newByCode[$code][] = $newItem;
+            }
+        }
+
+        // Detect "order complete" subject as a fallback when OCR doesn't extract items
+        $isOrderComplete = (bool) preg_match('/order\s+is\s+complete|order\s+complete/i', $emailSubject);
+
+        $existingItems = $oldItems['items'] ?? [];
+        $updated = false;
+
+        foreach ($existingItems as $idx => &$existingItem) {
+            $oldNormalized = MaterialOrderStatus::normalize($existingItem['Status'] ?? null);
+
+            if (! MaterialOrderStatus::isPending($oldNormalized)) {
+                continue;
+            }
+
+            $code = $existingItem['ProductCode'] ?? null;
+
+            // Try to match by ProductCode from the OCR'd update document
+            if ($code && isset($newByCode[$code])) {
+                $match = array_shift($newByCode[$code]);
+                $newStatus = $match['Status'] ?? null;
+
+                if ($newStatus !== null) {
+                    $existingItem['Status'] = $newStatus;
+                    $updated = true;
+                }
+
+                $newEta = $match['ETA'] ?? null;
+                $newNormalized = MaterialOrderStatus::normalize($newStatus ?? $existingItem['Status'] ?? null);
+
+                if (! empty($newEta)) {
+                    $existingItem['ETA'] = $newEta;
+                    $updated = true;
+                } elseif (MaterialOrderStatus::isResolved($newNormalized)) {
+                    $existingItem['ETA'] = $emailDate;
+                    $updated = true;
+                }
+            } elseif ($isOrderComplete) {
+                // Fallback: subject says "Order is Complete" — mark all pending items as available
+                $existingItem['Status'] = 'Available';
+                $existingItem['ETA'] = $emailDate;
+                $updated = true;
+            }
+        }
+        unset($existingItem);
+
+        if ($updated) {
+            $oldItems['items'] = $existingItems;
+            $existingReceipt->receipt_items = $oldItems;
+            $existingReceipt->save();
+
+            Log::channel('nylas')->info('Merged material order status/ETA update', [
+                'expense_id' => $expense->id,
+                'receipt_id' => $existingReceipt->id,
+                'items_count' => count($existingItems),
+            ]);
         }
     }
 

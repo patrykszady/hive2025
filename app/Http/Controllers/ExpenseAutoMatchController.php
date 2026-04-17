@@ -902,7 +902,69 @@ class ExpenseAutoMatchController extends Controller
         $collect('purchase_order');
         $collect('handwritten_notes');
 
+        // Extract site/job addresses from receipt content as fallback candidates.
+        foreach ($receipts as $receipt) {
+            $content = $receipt->receipt_items['raw_content']
+                ?? $receipt->receipt_html
+                ?? '';
+
+            if ($content === '') {
+                continue;
+            }
+
+            foreach ($this->extractSiteAddresses($content) as $address) {
+                $pushCandidate($address);
+            }
+        }
+
         return $candidates;
+    }
+
+    /**
+     * Extract site/job addresses from receipt text content.
+     *
+     * @return array<int, string>
+     */
+    protected function extractSiteAddresses(string $content): array
+    {
+        $addresses = [];
+
+        // Pattern 1: "SiteAddress: <street>" + optional "Site City: <city>" + "Site State: <state>"
+        if (preg_match('/SiteAddress:\s*(.+?)$/mi', $content, $m)) {
+            $street = trim($m[1]);
+            $city = '';
+            $state = '';
+            if (preg_match('/Site\s*City:\s*(.+?)$/mi', $content, $cm)) {
+                $city = trim($cm[1]);
+            }
+            if (preg_match('/Site\s*State:\s*(\w{2})/mi', $content, $sm)) {
+                $state = trim($sm[1]);
+            }
+            $full = $street;
+            if ($city !== '') {
+                $full .= ', ' . $city;
+            }
+            if ($state !== '') {
+                $full .= ', ' . $state;
+            }
+            if ($street !== '') {
+                $addresses[] = $full;
+                // Also add just the street for matching flexibility
+                if ($full !== $street) {
+                    $addresses[] = $street;
+                }
+            }
+        }
+
+        // Pattern 2: "Job Address: <street>"
+        if (preg_match('/Job\s*Address:\s*(.+?)$/mi', $content, $m)) {
+            $street = trim($m[1]);
+            if ($street !== '' && ! in_array($street, $addresses, true)) {
+                $addresses[] = $street;
+            }
+        }
+
+        return $addresses;
     }
 
     protected function normalizePurchaseOrderCandidate(mixed $value): ?string

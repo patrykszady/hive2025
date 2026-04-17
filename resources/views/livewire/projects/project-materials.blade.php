@@ -44,6 +44,7 @@
                                     >
                                         <flux:icon.arrow-top-right-on-square variant="micro" />
                                     </a>
+
                                 </span>
                             </flux:accordion.heading>
 
@@ -95,7 +96,7 @@
                                                         <span class="ml-auto flex shrink-0 items-center gap-1.5">
                                                             @if(!empty($item['Status']))
                                                                 @php($normalizedStatus = $this->normalizeStatus($item['Status']))
-                                                                @if($normalizedStatus === 'back order' && !empty($item['ETA']) && !\Carbon\Carbon::parse($item['ETA'])->isFuture())
+                                                                @if($normalizedStatus === 'back order' && !empty($item['ETA']) && !\Carbon\Carbon::parse($item['ETA'])->startOfDay()->gt(now(auth()->user()?->vendor?->timezone ?? config('app.timezone'))->startOfDay()))
                                                                     @php($normalizedStatus = 'available')
                                                                 @endif
                                                                 @php($statusColor = match($normalizedStatus) {
@@ -108,8 +109,9 @@
                                                                 <flux:badge size="sm" :color="$statusColor" inset="top bottom">{{ ucfirst($normalizedStatus) }}</flux:badge>
                                                             @endif
                                                             @if(!empty($item['ETA']))
-                                                                @php($cardDate = \Carbon\Carbon::parse($item['ETA']))
-                                                                <span class="{{ $cardDate->isFuture() ? 'text-red-500 dark:text-red-400' : 'text-green-600 dark:text-green-400' }}">{{ $cardDate->format('M j') }}</span>
+                                                                @php($cardDate = \Carbon\Carbon::parse($item['ETA'])->startOfDay())
+                                                                @php($todayDate = now(auth()->user()?->vendor?->timezone ?? config('app.timezone'))->startOfDay())
+                                                                <span class="{{ $cardDate->gt($todayDate) ? 'text-red-500 dark:text-red-400' : 'text-green-600 dark:text-green-400' }}">{{ $cardDate->format('M j') }}</span>
                                                             @endif
                                                         </span>
                                                     </div>

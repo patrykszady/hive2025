@@ -204,6 +204,91 @@ class MeetTaskCalendarService
         ]);
     }
 
+    /**
+     * Update an existing Meet calendar event with new date/time and details.
+     */
+    public function updateMeetEvent(Task $task): void
+    {
+        if (! config('nylas.meet.enabled', true)) {
+            return;
+        }
+
+        if ($task->type !== 'Meet') {
+            return;
+        }
+
+        $eventMeta = $this->resolveEventMetadata($task);
+        $eventId = (string) ($eventMeta['event_id'] ?? '');
+        $grantId = (string) ($eventMeta['grant_id'] ?? '');
+        $calendarId = (string) ($eventMeta['calendar_id'] ?? '');
+
+        if ($eventId === '' || $grantId === '' || $calendarId === '') {
+            Log::channel('nylas')->warning('Cannot update Meet event: missing metadata', [
+                'task_id' => $task->id,
+                'event_meta' => $eventMeta,
+            ]);
+
+            return;
+        }
+
+        $task->loadMissing(['project.client.users', 'project.createdByVendor', 'vendor']);
+
+        $recipientEmails = $this->resolveRecipientEmails($task);
+        [$startAt, $endAt, $timezone] = $this->resolveDateRange($task);
+
+        $payload = [
+            'calendar_id' => $calendarId,
+            'title' => $task->title ?: 'Meet',
+            'description' => $this->buildDescription($task, $recipientEmails),
+            'location' => $this->resolveProjectLocation($task),
+            'participants' => $recipientEmails
+                ->map(fn (string $email) => ['email' => $email])
+                ->values()
+                ->all(),
+            'when' => [
+                'start_time' => $startAt->timestamp,
+                'end_time' => $endAt->timestamp,
+                'start_timezone' => $timezone,
+                'end_timezone' => $timezone,
+            ],
+        ];
+
+        $response = $this->nylasService->updateEvent($grantId, $eventId, $payload);
+
+        if ($response['success'] ?? false) {
+            Log::channel('nylas')->info('Meet calendar event updated', [
+                'task_id' => $task->id,
+                'event_id' => $eventId,
+                'grant_id' => $grantId,
+                'start_time' => $startAt->toIso8601String(),
+                'end_time' => $endAt->toIso8601String(),
+            ]);
+
+            return;
+        }
+
+        $status = (int) ($response['status'] ?? 0);
+
+        // If event no longer exists, create a new one instead
+        if (in_array($status, [404, 410], true)) {
+            Log::channel('nylas')->warning('Meet event not found for update, creating new event', [
+                'task_id' => $task->id,
+                'event_id' => $eventId,
+            ]);
+            $this->createMeetEvent($task);
+
+            return;
+        }
+
+        Log::channel('nylas')->error('Meet calendar event update failed', [
+            'task_id' => $task->id,
+            'event_id' => $eventId,
+            'grant_id' => $grantId,
+            'status' => $status,
+            'error' => $response['error'] ?? $response['body'] ?? null,
+        ]);
+    }
+
     private function resolveGrantId(Task $task, ?int $actorUserId = null): ?string
     {
         $vendorId = $task->project?->belongs_to_vendor_id;

@@ -185,6 +185,18 @@ class TaskForm extends Form
             }
         }
 
+        // Prevent duplicate creation (double-click / double-submit)
+        $recentDuplicate = Task::withoutGlobalScopes()
+            ->where('project_id', $this->project_id)
+            ->where('title', $this->title)
+            ->where('start_date', $startDate)
+            ->where('created_at', '>=', now()->subSeconds(10))
+            ->first();
+
+        if ($recentDuplicate) {
+            return $recentDuplicate;
+        }
+
         // Store dates array in options
         $options = [
             'dates' => $this->dates,

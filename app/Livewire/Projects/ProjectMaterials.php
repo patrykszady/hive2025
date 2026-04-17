@@ -9,6 +9,7 @@ use App\Models\ProjectStatus;
 use App\Models\ReceiptLineItemDesc;
 use App\Models\Vendor;
 use App\Scopes\ExpenseScope;
+use App\Support\MaterialOrderStatus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Attributes\Computed;
@@ -56,7 +57,6 @@ class ProjectMaterials extends Component
         $this->resetValidation();
         $this->showUploadModal = true;
     }
-
 
     #[Computed]
     public function vendors()
@@ -305,14 +305,14 @@ class ProjectMaterials extends Component
 
     private function isItemAvailable(array $item): bool
     {
-        $status = $this->normalizeStatus($item['Status'] ?? null);
+        $status = MaterialOrderStatus::normalize($item['Status'] ?? null);
 
         // Explicit statuses take priority over date-based logic
         if (in_array($status, ['back order', 'open', 'cancelled'], true)) {
             return false;
         }
 
-        if (in_array($status, ['available', 'received', 'shipped'], true)) {
+        if (MaterialOrderStatus::isResolved($status)) {
             return true;
         }
 
@@ -324,7 +324,9 @@ class ProjectMaterials extends Component
         }
 
         try {
-            return ! Carbon::parse($rawDate)->isFuture();
+            $vendorTz = auth()->user()?->vendor?->timezone ?? config('app.timezone');
+
+            return ! Carbon::parse($rawDate)->startOfDay()->gt(now($vendorTz)->startOfDay());
         } catch (\Throwable) {
             return true;
         }
@@ -332,22 +334,7 @@ class ProjectMaterials extends Component
 
     public function normalizeStatus(?string $raw): ?string
     {
-        if ($raw === null) {
-            return null;
-        }
-
-        $raw = strtolower(trim($raw));
-
-        return match (true) {
-            in_array($raw, ['back ord', 'back order', 'bo', 'backorder', 'b/o'], true) => 'back order',
-            str_starts_with($raw, 'availabl') || $raw === 'available' => 'available',
-            in_array($raw, ['open', 'open item'], true) => 'open',
-            in_array($raw, ['received', 'recv', 'rec', 'delivered'], true) => 'received',
-            in_array($raw, ['shipped', 'ship'], true) => 'shipped',
-            in_array($raw, ['partial', 'partially shipped'], true) => 'partial',
-            in_array($raw, ['cancelled', 'cancel', 'canceled'], true) => 'cancelled',
-            default => $raw,
-        };
+        return MaterialOrderStatus::normalize($raw);
     }
 
     public function render()

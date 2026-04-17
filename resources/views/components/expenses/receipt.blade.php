@@ -98,16 +98,18 @@
                         @php(
                             $normalizedStatus = match (true) {
                                 in_array(strtolower(trim($itemStatus)), ['back ord', 'back order', 'bo', 'backorder', 'b/o'], true) => 'back order',
+                                str_starts_with(strtolower(trim($itemStatus)), 'received (was') => 'available',
                                 str_starts_with(strtolower(trim($itemStatus)), 'availabl') || strtolower(trim($itemStatus)) === 'available' => 'available',
-                                in_array(strtolower(trim($itemStatus)), ['open', 'open item'], true) => 'open',
-                                in_array(strtolower(trim($itemStatus)), ['received', 'recv', 'rec', 'delivered'], true) => 'received',
+                                in_array(strtolower(trim($itemStatus)), ['open', 'open item', 'open line'], true) => 'open',
+                                str_starts_with(strtolower(trim($itemStatus)), 'received') || in_array(strtolower(trim($itemStatus)), ['recv', 'rec', 'delivered'], true) => 'received',
+                                str_starts_with(strtolower(trim($itemStatus)), 'transfer arrived') || str_starts_with(strtolower(trim($itemStatus)), 'transfer') => 'received',
                                 in_array(strtolower(trim($itemStatus)), ['shipped', 'ship'], true) => 'shipped',
                                 in_array(strtolower(trim($itemStatus)), ['partial', 'partially shipped'], true) => 'partial',
                                 in_array(strtolower(trim($itemStatus)), ['cancelled', 'cancel', 'canceled'], true) => 'cancelled',
                                 default => strtolower(trim($itemStatus)),
                             }
                         )
-                        @if($normalizedStatus === 'back order' && !empty($itemDate) && !\Carbon\Carbon::parse($itemDate)->isFuture())
+                        @if($normalizedStatus === 'back order' && !empty($itemDate) && !\Carbon\Carbon::parse($itemDate)->startOfDay()->gt(now(auth()->user()?->vendor?->timezone ?? config('app.timezone'))->startOfDay()))
                             @php($normalizedStatus = 'available')
                         @endif
                     @endif
@@ -142,8 +144,9 @@
                                             <flux:badge size="sm" :color="$statusColor" inset="top bottom">{{ ucfirst($normalizedStatus) }}</flux:badge>
                                         @endif
                                         @if(!empty($itemDate))
-                                            @php($txDate = \Carbon\Carbon::parse($itemDate))
-                                            <span class="{{ $txDate->isFuture() ? 'text-red-500 dark:text-red-400' : 'text-green-600 dark:text-green-400' }}">{{ $txDate->format('M j') }}</span>
+                                            @php($txDate = \Carbon\Carbon::parse($itemDate)->startOfDay())
+                                            @php($todayDate = now(auth()->user()?->vendor?->timezone ?? config('app.timezone'))->startOfDay())
+                                            <span class="{{ $txDate->gt($todayDate) ? 'text-red-500 dark:text-red-400' : 'text-green-600 dark:text-green-400' }}">{{ $txDate->format('M j, Y') }}</span>
                                         @endif
                                     </span>
                                     </div>

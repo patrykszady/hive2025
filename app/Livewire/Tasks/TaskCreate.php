@@ -3,6 +3,7 @@
 namespace App\Livewire\Tasks;
 
 use App\Jobs\CreateMeetTaskCalendarEvent;
+use App\Jobs\UpdateMeetTaskCalendarEvent;
 use App\Models\Project;
 use App\Models\Task;
 use App\Models\User;
@@ -783,6 +784,8 @@ class TaskCreate extends Component
 
             if (($wasConvertedToMeet || $isMissingMeetEvent) && $this->form->task->start_date) {
                 CreateMeetTaskCalendarEvent::dispatch($this->form->task->id, auth()->id());
+            } elseif (! $isMissingMeetEvent && $this->form->task->start_date) {
+                UpdateMeetTaskCalendarEvent::dispatch($this->form->task->id);
             }
         }
 

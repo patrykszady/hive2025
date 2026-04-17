@@ -300,6 +300,52 @@ class NylasService
     }
 
     /**
+     * Update a calendar event for a given grant.
+     */
+    public function updateEvent(string $grantId, string $eventId, array $payload): array
+    {
+        $calendarId = (string) ($payload['calendar_id'] ?? '');
+
+        if ($calendarId === '') {
+            return [
+                'status' => 422,
+                'success' => false,
+                'error' => 'calendar_id is required',
+            ];
+        }
+
+        $body = $payload;
+        unset($body['calendar_id']);
+
+        return $this->retryWithBackoff(function () use ($grantId, $eventId, $calendarId, $body) {
+            $url = $this->baseUrl . "/grants/{$grantId}/events/{$eventId}";
+
+            try {
+                $response = Http::withHeaders([
+                    'Authorization' => "Bearer {$this->apiKey}",
+                    'Accept' => 'application/json',
+                    'Content-Type' => 'application/json',
+                ])
+                    ->withQueryParameters(['calendar_id' => $calendarId])
+                    ->put($url, $body);
+
+                return [
+                    'status' => $response->status(),
+                    'success' => $response->successful(),
+                    'data' => $response->json(),
+                    'body' => $response->body(),
+                ];
+            } catch (\Throwable $e) {
+                return [
+                    'status' => 500,
+                    'success' => false,
+                    'error' => $e->getMessage(),
+                ];
+            }
+        });
+    }
+
+    /**
      * Move or delete a message
      */
     public function moveOrDeleteMessage(string $messageId, string $grantId, ?int $companyEmailId = null, ?string $folderId = null): bool
