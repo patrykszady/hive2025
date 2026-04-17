@@ -113,6 +113,36 @@
             </div>
         @endif
 
+        {{-- Status/ETA Change History --}}
+        @if(!empty($item['_history']))
+            <div>
+                <flux:text class="text-zinc-400 text-sm mb-1">History</flux:text>
+                <div class="space-y-2">
+                    @foreach($item['_history'] as $change)
+                        <div class="rounded-md bg-zinc-50 dark:bg-zinc-900/60 px-3 py-2 text-sm space-y-1">
+                            @if(!empty($change['old_status']) && !empty($change['new_status']) && $change['old_status'] !== $change['new_status'])
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-2">
+                                        <flux:badge size="sm" color="red">{{ $change['old_status'] }}</flux:badge>
+                                        <flux:icon.arrow-right class="size-3 text-zinc-400 shrink-0" />
+                                        <flux:badge size="sm" color="green">{{ $change['new_status'] }}</flux:badge>
+                                    </div>
+                                    <flux:text class="text-xs text-zinc-400">{{ $change['date'] }}</flux:text>
+                                </div>
+                            @endif
+                            @if(!empty($change['old_eta']) && !empty($change['new_eta']) && $change['old_eta'] !== $change['new_eta'])
+                                <div class="flex items-center gap-2">
+                                    <span class="text-xs text-zinc-400 dark:text-zinc-500">{{ \Carbon\Carbon::parse($change['old_eta'])->format('M j, Y') }}</span>
+                                    <flux:icon.arrow-right class="size-3 text-zinc-400 shrink-0" />
+                                    <span class="text-xs font-medium text-green-600 dark:text-green-400">{{ \Carbon\Carbon::parse($change['new_eta'])->format('M j, Y') }}</span>
+                                </div>
+                            @endif
+                        </div>
+                    @endforeach
+                </div>
+            </div>
+        @endif
+
         @if(!empty($item['Notes'] ?? $item['notes'] ?? null))
             <div>
                 <flux:text class="text-zinc-400 text-sm mb-1">Notes</flux:text>

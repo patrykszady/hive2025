@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Client;
 use App\Models\Distribution;
 use App\Models\Expense;
 use App\Models\Project;
 use App\Models\ProjectStatus;
 use App\Models\Vendor;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
 
@@ -14,7 +16,14 @@ class ExpenseAutoMatchController extends Controller
 {
     public function runNoProjectExpenseAutoMatchRoute(): JsonResponse
     {
-        $this->runNoProjectExpenseAutoMatch();
+        $this->runNoProjectExpenseAutoMatch(
+            onlyBelongsToVendorIds: null,
+            onDecision: null,
+            onSummary: null,
+            summaryAll: false,
+            includeNullStatus: true,
+            includeNullSplits: true,
+        );
 
         return response()->json(['ok' => true]);
     }
@@ -47,6 +56,15 @@ class ExpenseAutoMatchController extends Controller
         $hiveVendors = $hiveVendorsQuery->get();
 
         foreach ($hiveVendors as $hiveVendor) {
+            // Include expenses belonging to Sub-type vendors (e.g. forwarded receipts billed to a sub-contractor)
+            $subVendorIds = Vendor::withoutGlobalScopes()
+                ->where('business_type', 'Sub')
+                ->where('id', '!=', $hiveVendor->id)
+                ->pluck('id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+            $matchableVendorIds = array_values(array_unique(array_merge([(int) $hiveVendor->id], $subVendorIds)));
+
             $distributionIndex = null;
             $distributionNameById = [];
 
@@ -63,6 +81,42 @@ class ExpenseAutoMatchController extends Controller
                     return [(int) $project->id => trim($display)];
                 })
                 ->all();
+
+            // Build a map of project_id => client name(s) for PO matching.
+            // Uses business_name when available, otherwise falls back to user last names.
+            $clientNameByProjectId = [];
+            $projectClientRows = DB::table('project_vendor')
+                ->where('project_vendor.vendor_id', $hiveVendor->id)
+                ->whereIn('project_vendor.project_id', $projects->pluck('id')->all())
+                ->whereNotNull('project_vendor.client_id')
+                ->join('clients', 'clients.id', '=', 'project_vendor.client_id')
+                ->select('project_vendor.project_id', 'clients.id as client_id', 'clients.business_name')
+                ->get();
+
+            foreach ($projectClientRows as $row) {
+                $projectId = (int) $row->project_id;
+                if ($projectId <= 0) {
+                    continue;
+                }
+
+                $businessName = trim((string) ($row->business_name ?? ''));
+                if ($businessName !== '') {
+                    $clientNameByProjectId[$projectId] = $businessName;
+                } else {
+                    // Fall back to user last names from client_user pivot.
+                    $lastNames = DB::table('client_user')
+                        ->where('client_user.client_id', $row->client_id)
+                        ->join('users', 'users.id', '=', 'client_user.user_id')
+                        ->pluck('users.last_name')
+                        ->filter()
+                        ->unique()
+                        ->implode(' ');
+
+                    if ($lastNames !== '') {
+                        $clientNameByProjectId[$projectId] = $lastNames;
+                    }
+                }
+            }
 
             $projectStatuses = ProjectStatus::withoutGlobalScopes()
                 ->where('belongs_to_vendor_id', $hiveVendor->id)
@@ -102,7 +156,7 @@ class ExpenseAutoMatchController extends Controller
             }
 
             $projectCandidates = $projects
-                ->map(function (Project $project) use ($statusesByProjectId): ?array {
+                ->map(function (Project $project) use ($statusesByProjectId, $clientNameByProjectId): ?array {
                     $variants = [];
 
                     $normalizedAddress = $this->normalizeText((string) ($project->address ?? ''));
@@ -118,6 +172,15 @@ class ExpenseAutoMatchController extends Controller
                     $normalizedName = $this->normalizeText((string) ($project->project_name ?? ''));
                     if ($normalizedName !== '' && ! in_array($normalizedName, $variants, true)) {
                         $variants[] = $normalizedName;
+                    }
+
+                    // Include the client business_name as a variant for PO matching.
+                    $clientName = $clientNameByProjectId[(int) $project->id] ?? '';
+                    if ($clientName !== '') {
+                        $normalizedClient = $this->normalizeText($clientName);
+                        if ($normalizedClient !== '' && ! in_array($normalizedClient, $variants, true)) {
+                            $variants[] = $normalizedClient;
+                        }
                     }
 
                     if ($variants === []) {
@@ -418,8 +481,8 @@ class ExpenseAutoMatchController extends Controller
             $page = 1;
 
             while (true) {
-                $paginator = Expense::scopedSearchForVendor(
-                    $hiveVendor->id,
+                $paginator = Expense::scopedSearchForVendors(
+                    $matchableVendorIds,
                     '',
                     $filterConditions,
                     'date',
@@ -457,7 +520,7 @@ class ExpenseAutoMatchController extends Controller
                 }
 
                 $expenses = Expense::withoutGlobalScopes()
-                    ->where('belongs_to_vendor_id', $hiveVendor->id)
+                    ->whereIn('belongs_to_vendor_id', $matchableVendorIds)
                     ->whereIn('id', $candidateIds)
                     ->with(['receipts:id,expense_id,receipt_items,created_at'])
                     ->get(['id', 'belongs_to_vendor_id', 'vendor_id', 'date', 'distribution_id', 'project_id']);
@@ -618,7 +681,7 @@ class ExpenseAutoMatchController extends Controller
                         ]);
 
                         $affected = Expense::withoutGlobalScopes()
-                            ->where('belongs_to_vendor_id', $hiveVendor->id)
+                            ->whereIn('belongs_to_vendor_id', $matchableVendorIds)
                             ->where('id', $expense->id)
                             ->where(function ($query) {
                                 $query->whereNull('distribution_id')->orWhere('distribution_id', 0);
@@ -652,7 +715,7 @@ class ExpenseAutoMatchController extends Controller
                         ]);
 
                         $affected = Expense::withoutGlobalScopes()
-                            ->where('belongs_to_vendor_id', $hiveVendor->id)
+                            ->whereIn('belongs_to_vendor_id', $matchableVendorIds)
                             ->where('id', $expense->id)
                             ->where(function ($query) {
                                 $query->whereNull('project_id')->orWhere('project_id', 0);
@@ -702,7 +765,7 @@ class ExpenseAutoMatchController extends Controller
             if ($updatedExpenseIds !== []) {
                 try {
                     Expense::withoutGlobalScopes()
-                        ->where('belongs_to_vendor_id', $hiveVendor->id)
+                        ->whereIn('belongs_to_vendor_id', $matchableVendorIds)
                         ->whereIn('id', array_values(array_unique($updatedExpenseIds)))
                         ->get(['id', 'belongs_to_vendor_id'])
                         ->searchable();

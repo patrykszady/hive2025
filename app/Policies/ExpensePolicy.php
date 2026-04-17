@@ -29,6 +29,14 @@ class ExpensePolicy
                 return true;
             }
 
+            // Sub-vendor access: expense belongs to a sub-contractor of the user's vendor
+            if ($expense->belongs_to_vendor_id) {
+                $belongsToVendor = \App\Models\Vendor::find($expense->belongs_to_vendor_id);
+                if ($belongsToVendor && $belongsToVendor->business_type === 'Sub') {
+                    return true;
+                }
+            }
+
             // Project-based access: expense is on a project belonging to this vendor
             if ($expense->project_id) {
                 $project = \App\Models\Project::find($expense->project_id);

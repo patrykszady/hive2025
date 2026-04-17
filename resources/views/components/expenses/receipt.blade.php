@@ -45,7 +45,7 @@
                         class="receipt-row-data transition-colors duration-150 !py-0 !border-none {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) === true)) ? 'bg-indigo-50 dark:bg-indigo-900/10 print:!bg-transparent' : '' }}">
                         <flux:table.cell class="!pl-5">
                             <div class="flex items-center gap-2">
-                                @if(!empty($line_item['image_url']) || !$receipt->is_material_order)<div class="shrink-0 w-10"></div>@endif
+                                <div class="shrink-0 w-10"></div>
                                 <span class="transition-opacity transition-colors duration-150 {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) !== true)) ? 'text-gray-300 line-through opacity-50' : '' }}">
                                 @if(isset($receipt->expense->vendor) && $receipt->expense->vendor->sku_search_url)
                                     <flux:link 
@@ -120,7 +120,7 @@
                         >
                             <flux:table.cell colspan="4" class="!pl-5 !pr-5 !border-t-0">
                                 <div class="flex items-center gap-2 text-xs">
-                                    @if(!empty($line_item['image_url']) || !$receipt->is_material_order)<div class="shrink-0 w-10"></div>@endif
+                                    <div class="shrink-0 w-10"></div>
                                     <div class="flex-1 min-w-0 flex items-center gap-1.5">
                                     @if(!empty($line_item['Area']))
                                         <span class="min-w-0 truncate text-zinc-500 dark:text-zinc-400">{{ is_array($line_item['Area']) ? implode(' / ', $line_item['Area']) : $line_item['Area'] }}</span>
@@ -133,6 +133,11 @@
                                         @endif
                                     @endif
                                     <span class="shrink-0 ml-auto flex items-center gap-1.5">
+                                        @if(!empty($itemDate))
+                                            @php($txDate = \Carbon\Carbon::parse($itemDate)->startOfDay())
+                                            @php($todayDate = now(auth()->user()?->vendor?->timezone ?? config('app.timezone'))->startOfDay())
+                                            <span class="{{ $txDate->gt($todayDate) ? 'text-red-500 dark:text-red-400' : 'text-green-600 dark:text-green-400' }}">{{ $txDate->format('M j') }}</span>
+                                        @endif
                                         @if(!empty($itemStatus))
                                             @php($statusColor = match($normalizedStatus) {
                                                 'back order' => 'red',
@@ -141,12 +146,7 @@
                                                 'cancelled' => 'zinc',
                                                 default => 'zinc',
                                             })
-                                            <flux:badge size="sm" :color="$statusColor" inset="top bottom">{{ ucfirst($normalizedStatus) }}</flux:badge>
-                                        @endif
-                                        @if(!empty($itemDate))
-                                            @php($txDate = \Carbon\Carbon::parse($itemDate)->startOfDay())
-                                            @php($todayDate = now(auth()->user()?->vendor?->timezone ?? config('app.timezone'))->startOfDay())
-                                            <span class="{{ $txDate->gt($todayDate) ? 'text-red-500 dark:text-red-400' : 'text-green-600 dark:text-green-400' }}">{{ $txDate->format('M j, Y') }}</span>
+                                            <flux:badge size="sm" :color="$statusColor">{{ ucfirst($normalizedStatus) }}</flux:badge>
                                         @endif
                                     </span>
                                     </div>

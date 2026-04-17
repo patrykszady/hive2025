@@ -10,6 +10,7 @@ use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
+use Spatie\Activitylog\Models\Activity;
 
 class ExpenseShow extends Component
 {
@@ -112,6 +113,23 @@ class ExpenseShow extends Component
 
         $item['_vendor_name'] = $this->expense->vendor?->business_name;
         $item['_expense_date'] = $this->expense->date?->format('M j, Y');
+
+        // Fetch activity log changes for this specific item
+        if ($receipt?->is_material_order) {
+            $item['_history'] = Activity::where('log_name', 'materials')
+                ->where('subject_type', 'App\\Models\\ExpenseReceipts')
+                ->where('subject_id', $receipt->id)
+                ->latest()
+                ->get()
+                ->flatMap(function ($log) use ($itemIndex) {
+                    $tz = auth()->user()?->vendor?->timezone ?? config('app.timezone');
+                    return collect($log->properties['items'] ?? [])
+                        ->filter(fn ($change) => ($change['item_index'] ?? null) === $itemIndex)
+                        ->map(fn ($change) => array_merge($change, ['date' => $log->created_at->timezone($tz)->format('n/j/y g:iA')]));
+                })
+                ->values()
+                ->toArray();
+        }
 
         $this->selectedItem = $item;
         $this->showItemModal = true;

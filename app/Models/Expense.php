@@ -169,6 +169,25 @@ class Expense extends Model
         return self::scopedSearchWithBaseFilter($query, $filterConditions, $sortBy, $sortDirection, $baseFilter);
     }
 
+    /**
+     * Scoped search across multiple belongs_to_vendor_id values (e.g. hive vendor + sub-vendors).
+     *
+     * @param  int[]  $vendorIds
+     */
+    public static function scopedSearchForVendors(array $vendorIds, $query = '', $filterConditions = [], $sortBy = 'date', $sortDirection = 'desc'): ScoutBuilder
+    {
+        $vendorIds = array_values(array_unique(array_map('intval', array_filter($vendorIds, fn ($id) => (int) $id > 0))));
+
+        if (count($vendorIds) === 1) {
+            return self::scopedSearchForVendor($vendorIds[0], $query, $filterConditions, $sortBy, $sortDirection);
+        }
+
+        $inList = implode(', ', $vendorIds);
+        $baseFilter = "__soft_deleted = 0 AND belongs_to_vendor_id IN [{$inList}]";
+
+        return self::scopedSearchWithBaseFilter($query, $filterConditions, $sortBy, $sortDirection, $baseFilter);
+    }
+
     protected static function scopedSearchWithBaseFilter($query, array $filterConditions, string $sortBy, string $sortDirection, string $baseFilter, bool $onlyTrashed = false): ScoutBuilder
     {
         return self::search($query, function ($meilisearch, $searchQuery, $options) use ($filterConditions, $sortBy, $sortDirection, $baseFilter) {

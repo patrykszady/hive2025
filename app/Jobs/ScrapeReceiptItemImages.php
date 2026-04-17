@@ -35,6 +35,28 @@ class ScrapeReceiptItemImages implements ShouldQueue
         $vendorName = $vendor?->business_name;
         $vendorWebsite = $vendor?->business_website;
 
+        // If the receipt's merchant_name differs from the expense vendor (e.g. a designer
+        // ordered materials from a supplier), use the supplier's website for product lookups.
+        $merchantName = $this->receipt->receipt_items['merchant_name'] ?? null;
+        if ($merchantName && $vendor && ! Str::contains(Str::lower($vendorName ?? ''), Str::lower($merchantName))) {
+            // Try exact match first, then fuzzy: strip common suffixes (LLC, Inc, Co, etc.)
+            $merchantVendor = \App\Models\Vendor::where('business_name', 'LIKE', '%' . $merchantName . '%')->first();
+
+            if (! $merchantVendor) {
+                $cleaned = preg_replace('/\b(LLC|INC|CO|CORP|COMPANY|LTD|LP|GROUP)\b\.?/i', '', $merchantName);
+                $cleaned = trim(preg_replace('/\s+/', ' ', $cleaned));
+                if (strlen($cleaned) >= 3) {
+                    $merchantVendor = \App\Models\Vendor::where('business_name', 'LIKE', '%' . $cleaned . '%')->first();
+                }
+            }
+
+            if ($merchantVendor) {
+                $vendorId = $merchantVendor->id;
+                $vendorName = $merchantVendor->business_name;
+                $vendorWebsite = $merchantVendor->business_website;
+            }
+        }
+
         // If vendor has no website, try to discover it
         if ($vendor && ! $vendorWebsite && $vendorName) {
             $vendorWebsite = $this->discoverVendorWebsite($vendorName);
@@ -282,16 +304,59 @@ class ScrapeReceiptItemImages implements ShouldQueue
             $queries[] = trim("{$vendor} {$name}");
         }
 
+        // Priority 3: generic search without vendor (for vendors whose sites lack product pages)
+        if ($sku && $name) {
+            $queries[] = "{$sku} {$name} porcelain tile";
+        }
+        if ($name) {
+            $queries[] = "{$name} porcelain tile product";
+        }
+
         $fallbackResult = null;
+        $rejectedUrls = [];
 
         foreach ($queries as $searchTerm) {
             $result = $this->webSearch($searchTerm, $endpoint, $apiKey);
-            if ($result && $this->urlMatchesProduct($result['product_url'] ?? null, $name)) {
-                if (! empty($result['image_url'])) {
-                    return $result;
+            if ($result) {
+                if ($this->urlMatchesProduct($result['product_url'] ?? null, $name)) {
+                    if (! empty($result['image_url'])) {
+                        return $result;
+                    }
+                    // URL matched but page had no extractable image (e.g. 404) — save as fallback
+                    $fallbackResult ??= $result;
+                } else {
+                    $rejectedUrls[] = $result['product_url'];
                 }
-                // URL matched but page had no extractable image (e.g. 404) — save as fallback
-                $fallbackResult ??= $result;
+            }
+        }
+
+        // Try dimension correction on rejected URLs (e.g. swap "4x24" → "12x24")
+        if (! $fallbackResult && ! empty($rejectedUrls) && $name) {
+            $nameDimensions = [];
+            foreach (preg_split('/[\s\/]+/', strtolower($name)) as $w) {
+                if (preg_match('/^\d+x\d+$/i', $w)) {
+                    $nameDimensions[] = $w;
+                }
+            }
+
+            if (! empty($nameDimensions)) {
+                foreach ($rejectedUrls as $url) {
+                    foreach ($nameDimensions as $dim) {
+                        $correctedUrl = preg_replace('/\d+x\d+/', $dim, $url, 1);
+                        if ($correctedUrl !== $url) {
+                            $imageUrl = $this->extractImageFromProductPage($correctedUrl);
+                            if ($imageUrl && $imageUrl !== false) {
+                                return [
+                                    'image_url' => $imageUrl,
+                                    'product_url' => $correctedUrl,
+                                ];
+                            }
+                            if ($imageUrl === null) {
+                                $fallbackResult ??= ['product_url' => $correctedUrl];
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -329,6 +394,23 @@ class ScrapeReceiptItemImages implements ShouldQueue
         // All significant words from the name should appear in the URL slug
         foreach ($significantWords as $word) {
             if (! str_contains($slug, $word)) {
+                return false;
+            }
+        }
+
+        // Verify dimensions match (e.g. "12x24" in name must match URL, reject "4x24")
+        $nameDimensions = array_filter($words, fn ($w) => preg_match('/^\d+x\d+$/i', $w));
+        if (! empty($nameDimensions)) {
+            $dimensionFound = false;
+            foreach ($nameDimensions as $dim) {
+                if (str_contains($slug, $dim)) {
+                    $dimensionFound = true;
+                    break;
+                }
+            }
+
+            // URL has a dimension but it doesn't match the product — wrong size
+            if (! $dimensionFound && preg_match('/\d+x\d+/', $slug)) {
                 return false;
             }
         }

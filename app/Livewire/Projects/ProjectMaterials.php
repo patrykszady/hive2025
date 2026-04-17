@@ -11,6 +11,7 @@ use App\Models\Vendor;
 use App\Scopes\ExpenseScope;
 use App\Support\MaterialOrderStatus;
 use Illuminate\Support\Facades\DB;
+use Spatie\Activitylog\Models\Activity;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
@@ -104,6 +105,21 @@ class ProjectMaterials extends Component
 
         $item['_vendor_name'] = $expense->vendor?->business_name;
         $item['_expense_date'] = $expense->date?->format('M j, Y');
+
+        // Fetch activity log changes for this specific item
+        $item['_history'] = Activity::where('log_name', 'materials')
+            ->where('subject_type', 'App\\Models\\ExpenseReceipts')
+            ->where('subject_id', $receipt->id)
+            ->latest()
+            ->get()
+            ->flatMap(function ($log) use ($itemIndex) {
+                $tz = auth()->user()?->vendor?->timezone ?? config('app.timezone');
+                return collect($log->properties['items'] ?? [])
+                    ->filter(fn ($change) => ($change['item_index'] ?? null) === $itemIndex)
+                    ->map(fn ($change) => array_merge($change, ['date' => $log->created_at->timezone($tz)->format('n/j/y g:iA')]));
+            })
+            ->values()
+            ->toArray();
 
         $this->selectedItem = $item;
         $this->showItemModal = true;
@@ -307,8 +323,7 @@ class ProjectMaterials extends Component
     {
         $status = MaterialOrderStatus::normalize($item['Status'] ?? null);
 
-        // Explicit statuses take priority over date-based logic
-        if (in_array($status, ['back order', 'open', 'cancelled'], true)) {
+        if ($status === 'cancelled') {
             return false;
         }
 
@@ -316,11 +331,11 @@ class ProjectMaterials extends Component
             return true;
         }
 
-        // Fall back to ship-date comparison
+        // For back order / open items, check if the ETA has passed (item likely arrived)
         $rawDate = $item['ETA'] ?? null;
 
         if (empty($rawDate)) {
-            return true;
+            return ! in_array($status, ['back order', 'open'], true);
         }
 
         try {

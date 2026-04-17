@@ -422,7 +422,7 @@ class CompanyEmailController extends Controller
         $grantId = config('nylas.receipts_grant_id');
 
         // Use the configured inbox folder ID (production) or test folder (non-production)
-        $folder = env('APP_ENV') === 'production'
+        $folder = app()->environment('production')
             ? config('nylas.receipts_inbox_folder_id')
             : (config('nylas.hive_receipts_test_folder_id') ?: config('nylas.receipts_inbox_folder_id'));
 
@@ -517,7 +517,7 @@ class CompanyEmailController extends Controller
                 // Parse the "Sent:" line from the Outlook forwarded-message block in the body.
                 // No timezone conversion — the Sent: value is a plain date string, not a timestamp.
                 if (!empty($message['body'])) {
-                    $bodyText = strip_tags($message['body']);
+                    $bodyText = str_replace("\xc2\xa0", ' ', html_entity_decode(strip_tags($message['body'])));
                     if (preg_match('/\bSent:\s*(?:\w+,\s*)?(\w+ \d{1,2},\s*\d{4})/i', $bodyText, $dateMatch)) {
                         try {
                             $dateEmail = Carbon::parse(trim($dateMatch[1]))->format('Y-m-d');
@@ -605,6 +605,83 @@ class CompanyEmailController extends Controller
                             ]);
                             $fromEmail = $bodyFromEmail;
                             break;
+                        }
+                    }
+                }
+            }
+
+            // Attachment-based vendor fallback: if no Receipt matched and the message has
+            // PDF attachments, download the first PDF, extract text with a generic analyzer,
+            // and try to identify the vendor from the extracted content.
+            $attachmentPdfPath = null;
+            $attachmentPdfFilename = null;
+            if (!$receipt && !empty($message['attachments'])) {
+                $pdfAttachment = collect($message['attachments'])->first(fn ($att) =>
+                    stripos($att['content_type'] ?? '', 'pdf') !== false
+                );
+
+                if ($pdfAttachment) {
+                    try {
+                        $probeFilename = date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '-probe.pdf';
+                        $probePath = '_temp_ocr/' . $probeFilename;
+                        if (!Storage::disk('files')->exists('_temp_ocr')) {
+                            Storage::disk('files')->makeDirectory('_temp_ocr');
+                        }
+
+                        $pdfContent = $this->nylasService->downloadAttachment($pdfAttachment['id'], $grantId, $messageId);
+                        Storage::disk('files')->put($probePath, $pdfContent);
+
+                        $probeResult = app(\App\Http\Controllers\ReceiptController::class)
+                            ->extractReceipt($probePath, 'pdf', null, 'email', null, 'prebuilt-invoice');
+
+                        if (is_array($probeResult) && !empty($probeResult['content'])) {
+                            $probeText = strtolower($probeResult['content']);
+
+                            // Build vendor lookup from active Receipt configs
+                            $receiptsByVendor = Receipt::whereNotNull('receipt_type')
+                                ->where('receipt_type', '!=', 0)
+                                ->whereNotNull('from_address')
+                                ->where('from_address', '!=', '')
+                                ->get()
+                                ->groupBy('vendor_id');
+
+                            $vendors = Vendor::whereIn('id', $receiptsByVendor->keys()->all())->get();
+
+                            foreach ($vendors as $vendor) {
+                                $name = strtolower(trim($vendor->business_name ?? ''));
+                                if ($name !== '' && str_contains($probeText, $name)) {
+                                    $matchedReceipts = $receiptsByVendor->get($vendor->id);
+                                    $receipt = $matchedReceipts->first(fn ($r) => !empty($r->options['document_model']))
+                                        ?? $matchedReceipts->first();
+
+                                    if ($receipt) {
+                                        $attachmentPdfPath = $probePath;
+                                        $attachmentPdfFilename = $probeFilename;
+
+                                        Log::channel('nylas')->info('Receipt matched via PDF attachment vendor detection', [
+                                            'message_id' => $messageId,
+                                            'vendor_id' => $vendor->id,
+                                            'vendor_name' => $vendor->business_name,
+                                            'receipt_id' => $receipt->id,
+                                            'pdf_filename' => $pdfAttachment['filename'] ?? null,
+                                        ]);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Clean up probe file if no vendor matched
+                        if (!$receipt) {
+                            Storage::disk('files')->delete($probePath);
+                        }
+                    } catch (\Throwable $e) {
+                        Log::channel('nylas')->warning('PDF attachment vendor probe failed', [
+                            'message_id' => $messageId,
+                            'error' => $e->getMessage(),
+                        ]);
+                        if (isset($probePath)) {
+                            Storage::disk('files')->delete($probePath);
                         }
                     }
                 }
@@ -736,7 +813,11 @@ class CompanyEmailController extends Controller
                 $doc_type = 'pdf'; // Default to PDF for most cases
                 $ocr_filename = date('Y-m-d-H-i-s') . '-' . rand(10, 99);
 
-                if (!isset($receipt->options['receipt_image_regex']) && !isset($receipt->options['pdf_html'])) {
+                if ($attachmentPdfPath) {
+                    // Matched via PDF attachment vendor detection — PDF already downloaded
+                    $ocr_filename = $attachmentPdfFilename;
+                    $ocr_path = $attachmentPdfPath;
+                } elseif (!isset($receipt->options['receipt_image_regex']) && !isset($receipt->options['pdf_html'])) {
                     // HTML to PDF conversion
                     $ocr_filename .= '.' . $doc_type;
                     $view = view('misc.create_pdf_receipt', [
@@ -907,6 +988,24 @@ class CompanyEmailController extends Controller
                     ->where('belongs_to_vendor_id', $companyEmail->vendor_id)
                     ->where('vendor_id', $receipt->vendor_id)
                     ->first();
+
+                // Detect the "bill to" vendor from OCR content (e.g. forwarded vendor orders
+                // where the buyer isn't the company email owner)
+                $detectedBillToVendorId = $this->detectBillToVendorId(
+                    $ocr_receipt_data['fields']['raw_content'] ?? '',
+                    $receipt->vendor_id // exclude the selling vendor
+                );
+                $effectiveBelongsToVendorId = $detectedBillToVendorId
+                    ?? ($receipt_account->belongs_to_vendor_id ?? $companyEmail->vendor_id);
+
+                if ($detectedBillToVendorId && $detectedBillToVendorId !== ($receipt_account->belongs_to_vendor_id ?? null)) {
+                    Log::channel('nylas')->info('Detected bill-to vendor from OCR content', [
+                        'message_id' => $messageId,
+                        'detected_vendor_id' => $detectedBillToVendorId,
+                        'default_belongs_to' => $receipt_account->belongs_to_vendor_id ?? null,
+                        'receipt_id' => $receipt->id,
+                    ]);
+                }
         
                 // Missing receipt_account.. receipt and company email exist but this pairing does not
                 if (is_null($receipt_account)) {
@@ -995,6 +1094,14 @@ class CompanyEmailController extends Controller
                     $invoice = null;
                 }
 
+                // invoice override via subject regex (useful when OCR picks the wrong field,
+                // e.g. account number instead of order number)
+                if (!empty($receipt->options['invoice_from_subject_regex'])) {
+                    if (preg_match($receipt->options['invoice_from_subject_regex'], $subject, $invoiceMatch)) {
+                        $invoice = trim($invoiceMatch[1] ?? $invoiceMatch[0]);
+                    }
+                }
+
                 // receipt po / purchase order — trust the CU API extraction
                 if (!empty($receipt->options['no_po'])) {
                     $purchase_order = null;
@@ -1008,8 +1115,7 @@ class CompanyEmailController extends Controller
                 // invoice number and vendor, update its amount/date, and attach the new
                 // receipt as an additional record (preserving the original).
                 if (!empty($receipt->options['update_existing']) && !empty($invoice)) {
-                    $existingExpense = Expense::where('belongs_to_vendor_id', $receipt_account->belongs_to_vendor_id)
-                        ->where('vendor_id', $receipt->vendor_id)
+                    $existingExpense = Expense::where('vendor_id', $receipt->vendor_id)
                         ->where('invoice', trim((string) $invoice))
                         ->whereNull('deleted_at')
                         ->latest('id')
@@ -1019,17 +1125,18 @@ class CompanyEmailController extends Controller
                         $oldAmount = $existingExpense->amount;
 
                         // For material order updates, only merge item statuses — don't overwrite amount/date
+                        // Use the actual email date (not OCR transaction_date which is the original order date)
                         if ($isMaterialOrder) {
-                            $this->mergeMaterialOrderUpdate($existingExpense, $ocr_receipt_data, $date, $subject);
+                            $this->mergeMaterialOrderUpdate($existingExpense, $ocr_receipt_data, $dateEmail, $subject);
                         } else {
                             // Update expense amount and date from the update email
                             $existingExpense->amount = $amount;
                             $existingExpense->date = $date;
                             $existingExpense->save();
-                        }
 
-                        // Attach as a new receipt record (keeps the original intact)
-                        $this->saveExpenseReceipt($existingExpense->id, $ocr_receipt_data, $ocr_filename, !empty($receipt->options['html_to_pdf']) ? null : $message, true, $isMaterialOrder);
+                            // Attach as a new receipt record (keeps the original intact)
+                            $this->saveExpenseReceipt($existingExpense->id, $ocr_receipt_data, $ocr_filename, !empty($receipt->options['html_to_pdf']) ? null : $message, true, $isMaterialOrder);
+                        }
 
                         Log::channel('nylas')->info('Updated existing expense via update_existing receipt', [
                             'expense_id' => $existingExpense->id,
@@ -1065,7 +1172,7 @@ class CompanyEmailController extends Controller
                 if ($invoice !== '') {
                     // When invoice exists, require invoice + amount + date range match
                     $duplicates = Expense::with('receipts')
-                        ->where('belongs_to_vendor_id', $receipt_account->belongs_to_vendor_id)
+                        ->where('belongs_to_vendor_id', $effectiveBelongsToVendorId)
                         ->where('vendor_id', $receipt->vendor_id)
                         ->where('invoice', $invoice)
                         ->where('amount', $amount)
@@ -1122,7 +1229,7 @@ class CompanyEmailController extends Controller
                 } else {
                     // Candidate pool by amount + date (eager-load receipts to avoid N+1)
                     $candidates = Expense::with('receipts')
-                        ->where('belongs_to_vendor_id', $receipt_account->belongs_to_vendor_id)
+                        ->where('belongs_to_vendor_id', $effectiveBelongsToVendorId)
                         ->where('vendor_id', $receipt->vendor_id)
                         ->whereNull('deleted_at')
                         ->where('amount', $amount)
@@ -1241,7 +1348,7 @@ class CompanyEmailController extends Controller
                 }else{
                     // Before creating a new expense, check if this receipt is a duplicate across all expenses
                     $existingExpenseWithDuplicate = $this->findExpenseWithDuplicateReceipt(
-                        $receipt_account->belongs_to_vendor_id,
+                        $effectiveBelongsToVendorId,
                         $receipt->vendor_id,
                         $amount,
                         $date,
@@ -1267,7 +1374,7 @@ class CompanyEmailController extends Controller
                         // Check if this receipt shares a DEPOSIT NO# with an existing expense's receipt
                         // (Home Depot sends separate deposit + final receipts for the same purchase)
                         $depositMatchExpense = $this->findExpenseBySharedDepositNumber(
-                            $receipt_account->belongs_to_vendor_id,
+                            $effectiveBelongsToVendorId,
                             $receipt->vendor_id,
                             $date,
                             $ocr_receipt_data['content']
@@ -1297,7 +1404,7 @@ class CompanyEmailController extends Controller
                         } else {
                         // Check if there are partial expenses that sum to this receipt total
                         $partialExpenses = $this->findPartialExpensesToConsolidate(
-                            $receipt_account->belongs_to_vendor_id,
+                            $effectiveBelongsToVendorId,
                             $receipt->vendor_id,
                             $amount,
                             $date,
@@ -1327,7 +1434,7 @@ class CompanyEmailController extends Controller
                             $expense->invoice = $invoice;
                             $expense->vendor_id = $receipt->vendor_id;
                             $expense->note = null;
-                            $expense->belongs_to_vendor_id = $receipt_account->belongs_to_vendor_id;
+                            $expense->belongs_to_vendor_id = $effectiveBelongsToVendorId;
                             $expense->save();
 
                             // Apply splits if the match has them
@@ -1364,7 +1471,7 @@ class CompanyEmailController extends Controller
                             $expense->invoice = $invoice;
                             $expense->vendor_id = $receipt->vendor_id; //Vendor_id of vendor being Queued
                             $expense->note = null;
-                            $expense->belongs_to_vendor_id = $receipt_account->belongs_to_vendor_id;
+                            $expense->belongs_to_vendor_id = $effectiveBelongsToVendorId;
                             $expense->save();
 
                             // Apply splits if the match has them
@@ -1790,6 +1897,7 @@ class CompanyEmailController extends Controller
 
         $existingItems = $oldItems['items'] ?? [];
         $updated = false;
+        $itemChanges = [];
 
         foreach ($existingItems as $idx => &$existingItem) {
             $oldNormalized = MaterialOrderStatus::normalize($existingItem['Status'] ?? null);
@@ -1799,6 +1907,8 @@ class CompanyEmailController extends Controller
             }
 
             $code = $existingItem['ProductCode'] ?? null;
+            $oldStatus = $existingItem['Status'] ?? null;
+            $oldEta = $existingItem['ETA'] ?? null;
 
             // Try to match by ProductCode from the OCR'd update document
             if ($code && isset($newByCode[$code])) {
@@ -1806,12 +1916,16 @@ class CompanyEmailController extends Controller
                 $newStatus = $match['Status'] ?? null;
 
                 if ($newStatus !== null) {
-                    $existingItem['Status'] = $newStatus;
+                    $newNormalized = MaterialOrderStatus::normalize($newStatus);
+                    // Store a clean display value: resolved statuses become "Available"
+                    $existingItem['Status'] = MaterialOrderStatus::isResolved($newNormalized)
+                        ? 'Available'
+                        : $newStatus;
                     $updated = true;
                 }
 
                 $newEta = $match['ETA'] ?? null;
-                $newNormalized = MaterialOrderStatus::normalize($newStatus ?? $existingItem['Status'] ?? null);
+                $newNormalized = MaterialOrderStatus::normalize($existingItem['Status'] ?? null);
 
                 if (! empty($newEta)) {
                     $existingItem['ETA'] = $newEta;
@@ -1826,6 +1940,19 @@ class CompanyEmailController extends Controller
                 $existingItem['ETA'] = $emailDate;
                 $updated = true;
             }
+
+            // Track per-item changes
+            if ($existingItem['Status'] !== $oldStatus || $existingItem['ETA'] !== $oldEta) {
+                $itemChanges[] = [
+                    'item_index' => $idx,
+                    'product_code' => $code,
+                    'description' => $existingItem['Description'] ?? null,
+                    'old_status' => $oldStatus,
+                    'new_status' => $existingItem['Status'],
+                    'old_eta' => $oldEta,
+                    'new_eta' => $existingItem['ETA'] ?? null,
+                ];
+            }
         }
         unset($existingItem);
 
@@ -1834,10 +1961,25 @@ class CompanyEmailController extends Controller
             $existingReceipt->receipt_items = $oldItems;
             $existingReceipt->save();
 
+            // Log per-item changes to activity_log
+            if (! empty($itemChanges)) {
+                activity('materials')
+                    ->performedOn($existingReceipt)
+                    ->withProperties([
+                        'expense_id' => $expense->id,
+                        'invoice' => $expense->invoice,
+                        'email_subject' => $emailSubject,
+                        'items' => $itemChanges,
+                    ])
+                    ->event('material_order_updated')
+                    ->log('Material order items updated');
+            }
+
             Log::channel('nylas')->info('Merged material order status/ETA update', [
                 'expense_id' => $expense->id,
                 'receipt_id' => $existingReceipt->id,
                 'items_count' => count($existingItems),
+                'changes' => $itemChanges,
             ]);
         }
     }
@@ -3044,5 +3186,68 @@ class CompanyEmailController extends Controller
         }
 
         return 'unknown';
+    }
+
+    /**
+     * Detect the "bill to" vendor from OCR raw content.
+     *
+     * Parses the "BILL TO:" section from receipt/order documents and matches
+     * the company name against known vendor business names.
+     *
+     * @return int|null The vendor_id of the matched bill-to vendor, or null
+     */
+    protected function detectBillToVendorId(string $rawContent, ?int $excludeVendorId = null): ?int
+    {
+        if ($rawContent === '') {
+            return null;
+        }
+
+        // Parse "BILL TO:" section — capture the first non-empty line after the label
+        if (!preg_match('/BILL\s*TO\s*:?\s*\n\s*\n?\s*(.+)/i', $rawContent, $match)) {
+            return null;
+        }
+
+        $billToName = trim($match[1]);
+        if ($billToName === '' || is_numeric($billToName)) {
+            return null;
+        }
+
+        $normalize = function (string $name): string {
+            $name = strtolower($name);
+            $name = preg_replace('/\b(inc|llc|corp|co|ltd|company)\b\.?/i', '', $name);
+            $name = str_replace(['.', ',', "'"], '', $name);
+
+            return trim(preg_replace('/\s+/', ' ', $name));
+        };
+
+        $normalizedBillTo = $normalize($billToName);
+        if ($normalizedBillTo === '') {
+            return null;
+        }
+
+        $vendors = Vendor::whereNotNull('business_name')
+            ->where('business_name', '!=', '')
+            ->get(['id', 'business_name']);
+
+        foreach ($vendors as $vendor) {
+            if ($vendor->id === $excludeVendorId) {
+                continue;
+            }
+
+            $normalizedVendor = $normalize($vendor->business_name);
+            if ($normalizedVendor === '') {
+                continue;
+            }
+
+            if ($normalizedBillTo === $normalizedVendor) {
+                return $vendor->id;
+            }
+
+            if (str_contains($normalizedVendor, $normalizedBillTo) || str_contains($normalizedBillTo, $normalizedVendor)) {
+                return $vendor->id;
+            }
+        }
+
+        return null;
     }
 }
