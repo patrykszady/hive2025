@@ -12,7 +12,7 @@
                 <div class="space-y-1">
                     <flux:text class="text-sm font-medium">Tasks</flux:text>
 
-                    @if ($this->groupedUpcomingTasks->flatten(1)->isEmpty() && $this->pendingTasks->isEmpty() && !$this->nextUpcomingTask)
+                    @if ($this->groupedUpcomingTasks->flatten(1)->isEmpty() && $this->pendingTasks->isEmpty() && $this->nextUpcomingTasks->isEmpty())
                         <div class="py-6 text-center">
                             <flux:icon name="calendar" class="mx-auto h-8 w-8 text-zinc-300 dark:text-zinc-600" />
                             <flux:text class="mt-2 text-sm text-zinc-400">No upcoming tasks</flux:text>
@@ -109,20 +109,20 @@
                                 </div>
                             @endforeach
 
-                            {{-- Next upcoming task beyond the 3-day window --}}
-                            @if ($this->nextUpcomingTask)
-                                @php $nextTask = $this->nextUpcomingTask; @endphp
+                            {{-- Next upcoming tasks beyond the 3-day window --}}
+                            @if ($this->nextUpcomingTasks->isNotEmpty())
+                                @php $nextTasks = $this->nextUpcomingTasks; @endphp
                                 <div wire:key="day-next-up" class="space-y-2">
                                     <div class="flex items-center gap-2 min-h-6">
                                         <flux:heading size="sm" class="text-zinc-700 dark:text-zinc-300">
-                                            {{ \Carbon\Carbon::parse($nextTask->start_date)->format('D, M j, Y') }}
+                                            {{ \Carbon\Carbon::parse($nextTasks->first()->start_date)->format('D, M j, Y') }}
                                         </flux:heading>
                                         <flux:badge color="sky" size="sm">Next Up</flux:badge>
                                     </div>
                                     @include('components.upcoming-tasks-list-tasks', [
-                                        'tasks' => collect([$nextTask]),
-                                        'date' => $nextTask->start_date->format('Y-m-d'),
-                                        'carbonDate' => \Carbon\Carbon::parse($nextTask->start_date),
+                                        'tasks' => $nextTasks,
+                                        'date' => $nextTasks->first()->start_date->format('Y-m-d'),
+                                        'carbonDate' => \Carbon\Carbon::parse($nextTasks->first()->start_date),
                                         'showAvatars' => true,
                                         'clickable' => false,
                                         'showProjectInfo' => count($this->clientProjectIds) > 1,

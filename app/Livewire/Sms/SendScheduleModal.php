@@ -190,37 +190,49 @@ class SendScheduleModal extends Component
             ->unique()
             ->values();
 
-        $nextTask = $this->nextUpcomingTask;
-        if ($nextTask) {
-            $ids->push($nextTask->id);
+        $nextTasks = $this->nextUpcomingTasks;
+        if ($nextTasks->isNotEmpty()) {
+            $ids = $ids->merge($nextTasks->pluck('id'));
         }
 
         return $ids->unique()->values()->all();
     }
 
     /**
-     * When no tasks exist in the upcoming window, find the next future task.
+     * When no tasks exist in the upcoming window, find all tasks on the next future day.
      */
     #[Computed]
-    public function nextUpcomingTask(): ?Task
+    public function nextUpcomingTasks(): \Illuminate\Support\Collection
     {
         $projectIds = $this->clientProjectIds;
 
         if (empty($projectIds)) {
-            return null;
+            return collect();
         }
 
         $today = Carbon::today(browser_timezone());
         $afterDate = $today->copy()->addDays($this->daysAhead)->format('Y-m-d');
 
-        return Task::whereIn('project_id', $projectIds)
-            ->with(['vendor', 'project.client', 'project.latestStatus'])
+        $firstTask = Task::whereIn('project_id', $projectIds)
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
             ->whereDate('start_date', '>=', $afterDate)
             ->orderBy('start_date')
             ->orderBy('order')
             ->first();
+
+        if (! $firstTask) {
+            return collect();
+        }
+
+        return Task::whereIn('project_id', $projectIds)
+            ->with(['vendor', 'project.client', 'project.latestStatus'])
+            ->whereNotNull('start_date')
+            ->whereNotNull('end_date')
+            ->whereDate('start_date', $firstTask->start_date)
+            ->orderBy('start_date')
+            ->orderBy('order')
+            ->get();
     }
 
     /**
@@ -235,10 +247,10 @@ class SendScheduleModal extends Component
         // Flatten all tasks to check if there are any
         $allTasks = $grouped->flatten(1)->merge($pendingTasks)->unique('id');
 
-        // Include next upcoming task if the window is empty
-        $nextTask = $this->nextUpcomingTask;
-        if ($nextTask) {
-            $allTasks = $allTasks->push($nextTask)->unique('id');
+        // Include next upcoming tasks if the window is empty
+        $nextTasks = $this->nextUpcomingTasks;
+        if ($nextTasks->isNotEmpty()) {
+            $allTasks = $allTasks->merge($nextTasks)->unique('id');
         }
 
         if ($allTasks->isEmpty()) {
@@ -296,18 +308,21 @@ class SendScheduleModal extends Component
             $daySections[] = "{$dateLabel}:\n{$taskLines}";
         }
 
-        // Add next upcoming task beyond the 3-day window
-        if ($nextTask) {
-            $nextDate = Carbon::parse($nextTask->start_date);
+        // Add next upcoming tasks beyond the 3-day window
+        if ($nextTasks->isNotEmpty()) {
+            $nextDate = Carbon::parse($nextTasks->first()->start_date);
             $dateLabel = $nextDate->format('D n/j');
-            $line = '- ' . trim($nextTask->title ?? 'Task');
 
-            $arrivalTime = $nextTask->getArrivalTimeLabel($nextDate->format('Y-m-d'));
-            if ($arrivalTime) {
-                $line .= " @ {$arrivalTime}";
-            }
+            $taskLines = $nextTasks->map(function (Task $task) use ($nextDate) {
+                $line = '- ' . trim($task->title ?? 'Task');
+                $arrivalTime = $task->getArrivalTimeLabel($nextDate->format('Y-m-d'));
+                if ($arrivalTime) {
+                    $line .= " @ {$arrivalTime}";
+                }
+                return $line;
+            })->implode("\n");
 
-            $daySections[] = "Next up {$dateLabel}:\n{$line}";
+            $daySections[] = "Next up {$dateLabel}:\n{$taskLines}";
         }
 
         // Add pending tasks section
