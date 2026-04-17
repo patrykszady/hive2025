@@ -372,26 +372,9 @@ class MeetTaskCalendarService
             return collect([$devRecipient])->filter();
         }
 
-        $selectedTeamMemberIds = collect($task->user_ids ?? [])
-            ->map(fn ($id) => is_numeric($id) ? (int) $id : null)
-            ->filter(fn (?int $id) => is_int($id) && $id > 0)
-            ->unique()
-            ->values();
-
-        $selectedTeamMemberEmails = $selectedTeamMemberIds->isEmpty()
-            ? collect()
-            : User::query()
-                ->whereIn('id', $selectedTeamMemberIds->all())
-                ->pluck('email');
-
-        $clientUserEmails = collect($task->project?->client?->users ?? [])->pluck('email');
-
-        // Include custom meeting participants from task options
-        $customParticipants = collect((array) ($task->options->meeting_participants ?? []));
-
-        return $selectedTeamMemberEmails
-            ->merge($clientUserEmails)
-            ->merge($customParticipants)
+        // meeting_participants is the single source of truth — it already contains
+        // team members, client users, vendor contacts, and any manually-added emails.
+        return collect((array) ($task->options->meeting_participants ?? []))
             ->filter(fn (?string $email) => is_string($email) && $email !== '')
             ->map(fn (string $email) => strtolower(trim($email)))
             ->unique()

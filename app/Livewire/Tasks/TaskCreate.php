@@ -928,10 +928,6 @@ class TaskCreate extends Component
         
         // Simply use the task as-is without reloading
         $this->form->setTask($task);
-
-        if ($this->form->type === 'Meet') {
-            $this->syncMeetingParticipants();
-        }
         
         $this->modal('task_create_form_modal')->show();
         $this->dispatch('task-modal-opened');

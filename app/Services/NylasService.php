@@ -244,7 +244,7 @@ class NylasService
                     'Accept' => 'application/json',
                     'Content-Type' => 'application/json',
                 ])
-                    ->withQueryParameters(['calendar_id' => $calendarId])
+                    ->withQueryParameters(['calendar_id' => $calendarId, 'notify_participants' => 'true'])
                     ->post($url, $body);
 
                 return [
@@ -277,11 +277,12 @@ class NylasService
                     'Accept' => 'application/json',
                 ]);
 
+                $queryParams = ['notify_participants' => 'true'];
                 if (is_string($calendarId) && $calendarId !== '') {
-                    $request = $request->withQueryParameters(['calendar_id' => $calendarId]);
+                    $queryParams['calendar_id'] = $calendarId;
                 }
 
-                $response = $request->delete($url);
+                $response = $request->withQueryParameters($queryParams)->delete($url);
 
                 return [
                     'status' => $response->status(),
@@ -326,7 +327,7 @@ class NylasService
                     'Accept' => 'application/json',
                     'Content-Type' => 'application/json',
                 ])
-                    ->withQueryParameters(['calendar_id' => $calendarId])
+                    ->withQueryParameters(['calendar_id' => $calendarId, 'notify_participants' => 'true'])
                     ->put($url, $body);
 
                 return [
