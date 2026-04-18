@@ -114,6 +114,7 @@
                                                         @php
                                                             $typeUi = $task->type_ui ?? [];
                                                             $taskTypeTextClasses = data_get($typeUi, 'text', '');
+                                                            $taskUsers = $task->users ?? collect();
                                                             $taskVendor = $task->vendor ?? null;
                                                         @endphp
                                                         @if($clickable)
@@ -131,11 +132,23 @@
                                                                         </flux:heading>
                                                                     </div>
                                                                 </div>
-                                                                @if($showAvatars && $taskVendor)
+                                                                @if($showAvatars && ($taskUsers->count() > 0 || $taskVendor))
                                                                     <div class="flex items-center gap-2 mt-2 min-w-0">
-                                                                        <flux:avatar circle size="xs" name="{{ $taskVendor->name }}" color="auto" color:seed="{{ $taskVendor->id }}" :title="($showVendorInfo ?? true) ? $taskVendor->name : null" />
-                                                                        @if($showVendorInfo ?? true)
-                                                                            <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">{{ $taskVendor->name }}</span>
+                                                                        @if($taskUsers->count() > 0)
+                                                                            <flux:avatar.group>
+                                                                                @foreach($taskUsers->take(3) as $user)
+                                                                                    <flux:avatar circle size="xs" name="{{ $user->full_name }}" color="auto" color:seed="{{ $user->id }}" title="{{ $user->full_name }}" />
+                                                                                @endforeach
+                                                                                @if($taskUsers->count() > 3)
+                                                                                    <flux:avatar circle size="xs">{{ $taskUsers->count() - 3 }}+</flux:avatar>
+                                                                                @endif
+                                                                            </flux:avatar.group>
+                                                                        @endif
+                                                                        @if($taskVendor)
+                                                                            <flux:avatar circle size="xs" name="{{ $taskVendor->name }}" color="auto" color:seed="{{ $taskVendor->id }}" :title="($showVendorInfo ?? true) ? $taskVendor->name : null" />
+                                                                            @if($showVendorInfo ?? true)
+                                                                                <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">{{ $taskVendor->name }}</span>
+                                                                            @endif
                                                                         @endif
                                                                     </div>
                                                                 @endif
@@ -153,11 +166,23 @@
                                                                         </flux:heading>
                                                                     </div>
                                                                 </div>
-                                                                @if($showAvatars && $taskVendor)
+                                                                @if($showAvatars && ($taskUsers->count() > 0 || $taskVendor))
                                                                     <div class="flex items-center gap-2 mt-2 min-w-0">
-                                                                        <flux:avatar circle size="xs" name="{{ $taskVendor->name }}" color="auto" color:seed="{{ $taskVendor->id }}" :title="($showVendorInfo ?? true) ? $taskVendor->name : null" />
-                                                                        @if($showVendorInfo ?? true)
-                                                                            <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">{{ $taskVendor->name }}</span>
+                                                                        @if($taskUsers->count() > 0)
+                                                                            <flux:avatar.group>
+                                                                                @foreach($taskUsers->take(3) as $user)
+                                                                                    <flux:avatar circle size="xs" name="{{ $user->full_name }}" color="auto" color:seed="{{ $user->id }}" title="{{ $user->full_name }}" />
+                                                                                @endforeach
+                                                                                @if($taskUsers->count() > 3)
+                                                                                    <flux:avatar circle size="xs">{{ $taskUsers->count() - 3 }}+</flux:avatar>
+                                                                                @endif
+                                                                            </flux:avatar.group>
+                                                                        @endif
+                                                                        @if($taskVendor)
+                                                                            <flux:avatar circle size="xs" name="{{ $taskVendor->name }}" color="auto" color:seed="{{ $taskVendor->id }}" :title="($showVendorInfo ?? true) ? $taskVendor->name : null" />
+                                                                            @if($showVendorInfo ?? true)
+                                                                                <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">{{ $taskVendor->name }}</span>
+                                                                            @endif
                                                                         @endif
                                                                     </div>
                                                                 @endif
@@ -173,6 +198,7 @@
                                         @php
                                             $typeUi = $task->type_ui ?? [];
                                             $taskTypeTextClasses = data_get($typeUi, 'text', '');
+                                            $taskUsers = $task->users ?? collect();
                                             $taskVendor = $task->vendor ?? null;
                                         @endphp
                                         @if($clickable)
@@ -190,11 +216,23 @@
                                                         </flux:heading>
                                                     </div>
                                                 </div>
-                                                @if($showAvatars && $taskVendor)
+                                                @if($showAvatars && ($taskUsers->count() > 0 || $taskVendor))
                                                     <div class="flex items-center gap-2 mt-2 min-w-0">
-                                                        <flux:avatar circle size="xs" name="{{ $taskVendor->name }}" color="auto" color:seed="{{ $taskVendor->id }}" :title="($showVendorInfo ?? true) ? $taskVendor->name : null" />
-                                                        @if($showVendorInfo ?? true)
-                                                            <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">{{ $taskVendor->name }}</span>
+                                                        @if($taskUsers->count() > 0)
+                                                            <flux:avatar.group>
+                                                                @foreach($taskUsers->take(3) as $user)
+                                                                    <flux:avatar circle size="xs" name="{{ $user->full_name }}" color="auto" color:seed="{{ $user->id }}" title="{{ $user->full_name }}" />
+                                                                @endforeach
+                                                                @if($taskUsers->count() > 3)
+                                                                    <flux:avatar circle size="xs">{{ $taskUsers->count() - 3 }}+</flux:avatar>
+                                                                @endif
+                                                            </flux:avatar.group>
+                                                        @endif
+                                                        @if($taskVendor)
+                                                            <flux:avatar circle size="xs" name="{{ $taskVendor->name }}" color="auto" color:seed="{{ $taskVendor->id }}" :title="($showVendorInfo ?? true) ? $taskVendor->name : null" />
+                                                            @if($showVendorInfo ?? true)
+                                                                <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">{{ $taskVendor->name }}</span>
+                                                            @endif
                                                         @endif
                                                     </div>
                                                 @endif
@@ -212,11 +250,23 @@
                                                         </flux:heading>
                                                     </div>
                                                 </div>
-                                                @if($showAvatars && $taskVendor)
+                                                @if($showAvatars && ($taskUsers->count() > 0 || $taskVendor))
                                                     <div class="flex items-center gap-2 mt-2 min-w-0">
-                                                        <flux:avatar circle size="xs" name="{{ $taskVendor->name }}" color="auto" color:seed="{{ $taskVendor->id }}" :title="($showVendorInfo ?? true) ? $taskVendor->name : null" />
-                                                        @if($showVendorInfo ?? true)
-                                                            <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">{{ $taskVendor->name }}</span>
+                                                        @if($taskUsers->count() > 0)
+                                                            <flux:avatar.group>
+                                                                @foreach($taskUsers->take(3) as $user)
+                                                                    <flux:avatar circle size="xs" name="{{ $user->full_name }}" color="auto" color:seed="{{ $user->id }}" title="{{ $user->full_name }}" />
+                                                                @endforeach
+                                                                @if($taskUsers->count() > 3)
+                                                                    <flux:avatar circle size="xs">{{ $taskUsers->count() - 3 }}+</flux:avatar>
+                                                                @endif
+                                                            </flux:avatar.group>
+                                                        @endif
+                                                        @if($taskVendor)
+                                                            <flux:avatar circle size="xs" name="{{ $taskVendor->name }}" color="auto" color:seed="{{ $taskVendor->id }}" :title="($showVendorInfo ?? true) ? $taskVendor->name : null" />
+                                                            @if($showVendorInfo ?? true)
+                                                                <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">{{ $taskVendor->name }}</span>
+                                                            @endif
                                                         @endif
                                                     </div>
                                                 @endif

@@ -448,15 +448,17 @@ class MeetTaskCalendarService
         }
 
         if ($recipientEmails->isNotEmpty()) {
+            $namesByEmail = $this->resolveAttendeeNames($recipientEmails);
             $lines[] = '';
             $lines[] = 'Attendees:';
             foreach ($recipientEmails as $email) {
-                $lines[] = "  {$email}";
+                $name = $namesByEmail[$email] ?? null;
+                $lines[] = $name ? "{$name} ({$email})" : $email;
             }
         }
 
         $lines[] = '';
-        $lines[] = 'If any changes, please contact us to let us know.';
+        $lines[] = 'Should anything change, please reach out to reschedule.';
         $lines[] = '';
         $lines[] = 'Thank you,';
         $lines[] = $vendorBusinessPhone !== ''
@@ -563,5 +565,28 @@ class MeetTaskCalendarService
         }
 
         return is_array($meta) ? $meta : [];
+    }
+
+    /**
+     * Resolve full names for attendee emails by looking up the users table.
+     *
+     * @return array<string, string>  email => full name
+     */
+    private function resolveAttendeeNames(Collection $emails): array
+    {
+        if ($emails->isEmpty()) {
+            return [];
+        }
+
+        return User::query()
+            ->whereIn('email', $emails->all())
+            ->get(['email', 'first_name', 'last_name'])
+            ->mapWithKeys(function (User $user): array {
+                $name = trim($user->full_name);
+                $email = strtolower(trim((string) $user->email));
+
+                return $name !== '' ? [$email => $name] : [];
+            })
+            ->all();
     }
 }

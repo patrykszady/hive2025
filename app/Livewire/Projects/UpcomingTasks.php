@@ -208,12 +208,34 @@ class UpcomingTasks extends Component
     #[Computed]
     public function unscheduledTasks(): Collection
     {
-        return Task::withTrashed()
+        $tasks = Task::withTrashed()
             ->where('project_id', $this->project->id)
             ->whereNull('start_date')
             ->with('vendor')
             ->orderBy('created_at')
             ->get();
+
+        $allUserIds = $tasks
+            ->pluck('user_ids')
+            ->flatten()
+            ->filter()
+            ->unique()
+            ->values();
+
+        if ($allUserIds->isNotEmpty()) {
+            $usersById = User::query()->whereIn('id', $allUserIds)->get()->keyBy('id');
+
+            foreach ($tasks as $task) {
+                $assignedUsers = collect($task->user_ids ?? [])
+                    ->map(fn ($userId) => $usersById->get($userId))
+                    ->filter()
+                    ->values();
+
+                $task->setRelation('users', $assignedUsers);
+            }
+        }
+
+        return $tasks;
     }
 
     public function render()
