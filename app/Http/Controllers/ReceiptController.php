@@ -720,7 +720,7 @@ class ReceiptController extends Controller
                         ? (float) $obj['Amount']['valueCurrency']['amount']
                         : $this->extractCurrencyAmount($obj['Amount'] ?? null));
                 if ($amount !== null) {
-                    $taxes[] = ['type' => $type ? trim($type) : 'Tax', 'amount' => $amount];
+                    $taxes[] = ['type' => $type ? mb_convert_case(trim($type), MB_CASE_TITLE) : 'Tax', 'amount' => $amount];
                 }
             }
             $taxes = $taxes ?: null;
@@ -734,6 +734,25 @@ class ReceiptController extends Controller
         $deposit    = isset($prefix['Deposit']) ? $this->extractCurrencyAmount($prefix['Deposit']) : null;
         $shipping   = isset($prefix['Shipping']) ? $this->extractCurrencyAmount($prefix['Shipping']) : null;
         $balanceDue = isset($prefix['BalanceDue']) ? $this->extractCurrencyAmount($prefix['BalanceDue']) : null;
+
+        // Fallback: CU sometimes returns a Shipping field with confidence but no value.
+        // Search keyValuePairs first, then raw content for any shipping-related amount.
+        if ($shipping === null && isset($prefix['Shipping'])) {
+            if ($keyValuePairs) {
+                $shippingKvp = $keyValuePairs->first(fn ($pair) => isset($pair->key->content)
+                    && preg_match('/\b(ship|freight|deliver|handl|s\s*&\s*h)\b/i', $pair->key->content)
+                    && isset($pair->value->content));
+                if ($shippingKvp) {
+                    $shipping = $this->parseAmountFromString($shippingKvp->value->content);
+                }
+            }
+
+            if ($shipping === null && $rawContent !== '') {
+                if (preg_match('/\b(?:ship(?:ping)?|freight|deliver(?:y)?|handl(?:ing)?|s\s*&\s*h)\b.{0,40}?\$?([\d,]+\.\d{2})/is', $rawContent, $m)) {
+                    $shipping = (float) str_replace(',', '', $m[1]);
+                }
+            }
+        }
 
         // ── 8. Transaction Date ───────────────────────────────────────
         $transactionDate = null;
@@ -1018,6 +1037,17 @@ class ReceiptController extends Controller
             $formattedItems = $this->supplementLineItemsFromContent($formattedItems, (string) ($content ?? ''), $subtotal);
             $formattedItems = $this->supplementQuantitiesFromContent($formattedItems, (string) ($content ?? ''));
             $formattedItems = $this->deduplicateLineItems($formattedItems);
+        }
+
+        // If shipping is already baked into the subtotal, subtract it so the
+        // stored subtotal reflects only product/material cost.
+        // Detection: subtotal + taxes ≈ total (within $0.02 tolerance) means
+        // shipping was included in the document's subtotal line.
+        if ($shipping !== null && $shipping > 0 && $subtotal !== null && $amount !== null) {
+            $subtotalPlusTaxes = round($subtotal + ($totalTax ?? 0), 2);
+            if (abs($subtotalPlusTaxes - $amount) < 0.02) {
+                $subtotal = round($subtotal - $shipping, 2);
+            }
         }
 
         // Misc fees = gap between total and (subtotal + tax + tip + shipping + deposit)

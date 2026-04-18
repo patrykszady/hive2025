@@ -438,7 +438,7 @@ class SyncContentUnderstandingAnalyzer extends Command
             ],
             'Shipping' => [
                 'type'        => 'number',
-                'description' => 'Total shipping, handling, and delivery charges. Look for labels: "S&H CHGS", "Shipping", "Freight", "Delivery", "Handling", "ENERGY HANDLING SCHG", "Freight Charges". SUM all shipping/handling/delivery line amounts into one total. Return null if no shipping charges exist — do NOT return 0.',
+                'description' => 'IMPORTANT — this line often appears near the bottom of the LAST page, between the last product item and the totals section. Total shipping, handling, and delivery charges. Look for labels: "S&H CHGS", "Shipping", "Freight", "Delivery", "Handling", "ENERGY HANDLING SCHG", "Freight Charges". This is NOT a line item — it is a standalone charge line. SUM all shipping/handling/delivery amounts into one total. Return null if no shipping charges exist — do NOT return 0.',
                 'method'      => 'extract',
             ],
             'Fees' => [
@@ -451,58 +451,53 @@ class SyncContentUnderstandingAnalyzer extends Command
                 'description' => implode("\n", [
                     'Extract ALL product line items from the ENTIRE document. All pages form ONE continuous table — pages 2, 3, etc. continue the same table from page 1.',
 
-                    'HOW TO IDENTIFY ITEMS: Each item has a 4-digit LINE number (0010, 0020, 0030, ...) in the LINE column, an ITEM# code, and numeric values in QTY ORD, UNIT PRICE, and PRICE columns. Only rows with ALL of these are real items. You must output exactly one object per real item.',
+                    'HOW TO IDENTIFY ITEMS: Look for a tabular list of products. Items typically have a line number or row index, a product code/SKU, description, quantity, unit price, and extended price. Column headers vary by vendor (e.g. "LINE", "ITEM#", "QTY", "UNIT PRICE", "PRICE", or "SKU", "DESCRIPTION", "QTY ORD", "AMOUNT", etc.). Identify the pattern from the table header row and extract one object per product row.',
 
-                    'CRITICAL — ITEMS AFTER PAGE BREAKS: A page that starts with "continued from previous page" text and notes for a prior item will ALSO contain NEW items below that continuation block. You MUST extract those new items with ALL their fields (LineNumber, ItemNumber, Quantity, UnitPrice, TotalPrice, Status, ETA). Do NOT skip items just because they appear on the same page as continuation text. The continuation text belongs to the previous item; the new LINE number below it starts a completely independent item that MUST have all its tabular fields extracted from the table columns.',
+                    'CRITICAL — ITEMS AFTER PAGE BREAKS: A page that starts with continuation text (e.g. "continued from previous page", "continued", or similar) and notes for a prior item will ALSO contain NEW items below that continuation block. You MUST extract those new items. The continuation text belongs to the previous item; a new line number below it starts a completely independent item.',
 
-                    'PAGE BREAKS AND CONTINUATION TEXT: When a new page starts with "continued from previous page", assign ALL text between that marker and the NEXT LINE number to the LAST item (highest LINE number) that appeared on the previous page. IMPORTANT: When a rowspan cell contains stacked LINE numbers (e.g. 0040 and 0050), BOTH items appear on the SAME page — the continuation on the NEXT page belongs to the LAST of those stacked items (0050), NOT the first (0040). The last item\'s notes may appear partially in its own row and then fully in the continuation — use the continuation to COMPLETE that item\'s notes.',
+                    'PAGE BREAKS AND CONTINUATION TEXT: When a new page starts with continuation text, assign ALL text between that marker and the NEXT line number to the LAST item from the previous page. When multiple line numbers appear stacked in the same cell, the continuation on the NEXT page belongs to the LAST of those stacked items.',
 
-                    'STACKED LINE NUMBERS IN ROWSPAN: When a rowspan cell contains multiple LINE numbers (e.g. "0040<br>0050"), the data rows within that rowspan are individual items — assign them in order: first data row with an ITEM# → first LINE, second data row with an ITEM# → second LINE, etc. Each item\'s Description, Area, Notes, and other fields come ONLY from its own row and (for the last item) any continuation on the next page.',
+                    'COMPLETENESS CHECK: Every item you output MUST have LineNumber (if the document uses line numbers), ItemNumber, Description, Quantity, UnitPrice, and TotalPrice. If any are missing, re-read that item\'s row — the data is in the table columns.',
 
-                    'COMPLETENESS CHECK: Every item you output MUST have LineNumber, ItemNumber, Description, Quantity, UnitPrice, and TotalPrice populated from the table. If any of these are missing for an item, re-read that item\'s table row — the data IS there in the LINE, ITEM#, QTY ORD, UNIT PRICE, and PRICE columns.',
+                    'VENDOR SUB-CODES: Secondary codes appearing after the primary product code are supplier sub-codes, NOT separate items. Ignore them.',
 
-                    'SUB-CODES: Codes like S016, S017, S020 appearing after the ITEM# are supplier sub-codes, NOT separate items. Ignore them.',
+                    'PROJECT/CUSTOMER LABELS: Text like a customer name or project name appearing alone above the items table is a section label — NOT a product description. Skip it.',
 
-                    'PROJECT LABELS: Text like "EGGER PRIMARY" appearing alone above the first item row is a project/customer label — NOT a product description. Skip it.',
-
-                    'SKIP completely: repeated page headers, ENERGY HANDLING SCHG, Weight lines, totals, "Agreed and Accepted", footer text.',
+                    'NOT LINE ITEMS — do NOT extract these as items: repeated page headers, shipping/handling/freight charges (extract those in the Shipping field instead), weight summaries, order totals, signature/acceptance lines, and footer text.',
                 ]),
                 'items'       => [
                     'type'       => 'object',
                     'properties' => [
                         'LineNumber' => [
                             'type'        => 'string',
-                            'description' => 'The 4-digit line number from the LINE column (e.g. "0010", "0020", "0030"). Every real item MUST have a LineNumber.',
+                            'description' => 'The line number or row index from the document table (e.g. "0010", "0020", "1", "2"). Return null if the document does not use line numbers.',
                             'method'      => 'extract',
                         ],
                         'ItemNumber' => [
                             'type'        => 'string',
-                            'description' => 'Product/SKU code from the ITEM# column (e.g. "VTSMSARPENNYH", "CAEPOER1224R", "ANALMCP1224HN"). Skip sub-codes (S016, S017, S020) — those are supplier references, not the item code.',
+                            'description' => 'Primary product code, SKU, or item number. Skip secondary supplier sub-codes — only extract the main product identifier.',
                             'method'      => 'extract',
                         ],
                         'Description' => [
                             'type'        => 'string',
                             'description' => implode(' ', [
-                                'Full product name from the DESCRIPTION column.',
-                                'Combine ALL product-name text lines for this item, including text that continues on the next row or the next page after "continued from previous page".',
-                                'STOP collecting description text when you reach a line starting with "C*", "Serial#", or "*" (asterisk followed by text) — those are area/notes, not product name.',
-                                'CROSS-PAGE RULE: If an item\'s description is split across a page break, the continuation text (after "continued from previous page") belongs to the PREVIOUS item, not the next one.',
-                                'Example: LINE 0030 on page 1 has "MOSCATO ARGENTO 1/2X12 BAR". Page 2 starts with "continued from previous page" then "LINER HONED". The full description for 0030 is "MOSCATO ARGENTO 1/2X12 BAR LINER HONED". The text "LINER HONED" does NOT belong to LINE 0040.',
-                                'Example: "LA MARCA CALACATTA PAONAZZO" on one row + "HONED 12X24 RECT NEW PKG" on next row = "LA MARCA CALACATTA PAONAZZO HONED 12X24 RECT NEW PKG".',
-                                'Example: "PORTRAITS ERICE 12X24 MATTE" + "RECT" on next line = "PORTRAITS ERICE 12X24 MATTE RECT".',
-                                'SKIP PROJECT/CUSTOMER LABELS: Text like "EGGER PRIMARY", "SMITH MASTER", or similar customer/project identifiers appearing alone on a line above the actual product name are NOT part of the description. These are section labels — do NOT prepend them to the product name.',
-                                'Do NOT include: project labels, area designations ("C* PRIMARY BATH"), notes ("* NATURAL STONE..."), serial numbers, or "continued from previous page".',
+                                'Full product name/description.',
+                                'Combine ALL product-name text lines for this item, including text that continues on the next row or across a page break.',
+                                'CROSS-PAGE RULE: If a description is split across a page break, continuation text belongs to the PREVIOUS item, not the next one.',
+                                'STOP collecting description text when you reach area designations (lines starting with "C*" or room labels), serial numbers, notes, or disclaimers.',
+                                'Do NOT include: project/customer labels, area designations, ordering notes, serial numbers, disclaimers, or continuation markers.',
                             ]),
                             'method'      => 'generate',
                         ],
                         'Area' => [
                             'type'        => 'string',
                             'description' => implode(' ', [
-                                'Room/area designation from "C*" lines in this item\'s section.',
-                                'Format: "C* ROOM/C* SUB-AREA" — include BOTH parts separated by " / ".',
-                                'Also include any clarifying sub-area text on the line immediately after the C* area line (e.g. "SHOWER ACCENT & BACKSPLASH ACCENT") — append it after the sub-area.',
-                                'IGNORE these C* lines (they are notes, not areas): "C* SPECIAL ORDER", "C* STOCK MATERIAL", "C* MUST SET", "C* ***".',
-                                'Return null if no C* area lines exist for this item.',
+                                'Room or area designation for this item, if present.',
+                                'Many vendors use "C*" prefixed lines (e.g. "C* PRIMARY BATH/C* SHOWER WALL") to indicate room/area — include both parts separated by " / ".',
+                                'Also include any clarifying sub-area text on the line immediately after the area designation (e.g. "SHOWER ACCENT & BACKSPLASH ACCENT").',
+                                'IGNORE lines that are ordering notes rather than areas (e.g. "C* SPECIAL ORDER", "C* STOCK MATERIAL", lines starting with "C* ***").',
+                                'Other vendors may use different formats — look for room names, locations, or installation areas associated with the item.',
+                                'Return null if no area/room designation exists for this item.',
                             ]),
                             'method'      => 'generate',
                         ],
@@ -513,12 +508,12 @@ class SyncContentUnderstandingAnalyzer extends Command
                         ],
                         'ETA' => [
                             'type'        => 'date',
-                            'description' => 'Ship/delivery date for this item from the SHIP DATE column (e.g. "4/10/26*" → 2026-04-10, "3/17/26" → 2026-03-17). Ignore trailing asterisks. Null if none.',
+                            'description' => 'Ship date, delivery date, or ETA for this item. May be labeled "SHIP DATE", "ETA", "DELIVERY", "EST SHIP", etc. Ignore trailing asterisks or other markers. Null if none.',
                             'method'      => 'extract',
                         ],
                         'Quantity' => [
                             'type'        => 'string',
-                            'description' => 'The numeric quantity from the QTY ORD column (e.g. "9.90", "121.41", "40.68", "108.50"). This is always a number. Do NOT extract page numbers, text, or values from other columns.',
+                            'description' => 'The numeric quantity ordered. May be labeled "QTY", "QTY ORD", "QUANTITY", "ORDER QTY", etc. This is always a number. Do NOT extract page numbers, text, or values from other columns.',
                             'method'      => 'extract',
                         ],
                         'Unit' => [
@@ -528,17 +523,17 @@ class SyncContentUnderstandingAnalyzer extends Command
                         ],
                         'UnitPrice' => [
                             'type'        => 'number',
-                            'description' => 'Per-unit price from the UNIT PRICE column (e.g. 17.250, 4.500).',
+                            'description' => 'Per-unit price. May be labeled "UNIT PRICE", "PRICE/UNIT", "RATE", "EACH", etc.',
                             'method'      => 'extract',
                         ],
                         'TotalPrice' => [
                             'type'        => 'number',
-                            'description' => 'Extended line total from the PRICE column (e.g. 170.78, 1511.55). This equals Quantity × UnitPrice.',
+                            'description' => 'Extended line total (quantity × unit price). May be labeled "PRICE", "AMOUNT", "EXT PRICE", "TOTAL", "LINE TOTAL", etc.',
                             'method'      => 'extract',
                         ],
                         'Status' => [
                             'type'        => 'string',
-                            'description' => 'Order status from the STATUS column (e.g. "Back Ord", "Availabl", "Available", "Shipped").',
+                            'description' => 'Order/fulfillment status for this item (e.g. "Back Ord", "Available", "Shipped", "Open", "Cancelled"). Null if no status column exists.',
                             'method'      => 'extract',
                         ],
                     ],
@@ -548,13 +543,13 @@ class SyncContentUnderstandingAnalyzer extends Command
 
         return [
             'description'    => implode(' ', [
-                'Material order / order acknowledgment analyzer for construction supply documents.',
+                'Material order / order acknowledgment analyzer for construction supply documents from various vendors.',
                 'CRITICAL: All pages are ONE continuous document. Pages 2, 3, etc. continue the same items table from page 1.',
-                'Repeated page headers (vendor name, bill-to, ship-to, column headers) on subsequent pages must be IGNORED.',
-                'Text after "continued from previous page" belongs to the LAST item from the previous page — it is NOT a new item.',
-                'LINE numbers (0010, 0020, 0030, ...) in the LINE column are the ONLY way to identify distinct items.',
-                'Each LINE number appears exactly once across the entire document. Count items by distinct LINE numbers.',
+                'Repeated page headers on subsequent pages must be IGNORED.',
+                'Continuation text (e.g. "continued from previous page") belongs to the LAST item from the previous page — it is NOT a new item.',
+                'Each distinct line number or product row represents exactly one item.',
                 'Description text may span multiple rows and even cross page boundaries — combine all product-name lines.',
+                'Shipping, handling, and freight charges are NOT line items — extract them in the Shipping field.',
             ]),
             'baseAnalyzerId' => 'prebuilt-document',
             'config'         => [
@@ -566,11 +561,11 @@ class SyncContentUnderstandingAnalyzer extends Command
             'fieldSchema'    => [
                 'name'        => 'HiveMaterialOrderSchema',
                 'description' => implode(' ', [
-                    'Construction material order extraction schema.',
+                    'Construction material order extraction schema for multiple vendors.',
                     'All pages = one continuous document. Ignore repeated headers on pages 2+.',
-                    '"continued from previous page" = continuation of the previous item, NOT a new item.',
+                    'Continuation text = continuation of the previous item, NOT a new item.',
                     'Follow visual reading order across all table columns left-to-right.',
-                    'Only create an item when you see a new LINE number (0010, 0020, ...) with an ITEM# code and numeric PRICE.',
+                    'Only create an item when you see a new product row with a product code/SKU and a price.',
                 ]),
                 'fields'      => $fields,
             ],
