@@ -3,6 +3,7 @@
 namespace App\Livewire\Estimates;
 
 use App\Models\Bid;
+use App\Models\EmailTemplate;
 use App\Models\Estimate;
 use App\Models\Project;
 use App\Models\ProjectStatus;
@@ -34,6 +35,9 @@ class EstimateAccept extends Component
     /** @var array<int> Selected vendor user IDs who must sign */
     public array $requiredVendorSignerIds = [];
 
+    /** @var array<int> Selected contract template IDs for this estimate */
+    public array $contractTemplateIds = [];
+
     protected $listeners = ['accept', 'signSetup', 'addPayment', 'refreshComponent' => 'refreshEstimateData'];
 
     protected function rules()
@@ -54,6 +58,19 @@ class EstimateAccept extends Component
 
         // Load required vendor signer IDs from options, fall back to vendor defaults
         $this->requiredVendorSignerIds = $estimate->options['required_vendor_signer_ids'] ?? [];
+
+        // Load contract template IDs from options; pre-select the default template when none saved yet
+        if (isset($estimate->options['contract_template_ids'])) {
+            $this->contractTemplateIds = array_map('intval', $estimate->options['contract_template_ids']);
+        } else {
+            $defaultTemplate = EmailTemplate::withoutGlobalScopes()
+                ->where('vendor_id', $estimate->belongs_to_vendor_id)
+                ->where('type', 'contract')
+                ->orderBy('id')
+                ->first();
+
+            $this->contractTemplateIds = $defaultTemplate ? [$defaultTemplate->id] : [];
+        }
 
         if (empty($this->requiredVendorSignerIds)) {
             $vendorDefaults = (array) data_get($estimate->vendor?->options, 'default_contract_signers', []);
@@ -121,6 +138,21 @@ class EstimateAccept extends Component
 
             $this->payments = collect($this->payments);
         }
+    }
+
+    /**
+     * Contract templates available for this estimate's vendor.
+     *
+     * @return \Illuminate\Support\Collection<int, \App\Models\EmailTemplate>
+     */
+    #[Computed]
+    public function contractTemplates(): \Illuminate\Support\Collection
+    {
+        return EmailTemplate::withoutGlobalScopes()
+            ->where('vendor_id', $this->estimate->belongs_to_vendor_id)
+            ->where('type', 'contract')
+            ->orderBy('name')
+            ->get();
     }
 
     /**
@@ -360,6 +392,9 @@ class EstimateAccept extends Component
 
             // Persist required vendor signer IDs
             $estimate_options['required_vendor_signer_ids'] = array_map('intval', $this->requiredVendorSignerIds);
+
+            // Persist contract template IDs
+            $estimate_options['contract_template_ids'] = array_map('intval', $this->contractTemplateIds);
 
             $estimate->options = $estimate_options;
             $estimate->save();

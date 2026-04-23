@@ -27,7 +27,8 @@ class EstimateSign extends Component
     public ?int $estimateId = null;
 
     #[Locked]
-    public ?string $contractHtml = null;
+    /** @var array<int, string> Rendered HTML for each selected contract template */
+    public array $contractHtml = [];
 
     public ?Estimate $estimate = null;
 
@@ -646,20 +647,31 @@ class EstimateSign extends Component
     /**
      * Build the contract HTML for inline rendering on the signing page.
      */
-    protected function buildContractHtml(Estimate $estimate): ?string
+    /**
+     * @return array<int, string>
+     */
+    protected function buildContractHtml(Estimate $estimate): array
     {
         $vendor = $estimate->vendor;
         $project = $estimate->project;
         $client = $project?->client ?? $estimate->client;
         $timezone = vendor_timezone();
 
-        $contractTemplate = EmailTemplate::withoutGlobalScopes()
+        $selectedIds = array_filter(array_map('intval', $estimate->options['contract_template_ids'] ?? []));
+
+        if (empty($selectedIds)) {
+            return [];
+        }
+
+        $contractTemplates = EmailTemplate::withoutGlobalScopes()
             ->where('vendor_id', $vendor->id)
             ->where('type', 'contract')
-            ->first();
+            ->whereIn('id', $selectedIds)
+            ->orderByRaw('FIELD(id, ' . implode(',', $selectedIds) . ')')
+            ->get();
 
-        if (! $contractTemplate) {
-            return null;
+        if ($contractTemplates->isEmpty()) {
+            return [];
         }
 
         $estimateTotal = $estimate->estimate_sections->sum('total');
@@ -670,7 +682,7 @@ class EstimateSign extends Component
 
         $paymentScheduleHtml = EstimateDocumentGenerator::renderPaymentSchedule($estimate->payments);
 
-        return EstimateDocumentGenerator::renderContractTemplate($contractTemplate->body, [
+        $placeholderData = [
             'today_date' => now()->setTimezone($timezone)->format('m/d/Y'),
             'vendor_name' => $vendor->business_name ?? 'Unknown Vendor',
             'short_vendor_name' => data_get($vendor->options, 'short_name') ?: ($vendor->business_name ?? 'Unknown Vendor'),
@@ -683,7 +695,12 @@ class EstimateSign extends Component
             'estimate_total_words' => $estimateTotalWords,
             'payment_schedule' => $paymentScheduleHtml,
             'current_year' => now()->setTimezone($timezone)->format('Y'),
-        ]);
+        ];
+
+        return $contractTemplates
+            ->map(fn (EmailTemplate $template) => EstimateDocumentGenerator::renderContractTemplate($template->body, $placeholderData))
+            ->values()
+            ->all();
     }
 
     public function render()

@@ -93,6 +93,7 @@
             <div x-data="signaturePad()">
 
             {{-- Estimate Sections --}}
+            <div class="space-y-4">
             @foreach($estimate->estimate_sections as $sectionIndex => $section)
                 <flux:card>
                     <div class="flex justify-between mb-2">
@@ -150,12 +151,15 @@
                     @endif
                 </flux:card>
             @endforeach
+            </div>
 
             {{-- Contract Content --}}
-            @if($contractHtml)
-                <flux:card class="prose prose-sm max-w-none dark:prose-invert">
-                    {!! $contractHtml !!}
-                </flux:card>
+            @if(!empty($contractHtml))
+                @foreach($contractHtml as $contractSection)
+                    <flux:card class="contract-body max-w-none mt-8 text-sm dark:text-zinc-100">
+                        {!! $contractSection !!}
+                    </flux:card>
+                @endforeach
                 <div x-ref="contractEnd" class="h-1"></div>
             @endif
 

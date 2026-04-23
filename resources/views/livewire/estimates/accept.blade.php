@@ -115,6 +115,22 @@
             </div>
         </x-island-card>
 
+        <x-island-card heading="Contract Templates" subheading="Select which contract template(s) apply to this estimate.">
+            @if($this->contractTemplates->isEmpty())
+                <flux:text class="text-zinc-500 italic text-sm">No contract templates found. Create one under Settings → Contract Templates.</flux:text>
+            @else
+                <div class="space-y-2">
+                    @foreach($this->contractTemplates as $template)
+                        <flux:checkbox
+                            wire:model.live="contractTemplateIds"
+                            value="{{ $template->id }}"
+                            label="{{ $template->name }}"
+                        />
+                    @endforeach
+                </div>
+            @endif
+        </x-island-card>
+
         <x-island-card heading="Required Signers" subheading="Select which team members must sign this contract.">
             <div class="space-y-2">
                 @foreach($this->vendorUsers as $vendorUser)
