@@ -5,6 +5,7 @@ namespace App\Livewire\Sms;
 use App\Livewire\Sms\SmsIndex;
 use App\Livewire\Sms\SmsNewThread;
 use App\Models\CallLog;
+use App\Models\Client;
 use App\Models\SmsGroupThread;
 use App\Models\SmsMessage;
 use App\Models\SmsThreadParticipant;
@@ -506,6 +507,38 @@ class SmsConversation extends Component
         ])->find($this->threadId);
     }
 
+    public function threadClientUsersFor(?Client $client): \Illuminate\Support\Collection
+    {
+        if (! $client || ! $this->thread) {
+            return collect();
+        }
+
+        $participantPhones = $this->thread->threadParticipants
+            ->pluck('phone_number')
+            ->filter();
+
+        $users = $client->relationLoaded('users')
+            ? $client->users
+            : $client->users()->get(['users.id', 'first_name', 'last_name', 'cell_phone']);
+
+        return $this->filterClientUsersToThreadParticipants($users, $participantPhones);
+    }
+
+    public function filterClientUsersToThreadParticipants(iterable $users, iterable $participantPhones): \Illuminate\Support\Collection
+    {
+        $participantPhoneMap = collect($participantPhones)
+            ->filter()
+            ->flip();
+
+        return collect($users)
+            ->filter(function (User $user) use ($participantPhoneMap): bool {
+                $e164 = $user->routeNotificationForTelnyx();
+
+                return is_string($e164) && $participantPhoneMap->has($e164);
+            })
+            ->values();
+    }
+
     /**
      * Initiate a click-to-call: dials the logged-in user first, then bridges to the target.
      */
@@ -738,7 +771,7 @@ class SmsConversation extends Component
 
         // Add client users from thread
         if ($this->thread?->client) {
-            foreach ($this->thread->client->users as $clientUser) {
+            foreach ($this->threadClientUsersFor($this->thread->client) as $clientUser) {
                 $e164 = $clientUser->routeNotificationForTelnyx();
                 if (! $e164 || $e164 === $calledNumber || $e164 === $userPhone) {
                     continue;
@@ -807,7 +840,7 @@ class SmsConversation extends Component
 
         // Client user first names take precedence
         if ($this->thread?->client) {
-            foreach ($this->thread->client->users as $user) {
+            foreach ($this->threadClientUsersFor($this->thread->client) as $user) {
                 $telnyx = $user->routeNotificationForTelnyx();
                 if ($telnyx) {
                     $map[$telnyx] = $user->first_name;

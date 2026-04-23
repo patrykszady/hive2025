@@ -161,6 +161,24 @@ class SyncContentUnderstandingAnalyzer extends Command
                 'method'      => 'extract',
             ],
 
+            'Shipping' => [
+                'type'        => 'number',
+                'description' => 'Total shipping, handling, and delivery charges. Look for labels: "Shipping", "Freight", "Delivery", "Handling", "S&H". Return null if no shipping charges exist — do NOT return 0.',
+                'method'      => 'extract',
+            ],
+
+            'Deposit' => [
+                'type'        => 'number',
+                'description' => 'Any deposit or prepayment amount already applied. Look for labels: "Deposit", "Deposit Applied", "Payment Received", "Amount Paid", "Prepayment", "Payments to Date". Return null if no deposit field exists — do NOT return 0.',
+                'method'      => 'extract',
+            ],
+
+            'BalanceDue' => [
+                'type'        => 'number',
+                'description' => 'Remaining balance owed after any deposits or partial payments. Look for labels: "Balance Due", "Amount Remaining", "Net Due", "Balance". Return null if no such field exists — do NOT return 0.',
+                'method'      => 'extract',
+            ],
+
             // ── Line items ─────────────────────────────────────────────────
             'Items' => [
                 'type'        => 'array',
@@ -170,12 +188,12 @@ class SyncContentUnderstandingAnalyzer extends Command
                     'properties' => [
                         'Description' => [
                             'type'        => 'string',
-                            'description' => 'Full name or description of the item. If the receipt shows a short/abbreviated name on one line and a longer product description on the next line, concatenate both lines into a single description. Do NOT include the product code, barcode, UPC, or item number in the description — those belong in the ProductCode field. Also strip any single-letter return-policy indicators such as <A>, <B>, <C>, etc. Example: given lines "084305382269 1QT BUCKET <A>" and "1QT HDX ALL PURP MIXING CONTAINER", the Description should be "1QT BUCKET 1QT HDX ALL PURP MIXING CONTAINER".',
+                            'description' => 'The product name/description ONLY — do NOT include the manufacturer name or manufacturer part number. Example: if the text is "KOHLER K-728-K-NA MASTERSHOWER TRANSFER VALVE", Description is "MASTERSHOWER TRANSFER VALVE" (KOHLER → Manufacturer, K-728-K-NA → ManufacturerPartNumber). If the receipt shows a short/abbreviated name on one line and a longer product description on the next line, concatenate both lines into a single description. Do NOT include the product code, barcode, UPC, or item number — those belong in the VendorCode field. Also strip any single-letter return-policy indicators such as <A>, <B>, <C>, etc. Example: given lines "084305382269 1QT BUCKET <A>" and "1QT HDX ALL PURP MIXING CONTAINER", the Description should be "1QT BUCKET 1QT HDX ALL PURP MIXING CONTAINER".',
                             'method'      => 'extract',
                         ],
-                        'ProductCode' => [
+                        'VendorCode' => [
                             'type'        => 'string',
-                            'description' => 'SKU, item number, or product code.',
+                            'description' => 'Vendor SKU, item number, barcode, or product code assigned by this specific retailer/vendor.',
                             'method'      => 'extract',
                         ],
                         'Quantity' => [
@@ -191,6 +209,16 @@ class SyncContentUnderstandingAnalyzer extends Command
                         'TotalPrice' => [
                             'type'        => 'number',
                             'description' => 'Total price for this line item (quantity × unit price).',
+                            'method'      => 'extract',
+                        ],
+                        'Manufacturer' => [
+                            'type'        => 'string',
+                            'description' => 'Brand or manufacturer name for this item (e.g. "KOHLER", "MOEN", "DELTA", "AMERICAN STANDARD"). Often appears as all-caps words at the start of the description before the model number. Return null if not identifiable.',
+                            'method'      => 'extract',
+                        ],
+                        'ManufacturerPartNumber' => [
+                            'type'        => 'string',
+                            'description' => 'Manufacturer model number or part number (e.g. "K-8304-KS-NA", "T14238-RB"). This is the manufacturer\'s own product code — a hyphenated alphanumeric code — distinct from the vendor SKU. Return null if not present.',
                             'method'      => 'extract',
                         ],
                     ],
@@ -459,7 +487,7 @@ class SyncContentUnderstandingAnalyzer extends Command
 
                     'COMPLETENESS CHECK: Every item you output MUST have LineNumber (if the document uses line numbers), ItemNumber, Description, Quantity, UnitPrice, and TotalPrice. If any are missing, re-read that item\'s row — the data is in the table columns.',
 
-                    'VENDOR SUB-CODES: Secondary codes appearing after the primary product code are supplier sub-codes, NOT separate items. Ignore them.',
+                    'VENDOR SUB-CODES: Some vendors print a narrow column of supplier sub-codes (e.g. Virginia Tile shows "S016", "S017", "S020" between the ItemNumber column and the Description column). These sub-codes are NOT separate items, NOT manufacturer names, and NOT part of the description. Skip them when building Description and do NOT put them in Manufacturer or ManufacturerPartNumber.',
 
                     'PROJECT/CUSTOMER LABELS: Text like a customer name or project name appearing alone above the items table is a section label — NOT a product description. Skip it.',
 
@@ -475,17 +503,51 @@ class SyncContentUnderstandingAnalyzer extends Command
                         ],
                         'ItemNumber' => [
                             'type'        => 'string',
-                            'description' => 'Primary product code, SKU, or item number. Skip secondary supplier sub-codes — only extract the main product identifier.',
+                            'description' => implode(' ', [
+                                'Primary vendor product code / SKU from the ITEM# (or SKU, PRODUCT CODE, ITEM NUMBER) column \u2014 the FIRST code column to the right of the LINE column.',
+                                'Always extract this when the table has an item-code column. Examples: Virginia Tile rows look like LINE | ITEM# | <sub-code> | DESCRIPTION, where ITEM# values are like \"VTSMSARPENNYH\", \"WOWYKDS25\", \"VTSMSARBARSMH\", \"CAEPOER1224R\", \"ANALMCP1224HN\" \u2014 each of these is the ItemNumber for its row.',
+                                'When TWO code columns appear between LINE and DESCRIPTION (a long alphanumeric SKU followed by a short S###/A### sub-code), the ItemNumber is the LONGER, FIRST code; the short sub-code is a vendor sub-code and goes nowhere (skip it).',
+                                'Return null only when the document genuinely has no SKU column.',
+                            ]),
+                            'method'      => 'extract',
+                        ],
+                        'Manufacturer' => [
+                            'type'        => 'string',
+                            'description' => implode(' ', [
+                                'Brand or manufacturer name for this item (e.g. "KOHLER", "MOEN", "DELTA", "AMERICAN STANDARD", "GROHE").',
+                                'A real Manufacturer is a RECOGNIZABLE COMPANY/BRAND NAME that you would find on the manufacturer\'s actual product packaging or website.',
+                                'It must appear EITHER (a) in a dedicated "Manufacturer" / "Brand" column on the receipt, OR (b) as the leading brand word(s) of the product description IMMEDIATELY followed by a real ManufacturerPartNumber (a hyphenated code that contains at least one DIGIT, e.g. "K-8304-KS-NA").',
+                                'CRITICAL — DO NOT FABRICATE: If there is no dedicated brand column AND the description does not begin with "<BRAND> <PART#-WITH-DIGITS>", return null. Do NOT guess a brand from generic product words.',
+                                'NEVER include descriptive product words as the manufacturer. Examples of WRONG extractions to AVOID: "PVC ISLAND DRAIN FREESTANDING TUB DRAIN" (this is a product description, not a brand), "KOHLER UNIVERSAL" from "KOHLER UNIVERSAL RITE-TEMP PB VALVE KIT" (the brand is just "KOHLER"; "UNIVERSAL" is a product line word, and "RITE-TEMP" is a product family name not a part number).',
+                                'CRITICAL — NOT A MANUFACTURER: Short alphanumeric supplier codes that appear in their OWN column between the ItemNumber and the Description (e.g. Virginia Tile prints a column of codes like "S016", "S017", "S020"). Patterns to REJECT as Manufacturer: a single letter followed by 3 digits (S017, A123), or 1–3 letters followed by 1–4 digits.',
+                                'For Virginia Tile orders specifically: Manufacturer should usually be null because the product description rarely contains a brand word. Do NOT use the S### sub-code as the manufacturer.',
+                                'When in doubt, return null. A null value is always preferable to a wrong value.',
+                            ]),
+                            'method'      => 'extract',
+                        ],
+                        'ManufacturerPartNumber' => [
+                            'type'        => 'string',
+                            'description' => implode(' ', [
+                                'Manufacturer model number or part number (e.g. "K-8304-KS-NA", "T14238-RB", "559-ORB").',
+                                'This is the manufacturer\'s own product code — a hyphenated alphanumeric code — distinct from the vendor\'s ItemNumber/SKU.',
+                                'CRITICAL — MUST CONTAIN AT LEAST ONE DIGIT: A real manufacturer part number always contains digits. Reject any candidate that is purely letters with hyphens.',
+                                'NEVER extract descriptive hyphenated product words as a part number. Examples of WRONG extractions to AVOID: "ROUGH-IN", "RITE-TEMP", "TWO-HANDLE", "PULL-DOWN", "BUILT-IN", "DROP-IN", "TUB-AND-SHOWER", "NON-SLIP", "SELF-CLOSING", "HEAVY-DUTY". These are descriptive terms found in the product description, not SKUs.',
+                                'Only extract a value when it is clearly a SKU/model code (alphanumeric with at least one digit) appearing in a dedicated part-number column OR as the second token of the description right after the brand name.',
+                                'When in doubt, return null. A null value is always preferable to a wrong value.',
+                            ]),
                             'method'      => 'extract',
                         ],
                         'Description' => [
                             'type'        => 'string',
                             'description' => implode(' ', [
-                                'Full product name/description.',
+                                'The product name/description ONLY — do NOT include the manufacturer name or manufacturer part number.',
+                                'Example: if the raw text is "KOHLER K-728-K-NA MASTERSHOWER 2 OR 3 WAY TRANSFER VALVE", the Description is "MASTERSHOWER 2 OR 3 WAY TRANSFER VALVE" (KOHLER goes in Manufacturer, K-728-K-NA goes in ManufacturerPartNumber).',
+                                'Example: "AMERICAN STANDARD T14238-RB COLONIAL SHOWER VALVE TRIM" → Description is "COLONIAL SHOWER VALVE TRIM".',
                                 'Combine ALL product-name text lines for this item, including text that continues on the next row or across a page break.',
+                                'CROSS-PAGE WRAP — CRITICAL: When an item is the LAST item on a page and its description text continues on the next page (after a "continued from previous page" marker), you MUST stitch the trailing text from the next page onto this item\'s Description. The text immediately after the continuation marker, up until the first non-description line (C* tag, Serial#, note, blank line, or the next item\'s line number), is the tail of THIS item\'s description. Examples that REQUIRE stitching: "MOSCATO ARGENTO 1/2X12 BAR" on page 1 + "LINER HONED" on page 2 → "MOSCATO ARGENTO 1/2X12 BAR LINER HONED". "PORTRAITS ERICE 12X24 MATTE" + "RECT" → "PORTRAITS ERICE 12X24 MATTE RECT".',
                                 'CROSS-PAGE RULE: If a description is split across a page break, continuation text belongs to the PREVIOUS item, not the next one.',
                                 'STOP collecting description text when you reach area designations (lines starting with "C*" or room labels), serial numbers, notes, or disclaimers.',
-                                'Do NOT include: project/customer labels, area designations, ordering notes, serial numbers, disclaimers, or continuation markers.',
+                                'Do NOT include: manufacturer name, manufacturer part number, project/customer labels, area designations, ordering notes, serial numbers, disclaimers, or continuation markers.',
                             ]),
                             'method'      => 'generate',
                         ],
@@ -493,9 +555,14 @@ class SyncContentUnderstandingAnalyzer extends Command
                             'type'        => 'string',
                             'description' => implode(' ', [
                                 'Room or area designation for this item, if present.',
-                                'Many vendors use "C*" prefixed lines (e.g. "C* PRIMARY BATH/C* SHOWER WALL") to indicate room/area — include both parts separated by " / ".',
-                                'Also include any clarifying sub-area text on the line immediately after the area designation (e.g. "SHOWER ACCENT & BACKSPLASH ACCENT").',
-                                'IGNORE lines that are ordering notes rather than areas (e.g. "C* SPECIAL ORDER", "C* STOCK MATERIAL", lines starting with "C* ***").',
+                                'SECTION TAGS (Studio 41 and similar vendors): Lines like "TAG: PRIMARY BATH" or "TAG: HALL BATH" act as SECTION HEADERS.',
+                                'A TAG applies to ALL items that follow it until the next TAG line appears.',
+                                'Example: if "TAG: PRIMARY BATH" appears, then items 3408127, 3451610, 3182272 etc. all get Area="PRIMARY BATH". When "TAG: HALL BATH" appears later, all subsequent items get Area="HALL BATH".',
+                                'Extract only the room/area name after "TAG:" — do NOT include the "TAG:" prefix itself.',
+                                'PER-ITEM AREAS (Virginia Tile and similar vendors): "C*" prefixed lines (e.g. "C* PRIMARY BATH/C* SHOWER WALL") indicate room/area for that specific item — include both parts separated by " / ".',
+                                'CRITICAL — SUB-AREA LINE: When the line IMMEDIATELY AFTER a "C*" area block does NOT start with "C*" and does NOT start with "*", and contains words like "ACCENT", "WALL", "FLOOR", "BACKSPLASH", "COUNTER", "NICHE", "TRIM", "BORDER", "SHOWER", "TUB", "VANITY", you MUST append it to the Area value (separated by " / "). It is part of the Area, NOT a Note.',
+                                'EXAMPLE: Lines "C* PRIMARY BATH/C* ACCENT" then "SHOWER ACCENT & BACKSPLASH ACCENT" then "C* SPECIAL ORDER..." → Area = "PRIMARY BATH / ACCENT / SHOWER ACCENT & BACKSPLASH ACCENT". The middle line is a sub-area, NOT a note.',
+                                'IGNORE lines that are ordering notes rather than areas (e.g. "C* SPECIAL ORDER", "C* STOCK MATERIAL", lines starting with "C* ***", lines starting with "*").',
                                 'Other vendors may use different formats — look for room names, locations, or installation areas associated with the item.',
                                 'Return null if no area/room designation exists for this item.',
                             ]),
@@ -503,7 +570,7 @@ class SyncContentUnderstandingAnalyzer extends Command
                         ],
                         'Notes' => [
                             'type'        => 'string',
-                            'description' => 'All remaining text in this item\'s section that is NOT the product Description and NOT an Area designation (including sub-area clarifications). Copy verbatim in document order. Include ALL of: serial numbers (Serial#), ordering notes, special order notices, material specs, disclaimers, stock/lead time info, quantities per carton, etc. Notes text may appear both BEFORE and AFTER the Area line — capture it all. Each distinct note on its own line. Return null if none.',
+                            'description' => 'All remaining text in this item\'s section that is NOT the product Description and NOT an Area designation (including sub-area clarifications like "SHOWER ACCENT & BACKSPLASH ACCENT", "VANITY WALL", "TUB DECK", etc. — those belong in Area, NOT here). Copy verbatim in document order. Include ALL of: serial numbers (Serial#), ordering notes, special order notices, material specs, disclaimers, stock/lead time info, quantities per carton, etc. Notes text may appear both BEFORE and AFTER the Area line — capture it all. Each distinct note on its own line. Return null if none.',
                             'method'      => 'generate',
                         ],
                         'ETA' => [

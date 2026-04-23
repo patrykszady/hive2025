@@ -125,4 +125,78 @@ class ExpenseAutoMatchControllerExtractPurchaseOrderCandidatesTest extends TestC
 
         $this->assertSame(['PO 999', 'HN 1'], $controller->extractCandidates($expense));
     }
+
+    public function test_extracts_ship_to_street_address_from_raw_content(): void
+    {
+        $controller = new class extends ExpenseAutoMatchController
+        {
+            /**
+             * @return array<int, string>
+             */
+            public function extractCandidates(Expense $expense): array
+            {
+                return $this->extractPurchaseOrderCandidates($expense);
+            }
+        };
+
+        $expense = new Expense();
+
+        // Mimics a Studio 41 / Kohler Store receipt where SHIP TO and SOLD TO contain the
+        // customer delivery address, which should match to the job-site project address.
+        $rawContent = implode("\n", [
+            'SOLD TO:',
+            'LOU & RICK FRIEDMAN',
+            '239 PERTH RD',
+            'CARY, IL 60013',
+            '',
+            'SHIP TO:',
+            'LOU & RICK FRIEDMAN',
+            '239 PERTH RD',
+            'CARY, IL 60013',
+        ]);
+
+        $receipt = new ExpenseReceipts([
+            'receipt_items' => [
+                'purchase_order'    => '',
+                'handwritten_notes' => [],
+                'raw_content'       => $rawContent,
+            ],
+        ]);
+
+        $expense->setRelation('receipts', new Collection([$receipt]));
+
+        // The street address should be extracted once (deduplicated) even though it appears
+        // under both SOLD TO and SHIP TO.
+        $this->assertSame(['239 PERTH RD'], $controller->extractCandidates($expense));
+    }
+
+    public function test_extracts_ship_to_address_when_blank_lines_precede_name(): void
+    {
+        $controller = new class extends ExpenseAutoMatchController
+        {
+            /**
+             * @return array<int, string>
+             */
+            public function extractCandidates(Expense $expense): array
+            {
+                return $this->extractPurchaseOrderCandidates($expense);
+            }
+        };
+
+        $expense = new Expense();
+
+        $rawContent = "SHIP TO:\n\nJANE DOE\n17 MAIN ST\nSPRINGFIELD IL 62701\n";
+
+        $receipt = new ExpenseReceipts([
+            'receipt_items' => [
+                'purchase_order'    => '',
+                'handwritten_notes' => [],
+                'raw_content'       => $rawContent,
+            ],
+        ]);
+
+        $expense->setRelation('receipts', new Collection([$receipt]));
+
+        $this->assertSame(['17 MAIN ST'], $controller->extractCandidates($expense));
+    }
 }

@@ -5,9 +5,12 @@ return [
         'api_key' => env('OPENAI_API_KEY'),
     ],
 
-    'google' => [
-        'custom_search_api_key' => env('GOOGLE_CSE_API_KEY'),
-        'custom_search_cx'     => env('GOOGLE_CSE_ID'),
+    'brave_search' => [
+        'api_key' => env('BRAVE_SEARCH_API_KEY'),
+    ],
+
+    'serpapi' => [
+        'api_key' => env('SERPAPI_KEY'),
     ],
 
     'azure_cu' => [

@@ -602,11 +602,32 @@ class SheetShow extends Component
                 $writer->addRow($emptyRow);
             }
 
-            $writer->addRow(Row::fromValues([$indent('Total Expenses', 0), $fmt($this->generalExpenses())], $grandTotalStyle));
+            // Uncategorized transactions (no expense/check association)
+            $uncatSum = $this->uncategorizedTransactionsSum();
+            if (!$isZero($uncatSum)) {
+                $writer->addRow(Row::fromValues([$indent('Uncategorized', 1)], $boldStyle));
+                foreach ($this->transactions_no_associations as $txn) {
+                    $txnAmount = (float) $txn->amount;
+                    if ($isZero($txnAmount)) { continue; }
+                    $txnName = $txn->plaid_merchant_name
+                        ?: (is_array($txn->details) ? ($txn->details['name'] ?? 'Unknown') : ($txn->details ?: 'Unknown'));
+                    $writer->addRow(Row::fromValues([
+                        $indent($txnName . ' (' . date('m/d/Y', strtotime($txn->transaction_date)) . ')', 2),
+                        $fmt($txnAmount),
+                    ]));
+                }
+                $writer->addRow(Row::fromValues([$indent('Total Uncategorized', 1), $fmt($uncatSum)], $categoryTotalStyle));
+                $writer->addRow($emptyRow);
+            } else {
+                $uncatSum = 0.0;
+            }
+
+            $totalExpenses = $this->generalExpenses() + $uncatSum;
+            $writer->addRow(Row::fromValues([$indent('Total Expenses', 0), $fmt($totalExpenses)], $grandTotalStyle));
             $writer->addRow($emptyRow); // spacer
 
             // ── NET OPERATING INCOME ──
-            $netOperatingIncome = $grossProfit - $this->generalExpenses();
+            $netOperatingIncome = $grossProfit - $totalExpenses;
             $writer->addRow(Row::fromValues(['Net Operating Income', $fmt($netOperatingIncome)], $grandTotalStyle));
             $writer->addRow(Row::fromValues([''])); // spacer
 
@@ -628,7 +649,9 @@ class SheetShow extends Component
 
         $cogsTotal = $this->costOfMaterialsSum() + $this->costOfLaborSum();
         $grossProfit = $this->revenue() - $cogsTotal;
-        $netOperatingIncome = $grossProfit - $this->generalExpenses();
+        $uncatSum = $this->uncategorizedTransactionsSum();
+        $totalExpenses = $this->generalExpenses() + $uncatSum;
+        $netOperatingIncome = $grossProfit - $totalExpenses;
 
         $html = view('pdf.profit-and-loss', [
             'companyName' => $companyName,
@@ -642,7 +665,9 @@ class SheetShow extends Component
             'cogsTotal' => $cogsTotal,
             'grossProfit' => $grossProfit,
             'expenseCategories' => $this->sortedExpenseCategories(),
-            'expensesTotal' => $this->generalExpenses(),
+            'uncategorizedTransactions' => $this->transactions_no_associations,
+            'uncategorizedSum' => $uncatSum,
+            'expensesTotal' => $totalExpenses,
             'netOperatingIncome' => $netOperatingIncome,
             'netIncome' => $netOperatingIncome,
         ])->render();

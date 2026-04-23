@@ -9,6 +9,8 @@ use App\Models\Transaction;
 use App\Models\Receipt;
 use App\Models\ReceiptAccount;
 use App\Models\TransactionBulkMatch;
+use App\Models\User;
+use App\Models\UserVendor;
 use App\Models\Vendor;
 
 use App\Services\NylasService;
@@ -419,6 +421,13 @@ class CompanyEmailController extends Controller
 
     public function fetchReceiptMessages()
     {
+        // Prevent the script from being killed when the HTTP client disconnects
+        // (e.g. browser tab closed, page refresh, proxy timeout). Without this,
+        // PHP silently terminates the process — bypassing catch blocks — leaving
+        // emails stuck in the source folder indefinitely.
+        ignore_user_abort(true);
+        set_time_limit(0);
+
         $grantId = config('nylas.receipts_grant_id');
 
         // Use the configured inbox folder ID (production) or test folder (non-production)
@@ -562,26 +571,34 @@ class CompanyEmailController extends Controller
             }
 
             if (!$companyEmail) {
-                Log::channel('nylas')->error('Unable to resolve CompanyEmail for receipt message', [
+                Log::channel('nylas')->warning('Unable to resolve CompanyEmail for receipt message — will attempt PDF probe with config defaults', [
                     'grant_id' => $grantId,
                     'to_email' => $toEmail,
                     'message_id' => $messageId,
                 ]);
-                continue;
             }
 
             $folderMap = [
-                'Error' => data_get($companyEmail->api_json, 'folders.Error') ?? config('nylas.hive_receipts_error_folder_id'),
-                'Duplicate' => data_get($companyEmail->api_json, 'folders.Duplicates') ?? config('nylas.hive_receipts_duplicate_folder_id'),
-                'Add' => data_get($companyEmail->api_json, 'folders.Add') ?? config('nylas.hive_receipts_need_to_add_folder_id'),
-                'Saved' => data_get($companyEmail->api_json, 'folders.Saved') ?? config('nylas.hive_receipts_saved_folder_id'),
+                'Error' => data_get($companyEmail?->api_json, 'folders.Error') ?? config('nylas.hive_receipts_error_folder_id'),
+                'Duplicate' => data_get($companyEmail?->api_json, 'folders.Duplicates') ?? config('nylas.hive_receipts_duplicate_folder_id'),
+                'Add' => data_get($companyEmail?->api_json, 'folders.Add') ?? config('nylas.hive_receipts_need_to_add_folder_id'),
+                'Saved' => data_get($companyEmail?->api_json, 'folders.Saved') ?? config('nylas.hive_receipts_saved_folder_id'),
             ];
+
+            // Coerce a blank model when no DB record was found so all downstream
+            // ->id / ->vendor_id accesses return null instead of throwing.
+            $companyEmail ??= new CompanyEmail();
 
             // Find Receipt using intelligent matching:
             // 1. from_address can be wildcard like "@stripe.com" (matches any email ending with @stripe.com)
             // 2. from_subject can be partial match (e.g., "AT&T payment processed" matches "AT&T payment processed for account ending in 1733")
             // Strip common email prefixes (Fw:, Fwd:, Re:) that may have been added during forwarding
             $cleanSubject = preg_replace('/^(fw:|fwd:|re:)\s*/i', '', $subject);
+
+            // Preserve the original metadata email before it may be overwritten by body-From fallback.
+            // Used later to detect the belongs-to vendor (e.g. jenn@jpeterson-design.com → vendor 60).
+            $metadataFromEmail = $fromEmail;
+
             $receipt = $this->findMatchingReceipt($fromEmail, $cleanSubject);
 
             // Fallback: if no match and body contains a "From:" line, try extracting the original sender.
@@ -669,6 +686,62 @@ class CompanyEmailController extends Controller
                                     }
                                 }
                             }
+                        }
+
+                        // Fallback: no Receipt config matched, but try all known vendors by name.
+                        // This handles the case where the DB was reset (configs wiped) or the vendor
+                        // simply has no Receipt config yet — the PDF still contains enough info to process.
+                        // PDF attachments forwarded to the receipts inbox are almost always supplier
+                        // invoices / material orders, so default to the material order analyzer.
+                        $materialOrderModel = config('services.azure_cu.analyzer_id_material_order');
+                        if (!$receipt && isset($probeText)) {
+                            $allVendors = Vendor::whereNotNull('business_name')
+                                ->where('business_name', '!=', '')
+                                ->get();
+
+                            foreach ($allVendors as $vendor) {
+                                $name = strtolower(trim($vendor->business_name));
+                                if ($name !== '' && str_contains($probeText, $name)) {
+                                    $receipt = new Receipt([
+                                        'vendor_id' => $vendor->id,
+                                        'options' => [
+                                            'pdf_html' => true,
+                                            'document_model' => $materialOrderModel,
+                                        ],
+                                    ]);
+                                    $attachmentPdfPath = $probePath;
+                                    $attachmentPdfFilename = $probeFilename;
+
+                                    Log::channel('nylas')->info('Receipt matched via PDF vendor name (no Receipt config — material order fallback)', [
+                                        'message_id' => $messageId,
+                                        'vendor_id' => $vendor->id,
+                                        'vendor_name' => $vendor->business_name,
+                                        'document_model' => $materialOrderModel,
+                                        'pdf_filename' => $pdfAttachment['filename'] ?? null,
+                                    ]);
+                                    break;
+                                }
+                            }
+                        }
+
+                        // Last resort: no vendor detected at all — still process the PDF with the
+                        // material order analyzer so OCR data is captured before the email lands in Add.
+                        if (!$receipt && isset($probePath) && Storage::disk('files')->exists($probePath)) {
+                            $receipt = new Receipt([
+                                'vendor_id' => null,
+                                'options' => [
+                                    'pdf_html' => true,
+                                    'document_model' => $materialOrderModel,
+                                ],
+                            ]);
+                            $attachmentPdfPath = $probePath;
+                            $attachmentPdfFilename = $probeFilename;
+
+                            Log::channel('nylas')->info('No vendor detected in PDF — using material order analyzer fallback', [
+                                'message_id' => $messageId,
+                                'document_model' => $materialOrderModel,
+                                'pdf_filename' => $pdfAttachment['filename'] ?? null,
+                            ]);
                         }
 
                         // Clean up probe file if no vendor matched
@@ -995,20 +1068,57 @@ class CompanyEmailController extends Controller
                     $ocr_receipt_data['fields']['raw_content'] ?? '',
                     $receipt->vendor_id // exclude the selling vendor
                 );
+
+                // Fallback: resolve the forwarding email address to a vendor
+                // (e.g. jenn@jpeterson-design.com → user 37 → vendor 60 via user_vendor)
+                $emailDetectedVendorId = $this->detectBelongsToVendorFromEmail(
+                    $metadataFromEmail,
+                    $receipt->vendor_id
+                );
+
                 $effectiveBelongsToVendorId = $detectedBillToVendorId
+                    ?? $emailDetectedVendorId
                     ?? ($receipt_account->belongs_to_vendor_id ?? $companyEmail->vendor_id);
 
-                if ($detectedBillToVendorId && $detectedBillToVendorId !== ($receipt_account->belongs_to_vendor_id ?? null)) {
-                    Log::channel('nylas')->info('Detected bill-to vendor from OCR content', [
+                $detectedVendorId = $detectedBillToVendorId ?? $emailDetectedVendorId;
+                if ($detectedVendorId && $detectedVendorId !== ($receipt_account->belongs_to_vendor_id ?? null)) {
+                    Log::channel('nylas')->info('Detected belongs-to vendor override', [
                         'message_id' => $messageId,
-                        'detected_vendor_id' => $detectedBillToVendorId,
+                        'detected_vendor_id' => $detectedVendorId,
+                        'detection_method' => $detectedBillToVendorId ? 'ocr_bill_to' : 'forwarding_email',
+                        'from_email' => $fromEmail,
                         'default_belongs_to' => $receipt_account->belongs_to_vendor_id ?? null,
                         'receipt_id' => $receipt->id,
                     ]);
                 }
+
+                // When the detected belongs-to vendor differs from the company email owner,
+                // this is a material order (e.g. vendor 1 forwarding a store receipt for a client).
+                // Re-OCR with the material order analyzer to extract Status/ETA/Area fields.
+                if (!$isMaterialOrder && $effectiveBelongsToVendorId !== $companyEmail->vendor_id) {
+                    $isMaterialOrder = true;
+                    $materialOrderModel = config('services.azure_cu.analyzer_id_material_order');
+                    Log::channel('nylas')->info('Upgrading to material order — belongs_to differs from company email vendor', [
+                        'message_id' => $messageId,
+                        'effective_belongs_to' => $effectiveBelongsToVendorId,
+                        'company_email_vendor' => $companyEmail->vendor_id,
+                        'original_model' => $document_model,
+                        'new_model' => $materialOrderModel,
+                        'receipt_id' => $receipt->id,
+                    ]);
+                    $document_model = $materialOrderModel;
+                    $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)
+                        ->extractReceipt($ocr_path, 'material_order', null, 'email', $receipt, $document_model);
+                    if (!isset($ocr_receipt_data['content']) || !is_string($ocr_receipt_data['content'])) {
+                        $ocr_receipt_data['content'] = '';
+                    }
+                }
         
-                // Missing receipt_account.. receipt and company email exist but this pairing does not
-                if (is_null($receipt_account)) {
+                // Missing receipt_account.. receipt and company email exist but this pairing does not.
+                // If we already know who the expense belongs to (via email or OCR detection), we can
+                // still create the expense — receipt_account is only needed as a fallback for that.
+                // Only bail to the Add folder when we have no way to determine belongs_to_vendor_id.
+                if (is_null($receipt_account) && is_null($effectiveBelongsToVendorId)) {
                     // Clean up temp OCR file if it exists
                     if (!empty($ocr_filename)) {
                         $sourcePath = '_temp_ocr/' . $ocr_filename;
@@ -1021,16 +1131,24 @@ class CompanyEmailController extends Controller
                             $messageId,
                             $folderMap['Add'],
                             $grantId,
-                            $companyEmail->id
+                            $companyEmail?->id
                         );
                     } else {
                         Log::channel('nylas')->warning('Missing Add folder configuration when receipt account lookup fails', [
                             'grant_id' => $grantId,
-                            'company_email_id' => $companyEmail->id,
+                            'company_email_id' => $companyEmail?->id,
                             'message_id' => $messageId,
                         ]);
                     }
                     continue;
+                }
+
+                if (is_null($receipt_account)) {
+                    Log::channel('nylas')->info('No receipt_account pairing found — proceeding with detected belongs_to_vendor_id', [
+                        'message_id' => $messageId,
+                        'effective_belongs_to_vendor_id' => $effectiveBelongsToVendorId,
+                        'receipt_vendor_id' => $receipt->vendor_id,
+                    ]);
                 }
 
                 //01-26-2023 pass rest of receipt info to ocr_extract method
@@ -1160,6 +1278,17 @@ class CompanyEmailController extends Controller
                 //confirm expense does not yet exist
                 //1-18-2023 | 9/30/2023 NEED TO ACCOUNT FOR SAME VENDOR, AMOUNT, AND DATE being saved multiple of times
                 //maybe by adding date_TIME to 'date'? or checking time in the expense_receipt_data json?
+
+                Log::channel('nylas')->info('Starting duplicate check and expense creation', [
+                    'message_id' => $messageId,
+                    'receipt_id' => $receipt->id,
+                    'amount' => $amount,
+                    'invoice' => $invoice ?? '',
+                    'date' => $date,
+                    'belongs_to_vendor_id' => $effectiveBelongsToVendorId,
+                    'vendor_id' => $receipt->vendor_id,
+                    'is_material_order' => $isMaterialOrder,
+                ]);
 
                 // Match on invoice number + amount + date range to avoid false positives
                 // (invoice numbers can repeat across different transactions at same vendor)
@@ -1490,6 +1619,17 @@ class CompanyEmailController extends Controller
                                     'message_id' => $messageId,
                                 ]);
                             }
+
+                            Log::channel('nylas')->info('Created new expense from receipt email', [
+                                'expense_id' => $expense->id,
+                                'message_id' => $messageId,
+                                'receipt_id' => $receipt->id,
+                                'amount' => $amount,
+                                'invoice' => $invoice,
+                                'vendor_id' => $receipt->vendor_id,
+                                'belongs_to_vendor_id' => $effectiveBelongsToVendorId,
+                                'is_material_order' => $isMaterialOrder,
+                            ]);
                         }
                     }
                     }
@@ -1525,11 +1665,19 @@ class CompanyEmailController extends Controller
 
                 continue;
             }
-        }        
+        }
+
+        // Queue an auto-match sweep so freshly-created receipt expenses get matched
+        // to their PO/distribution/project without waiting for the 10-minute scheduler.
+        // ShouldBeUnique guards against duplicate dispatches when batches finish back-to-back.
+        \App\Jobs\AutoMatchNoProjectExpenses::dispatch();
     }
 
     public function fetchAutoReceipts()
     {
+        ignore_user_abort(true);
+        set_time_limit(0);
+
         // Fetch company emails with the specified conditions.
         $company_emails = CompanyEmail::withoutGlobalScopes()
             ->whereNotNull('grant_id')
@@ -2112,7 +2260,7 @@ class CompanyEmailController extends Controller
                         $expense_receipt->save();
 
                         if ($isMaterialOrder && !empty($receipt_items['items'])) {
-                            \App\Jobs\ScrapeReceiptItemImages::dispatch($expense_receipt);
+                            \App\Jobs\ScrapeReceiptItemImagesV2::dispatch($expense_receipt);
                         }
 
                         // Move the file to permanent storage
@@ -2174,7 +2322,7 @@ class CompanyEmailController extends Controller
         $expense_receipt->save();
 
         if ($isMaterialOrder && !empty($receiptFields['items'])) {
-            \App\Jobs\ScrapeReceiptItemImages::dispatch($expense_receipt);
+            \App\Jobs\ScrapeReceiptItemImagesV2::dispatch($expense_receipt);
         }
 
         // Perform the move operation with fallback to copy-delete
@@ -3202,13 +3350,9 @@ class CompanyEmailController extends Controller
             return null;
         }
 
-        // Parse "BILL TO:" section — capture the first non-empty line after the label
-        if (!preg_match('/BILL\s*TO\s*:?\s*\n\s*\n?\s*(.+)/i', $rawContent, $match)) {
-            return null;
-        }
-
-        $billToName = trim($match[1]);
-        if ($billToName === '' || is_numeric($billToName)) {
+        // Parse "BILL TO:", "QUOTE TO:", "SOLD TO:", "SHIP TO:", or "ORDER TO:" sections
+        // — capture the first non-empty line after each label, try all matches
+        if (!preg_match_all('/(?:BILL|QUOTE|SOLD|SHIP|ORDER)\s*TO\s*:?\s*\n\s*\n?\s*(.+)/i', $rawContent, $matches)) {
             return null;
         }
 
@@ -3220,34 +3364,64 @@ class CompanyEmailController extends Controller
             return trim(preg_replace('/\s+/', ' ', $name));
         };
 
-        $normalizedBillTo = $normalize($billToName);
-        if ($normalizedBillTo === '') {
-            return null;
-        }
-
         $vendors = Vendor::whereNotNull('business_name')
             ->where('business_name', '!=', '')
             ->get(['id', 'business_name']);
 
-        foreach ($vendors as $vendor) {
-            if ($vendor->id === $excludeVendorId) {
+        // Try each captured name until one resolves to a known vendor
+        foreach ($matches[1] as $billToRaw) {
+            $billToName = trim($billToRaw);
+            if ($billToName === '' || is_numeric($billToName)) {
                 continue;
             }
 
-            $normalizedVendor = $normalize($vendor->business_name);
-            if ($normalizedVendor === '') {
+            $normalizedBillTo = $normalize($billToName);
+            if ($normalizedBillTo === '') {
                 continue;
             }
 
-            if ($normalizedBillTo === $normalizedVendor) {
-                return $vendor->id;
-            }
+            foreach ($vendors as $vendor) {
+                if ($vendor->id === $excludeVendorId) {
+                    continue;
+                }
 
-            if (str_contains($normalizedVendor, $normalizedBillTo) || str_contains($normalizedBillTo, $normalizedVendor)) {
-                return $vendor->id;
+                $normalizedVendor = $normalize($vendor->business_name);
+                if ($normalizedVendor === '') {
+                    continue;
+                }
+
+                if ($normalizedBillTo === $normalizedVendor) {
+                    return $vendor->id;
+                }
+
+                if (str_contains($normalizedVendor, $normalizedBillTo) || str_contains($normalizedBillTo, $normalizedVendor)) {
+                    return $vendor->id;
+                }
             }
         }
 
         return null;
+    }
+
+    /**
+     * Try to resolve a forwarding email address to a vendor via the user_vendor relationship.
+     * e.g. jenn@jpeterson-design.com → user 37 → vendor 60 (J Peterson Design, Inc.)
+     */
+    protected function detectBelongsToVendorFromEmail(string $email, ?int $excludeVendorId = null): ?int
+    {
+        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return null;
+        }
+
+        $user = User::where('email', $email)->first(['id']);
+        if (!$user) {
+            return null;
+        }
+
+        $userVendor = UserVendor::where('user_id', $user->id)
+            ->when($excludeVendorId, fn ($q) => $q->where('vendor_id', '!=', $excludeVendorId))
+            ->first(['vendor_id']);
+
+        return $userVendor?->vendor_id;
     }
 }

@@ -274,6 +274,31 @@
             <tr class="spacer"><td colspan="2"></td></tr>
         @endforeach
 
+        {{-- Uncategorized transactions --}}
+        @if(round((float) $uncategorizedSum, 2) != 0.0)
+            <tr class="indent-1 section-header">
+                <td class="col-label">Uncategorized</td>
+                <td class="col-amount"></td>
+            </tr>
+            @foreach($uncategorizedTransactions as $txn)
+                @php
+                    $txnAmount = round((float) $txn->amount, 2);
+                    $txnName = $txn->plaid_merchant_name
+                        ?: (is_array($txn->details) ? ($txn->details['name'] ?? 'Unknown') : ($txn->details ?: 'Unknown'));
+                @endphp
+                @if($txnAmount == 0.0) @continue @endif
+                <tr class="indent-2">
+                    <td class="col-label">{{ $txnName }} <span style="color:#888;font-size:8pt;">{{ date('m/d/Y', strtotime($txn->transaction_date)) }}</span></td>
+                    <td class="col-amount">{{ number_format($txnAmount, 2) }}</td>
+                </tr>
+            @endforeach
+            <tr class="category-total indent-1">
+                <td class="col-label">Total Uncategorized</td>
+                <td class="col-amount">{{ number_format($uncategorizedSum, 2) }}</td>
+            </tr>
+            <tr class="spacer"><td colspan="2"></td></tr>
+        @endif
+
         <tr class="section-total">
             <td class="col-label"><strong>Total Expenses</strong></td>
             <td class="col-amount">{{ number_format($expensesTotal, 2) }}</td>

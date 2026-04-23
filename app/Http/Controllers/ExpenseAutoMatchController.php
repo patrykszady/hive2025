@@ -309,8 +309,12 @@ class ExpenseAutoMatchController extends Controller
                             }
                         }
 
-                        // Active status code.
-                        if ($code !== 6) {
+                        // Treat any status except Cancelled (10) and VIEW ONLY (11) as
+                        // "work-in-progress" for window qualification.  Projects may go through
+                        // Estimate → Prep → Scheduled without ever being marked Active (6) yet
+                        // still have legitimate expenses placed before or during those phases.
+                        // The score threshold (≥0.70) is the real guard against false matches.
+                        if (in_array($code, [10, 11], true)) {
                             continue;
                         }
 
@@ -1024,6 +1028,24 @@ class ExpenseAutoMatchController extends Controller
             $street = trim($m[1]);
             if ($street !== '' && ! in_array($street, $addresses, true)) {
                 $addresses[] = $street;
+            }
+        }
+
+        // Pattern 3: "SHIP TO:" or "SOLD TO:" followed by optional name line then street address.
+        // Handles multi-page receipts (e.g. Studio 41/Kohler Store) where the customer delivery
+        // address appears under a "SOLD TO:" / "SHIP TO:" label with no explicit "SiteAddress:" key.
+        // We look for a line starting with a house number directly after the label (with one
+        // optional intermediate name line and any number of blank lines in between).
+        if (preg_match_all(
+            '/(?:SHIP|SOLD)\s+TO\s*:[ \t]*\n(?:[ \t]*\n)*(?:[^\d\n][^\n]*\n+)?(\d+\s+\S[^\n]+)/im',
+            $content,
+            $deliveryMatches
+        )) {
+            foreach ($deliveryMatches[1] as $street) {
+                $street = trim($street);
+                if ($street !== '' && ! in_array($street, $addresses, true)) {
+                    $addresses[] = $street;
+                }
             }
         }
 

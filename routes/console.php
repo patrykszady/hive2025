@@ -276,7 +276,7 @@ Schedule::call(function () {
         });
 
     foreach ($receipts as $receipt) {
-        \App\Jobs\ScrapeReceiptItemImages::dispatch($receipt);
+        \App\Jobs\ScrapeReceiptItemImagesV2::dispatch($receipt);
     }
 })->twiceDaily(10, 18)
   ->timezone('America/Chicago')

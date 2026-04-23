@@ -712,6 +712,70 @@ class TransactionController extends Controller
                 }
             }
 
+            // Check-only transactions (expense_id=null but check_id set): categorize the check's expenses
+            $checkOnlyTransactions =
+                Transaction::withoutGlobalScopes()
+                    ->whereNull('deleted_at')
+                    ->whereIn('bank_account_id', $hive_vendor_bank_account_ids)
+                    ->whereNotNull('check_id')
+                    ->whereNull('expense_id')
+                    ->whereNotNull('details')
+                    ->where('created_at', '>=', $cutoff)
+                    ->with(['check.expenses.vendor.category'])
+                    ->get();
+
+            foreach ($checkOnlyTransactions as $transaction) {
+                if (!$transaction->check) { continue; }
+
+                foreach ($transaction->check->expenses as $expense) {
+                    if ($expense->category) { continue; }
+                    if ($expense->created_at?->lt($cutoff)) { continue; }
+
+                    // 1) Vendor category
+                    $expenseVendorCategory = optional($expense->vendor)->category;
+                    if ($expenseVendorCategory) {
+                        if ((int) $expense->category_id !== (int) $expenseVendorCategory->id) {
+                            $expense->category()->associate($expenseVendorCategory);
+                            $expense->save();
+                        }
+                        continue;
+                    }
+
+                    // 2) Plaid category from the check's transaction
+                    $transaction_category = $transaction->details['personal_finance_category']['detailed'] ?? null;
+                    if ($transaction_category) {
+                        $category = $categories->where('detailed', $transaction_category)->first();
+                        if ($category) {
+                            if ((int) $expense->category_id !== (int) $category->id) {
+                                $expense->category()->associate($category);
+                                $expense->save();
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Pass 4a: vendor already has a default category_id — apply directly, no date restriction needed
+            $vendorDirectExpenses =
+                Expense::withoutGlobalScopes()
+                    ->whereNull('deleted_at')
+                    ->where('belongs_to_vendor_id', $hive_vendor->id)
+                    ->where('created_at', '>=', $cutoff)
+                    ->whereDoesntHave('category')
+                    ->whereHas('vendor', function ($q) {
+                        $q->whereNotNull('category_id');
+                    })
+                    ->with('vendor')
+                    ->get();
+
+            foreach ($vendorDirectExpenses as $directExpense) {
+                $directVendorCategoryId = $directExpense->vendor->category_id ?? null;
+                if ($directVendorCategoryId) {
+                    $directExpense->category_id = $directVendorCategoryId;
+                    $directExpense->save();
+                }
+            }
+
             $vendors_expenses =
                 Expense::withoutGlobalScopes()
                     ->whereNull('deleted_at')

@@ -152,8 +152,8 @@
                     // Collect users from the thread's primary client
                     // Only show users whose phone is a thread participant
                     $threadParticipants = $participantPhones;
-                    if ($this->thread->client && $this->thread->client->users->isNotEmpty()) {
-                        foreach ($this->thread->client->users as $user) {
+                    if ($this->thread->client) {
+                        foreach ($this->threadClientUsersFor($this->thread->client) as $user) {
                             $raw = $user->getRawOriginal('cell_phone');
                             if (! $raw) continue;
                             $e164 = $user->routeNotificationForTelnyx();
@@ -185,9 +185,9 @@
                             ->unique();
 
                         foreach ($extraClientIds as $clientId) {
-                            $extraClient = \App\Models\Client::with('users')->find($clientId);
+                            $extraClient = \App\Models\Client::with('users:id,first_name,last_name,cell_phone')->find($clientId);
                             if (! $extraClient) continue;
-                            foreach ($extraClient->users as $user) {
+                            foreach ($this->threadClientUsersFor($extraClient) as $user) {
                                 $raw = $user->getRawOriginal('cell_phone');
                                 if (! $raw) continue;
                                 $e164 = $user->routeNotificationForTelnyx();

@@ -28,7 +28,7 @@
                                         class="shrink-0 cursor-pointer"
                                         wire:click="selectReceiptItem({{ $receipt->id }}, {{ $index }})"
                                     >
-                                        <img src="{{ $line_item['image_url'] }}" alt="{{ $line_item['Description'] ?? '' }}" class="size-10 rounded object-cover bg-zinc-100 dark:bg-zinc-800" loading="lazy" />
+                                        <img src="{{ $line_item['image_url'] }}" alt="{{ $line_item['Description'] ?? '' }}" class="size-10 rounded object-contain bg-white dark:bg-white" loading="lazy" referrerpolicy="no-referrer" />
                                     </button>
                                 @endif
                                 <button
@@ -49,12 +49,12 @@
                                 <span class="transition-opacity transition-colors duration-150 {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) !== true)) ? 'text-gray-300 line-through opacity-50' : '' }}">
                                 @if(isset($receipt->expense->vendor) && $receipt->expense->vendor->sku_search_url)
                                     <flux:link 
-                                        href="{{ $receipt->expense->vendor->sku_search_url . ($line_item['ProductCode'] ?? '') }}" 
+                                        href="{{ $receipt->expense->vendor->sku_search_url . ($line_item['VendorCode'] ?? $line_item['ProductCode'] ?? '') }}" 
                                         external
                                         class="italic {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) !== true)) ? '!text-gray-300' : '' }}"
                                         variant="subtle"
                                     >
-                                        {{$line_item['ProductCode'] ?? ''}}
+                                        {{$line_item['ManufacturerPartNumber'] ?? $line_item['VendorCode'] ?? $line_item['ProductCode'] ?? ''}}
                                     </flux:link>
                                 @elseif(!empty($line_item['product_url']))
                                     <flux:link 
@@ -63,10 +63,10 @@
                                         class="italic {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) !== true)) ? '!text-gray-300' : '' }}"
                                         variant="subtle"
                                     >
-                                        {{$line_item['ProductCode'] ?? ''}}
+                                        {{$line_item['ManufacturerPartNumber'] ?? $line_item['VendorCode'] ?? $line_item['ProductCode'] ?? ''}}
                                     </flux:link>
                                 @else
-                                    <i>{{$line_item['ProductCode'] ?? ''}}</i>
+                                    <i>{{$line_item['ManufacturerPartNumber'] ?? $line_item['VendorCode'] ?? $line_item['ProductCode'] ?? ''}}</i>
                                 @endif
                                 </span>
                             </div>

@@ -9,6 +9,7 @@
                     src="{{ $item['image_url'] }}"
                     alt="{{ $item['Description'] ?? '' }}"
                     class="w-full max-h-64 object-contain"
+                    referrerpolicy="no-referrer"
                 />
             </div>
         @endif
@@ -25,10 +26,24 @@
 
         {{-- Details Grid --}}
         <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-            @if(!empty($item['ProductCode']))
+            @if(!empty($item['Manufacturer']))
                 <div>
-                    <flux:text class="text-zinc-400">SKU</flux:text>
-                    <flux:text class="font-medium">{{ $item['ProductCode'] }}</flux:text>
+                    <flux:text class="text-zinc-400">Manufacturer</flux:text>
+                    <flux:text class="font-medium">{{ $item['Manufacturer'] }}</flux:text>
+                </div>
+            @endif
+
+            @if(!empty($item['ManufacturerPartNumber']))
+                <div>
+                    <flux:text class="text-zinc-400">Part Number</flux:text>
+                    <flux:text class="font-medium">{{ $item['ManufacturerPartNumber'] }}</flux:text>
+                </div>
+            @endif
+
+            @if(!empty($item['VendorCode'] ?? $item['ProductCode'] ?? null))
+                <div>
+                    <flux:text class="text-zinc-400">{{ !empty($item['_vendor_name']) ? $item['_vendor_name'] . ' SKU' : 'SKU' }}</flux:text>
+                    <flux:text class="font-medium">{{ $item['VendorCode'] ?? $item['ProductCode'] }}</flux:text>
                 </div>
             @endif
 

@@ -20,11 +20,21 @@
                     @enderror
                 </flux:field>
 
+                @if ($clientId && count($recipientPresetOptions) > 0)
+                    <flux:field>
+                        <flux:select label="Conversation" wire:model.live="recipientPreset" variant="listbox" placeholder="Choose recipients...">
+                            @foreach($recipientPresetOptions as $option)
+                                <flux:select.option value="{{ $option['value'] }}">{{ $option['label'] }}</flux:select.option>
+                            @endforeach
+                        </flux:select>
+                    </flux:field>
+                @endif
+
                 {{-- Existing thread warning --}}
                 @if ($existingThreadId)
                     <flux:callout variant="warning" icon="exclamation-triangle">
                         <flux:callout.heading>Thread already exists</flux:callout.heading>
-                        <flux:callout.text>A message thread already exists for this client.</flux:callout.text>
+                        <flux:callout.text>A message thread already exists for this participant group.</flux:callout.text>
                         <x-slot:actions>
                             <flux:button size="sm" variant="primary" wire:click="goToExistingThread">
                                 Go to Thread

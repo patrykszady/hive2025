@@ -361,7 +361,7 @@ class ReceiptController extends Controller
                                 $receiptItems[$itemIdx]['Quantity'] = $item['itemQuantity'];
                                 $receiptItems[$itemIdx]['TotalPrice'] = $item['itemSubTotal']['amount'] ?? 0.00;
                                 $receiptItems[$itemIdx]['Description'] = $item['title'];
-                                $receiptItems[$itemIdx]['ProductCode'] = $item['asin'];
+                                $receiptItems[$itemIdx]['VendorCode'] = $item['asin'];
                             }
 
                             $receiptData = [
@@ -398,7 +398,7 @@ class ReceiptController extends Controller
                         $items[$items_key]['Quantity'] = $item['itemQuantity'];
                         $items[$items_key]['TotalPrice'] = $item['itemSubTotal']['amount'] ?? 0.00;
                         $items[$items_key]['Description'] = $item['title'];
-                        $items[$items_key]['ProductCode'] = $item['asin'];
+                        $items[$items_key]['VendorCode'] = $item['asin'];
                     }
 
                     $charges = $this->formatAmazonCharges($order['charges']);
@@ -556,7 +556,7 @@ class ReceiptController extends Controller
                         $items[$transaction_key]['Quantity'] = $item['itemQuantity'];
                         $items[$transaction_key]['TotalPrice'] = $item['totalAmount']['amount'];
                         $items[$transaction_key]['Description'] = $item['productTitle'];
-                        $items[$transaction_key]['ProductCode'] = $item['asin'];
+                        $items[$transaction_key]['VendorCode'] = $item['asin'];
                     }
 
                     //CHARGES
@@ -822,15 +822,50 @@ class ReceiptController extends Controller
                 }
 
                 $formattedItems[$key]['Description'] = $description;
-                $formattedItems[$key]['ProductCode']  = $this->sanitizeProductCode($line['ProductCode']['valueString'] ?? $line['ItemNumber']['valueString'] ?? $line['ItemNumber']['content'] ?? null);
+                $formattedItems[$key]['VendorCode']  = $this->sanitizeProductCode($line['VendorCode']['valueString'] ?? $line['ProductCode']['valueString'] ?? $line['ItemNumber']['valueString'] ?? $line['ItemNumber']['content'] ?? null);
 
-                // Strip product code and return-policy indicators (e.g. <A>) from description
-                if ($formattedItems[$key]['Description'] && $formattedItems[$key]['ProductCode']) {
-                    $formattedItems[$key]['Description'] = trim(str_replace($formattedItems[$key]['ProductCode'], '', $formattedItems[$key]['Description']));
+                // Strip vendor code and return-policy indicators (e.g. <A>) from description
+                if ($formattedItems[$key]['Description'] && $formattedItems[$key]['VendorCode']) {
+                    $formattedItems[$key]['Description'] = trim(str_replace($formattedItems[$key]['VendorCode'], '', $formattedItems[$key]['Description']));
                 }
                 if ($formattedItems[$key]['Description']) {
                     $formattedItems[$key]['Description'] = trim(preg_replace('/\s*<[A-Z]>\s*/i', ' ', $formattedItems[$key]['Description']));
                 }
+
+                // ── Manufacturer & manufacturer part number ──────────────────
+                // Prefer values extracted directly by Azure CU (from schema fields).
+                // Fall back to regex when Azure returns null — many material-order
+                // descriptions embed both inline, e.g.:
+                //   "KOHLER K-8304-KS-NA UNIVERSAL RITE-TEMP PB VALVE KIT, STOP"
+                //   "AMERICAN STANDARD T14238-RB COLONIAL SHOWER VALVE TRIM"
+                $manufacturer  = $line['Manufacturer']['valueString'] ?? null;
+                $mfrPartNumber = $line['ManufacturerPartNumber']['valueString'] ?? null;
+
+                if (($manufacturer === null || $mfrPartNumber === null) && $formattedItems[$key]['Description']) {
+                    if (preg_match(
+                        '/^([A-Z][A-Z\s&\.]*?)\s+([A-Z]{1,6}-[A-Z0-9][A-Z0-9\-]*)(?=\s|$)/u',
+                        $formattedItems[$key]['Description'],
+                        $mfrMatch
+                    )) {
+                        $candidateMfr  = trim($mfrMatch[1]);
+                        $candidatePart = trim($mfrMatch[2]);
+                        // Brand must contain only uppercase letters, spaces, & or .
+                        // Part number must contain at least one digit — this rejects
+                        // descriptive hyphenated terms like "ROUGH-IN", "RITE-TEMP",
+                        // "TWO-HANDLE" that are not actually SKUs. Real manufacturer
+                        // part numbers (e.g. "K-8304-KS-NA", "T14238-RB") always
+                        // contain digits.
+                        if ($candidateMfr !== ''
+                            && preg_match('/^[A-Z][A-Z\s&\.]*$/', $candidateMfr)
+                            && preg_match('/\d/', $candidatePart)
+                        ) {
+                            $manufacturer  = $manufacturer  ?? $candidateMfr;
+                            $mfrPartNumber = $mfrPartNumber ?? $candidatePart;
+                        }
+                    }
+                }
+                $formattedItems[$key]['Manufacturer']           = $manufacturer;
+                $formattedItems[$key]['ManufacturerPartNumber'] = $mfrPartNumber;
 
                 if (isset($line['TotalPrice'])) {
                     $formattedItems[$key]['TotalPrice'] = $this->extractCurrencyAmount($line['TotalPrice']);
@@ -857,8 +892,8 @@ class ReceiptController extends Controller
                         // Parse strings like "2ea", "lea", "10sf", "5pc"
                         if (preg_match('/^([lI1-9]\d*)\s*([a-zA-Z]{2,3})$/i', $qtyRaw, $qm)) {
                             $numPart = $qm[1];
-                            // OCR misreads "1" as "l" or "I"
-                            if ($numPart === 'l' || $numPart === 'I') {
+                            // OCR misreads "1" as "l", "L", "I", or "i"
+                            if (in_array(strtolower($numPart), ['l', 'i'], true)) {
                                 $numPart = '1';
                             }
                             $formattedItems[$key]['Quantity'] = (int) $numPart;
@@ -888,6 +923,20 @@ class ReceiptController extends Controller
                     } elseif (isset($line['Unit']['valueString'])) {
                         $formattedItems[$key]['Unit'] = strtoupper($line['Unit']['valueString']);
                     }
+                }
+
+                // Normalise OCR-mangled unit codes.
+                // "1ea" in a small font is commonly read as "1 LEA" (the digit bleeds into the
+                // unit, turning "ea" → "lea"). Map known OCR artifacts to their canonical forms.
+                $unitNormalizeMap = [
+                    'LEA' => 'EA',
+                    'LSF' => 'SF',
+                    'LLF' => 'LF',
+                    'LPC' => 'PC',
+                    'LPR' => 'PR',
+                ];
+                if (isset($formattedItems[$key]['Unit'], $unitNormalizeMap[$formattedItems[$key]['Unit']])) {
+                    $formattedItems[$key]['Unit'] = $unitNormalizeMap[$formattedItems[$key]['Unit']];
                 }
 
                 // Extract area/room designation from material order analyzer
@@ -994,6 +1043,24 @@ class ReceiptController extends Controller
             $amount = $expenseAmount;
         }
 
+        // ── 11b. Reconstruct total from balance + deposit ─────────────
+        // Some material-order PDFs (e.g. Studio 41) show "Amount Due" (the
+        // remaining balance after prior payments) as the last prominent number.
+        // Azure CU picks that up as TotalAmount, which is wrong.  When a
+        // deposit (Payments to Date) and a BalanceDue are present and their
+        // sum is significantly larger than the OCR-extracted amount, reconstruct:
+        // total = BalanceDue + |Deposit|.
+        if ($balanceDue !== null && $deposit !== null && $deposit != 0) {
+            $reconstructed = round($balanceDue + abs($deposit), 2);
+            if ($reconstructed > 0 && ($amount === null || abs($reconstructed - ($amount ?? 0)) > 1.00)) {
+                $amount  = $reconstructed;
+                // Recalculate subtotal if current one looks wrong (≤ 0 or suspicious).
+                if ($subtotal === null || $subtotal <= 0) {
+                    $subtotal = round($reconstructed - ($totalTax ?? 0) - ($shipping ?? 0), 2);
+                }
+            }
+        }
+
         if ($amount === null && $subtotal === null) {
             return ['error' => true];
         }
@@ -1037,6 +1104,7 @@ class ReceiptController extends Controller
             $formattedItems = $this->supplementLineItemsFromContent($formattedItems, (string) ($content ?? ''), $subtotal);
             $formattedItems = $this->supplementQuantitiesFromContent($formattedItems, (string) ($content ?? ''));
             $formattedItems = $this->deduplicateLineItems($formattedItems);
+            $formattedItems = $this->reorderItemsByContentPosition($formattedItems, (string) ($rawContent ?? ''));
         }
 
         // If shipping is already baked into the subtotal, subtract it so the
@@ -1050,10 +1118,12 @@ class ReceiptController extends Controller
             }
         }
 
-        // Misc fees = gap between total and (subtotal + tax + tip + shipping + deposit)
+        // Misc fees = gap between total and (subtotal + tax + tip + shipping).
+        // Deposit represents prior payments already received (not a fee), so
+        // it is excluded from this calculation.
         $miscFees = null;
         if ($amount !== null && $subtotal !== null) {
-            $knownSum = $subtotal + ($totalTax ?? 0) + ($tip ?? 0) + ($shipping ?? 0) + ($deposit ?? 0);
+            $knownSum = $subtotal + ($totalTax ?? 0) + ($tip ?? 0) + ($shipping ?? 0);
             $gap = round($amount - $knownSum, 2);
             if ($gap > 0.004) {
                 $miscFees = $gap;
@@ -1119,7 +1189,14 @@ class ReceiptController extends Controller
             }
 
             if (isset($field['valueNumber'])) {
-                return is_numeric($field['valueNumber']) ? (float) $field['valueNumber'] : $this->parseAmountFromString((string) $field['valueNumber']);
+                $num = is_numeric($field['valueNumber']) ? (float) $field['valueNumber'] : $this->parseAmountFromString((string) $field['valueNumber']);
+                // Azure CU returns valueNumber as a positive float even for parenthesized negatives
+                // (e.g. return receipts that show "(23.35)"). Check content for the parentheses sign.
+                $contentStr = $field['content'] ?? null;
+                if ($num !== null && $num > 0 && is_string($contentStr) && preg_match('/^\s*\(\s*[\d,]+\.\d{2}\s*\)\s*$/', $contentStr)) {
+                    $num = -$num;
+                }
+                return $num;
             }
 
             if (isset($field['valueString'])) {
@@ -1444,7 +1521,7 @@ class ReceiptController extends Controller
                 continue;
             }
 
-            $code = trim((string) ($item['ProductCode'] ?? ''));
+            $code = trim((string) ($item['VendorCode'] ?? $item['ProductCode'] ?? ''));
             $qty = (float) ($item['Quantity'] ?? 0);
             $total = (float) ($item['TotalPrice'] ?? 0);
             $existingSignatures[$code . '|' . $qty . '|' . $total] = true;
@@ -1483,7 +1560,7 @@ class ReceiptController extends Controller
 
             $items[] = [
                 'Description' => $description,
-                'ProductCode' => $productCode,
+                'VendorCode' => $productCode,
                 'TotalPrice' => $totalPrice,
                 'Quantity' => $quantity,
                 'Price' => $price ?? $totalPrice,
@@ -1605,7 +1682,7 @@ class ReceiptController extends Controller
 
             $normalized[] = array_merge($item, [
                 'Description' => $item['Description'] ?? null,
-                'ProductCode' => $item['ProductCode'] ?? null,
+                'VendorCode' => $item['VendorCode'] ?? $item['ProductCode'] ?? null,
                 'TotalPrice' => $item['TotalPrice'] ?? null,
                 'Quantity' => $item['Quantity'] ?? 1,
                 'Price' => $item['Price'] ?? ($item['TotalPrice'] ?? null),
@@ -1616,7 +1693,7 @@ class ReceiptController extends Controller
         $seen = [];
         $deduped = [];
         foreach ($normalized as $item) {
-            $code = trim((string) ($item['ProductCode'] ?? ''));
+            $code = trim((string) ($item['VendorCode'] ?? $item['ProductCode'] ?? ''));
             $qty = (string) ($item['Quantity'] ?? '');
             $total = (string) ($item['TotalPrice'] ?? '');
             $sig = $code . '|' . $qty . '|' . $total;
@@ -1632,7 +1709,7 @@ class ReceiptController extends Controller
         // Second pass: if a no-code row matches qty+total of a SKU row, keep the SKU row only
         $final = [];
         foreach ($deduped as $index => $item) {
-            $code = trim((string) ($item['ProductCode'] ?? ''));
+            $code = trim((string) ($item['VendorCode'] ?? $item['ProductCode'] ?? ''));
             if ($code !== '') {
                 $final[] = $item;
                 continue;
@@ -1647,7 +1724,7 @@ class ReceiptController extends Controller
                     continue;
                 }
 
-                $otherCode = trim((string) ($other['ProductCode'] ?? ''));
+                $otherCode = trim((string) ($other['VendorCode'] ?? $other['ProductCode'] ?? ''));
                 if ($otherCode === '') {
                     continue;
                 }
@@ -1667,6 +1744,50 @@ class ReceiptController extends Controller
         }
 
         return array_values($final);
+    }
+
+    /**
+     * Re-order items to match their appearance in the raw OCR content.
+     * Azure CU structured extraction can return items in a different order
+     * than the PDF (e.g. grouping by quantity). This uses each item's
+     * VendorCode position in rawContent to restore the original document order.
+     */
+    private function reorderItemsByContentPosition(array $items, string $rawContent): array
+    {
+        if ($rawContent === '' || count($items) < 2) {
+            return $items;
+        }
+
+        $positions = [];
+        foreach ($items as $i => $item) {
+            $code = trim((string) ($item['VendorCode'] ?? $item['ProductCode'] ?? ''));
+            if ($code !== '') {
+                $pos = strpos($rawContent, $code);
+                $positions[$i] = $pos !== false ? $pos : PHP_INT_MAX;
+            } else {
+                // Items without a VendorCode keep their relative position
+                $positions[$i] = PHP_INT_MAX;
+            }
+        }
+
+        // Only reorder if at least 2 items have a known position
+        $knownCount = count(array_filter($positions, fn ($p) => $p < PHP_INT_MAX));
+        if ($knownCount < 2) {
+            return $items;
+        }
+
+        // Stable sort by content position (use original index as tiebreaker)
+        $indexed = [];
+        foreach ($items as $i => $item) {
+            $indexed[] = ['idx' => $i, 'pos' => $positions[$i], 'item' => $item];
+        }
+
+        usort($indexed, function ($a, $b) {
+            $cmp = $a['pos'] <=> $b['pos'];
+            return $cmp !== 0 ? $cmp : $a['idx'] <=> $b['idx'];
+        });
+
+        return array_column($indexed, 'item');
     }
 
     private function extractTotalFromContent(string $content): ?float
@@ -1735,7 +1856,7 @@ class ReceiptController extends Controller
     private function normalizeMaterialOrderOcr(array $items, string $rawContent = ''): array
     {
         // ── A. Merge continuation rows ─────────────────────────────────
-        // The CU analyzer emits continuation entries (no ProductCode, no TotalPrice)
+        // The CU analyzer emits continuation entries (no VendorCode, no TotalPrice)
         // that contain Description fragments, Area tags, and Notes for a parent item.
         // Continuation entries may have a LineNumber matching the parent item (for cross-page)
         // or appear immediately after the parent (for same-page).
@@ -1747,7 +1868,7 @@ class ReceiptController extends Controller
         $orphanedLineNumbers = []; // LineNumbers from continuation/phantom rows for reassignment
 
         foreach ($items as $item) {
-            $hasCode  = isset($item['ProductCode']) && trim((string) $item['ProductCode']) !== '';
+            $hasCode  = !empty($item['VendorCode']) || !empty($item['ProductCode']);
             $hasPrice = isset($item['TotalPrice']) && $item['TotalPrice'] !== null && $item['TotalPrice'] > 0;
             $hasDesc  = isset($item['Description']) && trim((string) $item['Description']) !== '';
             $hasArea  = !empty($item['Area']);
@@ -1840,7 +1961,7 @@ class ReceiptController extends Controller
         $items = array_values($merged);
 
         // ── A2. Copy notes between stacked same-SKU items ────────────
-        // When consecutive items share the same ProductCode (e.g. two rows of
+        // When consecutive items share the same VendorCode (e.g. two rows of
         // CAEPOER1224R under LINE 0040/0050), they share the same notes
         // (stock info, per-carton quantities, serial#, etc.). The CU model
         // often assigns the full notes to only one of them. Copy the more
@@ -1849,8 +1970,8 @@ class ReceiptController extends Controller
             $curr = $items[$i];
             $next = $items[$i + 1];
 
-            $currCode = trim((string) ($curr['ProductCode'] ?? ''));
-            $nextCode = trim((string) ($next['ProductCode'] ?? ''));
+            $currCode = trim((string) ($curr['VendorCode'] ?? $curr['ProductCode'] ?? ''));
+            $nextCode = trim((string) ($next['VendorCode'] ?? $next['ProductCode'] ?? ''));
 
             if ($currCode === '' || $currCode !== $nextCode) {
                 continue;
@@ -1907,7 +2028,7 @@ class ReceiptController extends Controller
         // quantities), copy the most detailed area from a sibling.
         $areaByCode = [];
         foreach ($items as &$item) {
-            $code = trim((string) ($item['ProductCode'] ?? ''));
+            $code = trim((string) ($item['VendorCode'] ?? $item['ProductCode'] ?? ''));
             if ($code === '') continue;
             if (!empty($item['Area'])) {
                 // Keep the most detailed area (most parts) across siblings
@@ -1918,7 +2039,7 @@ class ReceiptController extends Controller
         }
         unset($item);
         foreach ($items as &$item) {
-            $code = trim((string) ($item['ProductCode'] ?? ''));
+            $code = trim((string) ($item['VendorCode'] ?? $item['ProductCode'] ?? ''));
             if ($code !== '' && isset($areaByCode[$code])) {
                 // Use sibling's area when ours is empty or less detailed
                 if (empty($item['Area']) || count($item['Area']) < count($areaByCode[$code])) {
@@ -1928,9 +2049,16 @@ class ReceiptController extends Controller
         }
         unset($item);
 
-        // ── E. Sort by LineNumber ──────────────────────────────────────
+        // ── E. Stable sort by LineNumber ───────────────────────────────
         // Items with a LineNumber come first (sorted numerically),
-        // items without a LineNumber go to the end (preserving relative order).
+        // items without a LineNumber go to the end (preserving original order).
+        // PHP's usort is not stable, so we use an index tie-breaker to preserve
+        // the original document order for items that compare equally.
+        foreach ($items as $i => &$tagItem) {
+            $tagItem['_orig_idx'] = $i;
+        }
+        unset($tagItem);
+
         usort($items, function ($a, $b) {
             $aLn = trim((string) ($a['LineNumber'] ?? ''));
             $bLn = trim((string) ($b['LineNumber'] ?? ''));
@@ -1938,12 +2066,21 @@ class ReceiptController extends Controller
             $bHas = $bLn !== '';
 
             if ($aHas && $bHas) {
-                return (int) $aLn <=> (int) $bLn;
+                $cmp = (int) $aLn <=> (int) $bLn;
+                if ($cmp !== 0) {
+                    return $cmp;
+                }
+                return $a['_orig_idx'] <=> $b['_orig_idx'];
             }
             if ($aHas && !$bHas) return -1;
             if (!$aHas && $bHas) return 1;
-            return 0;
+            return $a['_orig_idx'] <=> $b['_orig_idx'];
         });
+
+        foreach ($items as &$cleanItem) {
+            unset($cleanItem['_orig_idx']);
+        }
+        unset($cleanItem);
 
         return $items;
     }
@@ -1981,11 +2118,9 @@ class ReceiptController extends Controller
         }
 
         foreach ($items as &$item) {
-            $code = trim((string) ($item['ProductCode'] ?? ''));
+            $code = trim((string) ($item['VendorCode'] ?? $item['ProductCode'] ?? ''));
             $unitPrice = (float) ($item['Price'] ?? 0);
             $totalPrice = (float) ($item['TotalPrice'] ?? 0);
-
-            // Method 1: Arithmetic validation (most reliable — prices have >0.9 confidence)
             if ($unitPrice > 0 && $totalPrice > 0) {
                 $calcQty = $totalPrice / $unitPrice;
                 $roundedQty = (int) round($calcQty);

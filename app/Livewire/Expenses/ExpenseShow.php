@@ -237,8 +237,18 @@ class ExpenseShow extends Component
             return false;
         }
 
-        // Compare totals as floats
-        return (float) ($receipt->receipt_items['total'] ?? 0) !== (float) $this->expense->amount;
+        $receiptTotal  = (float) ($receipt->receipt_items['total'] ?? 0);
+        $expenseAmount = (float) $this->expense->amount;
+
+        // When a deposit/balance_due structure is present and the expense amount
+        // matches the balance due, the expense correctly represents the final
+        // payment — not a mismatch.
+        $balanceDue = $receipt->receipt_items['balance_due'] ?? null;
+        if ($balanceDue !== null && abs((float) $balanceDue - $expenseAmount) < 0.02) {
+            return false;
+        }
+
+        return abs($receiptTotal - $expenseAmount) >= 0.02;
     }
 
     #[Title('Expense')]

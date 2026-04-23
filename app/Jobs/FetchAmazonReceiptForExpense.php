@@ -137,7 +137,7 @@ class FetchAmazonReceiptForExpense implements ShouldQueue
                 'Quantity' => $item['itemQuantity'],
                 'TotalPrice' => $item['itemSubTotal']['amount'] ?? 0.00,
                 'Description' => $item['title'],
-                'ProductCode' => $item['asin'],
+                'VendorCode' => $item['asin'],
             ];
         }
 

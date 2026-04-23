@@ -20,6 +20,11 @@ class SmsNewThread extends Component
 
     public ?int $existingThreadId = null;
 
+    public ?string $recipientPreset = null;
+
+    /** @var array<int, array{value: string, label: string, recipients: array<int, array{number: string, display: string, label: string}>, existingThreadId: ?int}> */
+    public array $recipientPresetOptions = [];
+
     /** @var array<int, array{number: string, display: string, label: string}> */
     public array $recipients = [];
 
@@ -32,13 +37,13 @@ class SmsNewThread extends Component
 
     public function open(): void
     {
-        $this->reset(['clientId', 'message', 'existingThreadId', 'recipients', 'newNumber']);
+        $this->reset(['clientId', 'message', 'existingThreadId', 'recipientPreset', 'recipientPresetOptions', 'recipients', 'newNumber']);
         $this->showModal = true;
     }
 
     public function openWithPhone(string $phone): void
     {
-        $this->reset(['clientId', 'message', 'existingThreadId', 'recipients', 'newNumber']);
+        $this->reset(['clientId', 'message', 'existingThreadId', 'recipientPreset', 'recipientPresetOptions', 'recipients', 'newNumber']);
         $this->newNumber = $phone;
         $this->addNumber();
         $this->showModal = true;
@@ -47,17 +52,11 @@ class SmsNewThread extends Component
     public function updatedClientId(): void
     {
         $this->existingThreadId = null;
+        $this->recipientPreset = null;
+        $this->recipientPresetOptions = [];
+        $this->recipients = [];
 
         if (! $this->clientId) {
-            return;
-        }
-
-        // Check if a thread already exists for this client
-        $existing = SmsGroupThread::where('client_id', $this->clientId)->first();
-        if ($existing) {
-            $this->existingThreadId = $existing->id;
-            $this->message = '';
-
             return;
         }
 
@@ -67,20 +66,179 @@ class SmsNewThread extends Component
             return;
         }
 
-        // Auto-add client phone numbers to recipients list
-        $this->addClientPhoneNumbers($client);
+        $existingClientThreads = SmsGroupThread::query()
+            ->where('client_id', $client->id)
+            ->get(['id', 'participants']);
 
-        $firstNames = $client->users
-            ->pluck('first_name')
+        $this->recipientPresetOptions = $this->buildRecipientPresetOptions($client->users, $existingClientThreads);
+
+        if (! empty($this->recipientPresetOptions)) {
+            $defaultOption = collect($this->recipientPresetOptions)
+                ->sortByDesc(fn (array $option): int => count($option['recipients']))
+                ->first();
+
+            if (is_array($defaultOption)) {
+                $this->recipientPreset = $defaultOption['value'];
+                $this->applyRecipientPreset($this->recipientPreset);
+            }
+        } else {
+            $this->addClientPhoneNumbers($client);
+        }
+
+        $this->setDefaultMessageFromRecipients($client);
+    }
+
+    public function updatedRecipientPreset(): void
+    {
+        $this->applyRecipientPreset($this->recipientPreset);
+    }
+
+    /**
+     * @param  iterable<User>  $users
+     * @param  iterable<SmsGroupThread>  $threads
+     * @return array<int, array{value: string, label: string, recipients: array<int, array{number: string, display: string, label: string}>, existingThreadId: ?int}>
+     */
+    public function buildRecipientPresetOptions(iterable $users, iterable $threads = []): array
+    {
+        $recipientEntries = collect($users)
+            ->map(fn (User $user): ?array => $this->buildRecipientEntryFromUser($user))
+            ->filter()
+            ->values();
+
+        if ($recipientEntries->isEmpty()) {
+            return [];
+        }
+
+        $options = [];
+
+        foreach ($recipientEntries as $entry) {
+            $phones = [$entry['number']];
+            $signature = $this->participantSignature($phones);
+
+            $options[] = [
+                'value' => $signature,
+                'label' => $entry['label'] !== '' ? $entry['label'] : $entry['display'],
+                'recipients' => [$entry],
+                'existingThreadId' => $this->resolveExistingThreadIdForParticipants($threads, $phones),
+            ];
+        }
+
+        if ($recipientEntries->count() > 1) {
+            $groupRecipients = $recipientEntries->all();
+            $groupPhones = $recipientEntries->pluck('number')->all();
+            $groupSignature = $this->participantSignature($groupPhones);
+            $groupLabel = $recipientEntries
+                ->pluck('label')
+                ->filter()
+                ->join(', ', ' & ');
+
+            $options[] = [
+                'value' => $groupSignature,
+                'label' => $groupLabel !== '' ? $groupLabel : 'Group',
+                'recipients' => $groupRecipients,
+                'existingThreadId' => $this->resolveExistingThreadIdForParticipants($threads, $groupPhones),
+            ];
+        }
+
+        return collect($options)
+            ->unique('value')
+            ->values()
+            ->all();
+    }
+
+    private function applyRecipientPreset(?string $value): void
+    {
+        if (! $value) {
+            return;
+        }
+
+        $option = collect($this->recipientPresetOptions)
+            ->firstWhere('value', $value);
+
+        if (! is_array($option)) {
+            return;
+        }
+
+        $this->recipients = $option['recipients'];
+        $this->existingThreadId = $option['existingThreadId'];
+
+        if (! $this->existingThreadId && $this->message === '') {
+            $this->message = "Hi,\n" . GroupSmsService::START_CONSENT_TEXT;
+        }
+    }
+
+    private function buildRecipientEntryFromUser(User $user): ?array
+    {
+        $rawPhone = $user->getRawOriginal('cell_phone');
+
+        if (! is_string($rawPhone) || $rawPhone === '') {
+            $rawPhone = (string) ($user->cell_phone ?? '');
+        }
+
+        if (! is_string($rawPhone) || $rawPhone === '') {
+            return null;
+        }
+
+        $e164 = GroupSmsService::formatE164($rawPhone);
+        $label = trim(implode(' ', array_filter([
+            (string) ($user->first_name ?? ''),
+            (string) ($user->last_name ?? ''),
+        ])));
+
+        return [
+            'number' => $e164,
+            'display' => $this->formatDisplay($rawPhone),
+            'label' => $label,
+        ];
+    }
+
+    /**
+     * @param  iterable<SmsGroupThread>  $threads
+     * @param  array<int, string>  $phones
+     */
+    private function resolveExistingThreadIdForParticipants(iterable $threads, array $phones): ?int
+    {
+        $targetSignature = $this->participantSignature($phones);
+
+        foreach ($threads as $thread) {
+            $threadParticipants = $thread->participants;
+            if (! is_array($threadParticipants)) {
+                continue;
+            }
+
+            if ($this->participantSignature($threadParticipants) === $targetSignature) {
+                return $thread->id;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<int, string>  $phones
+     */
+    private function participantSignature(array $phones): string
+    {
+        return collect($phones)
+            ->map(fn (string $phone): string => GroupSmsService::formatE164($phone))
+            ->unique()
+            ->sort()
+            ->implode('|');
+    }
+
+    private function setDefaultMessageFromRecipients(Client $client): void
+    {
+        $recipientNames = collect($this->recipients)
+            ->pluck('label')
             ->filter()
             ->unique()
             ->join(', ', ' & ');
 
-        if ($firstNames === '') {
-            $firstNames = $client->name;
+        if ($recipientNames === '') {
+            $recipientNames = $client->name;
         }
 
-        $this->message = "Hi {$firstNames},\n" . GroupSmsService::START_CONSENT_TEXT;
+        $this->message = "Hi {$recipientNames},\n" . GroupSmsService::START_CONSENT_TEXT;
     }
 
     /**
@@ -246,13 +404,6 @@ class SmsNewThread extends Component
 
     public function send(GroupSmsService $smsService): void
     {
-        // Double-check no existing thread for the selected client
-        if ($this->clientId && SmsGroupThread::where('client_id', $this->clientId)->exists()) {
-            $this->addError('clientId', 'A thread already exists for this client.');
-
-            return;
-        }
-
         $this->validate([
             'clientId' => 'nullable|exists:clients,id',
             'message' => 'required|string|max:1600',
@@ -268,6 +419,25 @@ class SmsNewThread extends Component
             $this->addError('newNumber', 'Add at least one phone number.');
 
             return;
+        }
+
+        if ($this->clientId) {
+            $existingThread = SmsGroupThread::query()->where('client_id', $this->clientId);
+
+            foreach ($phones as $phone) {
+                $existingThread->whereJsonContains('participants', $phone);
+            }
+
+            $existingThread = $existingThread
+                ->whereJsonLength('participants', count($phones))
+                ->first();
+
+            if ($existingThread) {
+                $this->existingThreadId = $existingThread->id;
+                $this->addError('clientId', 'A thread already exists for this participant group.');
+
+                return;
+            }
         }
 
         $thread = $smsService->sendNewGroup($phones, $this->message, null, $this->clientId, auth()->id(), auth()->user()->vendor?->id);

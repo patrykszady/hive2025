@@ -180,7 +180,7 @@ class ReOcrReceipts extends Command
                 $data['items'] = $fields['items'];
 
                 foreach (['subtotal', 'total', 'total_tax', 'taxes', 'tip', 'misc_fees', 'deposit', 'shipping', 'balance_due', 'transaction_date', 'merchant_name', 'invoice_number', 'purchase_order', 'handwritten_notes', 'payment_methods', 'raw_content'] as $key) {
-                    if (array_key_exists($key, $fields) && $fields[$key] !== null) {
+                    if (array_key_exists($key, $fields)) {
                         $data[$key] = $fields[$key];
                     }
                 }
@@ -395,20 +395,39 @@ class ReOcrReceipts extends Command
         $oldItems = $data['items'] ?? [];
         $newItems = $fields['items'] ?? [];
 
-        // Preserve scraped image_url / product_url from old items by matching on ProductCode
+        // Preserve scraped image_url / product_url from old items. Match on
+        // VendorCode first (most reliable), then fall back to Description
+        // (so a transient analyzer regression that drops VendorCode for a
+        // single line doesn't cost us the previously-resolved URL/image).
         $oldByCode = [];
+        $oldByDesc = [];
         foreach ($oldItems as $old) {
-            $code = $old['ProductCode'] ?? null;
-            if ($code && (!empty($old['image_url']) || !empty($old['product_url']))) {
+            $hasMedia = ! empty($old['image_url']) || ! empty($old['product_url']);
+            if (! $hasMedia) {
+                continue;
+            }
+            $code = $old['VendorCode'] ?? $old['ProductCode'] ?? null;
+            if ($code) {
                 $oldByCode[$code] = $old;
+            }
+            $desc = trim((string) ($old['Description'] ?? ''));
+            if ($desc !== '') {
+                $oldByDesc[$desc] = $old;
             }
         }
 
         foreach ($newItems as &$newItem) {
-            $code = $newItem['ProductCode'] ?? null;
-            if ($code && isset($oldByCode[$code])) {
-                $newItem['image_url']   ??= $oldByCode[$code]['image_url'] ?? null;
-                $newItem['product_url'] ??= $oldByCode[$code]['product_url'] ?? null;
+            $code  = $newItem['VendorCode'] ?? null;
+            $match = ($code && isset($oldByCode[$code])) ? $oldByCode[$code] : null;
+            if (! $match) {
+                $desc = trim((string) ($newItem['Description'] ?? ''));
+                if ($desc !== '' && isset($oldByDesc[$desc])) {
+                    $match = $oldByDesc[$desc];
+                }
+            }
+            if ($match) {
+                $newItem['image_url']   ??= $match['image_url']   ?? null;
+                $newItem['product_url'] ??= $match['product_url'] ?? null;
             }
         }
         unset($newItem);
@@ -416,7 +435,7 @@ class ReOcrReceipts extends Command
         $data['items'] = $newItems;
 
         foreach (['subtotal', 'total', 'total_tax', 'taxes', 'tip', 'misc_fees', 'deposit', 'shipping', 'balance_due', 'transaction_date', 'merchant_name', 'invoice_number', 'purchase_order', 'handwritten_notes', 'payment_methods', 'raw_content'] as $key) {
-            if (array_key_exists($key, $fields) && $fields[$key] !== null) {
+            if (array_key_exists($key, $fields)) {
                 $data[$key] = $fields[$key];
             }
         }

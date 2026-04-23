@@ -1,133 +1,165 @@
 {
+  "description": "Hive 2025 receipt & invoice analyzer — extracts standard receipt fields plus PO/Job, Invoice #, line items, tip, fees, and per-method payment details.",
+  "baseAnalyzerId": "prebuilt-document",
+  "models": {
+    "completion": "gpt-4.1"
+  },
+  "fieldSchema": {
     "name": "HiveReceiptSchema",
     "description": "Schema for construction company receipt and invoice OCR.",
     "fields": {
-        "MerchantName": {
-            "type": "string",
-            "method": "extract",
-            "description": "The name of the merchant or vendor on the receipt."
-        },
-        "MerchantAddress": {
-            "type": "string",
-            "method": "extract",
-            "description": "Full address of the merchant."
-        },
-        "MerchantPhoneNumber": {
-            "type": "string",
-            "method": "extract",
-            "description": "Phone number of the merchant."
-        },
-        "TransactionDate": {
-            "type": "date",
-            "method": "extract",
-            "description": "The date of the transaction."
-        },
-        "TransactionTime": {
-            "type": "string",
-            "method": "extract",
-            "description": "The time of the transaction."
-        },
-        "SubTotal": {
-            "type": "number",
-            "method": "extract",
-            "description": "The subtotal before tax, fees, and tip."
-        },
-        "TotalTax": {
-            "type": "number",
-            "method": "extract",
-            "description": "Total tax amount charged."
-        },
-        "TotalAmount": {
-            "type": "number",
-            "method": "extract",
-            "description": "The grand total amount charged including tax, fees, and tip."
-        },
-        "InvoiceId": {
-            "type": "string",
-            "method": "extract",
-            "description": "The primary transaction identifier on the document. Look for labels such as 'Transaction Number', 'Transaction #', 'Invoice Number', 'Invoice #', 'Receipt Number', 'Receipt #', 'Order Number', 'Order #', 'Confirmation Number', or 'Trans #'. Prefer the Transaction Number if multiple identifiers are present. When the receipt header contains a multi-part number like '1913  00062  49221' (store, register, and transaction), return the FULL string with spaces (e.g. '1913 00062 49221'), not just the last segment."
-        },
-        "PurchaseOrder": {
-            "type": "string",
-            "method": "extract",
-            "description": "Purchase Order number, PO#, Job Name, Job Number, JobName, PRO JobName, or project reference. This value may appear anywhere on the document including loyalty, rewards, or membership sections. Extract only the short code or number, not the label."
-        },
-        "Tip": {
-            "type": "number",
-            "method": "extract",
-            "description": "Tip or gratuity amount paid."
-        },
-        "Fees": {
-            "type": "number",
-            "method": "extract",
-            "description": "Total of any miscellaneous fees, service charges, delivery fees, or surcharges that are not tax or tip."
-        },
-        "Items": {
-            "type": "array",
-            "description": "List of purchased line items on the receipt. Each physical item should appear exactly once. Some retailers (e.g. Home Depot, Lowe's) print a barcode with an abbreviated name on one line and the full product description on the next line — these belong to the SAME item and must be merged into a single entry, not treated as two separate items. Only lines that have a price are actual items.",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "Description": {
-                        "type": "string",
-                        "method": "extract",
-                        "description": "Full name or description of the item. If the receipt shows a short/abbreviated name on one line and a longer product description on the next line, concatenate both lines into a single description. Do NOT include the product code, barcode, UPC, or item number in the description — those belong in the ProductCode field. Also strip any single-letter return-policy indicators such as <A>, <B>, <C>, etc. Example: given lines '084305382269 1QT BUCKET <A>' and '1QT HDX ALL PURP MIXING CONTAINER', the Description should be '1QT BUCKET 1QT HDX ALL PURP MIXING CONTAINER'."
-                    },
-                    "ProductCode": {
-                        "type": "string",
-                        "method": "extract",
-                        "description": "SKU, item number, or product code."
-                    },
-                    "Quantity": {
-                        "type": "number",
-                        "method": "extract",
-                        "description": "Quantity purchased."
-                    },
-                    "Price": {
-                        "type": "number",
-                        "method": "extract",
-                        "description": "Unit price per item."
-                    },
-                    "TotalPrice": {
-                        "type": "number",
-                        "method": "extract",
-                        "description": "Total price for this line item (quantity × unit price)."
-                    }
-                }
+      "MerchantName": {
+        "type": "string",
+        "description": "The name of the merchant or vendor on the receipt.",
+        "method": "extract"
+      },
+      "MerchantAddress": {
+        "type": "string",
+        "description": "Full address of the merchant.",
+        "method": "extract"
+      },
+      "MerchantPhoneNumber": {
+        "type": "string",
+        "description": "Phone number of the merchant.",
+        "method": "extract"
+      },
+      "TransactionDate": {
+        "type": "date",
+        "description": "The date of the transaction.",
+        "method": "extract"
+      },
+      "TransactionTime": {
+        "type": "string",
+        "description": "The time of the transaction.",
+        "method": "extract"
+      },
+      "SubTotal": {
+        "type": "number",
+        "description": "The subtotal before tax, fees, and tip.",
+        "method": "extract"
+      },
+      "TotalTax": {
+        "type": "number",
+        "description": "Total tax amount charged.",
+        "method": "extract"
+      },
+      "TotalAmount": {
+        "type": "number",
+        "description": "The grand total amount charged including tax, fees, and tip.",
+        "method": "extract"
+      },
+      "InvoiceId": {
+        "type": "string",
+        "description": "The primary transaction identifier on the document. Look for labels such as \"Transaction Number\", \"Transaction #\", \"Invoice Number\", \"Invoice #\", \"Receipt Number\", \"Receipt #\", \"Order Number\", \"Order #\", \"Confirmation Number\", or \"Trans #\". Prefer the Transaction Number if multiple identifiers are present. When the receipt header contains a multi-part number like \"1913  00062  49221\" (store, register, and transaction), return the FULL string with spaces (e.g. \"1913 00062 49221\"), not just the last segment.",
+        "method": "extract"
+      },
+      "PurchaseOrder": {
+        "type": "string",
+        "description": "Purchase Order number, PO#, Job Name, Job Number, JobName, PRO JobName, or project reference. This value may appear anywhere on the document including loyalty, rewards, or membership sections. Extract only the short code or number, not the label.",
+        "method": "extract"
+      },
+      "Tip": {
+        "type": "number",
+        "description": "Tip or gratuity amount paid.",
+        "method": "extract"
+      },
+      "Fees": {
+        "type": "number",
+        "description": "Total of any miscellaneous fees, service charges, delivery fees, or surcharges that are not tax or tip.",
+        "method": "extract"
+      },
+      "Shipping": {
+        "type": "number",
+        "description": "Total shipping, handling, and delivery charges. Look for labels: \"Shipping\", \"Freight\", \"Delivery\", \"Handling\", \"S&H\". Return null if no shipping charges exist — do NOT return 0.",
+        "method": "extract"
+      },
+      "Deposit": {
+        "type": "number",
+        "description": "Any deposit or prepayment amount already applied. Look for labels: \"Deposit\", \"Deposit Applied\", \"Payment Received\", \"Amount Paid\", \"Prepayment\", \"Payments to Date\". Return null if no deposit field exists — do NOT return 0.",
+        "method": "extract"
+      },
+      "BalanceDue": {
+        "type": "number",
+        "description": "Remaining balance owed after any deposits or partial payments. Look for labels: \"Balance Due\", \"Amount Remaining\", \"Net Due\", \"Balance\". Return null if no such field exists — do NOT return 0.",
+        "method": "extract"
+      },
+      "Items": {
+        "type": "array",
+        "description": "List of purchased line items on the receipt. Each physical item should appear exactly once. Some retailers (e.g. Home Depot, Lowe's) print a barcode with an abbreviated name on one line and the full product description on the next line — these belong to the SAME item and must be merged into a single entry, not treated as two separate items. Only lines that have a price are actual items.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "Description": {
+              "type": "string",
+              "description": "Full name or description of the item. If the receipt shows a short/abbreviated name on one line and a longer product description on the next line, concatenate both lines into a single description. Do NOT include the product code, barcode, UPC, or item number in the description — those belong in the VendorCode field. Also strip any single-letter return-policy indicators such as <A>, <B>, <C>, etc. Example: given lines \"084305382269 1QT BUCKET <A>\" and \"1QT HDX ALL PURP MIXING CONTAINER\", the Description should be \"1QT BUCKET 1QT HDX ALL PURP MIXING CONTAINER\".",
+              "method": "extract"
+            },
+            "VendorCode": {
+              "type": "string",
+              "description": "Vendor SKU, item number, barcode, or product code assigned by this specific retailer/vendor.",
+              "method": "extract"
+            },
+            "Quantity": {
+              "type": "number",
+              "description": "Quantity purchased.",
+              "method": "extract"
+            },
+            "Price": {
+              "type": "number",
+              "description": "Unit price per item.",
+              "method": "extract"
+            },
+            "TotalPrice": {
+              "type": "number",
+              "description": "Total price for this line item (quantity × unit price).",
+              "method": "extract"
+            },
+            "Manufacturer": {
+              "type": "string",
+              "description": "Brand or manufacturer name for this item (e.g. \"KOHLER\", \"MOEN\", \"DELTA\", \"AMERICAN STANDARD\"). Often appears as all-caps words at the start of the description before the model number. Return null if not identifiable.",
+              "method": "extract"
+            },
+            "ManufacturerPartNumber": {
+              "type": "string",
+              "description": "Manufacturer model number or part number (e.g. \"K-8304-KS-NA\", \"T14238-RB\"). This is the manufacturer's own product code — a hyphenated alphanumeric code — distinct from the vendor SKU. Return null if not present.",
+              "method": "extract"
             }
-        },
-        "Payments": {
-            "type": "array",
-            "description": "List of payment methods used on this receipt. A receipt may have multiple rows when paying with a combination of methods (e.g. gift card + credit card).",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "PaymentType": {
-                        "type": "string",
-                        "method": "classify",
-                        "description": "Payment method type. One of: CreditCard, DebitCard, Cash, GiftCard, StoreCredit, Check, Other.",
-                        "enum": [
-                            "CreditCard",
-                            "DebitCard",
-                            "Cash",
-                            "GiftCard",
-                            "StoreCredit",
-                            "Check",
-                            "Other"
-                        ]
-                    },
-                    "LastFour": {
-                        "type": "string",
-                        "method": "extract",
-                        "description": "Last four digits of the card number, if applicable."
-                    },
-                    "Amount": {
-                        "type": "number",
-                        "method": "extract",
-                        "description": "Amount paid via this payment method."
-                    }
-                }
-            }
+          }
         }
+      },
+      "Payments": {
+        "type": "array",
+        "description": "List of payment methods used on this receipt. A receipt may have multiple rows when paying with a combination of methods (e.g. gift card + credit card).",
+        "items": {
+          "type": "object",
+          "properties": {
+            "PaymentType": {
+              "type": "string",
+              "description": "Payment method type. One of: CreditCard, DebitCard, Cash, GiftCard, StoreCredit, Check, Other.",
+              "method": "classify",
+              "enum": [
+                "CreditCard",
+                "DebitCard",
+                "Cash",
+                "GiftCard",
+                "StoreCredit",
+                "Check",
+                "Other"
+              ]
+            },
+            "LastFour": {
+              "type": "string",
+              "description": "Last four digits of the card number, if applicable.",
+              "method": "extract"
+            },
+            "Amount": {
+              "type": "number",
+              "description": "Amount paid via this payment method.",
+              "method": "extract"
+            }
+          }
+        }
+      }
     }
+  }
 }

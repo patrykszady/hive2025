@@ -63,6 +63,7 @@
                                                             src="{{ $item['image_url'] }}"
                                                             alt="{{ $item['Description'] ?? '' }}"
                                                             class="size-full object-cover"
+                                                            referrerpolicy="no-referrer"
                                                         />
                                                     @else
                                                         <div class="flex size-full items-center justify-center">
@@ -77,8 +78,8 @@
                                                     </div>
 
                                                     <div class="flex items-center gap-1.5 text-xs text-zinc-400">
-                                                        @if(!empty($item['ProductCode']))
-                                                            <span class="shrink-0">{{ $item['ProductCode'] }}</span>
+                                                        @if(!empty($item['VendorCode'] ?? $item['ProductCode'] ?? null))
+                                                            <span class="shrink-0">{{ $item['VendorCode'] ?? $item['ProductCode'] }}</span>
                                                         @endif
                                                         @if(!empty($item['Quantity']))
                                                             @php($unitType = strtoupper($item['Unit'] ?? 'PC'))
