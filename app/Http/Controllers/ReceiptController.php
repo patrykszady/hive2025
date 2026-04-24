@@ -685,6 +685,14 @@ class ReceiptController extends Controller
             $invoiceNumber = $prefix['OrderNumber']['valueString'] ?? $prefix['OrderNumber']['content'] ?? null;
         }
 
+        // Override with "Transaction Number" from raw content when present — e.g. Floor & Decor
+        // prints both a store Transaction Number (16-digit) and a payment terminal "Invoice Number:"
+        // (alphanumeric). Azure picks up the labeled "Invoice Number:" but we want the transaction.
+        $transactionNumberFromRaw = $this->extractTransactionNumberFromRawContent($rawContent);
+        if ($transactionNumberFromRaw !== null) {
+            $invoiceNumber = $transactionNumberFromRaw;
+        }
+
         // ── 6. Purchase Order / Job Name ──────────────────────────────
         $purchaseOrder = $this->extractFieldStringValue($prefix['PurchaseOrder'] ?? null);
         $jobName = $this->extractFieldStringValue($prefix['JobName'] ?? null);
@@ -1257,6 +1265,25 @@ class ReceiptController extends Controller
         }
 
         return '';
+    }
+
+    /**
+     * Extract a store Transaction Number from raw OCR content.
+     * Some vendors (e.g. Floor & Decor) label their store transaction as "Transaction Number"
+     * separately from the payment terminal "Invoice Number:" that Azure picks up.
+     * Returns the transaction number string if found, or null.
+     */
+    private function extractTransactionNumberFromRawContent(?string $rawContent): ?string
+    {
+        if ($rawContent === null || $rawContent === '') {
+            return null;
+        }
+
+        if (preg_match('/Transaction\s+Number\s*\n+([\d]{10,20})/i', $rawContent, $match)) {
+            return trim($match[1]);
+        }
+
+        return null;
     }
 
     /**
