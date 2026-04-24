@@ -686,15 +686,20 @@ class ReceiptController extends Controller
         }
 
         // ── 6. Purchase Order / Job Name ──────────────────────────────
-        $purchaseOrder = trim($prefix['PurchaseOrder']['valueString'] ?? '');
-        $jobName       = trim($prefix['JobName']['valueString'] ?? '');
+        $purchaseOrder = $this->extractFieldStringValue($prefix['PurchaseOrder'] ?? null);
+        $jobName = $this->extractFieldStringValue($prefix['JobName'] ?? null);
 
         $values = array_filter([$purchaseOrder, $jobName], fn ($v) => $v !== '');
         $purchaseOrderNumber = count($values) > 1 ? implode(', ', $values) : implode('', $values);
 
         // Fallback: material-order analyzer uses CustomerPO instead of PurchaseOrder/JobName
         if ($purchaseOrderNumber === '' && isset($prefix['CustomerPO'])) {
-            $purchaseOrderNumber = trim($prefix['CustomerPO']['valueString'] ?? '');
+            $purchaseOrderNumber = $this->extractFieldStringValue($prefix['CustomerPO']);
+        }
+
+        // Fallback: parse raw OCR content for labels like "PRO JobName" / "PO #".
+        if ($purchaseOrderNumber === '') {
+            $purchaseOrderNumber = $this->extractPurchaseOrderFromRawContent($rawContent);
         }
 
         // ── 7. Total Tax ──────────────────────────────────────────────
@@ -1213,6 +1218,45 @@ class ReceiptController extends Controller
         }
 
         return null;
+    }
+
+    /**
+     * Extract a normalized text value from a flexible OCR field shape.
+     */
+    private function extractFieldStringValue(mixed $field): string
+    {
+        if (is_array($field)) {
+            if (isset($field['valueString']) && is_string($field['valueString'])) {
+                return trim($field['valueString']);
+            }
+
+            if (isset($field['valueNumber']) && (is_numeric($field['valueNumber']) || is_string($field['valueNumber']))) {
+                return trim((string) $field['valueNumber']);
+            }
+
+            if (isset($field['content']) && is_string($field['content'])) {
+                return trim($field['content']);
+            }
+        }
+
+        if (is_numeric($field) || is_string($field)) {
+            return trim((string) $field);
+        }
+
+        return '';
+    }
+
+    private function extractPurchaseOrderFromRawContent(string $rawContent): string
+    {
+        if ($rawContent === '') {
+            return '';
+        }
+
+        if (preg_match('/(?:PO\s*\/\s*JOB\s*NAME|PO\s*NUMBER|PO\s*#|P\.?O\.?\s*#?|JOB\s*NAME|PRO\s*JobName)\s*:\s*([^\r\n]{1,80})/i', $rawContent, $match)) {
+            return trim($match[1]);
+        }
+
+        return '';
     }
 
     /**

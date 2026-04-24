@@ -285,6 +285,17 @@ class ExpenseReceipts extends Model
                     ? (array) $this->receipt_items['purchase_order']
                     : [];
 
+                $hasMeaningfulPurchaseOrder = collect($purchase_order)
+                    ->map(fn ($value) => is_string($value) ? trim($value) : '')
+                    ->contains(fn ($value) => $value !== '' && $value !== '0');
+
+                if (! $hasMeaningfulPurchaseOrder) {
+                    $rawContent = (string) ($this->receipt_items['raw_content'] ?? '');
+                    if ($rawContent !== '' && preg_match('/(?:PO\s*\/\s*JOB\s*NAME|PO\s*NUMBER|PO\s*#|P\.?O\.?\s*#?|JOB\s*NAME|PRO\s*JobName)\s*:\s*([^\r\n]{1,80})/i', $rawContent, $match)) {
+                        $purchase_order = [trim($match[1])];
+                    }
+                }
+
                 // Combine, filter out empty/meaningless values, deduplicate
                 $combined = array_merge($handwritten_notes, $purchase_order);
                 $filtered = array_filter($combined, function ($note) {
