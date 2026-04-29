@@ -26,8 +26,20 @@
                         <flux:table.cell class="font-mono text-xs">
                             {{ $receipt->from_address }}
                         </flux:table.cell>
-                        <flux:table.cell class="text-xs max-w-48 truncate">
-                            {{ $receipt->from_subject ?? '—' }}
+                        <flux:table.cell class="text-xs max-w-48">
+                            @php
+                                $subjects = $receipt->from_subject ?? [];
+                                if (! is_array($subjects)) { $subjects = [$subjects]; }
+                            @endphp
+                            @if(empty($subjects))
+                                —
+                            @else
+                                <div class="space-y-0.5">
+                                    @foreach($subjects as $subj)
+                                        <div class="truncate">{{ $subj }}</div>
+                                    @endforeach
+                                </div>
+                            @endif
                         </flux:table.cell>
                         <flux:table.cell>
                             @if($receipt->receipt_type == 1)
@@ -70,7 +82,21 @@
 
             <flux:input wire:model="from_address" label="From Address" placeholder="sender@example.com or @domain.com" description="Use @domain.com for wildcard domain matching." />
 
-            <flux:input wire:model="from_subject" label="Subject Match" placeholder="order has been received" description="Partial match — email subject must contain this text." />
+            <div>
+                <flux:label>Subject Match</flux:label>
+                <flux:description class="mb-2">Partial match — email subject must contain any one of these. Add multiple to support different subject lines for the same vendor.</flux:description>
+                <div class="space-y-2">
+                    @foreach($from_subjects as $idx => $_subject)
+                        <div wire:key="from-subject-{{ $idx }}" class="flex items-start gap-2">
+                            <div class="flex-1">
+                                <flux:input wire:model="from_subjects.{{ $idx }}" placeholder="order has been received" />
+                            </div>
+                            <flux:button wire:click="removeSubject({{ $idx }})" type="button" size="sm" variant="ghost" icon="trash" />
+                        </div>
+                    @endforeach
+                </div>
+                <flux:button wire:click="addSubject" type="button" size="xs" variant="ghost" icon="plus" class="mt-2">Add subject</flux:button>
+            </div>
 
             <flux:select wire:model="receipt_type" label="Receipt Type">
                 <flux:select.option value="1">Purchase</flux:select.option>

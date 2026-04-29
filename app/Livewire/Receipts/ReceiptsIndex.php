@@ -17,7 +17,7 @@ class ReceiptsIndex extends Component
     public ?int $editing_id = null;
     public ?int $vendor_id = null;
     public string $from_address = '';
-    public string $from_subject = '';
+    public array $from_subjects = [''];
     public ?int $receipt_type = 1;
     public array $options = [];
 
@@ -28,7 +28,8 @@ class ReceiptsIndex extends Component
         return [
             'vendor_id' => 'required|exists:vendors,id',
             'from_address' => 'required|string|max:255',
-            'from_subject' => 'nullable|string|max:255',
+            'from_subjects' => 'nullable|array',
+            'from_subjects.*' => 'nullable|string|max:255',
             'receipt_type' => 'required|in:1,2',
             'options' => 'nullable|array',
             'options.receipt_start' => 'nullable|string',
@@ -87,7 +88,11 @@ class ReceiptsIndex extends Component
         $this->editing_id = $receipt->id;
         $this->vendor_id = $receipt->vendor_id;
         $this->from_address = $receipt->from_address ?? '';
-        $this->from_subject = $receipt->from_subject ?? '';
+        $existingSubjects = $receipt->from_subject ?? [];
+        if (! is_array($existingSubjects)) {
+            $existingSubjects = [(string) $existingSubjects];
+        }
+        $this->from_subjects = empty($existingSubjects) ? [''] : array_values($existingSubjects);
         $this->receipt_type = $receipt->receipt_type;
         $this->options = is_array($receipt->options) ? $receipt->options : [];
 
@@ -104,11 +109,16 @@ class ReceiptsIndex extends Component
         // Filter out empty option values
         $cleanOptions = array_filter($this->options, fn ($v) => $v !== null && $v !== '');
 
+        $cleanSubjects = array_values(array_filter(
+            array_map('trim', $this->from_subjects),
+            fn ($v) => $v !== ''
+        ));
+
         $data = [
             'vendor_id' => $this->vendor_id,
             'from_type' => $fromType,
             'from_address' => $this->from_address,
-            'from_subject' => $this->from_subject ?: null,
+            'from_subject' => empty($cleanSubjects) ? null : $cleanSubjects,
             'receipt_type' => $this->receipt_type,
             'options' => $cleanOptions ?: (object) [],
         ];
@@ -149,9 +159,23 @@ class ReceiptsIndex extends Component
         $this->editing_id = null;
         $this->vendor_id = null;
         $this->from_address = '';
-        $this->from_subject = '';
+        $this->from_subjects = [''];
         $this->receipt_type = 1;
         $this->options = [];
+    }
+
+    public function addSubject(): void
+    {
+        $this->from_subjects[] = '';
+    }
+
+    public function removeSubject(int $index): void
+    {
+        unset($this->from_subjects[$index]);
+        $this->from_subjects = array_values($this->from_subjects);
+        if (empty($this->from_subjects)) {
+            $this->from_subjects = [''];
+        }
     }
 
     #[Title('Email Receipts')]

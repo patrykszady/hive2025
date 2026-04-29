@@ -3164,15 +3164,21 @@ class CompanyEmailController extends Controller
         
         foreach ($receipts as $receipt) {
             $address = strtolower(trim((string) $receipt->from_address));
-            $subject = strtolower(trim((string) $receipt->from_subject ?? ''));
-            
+            $subjects = $receipt->from_subject ?? [];
+            if (! is_array($subjects)) {
+                $subjects = [(string) $subjects];
+            }
+
             // Only process valid addresses (domain patterns start with @, emails contain @)
             if (str_starts_with($address, '@') || str_contains($address, '@')) {
                 if (!isset($receiptCriteria[$address])) {
                     $receiptCriteria[$address] = [];
                 }
-                if ($subject !== '' && !in_array($subject, $receiptCriteria[$address])) {
-                    $receiptCriteria[$address][] = $subject;
+                foreach ($subjects as $subject) {
+                    $subject = strtolower(trim((string) $subject));
+                    if ($subject !== '' && !in_array($subject, $receiptCriteria[$address])) {
+                        $receiptCriteria[$address][] = $subject;
+                    }
                 }
             }
         }
@@ -3361,8 +3367,15 @@ class CompanyEmailController extends Controller
         
         foreach ($receipts as $receipt) {
             $receiptFromAddress = $receipt->from_address ?? '';
-            $receiptFromSubject = $receipt->from_subject ?? '';
-            
+            $receiptFromSubjects = $receipt->from_subject ?? [];
+            if (! is_array($receiptFromSubjects)) {
+                $receiptFromSubjects = [(string) $receiptFromSubjects];
+            }
+            $receiptFromSubjects = array_values(array_filter(
+                array_map('trim', $receiptFromSubjects),
+                fn ($v) => $v !== ''
+            ));
+
             // Skip if receipt has no from_address
             if (empty($receiptFromAddress)) {
                 continue;
@@ -3388,16 +3401,14 @@ class CompanyEmailController extends Controller
             // Check from_subject matching
             $subjectMatches = false;
             
-            if (empty($receiptFromSubject)) {
+            if (empty($receiptFromSubjects)) {
                 // If receipt has no subject requirement, email match is sufficient
                 $subjectMatches = true;
             } else {
                 // Partial match: receipt subject must be contained in message subject (case-insensitive)
                 // Example: "AT&T payment processed for account ending in" matches "AT&T payment processed for account ending in 1733"
-                // Multiple alternative subjects can be provided pipe-delimited:
-                // "Received: Thank you for shopping with us!|Order confirmed. We're processing your order now!"
-                $candidateSubjects = array_filter(array_map('trim', explode('|', $receiptFromSubject)), 'strlen');
-                foreach ($candidateSubjects as $candidate) {
+                // Any one of the configured subjects matching is sufficient.
+                foreach ($receiptFromSubjects as $candidate) {
                     if (stripos($messageSubject, $candidate) !== false) {
                         $subjectMatches = true;
                         break;

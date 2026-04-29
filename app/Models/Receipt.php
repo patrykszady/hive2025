@@ -22,6 +22,7 @@ class Receipt extends Model
     {
         return [
             'options' => 'array',
+            'from_subject' => 'array',
         ];
     }
 

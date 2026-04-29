@@ -39,7 +39,10 @@ class ReOcrReceipts extends Command
             return self::FAILURE;
         }
 
-        $this->info("Receipt config: [{$receiptConfig->id}] {$receiptConfig->from_address} — \"{$receiptConfig->from_subject}\"");
+        $subjectsLabel = is_array($receiptConfig->from_subject)
+            ? implode(' | ', $receiptConfig->from_subject)
+            : (string) $receiptConfig->from_subject;
+        $this->info("Receipt config: [{$receiptConfig->id}] {$receiptConfig->from_address} — \"{$subjectsLabel}\"");
 
         // Resolve the Saved folder ID
         $grantId     = config('nylas.receipts_grant_id');
@@ -63,9 +66,16 @@ class ReOcrReceipts extends Command
         // Filter to only messages matching this receipt config's from_address
         // Saved folder emails are forwarded — original sender is in X-Hive-Metadata header
         $fromAddress = strtolower($receiptConfig->from_address);
-        $subjectMatch = $receiptConfig->from_subject;
+        $subjectMatches = $receiptConfig->from_subject ?? [];
+        if (! is_array($subjectMatches)) {
+            $subjectMatches = [(string) $subjectMatches];
+        }
+        $subjectMatches = array_values(array_filter(
+            array_map('trim', $subjectMatches),
+            fn ($v) => $v !== ''
+        ));
 
-        $filtered = collect($messages)->filter(function ($msg) use ($fromAddress, $subjectMatch) {
+        $filtered = collect($messages)->filter(function ($msg) use ($fromAddress, $subjectMatches) {
             // Parse X-Hive-Metadata header for original sender
             $metadata = $this->extractHiveMetadata($msg);
             $msgFrom = strtolower($metadata['from_email'] ?? ($msg['from'][0]['email'] ?? ''));
@@ -82,9 +92,14 @@ class ReOcrReceipts extends Command
                 return false;
             }
 
-            if ($subjectMatch) {
+            if (! empty($subjectMatches)) {
                 $cleanSubject = preg_replace('/^(fw:|fwd:|re:)\s*/i', '', $msgSubject);
-                return stripos($cleanSubject, $subjectMatch) !== false;
+                foreach ($subjectMatches as $candidate) {
+                    if (stripos($cleanSubject, $candidate) !== false) {
+                        return true;
+                    }
+                }
+                return false;
             }
 
             return true;
