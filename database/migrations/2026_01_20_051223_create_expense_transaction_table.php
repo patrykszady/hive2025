@@ -23,10 +23,11 @@ return new class extends Migration
             $table->index('transaction_id');
         });
 
-        // Migrate existing expense_id relationships from transactions table to pivot table
+        // Migrate existing expense_id relationships from transactions table to pivot table.
+        // Use CURRENT_TIMESTAMP for portability (NOW() is not available in sqlite).
         DB::statement("
             INSERT INTO expense_transaction (expense_id, transaction_id, created_at, updated_at)
-            SELECT expense_id, id, NOW(), NOW()
+            SELECT expense_id, id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
             FROM transactions
             WHERE expense_id IS NOT NULL
         ");

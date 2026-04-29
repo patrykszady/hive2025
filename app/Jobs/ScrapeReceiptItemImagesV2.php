@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\ExpenseReceipts;
+use App\Models\Product;
 use App\Models\ReceiptLineItemDesc;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -13,20 +14,22 @@ use Spatie\Browsershot\Browsershot;
 use Throwable;
 
 /**
- * V2 Receipt Item Image Scraper — simplified 3-phase pipeline.
+ * V2 Receipt Item Image Scraper — simplified 2-phase pipeline.
  *
- * Replaces the legacy 8-phase ScrapeReceiptItemImages with a clean,
- * fast, robust implementation:
- *
- *   PHASE A — RESOLVE: SerpAPI Google Shopping (1 query per item) →
- *            use inline product image+link, or fetch top organic result
- *            and extract JSON-LD / meta tags.
- *   PHASE B — FALLBACK: Browsershot+stealth for Cloudflare/SPA-protected
- *            hosts. SerpAPI Google Images as last resort for image-only
- *            misses.
+ *   PHASE A — RESOLVE: one SERP web search per item (returns organic +
+ *            shopping in a single Bright Data call). Vendor- and
+ *            SupplyHouse-biased pre-searches run first when relevant.
+ *            Each candidate URL is fetched (HTTP, escalating to a
+ *            headless Browsershot render for JS-protected hosts) and
+ *            its main product image is extracted from JSON-LD /
+ *            itemprop / og:image. The PDP's own image is the source
+ *            of truth — no Google-Images detours, no shopping-thumb
+ *            substitutions.
  *   PHASE C — VALIDATE: HEAD-check images, drop dead ones.
  *
- * Cache key is (manufacturer, MPN) — global, cross-receipt.
+ * Cache key is (manufacturer, MPN) — global, cross-receipt. The
+ * `verified_at` flag on `products` protects manually-curated entries
+ * from being overwritten by future scrapes.
  */
 class ScrapeReceiptItemImagesV2 implements ShouldQueue
 {
@@ -39,7 +42,7 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
      * Host of the receipt vendor's own website (e.g. 'virginiatile.com'),
      * derived from `vendor.business_website`. When set, this host is
      * preferred over every entry in PREFERRED_HOSTS and a `site:` filtered
-     * SerpAPI search is attempted FIRST so we land on the vendor's own
+     * SERP search is attempted FIRST so we land on the vendor's own
      * product page when one exists.
      */
     private ?string $vendorHost = null;
@@ -66,6 +69,9 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
         'qualitybath.com',
         'brizo.com',
         'brizofaucet.ca',
+        'homedepot.com',
+        'houseoffixtures.com',
+        'plumbers-supply-co.com',
     ];
 
     /**
@@ -73,11 +79,10 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
      * is on one of these hosts are tried FIRST so that:
      *   (a) URLs across the receipt are visually consistent
      *   (b) we get high-resolution merchant-page images instead of the
-     *       small SerpAPI Shopping thumbnails.
+     *       small SERP Shopping thumbnails.
      * Hosts not in this list still get tried, just in original rank order.
      */
     private const PREFERRED_HOSTS = [
-        'kbauthority.com',
         'supplyhouse.com',
         'faucetdirect.com',
         'build.com',
@@ -85,14 +90,22 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
         'efaucets.com',
         'rona.ca',
         'homedepot.com',
+        'kbauthority.com',
     ];
 
-    public function __construct(public ExpenseReceipts $receipt) {}
+    public function __construct(public ExpenseReceipts $receipt)
+    {
+        // Headless-render fallbacks (Browsershot ~30s) plus chained SERP
+        // lookups can run well past the default queue's 60s worker timeout.
+        // Route to Horizon's `long-running` supervisor (timeout 2100s).
+        $this->onQueue('long-running');
+    }
 
     public function handle(): void
     {
         $items = $this->receipt->receipt_items['items'] ?? [];
         if (empty($items)) {
+            \Log::info('ScrapeReceiptItemImagesV2: no items', ['receipt_id' => $this->receipt->id]);
             return;
         }
 
@@ -101,9 +114,40 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
         $this->vendorHost = $this->normalizeHost($vendor?->business_website);
         $changed         = false;
 
+        \Log::info('ScrapeReceiptItemImagesV2: start', [
+            'receipt_id'  => $this->receipt->id,
+            'item_count'  => count($items),
+            'vendor_host' => $this->vendorHost,
+        ]);
+
+        // When most items in a receipt share the same finish in their
+        // descriptions (e.g. "POLISHED CHROME"), siblings missing a
+        // finish almost certainly belong to the same finish family.
+        // Pre-compute the dominant finish so we can inject it into the
+        // search query for those siblings.
+        $receiptFinish = $this->inferReceiptFinish($items);
+
         foreach ($items as $idx => $item) {
             // Skip if already complete
             if (! empty($item['product_url']) && ! empty($item['image_url'])) {
+                \Log::info('ScrapeReceiptItemImagesV2: skip complete', [
+                    'receipt_id' => $this->receipt->id,
+                    'idx'        => $idx,
+                    'vc'         => $item['VendorCode'] ?? null,
+                ]);
+                // Even when the item is already complete, make sure the
+                // global products table reflects it so cross-receipt
+                // lookups stay in sync.
+                $this->storeCache(
+                    $vendorId,
+                    trim((string) ($item['Manufacturer'] ?? '')),
+                    trim((string) ($item['ManufacturerPartNumber'] ?? '')),
+                    $idx,
+                    [
+                        'product_url' => $item['product_url'],
+                        'image_url'   => $item['image_url'],
+                    ]
+                );
                 continue;
             }
 
@@ -111,31 +155,88 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
             $manufacturer = trim((string) ($item['Manufacturer'] ?? ''));
             $description  = trim((string) ($item['Description'] ?? ''));
 
+            \Log::info('ScrapeReceiptItemImagesV2: item begin', [
+                'receipt_id' => $this->receipt->id,
+                'idx'        => $idx,
+                'vc'         => $item['VendorCode'] ?? null,
+                'mpn'        => $mpn,
+                'mfr'        => $manufacturer,
+                'desc'       => substr($description, 0, 80),
+                'has_url'    => ! empty($item['product_url']),
+                'has_img'    => ! empty($item['image_url']),
+            ]);
+
+            // Receipts from vendors that don't break out an MPN column
+            // (e.g. Studio41) often embed the part number at the start
+            // of the description: "C3-455 CLEANSING TOILET SEAT WHITE".
+            // Promote it to the MPN slot so downstream MPN-aware ranking
+            // works.
+            if ($mpn === '' && $description !== '') {
+                $extracted = $this->extractMpnFromDescription($description);
+                if ($extracted) {
+                    $mpn = $extracted;
+                }
+            }
+
+            // Inject the receipt-wide finish into description-only items
+            // that don't already mention any finish, so SupplyHouse and
+            // friends return the correct color variant.
+            if ($receiptFinish && ! $this->descriptionHasFinish($description)) {
+                $description = trim($description . ' ' . $receiptFinish);
+            }
+
             if (! $description && ! $mpn) {
+                \Log::info('ScrapeReceiptItemImagesV2: skip no-desc-no-mpn', [
+                    'receipt_id' => $this->receipt->id,
+                    'idx'        => $idx,
+                ]);
                 continue;
             }
+
+            // Vendor-bias is only safe when we have an MPN. With
+            // description-only queries the vendor's site search will
+            // happily return a near-miss SKU (wrong product). Disable
+            // it for this item so PREFERRED_HOSTS (SupplyHouse first)
+            // wins instead.
+            $savedVendorHost = $this->vendorHost;
+            if ($mpn === '') {
+                $this->vendorHost = null;
+            }
+            try {
 
             // 1. Try global cache first (cross-receipt by manufacturer+MPN)
             $cached = $this->lookupGlobalCache($manufacturer, $mpn);
             if ($cached) {
-                $items[$idx]['product_url'] = $items[$idx]['product_url'] ?? $cached['product_url'];
-                $items[$idx]['image_url']   = $items[$idx]['image_url']   ?? $cached['image_url'];
+                \Log::info('ScrapeReceiptItemImagesV2: cache hit', [
+                    'receipt_id' => $this->receipt->id, 'idx' => $idx, 'mpn' => $mpn,
+                ]);
+                if (empty($items[$idx]['product_url'])) {
+                    $items[$idx]['product_url'] = $cached['product_url'];
+                }
+                if (empty($items[$idx]['image_url'])) {
+                    $items[$idx]['image_url'] = $cached['image_url'];
+                }
                 $changed = true;
                 continue;
             }
 
             // 2. Resolve (Phase A)
             $result = $this->resolveProduct($manufacturer, $mpn, $description);
+            \Log::info('ScrapeReceiptItemImagesV2: resolveProduct result', [
+                'receipt_id' => $this->receipt->id, 'idx' => $idx,
+                'product_url' => $result['product_url'] ?? null,
+                'image_url'   => $result['image_url'] ?? null,
+            ]);
 
-            // 3. Fallback (Phase B) if needed
-            if (! $result || empty($result['image_url'])) {
-                $fallback = $this->fallbackResolve($manufacturer, $mpn, $description, $result);
-                if ($fallback) {
-                    $result = array_merge($result ?? [], array_filter($fallback));
-                }
-            }
+            // Phase B fallback removed — extractProductData now escalates
+            // to a headless render itself, so resolveProduct returns
+            // either the PDP's own image or null. No more Google-Images
+            // detours that surfaced wrong-finish/wrong-product photos.
 
             if (! $result) {
+                \Log::info('ScrapeReceiptItemImagesV2: no result', [
+                    'receipt_id' => $this->receipt->id, 'idx' => $idx, 'mpn' => $mpn,
+                ]);
                 continue;
             }
 
@@ -148,12 +249,29 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
                 continue;
             }
 
-            $items[$idx]['product_url'] = $items[$idx]['product_url'] ?? $result['product_url'] ?? null;
-            $items[$idx]['image_url']   = $items[$idx]['image_url']   ?? $result['image_url']   ?? null;
+            if (empty($items[$idx]['product_url'])) {
+                $items[$idx]['product_url'] = $result['product_url'] ?? null;
+            }
+            if (empty($items[$idx]['image_url'])) {
+                $items[$idx]['image_url'] = $result['image_url'] ?? null;
+            }
             $changed = true;
 
             // Store in global cache + per-receipt cache
             $this->storeCache($vendorId, $manufacturer, $mpn, $idx, $result);
+
+            // Persist incrementally so a timeout doesn't wipe progress
+            // accumulated for earlier items in this same run.
+            $ri = $this->receipt->receipt_items;
+            $ri['items'] = $items;
+            $this->receipt->receipt_items = $ri;
+            $this->receipt->save();
+
+            } finally {
+                // Restore vendor host for the next iteration regardless of
+                // which `continue` exit path was taken inside the try.
+                $this->vendorHost = $savedVendorHost;
+            }
         }
 
         if ($changed) {
@@ -169,7 +287,7 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
     // ═══════════════════════════════════════════════════════════════
 
     /**
-     * One Brave web search → fetch top acceptable result → parse product page.
+     * One SERP web search → fetch top acceptable result → parse product page.
      * Returns ['product_url' => ..., 'image_url' => ...] or null.
      */
     private function resolveProduct(string $manufacturer, string $mpn, string $description): ?array
@@ -191,7 +309,19 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
             }
         }
 
-        // Single SerpAPI call returns BOTH organic + shopping results.
+        // SupplyHouse-priority pre-search: probe Google Shopping via
+        // SERP first (merchant feeds give us a paired PDP URL +
+        // thumbnail in one call). If shopping doesn't surface a
+        // SupplyHouse listing, fall back to a `site:supplyhouse.com`
+        // web search — many Kohler/Brizo PDPs are indexed organically
+        // but absent from the shopping feed.
+        $supplyResult = $this->resolveFromShoppingHost('supplyhouse.com', $query, $mpn)
+            ?? $this->resolveFromHost('supplyhouse.com', $query, $mpn);
+        if ($supplyResult) {
+            return $supplyResult;
+        }
+
+        // Single SERP call returns BOTH organic + shopping results.
         $search   = $this->serpWebSearch($query, 10);
         $organic  = $search['organic']  ?? [];
         $shopping = $search['shopping'] ?? [];
@@ -250,77 +380,67 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
         // then everything else preserving their existing order.
         $candidates = $this->rankCandidatesByHost($candidates);
 
-        // Walk candidates: try high-res page extract; on failure use the
-        // matched Shopping thumb (downloaded locally so it never expires).
-        // Untrusted extracts (e.g. kbauthority opaque proxy) are deferred
-        // and used only if nothing better surfaces.
+        // Walk candidates: for each, fetch the page (HTTP, escalating to
+        // a headless render when needed) and use its main product image.
+        // Trust the URL — no Google-Images detours, no shopping-thumb
+        // substitutions; if the PDP doesn't expose an image we surface
+        // the URL with no image (better than a wrong-product image).
         $firstAcceptable = null;
-        $untrustedFallback = null;
         foreach ($candidates as $cand) {
             $url = $cand['url'];
             $firstAcceptable = $firstAcceptable ?? $url;
-            $host = strtolower(parse_url($url, PHP_URL_HOST) ?? '');
 
-            $highRes = $this->extractProductData($url, $mpn);
-
-            // For headless-required hosts (e.g. kbauthority), or when plain
-            // HTTP extraction returned an untrusted image URL, escalate to
-            // Browsershot which can pick up the variant-specific og:image
-            // after JS settles.
-            $needsEscalation = $this->needsHeadless($host)
-                && (! is_string($highRes) || $highRes === ''
-                    || $this->isUntrustedImageUrl($highRes, $mpn));
-            if ($needsEscalation) {
-                $rendered = $this->headlessExtractImage($url, $mpn);
-                if ($rendered && ! $this->isUntrustedImageUrl($rendered, $mpn)) {
-                    return ['product_url' => $url, 'image_url' => $rendered];
-                }
+            $image = $this->extractProductData($url, $mpn);
+            if (! is_string($image) || $image === '' || $this->looksLikeLogo($image)) {
+                continue;
+            }
+            // Reject generic/placeholder/wrong-SKU images so we walk on
+            // to the next candidate URL instead of caching junk.
+            if ($this->isUntrustedImageUrl($image, $mpn)) {
+                continue;
             }
 
-            $extractTrusted = is_string($highRes) && $highRes !== ''
-                && ! $this->isUntrustedImageUrl($highRes, $mpn);
-
-            if ($extractTrusted) {
-                return ['product_url' => $url, 'image_url' => $highRes];
+            // Try to download. Many product hosts are Cloudflare-protected
+            // (403 to plain HTTP) or return tiny/no-content responses for
+            // a hotlinked image — in either case advance to the next
+            // candidate rather than caching an unusable remote URL.
+            $stored = $this->downloadImageLocally($image, $manufacturer, $mpn);
+            if ($stored) {
+                return ['product_url' => $url, 'image_url' => $stored];
             }
-            // Before falling back to the small Shopping thumb, try Google
-            // Images for a HIGH-RES MPN-matching original (verified by
-            // page-link/title containing the MPN, so finish is correct).
-            if ($cand['thumb']) {
-                $hires = $this->serpImageSearchHighRes($manufacturer, $mpn);
-                if ($hires) {
-                    return ['product_url' => $url, 'image_url' => $hires];
-                }
-                $stored = $this->downloadImageLocally($cand['thumb'], $manufacturer, $mpn);
+            \Log::info('ScrapeReceiptItemImagesV2: image download failed, walking on', [
+                'mpn' => $mpn, 'url' => $url, 'image' => $image,
+            ]);
+
+            // Last-resort for THIS candidate: many vendors host their
+            // hero image behind Cloudflare (full JS challenge) which
+            // blocks server-side fetches. The matching Google Shopping
+            // thumbnail is the same product (variant-correct when ranked
+            // by MPN) and Google's gstatic CDN is hotlink-friendly. Use
+            // it so we surface SOME image rather than walking off the
+            // last acceptable PDP URL with nothing.
+            $thumb = $cand['thumb'] ?? null;
+            if ($thumb && ! $this->isUntrustedImageUrl($thumb, $mpn)) {
+                $stored = $this->downloadImageLocally($thumb, $manufacturer, $mpn);
                 if ($stored) {
                     return ['product_url' => $url, 'image_url' => $stored];
                 }
             }
-            // Remember an untrusted extract as last-resort; keep walking.
-            // Untrusted IMAGE URLs (e.g. Amazon-hosted images leaked via
-            // merchant JSON-LD) are dropped — better to surface no image
-            // than a wrong-product image — but the product_url is still
-            // kept since it passed the MPN gate.
-            if ($untrustedFallback === null && is_string($highRes) && $highRes !== '') {
-                $imgIsUntrusted = $this->isUntrustedImageUrl($highRes, $mpn);
-                $untrustedFallback = [
-                    'product_url' => $url,
-                    'image_url'   => $imgIsUntrusted ? null : $highRes,
-                ];
-            }
-        }
-        if ($untrustedFallback !== null) {
-            return $untrustedFallback;
         }
 
-        // Final safety net — some MPN-matched thumb but no extractable page.
-        if ($firstAcceptable && $bestThumb) {
-            $stored = $this->downloadImageLocally($bestThumb, $manufacturer, $mpn);
-            if ($stored) {
-                return ['product_url' => $firstAcceptable, 'image_url' => $stored];
-            }
-        }
         if ($firstAcceptable) {
+            // Final last-resort: every candidate either had no image, an
+            // untrusted/placeholder image, or a download-blocked image.
+            // The top-ranked Shopping thumbnail (bestThumb) is the right
+            // product (matched by MPN rank) and gstatic.com is
+            // hotlink-friendly — surface it against the firstAcceptable
+            // PDP URL so the user sees an image instead of an empty box.
+            if ($bestThumb && ! $this->isUntrustedImageUrl($bestThumb, $mpn)) {
+                $stored = $this->downloadImageLocally($bestThumb, $manufacturer, $mpn);
+                if ($stored) {
+                    return ['product_url' => $firstAcceptable, 'image_url' => $stored];
+                }
+            }
             return ['product_url' => $firstAcceptable, 'image_url' => null];
         }
 
@@ -437,81 +557,134 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
     private function isUntrustedImageUrl(string $imgUrl, string $mpn): bool
     {
         $host = strtolower(parse_url($imgUrl, PHP_URL_HOST) ?? '');
-        // Amazon-hosted product images leaking through merchant JSON-LD
-        // are almost always unrelated SKUs (different brand/model).
-        if (str_contains($host, 'media-amazon.com') || str_contains($host, 'images-amazon.com')) {
+        $path = strtolower(parse_url($imgUrl, PHP_URL_PATH) ?? '');
+
+        // Marketplace CDN images (eBay, Amazon, Walmart, Pinterest, AliExpress)
+        // leak through merchant JSON-LD and are almost always unrelated
+        // SKUs from third-party listings — wrong color, wrong product, or
+        // generic stock photos. Reject so we fall back to a real merchant
+        // page or Google Shopping thumb.
+        $marketplaceHostFragments = [
+            'media-amazon.com', 'images-amazon.com', 'ssl-images-amazon.com',
+            'ebayimg.com',
+            'walmartimages.com',
+            'pinimg.com',
+            'alicdn.com',
+        ];
+        foreach ($marketplaceHostFragments as $frag) {
+            if (str_contains($host, $frag)) {
+                return true;
+            }
+        }
+
+        // kbauthority's image.php?type=T&id=N proxy serves the PARENT SKU
+        // image (wrong finish — typically chrome) even on variant PDPs.
+        // Reject so we fall back to itemprop=image which is variant-correct.
+        if (str_contains($host, 'kbauthority.com') && str_contains($path, '/image.php')) {
             return true;
         }
+
+        // kbauthority's /images/W/{N}/{FILE}.jpg — variant-specific when
+        // the filename contains the MPN (correct finish, just small at
+        // 130-250px). Only flag as untrusted when the filename doesn't
+        // match our MPN — that signals a parent-SKU placeholder.
+        if (str_contains($host, 'kbauthority.com')
+            && preg_match('#/images/[wW]/\d+/([^/]+)\.(?:jpg|jpeg|png|webp)$#i', $path, $m)) {
+            $mpnNorm = strtolower(preg_replace('/[^a-z0-9]/i', '', $mpn));
+            $altNorm = preg_match('/^k-?\d/i', $mpn)
+                ? strtolower(preg_replace('/[^a-z0-9]/i', '', preg_replace('/^K-?/i', '', $mpn)))
+                : '';
+            $fileNorm = strtolower(preg_replace('/[^a-z0-9]/i', '', $m[1]));
+            if ($mpnNorm && ! str_contains($fileNorm, $mpnNorm) && (! $altNorm || ! str_contains($fileNorm, $altNorm))) {
+                return true;
+            }
+        }
+
+        // SupplyHouse social-share placeholder served when extractProductData
+        // hits a category/listing page (no og:image for an actual product).
+        if (str_contains($host, 'supplyhouse.com') && str_contains($path, '/facebook_preview/')) {
+            return true;
+        }
+        if (str_ends_with($path, '/fb_link_01.png')) {
+            return true;
+        }
+
+        // afsupply.com generic catalog placeholder pattern
+        // (e.g. /media/catalog/product/cache/HASH/k/o/kohler1_22_5_7.png).
+        // The filename `kohler1` (or similar bare-brand placeholders) bears
+        // no relation to the MPN — it's the "no real product image" image.
+        if (str_contains($host, 'afsupply.com')
+            && preg_match('#/media/catalog/product/cache/[^/]+/[a-z0-9]/[a-z0-9]/([a-z0-9_]+)\.(?:png|jpg|jpeg|webp)$#', $path, $m)) {
+            $filename = $m[1];
+            $mpnNorm  = strtolower(preg_replace('/[^a-z0-9]/i', '', $mpn));
+            $altNorm  = preg_match('/^k-?\d/i', $mpn)
+                ? strtolower(preg_replace('/[^a-z0-9]/i', '', preg_replace('/^K-?/i', '', $mpn)))
+                : '';
+            $fileNorm = preg_replace('/[^a-z0-9]/i', '', $filename);
+            if ($mpnNorm && ! str_contains($fileNorm, $mpnNorm) && (! $altNorm || ! str_contains($fileNorm, $altNorm))) {
+                return true;
+            }
+        }
+
+        // Theme-level OG placeholder images (e.g. uakc.com's WordPress
+        // theme serves /wp-content/themes/.../og_snippet_1200x630.png
+        // when a product has no real image). Filename pattern is generic.
+        if (preg_match('#/og_snippet[_\-]?\d*x?\d*\.(?:png|jpe?g|webp)$#i', $path)) {
+            return true;
+        }
+        // Generic social/share fallbacks served by themes when a PDP
+        // lacks real imagery.
+        if (preg_match('#/(?:default|fallback|no[-_]?image|noimage|placeholder|share[-_]image|social[-_]share)[^/]*\.(?:png|jpe?g|webp)$#i', $path)) {
+            return true;
+        }
+
+        // Alternative-angle / detail / swatch images. Vendors often
+        // expose these in JSON-LD `image` arrays alongside the primary
+        // hero shot — they show only a part of the product (e.g. just
+        // a handle for a valve trim) so they're misleading. Reject so
+        // the candidate loop walks to the next merchant URL where the
+        // primary image (or a different alt-free PDP) can be picked.
+        // Patterns covered: `_alt`, `_alt2`, `/alternative/`, `_back`,
+        // `_side`, `_top`, `_bottom`, `_detail`, `_swatch`, `_thumb`,
+        // `_secondary`, `-alt-`, `-alt2-`.
+        // Only match against the BASENAME (the filename itself), not
+        // folder names — many vendors use generic folders like
+        // `/detail_page/`, `/thumbs/`, `/top/{cat}/` that happen to
+        // contain these tokens but the actual image is the primary.
+        $basename = strtolower(basename($path));
+        if (preg_match('#(?:^|[_\-])(?:alt\d*|alternative|back|side|top|bottom|detail|swatch|thumb|secondary)(?:[_\-\.]|$)#i', $basename)) {
+            return true;
+        }
+
         return false;
     }
 
     /**
-     * Find the best Shopping result whose link contains the full MPN, then
-     * download its thumbnail to local public storage so the URL never
-     * expires. Returns the public URL of the stored image, or null.
-     */
-    private function pickAndStoreShoppingImage(array $shopping, string $mpn, string $manufacturer): ?string
-    {
-        if (empty($shopping) || $mpn === '') {
-            return null;
-        }
-        $mpnNorm = strtolower(preg_replace('/[^a-z0-9]/i', '', $mpn));
-        if ($mpnNorm === '') {
-            return null;
-        }
-        // Also accept MPN with leading "K-" stripped (Kohler ads index w/o prefix).
-        // Handles both K-26052 and K26052 forms.
-        $altNorm = preg_match('/^k-?\d/i', $mpn)
-            ? strtolower(preg_replace('/[^a-z0-9]/i', '', preg_replace('/^K-?/i', '', $mpn)))
-            : null;
-
-        // Try in priority order:
-        //  1. link contains full MPN (best — variant-specific PDP)
-        //  2. title contains full MPN (merchant variant listing)
-        //  3. first shopping thumbnail (last resort, may be wrong finish)
-        $tiers = [[], [], []];
-        foreach ($shopping as $r) {
-            $thumb = $r['thumbnail'] ?? '';
-            if (! $thumb || $this->looksLikeLogo($thumb)) {
-                continue;
-            }
-            $linkNorm  = strtolower(preg_replace('/[^a-z0-9]/i', '', $r['link']  ?? ''));
-            $titleNorm = strtolower(preg_replace('/[^a-z0-9]/i', '', $r['title'] ?? ''));
-
-            if (str_contains($linkNorm, $mpnNorm) || ($altNorm && str_contains($linkNorm, $altNorm))) {
-                $tiers[0][] = $thumb;
-            } elseif (str_contains($titleNorm, $mpnNorm) || ($altNorm && str_contains($titleNorm, $altNorm))) {
-                $tiers[1][] = $thumb;
-            } else {
-                $tiers[2][] = $thumb;
-            }
-        }
-
-        // Only fall back to tier 2 (no MPN match anywhere) when the MPN has
-        // NO finish suffix — otherwise we'd risk storing the wrong color.
-        $hasFinishSuffix = $this->mpnHasFinishSuffix($mpn);
-        $candidates = array_merge($tiers[0], $tiers[1], $hasFinishSuffix ? [] : $tiers[2]);
-
-        foreach ($candidates as $thumb) {
-            $stored = $this->downloadImageLocally($thumb, $manufacturer, $mpn);
-            if ($stored) {
-                return $stored;
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Download an image (typically a SerpAPI-proxied gstatic thumbnail) to
+     * Download an image (typically a SERP-proxied gstatic thumbnail) to
      * storage/app/public/receipt-images/ and return its public URL. File
      * is keyed by md5(manufacturer:mpn) so re-runs deduplicate cleanly.
      */
     private function downloadImageLocally(string $url, string $manufacturer, string $mpn): ?string
     {
+        // Decode HTML entities (e.g. `&amp;` from JSON-LD/og:image).
+        $url = html_entity_decode($url, ENT_QUOTES | ENT_HTML5);
+
+        // Many product hosts sit behind Cloudflare and 403 plain HTTP
+        // clients without a real browser UA + same-origin Referer. Send
+        // both so the candidate-loop only walks-on for genuine failures.
+        $imgHost = strtolower(parse_url($url, PHP_URL_HOST) ?? '');
+        $referer = $imgHost !== '' ? ('https://' . $imgHost . '/') : null;
+        $headers = [
+            'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' .
+                            '(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+            'Accept'     => 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+        ];
+        if ($referer) {
+            $headers['Referer'] = $referer;
+        }
+
         try {
-            $resp = Http::timeout(10)
-                ->withHeaders(['User-Agent' => 'Mozilla/5.0'])
-                ->get($url);
+            $resp = Http::timeout(15)->withHeaders($headers)->get($url);
         } catch (Throwable $e) {
             return null;
         }
@@ -521,7 +694,7 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
 
         $bytes = $resp->body();
         if (strlen($bytes) < 500) {
-            // Empty/placeholder; SerpAPI shopping thumbs are typically
+            // Empty/placeholder; SERP shopping thumbs are typically
             // 700-4000 bytes (small webp previews) so use a generous floor.
             return null;
         }
@@ -529,6 +702,25 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
         if (! str_starts_with($ctype, 'image/')) {
             return null;
         }
+
+        // Reject tiny images (e.g. cpesupply 107x101 thumbnails). The UI
+        // displays product images at ~80-120px, so anything < 300px on
+        // either side will look blurry/pixelated when scaled.
+        $dims = @getimagesizefromstring($bytes);
+        if ($dims && (($dims[0] < 300) || ($dims[1] < 300))) {
+            return null;
+        }
+
+        // Auto-crop large white borders (scene7 ISO renders, Lowe's product
+        // shots, etc. often have 20-40% whitespace). Re-encodes as JPEG when
+        // crop is significant; leaves photos with full-bleed/colored
+        // backgrounds untouched.
+        $cropped = $this->cropWhiteBorders($bytes, $ctype);
+        if ($cropped !== null) {
+            $bytes = $cropped;
+            $ctype = 'image/jpeg';
+        }
+
         $ext = match (true) {
             str_contains($ctype, 'webp') => 'webp',
             str_contains($ctype, 'png')  => 'png',
@@ -536,7 +728,16 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
             default                      => 'jpg',
         };
 
-        $key      = md5(strtolower(trim($manufacturer)) . ':' . strtolower(trim($mpn)));
+        // Key by manufacturer:mpn so re-runs deduplicate the same product.
+        // When the item lacks BOTH manufacturer and MPN, fall back to a
+        // hash of the source image URL — otherwise every MPN-less item
+        // collides on md5(':') and the first download wins for all of
+        // them (causing wrong images on unrelated rows).
+        $manufacturerKey = strtolower(trim($manufacturer));
+        $mpnKey          = strtolower(trim($mpn));
+        $key = ($manufacturerKey === '' && $mpnKey === '')
+            ? md5($url)
+            : md5($manufacturerKey . ':' . $mpnKey);
         $path     = 'receipt-images/' . $key . '.' . $ext;
         $disk     = \Illuminate\Support\Facades\Storage::disk('public');
 
@@ -546,13 +747,99 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
         return asset('storage/' . $path);
     }
 
+    /**
+     * Trim large white borders from product photos (scene7 ISO renders,
+     * Lowe's/THD studio shots, etc.). Returns re-encoded JPEG bytes when
+     * cropping removes more than ~10% on any side; returns null if the
+     * image is full-bleed, has a colored background, or GD isn't available.
+     */
+    private function cropWhiteBorders(string $bytes, string $ctype): ?string
+    {
+        if (! function_exists('imagecreatefromstring') || ! function_exists('imagecrop')) {
+            return null;
+        }
+        // Don't crop animated GIFs (would lose animation) or webp with
+        // transparency.
+        if (str_contains($ctype, 'gif')) {
+            return null;
+        }
+
+        $img = @imagecreatefromstring($bytes);
+        if (! $img) {
+            return null;
+        }
+
+        $w = imagesx($img);
+        $h = imagesy($img);
+        $threshold = 240;
+        $minX = $w; $minY = $h; $maxX = 0; $maxY = 0;
+
+        // Sample every 2 pixels for speed (sufficient resolution for border detection).
+        for ($y = 0; $y < $h; $y += 2) {
+            for ($x = 0; $x < $w; $x += 2) {
+                $rgb = imagecolorat($img, $x, $y);
+                $r = ($rgb >> 16) & 0xFF;
+                $g = ($rgb >> 8) & 0xFF;
+                $b = $rgb & 0xFF;
+                if ($r < $threshold || $g < $threshold || $b < $threshold) {
+                    if ($x < $minX) { $minX = $x; }
+                    if ($y < $minY) { $minY = $y; }
+                    if ($x > $maxX) { $maxX = $x; }
+                    if ($y > $maxY) { $maxY = $y; }
+                }
+            }
+        }
+
+        // No non-white content found, or content fills the frame already.
+        if ($maxX <= $minX || $maxY <= $minY) {
+            imagedestroy($img);
+            return null;
+        }
+
+        $borderLeft   = $minX;
+        $borderRight  = $w - 1 - $maxX;
+        $borderTop    = $minY;
+        $borderBottom = $h - 1 - $maxY;
+        $maxBorder    = max($borderLeft, $borderRight, $borderTop, $borderBottom);
+
+        // Only crop when borders are substantial (>10% of dimension).
+        if ($maxBorder < min($w, $h) * 0.10) {
+            imagedestroy($img);
+            return null;
+        }
+
+        $pad = 15;
+        $minX = max(0, $minX - $pad);
+        $minY = max(0, $minY - $pad);
+        $maxX = min($w - 1, $maxX + $pad);
+        $maxY = min($h - 1, $maxY + $pad);
+
+        $cropped = @imagecrop($img, [
+            'x' => $minX, 'y' => $minY,
+            'width' => $maxX - $minX + 1,
+            'height' => $maxY - $minY + 1,
+        ]);
+        imagedestroy($img);
+        if (! $cropped) {
+            return null;
+        }
+
+        ob_start();
+        imagejpeg($cropped, null, 92);
+        $out = ob_get_clean();
+        imagedestroy($cropped);
+
+        return $out ?: null;
+    }
+
     private function buildQuery(string $manufacturer, string $mpn, string $description): ?string
     {
+        $finish = $this->extractFinish($description);
         if ($manufacturer && $mpn) {
-            return trim($manufacturer . ' ' . $mpn);
+            return trim($manufacturer . ' ' . $mpn . ($finish ? ' ' . $finish : ''));
         }
         if ($mpn) {
-            return $mpn;
+            return trim($mpn . ($finish ? ' ' . $finish : ''));
         }
         if ($description) {
             $clean = preg_replace('/[^A-Za-z0-9\s\-\/]/', ' ', $description);
@@ -563,59 +850,261 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
     }
 
     /**
+     * Return the longest FINISH_PHRASE found in the description, or null.
+     * Used to bias both the search query and result-matching toward the
+     * correct color/finish (e.g. WHITE vs BLACK toilet tanks).
+     */
+    private function extractFinish(string $description): ?string
+    {
+        $upper = strtoupper($description);
+        foreach (self::FINISH_PHRASES as $finish) {
+            if (str_contains($upper, $finish)) {
+                return $finish;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Returns true when the candidate text contains the requested finish,
+     * OR contains no other competing finish phrase. Returns false only
+     * when a *different* finish is explicitly named (wrong color).
+     */
+    private function matchesFinish(string $haystack, ?string $finish): bool
+    {
+        if (! $finish) {
+            return true;
+        }
+        $upper = strtoupper($haystack);
+        if (str_contains($upper, $finish)) {
+            return true;
+        }
+        foreach (self::FINISH_PHRASES as $other) {
+            if ($other === $finish) {
+                continue;
+            }
+            if (str_contains($upper, $other)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Vendors that don't break out an MPN column often embed the part
+     * number at the START of the description, separated by ":" or a
+     * space: "C3-455 CLEANSING TOILET SEAT WHITE".
+     *
+     * Heuristic: the first whitespace-delimited token is treated as a
+     * candidate MPN when it's 4-25 chars, contains BOTH a letter and a
+     * digit, and matches a typical alphanumeric SKU shape (letters,
+     * digits, dashes, optionally a trailing "-{FINISH}").
+     */
+    private function extractMpnFromDescription(string $description): ?string
+    {
+        $first = strtok(trim($description), " \t\n\r:");
+        if (! $first) {
+            return null;
+        }
+        $first = rtrim($first, ':');
+        if (strlen($first) < 4 || strlen($first) > 25) {
+            return null;
+        }
+        if (! preg_match('/^[A-Z0-9][A-Z0-9\-\/]+$/i', $first)) {
+            return null;
+        }
+        // Must contain at least one letter AND one digit to look like a SKU
+        if (! preg_match('/[A-Z]/i', $first) || ! preg_match('/\d/', $first)) {
+            return null;
+        }
+        // Reject common English words that happen to fit (KOHLER, BRIZO,
+        // BEAUCLERE, OTHER, PURIST, AWAKEN, etc.) — these are the brand
+        // or series names that prefix many descriptions instead of an MPN.
+        if (! preg_match('/\d/', $first)) {
+            return null;
+        }
+        return $first;
+    }
+
+    /**
+     * Look across all items in a receipt and return the most common
+     * finish phrase. Used to inject the right finish into queries for
+     * sibling items whose description omits it.
+     *
+     * @param  array<int, array<string, mixed>>  $items
+     */
+    private function inferReceiptFinish(array $items): ?string
+    {
+        $tally = [];
+        foreach ($items as $it) {
+            $desc = strtoupper((string) ($it['Description'] ?? ''));
+            foreach (self::FINISH_PHRASES as $finish) {
+                if (str_contains($desc, $finish)) {
+                    $tally[$finish] = ($tally[$finish] ?? 0) + 1;
+                    break; // longest-match-first ordering in const handles overlap
+                }
+            }
+        }
+        if (empty($tally)) {
+            return null;
+        }
+        arsort($tally);
+        $top = array_key_first($tally);
+        // Require at least 2 sibling items to share the finish so we
+        // don't propagate a one-off finish to unrelated items.
+        return ($tally[$top] >= 2) ? $top : null;
+    }
+
+    private function descriptionHasFinish(string $description): bool
+    {
+        $upper = strtoupper($description);
+        foreach (self::FINISH_PHRASES as $finish) {
+            if (str_contains($upper, $finish)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Common kitchen/bath finish phrases, ordered longest-first so the
+     * inference loop matches the most specific phrase before a substring
+     * (e.g. "VIBRANT BRUSHED MODERNE BRASS" beats "BRUSHED" alone).
+     */
+    private const FINISH_PHRASES = [
+        'VIBRANT BRUSHED MODERNE BRASS',
+        'VIBRANT BRUSHED NICKEL',
+        'VIBRANT POLISHED NICKEL',
+        'POLISHED CHROME',
+        'BRUSHED NICKEL',
+        'POLISHED NICKEL',
+        'MATTE BLACK',
+        'OIL RUBBED BRONZE',
+        'BRUSHED BRONZE',
+        'BRUSHED GOLD',
+        'POLISHED BRASS',
+        'STAINLESS STEEL',
+        'CHAMPAGNE BRONZE',
+        'CHROME',
+        'WHITE',
+    ];
+
+    /**
      * Extract product image from page using JSON-LD (preferred) and meta tags.
      * Returns image URL string, empty string if page accessible but no image,
      * or null if page failed to load.
      */
-    private function extractProductData(string $url, string $mpn): string|null
+    /**
+     * Get the main product image from the PDP at $url.
+     * Tries plain HTTP first; escalates to a headless render when the
+     * page is on a JS-protected host, returns < 10KB, or yields no
+     * recognisable image. Returns the absolute image URL or null.
+     */
+    private function extractProductData(string $url, string $mpn): ?string
     {
-        try {
-            $response = Http::timeout(8)
-                ->withHeaders([
-                    'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-                    'Accept'     => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                ])
-                ->get($url);
-        } catch (Throwable $e) {
-            return null;
-        }
+        $host = strtolower(parse_url($url, PHP_URL_HOST) ?? '');
+        $needsHeadless = $this->needsHeadless($host);
 
-        if (! $response->successful()) {
-            return null;
-        }
-
-        $html = $response->body();
-
-        // UA-sniff workaround: some sites (e.g. virginiatile.com) return
-        // a tiny JS-only stub when a Chrome UA is detected, but serve the
-        // full SSR HTML to non-Chrome agents. Retry without our UA so the
-        // og:image / inline product images become available.
-        if (strlen($html) < 10000) {
+        $html = null;
+        if (! $needsHeadless) {
             try {
-                $alt = Http::timeout(8)
-                    ->withHeaders(['Accept' => 'text/html,*/*;q=0.8'])
+                $response = Http::timeout(8)
+                    ->withHeaders([
+                        'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+                        'Accept'     => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    ])
                     ->get($url);
-                if ($alt->successful() && strlen($alt->body()) > strlen($html)) {
-                    $html = $alt->body();
+                if ($response->successful()) {
+                    $html = $response->body();
+                    // UA-sniff workaround for sites that ship a JS-only stub
+                    // to Chrome but a full SSR page to other agents.
+                    if (strlen($html) < 10000) {
+                        try {
+                            $alt = Http::timeout(8)
+                                ->withHeaders(['Accept' => 'text/html,*/*;q=0.8'])
+                                ->get($url);
+                            if ($alt->successful() && strlen($alt->body()) > strlen($html)) {
+                                $html = $alt->body();
+                            }
+                        } catch (Throwable $e) {
+                            // keep original $html
+                        }
+                    }
                 }
             } catch (Throwable $e) {
-                // keep original $html
+                $html = null;
             }
         }
 
-        // 1. JSON-LD Product structured data (gold standard)
+        $image = $html ? $this->parsePdpImage($html, $url, $mpn) : null;
+        if ($image) {
+            return $image;
+        }
+
+        // Plain-HTTP parse found nothing. Always escalate to a headless
+        // render: many modern PDPs (firstsupply, etc.) ship a 100KB+
+        // JS bundle whose product image is only injected after hydration.
+        // The earlier short-circuit on response size was wrong because a
+        // big JS stub still has zero parseable PDP markup.
+
+        // First pass: domcontentloaded (fast, ~5-10s). JSON-LD / og:image
+        // are server-rendered on most PDPs, so we usually get the image
+        // here without waiting for tracker scripts to finish.
+        $rendered = $this->browsershotRender($url, 'domcontentloaded', 25);
+        $image = $rendered ? $this->parsePdpImage($rendered, $url, $mpn) : null;
+        if ($image) {
+            return $image;
+        }
+
+        // Second pass: networkidle (slower, up to 60s) for lazy-loaded
+        // hero images on Shopify-style PDPs.
+        $rendered = $this->browsershotRender($url, 'networkidle0', 60);
+        return $rendered ? $this->parsePdpImage($rendered, $url, $mpn) : null;
+    }
+
+    /**
+     * Render a URL with Browsershot, returning HTML or null on failure.
+     */
+    private function browsershotRender(string $url, string $waitUntil, int $timeoutSeconds): ?string
+    {
+        try {
+            return Browsershot::url($url)
+                ->setOption('args', ['--no-sandbox', '--disable-setuid-sandbox'])
+                ->userAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36')
+                ->setOption('waitUntil', $waitUntil)
+                ->timeout($timeoutSeconds)
+                ->bodyHtml();
+        } catch (Throwable $e) {
+            Log::warning('V2 headless render failed', [
+                'url'        => $url,
+                'wait_until' => $waitUntil,
+                'timeout'    => $timeoutSeconds,
+                'err'        => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Extract the main product image URL from a fully-rendered HTML page.
+     * Tries, in order:
+     *   1. JSON-LD Product.image (with optional MPN-strict matching)
+     *   2. itemprop="image" containing the MPN (variant-correct on many
+     *      reseller sites where og:image points at the parent SKU)
+     *   3. og:image / og:image:secure_url
+     *   4. Inline `"image": "https://..."` (Shopify, custom JSON dumps)
+     *   5. twitter:image
+     *   6. Vendor CDN sniff (artivosurfaces, etc.)
+     */
+    private function parsePdpImage(string $html, string $url, string $mpn): ?string
+    {
         $image = $this->extractJsonLdImage($html, $mpn);
         if ($image) {
             return $image;
         }
 
-        // 1b. itemprop="image" — finish-specific image often lives here
-        // even when og:image points to the parent SKU's default image
-        // (kbauthority.com pattern: og:image=image.php?id=PARENT but
-        // itemprop=images/W/.../K-26052-BLL_Kohler_Matte_Black.jpg).
-        // Prefer when its URL contains the MPN.
-        $mpnNormForItemprop = strtolower(preg_replace('/[^a-z0-9]/i', '', $mpn));
-        if ($mpnNormForItemprop !== ''
+        $mpnNorm = strtolower(preg_replace('/[^a-z0-9]/i', '', $mpn));
+        if ($mpnNorm !== ''
             && preg_match_all('/itemprop=["\']image["\']\s+content=["\']([^"\']+)["\']/i', $html, $im)) {
             foreach ($im[1] as $candidate) {
                 $resolved = $this->resolveUrl($candidate, $url);
@@ -623,13 +1112,12 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
                     continue;
                 }
                 $urlNorm = strtolower(preg_replace('/[^a-z0-9]/i', '', $resolved));
-                if (str_contains($urlNorm, $mpnNormForItemprop)) {
+                if (str_contains($urlNorm, $mpnNorm)) {
                     return $resolved;
                 }
             }
         }
 
-        // 2. Open Graph image
         if (preg_match('/<meta\s+(?:property|name)=["\']og:image(?::secure_url)?["\']\s+content=["\']([^"\']+)["\']/i', $html, $m)) {
             $resolved = $this->resolveUrl($m[1], $url);
             if ($resolved && ! $this->looksLikeLogo($resolved)) {
@@ -637,7 +1125,6 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
             }
         }
 
-        // 3. Shopify product JSON (when loaded inline)
         if (preg_match('#"image":\s*"(https?:[^"]+)"#', $html, $m)) {
             $img = stripslashes($m[1]);
             if (! $this->looksLikeLogo($img)) {
@@ -645,7 +1132,6 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
             }
         }
 
-        // 4. Twitter card
         if (preg_match('/<meta\s+name=["\']twitter:image["\']\s+content=["\']([^"\']+)["\']/i', $html, $m)) {
             $resolved = $this->resolveUrl($m[1], $url);
             if ($resolved && ! $this->looksLikeLogo($resolved)) {
@@ -653,19 +1139,28 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
             }
         }
 
-        // 5. Vendor CDN sniff — some vendor sites (e.g. virginiatile.com)
-        // omit og:image and Product JSON-LD on PDPs, but render the
-        // product photo via a known image CDN in <img srcset>. Pick the
-        // FIRST CDN URL on the page and normalize the width param to a
-        // hi-res value, dropping any responsive `.webp` extension in
-        // favour of `.jpg` for broader downstream compatibility.
         if (preg_match('#https?://cdn\.artivosurfaces\.com/image/upload/[A-Za-z0-9_-]+/w_\d+/[A-Za-z0-9_-]+\.(?:jpg|webp)#', $html, $m)) {
             $hi = preg_replace('#/w_\d+/#', '/w_1340/', $m[0]);
             $hi = preg_replace('/\.webp$/', '.jpg', $hi);
             return $hi;
         }
 
-        return ''; // page loaded but no image found
+        // SupplyHouse PDPs sometimes ship without og:image / itemprop
+        // when their JS-rendered gallery hasn't hydrated. They host all
+        // product imagery under a predictable cloudfront path keyed by
+        // the dashed MPN slug (e.g. `k-26052-bll.jpeg`). Extract the
+        // dashed MPN from the URL path and fall back to that CDN URL.
+        // Negative-lookahead `(?![a-z])` stops at the first segment that
+        // begins a word (e.g. `-Essential`) so we don't capture marketing
+        // slug words after the actual SKU.
+        $host = strtolower(parse_url($url, PHP_URL_HOST) ?? '');
+        if (str_ends_with($host, 'supplyhouse.com')
+            && preg_match('#-([A-Z]+-?\d+(?:-[A-Z0-9]+(?![a-z]))*)#', $url, $m)) {
+            $slug = strtolower($m[1]);
+            return 'https://d3501hjdis3g5w.cloudfront.net/images/products/zoom/' . $slug . '.jpeg';
+        }
+
+        return null;
     }
 
     /**
@@ -736,49 +1231,6 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
         return null;
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // PHASE B — FALLBACK
-    // ═══════════════════════════════════════════════════════════════
-
-    private function fallbackResolve(string $manufacturer, string $mpn, string $description, ?array $partial): ?array
-    {
-        $out = [];
-
-        // B1. If we have a URL on a headless-required host, render it
-        if ($partial && ! empty($partial['product_url']) && empty($partial['image_url'])) {
-            $host = parse_url($partial['product_url'], PHP_URL_HOST) ?: '';
-            if ($this->needsHeadless($host)) {
-                $rendered = $this->headlessExtractImage($partial['product_url'], $mpn);
-                if ($rendered) {
-                    $out['image_url'] = $rendered;
-                }
-            }
-        }
-
-        // B2. Google Shopping thumbnail (gstatic CDN — stable product image).
-        // Download locally because gstatic URLs eventually return 404.
-        if (empty($out['image_url']) && (empty($partial['image_url']) ?? true)) {
-            $query = $this->buildQuery($manufacturer, $mpn, $description);
-            $shop  = $this->serpShoppingImage($query, $mpn);
-            if ($shop) {
-                $stored = $this->downloadImageLocally($shop, $manufacturer, $mpn);
-                $out['image_url'] = $stored ?: $shop;
-            }
-        }
-
-        // B3. SerpAPI Google Images as last resort
-        if (empty($out['image_url']) && (empty($partial['image_url']) ?? true)) {
-            $query  = $this->buildQuery($manufacturer, $mpn, $description);
-            $imgUrl = $this->serpImageSearch($query, $mpn);
-            if ($imgUrl) {
-                $stored = $this->downloadImageLocally($imgUrl, $manufacturer, $mpn);
-                $out['image_url'] = $stored ?: $imgUrl;
-            }
-        }
-
-        return $out ?: null;
-    }
-
     private function needsHeadless(string $host): bool
     {
         foreach (self::HEADLESS_HOSTS as $h) {
@@ -787,33 +1239,6 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
             }
         }
         return false;
-    }
-
-    private function headlessExtractImage(string $url, string $mpn): ?string
-    {
-        try {
-            $html = Browsershot::url($url)
-                ->setOption('args', ['--no-sandbox', '--disable-setuid-sandbox'])
-                ->userAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36')
-                ->waitUntilNetworkIdle()
-                ->timeout(30)
-                ->bodyHtml();
-        } catch (Throwable $e) {
-            Log::warning('V2 headless render failed', ['url' => $url, 'err' => $e->getMessage()]);
-            return null;
-        }
-
-        $img = $this->extractJsonLdImage($html, $mpn);
-        if ($img) {
-            return $img;
-        }
-        if (preg_match('/<meta\s+(?:property|name)=["\']og:image(?::secure_url)?["\']\s+content=["\']([^"\']+)["\']/i', $html, $m)) {
-            $resolved = $this->resolveUrl($m[1], $url);
-            if ($resolved && ! $this->looksLikeLogo($resolved)) {
-                return $resolved;
-            }
-        }
-        return null;
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -837,199 +1262,21 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // SERPAPI (Google Shopping + Web + Images)
+    // SERP (Google Web Search via Bright Data)
     // ═══════════════════════════════════════════════════════════════
 
     /**
-     * Google Shopping thumbnail extraction. Returns gstatic image URL
-     * preferring an MPN-matching title. Used only as image fallback.
-     */
-    private function serpShoppingImage(string $query, string $mpn): ?string
-    {
-        $apiKey = config('services.serpapi.api_key');
-        if (! $apiKey) {
-            return null;
-        }
-        try {
-            $response = Http::timeout(15)->get('https://serpapi.com/search.json', [
-                'engine'  => 'google_shopping',
-                'q'       => $query,
-                'gl'      => 'us',
-                'hl'      => 'en',
-                'api_key' => $apiKey,
-            ]);
-        } catch (Throwable $e) {
-            return null;
-        }
-        if (! $response->successful()) {
-            Log::warning('V2 SerpAPI shopping failed', ['status' => $response->status(), 'body' => substr($response->body(), 0, 200)]);
-            return null;
-        }
-        $results = $response->json('shopping_results') ?? [];
-        if (empty($results)) {
-            return null;
-        }
-
-        $mpnNorm = strtolower(preg_replace('/[^a-z0-9]/i', '', $mpn));
-        $altNorm = preg_match('/^k-?\d/i', $mpn)
-            ? strtolower(preg_replace('/[^a-z0-9]/i', '', preg_replace('/^K-?/i', '', $mpn)))
-            : '';
-
-        // Require MPN match in either link or title — never fall back to
-        // the first thumbnail (high risk of wrong color/finish).
-        foreach ($results as $r) {
-            $img = $r['thumbnail'] ?? null;
-            if (! $img || $this->looksLikeLogo($img)) {
-                continue;
-            }
-            $hayNorm = preg_replace('/[^a-z0-9]/i', '', strtolower(($r['title'] ?? '') . ' ' . ($r['link'] ?? '')));
-            if ($mpnNorm && (str_contains($hayNorm, $mpnNorm) || ($altNorm && str_contains($hayNorm, $altNorm)))) {
-                return $img;
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Single Google Web Search via SerpAPI. Returns BOTH organic and
+     * Single Google Web Search via SERP. Returns BOTH organic and
      * shopping results from the same call (1 API credit total):
      *   ['organic' => [...organic_results], 'shopping' => [...shopping_results]]
      */
     private function serpWebSearch(string $query, int $count = 10): array
     {
-        $apiKey = config('services.serpapi.api_key');
-        if (! $apiKey) {
-            return ['organic' => [], 'shopping' => []];
-        }
-        try {
-            $response = Http::timeout(15)->get('https://serpapi.com/search.json', [
-                'engine'  => 'google',
-                'q'       => $query,
-                'num'     => $count,
-                'gl'      => 'us',
-                'hl'      => 'en',
-                'api_key' => $apiKey,
-            ]);
-        } catch (Throwable $e) {
-            return ['organic' => [], 'shopping' => []];
-        }
-        if (! $response->successful()) {
-            Log::warning('V2 SerpAPI web failed', ['status' => $response->status(), 'body' => substr($response->body(), 0, 200)]);
-            return ['organic' => [], 'shopping' => []];
-        }
+        $result = \App\Services\Search\SerpClient::make()->web($query, $count);
         return [
-            'organic'  => $response->json('organic_results')  ?? [],
-            'shopping' => $response->json('shopping_results') ?? [],
+            'organic'  => $result['organic_results']  ?? [],
+            'shopping' => $result['shopping_results'] ?? [],
         ];
-    }
-
-    private function serpImageSearch(?string $query, string $mpn): ?string
-    {
-        if (! $query) {
-            return null;
-        }
-        $apiKey = config('services.serpapi.api_key');
-        if (! $apiKey) {
-            return null;
-        }
-        try {
-            $response = Http::timeout(15)->get('https://serpapi.com/search.json', [
-                'engine' => 'google_images',
-                'q'      => $query,
-                'gl'     => 'us',
-                'hl'     => 'en',
-                'api_key' => $apiKey,
-            ]);
-        } catch (Throwable $e) {
-            return null;
-        }
-        if (! $response->successful()) {
-            return null;
-        }
-        $results = $response->json('images_results') ?? [];
-
-        $mpnNorm = strtolower(preg_replace('/[^a-z0-9]/i', '', $mpn));
-        // Prefer MPN-matching result
-        foreach ($results as $r) {
-            $imgUrl = $r['original'] ?? ($r['thumbnail'] ?? null);
-            if (! $imgUrl) continue;
-            $title = strtolower($r['title'] ?? '');
-            $page  = strtolower($r['link'] ?? '');
-            $hayNorm = preg_replace('/[^a-z0-9]/i', '', $title . ' ' . $page);
-            if ($mpnNorm && str_contains($hayNorm, $mpnNorm) && ! $this->looksLikeLogo($imgUrl)) {
-                return $imgUrl;
-            }
-        }
-        foreach ($results as $r) {
-            $imgUrl = $r['original'] ?? ($r['thumbnail'] ?? null);
-            if ($imgUrl && ! $this->looksLikeLogo($imgUrl)) {
-                return $imgUrl;
-            }
-        }
-        return null;
-    }
-
-    /**
-     * High-resolution image lookup via Google Images, restricted to LARGE
-     * images (`tbs=isz:l`) and validated by MPN appearing in the result's
-     * page link or title (so finish is correct). Returns the `original`
-     * CDN URL — typically 800-2000px versus the ~150px Shopping thumbs.
-     * Returns null when no MPN-matching large image is found.
-     */
-    private function serpImageSearchHighRes(string $manufacturer, string $mpn): ?string
-    {
-        if ($mpn === '') {
-            return null;
-        }
-        $apiKey = config('services.serpapi.api_key');
-        if (! $apiKey) {
-            return null;
-        }
-        $query = trim(($manufacturer ? $manufacturer . ' ' : '') . $mpn);
-        try {
-            $response = Http::timeout(15)->get('https://serpapi.com/search.json', [
-                'engine'  => 'google_images',
-                'q'       => $query,
-                'tbs'     => 'isz:l',
-                'gl'      => 'us',
-                'hl'      => 'en',
-                'api_key' => $apiKey,
-            ]);
-        } catch (Throwable $e) {
-            return null;
-        }
-        if (! $response->successful()) {
-            return null;
-        }
-        $results = $response->json('images_results') ?? [];
-        if (empty($results)) {
-            return null;
-        }
-
-        $mpnNorm = strtolower(preg_replace('/[^a-z0-9]/i', '', $mpn));
-        $altNorm = preg_match('/^k/i', $mpnNorm) ? substr($mpnNorm, 1) : '';
-
-        foreach ($results as $r) {
-            $imgUrl = $r['original'] ?? null;
-            if (! $imgUrl || $this->looksLikeLogo($imgUrl)) {
-                continue;
-            }
-            // Reject obvious low-res CDN proxies (gstatic encrypted thumbs).
-            $imgHost = strtolower(parse_url($imgUrl, PHP_URL_HOST) ?? '');
-            if (str_contains($imgHost, 'gstatic.com')) {
-                continue;
-            }
-            // Reject untrusted hosts (Amazon CDNs etc) — wrong-product risk.
-            if ($this->isUntrustedImageUrl($imgUrl, $mpn)) {
-                continue;
-            }
-            $hay = strtolower(($r['title'] ?? '') . ' ' . ($r['link'] ?? '') . ' ' . $imgUrl);
-            $hayNorm = preg_replace('/[^a-z0-9]/i', '', $hay);
-            if (str_contains($hayNorm, $mpnNorm) || ($altNorm && str_contains($hayNorm, $altNorm))) {
-                return $imgUrl;
-            }
-        }
-        return null;
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -1055,13 +1302,24 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
             return null;
         }
 
-        $variants = array_unique(array_filter([
-            $query,
-            $this->stripNumericTokens($query),
-        ]));
+        return $this->resolveFromHost($this->vendorHost, $query, $mpn);
+    }
+
+    /**
+     * Generic `site:{host} {query}` web probe via SERP. Tries the
+     * cleaned query first, then an alphabetic-only fallback that drops
+     * fractions/dimensions/flags which often cause `site:` searches to
+     * return zero hits against slug URLs.
+     */
+    private function resolveFromHost(string $host, string $query, string $mpn): ?array
+    {
+        $variants = array_unique(array_filter(array_merge(
+            [$query, $this->stripNumericTokens($query)],
+            $this->mpnQueryVariants($query, $mpn),
+        )));
 
         foreach ($variants as $variant) {
-            $scoped  = 'site:' . $this->vendorHost . ' ' . $variant;
+            $scoped  = 'site:' . $host . ' ' . $variant;
             $organic = $this->serpWebSearch($scoped, 5)['organic'] ?? [];
             if (empty($organic)) {
                 continue;
@@ -1072,9 +1330,9 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
                 if (! $url) {
                     continue;
                 }
-                $host = strtolower(parse_url($url, PHP_URL_HOST) ?? '');
-                $host = preg_replace('/^www\./', '', $host);
-                if (! str_ends_with($host, $this->vendorHost)) {
+                $urlHost = strtolower(parse_url($url, PHP_URL_HOST) ?? '');
+                $urlHost = preg_replace('/^www\./', '', $urlHost);
+                if (! str_ends_with($urlHost, $host)) {
                     continue;
                 }
                 if (! $this->isAcceptableProductUrl($url, $mpn)) {
@@ -1084,13 +1342,121 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
                 if (is_string($image) && $image !== '' && ! $this->isUntrustedImageUrl($image, $mpn)) {
                     return ['product_url' => $url, 'image_url' => $image];
                 }
-                // Even without an image we prefer a vendor product URL
+                // Even without an image we prefer this host's product URL
                 // over a mismatched-brand URL from a generic search.
                 // Phase B will try Google Images for an MPN-matching photo.
                 return ['product_url' => $url, 'image_url' => null];
             }
         }
         return null;
+    }
+
+    /**
+     * Probe SERP's google_shopping engine and return the first
+     * MPN-matching merchant result whose link points at the given host.
+     * Shopping feeds give us a paired PDP URL + thumbnail in one call,
+     * which is more reliable than re-ranking generic organic results.
+     */
+    private function resolveFromShoppingHost(string $host, string $query, string $mpn): ?array
+    {
+        $apiKey = config('services.serpapi.api_key');
+        if (! $apiKey) {
+            return null;
+        }
+
+        $variants = array_unique(array_filter(array_merge(
+            [$query, $this->stripNumericTokens($query)],
+            $this->mpnQueryVariants($query, $mpn),
+        )));
+
+        $mpnNorm = strtolower(preg_replace('/[^a-z0-9]/i', '', $mpn));
+        $altNorm = preg_match('/^k-?\d/i', $mpn)
+            ? strtolower(preg_replace('/[^a-z0-9]/i', '', preg_replace('/^K-?/i', '', $mpn)))
+            : '';
+
+        foreach ($variants as $variant) {
+            try {
+                $response = Http::timeout(15)->get('https://serpapi.com/search.json', [
+                    'engine'  => 'google_shopping',
+                    'q'       => $variant,
+                    'gl'      => 'us',
+                    'hl'      => 'en',
+                    'api_key' => $apiKey,
+                ]);
+            } catch (Throwable $e) {
+                continue;
+            }
+            if (! $response->successful()) {
+                continue;
+            }
+            $results = $response->json('shopping_results') ?? [];
+            foreach ($results as $r) {
+                $url = $r['product_link'] ?? $r['link'] ?? null;
+                if (! $url) {
+                    continue;
+                }
+                $urlHost = strtolower(parse_url($url, PHP_URL_HOST) ?? '');
+                $urlHost = preg_replace('/^www\./', '', $urlHost);
+                if (! str_ends_with($urlHost, $host)) {
+                    continue;
+                }
+                if ($mpnNorm) {
+                    $hayNorm = preg_replace('/[^a-z0-9]/i', '', strtolower(($r['title'] ?? '') . ' ' . $url));
+                    if (! str_contains($hayNorm, $mpnNorm) && ! ($altNorm && str_contains($hayNorm, $altNorm))) {
+                        continue;
+                    }
+                }
+                if (! $this->isAcceptableProductUrl($url, $mpn)) {
+                    continue;
+                }
+                // Prefer scraping the PDP for a high-res image; fall back
+                // to the shopping thumbnail if extraction fails.
+                $image = $this->extractProductData($url, $mpn);
+                if (is_string($image) && $image !== '' && ! $this->isUntrustedImageUrl($image, $mpn)) {
+                    return ['product_url' => $url, 'image_url' => $image];
+                }
+                $thumb = $r['thumbnail'] ?? null;
+                if ($thumb && ! $this->looksLikeLogo($thumb) && ! $this->isUntrustedImageUrl($thumb, $mpn)) {
+                    return ['product_url' => $url, 'image_url' => $thumb];
+                }
+                return ['product_url' => $url, 'image_url' => null];
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Return query variants where the MPN token is rewritten into the
+     * canonical dashed forms vendors actually use in URL slugs. Receipts
+     * collapse Kohler MPNs into bare alphanumerics (`K200000`, `K41440`,
+     * `K26052BLL`) but supplyhouse / kbauthority / homedepot index them
+     * dashed (`K-20000-0`, `K-4144-0`, `K-26052-BLL`). Without this
+     * substitution `site:supplyhouse.com Kohler K200000 WHITE` returns
+     * zero hits even though the PDP exists.
+     */
+    private function mpnQueryVariants(string $query, string $mpn): array
+    {
+        if ($mpn === '' || stripos($query, $mpn) === false) {
+            return [];
+        }
+        $alts = [];
+        if (preg_match('/^K(\d+)([A-Z]+)$/i', $mpn, $m)) {
+            $alts[] = 'K-' . $m[1] . '-' . strtoupper($m[2]);
+        } elseif (preg_match('/^K(\d{2,})$/i', $mpn, $m)) {
+            $digits = $m[1];
+            $alts[] = 'K-' . $digits;
+            if (strlen($digits) >= 2) {
+                $alts[] = 'K-' . substr($digits, 0, -1) . '-' . substr($digits, -1);
+            }
+        }
+        $variants = [];
+        foreach (array_unique($alts) as $alt) {
+            $v = str_ireplace($mpn, $alt, $query);
+            if ($v !== $query && $v !== '') {
+                $variants[] = $v;
+            }
+        }
+        return $variants;
     }
 
     /**
@@ -1164,22 +1530,56 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
         // When MPN is meaningful (≥4 chars with a digit), require it to
         // appear in the URL. This rejects near-MPN PDPs (different model)
         // and wrong-finish variants. The MPN may appear with or without
-        // dashes/spaces, so compare normalized.
+        // dashes/spaces, so compare on a normalized form — but require a
+        // non-alphanumeric boundary on each side so `K200000` does NOT
+        // match inside `K-R20000-0` (Kohler "R20000" is a different sink).
         if (strlen($mpn) >= 4 && preg_match('/\d/', $mpn)) {
-            $urlNorm = strtolower(preg_replace('/[^a-z0-9]/i', '', $url));
+            $urlPath = strtolower(parse_url($url, PHP_URL_PATH) ?? '') . ' '
+                . strtolower(parse_url($url, PHP_URL_QUERY) ?? '');
             $mpnNorm = strtolower(preg_replace('/[^a-z0-9]/i', '', $mpn));
-            $altNorm = preg_match('/^k-?\d/i', $mpn)
-                ? strtolower(preg_replace('/[^a-z0-9]/i', '', preg_replace('/^K-?/i', '', $mpn)))
-                : null;
-            $matches = str_contains($urlNorm, $mpnNorm)
-                || ($altNorm && str_contains($urlNorm, $altNorm));
+            // Build a regex that allows optional separators (`-`, `_`,
+            // `/`, ` `) BETWEEN each character of the MPN, and requires
+            // a non-alphanumeric (or start/end) boundary on the outside.
+            $pattern = '#(?:^|[^a-z0-9])'
+                . implode('[\-_/\s]?', array_map(fn ($c) => preg_quote($c, '#'), str_split($mpnNorm)))
+                . '(?:[^a-z0-9]|$)#i';
+            $matches = (bool) preg_match($pattern, $urlPath);
+
+            // Kohler URLs sometimes drop the `K-` prefix (e.g.
+            // `/p/kohler-foo-r20000-0/...`). Allow that too.
+            if (! $matches && preg_match('/^k-?\d/i', $mpn)) {
+                $alt        = strtolower(preg_replace('/[^a-z0-9]/i', '', preg_replace('/^K-?/i', '', $mpn)));
+                $altPattern = '#(?:^|[^a-z0-9])'
+                    . implode('[\-_/\s]?', array_map(fn ($c) => preg_quote($c, '#'), str_split($alt)))
+                    . '(?:[^a-z0-9]|$)#i';
+                $matches = (bool) preg_match($altPattern, $urlPath);
+            }
             if (! $matches) {
                 return false;
             }
         }
 
-        // Reject paginated index pages (e.g. `/tile/page/10/`).
-        if (preg_match('#/page/[0-9]+/?#i', $url)) {
+        // Reject paginated index pages (e.g. `/tile/page/10/`, `?page=12`).
+        if (preg_match('#/page/[0-9]+/?#i', $url) || preg_match('#[?&]page=[0-9]+#i', $url)) {
+            return false;
+        }
+
+        // SupplyHouse category slugs end in a 6+ digit category id
+        // (e.g. `/Toilets-26001000`, `/Shower-Heads-14834000`). Real
+        // PDPs always start with a brand prefix (`/Kohler-K-...`).
+        if (str_ends_with($host, 'supplyhouse.com')
+            && preg_match('#^/[A-Za-z][A-Za-z0-9\-]*-\d{6,}/?$#', parse_url($url, PHP_URL_PATH) ?? '')) {
+            return false;
+        }
+
+        // Brizo bundle/configurable URLs join multiple SKUs with `--`
+        // (e.g. `/bath/product/T70165-PCLHP--HL7065-PC--R70100`). When
+        // the user wants a single component (a handle, a rough-in), the
+        // bundle PDP shows the whole assembly which is wrong. Reject
+        // any path that contains 2+ `--` segments — Brizo's standalone
+        // PDPs are at `/bath/product/<SINGLE-SKU>`.
+        if ((str_ends_with($host, 'brizo.com') || str_ends_with($host, 'brizofaucet.ca'))
+            && substr_count(parse_url($url, PHP_URL_PATH) ?? '', '--') >= 2) {
             return false;
         }
 
@@ -1202,7 +1602,7 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
     }
 
     /**
-     * Re-rank SerpAPI results so URLs containing the full MPN come first.
+     * Re-rank SERP results so URLs containing the full MPN come first.
      * That guarantees we land on the exact-finish variant PDP rather than
      * a parent product page that defaults to a different finish image.
      * Stable within tier — keeps Google's organic order as the tiebreaker.
@@ -1249,22 +1649,14 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
 
     private function lookupGlobalCache(string $manufacturer, string $mpn): ?array
     {
-        if (! $mpn) {
+        $product = Product::lookup($manufacturer, $mpn);
+        if (! $product) {
             return null;
         }
-        $row = ReceiptLineItemDesc::query()
-            ->where('sku', $mpn)
-            ->whereNotNull('product_url')
-            ->whereNotNull('product_image_url')
-            ->orderByDesc('updated_at')
-            ->first();
 
-        if (! $row) {
-            return null;
-        }
         return [
-            'product_url' => $row->product_url,
-            'image_url'   => $row->product_image_url,
+            'product_url' => $product->product_url,
+            'image_url'   => $product->image_url,
         ];
     }
 
@@ -1273,6 +1665,7 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
         if (! $mpn) {
             return;
         }
+
         ReceiptLineItemDesc::updateOrCreate(
             [
                 'expense_receipt_id' => $this->receipt->id,
@@ -1285,5 +1678,31 @@ class ScrapeReceiptItemImagesV2 implements ShouldQueue
                 'product_image_url' => $result['image_url']   ?? null,
             ]
         );
+
+        $norm = Product::normalizeMpn($mpn);
+        if ($norm === '') {
+            return;
+        }
+
+        $product = Product::firstOrNew([
+            'manufacturer' => $manufacturer ?: null,
+            'mpn'          => $mpn,
+        ]);
+
+        // Don't overwrite a human-verified pin with auto-scraped data.
+        if ($product->verified_at) {
+            $product->last_checked_at = now();
+            $product->save();
+            return;
+        }
+
+        $product->fill([
+            'mpn_normalized'  => $norm,
+            'product_url'     => $result['product_url'] ?? $product->product_url,
+            'image_url'       => $result['image_url']   ?? $product->image_url,
+            'vendor_id'       => $product->vendor_id ?? $vendorId,
+            'source'          => $product->source ?: 'scrape',
+            'last_checked_at' => now(),
+        ])->save();
     }
 }

@@ -15,7 +15,7 @@
                         <flux:menu.item icon="cog-6-tooth" wire:click="$dispatchTo('estimates.estimate-accept', 'accept')">Settings</flux:menu.item>
                         
                         <flux:menu.item icon="document-duplicate" wire:click="$dispatchTo('estimates.estimate-duplicate', 'duplicateModal', { estimate: {{$estimate->id}} })">Duplicate Estimate</flux:menu.item>
-                        <flux:menu.item icon="envelope" wire:click="$dispatchTo('estimates.estimate-email', 'compose', { estimate: {{$estimate->id}} })">Email Estimate</flux:menu.item>
+                        <flux:menu.item icon="envelope" wire:click="$dispatchTo('estimates.estimate-email', 'compose', { estimate: {{$estimate->id}}, showChanges: {{ $showChanges ? 'true' : 'false' }} })">Email Estimate</flux:menu.item>
                         @if(!empty($estimate->payments) && !empty($estimate->options['start_date']) && !empty($estimate->options['end_date']))
                             <flux:menu.item icon="pencil-square" href="{{ route('estimate.sign', $estimate) }}" navigate>Sign Contract</flux:menu.item>
                         @else

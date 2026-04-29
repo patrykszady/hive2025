@@ -44,8 +44,12 @@ class TransactionBulkMatch extends Model
      *
      * @return self|null The matching rule, or null if no match found.
      */
-    public static function findMatchForAmount(int $vendorId, float $amount, ?string $description = null): ?self
+    public static function findMatchForAmount(?int $vendorId, float $amount, ?string $description = null): ?self
     {
+        if ($vendorId === null) {
+            return null;
+        }
+
         $matches = static::where('vendor_id', $vendorId)->get();
 
         // First pass: check specific amount matches (non-ANY)

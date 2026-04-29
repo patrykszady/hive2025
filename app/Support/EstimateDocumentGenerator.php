@@ -25,7 +25,7 @@ class EstimateDocumentGenerator
      *
      * @return array{binary:string, filename:string, title:string, path?:string, relative_path?:string}
      */
-    public static function generate(Estimate $estimate, string $type = 'Estimate', bool $store = false, ?string $timezone = null): array
+    public static function generate(Estimate $estimate, string $type = 'Estimate', bool $store = false, ?string $timezone = null, bool $showChanges = false): array
     {
         // PDFs should use the vendor's timezone, not browser timezone.
         // Don't rely on vendor_timezone() which needs an authenticated vendor user;
@@ -139,7 +139,10 @@ class EstimateDocumentGenerator
 
         // Collect recent activity log entries for this estimate's sections & line items
         // so the PDF can highlight what changed since the last export.
-        $recentChanges = static::collectRecentChanges($estimate);
+        // Only included when the caller explicitly opts in (matching the UI "Show Changes" toggle).
+        $recentChanges = $showChanges
+            ? static::collectRecentChanges($estimate)
+            : ['line_items' => [], 'sections' => [], 'since' => null];
 
         $view = view('misc.estimate', compact('estimate', 'vendor', 'client', 'clientContacts', 'project', 'sections', 'payments', 'title', 'estimate_total', 'estimate_total_words', 'type', 'reimbursements', 'contractBody', 'vendorLogoDataUrl', 'projectStatusTitle', 'projectFinances', 'signatureData', 'signatureName', 'signatureDate', 'allSignatures', 'recentChanges'))->render();
 

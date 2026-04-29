@@ -1,0 +1,254 @@
+{
+    "expense_id": 26839,
+    "receipt_id": 16910,
+    "vendor": "STUDIO 41/KOHLER STORE",
+    "total": 11982.48,
+    "item_count": 27,
+    "captured_at": "2026-04-29T02:33:37+00:00",
+    "note": "Golden fixture for regression testing OCR + image scrape pipeline. Compare ManufacturerPartNumber, Manufacturer, Description, Price, Quantity match; verify product_url and image_url resolve.",
+    "items": [
+        {
+            "ManufacturerPartNumber": "65365LFPCLHP",
+            "Manufacturer": "Brizo",
+            "Description": "BEAUCLERE : WIDESPREAD LAVATORY FAUCET WITH ARC SPOUT - LESS HANDLES 1.2 GPM",
+            "Price": 395.85,
+            "Quantity": 2,
+            "product_url": "https://focalpointhardware.com/products/brizo-65365lf-beauclere-widespread-lavatory-faucet-with-arc-spout-less-handles-1-2-gpm?srsltid=AfmBOoqStqB4w-CfO_H1Zl25PkNCMm_-BeYwD3v4ASPNGrv-da28BpGF",
+            "image_url": "https://focalpointhardware.com/cdn/shop/files/pUmvSIZ.png?v=1741614858&width=1024"
+        },
+        {
+            "ManufacturerPartNumber": "HX5365PC",
+            "Manufacturer": "Brizo",
+            "Description": "BEAUCLERE : WIDESPREAD LAVATORY CROSS HANDLE KIT",
+            "Price": 157.95,
+            "Quantity": 2,
+            "product_url": "https://www.brizo.com/customer-support/repair-parts/HX5365-PC",
+            "image_url": "http://127.0.0.1:8000/storage/receipt-images/fdb31fd050acdf8ddf0acb15e9a21825.png"
+        },
+        {
+            "ManufacturerPartNumber": "RP72414PC",
+            "Manufacturer": "Brizo",
+            "Description": "OTHER: PUSH BUTTON POP-UP WITH OVERFLOW CHROME",
+            "Price": 92.3,
+            "Quantity": 2,
+            "product_url": "https://www.supplyhouse.com/Moen-131553-1-1-4-Spring-Loaded-Push-Button-Bathroom-Drain-Assembly-w-Overflow-Chrome?srsltid=AfmBOooRoa6RTTnS23YOv-2M3BEw0vU1QrEFFCzigDAIHfYkrTus_X0v",
+            "image_url": "https://d3501hjdis3g5w.cloudfront.net/images/products/zoom/131553moen01.jpg"
+        },
+        {
+            "ManufacturerPartNumber": "K200000",
+            "Manufacturer": "Kohler",
+            "Description": "KOHLER CAXTON RECTANGLE UNDER - COUNTER BATHROOM SINK WHITE",
+            "Price": 107.25,
+            "Quantity": 2,
+            "product_url": "https://www.kohler.com/en/products/bathroom-sinks/shop-bathroom-sinks/caxton-rectangle-undermount-bathroom-sink-with-overflow-and-clamp-assembly-20000",
+            "image_url": "http://127.0.0.1:8000/storage/receipt-images/cefab9dac99685b86228f2c2120c9871.jpg"
+        },
+        {
+            "ManufacturerPartNumber": "ATDN59IGWT",
+            "Manufacturer": "Barclay",
+            "Description": "CERES 59\" FREESTANDING ACWH TUB, INTERNAL DRAIN & OF WH",
+            "Price": 1729.98,
+            "Quantity": 1,
+            "product_url": "https://www.barclayproducts.com/products/ceres-59-acrylic-tub-with-integral-drain-and-overflow",
+            "image_url": "http://127.0.0.1:8000/storage/receipt-images/80224bdfa8a16ee0a137c2ff11a0aa4f.jpg"
+        },
+        {
+            "ManufacturerPartNumber": "ITD910P",
+            "Manufacturer": "Westbrass",
+            "Description": "PVC ISLAND DRAIN FREESTANDING TUB DRAIN ROUGH-IN",
+            "Price": 165.523,
+            "Quantity": 1,
+            "product_url": "https://www.supplyhouse.com/OSB-ITD5135-Island-Tub-Drain-Testable-Rough-In-for-Freestanding-Tubs-PVC?srsltid=AfmBOoo6W5XniQUoh6oSYZw5tayZExiw4tSmISvxx6pf-Xvqsc0piPVE",
+            "image_url": "https://d3501hjdis3g5w.cloudfront.net/images/products/zoom/itd5135osb01.jpg"
+        },
+        {
+            "ManufacturerPartNumber": "T70165PCLHP",
+            "Manufacturer": "Brizo",
+            "Description": "BEAUCLERE : SINGLE - HANDLE FREESTANDING TUB FILLER - LESS HANDLE",
+            "Price": 2184,
+            "Quantity": 1,
+            "product_url": "https://www.brizo.com/bath/product/T70165-PCLHP",
+            "image_url": "http://127.0.0.1:8000/storage/receipt-images/026b65224209753e6c9a2e1be1305927.png"
+        },
+        {
+            "ManufacturerPartNumber": "HL7065PC",
+            "Manufacturer": "Brizo",
+            "Description": "BEAUCLERE : SINGLE-HANDLE FLOOR MOUNT TUB FILLER LEVER HANDLE KIT",
+            "Price": 72.15,
+            "Quantity": 1,
+            "product_url": "https://products.southernmaterials.com/Springfield-MO/Brizo-HL7065-PC-Chrome-Tub-Filler.HTM",
+            "image_url": "https://products.southernmaterials.com/BRZ-HL7065-PC-B1.JPEG?ver=260428"
+        },
+        {
+            "ManufacturerPartNumber": "R70100WS",
+            "Manufacturer": "Brizo",
+            "Description": "OTHER: SINGLE-HANDLE FREESTANDING TUB FILLER ROUGH NOT APPLICABLE",
+            "Price": 423.8,
+            "Quantity": 1,
+            "product_url": "https://www.brizo.com/bath/product/R70100-WS",
+            "image_url": "http://127.0.0.1:8000/storage/receipt-images/dbec9b9c74d66eed7a4332511a885c26.png"
+        },
+        {
+            "ManufacturerPartNumber": "83865PC",
+            "Manufacturer": "Brizo",
+            "Description": "BEAUCLERE : SHOWER ARM AND FLANGE",
+            "Price": 81.9,
+            "Quantity": 1,
+            "product_url": "https://focalpointhardware.com/products/brizo-83965-beauclere-16-shower-arm-and-flange?srsltid=AfmBOoqk1dPqKdS8hrcbIt72smyOydAnvXblCYNJe171XqokspGL3wK3",
+            "image_url": "https://focalpointhardware.com/cdn/shop/files/PsrucEn.png?v=1741614859&width=1024"
+        },
+        {
+            "ManufacturerPartNumber": "87465PC",
+            "Manufacturer": "Brizo",
+            "Description": "BEAUCLERE : H2OKINETIC (R) MULTI-FUNCTION SHOWER HEAD",
+            "Price": 198.25,
+            "Quantity": 1,
+            "product_url": "https://plumbtile.com/products/brizo-87465?srsltid=AfmBOopO2tL9IDsCW1dgbHg3YbVM8_4n2ibAeVUB4dDAJqCGu09cM1eN",
+            "image_url": "https://plumbtile.com/cdn/shop/files/87465-PC-B1.jpg?v=1768145832"
+        },
+        {
+            "ManufacturerPartNumber": "88765PC",
+            "Manufacturer": "Brizo",
+            "Description": "BEAUCLERE : MULTI - FUNCTION SLIDE-BAR HAND SHOWER",
+            "Price": 443.95,
+            "Quantity": 1,
+            "product_url": "https://www.brizo.com/bath/product/88765-PC",
+            "image_url": "http://127.0.0.1:8000/storage/receipt-images/092d8b4c8a919f88f3b34475be30cee4.png"
+        },
+        {
+            "ManufacturerPartNumber": "T66T065PCLHP",
+            "Manufacturer": "Brizo",
+            "Description": "BEAUCLERE : SENSORI THERMOSTATIC VALVE TRIM - LESS HANDLE",
+            "Price": 374.4,
+            "Quantity": 1,
+            "product_url": "https://www.brizo.com/bath/product/T66T065-PCLHP",
+            "image_url": "http://127.0.0.1:8000/storage/receipt-images/bbe0b39cb41c0bd24c90d4a2dbf4613c.png"
+        },
+        {
+            "ManufacturerPartNumber": "HX6665PC",
+            "Manufacturer": "Brizo",
+            "Description": "BEAUCLERE : SENSORI THERMOSTATIC VALVE TRIM CROSS HANDLE KIT",
+            "Price": 215.15,
+            "Quantity": 1,
+            "product_url": "https://www.brizo.com/bath/product/HX6665-PC",
+            "image_url": "http://127.0.0.1:8000/storage/receipt-images/f87f23c7e31e8935f8c500828e550e6d.png"
+        },
+        {
+            "ManufacturerPartNumber": "R35000WS",
+            "Manufacturer": "Brizo",
+            "Description": "OTHER: SENSORI THERMOSTATIC SHOWER ROUGH NOT APPLICABLE",
+            "Price": 324.35,
+            "Quantity": 1,
+            "product_url": "https://focalpointhardware.com/products/brizo-r35000-other-sensori-thermostatic-shower-rough?srsltid=AfmBOorlJ--TL9haRXxDZ1w3rUozjVdRkLS1bcH_ZtAZvbcKFG_hxYXd",
+            "image_url": "https://focalpointhardware.com/cdn/shop/files/R35000-WS-B1.png?v=1698003333&width=1024"
+        },
+        {
+            "ManufacturerPartNumber": "T66666PC",
+            "Manufacturer": "Brizo",
+            "Description": "BEAUCLERE : SENSORI VOLUME CONTROL TRIM WITH CROSS HANDLE",
+            "Price": 193.7,
+            "Quantity": 2,
+            "product_url": "https://plumbtile.com/products/brizo-t66666?srsltid=AfmBOorEvQnuRaYrf5nJMhfQ6UAQ92-3Kr7xpPs9xAe49yESB8roAWSd",
+            "image_url": "https://plumbtile.com/cdn/shop/files/T66666-PC-B1.jpg?v=1768146443"
+        },
+        {
+            "ManufacturerPartNumber": "R35600",
+            "Manufacturer": "Brizo",
+            "Description": "OTHER: SENSORI VOLUME CONTROL ROUGH NOT APPLICABLE",
+            "Price": 143.65,
+            "Quantity": 2,
+            "product_url": "https://focalpointhardware.com/products/brizo-r35600-other-sensori-volume-control-rough?srsltid=AfmBOooQqsK4W283pPMten-_bs34wKYmyv3887BHlMhaT44OIfekJAei",
+            "image_url": "https://focalpointhardware.com/cdn/shop/files/R35600-B1.png?v=1698003341&width=1024"
+        },
+        {
+            "ManufacturerPartNumber": "K41440",
+            "Manufacturer": "Kohler",
+            "Description": "KOHLER CORBELLE CH EB SKIRTED BOWL WHITE",
+            "Price": 287.463,
+            "Quantity": 1,
+            "product_url": "https://www.kohler.com/en/products/toilets/shop-toilets/corbelle-toilet-bowl-4144",
+            "image_url": "http://127.0.0.1:8000/storage/receipt-images/77431db243770aa575b34e53349cdc11.jpg"
+        },
+        {
+            "ManufacturerPartNumber": "K41430",
+            "Manufacturer": "Kohler",
+            "Description": "KOHLER CORBELLE 1.28 GPF TOILET TANK WITH AQUAPISTON FLUSH TECHNOLOGY AND LEFT-HAND TRIP LEVER WHITE",
+            "Price": 165.263,
+            "Quantity": 1,
+            "product_url": "https://www.supplyhouse.com/Kohler-K-5711-0-Corbelle-Continuousclean-Xt-Toilet-Tank-1-28-GPF-White?srsltid=AfmBOoq6qDy0LSACKtNJLatfKy6MqO8fURy0QK-FGKR5Z3WAdoRRiHyb",
+            "image_url": "https://d3501hjdis3g5w.cloudfront.net/images/products/zoom/kohlerk-5711-001.jpg"
+        },
+        {
+            "ManufacturerPartNumber": "K8298CR0",
+            "Manufacturer": "Kohler",
+            "Description": "C3-455 CLEANSING TOILET SEAT WHITE",
+            "Price": 539.97,
+            "Quantity": 1,
+            "product_url": "https://splashes.com/products/kohler-c3-455-cleansing-toilet-seat-white-8298-cr-0?srsltid=AfmBOorzRuu9sFj8q2NO6VEbnzkvagMAMszGZbNpOWU2jskSF0vj7v5R",
+            "image_url": "http://splashes.com/cdn/shop/files/DS28266ab0-7a3f-44d3-a100-9c4a3608608a.jpg?v=1776545359"
+        },
+        {
+            "ManufacturerPartNumber": "69310PC",
+            "Manufacturer": "Brizo",
+            "Description": "OTHER: 24\" TRADITIONAL GRAB BAR CHROME",
+            "Price": 163.8,
+            "Quantity": 2,
+            "product_url": "https://www.fwwebb.com/product/Brizo/Grab-Bar/69310-PC/517995",
+            "image_url": "http://127.0.0.1:8000/storage/receipt-images/c86464073e445321974b1ae6ad0577f2.webp"
+        },
+        {
+            "ManufacturerPartNumber": "K45906CP",
+            "Manufacturer": "Kohler",
+            "Description": "HYDRORAIL -S-SHOWER COLUMN POLISHED CHROME",
+            "Price": 429.13,
+            "Quantity": 1,
+            "product_url": "https://www.kohler.com/en/products/showers/shop-shower-fittings/hydrorail-s-shower-column-45906",
+            "image_url": "http://127.0.0.1:8000/storage/receipt-images/877c9be0e4f565d218def96c260c247d.jpg"
+        },
+        {
+            "ManufacturerPartNumber": "K72414YCP",
+            "Manufacturer": "Kohler",
+            "Description": "AWAKEN G90 MULTIFUNCTION HANDSHOWER",
+            "Price": 46.183,
+            "Quantity": 1,
+            "product_url": "https://www.supplyhouse.com/Kohler-K-72414-Y-CP-Awaken-G90-3-Function-Handshower-2-5-GPM-Polished-Chrome?srsltid=AfmBOormxkL5OpMBZG7vrZ9hkJTdfYP0ZWsTS_WH2hNCLNQuQIW7U224",
+            "image_url": "https://d3501hjdis3g5w.cloudfront.net/images/products/zoom/kohlerk-72414-y-cp01.jpg"
+        },
+        {
+            "ManufacturerPartNumber": "K9514CP",
+            "Manufacturer": "Kohler",
+            "Description": "KOHLER MASTERSHOWER 60\" HOSE POLISHED CHROME",
+            "Price": 62.855,
+            "Quantity": 1,
+            "product_url": "https://www.supplyhouse.com/Kohler-K-9514-CP-MasterShower-60-Metal-Hand-Shower-Hose-Polished-Chrome?srsltid=AfmBOor6R4VWRFmFLSV26h8GQLA349KK9OJKtC71ZkFC5vODy2cM7RNy",
+            "image_url": "http://127.0.0.1:8000/storage/receipt-images/35e028610dca99cb0a6e7ddd3d3c47bc.jpg"
+        },
+        {
+            "ManufacturerPartNumber": "K22170CP",
+            "Manufacturer": "Kohler",
+            "Description": "KOHLER PURIST MULTIFUNCTION SHOWERHEAD 2.5GPM POLISHED CHROME",
+            "Price": 126.425,
+            "Quantity": 1,
+            "product_url": "https://www.kohler.com/en/products/showers/shop-shower-heads/purist-three-function-showerhead-2-5-gpm-22170-22170",
+            "image_url": "http://127.0.0.1:8000/storage/receipt-images/cbd9e7fa2ce4e1f6f09bc6b5caf762ca.jpg"
+        },
+        {
+            "ManufacturerPartNumber": "KTS144234CP",
+            "Manufacturer": "Kohler",
+            "Description": "PURIST VALVE TRIM - LEVER POLISHED CHROME",
+            "Price": 277.225,
+            "Quantity": 1,
+            "product_url": "https://www.kohler.com/en/products/showers/shop-shower-trims-valves/purist-rite-temp-valve-trim-w-lever-handle-ts14423-4",
+            "image_url": "http://127.0.0.1:8000/storage/receipt-images/dcef4f1ef67bd7df8f4eecb2869cc105.jpg"
+        },
+        {
+            "ManufacturerPartNumber": "K8304KSNA",
+            "Manufacturer": "Kohler",
+            "Description": "KOHLER UNIVERSAL RITE-TEMP PB VALVE KIT, STOP",
+            "Price": 122.558,
+            "Quantity": 1,
+            "product_url": "https://www.homedepot.com/p/KOHLER-Rite-Temp-Pressure-Balancing-Valve-Body-and-Cartridge-Kits-with-Service-Stops-K-8304-KS-NA/301988837",
+            "image_url": "https://cdn11.bigcommerce.com/s-nhvq5sozx6/images/stencil/2048x2048/products/122987/24149/61UR0wa8a4L._AC_SL1500___60255.1652889302.jpg?c=2"
+        }
+    ]
+}

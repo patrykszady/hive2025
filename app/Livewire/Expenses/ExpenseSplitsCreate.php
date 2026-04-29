@@ -12,7 +12,7 @@ use Illuminate\Support\Collection;
 class ExpenseSplitsCreate extends Component
 {
     // public ExpenseSplitForm $form;
-    public Expense $expense;
+    public ?Expense $expense = null;
 
     //keeps track of expense_splits.*.amount sum
     public $expense_splits = [];
@@ -201,19 +201,21 @@ class ExpenseSplitsCreate extends Component
         return round($this->expense_total - $this->splits_total, 2);
     }
 
-    public function addSplits($expense)
+    public function addSplits($expense = null, $amount = null)
     {
         // Handle both integer ID and array with 'id' key
         $expenseId = is_array($expense) ? ($expense['id'] ?? null) : $expense;
-        
-        if (!$expenseId) {
-            return;
-        }
-        
-        $this->expense = Expense::findOrFail($expenseId);
-        $expense = $this->expense;
 
-        $receipt = $expense->receipts()->latest()->first();
+        if ($expenseId) {
+            $this->expense = Expense::findOrFail($expenseId);
+        } else {
+            // No persisted expense yet (e.g. creating an expense from a
+            // transaction with no receipt). We can still build splits in memory
+            // and the parent ExpenseCreate component will persist them on save.
+            $this->expense = null;
+        }
+
+        $receipt = $this->expense?->receipts()->latest()->first();
 
         if (! is_null($receipt) && ! is_null($receipt->receipt_items['items'] ?? null)) {
             $this->expense_line_items = $receipt->receipt_items; // array or object
@@ -228,9 +230,9 @@ class ExpenseSplitsCreate extends Component
             $defaultItems = null;
         }
 
-        $this->expense_total = $expense['amount'];
+        $this->expense_total = $this->expense?->amount ?? (float) $amount;
 
-        if (! $expense->splits->isEmpty()) {
+        if ($this->expense && ! $this->expense->splits->isEmpty()) {
             // Normalize existing splits to plain arrays (no Eloquent models)
             $normalized = [];
             foreach ($expense->splits->values() as $sidx => $split) {
@@ -267,6 +269,8 @@ class ExpenseSplitsCreate extends Component
             }
 
             $this->expense_splits = collect($normalized);
+        } elseif ($this->expense_splits instanceof Collection && $this->expense_splits->isNotEmpty()) {
+            // already a populated Collection (preserve in-memory splits)
         } elseif (is_array($this->expense_splits) && ! empty($this->expense_splits)) {
             $this->expense_splits = collect($this->expense_splits);
         } elseif (! is_array($this->expense_splits)) {
@@ -315,7 +319,7 @@ class ExpenseSplitsCreate extends Component
 
     public function addSplit()
     {
-        $receipt = $this->expense->receipts()->latest()->first();
+        $receipt = $this->expense?->receipts()->latest()->first();
 
         if (! is_null($receipt) && ! is_null($receipt->receipt_items['items'] ?? null)) {
             $items = [];

@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Client;
 use App\Models\CompanyEmail;
 use App\Models\Expense;
 use App\Models\ExpenseReceipts;
+use App\Models\Project;
 use App\Models\Transaction;
 use App\Models\Receipt;
 use App\Models\ReceiptAccount;
@@ -14,6 +16,7 @@ use App\Models\UserVendor;
 use App\Models\Vendor;
 
 use App\Services\NylasService;
+use App\Services\ReceiptItemEnricher;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -633,9 +636,12 @@ class CompanyEmailController extends Controller
             $attachmentPdfPath = null;
             $attachmentPdfFilename = null;
             if (!$receipt && !empty($message['attachments'])) {
-                $pdfAttachment = collect($message['attachments'])->first(fn ($att) =>
-                    stripos($att['content_type'] ?? '', 'pdf') !== false
-                );
+                $pdfAttachment = collect($message['attachments'])->first(function ($att) {
+                    $ct = strtolower((string) ($att['content_type'] ?? ''));
+                    $fn = strtolower((string) ($att['filename'] ?? ''));
+                    return stripos($ct, 'pdf') !== false
+                        || str_ends_with($fn, '.pdf');
+                });
 
                 if ($pdfAttachment) {
                     try {
@@ -890,6 +896,38 @@ class CompanyEmailController extends Controller
                     // Matched via PDF attachment vendor detection — PDF already downloaded
                     $ocr_filename = $attachmentPdfFilename;
                     $ocr_path = $attachmentPdfPath;
+                } elseif (
+                    !isset($receipt->options['receipt_image_regex'])
+                    && !isset($receipt->options['pdf_html'])
+                    && ($receipt->options['document_model'] ?? null) === config('services.azure_cu.analyzer_id_material_order')
+                    && ($materialOrderPdfAtt = $this->firstPdfAttachment($message['attachments'] ?? [])) !== null
+                ) {
+                    // Perf: material orders forwarded as PDF attachments don't need an
+                    // HTML→PDF render of the email body (~57s Browsershot) followed by an
+                    // OCR pass of that rendered body (~74s Azure CU). The actual PDF
+                    // attachment is the source of truth, and saveExpenseReceipt() will
+                    // reuse our $ocr_receipt_data for the first attachment.
+                    $doc_type = 'pdf';
+                    $ocr_filename .= '.' . $doc_type;
+                    $ocr_path = '_temp_ocr/' . $ocr_filename;
+
+                    if (!Storage::disk('files')->exists('_temp_ocr')) {
+                        Storage::disk('files')->makeDirectory('_temp_ocr');
+                    }
+
+                    $pdfContent = $this->nylasService->downloadAttachment(
+                        $materialOrderPdfAtt['id'],
+                        $grantId,
+                        $messageId
+                    );
+                    Storage::disk('files')->put($ocr_path, $pdfContent);
+
+                    Log::channel('nylas')->info('Material order: skipping HTML→PDF render, OCRing PDF attachment directly', [
+                        'message_id' => $messageId,
+                        'receipt_id' => $receipt->id,
+                        'pdf_filename' => $materialOrderPdfAtt['filename'] ?? null,
+                        'pdf_size' => strlen($pdfContent),
+                    ]);
                 } elseif (!isset($receipt->options['receipt_image_regex']) && !isset($receipt->options['pdf_html'])) {
                     // HTML to PDF conversion
                     $ocr_filename .= '.' . $doc_type;
@@ -1080,6 +1118,26 @@ class CompanyEmailController extends Controller
                     ?? $emailDetectedVendorId
                     ?? ($receipt_account->belongs_to_vendor_id ?? $companyEmail->vendor_id);
 
+                // Detect a "sold to" / "bill to" client (e.g. material order PDFs that are
+                // billed to a homeowner). This is independent of belongs_to_vendor_id —
+                // a contractor (vendor) can purchase materials FOR a specific client.
+                $detectedBillToClientId = $this->detectBillToClientId(
+                    $ocr_receipt_data['fields']['raw_content'] ?? ''
+                );
+                $detectedProjectId = null;
+                if ($detectedBillToClientId) {
+                    $detectedProjectId = $this->resolveProjectIdForClient(
+                        $detectedBillToClientId,
+                        $companyEmail->vendor_id
+                    );
+                    Log::channel('nylas')->info('Detected bill-to client', [
+                        'message_id' => $messageId,
+                        'client_id' => $detectedBillToClientId,
+                        'project_id' => $detectedProjectId,
+                        'receipt_id' => $receipt->id,
+                    ]);
+                }
+
                 $detectedVendorId = $detectedBillToVendorId ?? $emailDetectedVendorId;
                 if ($detectedVendorId && $detectedVendorId !== ($receipt_account->belongs_to_vendor_id ?? null)) {
                     Log::channel('nylas')->info('Detected belongs-to vendor override', [
@@ -1093,15 +1151,17 @@ class CompanyEmailController extends Controller
                 }
 
                 // When the detected belongs-to vendor differs from the company email owner,
-                // this is a material order (e.g. vendor 1 forwarding a store receipt for a client).
+                // OR when we matched a "sold to" client on the receipt, this is a material order
+                // (e.g. vendor 1 forwarding a store receipt for a client).
                 // Re-OCR with the material order analyzer to extract Status/ETA/Area fields.
-                if (!$isMaterialOrder && $effectiveBelongsToVendorId !== $companyEmail->vendor_id) {
+                if (!$isMaterialOrder && ($effectiveBelongsToVendorId !== $companyEmail->vendor_id || $detectedBillToClientId)) {
                     $isMaterialOrder = true;
                     $materialOrderModel = config('services.azure_cu.analyzer_id_material_order');
                     Log::channel('nylas')->info('Upgrading to material order — belongs_to differs from company email vendor', [
                         'message_id' => $messageId,
                         'effective_belongs_to' => $effectiveBelongsToVendorId,
                         'company_email_vendor' => $companyEmail->vendor_id,
+                        'detected_client_id' => $detectedBillToClientId,
                         'original_model' => $document_model,
                         'new_model' => $materialOrderModel,
                         'receipt_id' => $receipt->id,
@@ -1475,6 +1535,131 @@ class CompanyEmailController extends Controller
                         ]);
                     }
                 }else{
+                    // Material orders / supplements often have no totals to match on, but the
+                    // invoice/order number on the PDF is the same as on a previously-saved
+                    // receipt for that purchase. If we can match by invoice, MERGE the
+                    // supplement's Manufacturer/MPN data into the existing receipt's items
+                    // rather than attaching a duplicate receipt row.
+                    //
+                    // FALLBACK: when OCR fails to extract the invoice (common for supplement
+                    // PDFs), score recent material-order expenses by item-description overlap
+                    // and merge into the best-matching one above the threshold.
+                    if ($isMaterialOrder) {
+                        $supplementItems = $ocr_receipt_data['fields']['items'] ?? [];
+                        $invoiceMatchExpense = null;
+
+                        if ($invoice !== '') {
+                            $invoiceMatchExpense = Expense::withoutGlobalScopes()
+                                ->with('receipts')
+                                ->whereNull('deleted_at')
+                                ->where('invoice', $invoice)
+                                ->orderBy('date')
+                                ->first();
+                        }
+
+                        $matchReason = $invoiceMatchExpense ? 'invoice' : null;
+
+                        if (!$invoiceMatchExpense && !empty($subject)) {
+                            $invoiceMatchExpense = $this->findMaterialOrderBySubjectInvoice(
+                                (string) $subject,
+                                $effectiveBelongsToVendorId,
+                                $date
+                            );
+                            if ($invoiceMatchExpense) {
+                                $matchReason = 'subject_invoice';
+                            }
+                        }
+
+                        if (!$invoiceMatchExpense && !empty($supplementItems)) {
+                            $invoiceMatchExpense = $this->findMaterialOrderByItemSignature(
+                                $supplementItems,
+                                $effectiveBelongsToVendorId,
+                                $date
+                            );
+                            if ($invoiceMatchExpense) {
+                                $matchReason = 'item_signature';
+                            }
+                        }
+
+                        if ($invoiceMatchExpense) {
+                            $existingReceipt = $invoiceMatchExpense->receipts->sortByDesc('id')->first();
+
+                            $changedCount = 0;
+                            $changedIndexes = [];
+                            $appendedCount = 0;
+                            $appendedIndexes = [];
+                            if ($existingReceipt && !empty($supplementItems)) {
+                                $existingPayload = $existingReceipt->receipt_items ?? [];
+                                $existingItems = $existingPayload['items'] ?? [];
+
+                                if (!empty($existingItems)) {
+                                    $enricher = app(ReceiptItemEnricher::class);
+                                    $updates = $enricher->planMerge($existingItems, $supplementItems);
+                                    $existingItems = $enricher->applyUpdates($existingItems, $updates);
+                                    $changedCount = collect($updates)->where('changed', true)->count();
+                                    $changedIndexes = collect($updates)
+                                        ->where('changed', true)
+                                        ->pluck('index')
+                                        ->all();
+
+                                    // Newly-supplied Manufacturer/MPN must drive a re-scrape:
+                                    // clear stale scraped fields and cache rows for changed
+                                    // items so ScrapeReceiptItemImagesV2 re-resolves them.
+                                    foreach ($changedIndexes as $changedIdx) {
+                                        $existingItems[$changedIdx]['product_url'] = null;
+                                        $existingItems[$changedIdx]['image_url']   = null;
+                                    }
+
+                                    // Append supplement items that didn't match anything
+                                    // existing (e.g. mirrors / accessories added by the
+                                    // designer that weren't on the original PO). These
+                                    // become brand-new rows on the receipt and need scraping.
+                                    $appendedItems = $enricher->unmatchedSupplementItems($existingItems, $supplementItems, $updates);
+                                    $appendedCount = count($appendedItems);
+                                    if ($appendedCount > 0) {
+                                        $nextIdx = count($existingItems);
+                                        foreach ($appendedItems as $newItem) {
+                                            $existingItems[$nextIdx] = $newItem;
+                                            $appendedIndexes[] = $nextIdx;
+                                            $nextIdx++;
+                                        }
+                                    }
+
+                                    $existingPayload['items'] = $existingItems;
+                                    $existingReceipt->receipt_items = $existingPayload;
+                                    $existingReceipt->save();
+
+                                    if (!empty($changedIndexes) || $appendedCount > 0) {
+                                        \App\Models\ReceiptLineItemDesc::where('expense_receipt_id', $existingReceipt->id)
+                                            ->whereIn('item_index', array_merge($changedIndexes, $appendedIndexes))
+                                            ->delete();
+
+                                        \App\Jobs\ScrapeReceiptItemImagesV2::dispatch($existingReceipt);
+                                    }
+                                }
+                            }
+
+                            Log::channel('nylas')->info('Material order supplement merged into existing expense', [
+                                'message_id' => $messageId,
+                                'match_reason' => $matchReason,
+                                'invoice' => $invoice,
+                                'existing_expense_id' => $invoiceMatchExpense->id,
+                                'existing_receipt_id' => $existingReceipt?->id,
+                                'supplement_item_count' => count($supplementItems),
+                                'items_changed' => $changedCount,
+                                'items_appended' => $appendedCount,
+                            ]);
+
+                            // Move email to Duplicate folder — the supplement has been absorbed
+                            // into the existing receipt; we don't need it as a standalone receipt.
+                            if (!empty($folderMap['Duplicate'])) {
+                                $this->nylasService->moveEmailToFolder($messageId, $folderMap['Duplicate'], $grantId, $companyEmail->id);
+                            }
+
+                            continue;
+                        }
+                    }
+
                     // Before creating a new expense, check if this receipt is a duplicate across all expenses
                     $existingExpenseWithDuplicate = $this->findExpenseWithDuplicateReceipt(
                         $effectiveBelongsToVendorId,
@@ -1556,7 +1741,7 @@ class CompanyEmailController extends Controller
                             $expense = new Expense;
                             $expense->amount = $amount;
                             $expense->reimbursment = null;
-                            $expense->project_id = null;
+                            $expense->project_id = $detectedProjectId;
                             $expense->distribution_id = $bulkMatch?->distribution_id;
                             $expense->created_by_user_id = 0; //automated
                             $expense->date = $date;
@@ -1564,6 +1749,7 @@ class CompanyEmailController extends Controller
                             $expense->vendor_id = $receipt->vendor_id;
                             $expense->note = null;
                             $expense->belongs_to_vendor_id = $effectiveBelongsToVendorId;
+                            $expense->belongs_to_client_id = $detectedBillToClientId;
                             $expense->save();
 
                             // Apply splits if the match has them
@@ -1593,7 +1779,7 @@ class CompanyEmailController extends Controller
                             $expense = new Expense;
                             $expense->amount = $amount;
                             $expense->reimbursment = null;
-                            $expense->project_id = null;
+                            $expense->project_id = $detectedProjectId;
                             $expense->distribution_id = $bulkMatch?->distribution_id;
                             $expense->created_by_user_id = 0; //automated
                             $expense->date = $date;
@@ -1601,6 +1787,7 @@ class CompanyEmailController extends Controller
                             $expense->vendor_id = $receipt->vendor_id; //Vendor_id of vendor being Queued
                             $expense->note = null;
                             $expense->belongs_to_vendor_id = $effectiveBelongsToVendorId;
+                            $expense->belongs_to_client_id = $detectedBillToClientId;
                             $expense->save();
 
                             // Apply splits if the match has them
@@ -2214,9 +2401,26 @@ class CompanyEmailController extends Controller
 
                         Storage::disk('files')->put($ocr_path, $attachmentContent);
 
-                        // OCR the file via unified extractReceipt()
-                        $current_ocr_data = app(\App\Http\Controllers\ReceiptController::class)
-                            ->extractReceipt($ocr_path, $doc_type, null, 'email');
+                        // OCR the file via unified extractReceipt(). For material orders we MUST
+                        // pass the material_order analyzer/docType so multi-page product portfolio
+                        // PDFs (e.g. Studio 41 / Kohler Signature) extract items + content. Without
+                        // this the generic receipt analyzer fails and the supplement is dropped,
+                        // which previously caused orphan expenses to be created with no items.
+                        //
+                        // OPTIMIZATION: For the FIRST attachment, the caller already OCR'd this exact
+                        // file (it's the same temp PDF). Reuse that result instead of running Azure CU
+                        // a second time — saves 10-40s per multi-page material order PDF.
+                        $isFirstAttachment = $attachmentIndex === array_key_first($nonInlineAttachments);
+                        if ($isFirstAttachment && !empty($ocr_receipt_data['content'])) {
+                            $current_ocr_data = $ocr_receipt_data;
+                        } else {
+                            $attachmentDocType = $isMaterialOrder ? 'material_order' : $doc_type;
+                            $attachmentAnalyzerId = $isMaterialOrder
+                                ? config('services.azure_cu.analyzer_id_material_order')
+                                : null;
+                            $current_ocr_data = app(\App\Http\Controllers\ReceiptController::class)
+                                ->extractReceipt($ocr_path, $attachmentDocType, null, 'email', null, $attachmentAnalyzerId);
+                        }
 
                         // If OCR extraction failed (e.g. Azure couldn't parse the file), skip this attachment
                         if (isset($current_ocr_data['error']) && $current_ocr_data['error'] === true) {
@@ -2659,6 +2863,178 @@ class CompanyEmailController extends Controller
     }
 
     /**
+     * Scan an email subject for any invoice/order token belonging to a recent
+     * material-order Expense and return the match. Supplement emails almost
+     * always reference the original order in the subject (e.g.
+     * "Fw: S2431488 Presentation - Egger" → invoice S2431488), even when the
+     * attachment OCR fails to surface the invoice number.
+     *
+     * Strategy:
+     *   1. Pull recent material-order expenses (vendor-scoped first, then
+     *      cross-vendor as fallback) within $lookbackDays.
+     *   2. For each candidate, normalise its `invoice` and check whether the
+     *      subject (also normalised) contains it as a token.
+     *   3. Prefer longer (more specific) invoice tokens to avoid false hits
+     *      on short/numeric IDs that happen to appear in unrelated subjects.
+     */
+    protected function findMaterialOrderBySubjectInvoice(
+        string $subject,
+        ?int $belongsToVendorId,
+        ?string $supplementDate,
+        int $lookbackDays = 180,
+        int $minInvoiceLen = 5
+    ): ?Expense {
+        $subjectNorm = strtoupper(preg_replace('/[^A-Z0-9]/i', '', $subject));
+        if ($subjectNorm === '') {
+            return null;
+        }
+
+        $cutoffDate = $supplementDate
+            ? Carbon::parse($supplementDate)->copy()->subDays($lookbackDays)->toDateString()
+            : Carbon::now()->subDays($lookbackDays)->toDateString();
+
+        $query = Expense::withoutGlobalScopes()
+            ->whereNull('deleted_at')
+            ->whereHas('receipts', fn ($q) => $q->where('is_material_order', true))
+            ->whereNotNull('invoice')
+            ->where('invoice', '!=', '')
+            ->where('date', '>=', $cutoffDate)
+            ->orderByDesc('date');
+
+        if ($belongsToVendorId) {
+            $vendorMatches = (clone $query)
+                ->where('belongs_to_vendor_id', $belongsToVendorId)
+                ->limit(200)
+                ->get();
+            $match = $this->matchExpenseByInvoiceInSubject($vendorMatches, $subjectNorm, $minInvoiceLen);
+            if ($match) {
+                return $match;
+            }
+        }
+
+        $allMatches = $query->limit(500)->get();
+        return $this->matchExpenseByInvoiceInSubject($allMatches, $subjectNorm, $minInvoiceLen);
+    }
+
+    /**
+     * Pick the best Expense whose normalised invoice appears as a substring
+     * of the normalised subject. Ties are broken by longest invoice (most
+     * specific) then most recent date.
+     *
+     * @param \Illuminate\Support\Collection<int, Expense> $candidates
+     */
+    private function matchExpenseByInvoiceInSubject(
+        \Illuminate\Support\Collection $candidates,
+        string $subjectNorm,
+        int $minInvoiceLen
+    ): ?Expense {
+        $best = null;
+        $bestLen = 0;
+
+        foreach ($candidates as $candidate) {
+            $invNorm = strtoupper(preg_replace('/[^A-Z0-9]/i', '', (string) $candidate->invoice));
+            if (strlen($invNorm) < $minInvoiceLen) {
+                continue;
+            }
+            if (!str_contains($subjectNorm, $invNorm)) {
+                continue;
+            }
+            $len = strlen($invNorm);
+            if ($len > $bestLen) {
+                $best = $candidate;
+                $bestLen = $len;
+            }
+        }
+
+        return $best;
+    }
+
+    /**
+     * Find an existing material-order Expense whose latest receipt's items strongly
+     * overlap (by description, ≥60%) with the supplied supplement items. Used to
+     * merge a supplement PDF into an existing receipt when the OCR failed to
+     * extract the invoice number.
+     *
+     * @param array<int, array<string, mixed>> $supplementItems
+     */
+    protected function findMaterialOrderByItemSignature(
+        array $supplementItems,
+        ?int $belongsToVendorId,
+        ?string $supplementDate,
+        int $lookbackDays = 90,
+        float $minMatchRatio = 0.6
+    ): ?Expense {
+        if (empty($supplementItems) || !$belongsToVendorId) {
+            return null;
+        }
+
+        $supplementSig = $this->buildItemsSignature(['items' => $supplementItems]);
+        $supplementDescs = $supplementSig['descriptions'] ?? [];
+        $supplementCodes = $supplementSig['codes'] ?? [];
+        $totalSupplement = max(count($supplementDescs), 1);
+
+        $anchor = $supplementDate ? Carbon::parse($supplementDate) : Carbon::now();
+        $start = $anchor->copy()->subDays($lookbackDays)->format('Y-m-d');
+        $end = $anchor->copy()->addDays($lookbackDays)->format('Y-m-d');
+
+        $candidates = Expense::withoutGlobalScopes()
+            ->with(['receipts' => fn ($q) => $q->orderByDesc('id')])
+            ->whereNull('deleted_at')
+            ->where('belongs_to_vendor_id', $belongsToVendorId)
+            ->whereBetween('date', [$start, $end])
+            ->whereHas('receipts', fn ($q) => $q->where('is_material_order', true))
+            ->orderByDesc('date')
+            ->limit(200)
+            ->get();
+
+        $bestExpense = null;
+        $bestScore = 0.0;
+
+        foreach ($candidates as $candidate) {
+            $receipt = $candidate->receipts->first();
+            if (!$receipt) {
+                continue;
+            }
+            $storedFields = json_decode(json_encode($receipt->receipt_items), true) ?? [];
+            $storedSig = $this->buildItemsSignature($storedFields);
+            $storedDescs = $storedSig['descriptions'] ?? [];
+            $storedCodes = $storedSig['codes'] ?? [];
+
+            // Code overlap is the strongest signal when present.
+            $matched = count(array_intersect($supplementCodes, $storedCodes));
+
+            // Description fuzzy matching for items lacking a code on either side.
+            $usedStored = [];
+            foreach ($supplementDescs as $descA) {
+                foreach ($storedDescs as $j => $descB) {
+                    if (isset($usedStored[$j])) {
+                        continue;
+                    }
+                    if ($descA === $descB) {
+                        $matched++;
+                        $usedStored[$j] = true;
+                        break;
+                    }
+                    similar_text($descA, $descB, $pct);
+                    if ($pct >= 80) {
+                        $matched++;
+                        $usedStored[$j] = true;
+                        break;
+                    }
+                }
+            }
+
+            $score = $matched / $totalSupplement;
+            if ($score > $bestScore) {
+                $bestScore = $score;
+                $bestExpense = $candidate;
+            }
+        }
+
+        return $bestScore >= $minMatchRatio ? $bestExpense : null;
+    }
+
+    /**
      * Extract a Carbon time from receipt content. Falls back to null.
      * Accepts content and the date (Y-m-d) to bind time onto.
      */
@@ -3018,7 +3394,15 @@ class CompanyEmailController extends Controller
             } else {
                 // Partial match: receipt subject must be contained in message subject (case-insensitive)
                 // Example: "AT&T payment processed for account ending in" matches "AT&T payment processed for account ending in 1733"
-                $subjectMatches = stripos($messageSubject, $receiptFromSubject) !== false;
+                // Multiple alternative subjects can be provided pipe-delimited:
+                // "Received: Thank you for shopping with us!|Order confirmed. We're processing your order now!"
+                $candidateSubjects = array_filter(array_map('trim', explode('|', $receiptFromSubject)), 'strlen');
+                foreach ($candidateSubjects as $candidate) {
+                    if (stripos($messageSubject, $candidate) !== false) {
+                        $subjectMatches = true;
+                        break;
+                    }
+                }
             }
             
             // If both email and subject match, return this receipt
@@ -3045,7 +3429,7 @@ class CompanyEmailController extends Controller
      */
     protected function findExpenseWithDuplicateReceipt(
         int $belongs_to_vendor_id,
-        int $vendor_id,
+        ?int $vendor_id,
         string $amount,
         string $date,
         string $receipt_html,
@@ -3058,7 +3442,7 @@ class CompanyEmailController extends Controller
         $candidates = Expense::withoutGlobalScopes()
             ->with('receipts')
             ->where('belongs_to_vendor_id', $belongs_to_vendor_id)
-            ->where('vendor_id', $vendor_id)
+            ->when($vendor_id !== null, fn($q) => $q->where('vendor_id', $vendor_id), fn($q) => $q->whereNull('vendor_id'))
             ->whereNull('deleted_at')
             ->where('amount', $amount)
             ->whereBetween('date', [$startDate, $endDate])
@@ -3120,7 +3504,7 @@ class CompanyEmailController extends Controller
      */
     protected function findExpenseBySharedDepositNumber(
         int $belongs_to_vendor_id,
-        int $vendor_id,
+        ?int $vendor_id,
         string $date,
         string $receiptContent
     ): ?Expense {
@@ -3134,7 +3518,7 @@ class CompanyEmailController extends Controller
 
         return Expense::withoutGlobalScopes()
             ->where('belongs_to_vendor_id', $belongs_to_vendor_id)
-            ->where('vendor_id', $vendor_id)
+            ->when($vendor_id !== null, fn($q) => $q->where('vendor_id', $vendor_id), fn($q) => $q->whereNull('vendor_id'))
             ->whereNull('deleted_at')
             ->whereBetween('date', [$startDate, $endDate])
             ->whereHas('receipts', function ($q) use ($depositNumber) {
@@ -3216,7 +3600,7 @@ class CompanyEmailController extends Controller
      */
     protected function findPartialExpensesToConsolidate(
         int $belongs_to_vendor_id,
-        int $vendor_id,
+        ?int $vendor_id,
         string $amount,
         string $date,
         ?string $invoice = null
@@ -3228,7 +3612,7 @@ class CompanyEmailController extends Controller
         // Find all potential partial expenses for this vendor without receipts
         $candidates = Expense::withoutGlobalScopes()
             ->where('belongs_to_vendor_id', $belongs_to_vendor_id)
-            ->where('vendor_id', $vendor_id)
+            ->when($vendor_id !== null, fn($q) => $q->where('vendor_id', $vendor_id), fn($q) => $q->whereNull('vendor_id'))
             ->whereNull('deleted_at')
             ->whereBetween('date', [$startDate, $endDate])
             ->whereDoesntHave('receipts') // Only expenses without receipts (manually created)
@@ -3286,6 +3670,29 @@ class CompanyEmailController extends Controller
         }
 
         return collect();
+    }
+
+    /**
+     * Find the first non-inline PDF attachment in a Nylas message attachment
+     * list (using filename / content_type metadata only — no download).
+     *
+     * @param array<int,array<string,mixed>> $attachments
+     * @return array<string,mixed>|null
+     */
+    protected function firstPdfAttachment(array $attachments): ?array
+    {
+        foreach ($attachments as $att) {
+            if (!empty($att['is_inline'])) {
+                continue;
+            }
+            $ct = strtolower((string) ($att['content_type'] ?? ''));
+            $fn = strtolower((string) ($att['filename'] ?? ''));
+            if (stripos($ct, 'pdf') !== false || str_ends_with($fn, '.pdf')) {
+                return $att;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -3401,6 +3808,125 @@ class CompanyEmailController extends Controller
         }
 
         return null;
+    }
+
+    /**
+     * Detect the "sold to" / "bill to" client from OCR raw content.
+     *
+     * Parses the BILL/SOLD/SHIP/QUOTE/ORDER TO sections from receipt/order
+     * documents and matches each captured block against the full names of
+     * users associated with clients. Returns the client_id only when a
+     * single distinct client is matched (ambiguous matches return null).
+     *
+     * @return int|null The matched client_id, or null
+     */
+    protected function detectBillToClientId(string $rawContent): ?int
+    {
+        if ($rawContent === '') {
+            return null;
+        }
+
+        // Capture the few lines following each label so multi-line "SOLD TO:" blocks
+        // (e.g. "LOU & RICK FRIEDMAN\n239 PERTH RD\nCARY, IL 60013") are searchable.
+        if (!preg_match_all(
+            '/(?:BILL|QUOTE|SOLD|SHIP|ORDER)\s*TO\s*:?\s*\n((?:[^\n]+\n){1,6})/i',
+            $rawContent,
+            $matches
+        )) {
+            return null;
+        }
+
+        $users = User::query()
+            ->whereNotNull('first_name')
+            ->whereNotNull('last_name')
+            ->where('first_name', '!=', '')
+            ->where('last_name', '!=', '')
+            ->whereHas('clients')
+            ->with(['clients' => function ($q) {
+                $q->withoutGlobalScopes()->select('clients.id', 'clients.address', 'clients.zip_code');
+            }])
+            ->get(['id', 'first_name', 'last_name']);
+
+        // Score each candidate client; pick the highest. Scoring:
+        //   +2 for each user (first+last name) match within a label block
+        //   +3 if the client's zip_code appears in the same block
+        //   +2 if the client's street address (number + first word) appears in the block
+        $clientScores = [];
+
+        foreach ($matches[1] as $block) {
+            foreach ($users as $user) {
+                $first = preg_quote(trim($user->first_name), '/');
+                $last = preg_quote(trim($user->last_name), '/');
+                if ($first === '' || $last === '') {
+                    continue;
+                }
+
+                // Allow tokens between first and last (e.g. "LOU & RICK FRIEDMAN"
+                // matches both "Lou Friedman" and "Rick Friedman").
+                if (!preg_match('/\b'.$first.'\b[^\n]*\b'.$last.'\b/i', $block)) {
+                    continue;
+                }
+
+                foreach ($user->clients as $client) {
+                    $clientScores[$client->id] = ($clientScores[$client->id] ?? 0) + 2;
+
+                    if (!empty($client->zip_code) && stripos($block, (string) $client->zip_code) !== false) {
+                        $clientScores[$client->id] += 3;
+                    }
+
+                    if (!empty($client->address)) {
+                        $addr = trim((string) $client->address);
+                        // Match street number + first street-name token (e.g. "239 PERTH").
+                        if (preg_match('/^\s*(\d+)\s+(\S+)/', $addr, $am)) {
+                            $needle = '/\b'.preg_quote($am[1], '/').'\s+'.preg_quote($am[2], '/').'\b/i';
+                            if (preg_match($needle, $block)) {
+                                $clientScores[$client->id] += 2;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (empty($clientScores)) {
+            return null;
+        }
+
+        arsort($clientScores);
+        $top = array_keys($clientScores);
+        $topScore = $clientScores[$top[0]];
+
+        // Tie at the top → ambiguous, skip rather than guess wrong.
+        if (isset($top[1]) && $clientScores[$top[1]] === $topScore) {
+            return null;
+        }
+
+        return $top[0];
+    }
+
+    /**
+     * Resolve the project_id for a detected bill-to client. Prefers a project
+     * that belongs to the same Hive vendor as the company email; falls back to
+     * the client's most recent non-deleted project.
+     */
+    protected function resolveProjectIdForClient(int $clientId, ?int $preferredVendorId): ?int
+    {
+        $base = Project::withoutGlobalScopes()
+            ->where('client_id', $clientId)
+            ->whereNull('deleted_at');
+
+        if ($preferredVendorId) {
+            $projectId = (clone $base)
+                ->where('belongs_to_vendor_id', $preferredVendorId)
+                ->latest('id')
+                ->value('id');
+
+            if ($projectId) {
+                return $projectId;
+            }
+        }
+
+        return $base->latest('id')->value('id');
     }
 
     /**

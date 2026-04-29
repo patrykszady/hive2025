@@ -53,7 +53,16 @@
                         href="{{ isset($expense->vendor->id) ? route('vendors.show', $expense->vendor->id) : null }}"
                     />
 
-                    @if($expense->belongs_to_vendor_id && $expense->belongs_to_vendor_id !== auth()->user()->vendor->id)
+                    @if($expense->belongs_to_client_id)
+                        @php $belongsToClient = \App\Models\Client::find($expense->belongs_to_client_id); @endphp
+                        @if($belongsToClient)
+                            <x-details.row 
+                                title="Belongs To" 
+                                content="{{ $belongsToClient->name }}"
+                                href="{{ route('clients.show', $belongsToClient->id) }}"
+                            />
+                        @endif
+                    @elseif($expense->belongs_to_vendor_id && $expense->belongs_to_vendor_id !== auth()->user()->vendor->id)
                         @php $belongsToVendor = \App\Models\Vendor::find($expense->belongs_to_vendor_id); @endphp
                         @if($belongsToVendor)
                             <x-details.row 

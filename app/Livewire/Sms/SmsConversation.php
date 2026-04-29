@@ -941,7 +941,17 @@ class SmsConversation extends Component
 
         return [
             'visible' => $withoutTapbacks->where('status', '!=', 'scheduled')->values(),
-            'scheduled' => $withoutTapbacks->where('status', 'scheduled')->values(),
+            // Scheduled messages render in a flex-col-reverse container, so the
+            // first item in DOM is visually at the bottom. Sort descending by
+            // send time (and creation time as a tie-breaker) so the earliest
+            // scheduled message stays on top and later ones stack below it.
+            'scheduled' => $withoutTapbacks
+                ->where('status', 'scheduled')
+                ->sortByDesc(fn ($m) => [
+                    optional($m->scheduled_at)->getTimestamp() ?? 0,
+                    $m->created_at?->getTimestamp() ?? 0,
+                ])
+                ->values(),
             'reactions' => $reactionsMap,
         ];
     }

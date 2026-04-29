@@ -111,12 +111,31 @@ return new class extends Migration
 
     private function dropIndexIfExists(string $table, string $indexName): void
     {
-        $exists = DB::select("SHOW INDEX FROM `{$table}` WHERE Key_name = ?", [$indexName]);
-        if (count($exists) === 0) {
+        if (! Schema::hasTable($table)) {
             return;
         }
 
-        DB::statement("ALTER TABLE `{$table}` DROP INDEX `{$indexName}`");
+        $driver = DB::connection()->getDriverName();
+
+        if ($driver === 'mysql' || $driver === 'mariadb') {
+            $exists = DB::select("SHOW INDEX FROM `{$table}` WHERE Key_name = ?", [$indexName]);
+            if (count($exists) === 0) {
+                return;
+            }
+            DB::statement("ALTER TABLE `{$table}` DROP INDEX `{$indexName}`");
+
+            return;
+        }
+
+        // Driver-agnostic fallback (sqlite/pgsql/etc.) using Doctrine via Schema.
+        $indexes = collect(Schema::getIndexes($table))->pluck('name')->all();
+        if (! in_array($indexName, $indexes, true)) {
+            return;
+        }
+
+        Schema::table($table, function (Blueprint $table) use ($indexName) {
+            $table->dropIndex($indexName);
+        });
     }
 
     /**
@@ -136,13 +155,24 @@ return new class extends Migration
             }
         }
 
-        $exists = DB::select("SHOW INDEX FROM `{$table}` WHERE Key_name = ?", [$indexName]);
-        if (count($exists) > 0) {
+        $exists = $this->indexExists($table, $indexName);
+        if ($exists) {
             return;
         }
 
         Schema::table($table, function (Blueprint $tableBlueprint) use ($columns, $indexName) {
             $tableBlueprint->index($columns, $indexName);
         });
+    }
+
+    private function indexExists(string $table, string $indexName): bool
+    {
+        $driver = DB::connection()->getDriverName();
+
+        if ($driver === 'mysql' || $driver === 'mariadb') {
+            return count(DB::select("SHOW INDEX FROM `{$table}` WHERE Key_name = ?", [$indexName])) > 0;
+        }
+
+        return collect(Schema::getIndexes($table))->pluck('name')->contains($indexName);
     }
 };

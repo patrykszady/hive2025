@@ -29,7 +29,8 @@ class ExpenseScope implements Scope
             // if Admin: all vendor expenses
             if ($user->vendor_role == 'Admin') {
                 $builder->where(function ($query) use ($user) {
-                    $query->where('belongs_to_vendor_id', $user->vendor->id);
+                    $query->where('belongs_to_vendor_id', $user->vendor->id)
+                          ->whereNull('belongs_to_client_id');
                 });
             } 
             // if Member: only expenses the User Paid For + their via vendor expenses
@@ -38,7 +39,8 @@ class ExpenseScope implements Scope
                     // Regular user PAID BY expenses
                     $query->where(function ($subQuery) use ($user) {
                         $subQuery->where('belongs_to_vendor_id', $user->vendor->id)
-                                ->where('paid_by', $user->id);
+                                ->where('paid_by', $user->id)
+                                ->whereNull('belongs_to_client_id');
                     });
                     
                     // Add via vendor expenses if applicable

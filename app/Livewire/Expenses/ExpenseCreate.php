@@ -195,6 +195,15 @@ class ExpenseCreate extends Component
         $this->form->split = true;
     }
 
+    public function openSplits(): void
+    {
+        $this->dispatch(
+            'addSplits',
+            expense: $this->expense->id ?? null,
+            amount: $this->form->amount,
+        )->to(ExpenseSplitsCreate::class);
+    }
+
     public function newExpense($amount)
     {
         $this->clearCheckFields();

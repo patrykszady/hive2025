@@ -48,6 +48,8 @@ class EstimateEmail extends Component
 
     public array $additionalAttachments = [];
 
+    public bool $showChanges = false;
+
     public ?string $project_status = null;
 
     public ?string $project_status_date = null;
@@ -95,9 +97,11 @@ class EstimateEmail extends Component
         }
     }
 
-    public function openModal(Estimate $estimate)
+    public function openModal(Estimate $estimate, bool $showChanges = false)
     {
         $this->authorize('view', $estimate);
+
+        $this->showChanges = $showChanges;
 
         $this->estimate = $estimate->fresh(['project.client.users', 'project.latestStatus', 'vendor']);
 
@@ -373,6 +377,7 @@ class EstimateEmail extends Component
             emailTemplateName: $templateName,
             senderIp: request()->ip(),
             additionalAttachmentPaths: $additionalAttachmentPaths,
+            showChanges: $this->showChanges,
         );
 
         $this->modal('estimate_email_modal')->close();

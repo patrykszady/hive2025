@@ -19,6 +19,9 @@ class SendScheduledSmsMessages extends Command
         $messages = SmsMessage::query()
             ->where('status', 'scheduled')
             ->where('scheduled_at', '<=', now())
+            ->orderBy('scheduled_at')
+            ->orderBy('created_at')
+            ->orderBy('id')
             ->get();
 
         if ($messages->isEmpty()) {
@@ -27,10 +30,22 @@ class SendScheduledSmsMessages extends Command
             return self::SUCCESS;
         }
 
+        // When several messages in the same thread are due at the same time,
+        // stagger the actual sends by 10 seconds each so they arrive in the
+        // order they were composed (and the recipient sees them in order).
+        $threadOffsets = [];
+
         foreach ($messages as $message) {
+            $threadId = $message->thread_id;
+            $delaySeconds = $threadOffsets[$threadId] ?? 0;
+            $threadOffsets[$threadId] = $delaySeconds + 10;
+
             $message->update(['status' => 'sending']);
 
-            SendGroupMms::dispatch($message->id);
+            $job = SendGroupMms::dispatch($message->id);
+            if ($delaySeconds > 0) {
+                $job->delay(now()->addSeconds($delaySeconds));
+            }
 
             $message->thread?->update(['last_activity_at' => now()]);
 

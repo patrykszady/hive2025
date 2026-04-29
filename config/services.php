@@ -5,12 +5,10 @@ return [
         'api_key' => env('OPENAI_API_KEY'),
     ],
 
-    'brave_search' => [
-        'api_key' => env('BRAVE_SEARCH_API_KEY'),
-    ],
-
-    'serpapi' => [
-        'api_key' => env('SERPAPI_KEY'),
+    'brightdata' => [
+        'api_token' => env('BRIGHTDATA_API_TOKEN'),
+        // SERP API zone name (e.g. "hive_serp_api"). Synchronous Google search via /request.
+        'serp_zone' => env('BRIGHTDATA_SERP_ZONE'),
     ],
 
     'azure_cu' => [

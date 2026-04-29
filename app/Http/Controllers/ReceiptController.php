@@ -685,6 +685,14 @@ class ReceiptController extends Controller
             $invoiceNumber = $prefix['OrderNumber']['valueString'] ?? $prefix['OrderNumber']['content'] ?? null;
         }
 
+        // Custom CU analyzers (e.g. hive_MaterialOrder_1) do not emit a `confidence` field, so
+        // OrderNumber is silently dropped above. Accept it for material_order docs.
+        if ($invoiceNumber === null && $isMaterialOrderDoc && isset($prefix['OrderNumber'])) {
+            $invoiceNumber = $prefix['OrderNumber']['valueString']
+                ?? $prefix['OrderNumber']['content']
+                ?? (is_string($prefix['OrderNumber']) ? $prefix['OrderNumber'] : null);
+        }
+
         // Override with "Transaction Number" from raw content when present — e.g. Floor & Decor
         // prints both a store Transaction Number (16-digit) and a payment terminal "Invoice Number:"
         // (alphanumeric). Azure picks up the labeled "Invoice Number:" but we want the transaction.
@@ -1075,7 +1083,16 @@ class ReceiptController extends Controller
         }
 
         if ($amount === null && $subtotal === null) {
-            return ['error' => true];
+            // For material orders / supplement quotes, line items are the primary payload.
+            // Don't bail out just because the PDF has no monetary totals (e.g. Kohler
+            // Signature presentations omit pricing). Default amount/subtotal to 0 so the
+            // downstream pipeline can still persist the items.
+            if ($isMaterialOrderDoc && !empty($formattedItems)) {
+                $amount   = 0;
+                $subtotal = 0;
+            } else {
+                return ['error' => true];
+            }
         }
 
         // Normalize arrays to scalars

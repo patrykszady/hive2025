@@ -20,7 +20,7 @@ class Expense extends Model
 {
     use HasFactory, Searchable, SoftDeletes, HasNumericSearch;
 
-    protected $fillable = ['amount', 'date', 'invoice', 'note', 'project_id', 'distribution_id', 'vendor_id', 'check_id', 'parent_expense_id', 'reimbursment', 'belongs_to_vendor_id', 'created_by_user_id', 'paid_by', 'created_at', 'updated_at', 'deleted_at'];
+    protected $fillable = ['amount', 'date', 'invoice', 'note', 'project_id', 'distribution_id', 'vendor_id', 'check_id', 'parent_expense_id', 'reimbursment', 'belongs_to_vendor_id', 'belongs_to_client_id', 'created_by_user_id', 'paid_by', 'created_at', 'updated_at', 'deleted_at'];
 
     protected function casts(): array
     {
@@ -269,6 +269,11 @@ class Expense extends Model
                 $vendor->business_name = 'NO VENDOR';
             }
         });
+    }
+
+    public function belongsToClient(): BelongsTo
+    {
+        return $this->belongsTo(Client::class, 'belongs_to_client_id');
     }
 
     public function paidby(): BelongsTo

@@ -38,6 +38,7 @@ class SendEstimateEmailJob implements ShouldQueue
         protected ?string $emailTemplateName = null,
         protected ?string $senderIp = null,
         protected array $additionalAttachmentPaths = [],
+        protected bool $showChanges = false,
     ) {
     }
 
@@ -92,7 +93,7 @@ class SendEstimateEmailJob implements ShouldQueue
             }
 
             if ($this->includeEstimatePdf) {
-                $estimateDocument = EstimateDocumentGenerator::generate($estimate, 'Estimate');
+                $estimateDocument = EstimateDocumentGenerator::generate($estimate, 'Estimate', showChanges: $this->showChanges);
                 if ($estimateDocument && isset($estimateDocument['binary'], $estimateDocument['filename'])) {
                     $tempPath = $tempDir . '/' . $estimateDocument['filename'];
                     file_put_contents($tempPath, $estimateDocument['binary']);

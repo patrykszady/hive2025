@@ -78,6 +78,13 @@ fi
 # Remove stale lock on force restart
 [ "$FORCE" = true ] && rm -f "$LOCK_FILE"
 
+# On --force, kill existing cloudflared so it restarts fresh below
+if [ "$FORCE" = true ] && pgrep -f "cloudflared tunnel" >/dev/null 2>&1; then
+  echo "🔄 Stopping existing Cloudflare tunnel (force restart)..."
+  pkill -f "cloudflared tunnel" 2>/dev/null || true
+  sleep 0.5
+fi
+
 echo "🚀 Starting all Laravel applications..."
 echo ""
 
@@ -160,7 +167,7 @@ else
     GSC_PID=$(lsof -Pi :8003 -sTCP:LISTEN -t)
     echo "✅ GSC server already running (pid: $GSC_PID)"
   else
-    (cd "$GSC_DIR" && nohup php artisan serve --host=0.0.0.0 --port=8003 --no-interaction > storage/logs/serve.log 2>&1 &)
+    (cd "$GSC_DIR" && nohup php artisan serve --host=127.0.0.1 --port=8003 --no-interaction > storage/logs/serve.log 2>&1 &)
     sleep 0.7
     if lsof -Pi :8003 -sTCP:LISTEN -t >/dev/null 2>&1; then
       echo "✅ GSC Laravel server started on port 8003"

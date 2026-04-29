@@ -1669,12 +1669,15 @@ class TransactionController extends Controller
             if ($check->check_type == 'Transfer') {
                 $check_number = '1010101';
                 $add_days = 14;
+                $sub_days = 14;
             } elseif ($check->check_type == 'Check') {
                 $check_number = $check->check_number;
                 $add_days = 180;
+                $sub_days = 7;
             } elseif ($check->check_type == 'Cash') {
                 $check_number = '2020202';
                 $add_days = 14;
+                $sub_days = 14;
             } else {
                 Log::channel('add_check_id_to_transactions')->info($check);
                 continue;
@@ -1697,7 +1700,7 @@ class TransactionController extends Controller
                     return $query->whereIn('bank_account_id', $bank_account_ids);
                 })
                 ->whereBetween('transaction_date', [
-                    $check->date->subDays(7)->format('Y-m-d'),
+                    $check->date->subDays($sub_days)->format('Y-m-d'),
                     $check->date->addDays($add_days)->format('Y-m-d'),
                 ])
                 ->where('amount', $check->amount)
@@ -1721,7 +1724,7 @@ class TransactionController extends Controller
             } else {
                 // No exact match found - try subset sum matching
                 // Find multiple transactions that sum to the check amount
-                $this->matchTransactionsToCheckBySubsetSum($check, $check_number, $bank_account_ids, $add_days);
+                $this->matchTransactionsToCheckBySubsetSum($check, $check_number, $bank_account_ids, $add_days, $sub_days);
             }
         }
 
@@ -2044,7 +2047,7 @@ class TransactionController extends Controller
      * Match multiple transactions to a single check using subset sum matching.
      * Finds groups of transactions that sum to the check amount.
      */
-    protected function matchTransactionsToCheckBySubsetSum(Check $check, string $check_number, $bank_account_ids, int $add_days): void
+    protected function matchTransactionsToCheckBySubsetSum(Check $check, string $check_number, $bank_account_ids, int $add_days, int $sub_days = 7): void
     {
         // Get all unmatched transactions within the date range that could potentially match
         $transactions = Transaction::withoutGlobalScopes()
@@ -2061,7 +2064,7 @@ class TransactionController extends Controller
                 return $query->whereIn('bank_account_id', $bank_account_ids);
             })
             ->whereBetween('transaction_date', [
-                $check->date->copy()->subDays(7)->format('Y-m-d'),
+                $check->date->copy()->subDays($sub_days)->format('Y-m-d'),
                 $check->date->copy()->addDays($add_days)->format('Y-m-d'),
             ])
             ->where('amount', '<=', $check->amount) // Only transactions <= check amount

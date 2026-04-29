@@ -555,7 +555,7 @@ class EstimateShow extends Component
     //$type = [estimate, invoice, work order]
     public function create_pdf($type)
     {
-        $document = EstimateDocumentGenerator::generate($this->estimate, $type);
+        $document = EstimateDocumentGenerator::generate($this->estimate, $type, showChanges: $this->showChanges);
 
         // Force immediate component state preservation before download
         $this->skipRender();

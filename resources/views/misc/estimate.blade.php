@@ -123,11 +123,13 @@
                                             ->get()
                                             ->values();
 
-                                        $trashedLineItems = $estimate->estimate_line_items()
-                                            ->onlyTrashed()
-                                            ->with('allowances')
-                                            ->where('section_id', $section->id)
-                                            ->get();
+                                        $trashedLineItems = ($recentChanges['since'] ?? null)
+                                            ? $estimate->estimate_line_items()
+                                                ->onlyTrashed()
+                                                ->with('allowances')
+                                                ->where('section_id', $section->id)
+                                                ->get()
+                                            : collect();
 
                                         // Build merged list: active items in order, trashed items
                                         // inserted at their original position from the activity log.
