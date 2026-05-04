@@ -85,31 +85,13 @@ class EstimateDocumentGenerator
         $projectName = $project?->project_name ?? 'Unknown Project';
         $title = $clientName . ' - ' . $type . ' - ' . $projectName . ' - ' . $estimate->number;
 
-        // Load contract template for estimates
+        // Load only the selected contract templates for estimates
         $contractBody = null;
         if ($type === 'Estimate') {
-            $contractTemplate = EmailTemplate::withoutGlobalScopes()
-                ->where('vendor_id', $vendor->id)
-                ->where('type', 'contract')
-                ->first();
+            $contractBodies = static::contractBodiesForEstimate($estimate, $timezone);
 
-            if ($contractTemplate) {
-                $paymentScheduleHtml = static::renderPaymentSchedule($estimate->payments);
-
-                $contractBody = static::renderContractTemplate($contractTemplate->body, [
-                    'today_date' => now()->setTimezone($timezone)->format('m/d/Y'),
-                    'vendor_name' => $vendor->business_name ?? 'Unknown Vendor',
-                    'short_vendor_name' => data_get($vendor->options, 'short_name') ?: ($vendor->business_name ?? 'Unknown Vendor'),
-                    'client_name' => $client?->name ?? 'Unknown Client',
-                    'estimate_number' => $estimate->number,
-                    'project_address' => $project?->full_address ?? 'No address on file',
-                    'start_date' => $estimate->start_date?->format('m/d/Y') ?? 'START_DATE_HERE',
-                    'end_date' => $estimate->end_date?->format('m/d/Y') ?? 'END_DATE_HERE',
-                    'estimate_total' => money($estimate_total),
-                    'estimate_total_words' => $estimate_total_words,
-                    'payment_schedule' => $paymentScheduleHtml,
-                    'current_year' => now()->setTimezone($timezone)->format('Y'),
-                ]);
+            if (! empty($contractBodies)) {
+                $contractBody = implode('<div style="page-break-before: always;"></div>', $contractBodies);
             }
         }
 
@@ -428,6 +410,73 @@ class EstimateDocumentGenerator
         $html = preg_replace('#(//)\s*(localhost)#i', '//removed-local-ref', $html);
 
         return $html;
+    }
+
+    /**
+     * Build rendered contract bodies from the selected template IDs on estimate options.
+     *
+     * @return array<int, string>
+     */
+    public static function contractBodiesForEstimate(Estimate $estimate, string $timezone): array
+    {
+        $vendor = Vendor::withoutGlobalScopes()->find($estimate->belongs_to_vendor_id);
+
+        if (! $vendor) {
+            return [];
+        }
+
+        $selectedIds = array_values(array_filter(array_map('intval', $estimate->options['contract_template_ids'] ?? [])));
+
+        if ($selectedIds === []) {
+            return [];
+        }
+
+        $contractTemplates = EmailTemplate::withoutGlobalScopes()
+            ->where('vendor_id', $vendor->id)
+            ->where('type', 'contract')
+            ->whereIn('id', $selectedIds)
+            ->get();
+
+        $selectedOrder = array_flip($selectedIds);
+
+        $contractTemplates = $contractTemplates
+            ->sortBy(fn (EmailTemplate $template) => $selectedOrder[$template->id] ?? PHP_INT_MAX)
+            ->values();
+
+        if ($contractTemplates->isEmpty()) {
+            return [];
+        }
+
+        $project = $estimate->project;
+        $client = $project?->client ?? $estimate->client;
+
+        $estimateTotal = $estimate->estimate_sections->sum('total');
+        $estimateTotalWords = ucwords(
+            Number::spell((int) $estimateTotal) . ' dollars and ' .
+            Number::spell((int) (($estimateTotal - (int) $estimateTotal) * 100)) . ' cents'
+        );
+
+        $paymentScheduleHtml = static::renderPaymentSchedule($estimate->payments);
+
+        $placeholderData = [
+            'today_date' => now()->setTimezone($timezone)->format('m/d/Y'),
+            'vendor_name' => $vendor->business_name ?? 'Unknown Vendor',
+            'short_vendor_name' => data_get($vendor->options, 'short_name') ?: ($vendor->business_name ?? 'Unknown Vendor'),
+            'client_name' => $client?->name ?? 'Unknown Client',
+            'estimate_number' => $estimate->number,
+            'project_address' => $project?->full_address ?? 'No address on file',
+            'start_date' => $estimate->start_date?->format('m/d/Y') ?? 'START_DATE_HERE',
+            'end_date' => $estimate->end_date?->format('m/d/Y') ?? 'END_DATE_HERE',
+            'estimate_total' => money($estimateTotal),
+            'estimate_total_words' => $estimateTotalWords,
+            'payment_schedule' => $paymentScheduleHtml,
+            'current_year' => now()->setTimezone($timezone)->format('Y'),
+        ];
+
+        return $contractTemplates
+            ->map(fn (EmailTemplate $template) => static::renderContractTemplate($template->body, $placeholderData))
+            ->values()
+            ->all();
     }
 
     /**
