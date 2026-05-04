@@ -5,22 +5,21 @@ namespace App\Traits;
 use App\Models\Agent;
 use App\Models\Vendor;
 use App\Models\VendorDoc;
-use App\Services\GooglePlacesService;
+use App\Services\GeoapifyService;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
 
 trait ProcessesVendorDocs
 {
-    protected $googlePlacesService;
+    protected $geoapifyService;
 
-    protected function getGooglePlacesService()
+    protected function getGeoapifyService()
     {
-        if (!$this->googlePlacesService) {
-            // Now we can instantiate it directly since it's imported.
-            $this->googlePlacesService = new GooglePlacesService();
+        if (!$this->geoapifyService) {
+            $this->geoapifyService = new GeoapifyService();
         }
-        return $this->googlePlacesService;
+        return $this->geoapifyService;
     }
 
     public function handleVendorDocProcessing(
@@ -505,15 +504,13 @@ trait ProcessesVendorDocs
 
     /**
      * Fallback method: Match vendor by comparing addresses.
-     * This method uses GooglePlacesService to process and parse an OCR address
+     * This method uses GeoapifyService to process and parse an OCR address
      * and builds a composite address string, then compares it against vendor records.
      */
     public function fallbackToAddress($addressString)
     {
-        // Use the lazy-loaded GooglePlacesService.
-        $googleService = $this->getGooglePlacesService();
+        $googleService = $this->getGeoapifyService();
 
-        // Get autocomplete suggestions from Google Places.
         $suggestions = $googleService->getAutocompleteSuggestions($addressString);
         if (empty($suggestions)) {
             return null;

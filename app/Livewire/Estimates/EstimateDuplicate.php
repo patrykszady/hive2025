@@ -164,12 +164,12 @@ class EstimateDuplicate extends Component
 
             // Use template data for these fields
             $new_line_item->line_item_id = $line_item_template->id;
-            $new_line_item->name = $line_item_template->name;
-            $new_line_item->category = $line_item_template->category;
-            $new_line_item->sub_category = $line_item_template->sub_category;
-            $new_line_item->unit_type = $line_item_template->unit_type;
-            $new_line_item->desc = $line_item_template->desc;
-            $new_line_item->notes = $line_item_template->notes;
+            $new_line_item->name = $estimate_line_item->name ?? $line_item_template->name;
+            $new_line_item->category = $estimate_line_item->category ?? $line_item_template->category;
+            $new_line_item->sub_category = $estimate_line_item->sub_category ?? $line_item_template->sub_category;
+            $new_line_item->unit_type = $estimate_line_item->unit_type ?? $line_item_template->unit_type;
+            $new_line_item->desc = $estimate_line_item->desc ?? $line_item_template->desc;
+            $new_line_item->notes = $estimate_line_item->notes ?? $line_item_template->notes;
 
             if ($this->cost_mode === 'exact') {
                 $new_line_item->cost = $estimate_line_item->cost;
@@ -197,12 +197,18 @@ class EstimateDuplicate extends Component
 
         $this->modal('estimate_duplicate_modal')->close();
 
-        Flux::toast(
+        $this->dispatch('toast-show',
             duration: 5000,
-            position: 'top right',
-            variant: 'success',
-            heading: 'Section Duplicated Successfully',
-            text: 'Section "' . $new_section->name . '" has been added to Estimate #' . $new_estimate->id,
+            slots: [
+                'heading' => 'Section Duplicated Successfully',
+                'text' => 'Section "' . $new_section->name . '" has been added to Estimate #' . $new_estimate->id,
+                'action' => 'Go to estimate',
+            ],
+            dataset: [
+                'variant' => 'success',
+                'position' => 'top end',
+                'route' => route('estimates.show', $new_estimate->id),
+            ],
         );
     }
 

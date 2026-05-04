@@ -2,30 +2,29 @@
 
 namespace App\Traits;
 
-use App\Services\GooglePlacesService;
+use App\Services\GeoapifyService;
 
 trait HandlesAddresses
 {
     public $address_query = NULL;
-    public $address_selection = NULL;
     public $address_suggestions = [];
+    public bool $addressJustSelected = false;
     public $address_1 = NULL;
     public $address_2 = NULL;
     public $city = NULL;
     public $state = NULL;
     public $zip_code = NULL;
-    protected $googlePlacesService;
+    protected $geoapifyService;
 
-    public function bootHandlesAddresses(GooglePlacesService $googlePlacesService)
+    public function bootHandlesAddresses(GeoapifyService $geoapifyService)
     {
-        $this->googlePlacesService = $googlePlacesService;
+        $this->geoapifyService = $geoapifyService;
     }
 
     public function rules()
     {
         return [
             'address_query' => 'nullable',
-            'address_selection' => 'nullable',
             'address_1' => 'nullable',
             'address_2' => 'nullable',
             'city' => 'nullable',
@@ -36,33 +35,35 @@ trait HandlesAddresses
 
     public function updatedAddressQuery($value)
     {
-        if (strlen($value) < 3) {
-            $this->address_suggestions = []; // Prevents unnecessary API calls
+        if ($this->addressJustSelected) {
+            $this->addressJustSelected = false;
             return;
         }
 
-        $this->address_suggestions = $this->googlePlacesService->getAutocompleteSuggestions($value);
-    }
-
-    public function updatedAddressSelection($value)
-    {
-        // Return early if there is no valid value
-        if (empty($value)) {
-            return; // No API call is made when value is empty
+        if (strlen($value) < 3) {
+            $this->address_suggestions = [];
+            return;
         }
 
-        // Fetch address details using the provided place_id
-        $address_details = $this->googlePlacesService->getPlaceDetails($value);
+        $this->address_suggestions = $this->geoapifyService->getAutocompleteSuggestions($value);
+    }
+
+    public function selectSuggestion(string $placeId): void
+    {
+        if (empty($placeId)) {
+            return;
+        }
+
+        $address_details = $this->geoapifyService->getPlaceDetails($placeId);
 
         if ($address_details) {
-            $this->address_1 = ($address_details['street_number'] ?? '') . ' ' . ($address_details['route'] ?? '');
+            $this->address_1 = trim(($address_details['street_number'] ?? '') . ' ' . ($address_details['route'] ?? ''));
             $this->city = $address_details['locality'] ?? null;
             $this->state = $address_details['administrative_area_level_1'] ?? null;
             $this->zip_code = $address_details['postal_code'] ?? null;
         }
 
-        // Clear only address suggestions after processing
-        $this->address_selection = null;
+        $this->addressJustSelected = true;
         $this->address_query = null;
         $this->address_suggestions = [];
     }

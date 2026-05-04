@@ -19,9 +19,9 @@
             x-show="$wire.client_id"
             x-transition
             >
-            <flux:select label="Project" wire:model.live="project_id" variant="listbox" searchable placeholder="Choose project...">
+            <flux:select label="Project" wire:model.live="project_id" variant="listbox" placeholder="Choose project...">
                 @foreach($client_projects as $client_project)
-                    <flux:select.option value="{{$client_project->id}}" wire:key="project-{{$client_project->id}}">{{ $client_project->project_name ?: $client_project->name ?: $client_project->address ?: ('Project #' . $client_project->id) }}</flux:select.option>
+                    <flux:select.option value="{{$client_project->id}}" wire:key="project-{{$client_project->id}}">{{ $client_project->project_name ?: $client_project->short_address ?: ('Project #' . $client_project->id) }}</flux:select.option>
                 @endforeach
             </flux:select>
         </div>

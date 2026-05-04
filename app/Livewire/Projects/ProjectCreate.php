@@ -3,7 +3,7 @@
 namespace App\Livewire\Projects;
 
 use App\Livewire\Forms\ProjectForm;
-use App\Services\GooglePlacesService;
+use App\Services\GeoapifyService;
 use App\Traits\HandlesAddresses;
 
 use App\Models\Client;
@@ -32,11 +32,9 @@ class ProjectCreate extends Component
     ];
 
     protected $listeners = ['newProject', 'editProject'];
-    protected $googlePlacesService;
-
-    public function boot(GooglePlacesService $googlePlacesService)
+    public function boot(GeoapifyService $geoapifyService)
     {
-        $this->bootHandlesAddresses($googlePlacesService);
+        $this->bootHandlesAddresses($geoapifyService);
     }
 
     public function updated($field, $value)

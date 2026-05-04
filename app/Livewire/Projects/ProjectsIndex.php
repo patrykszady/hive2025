@@ -5,9 +5,7 @@ namespace App\Livewire\Projects;
 use App\Models\Client;
 use App\Models\Project;
 use App\Models\ProjectStatus;
-use Carbon\Carbon;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Session;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
@@ -19,7 +17,6 @@ class ProjectsIndex extends Component
     use AuthorizesRequests, WithPagination;
 
     public $project_name_search = '';
-    public $clients = [];
     public $client_id = null;
 
     public $client = null;
@@ -68,13 +65,6 @@ class ProjectsIndex extends Component
 
         if ($this->client) {
             $this->client_id = $this->client->id;
-        } else {
-            // Client users only see their own clients
-            if (auth()->user()->is_browsing_as_client) {
-                $this->clients = auth()->user()->clients()->get();
-            } else {
-                $this->clients = Client::orderBy('created_at', 'DESC')->get();
-            }
         }
 
         // Special case for view mode
@@ -144,146 +134,21 @@ class ProjectsIndex extends Component
 
 
     #[Computed]
-    public function stats()
+    public function clients()
     {
-        // Get base query
-        $baseQuery = Project::query();
-        
-        if (! is_null($this->client)) {
-            $currentVendorId = auth()->user()->vendor?->id;
-
-            // If viewing the current vendor's own client record, scope to project_vendor
-            if ($currentVendorId && isset($this->client->vendor_id) && (int) $this->client->vendor_id === $currentVendorId) {
-                $projectIds = \Illuminate\Support\Facades\DB::table('project_vendor')
-                    ->where('vendor_id', $currentVendorId)
-                    ->where('client_id', $this->client->id)
-                    ->pluck('project_id');
-                $baseQuery->whereIn('id', $projectIds);
-            } elseif (isset($this->client->vendor_id)) {
-                $client_ids = Project::where('belongs_to_vendor_id', $this->client->vendor_id)->pluck('client_id')->toArray();
-                $baseQuery->whereIn('client_id', $client_ids);
-            } else {
-                $client_ids = [$this->client->id];
-                $baseQuery->whereIn('client_id', $client_ids);
-            }
-        } elseif (auth()->user()->is_browsing_as_client) {
-            // Client users only see stats for their client's projects
-            $userClientIds = auth()->user()->clients()->pluck('clients.id')->toArray();
-            $baseQuery->whereIn('client_id', $userClientIds);
+        if (auth()->user()->is_browsing_as_client) {
+            return auth()->user()->clients()->get();
         }
 
-        $projectIds = (clone $baseQuery)->pluck('id');
-
-        $projects = (clone $baseQuery)->with('latestStatus')->get();
-
-        $latestStatuses = $projects
-            ->pluck('latestStatus.title') // accessor provides label
-            ->filter()
-            ->countBy();
-
-        $projectStatuses = $projectIds->isEmpty()
-            ? collect()
-            : ProjectStatus::select('project_id', 'status_code', 'start_date', 'id')
-                ->whereIn('project_id', $projectIds)
-                ->orderBy('project_id')
-                ->orderBy('start_date')
-                ->orderBy('id')
-                ->get()
-                ->groupBy('project_id')
-                ->map(function ($statuses) {
-                    return $statuses
-                        ->values()
-                        ->map(function ($status) {
-                            return [
-                                'title' => ProjectStatus::getLabelForCode((int) $status->status_code),
-                                'start_date' => $status->start_date
-                                    ? $status->start_date->copy()
-                                    : null,
-                            ];
-                        });
-                });
-
-        // Define stats in display order
-        $stats = [
-            [
-                'title' => 'Active',
-                'value' => (string) $latestStatuses->get('Active', 0),
-                'chartData' => $this->getYtdChartData('Active', $projectStatuses),
-            ],
-            [
-                'title' => 'Estimate',
-                'value' => (string) $latestStatuses->get('Estimate', 0),
-                'chartData' => $this->getYtdChartData('Estimate', $projectStatuses),
-            ],
-            [
-                'title' => 'Response',
-                'value' => (string) $latestStatuses->get('Awaiting Response', 0),
-                'chartData' => $this->getYtdChartData('Awaiting Response', $projectStatuses),
-            ],
-            [
-                'title' => 'Scheduled',
-                'value' => (string) $latestStatuses->get('Scheduled', 0),
-                'chartData' => $this->getYtdChartData('Scheduled', $projectStatuses),
-            ],
-        ];
-
-        return $stats;
+        return Client::orderBy('created_at', 'DESC')->get();
     }
-
-    protected function getYtdChartData(string $status, Collection $projectStatuses): array
-    {
-        $now = now();
-        $currentYear = $now->year;
-        $currentMonth = $now->month;
-
-        if ($projectStatuses->isEmpty()) {
-            return array_fill(0, $currentMonth, 0);
-        }
-
-        $monthlyData = [];
-        $pointers = [];
-
-        for ($month = 1; $month <= $currentMonth; $month++) {
-            $endOfMonth = $now->copy()->setDate($currentYear, $month, 1)->endOfMonth();
-            $count = 0;
-
-            foreach ($projectStatuses as $projectId => $statuses) {
-                $index = $pointers[$projectId] ?? -1;
-                $statusesCount = $statuses->count();
-
-                while (($index + 1) < $statusesCount) {
-                    $next = $statuses[$index + 1];
-                    /** @var Carbon|null $startDate */
-                    $startDate = $next['start_date'];
-
-                    if ($startDate !== null && $startDate->gt($endOfMonth)) {
-                        break;
-                    }
-
-                    $index++;
-                }
-
-                $pointers[$projectId] = $index;
-
-                if ($index >= 0) {
-                    $currentStatus = $statuses[$index]['title'];
-                    if ($currentStatus === $status) {
-                        $count++;
-                    }
-                }
-            }
-
-            $monthlyData[] = $count;
-        }
-
-        return $monthlyData;
-    }
-
 
     #[Title('Projects')]
     public function render()
     {
         $this->authorize('viewAny', Project::class);
-        return view('livewire.projects.index');
+        return view('livewire.projects.index', [
+            'clients' => $this->clients,
+        ]);
     }
 }

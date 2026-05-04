@@ -6,7 +6,7 @@ use App\Livewire\Forms\VendorForm;
 use App\Models\User;
 use App\Models\Vendor;
 
-use App\Services\GooglePlacesService;
+use App\Services\GeoapifyService;
 use App\Traits\HandlesAddresses;
 
 use Flux;
@@ -52,12 +52,9 @@ class VendorCreate extends Component
             'viaVendor',
         ];
 
-    protected $googlePlacesService;
-
-    //so that protected $googlePlacesService can be initialized
-    public function boot(GooglePlacesService $googlePlacesService)
+    public function boot(GeoapifyService $geoapifyService)
     {
-        $this->bootHandlesAddresses($googlePlacesService);
+        $this->bootHandlesAddresses($geoapifyService);
     }
 
     protected function rules()

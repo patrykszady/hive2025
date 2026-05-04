@@ -67,6 +67,10 @@ return [
         'api_key' => env('TWOCAPTCHA_API_KEY'),
     ],
 
+    'geoapify' => [
+        'key' => env('GEOAPIFY_API_KEY'),
+    ],
+
     'vapid' => [
         'subject' => env('VAPID_SUBJECT', env('APP_URL', 'http://localhost')),
         'public_key' => env('VAPID_PUBLIC_KEY'),

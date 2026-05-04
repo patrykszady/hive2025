@@ -306,11 +306,65 @@ class ExpenseReceipts extends Model
                     // Filter out empty strings and meaningless placeholder values
                     return $trimmed !== '' && $trimmed !== '0';
                 });
+
+                // Fallback: if both structured sources are empty, check raw_content for a
+                // short freeform note on the first non-blank line (e.g. handwritten "Office"
+                // on a terminal slip where OCR style confidence was too low to be captured).
+                if (empty($filtered)) {
+                    $rawContent = (string) ($this->receipt_items['raw_content'] ?? '');
+                    $fallback = $this->extractLeadingNoteFromRawContent($rawContent);
+                    if ($fallback !== null) {
+                        $filtered = [$fallback];
+                    }
+                }
+
                 $unique = array_unique(array_map('trim', $filtered));
 
                 return implode(' | ', $unique);
             }
         );
+    }
+
+    /**
+     * Scan the first few lines of raw_content for a short freeform note.
+     * Mirrors the logic in ReceiptController::extractLeadingHandwrittenNote().
+     * Used by the notes() accessor to surface handwritten labels on existing
+     * receipts whose OCR run didn't yield a high-confidence style span.
+     */
+    protected function extractLeadingNoteFromRawContent(string $rawContent): ?string
+    {
+        if ($rawContent === '') {
+            return null;
+        }
+        $lines = preg_split('/\r?\n/', $rawContent);
+        foreach (array_slice($lines, 0, 6) as $line) {
+            $line = trim($line);
+            if ($line === '') {
+                continue;
+            }
+            if (preg_match('/^\+?\d[\d\s().\-]{6,}$/', $line)) {
+                continue; // phone
+            }
+            if (preg_match('/^\d{1,4}[\/.\-]\d{1,2}[\/.\-]\d{2,4}/', $line)) {
+                continue; // date
+            }
+            if (preg_match('/^\$?\d+\.\d{2}$/', $line)) {
+                continue; // currency
+            }
+            if (preg_match('/[*X]{4,}|^\d{6,}/', $line)) {
+                continue; // masked card / digit run
+            }
+            if (strlen($line) > 50) {
+                continue; // too long
+            }
+            if (strlen($line) > 20 && $line === strtoupper($line)) {
+                continue; // all-caps store name
+            }
+
+            return $line;
+        }
+
+        return null;
     }
 
     // Add this scope for ordering receipts

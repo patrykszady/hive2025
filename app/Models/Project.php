@@ -410,6 +410,13 @@ class Project extends Model
             return $this->latestStatus;
         }
 
+        if ($this->relationLoaded('statuses')) {
+            return $this->statuses
+                ->where('belongs_to_vendor_id', $vendorId)
+                ->sortByDesc(fn ($s) => [$s->start_date?->timestamp ?? 0, $s->id])
+                ->first() ?? $this->latestStatus;
+        }
+
         return $this->statuses()
             ->where('belongs_to_vendor_id', $vendorId)
             ->orderByDesc('start_date')

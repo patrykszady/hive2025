@@ -5,22 +5,28 @@
         <div class="space-y-2">
             <flux:field>
                 <flux:label>Lookup Address</flux:label>
-                <flux:select wire:model.live="address_selection" variant="combobox">
-                    <x-slot name="input">
-                        <div>
-                            <flux:select.input
-                                wire:model.live.debounce.300ms="address_query"
-                                placeholder="Start typing (e.g. 130 E Main Ave)" />
-                        </div>
-                    </x-slot>
-                    @if(!empty($address_query))
+                <div class="relative">
+                    <flux:autocomplete
+                        wire:model.live.debounce.300ms="address_query"
+                        :filter="false"
+                        loading="address_query,selectSuggestion"
+                        placeholder="Start typing (e.g. 130 E Main Ave)">
                         @foreach ($address_suggestions as $address_suggestion)
-                            <flux:select.option value="{{$address_suggestion['place_id']}}" :key="$address_suggestion['place_id']">
-                                {{$address_suggestion['description']}}
-                            </flux:select.option>
+                            <flux:autocomplete.item
+                                wire:click="selectSuggestion('{{ $address_suggestion['place_id'] }}')"
+                                value="{{ $address_suggestion['description'] }}">
+                                {{ $address_suggestion['description'] }}
+                            </flux:autocomplete.item>
                         @endforeach
-                    @endif
-                </flux:select>
+                    </flux:autocomplete>
+
+                    <div
+                        wire:loading
+                        wire:target="address_query,selectSuggestion"
+                        class="pointer-events-none absolute right-3 top-1/2 z-10 -translate-y-1/2">
+                        <flux:icon.loading class="size-4 animate-spin text-zinc-400" />
+                    </div>
+                </div>
             </flux:field>
 
             <div class="grid grid-cols-5 gap-2">

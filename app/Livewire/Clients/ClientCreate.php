@@ -6,7 +6,7 @@ use App\Models\Client;
 use App\Models\User;
 
 use App\Livewire\Forms\ClientForm;
-use App\Services\GooglePlacesService;
+use App\Services\GeoapifyService;
 use App\Traits\HandlesAddresses;
 
 use Flux;
@@ -43,13 +43,9 @@ class ClientCreate extends Component
     public bool $saving = false;
 
     protected $listeners = ['addUser', 'editClient', 'newClient'];
-    protected $googlePlacesService;
-
-    //boot instead of public function mount(GooglePlacesService $googlePlacesService)
-    //so that protected $googlePlacesService can be initialized
-    public function boot(GooglePlacesService $googlePlacesService)
+    public function boot(GeoapifyService $geoapifyService)
     {
-        $this->bootHandlesAddresses($googlePlacesService);
+        $this->bootHandlesAddresses($geoapifyService);
     }
 
     public function addUser(User $user, $client_id)

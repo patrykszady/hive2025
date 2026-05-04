@@ -2,7 +2,7 @@
 
 namespace App\Traits;
 
-use App\Services\GooglePlacesService;
+use App\Services\GeoapifyService;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 
 trait HasAddress

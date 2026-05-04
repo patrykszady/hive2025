@@ -665,6 +665,14 @@ class ReceiptController extends Controller
             }
         }
 
+        // Fallback: if style-based detection found nothing, check the first few lines
+        // of raw OCR content for a short freeform note that precedes the merchant block.
+        // This handles cases like a handwritten "Office" on a terminal slip where the
+        // Azure model didn't emit a high-confidence isHandwritten span.
+        if (empty($handwrittenNotes) && $content !== '') {
+            $handwrittenNotes = $this->extractLeadingHandwrittenNote($content);
+        }
+
         // ── 4. Merchant / Vendor Name ─────────────────────────────────
         $merchantName = $prefix['MerchantName']['valueString']
             ?? $prefix['MerchantName']['content']
