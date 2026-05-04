@@ -360,6 +360,12 @@ class ExpenseReceipts extends Model
             if (strlen($line) > 20 && $line === strtoupper($line)) {
                 continue; // all-caps store name
             }
+            // Strip common trademark/copyright symbols and check if remaining text is all-caps
+            // to catch store headers like "MENARDS®" or "HOME DEPOT™"
+            $stripped = trim(preg_replace('/[®™©]/u', '', $line));
+            if ($stripped !== '' && $stripped === strtoupper($stripped) && preg_match('/[A-Z]{3,}/', $stripped)) {
+                continue; // store header with trademark symbol
+            }
 
             return $line;
         }

@@ -1279,6 +1279,52 @@ class ReceiptController extends Controller
         return '';
     }
 
+    /**
+     * Scan the first few lines of raw OCR content for a short freeform note
+     * that precedes the merchant block (e.g. a handwritten label like "Office").
+     * Returns an array for consistency with $handwrittenNotes.
+     *
+     * @return array<int, string>
+     */
+    private function extractLeadingHandwrittenNote(string $content): array
+    {
+        $lines = preg_split('/\r?\n/', $content);
+        foreach (array_slice($lines, 0, 6) as $line) {
+            $line = trim($line);
+            if ($line === '') {
+                continue;
+            }
+            if (preg_match('/^\+?\d[\d\s().\-]{6,}$/', $line)) {
+                continue; // phone number
+            }
+            if (preg_match('/^\d{1,4}[\/.\-]\d{1,2}[\/.\-]\d{2,4}/', $line)) {
+                continue; // date
+            }
+            if (preg_match('/^\$?\d+\.\d{2}$/', $line)) {
+                continue; // currency amount
+            }
+            if (preg_match('/[*X]{4,}|^\d{6,}/', $line)) {
+                continue; // masked card / digit run
+            }
+            if (strlen($line) > 50) {
+                continue; // too long to be a note
+            }
+            if (strlen($line) > 20 && $line === strtoupper($line)) {
+                continue; // all-caps store name
+            }
+            // Strip common trademark/copyright symbols and check if remaining text is all-caps
+            // to catch store headers like "MENARDS®" or "HOME DEPOT™"
+            $stripped = trim(preg_replace('/[®™©]/u', '', $line));
+            if ($stripped !== '' && $stripped === strtoupper($stripped) && preg_match('/[A-Z]{3,}/', $stripped)) {
+                continue; // store header with trademark symbol
+            }
+
+            return [$line];
+        }
+
+        return [];
+    }
+
     private function extractPurchaseOrderFromRawContent(string $rawContent): string
     {
         if ($rawContent === '') {

@@ -276,7 +276,7 @@
     @endif
 
     @if($view === NULL && auth()->user()->can('create', App\Models\Expense::class))
-        <x-island-card heading="Transactions" x-intersect.once="$wire.loadTransactions()">
+        <x-island-card heading="Transactions" x-init="if (!$wire.transactionsReady) { $wire.loadTransactions() }">
             <x-slot:actions>
                 @if($this->transactionsReady && $this->transactions->total() > 0)
                     <flux:badge size="sm" color="yellow">{{ $this->transactions->total() }} unmatched</flux:badge>

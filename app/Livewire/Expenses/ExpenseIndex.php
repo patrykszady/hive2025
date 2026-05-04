@@ -119,6 +119,10 @@ class ExpenseIndex extends Component
             $this->paginate_number = 5;
         }
 
+        if ($this->view === null && auth()->user()?->can('create', Expense::class)) {
+            $this->transactionsReady = true;
+        }
+
         $vendorId = auth()->user()->vendor->id;
 
         $this->vendors = Cache::remember("filters:v{$vendorId}:vendors", 600, function () {
