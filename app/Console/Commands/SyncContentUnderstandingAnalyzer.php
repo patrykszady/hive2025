@@ -163,7 +163,7 @@ class SyncContentUnderstandingAnalyzer extends Command
 
             'Shipping' => [
                 'type'        => 'number',
-                'description' => 'Total shipping, handling, and delivery charges. Look for labels: "Shipping", "Freight", "Delivery", "Handling", "S&H". Return null if no shipping charges exist — do NOT return 0.',
+                'description' => 'Total shipping, handling, and delivery charges. Look ONLY for an explicit numeric dollar amount appearing on the SAME line as one of these labels: "Shipping", "Freight", "Delivery", "Handling", "S&H". Return null if the label is absent, OR if the value next to the label is non-numeric such as "FREE", "Free", "Included", "N/A", "—", or "$0.00". NEVER use a value from a Tax, Subtotal, Total, Tip, or Fees line. Do NOT infer or guess — if no explicit dollar amount appears next to a shipping/delivery/handling/freight label, return null. Do NOT return 0.',
                 'method'      => 'extract',
             ],
 

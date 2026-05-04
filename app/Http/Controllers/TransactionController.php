@@ -1713,8 +1713,11 @@ class TransactionController extends Controller
                 $matchedTransaction->check()->associate($check)->save();
             } elseif ($transactions->count() > 1) {
                 // Pick the closest-by-days without mutating attributes
+                // NOTE: Carbon 3 returns SIGNED values from diffInDays($other); pass true for absolute,
+                // otherwise transactions dated AFTER the check get the most-negative value and would be
+                // incorrectly selected as the "closest" by an ascending sort.
                 $closest = $transactions
-                    ->sortBy(fn ($t) => $t->transaction_date->diffInDays($check->date))
+                    ->sortBy(fn ($t) => abs($t->transaction_date->diffInDays($check->date, true)))
                     ->first();
 
                 if ($closest) {
@@ -2160,40 +2163,61 @@ class TransactionController extends Controller
             return false; // Skip if too many items or only one transaction
         }
 
-        $results = collect($this->subsetSums($arr, $n, $transaction_ids, 'transaction'))->sortBy('sum');
+        // Build id -> transaction_date lookup for date-proximity scoring
+        $transactionDatesById = $transactions->pluck('transaction_date', 'id');
+
+        // Filter combos to only those that match the check amount, then sort by total
+        // absolute date distance from the check date so the *date-tightest* combo wins.
+        // Without this, the algorithm would greedily pick the first combo it finds
+        // (e.g., for a check dated 3/21 with five $100 candidates spread across 3/16-3/25,
+        // it might pick 3/16+3/20 instead of the same-date 3/21+3/21 pair).
+        $results = collect($this->subsetSums($arr, $n, $transaction_ids, 'transaction'))
+            ->filter(function ($result) use ($check) {
+                if (!isset($result['transactions'])) {
+                    return false;
+                }
+                return number_format($result['sum'], 2, '.', '') == $check->amount;
+            })
+            ->sortBy(function ($result) use ($check, $transactionDatesById) {
+                $totalDistance = 0;
+                foreach ($result['transactions'] as $t) {
+                    $txDate = $transactionDatesById[$t['transaction_id']] ?? null;
+                    if ($txDate) {
+                        $totalDistance += abs($txDate->diffInDays($check->date, true));
+                    }
+                }
+                return $totalDistance;
+            })
+            ->values();
 
         foreach ($results as $result) {
-            $sum = number_format($result['sum'], 2, '.', '');
+            $matchingTransactionIds = collect($result['transactions'])->pluck('transaction_id')->toArray();
 
-            if ($sum == $check->amount && isset($result['transactions'])) {
-                $matchingTransactionIds = collect($result['transactions'])->pluck('transaction_id')->toArray();
+            // Verify transactions haven't been linked to other checks since we queried
+            $stillAvailable = Transaction::withoutGlobalScopes()
+                ->whereIn('id', $matchingTransactionIds)
+                ->whereNull('check_id')
+                ->pluck('id')
+                ->toArray();
 
-                // Verify transactions haven't been linked to other checks since we queried
-                $stillAvailable = Transaction::withoutGlobalScopes()
+            if (count($stillAvailable) === count($matchingTransactionIds)) {
+                // Link all matching transactions to this check
+                Transaction::withoutGlobalScopes()
                     ->whereIn('id', $matchingTransactionIds)
-                    ->whereNull('check_id')
-                    ->pluck('id')
-                    ->toArray();
+                    ->update(['check_id' => $check->id]);
 
-                if (count($stillAvailable) === count($matchingTransactionIds)) {
-                    // Link all matching transactions to this check
-                    Transaction::withoutGlobalScopes()
-                        ->whereIn('id', $matchingTransactionIds)
-                        ->update(['check_id' => $check->id]);
+                // Re-index transactions in Meilisearch after bulk update (bulk updates bypass Scout)
+                Transaction::withoutGlobalScopes()
+                    ->whereIn('id', $matchingTransactionIds)
+                    ->searchable();
 
-                    // Re-index transactions in Meilisearch after bulk update (bulk updates bypass Scout)
-                    Transaction::withoutGlobalScopes()
-                        ->whereIn('id', $matchingTransactionIds)
-                        ->searchable();
-
-                    Log::channel('add_check_id_to_transactions')->info('Matched multiple transactions to check via subset sum', [
-                        'check_id' => $check->id,
-                        'check_amount' => $check->amount,
-                        'transaction_ids' => $matchingTransactionIds,
-                        'transaction_count' => count($matchingTransactionIds),
-                    ]);
-                    return true; // Found a match
-                }
+                Log::channel('add_check_id_to_transactions')->info('Matched multiple transactions to check via subset sum', [
+                    'check_id' => $check->id,
+                    'check_amount' => $check->amount,
+                    'transaction_ids' => $matchingTransactionIds,
+                    'transaction_count' => count($matchingTransactionIds),
+                ]);
+                return true; // Found a match
             }
         }
 

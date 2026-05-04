@@ -111,18 +111,20 @@
                     @endif
                 </div>
 
+                @if(! ($form->transaction && ! $expense->exists))
                 <div class="mt-2 flex items-center gap-2">
                     <flux:switch wire:model.live="split" align="left" />
 
                     <span class="text-sm text-zinc-600" x-text="split ? 'Project Split' : 'Split'"></span>
                 </div>
+                @endif
             </flux:field>
         </div>
 
         {{-- SPLITS --}}
         <div
             x-data="{ open: @entangle('split'), splits: @entangle('splits'), total: @entangle('form.amount')}"
-            x-show="open"
+            x-show="open && !{{ ($form->transaction && ! $expense->exists) ? 'true' : 'false' }}"
             x-transition
             >
             <flux:button

@@ -777,7 +777,7 @@ class CompanyEmailController extends Controller
                 continue;
             } elseif ($receipt) {
                 $string = $message['body'];
-
+              
                 // Check if the body contains HTML
                 $bodyType = strip_tags($string) !== $string ? 'html' : 'text';
 
@@ -809,7 +809,7 @@ class CompanyEmailController extends Controller
                     foreach ($starts as $start_text) {
                         $matchPositions = [];
                         $searchPos = 0;
-                        while (($pos = stripos($string, $start_text, $searchPos)) !== false) {
+                        while (($pos = strpos($string, $start_text, $searchPos)) !== false) {
                             $matchPositions[] = $pos;
                             $searchPos = $pos + max(strlen($start_text), 1);
                         }
@@ -843,7 +843,7 @@ class CompanyEmailController extends Controller
 
                 // Extract main receipt content
                 $receipt_html_main = substr($string, $receipt_start, $receipt_end - $receipt_start);
-
+             
                 // Remove middle text if specified
                 if (!empty($receipt->options['receipt_middle_text'])) {
                     preg_match($receipt->options['receipt_middle_text'], $string, $matches);
