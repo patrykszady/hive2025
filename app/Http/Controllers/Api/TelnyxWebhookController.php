@@ -7,6 +7,7 @@ use App\Jobs\SendInboundSmsBrowserNotifications;
 use App\Events\InboundCallJoined;
 use App\Jobs\SendCallAnsweredBrowserNotifications;
 use App\Jobs\SendIncomingCallBrowserNotifications;
+use App\Jobs\SendVoicemailBrowserNotifications;
 use App\Jobs\StoreCallRecording;
 use App\Jobs\StoreSmsMedia;
 use App\Models\CallLog;
@@ -1200,6 +1201,17 @@ class TelnyxWebhookController extends Controller
                 ]);
                 $this->triggerVoicemail($incomingCallControlId, $callLogId);
             } else {
+                $holdAudioUrl = config('services.telnyx.hold_audio_url')
+                    ?: $this->telnyxBaseUrl() . '/telnyx-audio/ringback.wav';
+
+                $this->sendCallCommand($incomingCallControlId, 'playback_start', [
+                    'audio_url' => $holdAudioUrl,
+                    'client_state' => base64_encode(json_encode([
+                        'action' => 'caller_waiting',
+                        'call_log_id' => $callLogId,
+                    ])),
+                ]);
+
                 Log::channel('telnyx')->info('Admin hung up before joining conference — other admins still ringing, waiting', [
                     'incoming_call_control_id' => $incomingCallControlId,
                     'call_log_id' => $callLogId,
@@ -2010,6 +2022,11 @@ class TelnyxWebhookController extends Controller
 
             // Download the recording locally before the Telnyx signed URL expires (~10 min)
             StoreCallRecording::dispatch($callLog->id);
+
+            // Notify all admin recipients (in-app + browser push) that a new voicemail was left.
+            if ($isVoicemail) {
+                SendVoicemailBrowserNotifications::dispatch($callLog->id);
+            }
         }
 
         Log::channel('telnyx')->info('Call recording saved', [
@@ -2628,10 +2645,10 @@ class TelnyxWebhookController extends Controller
             'valid_digits' => $validDigits,
             'minimum_digits' => 1,
             'maximum_digits' => 1,
-            // Give the caller 7 seconds after the menu finishes to press a digit.
-            // 2s was too short — by the time the caller processes "Press 2…" and
-            // moves their phone, the gather already timed out and we re-played the menu.
-            'timeout_millis' => 7000,
+            // Wait 2 seconds after the menu finishes for a digit press, then
+            // fall through to the voicemail greeting. Longer waits felt like dead-air to
+            // most callers — they assume the call is broken and hang up.
+            'timeout_millis' => 2000,
             'maximum_tries' => 1,
             'client_state' => base64_encode(json_encode([
                 'action' => 'voicemail_ivr_menu',

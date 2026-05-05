@@ -111,6 +111,20 @@ beforeEach(function () {
         });
     }
 
+    if (! Schema::hasTable('app_notifications')) {
+        Schema::create('app_notifications', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('user_id')->index();
+            $table->string('type');
+            $table->string('title');
+            $table->text('body')->nullable();
+            $table->string('action_url')->nullable();
+            $table->json('data')->nullable();
+            $table->timestamp('read_at')->nullable();
+            $table->timestamps();
+        });
+    }
+
     // Vendor->ytd_expense_sum (used by Scout's toSearchableArray) reads from
     // expenses; create an empty table so saves don't blow up.
     if (! Schema::hasTable('expenses')) {
@@ -970,7 +984,7 @@ it('triggerVoicemail is idempotent — admin hangup race does not produce two me
     expect($gatherCount)->toBe(1);
 });
 
-it('voicemail gather uses a 7s timeout giving the caller time to react', function () {
+it('voicemail gather uses a 2s timeout to minimize dead air', function () {
     $admin = User::factory()->create(['first_name' => 'Patryk', 'cell_phone' => '2249993880']);
 
     $this->vendor->update(['options' => (object) [
@@ -1008,7 +1022,7 @@ it('voicemail gather uses a 7s timeout giving the caller time to react', functio
         if (! str_contains($request->url(), 'incoming-cc/actions/gather_using_speak')) {
             return false;
         }
-        return ($request->data()['timeout_millis'] ?? null) === 7000;
+        return ($request->data()['timeout_millis'] ?? null) === 2000;
     });
 });
 
@@ -1073,6 +1087,75 @@ it('routes the caller to voicemail when the only admin hangs up before joining t
     // Voicemail must have been marked as triggered (idempotency) so the
     // subsequent admin call.hangup event doesn't trigger a duplicate menu.
     expect(\Illuminate\Support\Facades\Cache::has("telnyx_voicemail_triggered:{$callLog->id}"))->toBeTrue();
+});
+
+it('keeps caller on ringback when first admin hangs up but other admins are still ringing', function () {
+    $admin1 = User::factory()->create([
+        'first_name' => 'Patryk',
+        'cell_phone' => '2249993880',
+    ]);
+
+    $admin2 = User::factory()->create([
+        'first_name' => 'Alex',
+        'cell_phone' => '2249993881',
+    ]);
+
+    $this->vendor->update(['options' => (object) [
+        'short_name' => 'GS Construction',
+        'call_recipients' => [$admin1->id, $admin2->id],
+        'voicemail_enabled' => true,
+    ]]);
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_ANSWERED,
+        'caller_name' => 'Bob Smith',
+        'metadata' => [
+            'admin_call_control_ids' => ['admin-cc-1', 'admin-cc-2'],
+            'tts_complete' => true,
+        ],
+    ]);
+
+    app()->forgetInstance('Illuminate\\Http\\Client\\Factory');
+    Http::swap(new \Illuminate\Http\Client\Factory());
+    Http::fake([
+        'api.telnyx.com/v2/conferences/*/actions/join' => Http::response([
+            'errors' => [['code' => '90018', 'title' => 'Call has already ended']],
+        ], 422),
+        'api.telnyx.com/v2/conferences' => Http::response(['data' => ['id' => 'conf-uuid-123']], 200),
+        'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
+    ]);
+
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.speak.ended',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'admin-cc-1',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'admin_screen_done',
+                    'call_log_id' => $callLog->id,
+                    'incoming_call_control_id' => 'incoming-cc',
+                    'admin_user_id' => $admin1->id,
+                    'conference_id' => null,
+                ])),
+            ],
+        ],
+    ])->assertSuccessful();
+
+    Http::assertSent(function ($request) {
+        if (! str_contains($request->url(), 'incoming-cc/actions/playback_start')) {
+            return false;
+        }
+
+        $state = json_decode(base64_decode($request->data()['client_state'] ?? ''), true);
+
+        return ($state['action'] ?? null) === 'caller_waiting';
+    });
+
+    Http::assertNotSent(function ($request) {
+        return str_contains($request->url(), 'incoming-cc/actions/gather_using_speak');
+    });
 });
 
 it('sends Azure TTS as SSML with friendly style and trailing break to avoid clipping', function () {
@@ -1168,5 +1251,119 @@ it('renderPrompt returns plain text with trailing space for non-Azure voices', f
     ]);
 
     expect($result)->toBe('Hello Bob. ');
+});
+
+it('voicemail IVR gather uses a short 2-second post-prompt timeout', function () {
+    $callLog = CallLog::create([
+        'call_control_id' => 'incoming-cc',
+        'direction' => 'incoming',
+        'from_number' => '+15551112222',
+        'status' => CallLog::STATUS_INITIATED,
+    ]);
+
+    $controller = app(\App\Http\Controllers\Api\TelnyxWebhookController::class);
+    $reflection = new \ReflectionMethod($controller, 'startVoicemailGather');
+    $reflection->setAccessible(true);
+
+    $reflection->invoke($controller, 'incoming-cc', [
+        'call_log_id' => $callLog->id,
+        'ivr_prompt' => 'Press 2 to leave a message',
+        'valid_digits' => '2',
+        'is_known_caller' => false,
+        'original_caller' => '+15551112222',
+    ]);
+
+    Http::assertSent(function ($request) {
+        if (! str_contains($request->url(), 'incoming-cc/actions/gather_using_speak')) {
+            return false;
+        }
+        return ($request->data()['timeout_millis'] ?? null) === 2000;
+    });
+});
+
+it('dispatches voicemail browser notification job when recording is saved as voicemail', function () {
+    \Illuminate\Support\Facades\Bus::fake();
+
+    $callLog = CallLog::create([
+        'call_control_id' => 'voicemail-cc',
+        'direction' => 'incoming',
+        'from_number' => '+15551112222',
+        'caller_name' => 'John Doe',
+        'status' => CallLog::STATUS_INITIATED,
+    ]);
+
+    $clientState = base64_encode(json_encode([
+        'action' => 'voicemail_recording',
+        'call_log_id' => $callLog->id,
+    ]));
+
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.recording.saved',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'voicemail-cc',
+                'recording_urls' => ['mp3' => 'https://example.com/rec.mp3'],
+                'client_state' => $clientState,
+            ],
+        ],
+    ])->assertSuccessful();
+
+    \Illuminate\Support\Facades\Bus::assertDispatched(\App\Jobs\SendVoicemailBrowserNotifications::class);
+
+    expect($callLog->fresh()->has_voicemail)->toBeTrue();
+});
+
+it('does not dispatch voicemail notification job for non-voicemail recordings', function () {
+    \Illuminate\Support\Facades\Bus::fake();
+
+    $callLog = CallLog::create([
+        'call_control_id' => 'normal-cc',
+        'direction' => 'incoming',
+        'from_number' => '+15551112222',
+        'status' => CallLog::STATUS_ANSWERED,
+    ]);
+
+    // No client_state action = not a voicemail
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.recording.saved',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'normal-cc',
+                'recording_urls' => ['mp3' => 'https://example.com/rec.mp3'],
+            ],
+        ],
+    ])->assertSuccessful();
+
+    \Illuminate\Support\Facades\Bus::assertNotDispatched(\App\Jobs\SendVoicemailBrowserNotifications::class);
+});
+
+it('CallLogObserver creates AppNotifications for admin recipients on missed status', function () {
+    $admin1 = User::factory()->create(['cell_phone' => '5551001001']);
+    $admin2 = User::factory()->create(['cell_phone' => '5551001002']);
+
+    $this->vendor->update(['options' => (object) array_merge((array) $this->vendor->options, [
+        'call_recipients' => [$admin1->id, $admin2->id],
+    ])]);
+
+    $callLog = CallLog::create([
+        'call_control_id' => 'missed-cc',
+        'direction' => 'incoming',
+        'from_number' => '+15551112222',
+        'caller_name' => 'Jane Caller',
+        'status' => CallLog::STATUS_INITIATED,
+    ]);
+
+    $callLog->update(['status' => CallLog::STATUS_MISSED]);
+
+    $notifications = \App\Models\AppNotification::query()
+        ->where('type', 'missed_call')
+        ->get();
+
+    expect($notifications)->toHaveCount(2);
+    expect($notifications->pluck('user_id')->sort()->values()->all())
+        ->toEqual(collect([$admin1->id, $admin2->id])->sort()->values()->all());
+    expect($notifications->first()->title)->toContain('Jane Caller');
 });
 

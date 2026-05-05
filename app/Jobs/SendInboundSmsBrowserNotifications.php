@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\AppNotification;
 use App\Models\PushSubscription;
 use App\Models\SmsGroupThread;
 use App\Models\SmsMessage;
@@ -33,16 +34,38 @@ class SendInboundSmsBrowserNotifications implements ShouldQueue
             return;
         }
 
+        $fromLabel = $this->resolveSenderDisplayName($message);
+        $body = trim($message->display_text ?: 'New message received');
+
         $enabledSubscriptions = PushSubscription::query()
             ->where('sms_inbound_enabled', true)
             ->get();
 
+        // ── In-app notifications (powers /notifications view) ──
+        // Notify every user who has at least one push-subscription opted in for inbound SMS.
+        $recipientUserIds = $enabledSubscriptions->pluck('user_id')->unique()->values();
+        $actionUrl = $message->thread_id
+            ? "/messages?threadId={$message->thread_id}"
+            : '/messages';
+
+        foreach ($recipientUserIds as $userId) {
+            AppNotification::create([
+                'user_id' => $userId,
+                'type' => 'sms_received',
+                'title' => "New Text from {$fromLabel}",
+                'body' => mb_substr($body, 0, 180),
+                'action_url' => $actionUrl,
+                'data' => [
+                    'sms_message_id' => $message->id,
+                    'thread_id' => $message->thread_id,
+                    'from_number' => $message->from_number,
+                ],
+            ]);
+        }
+
         if ($enabledSubscriptions->isEmpty()) {
             return;
         }
-
-        $fromLabel = $this->resolveSenderDisplayName($message);
-        $body = trim($message->display_text ?: 'New message received');
 
         $basePayload = [
             'title' => "New Text from {$fromLabel}",

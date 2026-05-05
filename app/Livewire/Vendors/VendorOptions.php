@@ -250,6 +250,11 @@ class VendorOptions extends Component
         $text = preg_replace('/\s+/', ' ', trim($text));
         $text = preg_replace('/\s+([!.?,])/', '$1', $text);
 
+        // Ensure the text ends with sentence-final punctuation so TTS prosody lands naturally.
+        if ($text !== '' && ! preg_match('/[.!?]$/', $text)) {
+            $text .= '.';
+        }
+
         $apiKey = config('services.telnyx.api_key');
 
         if (! $apiKey) {
@@ -257,12 +262,26 @@ class VendorOptions extends Component
             return;
         }
 
+        $isAzure = config('services.telnyx.tts_voice_type') === 'azure';
+
+        // Azure Neural clips the last phoneme without an explicit trailing silence.
+        // Wrap in SSML with a 400 ms break — same approach used in the live call flow.
+        $payload = $isAzure
+            ? '<speak version="1.0" xml:lang="en-US">' . htmlspecialchars($text, ENT_XML1 | ENT_QUOTES, 'UTF-8') . '<break time="400ms"/></speak>'
+            : $text;
+
+        $requestBody = [
+            'voice' => config('services.telnyx.tts_voice'),
+            'text' => $payload,
+        ];
+
+        if ($isAzure) {
+            $requestBody['text_type'] = 'ssml';
+        }
+
         try {
             $response = \Illuminate\Support\Facades\Http::withToken($apiKey)
-                ->post('https://api.telnyx.com/v2/text-to-speech/speech', [
-                    'text' => $text,
-                    'voice' => config('services.telnyx.tts_voice'),
-                ]);
+                ->post('https://api.telnyx.com/v2/text-to-speech/speech', $requestBody);
 
             if ($response->successful()) {
                 $audioBase64 = base64_encode($response->body());

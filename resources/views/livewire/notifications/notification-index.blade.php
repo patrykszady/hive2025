@@ -23,6 +23,23 @@
                         @endif
                     </div>
 
+                    {{-- Type icon --}}
+                    <div class="shrink-0 pt-0.5">
+                        @switch($notification->type)
+                            @case('voicemail_received')
+                                <flux:icon.microphone class="size-5 text-rose-500" />
+                                @break
+                            @case('missed_call')
+                                <flux:icon.phone-x-mark class="size-5 text-amber-500" />
+                                @break
+                            @case('sms_received')
+                                <flux:icon.chat-bubble-left class="size-5 text-sky-500" />
+                                @break
+                            @default
+                                <flux:icon.bell class="size-5 text-zinc-400" />
+                        @endswitch
+                    </div>
+
                     {{-- Content --}}
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center justify-between gap-2">

@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Models\Bid;
+use App\Models\CallLog;
 use App\Models\Client;
 use App\Models\EstimateLineItem;
 use App\Models\Expense;
@@ -11,6 +12,7 @@ use App\Models\Project;
 use App\Models\Vendor;
 
 use App\Observers\BidObserver;
+use App\Observers\CallLogObserver;
 use App\Observers\ClientObserver;
 use App\Observers\EstimateLineItemObserver;
 use App\Observers\ExpenseObserver;
@@ -179,6 +181,7 @@ class AppServiceProvider extends ServiceProvider
     public function bootEvent()
     {
         Bid::observe(BidObserver::class);
+        CallLog::observe(CallLogObserver::class);
         Client::observe(ClientObserver::class);
         Expense::observe(ExpenseObserver::class);
         EstimateLineItem::observe(EstimateLineItemObserver::class);
