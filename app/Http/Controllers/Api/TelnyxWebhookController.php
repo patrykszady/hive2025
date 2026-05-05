@@ -1161,9 +1161,51 @@ class TelnyxWebhookController extends Controller
                 'admin_call_control_id' => $adminCallControlId,
                 'conference_id' => $conferenceId,
             ]);
-            // Release the bridge lock so another admin can attempt to join.
+
+            // The admin leg died between answering and joining the conference
+            // (most often: rejected the screening prompt by hanging up). The
+            // caller is now alone in a freshly-created conference and would
+            // otherwise hear silence/comfort-noise indefinitely. Roll back the
+            // joined-admin bookkeeping and route them straight to voicemail.
+            $rollback = $callLog->fresh()?->metadata ?? $metadata;
+            $rollback['joined_admin_ids'] = array_values(array_filter(
+                $rollback['joined_admin_ids'] ?? [],
+                fn ($id) => $id !== $adminUserId
+            ));
+            $rollback['admin_call_control_ids'] = array_values(array_filter(
+                $rollback['admin_call_control_ids'] ?? [],
+                fn ($cc) => $cc !== $adminCallControlId
+            ));
+            unset($rollback['conference_id'], $rollback['conference_name']);
+            $callLog->update([
+                'status' => CallLog::STATUS_ANSWERED,
+                'forwarded_to' => null,
+                'metadata' => $rollback,
+            ]);
+            Cache::forget("telnyx_bridged:{$incomingCallControlId}");
+            Cache::forget("telnyx_bridged:{$adminCallControlId}");
             Cache::forget("telnyx_bridge_lock:{$callLogId}");
+            Cache::put("telnyx_admin_dead:{$adminCallControlId}", true, now()->addMinutes(10));
+
             $this->sendCallCommand($adminCallControlId, 'hangup');
+
+            // If other admin legs are still ringing, let them keep trying.
+            // Otherwise, send the caller to voicemail right now so they aren't
+            // stranded in an empty conference.
+            $stillRinging = ! empty($rollback['admin_call_control_ids']);
+            if (! $stillRinging) {
+                Log::channel('telnyx')->warning('Admin hung up before joining conference — no other admins ringing, triggering voicemail', [
+                    'incoming_call_control_id' => $incomingCallControlId,
+                    'call_log_id' => $callLogId,
+                ]);
+                $this->triggerVoicemail($incomingCallControlId, $callLogId);
+            } else {
+                Log::channel('telnyx')->info('Admin hung up before joining conference — other admins still ringing, waiting', [
+                    'incoming_call_control_id' => $incomingCallControlId,
+                    'call_log_id' => $callLogId,
+                    'remaining_admin_legs' => count($rollback['admin_call_control_ids']),
+                ]);
+            }
             return;
         }
 
@@ -3206,7 +3248,10 @@ class TelnyxWebhookController extends Controller
                     'name' => $name,
                     'call_control_id' => $beneficiaryCallControlId,
                     'comfort_noise' => true,
-                    'beep_enabled' => 'always',
+                    // Disable join/leave beeps. They overlap the screening prompt /
+                    // welcome TTS as participants enter and leave the conference
+                    // and were reported as confusing in production.
+                    'beep_enabled' => 'never',
                 ]);
 
             if ($response->successful()) {
@@ -3948,17 +3993,34 @@ class TelnyxWebhookController extends Controller
     /**
      * Get TTS voice parameters for Telnyx speak/gather commands.
      *
-     * @return array{voice: string, language: string, payload_type: string, voice_settings: array{type: string}}
+     * For Azure Neural voices we ship the prompt as SSML so we can:
+     *  - wrap with a trailing <break> to stop the engine clipping the final
+     *    syllable when Telnyx transitions to the next call command
+     *    (playback_start, gather, hangup, etc.); and
+     *  - request a friendlier prosody via Microsoft's mstts:express-as style.
+     *
+     * The matching renderPrompt() helper is responsible for emitting the
+     * <speak> envelope so the payload sent to Telnyx is already valid SSML.
+     *
+     * @return array{voice: string, language: string, payload_type: string, voice_settings: array<string,mixed>}
      */
     protected function ttsVoiceParams(): array
     {
+        $voiceType = config('services.telnyx.tts_voice_type');
+        $isAzure = $voiceType === 'azure';
+
+        $voiceSettings = ['type' => $voiceType];
+        if ($isAzure) {
+            // Azure Neural "speaking style" hint — friendly is the warmest
+            // option for customer-facing IVR prompts.
+            $voiceSettings['style'] = 'friendly';
+        }
+
         return [
             'voice' => config('services.telnyx.tts_voice'),
             'language' => 'en-US',
-            'payload_type' => 'text',
-            'voice_settings' => [
-                'type' => config('services.telnyx.tts_voice_type'),
-            ],
+            'payload_type' => $isAzure ? 'ssml' : 'text',
+            'voice_settings' => $voiceSettings,
         ];
     }
 
@@ -3995,7 +4057,22 @@ class TelnyxWebhookController extends Controller
             $text .= '.';
         }
 
-        return $text;
+        // For Azure voices we ship SSML (see ttsVoiceParams()) so we can add
+        // a trailing <break> that stops the engine clipping the final
+        // syllable when Telnyx fires the next call command. We also escape
+        // XML-significant characters so customer-supplied prompts can't
+        // break the SSML envelope.
+        if (config('services.telnyx.tts_voice_type') === 'azure') {
+            $escaped = htmlspecialchars($text, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+            return '<speak version="1.0" xml:lang="en-US">'
+                . $escaped
+                . '<break time="400ms"/>'
+                . '</speak>';
+        }
+
+        // Trailing space gives non-Azure engines an extra tail buffer so the
+        // final phoneme isn't clipped at the speak → next-command boundary.
+        return $text . ' ';
     }
 
     /**

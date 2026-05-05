@@ -567,7 +567,7 @@ it('first admin answering plays screening prompt then on speak.ended creates con
         $body = $request->data();
         return $body['call_control_id'] === 'incoming-cc'
             && str_starts_with($body['name'], "call_{$callLog->id}_")
-            && ($body['beep_enabled'] ?? null) === 'always'
+            && ($body['beep_enabled'] ?? null) === 'never'
             && ($body['comfort_noise'] ?? null) === true;
     });
 
@@ -1010,5 +1010,163 @@ it('voicemail gather uses a 7s timeout giving the caller time to react', functio
         }
         return ($request->data()['timeout_millis'] ?? null) === 7000;
     });
+});
+
+it('routes the caller to voicemail when the only admin hangs up before joining the conference', function () {
+    $admin = User::factory()->create([
+        'first_name' => 'Patryk',
+        'cell_phone' => '2249993880',
+    ]);
+
+    $this->vendor->update(['options' => (object) [
+        'short_name' => 'GS Construction',
+        'call_recipients' => [$admin->id],
+        'voicemail_enabled' => true,
+    ]]);
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_ANSWERED,
+        'caller_name' => 'Bob Smith',
+        'metadata' => [
+            'admin_call_control_ids' => ['admin-cc-1'],
+            'tts_complete' => true,
+        ],
+    ]);
+
+    // Conference creation succeeds, but the admin's join fails because the
+    // admin leg ended (rejected screening prompt by hanging up).
+    app()->forgetInstance('Illuminate\Http\Client\Factory');
+    Http::swap(new \Illuminate\Http\Client\Factory());
+    Http::fake([
+        'api.telnyx.com/v2/conferences/*/actions/join' => Http::response([
+            'errors' => [['code' => '90018', 'title' => 'Call has already ended']],
+        ], 422),
+        'api.telnyx.com/v2/conferences' => Http::response(['data' => ['id' => 'conf-uuid-123']], 200),
+        'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
+    ]);
+
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.speak.ended',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'admin-cc-1',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'admin_screen_done',
+                    'call_log_id' => $callLog->id,
+                    'incoming_call_control_id' => 'incoming-cc',
+                    'admin_user_id' => $admin->id,
+                    'conference_id' => null,
+                ])),
+            ],
+        ],
+    ])->assertSuccessful();
+
+    // Voicemail IVR must be started on the caller leg so they aren't stranded
+    // alone in the empty conference.
+    Http::assertSent(function ($request) {
+        return str_contains($request->url(), 'incoming-cc/actions/gather_using_speak')
+            && $request->method() === 'POST';
+    });
+
+    // Voicemail must have been marked as triggered (idempotency) so the
+    // subsequent admin call.hangup event doesn't trigger a duplicate menu.
+    expect(\Illuminate\Support\Facades\Cache::has("telnyx_voicemail_triggered:{$callLog->id}"))->toBeTrue();
+});
+
+it('sends Azure TTS as SSML with friendly style and trailing break to avoid clipping', function () {
+    config([
+        'services.telnyx.tts_voice' => 'Azure.en-US-AvaMultilingualNeural',
+        'services.telnyx.tts_voice_type' => 'azure',
+    ]);
+
+    $admin = User::factory()->create([
+        'first_name' => 'Patryk',
+        'cell_phone' => '2249993880',
+    ]);
+
+    $this->vendor->update(['options' => (object) [
+        'short_name' => 'GS Construction',
+        'call_recipients' => [$admin->id],
+        'voicemail_enabled' => true,
+    ]]);
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'from_number' => '+12245551234',
+    ]);
+
+    Http::fake(['api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200)]);
+
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.answered',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'incoming-cc',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'welcome_or_ring',
+                    'call_log_id' => $callLog->id,
+                    'caller_name' => null,
+                    'original_caller' => '+12245551234',
+                ])),
+            ],
+        ],
+    ])->assertSuccessful();
+
+    Http::assertSent(function ($request) {
+        if (! str_contains($request->url(), 'incoming-cc/actions/speak')) {
+            return false;
+        }
+        $data = $request->data();
+        $payload = (string) ($data['payload'] ?? '');
+
+        // Payload must be SSML-wrapped with a trailing break so the final
+        // syllable isn't clipped at the speak → next-command boundary.
+        return ($data['payload_type'] ?? null) === 'ssml'
+            && str_starts_with($payload, '<speak')
+            && str_ends_with($payload, '</speak>')
+            && str_contains($payload, '<break time="400ms"/>')
+            && (($data['voice_settings']['type'] ?? null) === 'azure')
+            && (($data['voice_settings']['style'] ?? null) === 'friendly');
+    });
+});
+
+it('renderPrompt escapes XML-significant characters when emitting SSML for Azure', function () {
+    config(['services.telnyx.tts_voice_type' => 'azure']);
+
+    $controller = app(\App\Http\Controllers\Api\TelnyxWebhookController::class);
+    $reflection = new \ReflectionMethod($controller, 'renderPrompt');
+    $reflection->setAccessible(true);
+
+    $result = $reflection->invoke($controller, "Hi {name}, you're at Bob & Sons", [
+        '{name}' => 'A<B>',
+        '{company}' => '',
+        '{greeting}' => '',
+    ]);
+
+    expect($result)
+        ->toStartWith('<speak')
+        ->toEndWith('</speak>')
+        ->toContain('A&lt;B&gt;')
+        ->toContain('Bob &amp; Sons')
+        ->toContain('<break time="400ms"/>');
+});
+
+it('renderPrompt returns plain text with trailing space for non-Azure voices', function () {
+    config(['services.telnyx.tts_voice_type' => 'polly']);
+
+    $controller = app(\App\Http\Controllers\Api\TelnyxWebhookController::class);
+    $reflection = new \ReflectionMethod($controller, 'renderPrompt');
+    $reflection->setAccessible(true);
+
+    $result = $reflection->invoke($controller, 'Hello {name}', [
+        '{name}' => 'Bob',
+        '{company}' => '',
+        '{greeting}' => '',
+    ]);
+
+    expect($result)->toBe('Hello Bob. ');
 });
 
