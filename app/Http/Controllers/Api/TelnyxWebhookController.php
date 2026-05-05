@@ -771,25 +771,119 @@ class TelnyxWebhookController extends Controller
             return response()->json(['status' => 'ok']);
         }
 
-        // No screening prompt. Drop the admin straight into the call. The
-        // conference's beep='always' announces them on enter and exit.
-        //
-        // If a conference already exists, just join it (late answerer).
+        // Play a screening prompt to the answering admin: "{Caller} is calling.
+        // Hang up now to send them to voicemail or remain on the line to
+        // connect." On speak.ended (admin_screen_done) we'll either join the
+        // existing conference (late answerer) or create one (first answerer).
+        // If the admin hangs up during the prompt, the admin_ring hangup
+        // handler removes them and may trigger voicemail.
         $metadata = $callLog->metadata ?? [];
         $joinedAdminIds = $metadata['joined_admin_ids'] ?? [];
         $conferenceId = $metadata['conference_id'] ?? null;
-        if (! empty($joinedAdminIds) && $conferenceId) {
-            Log::channel('telnyx')->info('Late admin answered — joining conference directly', [
-                'admin_call_control_id' => $callControlId,
-                'call_log_id' => $callLogId,
+        $isLateAnswerer = ! empty($joinedAdminIds) && $conferenceId;
+
+        return $this->playAdminScreeningPrompt(
+            $callControlId,
+            $callLog,
+            $incomingCallControlId,
+            $adminUserId,
+            $isLateAnswerer ? $conferenceId : null,
+        );
+    }
+
+    /**
+     * Speak the screening prompt to the answering admin. The prompt tells them
+     * who's calling and that hanging up sends the caller to voicemail. On
+     * speak.ended (action=admin_screen_done) the bridge/join is performed.
+     */
+    protected function playAdminScreeningPrompt(
+        string $callControlId,
+        CallLog $callLog,
+        string $incomingCallControlId,
+        ?int $adminUserId,
+        ?string $existingConferenceId,
+    ): JsonResponse {
+        $callerLabel = $callLog->caller_name ?: 'Someone';
+        $promptText = "{$callerLabel} is calling. Hang up now to send them to voicemail, or remain on the line to connect.";
+
+        Log::channel('telnyx')->info('Playing admin screening prompt', [
+            'admin_call_control_id' => $callControlId,
+            'call_log_id' => $callLog->id,
+            'admin_user_id' => $adminUserId,
+            'is_late_answerer' => $existingConferenceId !== null,
+            'caller_label' => $callerLabel,
+        ]);
+
+        $this->sendCallCommand($callControlId, 'speak', [
+            'payload' => $promptText,
+            'voice' => 'female',
+            'language' => 'en-US',
+            'client_state' => base64_encode(json_encode([
+                'action' => 'admin_screen_done',
+                'call_log_id' => $callLog->id,
+                'incoming_call_control_id' => $incomingCallControlId,
                 'admin_user_id' => $adminUserId,
-                'conference_id' => $conferenceId,
-            ]);
-            $this->joinAdminToConference($callControlId, $callLogId, $adminUserId, $conferenceId);
+                'conference_id' => $existingConferenceId,
+            ])),
+        ]);
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Called from handleCallSpeakEnded when the admin screening prompt finishes
+     * and the admin has stayed on the line. Join existing conference (late
+     * answerer) or claim the bridge lock and create a new one.
+     */
+    protected function handleAdminScreenDone(string $callControlId, array $clientState): JsonResponse
+    {
+        $callLogId = $clientState['call_log_id'] ?? null;
+        $incomingCallControlId = $clientState['incoming_call_control_id'] ?? null;
+        $adminUserId = $clientState['admin_user_id'] ?? null;
+        $existingConferenceId = $clientState['conference_id'] ?? null;
+        $callLog = $callLogId ? CallLog::find($callLogId) : null;
+
+        if (! $callLog || ! $incomingCallControlId) {
+            $this->sendCallCommand($callControlId, 'hangup');
             return response()->json(['status' => 'ok']);
         }
 
-        // First answerer: bridge immediately (or hold until caller's TTS finishes).
+        // If the caller disconnected during the screening prompt, hang up the admin.
+        if (in_array($callLog->status, [CallLog::STATUS_COMPLETED, CallLog::STATUS_MISSED])) {
+            Log::channel('telnyx')->info('Screening prompt done but caller disconnected — hanging up admin', [
+                'admin_call_control_id' => $callControlId,
+                'call_log_id' => $callLogId,
+            ]);
+            $this->sendCallCommand($callControlId, 'hangup');
+            return response()->json(['status' => 'ok']);
+        }
+
+        // Late answerer: a conference already exists.
+        if ($existingConferenceId) {
+            Log::channel('telnyx')->info('Late admin screening done — joining existing conference', [
+                'admin_call_control_id' => $callControlId,
+                'call_log_id' => $callLogId,
+                'admin_user_id' => $adminUserId,
+                'conference_id' => $existingConferenceId,
+            ]);
+            $this->joinAdminToConference($callControlId, $callLogId, $adminUserId, $existingConferenceId);
+            return response()->json(['status' => 'ok']);
+        }
+
+        // Maybe another admin became the first joiner during our prompt — re-check.
+        $callLog->refresh();
+        $freshConferenceId = ($callLog->metadata ?? [])['conference_id'] ?? null;
+        if ($freshConferenceId) {
+            Log::channel('telnyx')->info('Screening done — conference appeared during prompt, joining', [
+                'admin_call_control_id' => $callControlId,
+                'call_log_id' => $callLogId,
+                'conference_id' => $freshConferenceId,
+            ]);
+            $this->joinAdminToConference($callControlId, $callLogId, $adminUserId, $freshConferenceId);
+            return response()->json(['status' => 'ok']);
+        }
+
+        // First answerer who passed the screening: bridge into a new conference.
         return $this->bridgeFirstAdmin($callControlId, $incomingCallControlId, $callLog, $adminUserId);
     }
 
@@ -1568,6 +1662,10 @@ class TelnyxWebhookController extends Controller
             'client_state' => $clientState,
             'client_state_raw_present' => $clientStateRaw !== null,
         ]);
+
+        if ($action === 'admin_screen_done') {
+            return $this->handleAdminScreenDone($callControlId, $clientState ?? []);
+        }
 
         if ($action === 'welcome_done') {
             $callLogId = $clientState['call_log_id'] ?? null;

@@ -483,7 +483,7 @@ it('does NOT send AMD config when dialing admins (DTMF screening replaces AMD)',
 // Conference flow (multi-recipient ring + late join + DTMF 9 invite)
 // =========================================================================
 
-it('first admin answering creates conference and joins both legs (no screening prompt)', function () {
+it('first admin answering plays screening prompt then on speak.ended creates conference and joins', function () {
     $admin = User::factory()->create([
         'first_name' => 'Patryk',
         'cell_phone' => '2249993880',
@@ -493,6 +493,7 @@ it('first admin answering creates conference and joins both legs (no screening p
         'call_control_id' => 'incoming-cc',
         'status' => CallLog::STATUS_ANSWERED,
         'from_number' => '+18472123894',
+        'caller_name' => 'Bob Smith',
         'metadata' => [
             'admin_call_control_ids' => ['admin-cc-1'],
             'tts_complete' => true,
@@ -500,7 +501,6 @@ it('first admin answering creates conference and joins both legs (no screening p
         ],
     ]);
 
-    // Override the catch-all so /v2/conferences and /actions/join return matching shapes.
     app()->forgetInstance('Illuminate\Http\Client\Factory');
     Http::swap(new \Illuminate\Http\Client\Factory());
     Http::fake([
@@ -508,7 +508,9 @@ it('first admin answering creates conference and joins both legs (no screening p
         'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
     ]);
 
-    $response = $this->postJson('/webhooks/telnyx/voice', [
+    // Step 1: admin answers — should send the screening speak prompt, NOT
+    // create a conference yet.
+    $this->postJson('/webhooks/telnyx/voice', [
         'data' => [
             'event_type' => 'call.answered',
             'record_type' => 'event',
@@ -522,17 +524,42 @@ it('first admin answering creates conference and joins both legs (no screening p
                 ])),
             ],
         ],
-    ]);
+    ])->assertSuccessful();
 
-    $response->assertSuccessful();
-
-    // No screening TTS / gather should be sent to the admin.
-    Http::assertNotSent(function ($request) {
-        return str_contains($request->url(), 'admin-cc-1/actions/gather_using_speak')
-            || str_contains($request->url(), 'admin-cc-1/actions/speak');
+    // Screening TTS sent to admin
+    Http::assertSent(function ($request) {
+        if (! str_contains($request->url(), 'admin-cc-1/actions/speak') || $request->method() !== 'POST') {
+            return false;
+        }
+        $payload = (string) ($request->data()['payload'] ?? '');
+        return str_contains($payload, 'Bob Smith is calling')
+            && str_contains($payload, 'voicemail')
+            && str_contains($payload, 'remain on the line');
     });
 
-    // Conference creation request with proper shape
+    // No conference yet — wait for speak.ended.
+    Http::assertNotSent(function ($request) {
+        return str_ends_with($request->url(), '/v2/conferences') && $request->method() === 'POST';
+    });
+
+    // Step 2: speak.ended fires → conference is created and admin joins.
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.speak.ended',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'admin-cc-1',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'admin_screen_done',
+                    'call_log_id' => $callLog->id,
+                    'incoming_call_control_id' => 'incoming-cc',
+                    'admin_user_id' => $admin->id,
+                    'conference_id' => null,
+                ])),
+            ],
+        ],
+    ])->assertSuccessful();
+
     Http::assertSent(function ($request) use ($callLog) {
         if (! str_ends_with($request->url(), '/v2/conferences') || $request->method() !== 'POST') {
             return false;
@@ -544,7 +571,6 @@ it('first admin answering creates conference and joins both legs (no screening p
             && ($body['comfort_noise'] ?? null) === true;
     });
 
-    // Admin joined the conference
     Http::assertSent(function ($request) {
         return str_contains($request->url(), '/v2/conferences/conf-uuid-123/actions/join')
             && $request->method() === 'POST'
@@ -557,7 +583,7 @@ it('first admin answering creates conference and joins both legs (no screening p
     expect($callLog->status)->toBe(CallLog::STATUS_TRANSFERRED);
 });
 
-it('second admin answering joins existing conference directly without TTS prompt', function () {
+it('late admin answering plays screening prompt then on speak.ended joins existing conference', function () {
     $first = User::factory()->create([
         'first_name' => 'Patryk',
         'cell_phone' => '2249993880',
@@ -582,11 +608,10 @@ it('second admin answering joins existing conference directly without TTS prompt
             'tts_complete' => true,
             'joined_admin_ids' => [$first->id],
             'conference_id' => 'conf-uuid-existing',
-            'conference_name' => "call_1_abcdef",
+            'conference_name' => 'call_1_abcdef',
         ],
     ]);
 
-    // Override catch-all so /v2/conferences/{id}/actions/join is matched explicitly.
     app()->forgetInstance('Illuminate\Http\Client\Factory');
     Http::swap(new \Illuminate\Http\Client\Factory());
     Http::fake([
@@ -594,8 +619,8 @@ it('second admin answering joins existing conference directly without TTS prompt
         'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
     ]);
 
-    // 2nd admin's call is answered → should join the conference IMMEDIATELY (no prompt).
-    $response = $this->postJson('/webhooks/telnyx/voice', [
+    // Step 1: late admin answers → screening prompt with conference_id present.
+    $this->postJson('/webhooks/telnyx/voice', [
         'data' => [
             'event_type' => 'call.answered',
             'record_type' => 'event',
@@ -609,23 +634,44 @@ it('second admin answering joins existing conference directly without TTS prompt
                 ])),
             ],
         ],
-    ]);
+    ])->assertSuccessful();
 
-    $response->assertSuccessful();
-
-    // No TTS / gather should be sent to the late answerer.
-    Http::assertNotSent(function ($request) {
-        return str_contains($request->url(), 'admin-cc-2/actions/gather_using_speak')
-            || str_contains($request->url(), 'admin-cc-2/actions/speak');
+    Http::assertSent(function ($request) {
+        if (! str_contains($request->url(), 'admin-cc-2/actions/speak') || $request->method() !== 'POST') {
+            return false;
+        }
+        return str_contains((string) ($request->data()['payload'] ?? ''), 'Bob Smith is calling');
     });
 
-    // Should join the existing conference directly.
+    // No join yet.
+    Http::assertNotSent(function ($request) {
+        return str_contains($request->url(), '/v2/conferences/conf-uuid-existing/actions/join');
+    });
+
+    // Step 2: speak.ended → join the existing conference.
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.speak.ended',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'admin-cc-2',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'admin_screen_done',
+                    'call_log_id' => $callLog->id,
+                    'incoming_call_control_id' => 'incoming-cc',
+                    'admin_user_id' => $second->id,
+                    'conference_id' => 'conf-uuid-existing',
+                ])),
+            ],
+        ],
+    ])->assertSuccessful();
+
     Http::assertSent(function ($request) {
         return str_contains($request->url(), '/v2/conferences/conf-uuid-existing/actions/join')
             && ($request->data()['call_control_id'] ?? null) === 'admin-cc-2';
     });
 
-    // No new conference was created
+    // No new conference created.
     Http::assertNotSent(function ($request) {
         return str_ends_with($request->url(), '/v2/conferences') && $request->method() === 'POST';
     });
