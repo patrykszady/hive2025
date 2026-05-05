@@ -1267,11 +1267,12 @@ it('sends Azure TTS as SSML with friendly style and trailing break to avoid clip
         $data = $request->data();
         $payload = (string) ($data['payload'] ?? '');
 
-        // Payload must be SSML-wrapped with a trailing break so the final
-        // syllable isn't clipped at the speak → next-command boundary.
+        // Payload must be SSML-wrapped with leading + trailing breaks to
+        // prevent clipping of the first and last syllable.
         return ($data['payload_type'] ?? null) === 'ssml'
             && str_starts_with($payload, '<speak')
             && str_ends_with($payload, '</speak>')
+            && str_contains($payload, '<break time="200ms"/>')
             && str_contains($payload, '<break time="400ms"/>')
             && (($data['voice_settings']['type'] ?? null) === 'azure')
             && (($data['voice_settings']['style'] ?? null) === 'friendly');
@@ -1294,9 +1295,36 @@ it('renderPrompt escapes XML-significant characters when emitting SSML for Azure
     expect($result)
         ->toStartWith('<speak')
         ->toEndWith('</speak>')
+        ->toContain('<break time="200ms"/>')
         ->toContain('A&lt;B&gt;')
         ->toContain('Bob &amp; Sons')
         ->toContain('<break time="400ms"/>');
+});
+
+it('renderPrompt injects only leading and trailing breaks (Azure handles internal prosody)', function () {
+    config(['services.telnyx.tts_voice_type' => 'azure', 'services.telnyx.tts_rate' => '+15%']);
+
+    $controller = app(\App\Http\Controllers\Api\TelnyxWebhookController::class);
+    $reflection = new \ReflectionMethod($controller, 'renderPrompt');
+    $reflection->setAccessible(true);
+
+    $result = $reflection->invoke($controller, 'Good morning, thanks for calling {company}! One moment while we connect you.', [
+        '{name}' => '',
+        '{company}' => 'GS Construction',
+        '{greeting}' => '',
+    ]);
+
+    // Exactly two <break> tags: one head-pad (200ms) + one tail-pad (400ms).
+    // Azure Neural TTS handles internal sentence/clause prosody from punctuation.
+    expect(substr_count($result, '<break'))->toBe(2);
+    expect($result)->toContain('<break time="200ms"/>');
+    expect($result)->toContain('<break time="400ms"/>');
+    // Prosody rate wrapper applied
+    expect($result)->toContain('<prosody rate="+15%">');
+    expect($result)->toContain('</prosody>');
+    // No mid-sentence break injection
+    expect($result)->not->toContain('morning,<break');
+    expect($result)->not->toContain('!<break time="400ms"/>One');
 });
 
 it('renderPrompt returns plain text with trailing space for non-Azure voices', function () {

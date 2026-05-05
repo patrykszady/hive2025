@@ -4095,8 +4095,22 @@ class TelnyxWebhookController extends Controller
         // break the SSML envelope.
         if (config('services.telnyx.tts_voice_type') === 'azure') {
             $escaped = htmlspecialchars($text, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+
+            // We rely on Azure Neural TTS's built-in prosody for sentence and
+            // clause pauses (it parses ,.!? automatically). The leading and
+            // trailing <break> tags are NOT prosody — they work around two
+            // Telnyx pipeline bugs:
+            //   - Leading break: Telnyx drops the first ~150ms of audio while
+            //     warming up its outbound RTP stream, so without a head-pad
+            //     the first word is clipped.
+            //   - Trailing break: Telnyx fires the next call command the moment
+            //     Azure reports speech.ended, cutting off the final phoneme.
+            $rate = config('services.telnyx.tts_rate', '+10%');
             return '<speak version="1.0" xml:lang="en-US">'
+                . '<break time="200ms"/>'
+                . '<prosody rate="' . $rate . '">'
                 . $escaped
+                . '</prosody>'
                 . '<break time="400ms"/>'
                 . '</speak>';
         }

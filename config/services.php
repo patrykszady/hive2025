@@ -41,6 +41,7 @@ return [
         'hold_audio_url' => env('TELNYX_HOLD_AUDIO_URL'),
         'tts_voice' => env('TELNYX_TTS_VOICE', 'Azure.en-US-AvaMultilingualNeural'),
         'tts_voice_type' => env('TELNYX_TTS_VOICE_TYPE', 'azure'),
+        'tts_rate' => env('TELNYX_TTS_RATE', '+10%'),
         'public_url' => env('TELNYX_PUBLIC_URL'),
     ],
 
