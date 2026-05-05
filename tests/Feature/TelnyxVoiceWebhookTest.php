@@ -540,7 +540,7 @@ it('first admin answering creates conference and joins both legs (no screening p
         $body = $request->data();
         return $body['call_control_id'] === 'incoming-cc'
             && str_starts_with($body['name'], "call_{$callLog->id}_")
-            && ($body['beep_enabled'] ?? null) === 'on_enter_exit'
+            && ($body['beep_enabled'] ?? null) === 'always'
             && ($body['comfort_noise'] ?? null) === true;
     });
 

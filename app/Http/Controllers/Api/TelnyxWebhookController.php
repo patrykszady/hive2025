@@ -772,7 +772,7 @@ class TelnyxWebhookController extends Controller
         }
 
         // No screening prompt. Drop the admin straight into the call. The
-        // conference's beep_enabled='on_enter_exit' announces them.
+        // conference's beep='always' announces them on enter and exit.
         //
         // If a conference already exists, just join it (late answerer).
         $metadata = $callLog->metadata ?? [];
@@ -3051,7 +3051,7 @@ class TelnyxWebhookController extends Controller
                     'name' => $name,
                     'call_control_id' => $beneficiaryCallControlId,
                     'comfort_noise' => true,
-                    'beep_enabled' => 'on_enter_exit',
+                    'beep_enabled' => 'always',
                 ]);
 
             if ($response->successful()) {
