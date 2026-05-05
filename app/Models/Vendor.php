@@ -40,6 +40,55 @@ class Vendor extends Model
         static::addGlobalScope(new VendorScope);
     }
 
+    /**
+     * Default business hours used when a vendor has not configured custom values.
+     *
+     * @var array{start:string,end:string,days:array<int>}
+     */
+    public const DEFAULT_BUSINESS_HOURS = [
+        'start' => '07:00',
+        'end' => '18:00',
+        'days' => [1, 2, 3, 4, 5], // Mon–Fri (ISO weekday)
+    ];
+
+    /**
+     * Resolved business-hours configuration with defaults filled in.
+     *
+     * @return array{start:string,end:string,days:array<int>}
+     */
+    public function businessHours(): array
+    {
+        $opts = (array) ($this->options ?? []);
+        $start = (string) (data_get($opts, 'business_hours_start') ?: self::DEFAULT_BUSINESS_HOURS['start']);
+        $end = (string) (data_get($opts, 'business_hours_end') ?: self::DEFAULT_BUSINESS_HOURS['end']);
+        $days = data_get($opts, 'business_hours_days');
+        $days = is_array($days) && ! empty($days)
+            ? array_values(array_unique(array_map('intval', $days)))
+            : self::DEFAULT_BUSINESS_HOURS['days'];
+
+        return ['start' => $start, 'end' => $end, 'days' => $days];
+    }
+
+    /**
+     * Determine whether the given moment (defaults to "now") falls inside the
+     * vendor's configured business hours, in the vendor's timezone.
+     */
+    public function isWithinBusinessHours(?Carbon $at = null): bool
+    {
+        $tz = $this->timezone ?: 'America/Chicago';
+        $now = ($at ?: now())->copy()->setTimezone($tz);
+        $hours = $this->businessHours();
+
+        if (! in_array($now->dayOfWeekIso, $hours['days'], true)) {
+            return false;
+        }
+
+        $start = Carbon::parse($hours['start'], $tz)->setDate($now->year, $now->month, $now->day);
+        $end = Carbon::parse($hours['end'], $tz)->setDate($now->year, $now->month, $now->day);
+
+        return $now->between($start, $end);
+    }
+
     //Searchable
     public function toSearchableArray(): array
     {

@@ -1226,6 +1226,9 @@ it('sends Azure TTS as SSML with friendly style and trailing break to avoid clip
         'services.telnyx.tts_voice_type' => 'azure',
     ]);
 
+    // Pin to Wednesday 11:00 vendor-local time so we're inside default business hours
+    \Carbon\Carbon::setTestNow(\Carbon\Carbon::create(2025, 1, 8, 11, 0, 0, 'America/Chicago'));
+
     $admin = User::factory()->create([
         'first_name' => 'Patryk',
         'cell_phone' => '2249993880',
@@ -1277,6 +1280,8 @@ it('sends Azure TTS as SSML with friendly style and trailing break to avoid clip
             && (($data['voice_settings']['type'] ?? null) === 'azure')
             && (($data['voice_settings']['style'] ?? null) === 'friendly');
     });
+
+    \Carbon\Carbon::setTestNow();
 });
 
 it('renderPrompt escapes XML-significant characters when emitting SSML for Azure', function () {
@@ -1455,5 +1460,123 @@ it('CallLogObserver creates AppNotifications for admin recipients on missed stat
     expect($notifications->pluck('user_id')->sort()->values()->all())
         ->toEqual(collect([$admin1->id, $admin2->id])->sort()->values()->all());
     expect($notifications->first()->title)->toContain('Jane Caller');
+});
+
+// =========================================================================
+// Business hours: after-hours calls skip welcome and go straight to voicemail
+// =========================================================================
+
+it('skips welcome and routes straight to voicemail when call answered outside business hours', function () {
+    $admin = User::factory()->create([
+        'first_name' => 'Patryk',
+        'cell_phone' => '2249993880',
+    ]);
+
+    // Configure Mon–Fri 09:00–17:00 in vendor TZ
+    $this->vendor->update(['options' => (object) [
+        'short_name' => 'GS Construction',
+        'call_recipients' => [$admin->id],
+        'voicemail_enabled' => true,
+        'business_hours_start' => '09:00',
+        'business_hours_end' => '17:00',
+        'business_hours_days' => [1, 2, 3, 4, 5],
+    ]]);
+
+    // Pin "now" to a Saturday at 10:00 vendor-local time → outside hours
+    \Carbon\Carbon::setTestNow(\Carbon\Carbon::create(2025, 1, 4, 10, 0, 0, 'America/Chicago'));
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'after-hours-cc',
+        'status' => CallLog::STATUS_INITIATED,
+        'from_number' => '+18005550000',
+    ]);
+
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.answered',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'after-hours-cc',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'welcome_or_ring',
+                    'call_log_id' => $callLog->id,
+                    'original_caller' => '+18005550000',
+                    'caller_name' => null,
+                    'caller_user_id' => null,
+                ])),
+            ],
+        ],
+    ])->assertSuccessful();
+
+    // No welcome speak should have fired on the inbound leg
+    Http::assertNotSent(function ($request) {
+        return str_contains($request->url(), 'after-hours-cc/actions/speak') && $request->method() === 'POST';
+    });
+
+    // No admin dial should have fired
+    Http::assertNotSent(function ($request) {
+        return str_ends_with($request->url(), '/v2/calls') && $request->method() === 'POST';
+    });
+
+    // Voicemail menu (gather_using_speak) should have been invoked
+    Http::assertSent(function ($request) {
+        return str_contains($request->url(), 'after-hours-cc/actions/gather_using_speak') && $request->method() === 'POST';
+    });
+
+    \Carbon\Carbon::setTestNow();
+});
+
+it('plays the welcome message normally when call answered within business hours', function () {
+    $admin = User::factory()->create([
+        'first_name' => 'Patryk',
+        'cell_phone' => '2249993880',
+    ]);
+
+    $this->vendor->update(['options' => (object) [
+        'short_name' => 'GS Construction',
+        'call_recipients' => [$admin->id],
+        'voicemail_enabled' => true,
+        'business_hours_start' => '09:00',
+        'business_hours_end' => '17:00',
+        'business_hours_days' => [1, 2, 3, 4, 5],
+    ]]);
+
+    // Wednesday 11:00 vendor-local — inside hours
+    \Carbon\Carbon::setTestNow(\Carbon\Carbon::create(2025, 1, 8, 11, 0, 0, 'America/Chicago'));
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'in-hours-cc',
+        'status' => CallLog::STATUS_INITIATED,
+        'from_number' => '+18005550000',
+    ]);
+
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.answered',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'in-hours-cc',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'welcome_or_ring',
+                    'call_log_id' => $callLog->id,
+                    'original_caller' => '+18005550000',
+                    'caller_name' => null,
+                    'caller_user_id' => null,
+                ])),
+            ],
+        ],
+    ])->assertSuccessful();
+
+    // Welcome speak should have fired
+    Http::assertSent(function ($request) {
+        return str_contains($request->url(), 'in-hours-cc/actions/speak') && $request->method() === 'POST';
+    });
+
+    // Voicemail menu should NOT have fired
+    Http::assertNotSent(function ($request) {
+        return str_contains($request->url(), 'in-hours-cc/actions/gather_using_speak') && $request->method() === 'POST';
+    });
+
+    \Carbon\Carbon::setTestNow();
 });
 

@@ -39,6 +39,12 @@ class VendorOptions extends Component
     public string $ivr_press2_message = '';
     public string $voicemail_greeting = '';
 
+    /** Business hours — drive after-hours call routing and default user notification window. */
+    public string $business_hours_start = '07:00';
+    public string $business_hours_end = '18:00';
+    /** @var array<int> ISO weekdays (1=Mon … 7=Sun) when business is open. */
+    public array $business_hours_days = [1, 2, 3, 4, 5];
+
     public const DEFAULT_WELCOME = "{greeting} {name}! Thanks for calling {company}. One moment while we connect you.";
     public const DEFAULT_WELCOME_UNKNOWN = "{greeting}! Thanks for calling {company}. One moment while we connect you.";
     public const DEFAULT_SCREENING = "{name} is calling. Hang up now to send them to voicemail, or remain on the line to connect.";
@@ -98,6 +104,12 @@ class VendorOptions extends Component
         $this->ivr_press1_message = data_get($this->vendor->options, 'ivr_press1_message', '') ?: self::DEFAULT_IVR_PRESS1;
         $this->ivr_press2_message = data_get($this->vendor->options, 'ivr_press2_message', '') ?: self::DEFAULT_IVR_PRESS2;
         $this->voicemail_greeting = data_get($this->vendor->options, 'voicemail_greeting', '') ?: self::DEFAULT_VOICEMAIL_GREETING;
+
+        $hours = $this->vendor->businessHours();
+        $this->business_hours_start = $hours['start'];
+        $this->business_hours_end = $hours['end'];
+        $this->business_hours_days = $hours['days'];
+
         $this->adminUsersWithPhones = $this->vendor->getAdminUsersWithCellPhones();
     }
 
@@ -123,6 +135,10 @@ class VendorOptions extends Component
             'ivr_press1_message' => 'nullable|string|max:500',
             'ivr_press2_message' => 'nullable|string|max:500',
             'voicemail_greeting' => 'nullable|string|max:500',
+            'business_hours_start' => 'required|date_format:H:i',
+            'business_hours_end' => 'required|date_format:H:i|after:business_hours_start',
+            'business_hours_days' => 'array',
+            'business_hours_days.*' => 'integer|between:1,7',
         ];
     }
 
@@ -155,6 +171,9 @@ class VendorOptions extends Component
         $options['ivr_press1_message'] = $this->ivr_press1_message ?: null;
         $options['ivr_press2_message'] = $this->ivr_press2_message ?: null;
         $options['voicemail_greeting'] = $this->voicemail_greeting ?: null;
+        $options['business_hours_start'] = $this->business_hours_start;
+        $options['business_hours_end'] = $this->business_hours_end;
+        $options['business_hours_days'] = array_values(array_map('intval', $this->business_hours_days));
 
         // Handle logo upload
         if ($this->logo) {

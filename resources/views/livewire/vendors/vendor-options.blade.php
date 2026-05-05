@@ -110,6 +110,46 @@
                 </div>
             </div>
 
+            {{-- Business Hours (system-wide) --}}
+            <div class="space-y-2">
+                <div class="text-sm font-semibold text-zinc-800 dark:text-white">Business Hours</div>
+                <flux:description>
+                    Sets your company's working window. Inbound calls outside these hours skip the welcome message and admin ring, going straight to the voicemail menu. Also seeds the default Notification Window for each team member (which they may override on their own profile).
+                </flux:description>
+
+                <div class="mt-2 flex gap-3">
+                    <div class="flex flex-col gap-1 flex-1">
+                        <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Open</div>
+                        <flux:input wire:model="business_hours_start" type="time" />
+                        <flux:error name="business_hours_start" />
+                    </div>
+                    <div class="flex flex-col gap-1 flex-1">
+                        <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Close</div>
+                        <flux:input wire:model="business_hours_end" type="time" />
+                        <flux:error name="business_hours_end" />
+                    </div>
+                    <div class="flex flex-col gap-1 flex-1">
+                        <div class="text-sm font-medium text-zinc-500 dark:text-zinc-400">Timezone</div>
+                        <flux:input :value="$vendor->timezone ?: 'America/Chicago'" disabled />
+                        <div class="text-xs text-zinc-500 dark:text-zinc-400">Set by your business address.</div>
+                    </div>
+                </div>
+                <div class="mt-1 space-y-1">
+                    <flux:error name="business_hours_start" />
+                    <flux:error name="business_hours_end" />
+                </div>
+
+                <div class="mt-3 flex flex-wrap gap-3">
+                    @foreach (['Mon' => 1, 'Tue' => 2, 'Wed' => 3, 'Thu' => 4, 'Fri' => 5, 'Sat' => 6, 'Sun' => 7] as $label => $iso)
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <flux:checkbox wire:model="business_hours_days" value="{{ $iso }}" />
+                            <span class="text-sm text-zinc-700 dark:text-zinc-300">{{ $label }}</span>
+                        </label>
+                    @endforeach
+                </div>
+                <flux:error name="business_hours_days" />
+            </div>
+
             {{-- Phone System --}}
             @if($vendor->id === 1)
             <flux:field>
@@ -138,7 +178,6 @@
                         @endif
                     </div>
 
-                    {{-- Welcome Message --}}
                     <div class="space-y-2">
                         <div>
                             <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Welcome Message</div>

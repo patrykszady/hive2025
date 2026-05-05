@@ -701,6 +701,18 @@ class TelnyxWebhookController extends Controller
         $vendor = Vendor::find(1);
         $vendorOptions = $vendor ? (array) $vendor->options : [];
 
+        // After-hours: skip welcome + admin ring, send straight to voicemail menu.
+        if ($vendor && ! $vendor->isWithinBusinessHours()) {
+            Log::channel('telnyx')->info('Inbound call outside business hours — routing to voicemail', [
+                'call_control_id' => $callControlId,
+                'call_log_id' => $callLogId,
+                'business_hours' => $vendor->businessHours(),
+                'vendor_timezone' => $vendor->timezone,
+            ]);
+            $this->triggerVoicemail($callControlId, $callLogId);
+            return response()->json(['status' => 'ok']);
+        }
+
         // Build welcome TTS payload
         $shortName = data_get($vendorOptions, 'short_name') ?: ($vendor?->business_name ?? 'our team');
         $greeting = $this->buildTimeGreeting();

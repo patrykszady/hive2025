@@ -37,6 +37,14 @@ class UserNotificationSettings extends Component
 
         $this->user = $user;
 
+        // Seed defaults from vendor business hours so each user inherits the
+        // company-wide window unless they override it.
+        $vendorHours = $this->user->vendor?->businessHours();
+        if ($vendorHours) {
+            $this->realtime_start = $vendorHours['start'];
+            $this->realtime_end = $vendorHours['end'];
+        }
+
         $setting = $this->user->notificationSetting;
 
         if ($setting) {
@@ -47,8 +55,8 @@ class UserNotificationSettings extends Component
             $this->evening_email = (bool) $setting->evening_email;
             $this->evening_sms = (bool) $setting->evening_sms;
 
-            $this->realtime_start = $setting->realtime_start ?? '07:00';
-            $this->realtime_end = $setting->realtime_end ?? '18:00';
+            $this->realtime_start = $setting->realtime_start ?? $this->realtime_start;
+            $this->realtime_end = $setting->realtime_end ?? $this->realtime_end;
 
             if ($this->user->vendor_role === 'Admin') {
                 $this->sms_inbound_browser = (bool) $setting->sms_inbound_browser;
