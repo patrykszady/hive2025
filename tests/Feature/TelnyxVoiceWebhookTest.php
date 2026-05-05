@@ -1272,8 +1272,8 @@ it('sends Azure TTS as SSML with friendly style and trailing break to avoid clip
         return ($data['payload_type'] ?? null) === 'ssml'
             && str_starts_with($payload, '<speak')
             && str_ends_with($payload, '</speak>')
-            && str_contains($payload, '<break time="200ms"/>')
             && str_contains($payload, '<break time="400ms"/>')
+            && (substr_count($payload, '<break') >= 2)
             && (($data['voice_settings']['type'] ?? null) === 'azure')
             && (($data['voice_settings']['style'] ?? null) === 'friendly');
     });
@@ -1295,10 +1295,10 @@ it('renderPrompt escapes XML-significant characters when emitting SSML for Azure
     expect($result)
         ->toStartWith('<speak')
         ->toEndWith('</speak>')
-        ->toContain('<break time="200ms"/>')
+        ->toContain('<break time="400ms"/>')
         ->toContain('A&lt;B&gt;')
         ->toContain('Bob &amp; Sons')
-        ->toContain('<break time="400ms"/>');
+        ->not->toContain('<break time="200ms"/>');
 });
 
 it('renderPrompt injects only leading and trailing breaks (Azure handles internal prosody)', function () {
@@ -1317,7 +1317,7 @@ it('renderPrompt injects only leading and trailing breaks (Azure handles interna
     // Exactly two <break> tags: one head-pad (200ms) + one tail-pad (400ms).
     // Azure Neural TTS handles internal sentence/clause prosody from punctuation.
     expect(substr_count($result, '<break'))->toBe(2);
-    expect($result)->toContain('<break time="200ms"/>');
+    expect($result)->not->toContain('<break time="200ms"/>');  // only 400ms breaks now
     expect($result)->toContain('<break time="400ms"/>');
     // Prosody rate wrapper applied
     expect($result)->toContain('<prosody rate="+15%">');

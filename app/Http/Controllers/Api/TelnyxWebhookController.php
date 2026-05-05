@@ -4100,14 +4100,17 @@ class TelnyxWebhookController extends Controller
             // clause pauses (it parses ,.!? automatically). The leading and
             // trailing <break> tags are NOT prosody — they work around two
             // Telnyx pipeline bugs:
-            //   - Leading break: Telnyx drops the first ~150ms of audio while
-            //     warming up its outbound RTP stream, so without a head-pad
-            //     the first word is clipped.
+            //   - Leading break: Telnyx drops the first ~150-200ms of audio while
+            //     warming up its outbound RTP stream. Short opening phrases like
+            //     "Good morning," at +15% speed are ~200ms themselves, so words
+            //     immediately after them (e.g. "thanks for calling") still land
+            //     in the dead zone. 400ms gives headroom for any speed/network
+            //     variance.
             //   - Trailing break: Telnyx fires the next call command the moment
             //     Azure reports speech.ended, cutting off the final phoneme.
             $rate = config('services.telnyx.tts_rate', '+10%');
             return '<speak version="1.0" xml:lang="en-US">'
-                . '<break time="200ms"/>'
+                . '<break time="400ms"/>'
                 . '<prosody rate="' . $rate . '">'
                 . $escaped
                 . '</prosody>'
