@@ -1511,21 +1511,29 @@ class TelnyxWebhookController extends Controller
 
         $metadata = $callLog->metadata ?? [];
 
-        // If at least one admin already joined the conference, this is just another leg timing out — ignore
-        if (! empty($metadata['joined_admin_ids'])) {
-            return response()->json(['status' => 'ok']);
-        }
-
         // Remove this admin from the pending list
         $adminCallControlIds = $metadata['admin_call_control_ids'] ?? [];
         $metadata['admin_call_control_ids'] = array_values(
             array_filter($adminCallControlIds, fn ($id) => $id !== $callControlId)
         );
 
+        // If this admin had already joined the conference, also remove them from
+        // joined_admin_ids so we can detect "caller is now alone in conference".
+        $adminUserId = $clientState['admin_user_id'] ?? null;
+        $joinedAdminIds = $metadata['joined_admin_ids'] ?? [];
+        $hadJoined = $adminUserId && in_array($adminUserId, $joinedAdminIds, true);
+        if ($hadJoined) {
+            $metadata['joined_admin_ids'] = array_values(
+                array_filter($joinedAdminIds, fn ($id) => $id !== $adminUserId)
+            );
+        }
+
         Log::channel('telnyx')->info('Admin removed from pending list', [
             'removed_id' => $callControlId,
             'was_in_list' => in_array($callControlId, $adminCallControlIds, true),
-            'remaining_count' => count($metadata['admin_call_control_ids']),
+            'had_joined_conference' => $hadJoined,
+            'remaining_ringing_count' => count($metadata['admin_call_control_ids']),
+            'remaining_joined_count' => count($metadata['joined_admin_ids'] ?? []),
             'call_log_id' => $callLogId,
         ]);
 
@@ -1537,7 +1545,13 @@ class TelnyxWebhookController extends Controller
 
         $callLog->update(['metadata' => $metadata]);
 
-        // If all admin legs have ended and none joined → trigger voicemail (or defer if TTS still playing)
+        // If at least one OTHER admin is still in the conference, the caller still
+        // has a connected party — nothing to do.
+        if (! empty($metadata['joined_admin_ids'])) {
+            return response()->json(['status' => 'ok']);
+        }
+
+        // If all admin legs have ended (none ringing AND none still joined) → trigger voicemail
         if (empty($metadata['admin_call_control_ids'])) {
             // If the caller already disconnected, skip voicemail — the call is dead
             $callLog->refresh();

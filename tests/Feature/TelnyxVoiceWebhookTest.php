@@ -1158,6 +1158,68 @@ it('keeps caller on ringback when first admin hangs up but other admins are stil
     });
 });
 
+it('routes the caller to voicemail when the only joined admin hangs up after entering the conference', function () {
+    $admin = User::factory()->create([
+        'first_name' => 'Patryk',
+        'cell_phone' => '2249993880',
+    ]);
+
+    $this->vendor->update(['options' => (object) [
+        'short_name' => 'GS Construction',
+        'call_recipients' => [$admin->id],
+        'voicemail_enabled' => true,
+    ]]);
+
+    // Caller is in conference, admin already joined (the production case
+    // where the admin briefly joins then immediately hangs up, leaving the
+    // caller alone in an empty conference with no audio).
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_TRANSFERRED,
+        'caller_name' => 'Bob Smith',
+        'metadata' => [
+            'admin_call_control_ids' => ['admin-cc-1'],
+            'joined_admin_ids' => [$admin->id],
+            'conference_id' => 'conf-uuid-123',
+            'conference_name' => 'call_999_test',
+            'tts_complete' => true,
+        ],
+    ]);
+
+    app()->forgetInstance('Illuminate\\Http\\Client\\Factory');
+    Http::swap(new \Illuminate\Http\Client\Factory());
+    Http::fake(['api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200)]);
+
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.hangup',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'admin-cc-1',
+                'hangup_cause' => 'normal_clearing',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'admin_screen',
+                    'call_log_id' => $callLog->id,
+                    'incoming_call_control_id' => 'incoming-cc',
+                    'admin_user_id' => $admin->id,
+                ])),
+            ],
+        ],
+    ])->assertSuccessful();
+
+    // The caller must be routed to the voicemail IVR rather than left
+    // alone with silence in the empty conference.
+    Http::assertSent(function ($request) {
+        return str_contains($request->url(), 'incoming-cc/actions/gather_using_speak');
+    });
+
+    // The admin must have been removed from joined_admin_ids so subsequent
+    // status calculations correctly classify the call as missed/voicemail.
+    $callLog->refresh();
+    expect($callLog->metadata['joined_admin_ids'] ?? [])->toBeEmpty();
+    expect($callLog->metadata['admin_call_control_ids'] ?? [])->toBeEmpty();
+});
+
 it('sends Azure TTS as SSML with friendly style and trailing break to avoid clipping', function () {
     config([
         'services.telnyx.tts_voice' => 'Azure.en-US-AvaMultilingualNeural',
