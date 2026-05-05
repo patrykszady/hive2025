@@ -51,18 +51,31 @@ class SendIncomingCallBrowserNotifications implements ShouldQueue
 
         $callerLabel = $this->resolveCallerDisplayName($callLog);
 
-        $webPush->sendToSubscriptions($subscriptions, [
-            'title' => "{$callerLabel} is Calling",
+        // Send TWO notifications with distinct tags. Rationale: on iOS, the
+        // native phone UI ("GS Construction" / business number) overlaps the
+        // first browser notification, hiding the actual caller. A second
+        // notification surfaces above/after the iOS card so the recipient can
+        // see who is really calling.
+        $basePayload = [
             'body' => 'Incoming phone call',
             'icon' => '/favicons/icon-192x192.png',
             'badge' => '/favicons/icon-96x96.png',
-            'tag' => "incoming-call-{$callLog->id}",
             'data' => [
                 'url' => '/calls',
                 'type' => 'incoming_call',
                 'call_log_id' => $callLog->id,
             ],
             'requireInteraction' => true,
+        ];
+
+        $webPush->sendToSubscriptions($subscriptions, $basePayload + [
+            'title' => "{$callerLabel} is Calling",
+            'tag' => "incoming-call-{$callLog->id}-a",
+        ], 'telnyx');
+
+        $webPush->sendToSubscriptions($subscriptions, $basePayload + [
+            'title' => "Incoming Call from {$callerLabel}",
+            'tag' => "incoming-call-{$callLog->id}-b",
         ], 'telnyx');
     }
 

@@ -2022,12 +2022,11 @@ class TelnyxWebhookController extends Controller
         $apiKey = config('services.telnyx.api_key');
         $connectionId = config('services.telnyx.connection_id');
         $telnyxFrom = config('services.telnyx.from');
-        // Show the original caller's number on the recipient's native phone UI
-        // (caller-ID passthrough). Falls back to our Telnyx number if the caller's
-        // number is unavailable. Telnyx allows arbitrary E.164 in `from`; STIR/SHAKEN
-        // attestation will be C since we don't own the number, but the recipient sees
-        // who is actually calling instead of "GS Construction".
-        $callerIdFrom = $callLog->from_number ?: $telnyxFrom;
+        // NOTE: Telnyx rejects outbound calls (error D51 "Unverified origination
+        // number") when `from` is a non-Telnyx number we don't own. So we must
+        // dial from our Telnyx number; the recipient's caller ID will show our
+        // business number. We surface the actual caller via `from_display_name`
+        // (CNAM) — some mobile carriers display it, others ignore it.
         $timeout = 15;
 
         $newCallControlIds = $metadata['admin_call_control_ids'] ?? [];
@@ -2048,7 +2047,7 @@ class TelnyxWebhookController extends Controller
                     ->post('https://api.telnyx.com/v2/calls', [
                         'connection_id' => $connectionId,
                         'to' => $phone,
-                        'from' => $callerIdFrom,
+                        'from' => $telnyxFrom,
                         'from_display_name' => $callLog->caller_name ?: 'Conference Invite',
                         'timeout_secs' => $timeout,
                         'client_state' => base64_encode(json_encode([
@@ -2190,9 +2189,10 @@ class TelnyxWebhookController extends Controller
         $apiKey = config('services.telnyx.api_key');
         $connectionId = config('services.telnyx.connection_id');
         $telnyxFrom = config('services.telnyx.from');
-        // Show the original caller on the recipient's native phone UI (caller-ID
-        // passthrough). Falls back to our Telnyx number when unavailable.
-        $callerIdFrom = $originalCaller ?: ($callLog?->from_number ?: $telnyxFrom);
+        // NOTE: Telnyx rejects outbound calls (error D51 "Unverified origination
+        // number") when `from` is a non-Telnyx number we don't own. We must dial
+        // from our Telnyx number; recipient's native caller ID shows that. The
+        // actual caller is surfaced via `from_display_name` (CNAM).
         // Use a short timeout so admin phones stop ringing well before
         // carrier voicemail picks up (~25s). This ensures callers always
         // reach our Telnyx Voicemail Menu instead of personal voicemail.
@@ -2217,7 +2217,7 @@ class TelnyxWebhookController extends Controller
                     ->post('https://api.telnyx.com/v2/calls', [
                         'connection_id' => $connectionId,
                         'to' => $phone,
-                        'from' => $callerIdFrom,
+                        'from' => $telnyxFrom,
                         'from_display_name' => $callLog?->caller_name ?: ($originalCaller ?? 'Incoming Call'),
                         'timeout_secs' => $timeout,
                         'client_state' => base64_encode(json_encode([
