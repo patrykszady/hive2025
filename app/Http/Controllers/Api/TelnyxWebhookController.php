@@ -703,8 +703,14 @@ class TelnyxWebhookController extends Controller
         // Build welcome TTS payload
         $shortName = data_get($vendorOptions, 'short_name') ?: ($vendor?->business_name ?? 'our team');
         $greeting = $this->buildTimeGreeting();
-        $welcomeTemplate = data_get($vendorOptions, 'welcome_message')
-            ?: "{greeting} {name}! Thanks for calling {company}. One moment while we connect you.";
+        $isKnownCaller = ! empty($callerName);
+        if ($isKnownCaller) {
+            $welcomeTemplate = data_get($vendorOptions, 'welcome_message')
+                ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_WELCOME;
+        } else {
+            $welcomeTemplate = data_get($vendorOptions, 'welcome_message_unknown')
+                ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_WELCOME_UNKNOWN;
+        }
         $ttsPayload = str_replace(
             ['{name}', '{company}', '{greeting}'],
             [$callerName ?? '', $shortName, $greeting],
@@ -717,6 +723,7 @@ class TelnyxWebhookController extends Controller
         Log::channel('telnyx')->info('Playing welcome TTS and dialing admins simultaneously', [
             'call_control_id' => $callControlId,
             'tts' => $ttsPayload,
+            'is_known_caller' => $isKnownCaller,
         ]);
 
         // Play TTS to the caller — admins are dialed simultaneously below
@@ -804,7 +811,21 @@ class TelnyxWebhookController extends Controller
         ?string $existingConferenceId,
     ): JsonResponse {
         $callerLabel = $callLog->caller_name ?: 'Someone';
-        $promptText = "{$callerLabel} is calling. Hang up now to send them to voicemail, or remain on the line to connect.";
+
+        // TODO: Multi-vendor support — look up vendor by connection_id
+        $vendor = Vendor::find(1);
+        $vendorOptions = $vendor ? (array) $vendor->options : [];
+        $shortName = data_get($vendorOptions, 'short_name') ?: ($vendor?->business_name ?? 'our team');
+        $greeting = $this->buildTimeGreeting();
+        $template = data_get($vendorOptions, 'screening_message')
+            ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_SCREENING;
+        $promptText = str_replace(
+            ['{name}', '{company}', '{greeting}'],
+            [$callerLabel, $shortName, $greeting],
+            $template
+        );
+        $promptText = preg_replace('/\s+/', ' ', trim($promptText));
+        $promptText = preg_replace('/\s+([!.?,])/', '$1', $promptText);
 
         Log::channel('telnyx')->info('Playing admin screening prompt', [
             'admin_call_control_id' => $callControlId,
@@ -816,8 +837,7 @@ class TelnyxWebhookController extends Controller
 
         $this->sendCallCommand($callControlId, 'speak', [
             'payload' => $promptText,
-            'voice' => 'female',
-            'language' => 'en-US',
+            ...$this->ttsVoiceParams(),
             'client_state' => base64_encode(json_encode([
                 'action' => 'admin_screen_done',
                 'call_log_id' => $callLog->id,

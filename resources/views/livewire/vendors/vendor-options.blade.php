@@ -140,16 +140,55 @@
 
                     {{-- Welcome Message --}}
                     <div class="space-y-2">
+                        <div>
+                            <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Welcome Message</div>
+                            <div class="text-xs text-zinc-500">Played to the caller while we ring your team.</div>
+                        </div>
+                        <div class="space-y-4 pl-1 border-l-2 border-zinc-200 dark:border-zinc-700 ml-1">
+                            {{-- Known Caller --}}
+                            <div class="pl-3">
+                                <div class="flex items-center justify-between gap-2 mb-1">
+                                    <div class="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                                        <flux:badge size="sm" color="sky" class="mr-1">
+                                            <flux:icon.user variant="micro" class="size-3" />
+                                        </flux:badge>
+                                        Welcome <span class="text-xs font-normal text-zinc-400">(known caller)</span>
+                                    </div>
+                                    <flux:button size="xs" variant="ghost" icon="play" wire:click="previewTts('welcome')" wire:loading.attr="disabled" wire:target="previewTts" title="Preview known caller welcome" />
+                                </div>
+                                <flux:textarea wire:model="welcome_message" rows="2" placeholder="{{ \App\Livewire\Vendors\VendorOptions::DEFAULT_WELCOME }}" resize="vertical" />
+                                <div class="text-xs text-zinc-400 mt-1">Placeholders: <code class="text-zinc-500">{name}</code> <code class="text-zinc-500">{company}</code> <code class="text-zinc-500">{greeting}</code></div>
+                            </div>
+
+                            {{-- Unknown Caller --}}
+                            <div class="pl-3">
+                                <div class="flex items-center justify-between gap-2 mb-1">
+                                    <div class="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                                        <flux:badge size="sm" color="zinc" class="mr-1">
+                                            <flux:icon.user variant="micro" class="size-3" />
+                                        </flux:badge>
+                                        Welcome <span class="text-xs font-normal text-zinc-400">(unknown caller)</span>
+                                    </div>
+                                    <flux:button size="xs" variant="ghost" icon="play" wire:click="previewTts('welcome_unknown')" wire:loading.attr="disabled" wire:target="previewTts" title="Preview unknown caller welcome" />
+                                </div>
+                                <flux:textarea wire:model="welcome_message_unknown" rows="2" placeholder="{{ \App\Livewire\Vendors\VendorOptions::DEFAULT_WELCOME_UNKNOWN }}" resize="vertical" />
+                                <div class="text-xs text-zinc-400 mt-1">No <code class="text-zinc-500">{name}</code> available. Placeholders: <code class="text-zinc-500">{company}</code> <code class="text-zinc-500">{greeting}</code></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {{-- Screening Prompt (played to the answering recipient) --}}
+                    <div class="space-y-2">
                         <div class="flex items-center justify-between gap-4">
                             <div>
-                                <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Welcome Message</div>
-                                <div class="text-xs text-zinc-500">Played to the caller while we ring your team.</div>
+                                <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Screening Prompt</div>
+                                <div class="text-xs text-zinc-500">Played to your team member when they answer. They can hang up to send the caller to voicemail or stay on the line to connect.</div>
                             </div>
-                            <flux:button size="xs" variant="ghost" icon="play" wire:click="previewTts('welcome')" wire:loading.attr="disabled" wire:target="previewTts" title="Preview with AI voice" />
+                            <flux:button size="xs" variant="ghost" icon="play" wire:click="previewTts('screening')" wire:loading.attr="disabled" wire:target="previewTts" title="Preview screening prompt" />
                         </div>
                         <div>
-                            <flux:textarea wire:model="welcome_message" rows="2" placeholder="{{ \App\Livewire\Vendors\VendorOptions::DEFAULT_WELCOME }}" resize="vertical" />
-                            <div class="text-xs text-zinc-400 mt-1">Placeholders: <code class="text-zinc-500">{name}</code> <code class="text-zinc-500">{company}</code> <code class="text-zinc-500">{greeting}</code></div>
+                            <flux:textarea wire:model="screening_message" rows="2" placeholder="{{ \App\Livewire\Vendors\VendorOptions::DEFAULT_SCREENING }}" resize="vertical" />
+                            <div class="text-xs text-zinc-400 mt-1">Placeholders: <code class="text-zinc-500">{name}</code> (caller) <code class="text-zinc-500">{company}</code> <code class="text-zinc-500">{greeting}</code></div>
                         </div>
                     </div>
 

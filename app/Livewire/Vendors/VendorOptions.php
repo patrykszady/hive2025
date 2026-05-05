@@ -31,6 +31,8 @@ class VendorOptions extends Component
     public bool $call_welcome_enabled = true;
     public bool $voicemail_enabled = true;
     public string $welcome_message = '';
+    public string $welcome_message_unknown = '';
+    public string $screening_message = '';
     public string $voicemail_message = '';
     public string $voicemail_message_unknown = '';
     public string $ivr_press1_message = '';
@@ -38,6 +40,8 @@ class VendorOptions extends Component
     public string $voicemail_greeting = '';
 
     public const DEFAULT_WELCOME = "{greeting} {name}! Thanks for calling {company}. One moment while we connect you.";
+    public const DEFAULT_WELCOME_UNKNOWN = "{greeting}! Thanks for calling {company}. One moment while we connect you.";
+    public const DEFAULT_SCREENING = "{name} is calling. Hang up now to send them to voicemail, or remain on the line to connect.";
     public const DEFAULT_VOICEMAIL = "{company} is not available right now. {name}, if this is an emergency, press 1 to re-dial {company}. Press 2 to send a text on your behalf so {company} knows to call you back ASAP. Stay on the line to leave a voicemail.";
     public const DEFAULT_VOICEMAIL_UNKNOWN = "{company} is not available right now. Press 2 to send a text on your behalf so {company} knows to call you back ASAP. Stay on the line to leave a voicemail.";
     public const DEFAULT_IVR_PRESS1 = "{name}, no problem! Let me try connecting you again. I also texted you emergency numbers in case you cannot get through again.";
@@ -87,6 +91,8 @@ class VendorOptions extends Component
         $this->call_welcome_enabled = (bool) data_get($this->vendor->options, 'call_welcome_enabled', true);
         $this->voicemail_enabled = (bool) data_get($this->vendor->options, 'voicemail_enabled', true);
         $this->welcome_message = data_get($this->vendor->options, 'welcome_message', '') ?: self::DEFAULT_WELCOME;
+        $this->welcome_message_unknown = data_get($this->vendor->options, 'welcome_message_unknown', '') ?: self::DEFAULT_WELCOME_UNKNOWN;
+        $this->screening_message = data_get($this->vendor->options, 'screening_message', '') ?: self::DEFAULT_SCREENING;
         $this->voicemail_message = data_get($this->vendor->options, 'voicemail_message', '') ?: self::DEFAULT_VOICEMAIL;
         $this->voicemail_message_unknown = data_get($this->vendor->options, 'voicemail_message_unknown', '') ?: self::DEFAULT_VOICEMAIL_UNKNOWN;
         $this->ivr_press1_message = data_get($this->vendor->options, 'ivr_press1_message', '') ?: self::DEFAULT_IVR_PRESS1;
@@ -110,6 +116,8 @@ class VendorOptions extends Component
             'call_welcome_enabled' => 'boolean',
             'voicemail_enabled' => 'boolean',
             'welcome_message' => 'nullable|string|max:500',
+            'welcome_message_unknown' => 'nullable|string|max:500',
+            'screening_message' => 'nullable|string|max:500',
             'voicemail_message' => 'nullable|string|max:500',
             'voicemail_message_unknown' => 'nullable|string|max:500',
             'ivr_press1_message' => 'nullable|string|max:500',
@@ -140,6 +148,8 @@ class VendorOptions extends Component
         $options['call_welcome_enabled'] = $this->call_welcome_enabled;
         $options['voicemail_enabled'] = $this->voicemail_enabled;
         $options['welcome_message'] = $this->welcome_message ?: null;
+        $options['welcome_message_unknown'] = $this->welcome_message_unknown ?: null;
+        $options['screening_message'] = $this->screening_message ?: null;
         $options['voicemail_message'] = $this->voicemail_message ?: null;
         $options['voicemail_message_unknown'] = $this->voicemail_message_unknown ?: null;
         $options['ivr_press1_message'] = $this->ivr_press1_message ?: null;
@@ -220,6 +230,8 @@ class VendorOptions extends Component
 
         $template = match ($type) {
             'welcome' => $this->welcome_message ?: self::DEFAULT_WELCOME,
+            'welcome_unknown' => $this->welcome_message_unknown ?: self::DEFAULT_WELCOME_UNKNOWN,
+            'screening' => $this->screening_message ?: self::DEFAULT_SCREENING,
             'voicemail' => $this->voicemail_message ?: self::DEFAULT_VOICEMAIL,
             'voicemail_unknown' => $this->voicemail_message_unknown ?: self::DEFAULT_VOICEMAIL_UNKNOWN,
             'ivr_press1' => $this->ivr_press1_message ?: self::DEFAULT_IVR_PRESS1,
