@@ -2030,3 +2030,46 @@
 [2026-05-05 02:47:46] production.INFO: Unhandled voice event {"event_type":"conference.ended"} 
 [2026-05-05 02:47:46] production.INFO: Telnyx voice webhook received {"event_type":"conference.participant.left","call_control_id":"v3:4kHWB2-eR03luYHBVtC98O4CNRz9xcVrPHtXbOm6f37F0BbFMoXDPg","direction":null} 
 [2026-05-05 02:47:46] production.INFO: Unhandled voice event {"event_type":"conference.participant.left"} 
+[2026-05-05 04:09:33] production.INFO: Telnyx voice webhook received {"event_type":"call.initiated","call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww","direction":"incoming"} 
+[2026-05-05 04:09:33] production.INFO: Incoming call - answering {"call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww","from":"+18472123894","to":"+12247354200","caller_user_id":null,"caller_name":"GRZEGORZ SZADY"} 
+[2026-05-05 04:09:34] production.INFO: Call command sent: answer {"call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww","result":"ok"} 
+[2026-05-05 04:09:34] production.INFO: Telnyx voice webhook received {"event_type":"call.answered","call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww","direction":null} 
+[2026-05-05 04:09:34] production.INFO: Inbound call outside business hours — routing to voicemail {"call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww","call_log_id":936,"business_hours":{"start":"07:00","end":"18:00","days":[1,2,3,4,5]},"vendor_timezone":"America/Chicago"} 
+[2026-05-05 04:09:34] production.INFO: Call command sent: playback_stop {"call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww","result":"ok"} 
+[2026-05-05 04:09:34] production.INFO: Playing voicemail IVR menu {"call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww","call_log_id":936,"ivr_prompt":"<speak version=\"1.0\" xml:lang=\"en-US\"><break time=\"400ms\"/><prosody rate=\"+15%\">GS Construction is not available right now. Press 2 to send a text on your behalf so the GS Crew knows to call you back ASAP. Or stay on the line to leave a voicemail.</prosody><break time=\"400ms\"/></speak>","is_known_caller":false} 
+[2026-05-05 04:09:34] production.INFO: Call command sent: gather_using_speak {"call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww","result":"ok"} 
+[2026-05-05 04:09:34] production.DEBUG: Push notification delivered {"endpoint":"https://web.push.apple.com/QDkJcfxcMRPW4uLNUaYZ21nDUMJHCJ-cyja1FMQcNEv6qKbL-ec_s…","status":201} 
+[2026-05-05 04:09:34] production.DEBUG: Push notification delivered {"endpoint":"https://fcm.googleapis.com/fcm/send/cYR-NIq4nms:APA91bEppjWa7ZIrYxviNuWljHyZ7qnu…","status":201} 
+[2026-05-05 04:09:34] production.DEBUG: Push notification delivered {"endpoint":"https://wns2-by3p.notify.windows.com/w/?token=BQYAAACU%2bKDb9Gyej4KtbEbQJBisasbB…","status":201,"wns_status":"received","wns_msg_id":"333777B7120DBC41","wns_debug":"BY3PEPF0001AAFA","content_encoding":"aes128gcm","response_body":""} 
+[2026-05-05 04:09:35] production.DEBUG: Push notification delivered {"endpoint":"https://web.push.apple.com/QDkJcfxcMRPW4uLNUaYZ21nDUMJHCJ-cyja1FMQcNEv6qKbL-ec_s…","status":201} 
+[2026-05-05 04:09:35] production.DEBUG: Push notification delivered {"endpoint":"https://fcm.googleapis.com/fcm/send/cYR-NIq4nms:APA91bEppjWa7ZIrYxviNuWljHyZ7qnu…","status":201} 
+[2026-05-05 04:09:35] production.DEBUG: Push notification delivered {"endpoint":"https://wns2-by3p.notify.windows.com/w/?token=BQYAAACU%2bKDb9Gyej4KtbEbQJBisasbB…","status":201,"wns_status":"received","wns_msg_id":"3969A68E2DADC14C","wns_debug":"BY3PEPF00028D18","content_encoding":"aes128gcm","response_body":""} 
+[2026-05-05 04:09:35] production.INFO: Telnyx voice webhook received {"event_type":"call.speak.started","call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww","direction":null} 
+[2026-05-05 04:09:35] production.INFO: TTS speak started {"call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww"} 
+[2026-05-05 04:09:46] production.INFO: Telnyx voice webhook received {"event_type":"call.speak.ended","call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww","direction":null} 
+[2026-05-05 04:09:46] production.INFO: handleCallSpeakEnded ENTRY {"call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww","action":"voicemail_ivr_menu","client_state":{"action":"voicemail_ivr_menu","call_log_id":936,"original_caller":"+18472123894","is_known_caller":false,"retry_count":0},"client_state_raw_present":true} 
+[2026-05-05 04:09:47] production.INFO: Telnyx voice webhook received {"event_type":"call.dtmf.received","call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww","direction":null} 
+[2026-05-05 04:09:47] production.INFO: DTMF received {"call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww","digit":"2"} 
+[2026-05-05 04:09:47] production.INFO: Telnyx voice webhook received {"event_type":"call.gather.ended","call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww","direction":null} 
+[2026-05-05 04:09:47] production.INFO: IVR gather ended {"call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww","digits":"2","call_log_id":936} 
+[2026-05-05 04:09:47] production.INFO: IVR: caller pressed 2 — sending SMS {"call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww","caller_number":"+18472123894"} 
+[2026-05-05 04:09:47] production.INFO: Callback SMS sent to caller {"caller_number":"+18472123894","from":"+12247354200"} 
+[2026-05-05 04:09:47] production.INFO: Callback message created in SMS system {"call_log_id":936,"caller_number":"+18472123894","thread_id":226,"message_id":41719} 
+[2026-05-05 04:09:47] production.INFO: Telnyx webhook received {"event_type":"message.sent","message_id":"40319df6-53e8-40d8-92d2-0555ebbd86e1"} 
+[2026-05-05 04:09:47] production.INFO: Message sent {"id":"40319df6-53e8-40d8-92d2-0555ebbd86e1","to":"+18472123894","from":"+12247354200"} 
+[2026-05-05 04:09:47] production.INFO: Call command sent: speak {"call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww","result":"ok"} 
+[2026-05-05 04:09:47] production.INFO: Telnyx webhook received {"event_type":"message.finalized","message_id":"40319df6-53e8-40d8-92d2-0555ebbd86e1"} 
+[2026-05-05 04:09:47] production.INFO: Message finalized {"id":"40319df6-53e8-40d8-92d2-0555ebbd86e1","to":"+18472123894","status":"delivered"} 
+[2026-05-05 04:09:48] production.INFO: Telnyx voice webhook received {"event_type":"call.speak.started","call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww","direction":null} 
+[2026-05-05 04:09:48] production.INFO: TTS speak started {"call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww"} 
+[2026-05-05 04:09:49] production.DEBUG: Push notification delivered {"endpoint":"https://web.push.apple.com/QDkJcfxcMRPW4uLNUaYZ21nDUMJHCJ-cyja1FMQcNEv6qKbL-ec_s…","status":201} 
+[2026-05-05 04:09:49] production.DEBUG: Push notification delivered {"endpoint":"https://fcm.googleapis.com/fcm/send/cYR-NIq4nms:APA91bEppjWa7ZIrYxviNuWljHyZ7qnu…","status":201} 
+[2026-05-05 04:09:49] production.DEBUG: Push notification delivered {"endpoint":"https://wns2-by3p.notify.windows.com/w/?token=BQYAAACU%2bKDb9Gyej4KtbEbQJBisasbB…","status":201,"wns_status":"received","wns_msg_id":"3291F48B6F95FA02","wns_debug":"BY3PEPF00028D10","content_encoding":"aes128gcm","response_body":""} 
+[2026-05-05 04:09:49] production.DEBUG: Push notification delivered {"endpoint":"https://wns2-ch1p.notify.windows.com/w/?token=BQYAAAAQe2hvIFkElPQKFh5BKOEEEpIVqW…","status":201,"wns_status":"received","wns_msg_id":"58C6F0741F92779D","wns_debug":"CH1PEPF00006E97","content_encoding":"aes128gcm","response_body":""} 
+[2026-05-05 04:09:50] production.DEBUG: Push notification delivered {"endpoint":"https://web.push.apple.com/QJnqrnzJg9xule8bhPY8CE20AFCRYEqQblM8TaB0eTcRZ7HDySHVw…","status":201} 
+[2026-05-05 04:09:56] production.INFO: Telnyx voice webhook received {"event_type":"call.speak.ended","call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww","direction":null} 
+[2026-05-05 04:09:56] production.INFO: handleCallSpeakEnded ENTRY {"call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww","action":"ivr_sms_confirmation","client_state":{"action":"ivr_sms_confirmation","call_log_id":936},"client_state_raw_present":true} 
+[2026-05-05 04:09:56] production.INFO: IVR SMS confirmation done — hanging up {"call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww","call_log_id":936} 
+[2026-05-05 04:09:56] production.INFO: Call command sent: hangup {"call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww","result":"ok"} 
+[2026-05-05 04:09:57] production.INFO: Telnyx voice webhook received {"event_type":"call.hangup","call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww","direction":null} 
+[2026-05-05 04:09:57] production.INFO: Call ended {"call_control_id":"v3:ABaz5vmmY5ewmYIS2CWW9i9rCGAYf8J-SEUzBILFzqC6I_-AWFkzww","status":"missed","hangup_cause":"normal_clearing","duration":23.171265} 

@@ -1170,7 +1170,7 @@ class TelnyxWebhookController extends Controller
 
         // Join the admin to the conference.
         if (! $this->joinConference($conferenceId, $adminCallControlId)) {
-            Log::channel('telnyx')->error('Failed to join admin to fresh conference', [
+            Log::channel('telnyx')->info('Admin leg gone before conference join — rolling back to voicemail', [
                 'admin_call_control_id' => $adminCallControlId,
                 'conference_id' => $conferenceId,
             ]);
@@ -3097,10 +3097,12 @@ class TelnyxWebhookController extends Controller
             : $callerNumber;
 
         $vendor = Vendor::find(1);
-        $shortName = data_get($vendor?->options ?? [], 'short_name') ?: ($vendor?->business_name ?? 'us');
-        $smsText = $callerName
-            ? "Hello {$callerName}, {$shortName} received your call. We'll get back to you as soon as possible. Thank you for your patience!"
-            : "Hello, {$shortName} received your call. We'll get back to you as soon as possible. Thank you for your patience!";
+        $businessName = $vendor?->business_name ?: 'us';
+        $website = trim((string) ($vendor?->business_website ?? ''));
+        $smsText = "Hi, {$businessName} received your call. We'll get back to you as soon as possible.";
+        if ($website !== '') {
+            $smsText .= ' ' . $website;
+        }
 
         $ourNumber = config('services.telnyx.from');
         if (! $ourNumber) {
@@ -3166,6 +3168,21 @@ class TelnyxWebhookController extends Controller
             'text' => $inAppText,
             'status' => 'received',
         ]);
+
+        // Also record the outbound SMS we just sent to the caller so it appears
+        // in the thread alongside any future replies.
+        if ($thread) {
+            SmsMessage::create([
+                'thread_id' => $thread->id,
+                'provider' => 'telnyx',
+                'provider_message_id' => 'callback_reply_' . ($callLogId ?? uniqid()),
+                'direction' => SmsMessage::DIRECTION_OUTBOUND,
+                'from_number' => $ourNumber,
+                'to_numbers' => [$normalizedCaller],
+                'text' => $smsText,
+                'status' => 'sent',
+            ]);
+        }
 
         if ($thread) {
             $thread->update(['last_activity_at' => now()]);
@@ -3346,11 +3363,14 @@ class TelnyxWebhookController extends Controller
                 return true;
             }
 
-            Log::channel('telnyx')->error('Conference join failed', [
+            $body = $response->json();
+            $code = (string) data_get($body, 'errors.0.code');
+            $level = in_array($code, ['90018', '90015'], true) ? 'info' : 'error';
+            Log::channel('telnyx')->{$level}('Conference join failed', [
                 'conference_id' => $conferenceId,
                 'call_control_id' => $callControlId,
                 'status' => $response->status(),
-                'error' => $response->json(),
+                'error' => $body,
             ]);
         } catch (\Exception $e) {
             Log::channel('telnyx')->error('Conference join exception', [
@@ -3386,10 +3406,15 @@ class TelnyxWebhookController extends Controller
                 ]);
                 return true;
             } else {
-                Log::channel('telnyx')->error("Call command failed: {$action}", [
+                $body = $response->json();
+                $code = (string) data_get($body, 'errors.0.code');
+                // 90018 = call already ended, 90015 = invalid call control id (leg ended).
+                // Both are expected race conditions when the remote party hangs up before our command lands.
+                $level = in_array($code, ['90018', '90015'], true) ? 'info' : 'error';
+                Log::channel('telnyx')->{$level}("Call command failed: {$action}", [
                     'call_control_id' => $callControlId,
                     'status' => $response->status(),
-                    'error' => $response->json(),
+                    'error' => $body,
                 ]);
                 return false;
             }
@@ -3434,11 +3459,14 @@ class TelnyxWebhookController extends Controller
                 ]);
                 return true;
             } else {
-                Log::channel('telnyx')->error('Bridge failed', [
+                $body = $response->json();
+                $code = (string) data_get($body, 'errors.0.code');
+                $level = in_array($code, ['90018', '90015'], true) ? 'info' : 'error';
+                Log::channel('telnyx')->{$level}('Bridge failed', [
                     'call_control_id_a' => $callControlIdA,
                     'call_control_id_b' => $callControlIdB,
                     'status' => $response->status(),
-                    'error' => $response->json(),
+                    'error' => $body,
                 ]);
                 return false;
             }
@@ -3765,6 +3793,31 @@ class TelnyxWebhookController extends Controller
         }
 
         SendInboundSmsBrowserNotifications::dispatch($message->id);
+
+        // If the sender hasn't opted in yet and we've never asked them, send the
+        // START consent prompt so the conversation can continue. This covers the
+        // case where a caller pressed "2" during the IVR (auto-creating a thread
+        // with no prior opt-in) and then replied to the callback confirmation SMS.
+        if ($thread
+            && ! $isGroupMms
+            && ! GroupSmsService::isStartKeyword($text)
+            && $thread->opt_in_prompt_sent_at === null
+            && $thread->hasPendingOptIn()
+        ) {
+            try {
+                $this->groupSmsService->resendConsentPrompt($thread);
+                Log::channel('telnyx')->info('Sent opt-in consent prompt to inbound sender', [
+                    'thread_id' => $thread->id,
+                    'from' => $from,
+                ]);
+            } catch (\Throwable $e) {
+                Log::channel('telnyx')->warning('Failed to send opt-in consent prompt', [
+                    'thread_id' => $thread->id,
+                    'from' => $from,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
 
         return response()->json(['status' => 'ok']);
     }
