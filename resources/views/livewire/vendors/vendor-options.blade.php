@@ -196,7 +196,7 @@
                     <div class="space-y-2">
                         <div>
                             <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Voicemail Menu</div>
-                            <div class="text-xs text-zinc-500">If no one answers, play an interactive menu: re-dial, send a text, or leave a voicemail.</div>
+                            <div class="text-xs text-zinc-500">If no one answers, play an interactive menu: redial, send a text, or leave a voicemail.</div>
                         </div>
                         <div class="space-y-4 pl-1 border-l-2 border-zinc-200 dark:border-zinc-700 ml-1">
                                 {{-- IVR Main Menu: Known Caller --}}
@@ -211,7 +211,7 @@
                                         <flux:button size="xs" variant="ghost" icon="play" wire:click="previewTts('voicemail')" wire:loading.attr="disabled" wire:target="previewTts" title="Preview known caller menu prompt" />
                                     </div>
                                     <flux:textarea wire:model="voicemail_message" rows="2" placeholder="{{ \App\Livewire\Vendors\VendorOptions::DEFAULT_VOICEMAIL }}" resize="vertical" />
-                                    <div class="text-xs text-zinc-400 mt-1">Includes Press 1 re-dial option. Placeholders: <code class="text-zinc-500">{name}</code> <code class="text-zinc-500">{company}</code> <code class="text-zinc-500">{greeting}</code></div>
+                                    <div class="text-xs text-zinc-400 mt-1">Includes Press 1 redial option. Placeholders: <code class="text-zinc-500">{name}</code> <code class="text-zinc-500">{company}</code> <code class="text-zinc-500">{greeting}</code></div>
                                 </div>
 
                                 {{-- IVR Main Menu: Unknown Caller --}}
@@ -226,19 +226,19 @@
                                         <flux:button size="xs" variant="ghost" icon="play" wire:click="previewTts('voicemail_unknown')" wire:loading.attr="disabled" wire:target="previewTts" title="Preview unknown caller menu prompt" />
                                     </div>
                                     <flux:textarea wire:model="voicemail_message_unknown" rows="2" placeholder="{{ \App\Livewire\Vendors\VendorOptions::DEFAULT_VOICEMAIL_UNKNOWN }}" resize="vertical" />
-                                    <div class="text-xs text-zinc-400 mt-1">No re-dial option. Placeholders: <code class="text-zinc-500">{name}</code> <code class="text-zinc-500">{company}</code> <code class="text-zinc-500">{greeting}</code></div>
+                                    <div class="text-xs text-zinc-400 mt-1">No redial option. Placeholders: <code class="text-zinc-500">{name}</code> <code class="text-zinc-500">{company}</code> <code class="text-zinc-500">{greeting}</code></div>
                                 </div>
 
-                                {{-- Press 1: Re-dial --}}
+                                {{-- Press 1: Redial --}}
                                 <div class="pl-3">
                                     <div class="flex items-center justify-between gap-2 mb-1">
                                         <div class="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                                            <flux:badge size="sm" color="blue" class="mr-1">1</flux:badge> Re-dial Response
+                                            <flux:badge size="sm" color="blue" class="mr-1">1</flux:badge> Redial Response
                                         </div>
                                         <flux:button size="xs" variant="ghost" icon="play" wire:click="previewTts('ivr_press1')" wire:loading.attr="disabled" wire:target="previewTts" title="Preview press 1 response" />
                                     </div>
                                     <flux:textarea wire:model="ivr_press1_message" rows="1" placeholder="{{ \App\Livewire\Vendors\VendorOptions::DEFAULT_IVR_PRESS1 }}" resize="vertical" />
-                                    <div class="text-xs text-zinc-400 mt-1">Played before re-dialing your team. Placeholders: <code class="text-zinc-500">{name}</code> <code class="text-zinc-500">{company}</code> <code class="text-zinc-500">{greeting}</code></div>
+                                    <div class="text-xs text-zinc-400 mt-1">Played before redialing your team. Placeholders: <code class="text-zinc-500">{name}</code> <code class="text-zinc-500">{company}</code> <code class="text-zinc-500">{greeting}</code></div>
                                 </div>
 
                                 {{-- Press 2: Send text --}}

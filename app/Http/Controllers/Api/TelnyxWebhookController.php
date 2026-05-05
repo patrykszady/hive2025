@@ -711,14 +711,11 @@ class TelnyxWebhookController extends Controller
             $welcomeTemplate = data_get($vendorOptions, 'welcome_message_unknown')
                 ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_WELCOME_UNKNOWN;
         }
-        $ttsPayload = str_replace(
-            ['{name}', '{company}', '{greeting}'],
-            [$callerName ?? '', $shortName, $greeting],
-            $welcomeTemplate
-        );
-        // Clean up extra spaces/punctuation from empty {name}
-        $ttsPayload = preg_replace('/\s+/', ' ', trim($ttsPayload));
-        $ttsPayload = preg_replace('/\s+([!.?,])/', '$1', $ttsPayload);
+        $ttsPayload = $this->renderPrompt($welcomeTemplate, [
+            '{name}' => $callerName ?? '',
+            '{company}' => $shortName,
+            '{greeting}' => $greeting,
+        ]);
 
         Log::channel('telnyx')->info('Playing welcome TTS and dialing admins simultaneously', [
             'call_control_id' => $callControlId,
@@ -819,13 +816,11 @@ class TelnyxWebhookController extends Controller
         $greeting = $this->buildTimeGreeting();
         $template = data_get($vendorOptions, 'screening_message')
             ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_SCREENING;
-        $promptText = str_replace(
-            ['{name}', '{company}', '{greeting}'],
-            [$callerLabel, $shortName, $greeting],
-            $template
-        );
-        $promptText = preg_replace('/\s+/', ' ', trim($promptText));
-        $promptText = preg_replace('/\s+([!.?,])/', '$1', $promptText);
+        $promptText = $this->renderPrompt($template, [
+            '{name}' => $callerLabel,
+            '{company}' => $shortName,
+            '{greeting}' => $greeting,
+        ]);
 
         Log::channel('telnyx')->info('Playing admin screening prompt', [
             'admin_call_control_id' => $callControlId,
@@ -865,6 +860,27 @@ class TelnyxWebhookController extends Controller
 
         if (! $callLog || ! $incomingCallControlId) {
             $this->sendCallCommand($callControlId, 'hangup');
+            return response()->json(['status' => 'ok']);
+        }
+
+        // If this admin leg already hung up while the screening prompt was
+        // playing, Telnyx still fires call.speak.ended for the interrupted
+        // speak. Don't try to bridge a dead admin — route the caller to the
+        // voicemail IVR instead so they aren't left in silence.
+        if (Cache::has("telnyx_admin_dead:{$callControlId}")) {
+            Log::channel('telnyx')->info('Screening prompt ended but admin already hung up — routing caller to voicemail', [
+                'admin_call_control_id' => $callControlId,
+                'call_log_id' => $callLogId,
+                'incoming_call_control_id' => $incomingCallControlId,
+            ]);
+
+            // Best-effort: only trigger voicemail if the caller is still on
+            // the line. triggerVoicemail() is idempotent so it's safe even if
+            // handleAdminRingHangup already triggered it.
+            if (! in_array($callLog->status, [CallLog::STATUS_COMPLETED, CallLog::STATUS_MISSED])) {
+                $this->triggerVoicemail($incomingCallControlId, $callLogId);
+            }
+
             return response()->json(['status' => 'ok']);
         }
 
@@ -1425,6 +1441,11 @@ class TelnyxWebhookController extends Controller
             'incoming_call_control_id' => $incomingCallControlId,
         ]);
 
+        // Mark this admin leg as dead so a racing call.speak.ended for the
+        // screening prompt (which fires when Telnyx tears down the speak after
+        // the admin hangs up) doesn't try to bridge an admin that's already gone.
+        Cache::put("telnyx_admin_dead:{$callControlId}", true, now()->addMinutes(10));
+
         if (! $callLog || ! $incomingCallControlId) {
             Log::channel('telnyx')->warning('Admin ring hangup — missing call log or incoming ID, cannot trigger voicemail', [
                 'call_log_id' => $callLogId,
@@ -1685,6 +1706,13 @@ class TelnyxWebhookController extends Controller
 
         if ($action === 'admin_screen_done') {
             return $this->handleAdminScreenDone($callControlId, $clientState ?? []);
+        }
+
+        if ($action === 'voicemail_ivr_menu') {
+            // Mark that the menu TTS finished playing so the gather.ended
+            // handler can distinguish "TTS played but caller didn't press"
+            // (skip retry) from "TTS never played" (retry once).
+            Cache::put("telnyx_voicemail_tts_played:{$callControlId}", true, now()->addMinutes(5));
         }
 
         if ($action === 'welcome_done') {
@@ -2396,6 +2424,21 @@ class TelnyxWebhookController extends Controller
      */
     protected function triggerVoicemail(string $callControlId, ?int $callLogId): void
     {
+        // Idempotency: only ever trigger voicemail once per call.
+        // Multiple paths (admin hangup, all-admins-failed safety net, admin
+        // screen abort) can all race to call this. The duplicate gather then
+        // makes the caller hear the menu twice.
+        $idempotencyKey = $callLogId
+            ? "telnyx_voicemail_triggered:{$callLogId}"
+            : "telnyx_voicemail_triggered_cc:{$callControlId}";
+        if (! Cache::add($idempotencyKey, true, now()->addMinutes(10))) {
+            Log::channel('telnyx')->info('Voicemail already triggered for this call — skipping duplicate', [
+                'call_control_id' => $callControlId,
+                'call_log_id' => $callLogId,
+            ]);
+            return;
+        }
+
         // Check if caller already disconnected before starting voicemail flow
         if ($callLogId) {
             $freshLog = CallLog::find($callLogId);
@@ -2445,22 +2488,19 @@ class TelnyxWebhookController extends Controller
         // Known callers get full IVR (press 1 re-dial + press 2 SMS), unknown get press 2 + voicemail only
         if ($isKnownCaller) {
             $ivrTemplate = data_get($vendor?->options ?? [], 'voicemail_message')
-                ?: "{company} is not available right now. {name}, if this is an emergency, press 1 to re-dial {company}. Press 2 to send a text on your behalf so {company} knows to call you back ASAP. Stay on the line to leave a voicemail.";
+                ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_VOICEMAIL;
             $validDigits = '12';
         } else {
             $ivrTemplate = data_get($vendor?->options ?? [], 'voicemail_message_unknown')
-                ?: "{company} is not available right now. Press 2 to send a text on your behalf so {company} knows to call you back ASAP. Stay on the line to leave a voicemail.";
+                ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_VOICEMAIL_UNKNOWN;
             $validDigits = '2';
         }
 
-        $ivrPrompt = str_replace(
-            ['{name}', '{company}', '{greeting}'],
-            [$callerName ?? '', $shortName, $this->buildTimeGreeting()],
-            $ivrTemplate
-        );
-        // Clean up extra spaces/punctuation from empty {name}
-        $ivrPrompt = preg_replace('/\s+/', ' ', trim($ivrPrompt));
-        $ivrPrompt = preg_replace('/\s+([!.?,])/', '$1', $ivrPrompt);
+        $ivrPrompt = $this->renderPrompt($ivrTemplate, [
+            '{name}' => $callerName ?? '',
+            '{company}' => $shortName,
+            '{greeting}' => $this->buildTimeGreeting(),
+        ]);
 
         $voicemailContext = [
             'call_log_id' => $callLogId,
@@ -2474,10 +2514,13 @@ class TelnyxWebhookController extends Controller
         // speak.ended/playback.ended handlers that the call is handled.
         Cache::put("telnyx_bridged:{$callControlId}", true, now()->addMinutes(10));
 
-        // Start the IVR directly — gather_using_speak will automatically interrupt
-        // any active audio (welcome TTS speak or ringback playback) on the call.
-        // This avoids the race condition where event handlers (speak.ended, playback.ended)
-        // might not find the pending_voicemail cache value due to concurrent webhook processing.
+        // Stop any active ringback playback FIRST — Telnyx otherwise queues the
+        // gather_using_speak behind the current audio loop iteration which can
+        // delay the menu by 20+ seconds (we've seen 22s in production logs).
+        // Best-effort; ignore errors if no playback is active.
+        $this->sendCallCommand($callControlId, 'playback_stop');
+
+        // Start the IVR — gather_using_speak will play the menu and collect a digit.
         $this->startVoicemailGather($callControlId, $voicemailContext);
     }
 
@@ -2500,19 +2543,17 @@ class TelnyxWebhookController extends Controller
 
         if ($isKnownCaller) {
             $ivrTemplate = data_get($vendor?->options ?? [], 'voicemail_message')
-                ?: "{company} is not available right now. {name}, if this is an emergency, press 1 to re-dial {company}. Press 2 to send a text on your behalf so {company} knows to call you back ASAP. Stay on the line to leave a voicemail.";
+                ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_VOICEMAIL;
         } else {
             $ivrTemplate = data_get($vendor?->options ?? [], 'voicemail_message_unknown')
-                ?: "{company} is not available right now. Press 2 to send a text on your behalf so {company} knows to call you back ASAP. Stay on the line to leave a voicemail.";
+                ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_VOICEMAIL_UNKNOWN;
         }
 
-        $ivrPrompt = str_replace(
-            ['{name}', '{company}', '{greeting}'],
-            [$callerName ?? '', $shortName, $this->buildTimeGreeting()],
-            $ivrTemplate
-        );
-        $ivrPrompt = preg_replace('/\s+/', ' ', trim($ivrPrompt));
-        $ivrPrompt = preg_replace('/\s+([!.?,])/', '$1', $ivrPrompt);
+        $ivrPrompt = $this->renderPrompt($ivrTemplate, [
+            '{name}' => $callerName ?? '',
+            '{company}' => $shortName,
+            '{greeting}' => $this->buildTimeGreeting(),
+        ]);
 
         return $ivrPrompt;
     }
@@ -2545,7 +2586,10 @@ class TelnyxWebhookController extends Controller
             'valid_digits' => $validDigits,
             'minimum_digits' => 1,
             'maximum_digits' => 1,
-            'timeout_millis' => 2000,
+            // Give the caller 7 seconds after the menu finishes to press a digit.
+            // 2s was too short — by the time the caller processes "Press 2…" and
+            // moves their phone, the gather already timed out and we re-played the menu.
+            'timeout_millis' => 7000,
             'maximum_tries' => 1,
             'client_state' => base64_encode(json_encode([
                 'action' => 'voicemail_ivr_menu',
@@ -2618,14 +2662,12 @@ class TelnyxWebhookController extends Controller
             $vendor = Vendor::find(1);
             $shortName = data_get($vendor?->options ?? [], 'short_name') ?: ($vendor?->business_name ?? 'the team');
             $press1Template = data_get($vendor?->options ?? [], 'ivr_press1_message')
-                ?: "{name}, no problem! Let me try connecting you again. I also texted you emergency numbers in case you cannot get through again.";
-            $press1Payload = str_replace(
-                ['{name}', '{company}', '{greeting}'],
-                [$callerName ?? '', $shortName, $this->buildTimeGreeting()],
-                $press1Template
-            );
-            $press1Payload = preg_replace('/\s+/', ' ', trim($press1Payload));
-            $press1Payload = preg_replace('/\s+([!.?,])/', '$1', $press1Payload);
+                ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_IVR_PRESS1;
+            $press1Payload = $this->renderPrompt($press1Template, [
+                '{name}' => $callerName ?? '',
+                '{company}' => $shortName,
+                '{greeting}' => $this->buildTimeGreeting(),
+            ]);
 
             $this->sendCallCommand($callControlId, 'speak', [
                 'payload' => $press1Payload,
@@ -2648,14 +2690,12 @@ class TelnyxWebhookController extends Controller
             $vendor = Vendor::find(1);
             $shortName = data_get($vendor?->options ?? [], 'short_name') ?: ($vendor?->business_name ?? 'the team');
             $press2Template = data_get($vendor?->options ?? [], 'ivr_press2_message')
-                ?: "Got it! We've sent a message to {company} letting them know you called. They should be reaching out to you shortly. Take care!";
-            $press2Payload = str_replace(
-                ['{name}', '{company}', '{greeting}'],
-                [$callerName ?? '', $shortName, $this->buildTimeGreeting()],
-                $press2Template
-            );
-            $press2Payload = preg_replace('/\s+/', ' ', trim($press2Payload));
-            $press2Payload = preg_replace('/\s+([!.?,])/', '$1', $press2Payload);
+                ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_IVR_PRESS2;
+            $press2Payload = $this->renderPrompt($press2Template, [
+                '{name}' => $callerName ?? '',
+                '{company}' => $shortName,
+                '{greeting}' => $this->buildTimeGreeting(),
+            ]);
 
             $this->sendCallCommand($callControlId, 'speak', [
                 'payload' => $press2Payload,
@@ -2674,11 +2714,16 @@ class TelnyxWebhookController extends Controller
                 ]);
             }
         } else {
-            // ── No digit / timeout: retry IVR once (TTS can fail due to Telnyx race condition), then voicemail ──
+            // ── No digit / timeout ──
+            // Only retry the menu if the TTS truly didn't play (no speak.ended
+            // event was seen). Otherwise we were just hearing silence; go
+            // straight to the voicemail greeting so the caller doesn't hear
+            // the menu prompt twice.
             $retryCount = $clientState['retry_count'] ?? 0;
+            $ttsPlayed = Cache::pull("telnyx_voicemail_tts_played:{$callControlId}", false);
 
-            if ($retryCount < 1) {
-                Log::channel('telnyx')->info('IVR: no digit pressed — retrying IVR menu (TTS may not have played)', [
+            if ($retryCount < 1 && ! $ttsPlayed) {
+                Log::channel('telnyx')->info('IVR: no digit pressed and TTS never played — retrying menu once', [
                     'call_control_id' => $callControlId,
                     'retry_count' => $retryCount,
                     'call_log_id' => $callLogId,
@@ -2696,8 +2741,8 @@ class TelnyxWebhookController extends Controller
                 return response()->json(['status' => 'ok']);
             }
 
-            // No digit after retry — go directly to voicemail greeting
-            Log::channel('telnyx')->info('IVR: no digit pressed after retry — playing voicemail greeting', [
+            // TTS played (or we already retried) — go directly to voicemail greeting
+            Log::channel('telnyx')->info('IVR: no digit pressed — playing voicemail greeting', [
                 'call_control_id' => $callControlId,
                 'call_log_id' => $callLogId,
             ]);
@@ -2706,14 +2751,12 @@ class TelnyxWebhookController extends Controller
             $shortName = data_get($vendor?->options ?? [], 'short_name') ?: ($vendor?->business_name ?? 'us');
 
             $greetingTemplate = data_get($vendor?->options ?? [], 'voicemail_greeting')
-                ?: "{name}, you've reached {company}. We can't get to the phone right now, but leave us a message after the beep and we'll get back to you shortly.";
-            $greetingPayload = str_replace(
-                ['{name}', '{company}', '{greeting}'],
-                [$callerName ?? '', $shortName, $this->buildTimeGreeting()],
-                $greetingTemplate
-            );
-            $greetingPayload = preg_replace('/\s+/', ' ', trim($greetingPayload));
-            $greetingPayload = preg_replace('/\s+([!.?,])/', '$1', $greetingPayload);
+                ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_VOICEMAIL_GREETING;
+            $greetingPayload = $this->renderPrompt($greetingTemplate, [
+                '{name}' => $callerName ?? '',
+                '{company}' => $shortName,
+                '{greeting}' => $this->buildTimeGreeting(),
+            ]);
 
             $this->sendCallCommand($callControlId, 'speak', [
                 'payload' => $greetingPayload,
@@ -2757,14 +2800,12 @@ class TelnyxWebhookController extends Controller
             $this->sendEmergencyContactsSms($originalCaller);
 
             $press1Template = data_get($vendor?->options ?? [], 'ivr_press1_message')
-                ?: "{name}, no problem! Let me try connecting you again. I also texted you emergency numbers in case you cannot get through again.";
-            $press1Payload = str_replace(
-                ['{name}', '{company}', '{greeting}'],
-                [$callerName ?? '', $shortName, $this->buildTimeGreeting()],
-                $press1Template
-            );
-            $press1Payload = preg_replace('/\s+/', ' ', trim($press1Payload));
-            $press1Payload = preg_replace('/\s+([!.?,])/', '$1', $press1Payload);
+                ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_IVR_PRESS1;
+            $press1Payload = $this->renderPrompt($press1Template, [
+                '{name}' => $callerName ?? '',
+                '{company}' => $shortName,
+                '{greeting}' => $this->buildTimeGreeting(),
+            ]);
 
             $this->sendCallCommand($callControlId, 'speak', [
                 'payload' => $press1Payload,
@@ -2784,14 +2825,12 @@ class TelnyxWebhookController extends Controller
             $this->sendCallbackSms($callLogId, $originalCaller);
 
             $press2Template = data_get($vendor?->options ?? [], 'ivr_press2_message')
-                ?: "Got it! We've sent a message to {company} letting them know you called. They should be reaching out to you shortly. Take care!";
-            $press2Payload = str_replace(
-                ['{name}', '{company}', '{greeting}'],
-                [$callerName ?? '', $shortName, $this->buildTimeGreeting()],
-                $press2Template
-            );
-            $press2Payload = preg_replace('/\s+/', ' ', trim($press2Payload));
-            $press2Payload = preg_replace('/\s+([!.?,])/', '$1', $press2Payload);
+                ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_IVR_PRESS2;
+            $press2Payload = $this->renderPrompt($press2Template, [
+                '{name}' => $callerName ?? '',
+                '{company}' => $shortName,
+                '{greeting}' => $this->buildTimeGreeting(),
+            ]);
 
             $this->sendCallCommand($callControlId, 'speak', [
                 'payload' => $press2Payload,
@@ -2816,14 +2855,12 @@ class TelnyxWebhookController extends Controller
             ]);
 
             $greetingTemplate = data_get($vendor?->options ?? [], 'voicemail_greeting')
-                ?: "{name}, you've reached {company}. We can't get to the phone right now, but leave us a message after the beep and we'll get back to you shortly.";
-            $greetingPayload = str_replace(
-                ['{name}', '{company}', '{greeting}'],
-                [$callerName ?? '', $shortName, $this->buildTimeGreeting()],
-                $greetingTemplate
-            );
-            $greetingPayload = preg_replace('/\s+/', ' ', trim($greetingPayload));
-            $greetingPayload = preg_replace('/\s+([!.?,])/', '$1', $greetingPayload);
+                ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_VOICEMAIL_GREETING;
+            $greetingPayload = $this->renderPrompt($greetingTemplate, [
+                '{name}' => $callerName ?? '',
+                '{company}' => $shortName,
+                '{greeting}' => $this->buildTimeGreeting(),
+            ]);
 
             $this->sendCallCommand($callControlId, 'speak', [
                 'payload' => $greetingPayload,
@@ -3923,6 +3960,42 @@ class TelnyxWebhookController extends Controller
                 'type' => config('services.telnyx.tts_voice_type'),
             ],
         ];
+    }
+
+    /**
+     * Substitute {name}/{company}/{greeting} placeholders into a prompt
+     * template and clean it up for Azure Neural TTS:
+     *  - collapse whitespace runs left over from empty placeholders
+     *  - remove spaces before terminal punctuation (e.g. ", " becoming " ,")
+     *  - strip leading/trailing punctuation orphans (e.g. ", who's calling")
+     *  - ensure the prompt ends with terminal punctuation so Azure doesn't
+     *    clip the final word.
+     */
+    protected function renderPrompt(string $template, array $vars): string
+    {
+        $text = strtr($template, [
+            '{name}' => $vars['{name}'] ?? '',
+            '{company}' => $vars['{company}'] ?? '',
+            '{greeting}' => $vars['{greeting}'] ?? '',
+        ]);
+
+        // Collapse multiple spaces and tidy spaces before punctuation.
+        $text = preg_replace('/\s+/', ' ', trim($text));
+        $text = preg_replace('/\s+([!.?,;:])/', '$1', $text);
+        // Remove an orphan leading comma left by an empty placeholder
+        // (e.g. ", you've reached..." → "you've reached...").
+        $text = preg_replace('/^[,;:]\s*/', '', $text);
+        // Collapse double punctuation like ".." or "!." that an empty
+        // placeholder can leave behind.
+        $text = preg_replace('/([.!?])[.!?,;:]+/', '$1', $text);
+
+        // Ensure terminal punctuation so Azure Neural TTS doesn't drop the
+        // last word.
+        if ($text !== '' && ! preg_match('/[.!?]$/', $text)) {
+            $text .= '.';
+        }
+
+        return $text;
     }
 
     /**

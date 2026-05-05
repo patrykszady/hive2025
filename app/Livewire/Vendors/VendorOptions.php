@@ -42,8 +42,8 @@ class VendorOptions extends Component
     public const DEFAULT_WELCOME = "{greeting} {name}! Thanks for calling {company}. One moment while we connect you.";
     public const DEFAULT_WELCOME_UNKNOWN = "{greeting}! Thanks for calling {company}. One moment while we connect you.";
     public const DEFAULT_SCREENING = "{name} is calling. Hang up now to send them to voicemail, or remain on the line to connect.";
-    public const DEFAULT_VOICEMAIL = "{company} is not available right now. {name}, if this is an emergency, press 1 to re-dial {company}. Press 2 to send a text on your behalf so {company} knows to call you back ASAP. Stay on the line to leave a voicemail.";
-    public const DEFAULT_VOICEMAIL_UNKNOWN = "{company} is not available right now. Press 2 to send a text on your behalf so {company} knows to call you back ASAP. Stay on the line to leave a voicemail.";
+    public const DEFAULT_VOICEMAIL = "{company} is not available right now. {name}, if this is an emergency, press 1 to redial {company}. Press 2 to send a text on your behalf so {company} knows to call you back as soon as possible. Stay on the line to leave a voicemail.";
+    public const DEFAULT_VOICEMAIL_UNKNOWN = "{company} is not available right now. Press 2 to send a text on your behalf so {company} knows to call you back as soon as possible. Stay on the line to leave a voicemail.";
     public const DEFAULT_IVR_PRESS1 = "{name}, no problem! Let me try connecting you again. I also texted you emergency numbers in case you cannot get through again.";
     public const DEFAULT_IVR_PRESS2 = "Got it! We've sent a message to {company} letting them know you called. They should be reaching out to you shortly. Take care!";
     public const DEFAULT_VOICEMAIL_GREETING = "{greeting} {name}, you've reached {company}. We can't get to the phone right now, but leave us a message after the beep and we'll get back to you shortly.";

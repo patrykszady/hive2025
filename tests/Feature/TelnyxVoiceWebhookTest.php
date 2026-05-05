@@ -832,3 +832,183 @@ it('conference invite (Add to Call): intro TTS done causes leg to join existing 
             && ($request->data()['call_control_id'] ?? null) === 'invitee-cc';
     });
 });
+
+it('does not play the voicemail menu twice when the caller does not press a digit', function () {
+    $admin = User::factory()->create([
+        'first_name' => 'Patryk',
+        'cell_phone' => '2249993880',
+    ]);
+
+    $this->vendor->update(['options' => (object) [
+        'short_name' => 'GS',
+        'call_recipients' => [$admin->id],
+        'voicemail_enabled' => true,
+    ]]);
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_TRANSFERRED,
+        'metadata' => ['admin_call_control_ids' => []],
+    ]);
+
+    Http::fake(['api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200)]);
+
+    // Simulate the IVR menu speak.ended (TTS played fully).
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.speak.ended',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'incoming-cc',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'voicemail_ivr_menu',
+                    'call_log_id' => $callLog->id,
+                ])),
+            ],
+        ],
+    ])->assertSuccessful();
+
+    // Now gather.ended fires with no digits — should NOT replay menu, should
+    // go straight to the voicemail greeting.
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.gather.ended',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'incoming-cc',
+                'digits' => '',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'voicemail_ivr_menu',
+                    'call_log_id' => $callLog->id,
+                    'original_caller' => '+15555550100',
+                    'is_known_caller' => false,
+                    'retry_count' => 0,
+                ])),
+            ],
+        ],
+    ])->assertSuccessful();
+
+    // No second gather_using_speak should have been sent.
+    Http::assertNotSent(function ($request) {
+        return str_contains($request->url(), '/actions/gather_using_speak');
+    });
+
+    // A speak (the voicemail greeting) was sent with action=voicemail_prompt_done.
+    Http::assertSent(function ($request) {
+        if (! str_contains($request->url(), 'incoming-cc/actions/speak') || $request->method() !== 'POST') {
+            return false;
+        }
+        $clientState = json_decode(base64_decode($request->data()['client_state'] ?? ''), true);
+        return ($clientState['action'] ?? null) === 'voicemail_prompt_done';
+    });
+});
+
+it('triggerVoicemail is idempotent — admin hangup race does not produce two menus', function () {
+    $admin = User::factory()->create([
+        'first_name' => 'Patryk',
+        'cell_phone' => '2249993880',
+    ]);
+
+    $this->vendor->update(['options' => (object) [
+        'short_name' => 'GS',
+        'call_recipients' => [$admin->id],
+        'voicemail_enabled' => true,
+    ]]);
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_TRANSFERRED,
+        'metadata' => ['admin_call_control_ids' => ['admin-cc-1']],
+    ]);
+
+    Http::fake(['api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200)]);
+
+    // Admin hangs up — handleAdminRingHangup triggers voicemail (1st time).
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.hangup',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'admin-cc-1',
+                'hangup_cause' => 'normal_clearing',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'admin_ring',
+                    'call_log_id' => $callLog->id,
+                    'incoming_call_control_id' => 'incoming-cc',
+                    'admin_user_id' => $admin->id,
+                ])),
+            ],
+        ],
+    ])->assertSuccessful();
+
+    // Then the racing speak.ended for the screening prompt arrives — must NOT
+    // trigger a second voicemail gather.
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.speak.ended',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'admin-cc-1',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'admin_screen_done',
+                    'call_log_id' => $callLog->id,
+                    'incoming_call_control_id' => 'incoming-cc',
+                    'admin_user_id' => $admin->id,
+                    'conference_id' => null,
+                ])),
+            ],
+        ],
+    ])->assertSuccessful();
+
+    // Exactly ONE gather_using_speak (the voicemail menu) was sent to the caller.
+    $gatherCount = 0;
+    foreach (Http::recorded() as [$request]) {
+        if (str_contains($request->url(), 'incoming-cc/actions/gather_using_speak')) {
+            $gatherCount++;
+        }
+    }
+    expect($gatherCount)->toBe(1);
+});
+
+it('voicemail gather uses a 7s timeout giving the caller time to react', function () {
+    $admin = User::factory()->create(['first_name' => 'Patryk', 'cell_phone' => '2249993880']);
+
+    $this->vendor->update(['options' => (object) [
+        'short_name' => 'GS',
+        'call_recipients' => [$admin->id],
+        'voicemail_enabled' => true,
+    ]]);
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_TRANSFERRED,
+        'metadata' => ['admin_call_control_ids' => ['admin-cc-1']],
+    ]);
+
+    Http::fake(['api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200)]);
+
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.hangup',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'admin-cc-1',
+                'hangup_cause' => 'timeout',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'admin_ring',
+                    'call_log_id' => $callLog->id,
+                    'incoming_call_control_id' => 'incoming-cc',
+                    'admin_user_id' => $admin->id,
+                ])),
+            ],
+        ],
+    ])->assertSuccessful();
+
+    Http::assertSent(function ($request) {
+        if (! str_contains($request->url(), 'incoming-cc/actions/gather_using_speak')) {
+            return false;
+        }
+        return ($request->data()['timeout_millis'] ?? null) === 7000;
+    });
+});
+
