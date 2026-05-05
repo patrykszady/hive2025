@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Jobs\SendInboundSmsBrowserNotifications;
+use App\Events\InboundCallJoined;
 use App\Jobs\SendCallAnsweredBrowserNotifications;
 use App\Jobs\SendIncomingCallBrowserNotifications;
 use App\Jobs\StoreCallRecording;
@@ -85,6 +86,7 @@ class TelnyxWebhookController extends Controller
                 'call.speak.started' => $this->handleCallSpeakStarted($data),
                 'call.playback.ended' => $this->handleCallPlaybackEnded($data),
                 'call.gather.ended' => $this->handleCallGatherEnded($data),
+                'call.dtmf.received' => $this->handleCallDtmfReceived($data),
                 'call.recording.saved' => $this->handleCallRecordingSaved($data),
                 'call.machine.detection.ended' => $this->handleAmdEnded($data),
                 'call.machine.premium.detection.ended' => $this->handleAmdEnded($data),
@@ -758,9 +760,9 @@ class TelnyxWebhookController extends Controller
             return response()->json(['status' => 'ok']);
         }
 
-        // If another admin already got bridged or the caller disconnected, hang up this leg
-        if (in_array($callLog->status, [CallLog::STATUS_TRANSFERRED, CallLog::STATUS_COMPLETED, CallLog::STATUS_MISSED])) {
-            Log::channel('telnyx')->info('Admin answered but call already handled — hanging up', [
+        // If the caller disconnected entirely, hang up this leg.
+        if (in_array($callLog->status, [CallLog::STATUS_COMPLETED, CallLog::STATUS_MISSED])) {
+            Log::channel('telnyx')->info('Admin answered but caller disconnected — hanging up', [
                 'call_control_id' => $callControlId,
                 'call_log_id' => $callLogId,
                 'call_status' => $callLog->status,
@@ -769,33 +771,93 @@ class TelnyxWebhookController extends Controller
             return response()->json(['status' => 'ok']);
         }
 
-        // Screen the admin with a DTMF challenge to filter out carrier voicemail.
-        // This replaces AMD which had false-positive issues (admin says "hello?"
-        // into silence, AMD mistakes it for a voicemail greeting).
-        $callerName = $callLog->caller_name ?: 'unknown caller';
+        // No screening prompt. Drop the admin straight into the call. The
+        // conference's beep_enabled='on_enter_exit' announces them.
+        //
+        // If a conference already exists, just join it (late answerer).
+        $metadata = $callLog->metadata ?? [];
+        $joinedAdminIds = $metadata['joined_admin_ids'] ?? [];
+        $conferenceId = $metadata['conference_id'] ?? null;
+        if (! empty($joinedAdminIds) && $conferenceId) {
+            Log::channel('telnyx')->info('Late admin answered — joining conference directly', [
+                'admin_call_control_id' => $callControlId,
+                'call_log_id' => $callLogId,
+                'admin_user_id' => $adminUserId,
+                'conference_id' => $conferenceId,
+            ]);
+            $this->joinAdminToConference($callControlId, $callLogId, $adminUserId, $conferenceId);
+            return response()->json(['status' => 'ok']);
+        }
 
-        Log::channel('telnyx')->info('Admin answered — playing DTMF screen', [
+        // First answerer: bridge immediately (or hold until caller's TTS finishes).
+        return $this->bridgeFirstAdmin($callControlId, $incomingCallControlId, $callLog, $adminUserId);
+    }
+
+    /**
+     * First admin to answer: claim the bridge lock, then either start the
+     * conference (if caller's intro TTS is done) or hold the admin until it is.
+     */
+    protected function bridgeFirstAdmin(string $callControlId, string $incomingCallControlId, CallLog $callLog, ?int $adminUserId): JsonResponse
+    {
+        $callLogId = $callLog->id;
+
+        Log::channel('telnyx')->info('First admin answered — bridging without prompt', [
             'admin_call_control_id' => $callControlId,
             'incoming_call_control_id' => $incomingCallControlId,
             'call_log_id' => $callLogId,
             'admin_user_id' => $adminUserId,
         ]);
 
-        $this->sendCallCommand($callControlId, 'gather_using_speak', [
-            'payload' => "Incoming call from {$callerName}. Press any key to accept.",
-            ...$this->ttsVoiceParams(),
-            'valid_digits' => '0123456789*#',
-            'minimum_digits' => 1,
-            'maximum_digits' => 1,
-            'timeout_millis' => 5000,
-            'maximum_tries' => 1,
-            'client_state' => base64_encode(json_encode([
-                'action' => 'admin_screen',
+        // Race-safe: claim the bridge lock. If someone else already became the
+        // first joiner between our admin_ring dispatch and the answer event,
+        // join the existing conference instead.
+        $bridgeLockKey = "telnyx_bridge_lock:{$callLogId}";
+        if (! Cache::add($bridgeLockKey, 'admin_answered', 60)) {
+            $callLog->refresh();
+            $conferenceId = ($callLog->metadata ?? [])['conference_id'] ?? null;
+            if ($conferenceId) {
+                Log::channel('telnyx')->info('Lost first-join race — joining existing conference', [
+                    'call_control_id' => $callControlId,
+                    'call_log_id' => $callLogId,
+                    'conference_id' => $conferenceId,
+                ]);
+                $this->joinAdminToConference($callControlId, $callLogId, $adminUserId, $conferenceId);
+            } else {
+                $this->sendCallCommand($callControlId, 'hangup');
+            }
+            return response()->json(['status' => 'ok']);
+        }
+
+        $metadata = $callLog->metadata ?? [];
+        $ttsComplete = ! empty($metadata['tts_complete'])
+            || Cache::has("telnyx_tts_complete:{$callLogId}");
+
+        if ($ttsComplete) {
+            $this->startConferenceWithCaller($callControlId, $callLogId, $incomingCallControlId, $adminUserId);
+        } else {
+            // Hold the admin until the caller's intro TTS finishes; the speak.ended
+            // handler will pick the pending admin up and start the conference.
+            Log::channel('telnyx')->info('Admin answered but TTS still playing — holding admin', [
+                'admin_call_control_id' => $callControlId,
                 'call_log_id' => $callLogId,
-                'incoming_call_control_id' => $incomingCallControlId,
-                'admin_user_id' => $adminUserId,
-            ])),
-        ]);
+            ]);
+
+            $metadata['pending_admin_call_control_id'] = $callControlId;
+            $metadata['pending_admin_user_id'] = $adminUserId;
+            $callLog->update(['metadata' => $metadata]);
+
+            $holdAudioUrl = config('services.telnyx.hold_audio_url')
+                ?: $this->telnyxBaseUrl() . '/telnyx-audio/ringback.wav';
+            $this->sendCallCommand($callControlId, 'playback_start', [
+                'audio_url' => $holdAudioUrl,
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'admin_waiting_for_tts',
+                    'call_log_id' => $callLogId,
+                    'incoming_call_control_id' => $incomingCallControlId,
+                    'admin_user_id' => $adminUserId,
+                ])),
+            ]);
+        }
 
         return response()->json(['status' => 'ok']);
     }
@@ -835,50 +897,52 @@ class TelnyxWebhookController extends Controller
             'admin_user_id' => $adminUserId,
         ]);
 
-        // If call already handled by another admin or caller disconnected, hang up
-        if (in_array($callLog->status, [CallLog::STATUS_TRANSFERRED, CallLog::STATUS_COMPLETED, CallLog::STATUS_MISSED])) {
+        // If caller disconnected, abort
+        if (in_array($callLog->status, [CallLog::STATUS_COMPLETED, CallLog::STATUS_MISSED])) {
             $this->sendCallCommand($callControlId, 'hangup');
             return response()->json(['status' => 'ok']);
         }
 
-        // Atomic bridge lock — only one admin can proceed
-        $bridgeLockKey = "telnyx_bridge_lock:{$callLogId}";
-        if (! Cache::add($bridgeLockKey, 'admin_screen', 60)) {
-            Log::channel('telnyx')->info('Admin screen passed but bridge lock already held — hanging up', [
-                'call_control_id' => $callControlId,
-                'call_log_id' => $callLogId,
-            ]);
-            $this->sendCallCommand($callControlId, 'hangup');
-            return response()->json(['status' => 'ok']);
-        }
-
-        // Hang up other ringing admin legs
-        $this->hangupOtherAdminLegs($callLogId, $callControlId);
-
-        // Re-read to get latest metadata
+        // If a conference already exists (race: another admin became first), join it.
         $callLog->refresh();
         $metadata = $callLog->metadata ?? [];
+        $conferenceId = $metadata['conference_id'] ?? null;
+
+        if ($conferenceId) {
+            $this->joinAdminToConference($callControlId, $callLogId, $adminUserId, $conferenceId);
+            return response()->json(['status' => 'ok']);
+        }
+
+        // ── First admin to confirm: claim the bridge lock and create conference ──
+        $bridgeLockKey = "telnyx_bridge_lock:{$callLogId}";
+        if (! Cache::add($bridgeLockKey, 'admin_screen', 60)) {
+            // Lost the race — somebody else became the first joiner. If a
+            // conference now exists, join it; otherwise hang up gracefully.
+            $callLog->refresh();
+            $conferenceId = ($callLog->metadata ?? [])['conference_id'] ?? null;
+            if ($conferenceId) {
+                Log::channel('telnyx')->info('Lost first-join race — joining conference instead', [
+                    'call_control_id' => $callControlId,
+                    'call_log_id' => $callLogId,
+                    'conference_id' => $conferenceId,
+                ]);
+                $this->joinAdminToConference($callControlId, $callLogId, $adminUserId, $conferenceId);
+            } else {
+                $this->sendCallCommand($callControlId, 'hangup');
+            }
+            return response()->json(['status' => 'ok']);
+        }
 
         // Check TTS completion (race-safe via cache)
         $ttsComplete = ! empty($metadata['tts_complete'])
             || Cache::has("telnyx_tts_complete:{$callLogId}");
 
         if ($ttsComplete) {
-            // Check if already bridged (prevents double-bridge)
-            if (Cache::has("telnyx_bridged:{$incomingCallControlId}")) {
-                return response()->json(['status' => 'ok']);
-            }
-
-            // TTS already done — bridge immediately
-            Log::channel('telnyx')->info('Admin confirmed + TTS done — bridging now', [
-                'admin_call_control_id' => $callControlId,
-                'incoming_call_control_id' => $incomingCallControlId,
-                'call_log_id' => $callLogId,
-            ]);
-
-            $this->bridgeAdminWithCaller($callControlId, $callLogId, $incomingCallControlId, $adminUserId);
+            // TTS done — start the conference now
+            $this->startConferenceWithCaller($callControlId, $callLogId, $incomingCallControlId, $adminUserId);
         } else {
-            // TTS still playing — hold admin with ringback until TTS finishes
+            // TTS still playing — hold this admin until TTS finishes; speak.ended
+            // handler will pick the pending admin up and start the conference.
             Log::channel('telnyx')->info('Admin confirmed but TTS still playing — holding admin', [
                 'admin_call_control_id' => $callControlId,
                 'call_log_id' => $callLogId,
@@ -905,7 +969,139 @@ class TelnyxWebhookController extends Controller
     }
 
     /**
-     * Bridge an admin with the incoming caller.
+     * Create a conference, drop the caller into it, then drop the first admin into it.
+     */
+    protected function startConferenceWithCaller(string $adminCallControlId, int $callLogId, string $incomingCallControlId, ?int $adminUserId): void
+    {
+        $callLog = CallLog::find($callLogId);
+        if (! $callLog) {
+            return;
+        }
+
+        $adminUser = $adminUserId ? User::find($adminUserId) : null;
+        $conferenceName = "call_{$callLogId}_" . substr(md5($incomingCallControlId), 0, 8);
+
+        Log::channel('telnyx')->info('Creating conference with caller as first participant', [
+            'call_log_id' => $callLogId,
+            'conference_name' => $conferenceName,
+            'incoming_call_control_id' => $incomingCallControlId,
+            'admin_call_control_id' => $adminCallControlId,
+            'admin_user_id' => $adminUserId,
+        ]);
+
+        // Stop any audio on both legs before joining the conference.
+        $this->sendCallCommand($incomingCallControlId, 'playback_stop');
+        $this->sendCallCommand($adminCallControlId, 'playback_stop');
+
+        // Create the conference seeded with the caller's leg.
+        $conferenceId = $this->createConference($conferenceName, $incomingCallControlId);
+        if (! $conferenceId) {
+            Log::channel('telnyx')->error('Failed to create conference — hanging up admin leg', [
+                'call_log_id' => $callLogId,
+            ]);
+            // Release the bridge lock so another answering admin can retry.
+            Cache::forget("telnyx_bridge_lock:{$callLogId}");
+            $this->sendCallCommand($adminCallControlId, 'hangup');
+            return;
+        }
+
+        // Mark caller as bridged (used by ringback re-loop guard).
+        Cache::put("telnyx_bridged:{$incomingCallControlId}", true, now()->addMinutes(60));
+        Cache::put("telnyx_bridged:{$adminCallControlId}", true, now()->addMinutes(60));
+
+        // Persist conference id and mark first admin joined.
+        $metadata = $callLog->metadata ?? [];
+        $metadata['conference_id'] = $conferenceId;
+        $metadata['conference_name'] = $conferenceName;
+        $joinedAdmins = $metadata['joined_admin_ids'] ?? [];
+        if ($adminUserId) {
+            $joinedAdmins[] = $adminUserId;
+        }
+        $metadata['joined_admin_ids'] = array_values(array_unique($joinedAdmins));
+
+        $callLog->update([
+            'status' => CallLog::STATUS_TRANSFERRED,
+            'forwarded_to' => $adminUser?->cell_phone,
+            'metadata' => $metadata,
+        ]);
+
+        // Join the admin to the conference.
+        if (! $this->joinConference($conferenceId, $adminCallControlId)) {
+            Log::channel('telnyx')->error('Failed to join admin to fresh conference', [
+                'admin_call_control_id' => $adminCallControlId,
+                'conference_id' => $conferenceId,
+            ]);
+            // Release the bridge lock so another admin can attempt to join.
+            Cache::forget("telnyx_bridge_lock:{$callLogId}");
+            $this->sendCallCommand($adminCallControlId, 'hangup');
+            return;
+        }
+
+        if ($adminUserId) {
+            SendCallAnsweredBrowserNotifications::dispatch($callLogId, $adminUserId);
+            event(new InboundCallJoined($adminUserId, $callLogId));
+        }
+
+        // NOTE: we intentionally do NOT hang up other ringing admin legs here.
+        // They keep ringing for their original timeout so a second/third recipient
+        // can answer and join the conference with the "already connected" prompt.
+    }
+
+    /**
+     * Join an additional admin into an existing conference (late answerer or invite).
+     */
+    protected function joinAdminToConference(string $adminCallControlId, int $callLogId, ?int $adminUserId, string $conferenceId): void
+    {
+        $callLog = CallLog::find($callLogId);
+        if (! $callLog) {
+            $this->sendCallCommand($adminCallControlId, 'hangup');
+            return;
+        }
+
+        $this->sendCallCommand($adminCallControlId, 'playback_stop');
+
+        if (! $this->joinConference($conferenceId, $adminCallControlId)) {
+            $this->sendCallCommand($adminCallControlId, 'hangup');
+            return;
+        }
+
+        Cache::put("telnyx_bridged:{$adminCallControlId}", true, now()->addMinutes(60));
+
+        $metadata = $callLog->metadata ?? [];
+        $joinedAdmins = $metadata['joined_admin_ids'] ?? [];
+        if ($adminUserId) {
+            $joinedAdmins[] = $adminUserId;
+        }
+        $metadata['joined_admin_ids'] = array_values(array_unique($joinedAdmins));
+
+        // Track this leg in admin_call_control_ids so DTMF lookup can locate it
+        $adminCcIds = $metadata['admin_call_control_ids'] ?? [];
+        if (! in_array($adminCallControlId, $adminCcIds, true)) {
+            $adminCcIds[] = $adminCallControlId;
+        }
+        $metadata['admin_call_control_ids'] = array_values(array_unique($adminCcIds));
+
+        $callLog->update(['metadata' => $metadata]);
+
+        if ($adminUserId) {
+            SendCallAnsweredBrowserNotifications::dispatch($callLogId, $adminUserId);
+            event(new InboundCallJoined($adminUserId, $callLogId));
+        }
+
+        Log::channel('telnyx')->info('Admin joined conference', [
+            'admin_call_control_id' => $adminCallControlId,
+            'conference_id' => $conferenceId,
+            'call_log_id' => $callLogId,
+            'admin_user_id' => $adminUserId,
+        ]);
+    }
+
+    /**
+     * Bridge an admin with the incoming caller (compat shim).
+     *
+     * Now routes through the conference flow: if a conference already exists
+     * for this call log, the admin joins it; otherwise a new conference is
+     * created with the caller and admin as the first two participants.
      */
     protected function bridgeAdminWithCaller(string $adminCallControlId, int $callLogId, string $incomingCallControlId, ?int $adminUserId): void
     {
@@ -914,61 +1110,13 @@ class TelnyxWebhookController extends Controller
             return;
         }
 
-        $adminUser = $adminUserId ? User::find($adminUserId) : null;
-
-        Log::channel('telnyx')->info('Bridging admin with caller', [
-            'admin_call_control_id' => $adminCallControlId,
-            'incoming_call_control_id' => $incomingCallControlId,
-            'admin_user_id' => $adminUserId,
-            'admin_name' => $adminUser?->full_name,
-        ]);
-
-        // Set cache flag BEFORE stopping playback to prevent the playback-ended
-        // handler from re-looping ringback during the bridge race window
-        Cache::put("telnyx_bridged:{$incomingCallControlId}", true, now()->addMinutes(10));
-        Cache::put("telnyx_bridged:{$adminCallControlId}", true, now()->addMinutes(10));
-
-        // Stop any active TTS/ringback on the caller's leg before bridging
-        $this->sendCallCommand($incomingCallControlId, 'playback_stop');
-
-        // Stop ringback on the admin's leg too
-        $this->sendCallCommand($adminCallControlId, 'playback_stop');
-
-        // Bridge admin with the incoming caller
-        $bridgeSuccess = $this->bridgeCalls($adminCallControlId, $incomingCallControlId);
-
-        if (! $bridgeSuccess) {
-            // Bridge failed (caller likely hung up) — clean up
-            Cache::forget("telnyx_bridged:{$incomingCallControlId}");
-            Cache::forget("telnyx_bridged:{$adminCallControlId}");
-            Log::channel('telnyx')->warning('Bridge failed — hanging up admin leg', [
-                'admin_call_control_id' => $adminCallControlId,
-                'incoming_call_control_id' => $incomingCallControlId,
-                'call_log_id' => $callLogId,
-            ]);
-            $this->sendCallCommand($adminCallControlId, 'hangup');
+        $conferenceId = ($callLog->metadata ?? [])['conference_id'] ?? null;
+        if ($conferenceId) {
+            $this->joinAdminToConference($adminCallControlId, $callLogId, $adminUserId, $conferenceId);
             return;
         }
 
-        // Track that at least one admin answered
-        $metadata = $callLog->metadata ?? [];
-        $joinedAdmins = $metadata['joined_admin_ids'] ?? [];
-        $joinedAdmins[] = $adminUserId;
-        $metadata['joined_admin_ids'] = array_unique($joinedAdmins);
-
-        $callLog->update([
-            'status' => CallLog::STATUS_TRANSFERRED,
-            'forwarded_to' => $adminUser?->cell_phone,
-            'metadata' => $metadata,
-        ]);
-
-        // Notify other admins that the call was answered
-        if ($adminUserId) {
-            SendCallAnsweredBrowserNotifications::dispatch($callLogId, $adminUserId);
-        }
-
-        // Hang up other ringing admin legs
-        $this->hangupOtherAdminLegs($callLogId, $adminCallControlId);
+        $this->startConferenceWithCaller($adminCallControlId, $callLogId, $incomingCallControlId, $adminUserId);
     }
 
     /**
@@ -1607,11 +1755,27 @@ class TelnyxWebhookController extends Controller
                 $this->sendCallCommand($callControlId, 'hangup');
             }
         } elseif ($action === 'conference_invite_intro_done') {
-            // Conference invite is currently disabled (using bridge mode, not conferences)
-            Log::channel('telnyx')->info('Conference invite disabled — hanging up invited participant', [
-                'call_control_id' => $callControlId,
-            ]);
-            $this->sendCallCommand($callControlId, 'hangup');
+            // Invited participant intro TTS finished → join the existing conference
+            $callLogId = $clientState['call_log_id'] ?? null;
+            $callLog = $callLogId ? CallLog::find($callLogId) : null;
+            $conferenceId = $callLog ? (($callLog->metadata ?? [])['conference_id'] ?? null) : null;
+
+            if (! $callLog || ! $conferenceId) {
+                Log::channel('telnyx')->warning('Conference invite intro done but no conference id available — hanging up', [
+                    'call_control_id' => $callControlId,
+                    'call_log_id' => $callLogId,
+                ]);
+                $this->sendCallCommand($callControlId, 'hangup');
+            } elseif (in_array($callLog->status, [CallLog::STATUS_COMPLETED, CallLog::STATUS_MISSED, CallLog::STATUS_FAILED])) {
+                Log::channel('telnyx')->info('Conference invite intro done but call ended — hanging up', [
+                    'call_control_id' => $callControlId,
+                    'call_log_id' => $callLogId,
+                    'status' => $callLog->status,
+                ]);
+                $this->sendCallCommand($callControlId, 'hangup');
+            } else {
+                $this->joinAdminToConference($callControlId, $callLogId, null, $conferenceId);
+            }
         } elseif ($action === 'click_to_call_failed_tts') {
             // Failed to reach target — TTS error message done → hang up
             $callLogId = $clientState['call_log_id'] ?? null;
@@ -1759,6 +1923,172 @@ class TelnyxWebhookController extends Controller
     }
 
     /**
+     * Handle DTMF digits pressed during a call.
+     *
+     * In-conference: a joined recipient can press 9 to dial all other call
+     * recipients who haven't joined yet, prompting them to join the conference.
+     */
+    protected function handleCallDtmfReceived(array $data): JsonResponse
+    {
+        $payload = $data['payload'] ?? [];
+        $callControlId = $payload['call_control_id'] ?? null;
+        $digit = $payload['digit'] ?? null;
+
+        Log::channel('telnyx')->info('DTMF received', [
+            'call_control_id' => $callControlId,
+            'digit' => $digit,
+        ]);
+
+        if ($digit !== '9' || ! $callControlId) {
+            return response()->json(['status' => 'ok']);
+        }
+
+        // Only act if this leg is part of an active conference
+        if (! Cache::has("telnyx_bridged:{$callControlId}")) {
+            return response()->json(['status' => 'ok']);
+        }
+
+        // Find the call log for this leg via metadata->admin_call_control_ids or
+        // the bridged caller leg.
+        $callLog = CallLog::query()
+            ->whereJsonContains('metadata->admin_call_control_ids', $callControlId)
+            ->latest('id')
+            ->first();
+
+        if (! $callLog) {
+            $callLog = CallLog::query()
+                ->where('call_control_id', $callControlId)
+                ->latest('id')
+                ->first();
+        }
+
+        if (! $callLog) {
+            Log::channel('telnyx')->info('DTMF 9: no matching call log found', [
+                'call_control_id' => $callControlId,
+            ]);
+            return response()->json(['status' => 'ok']);
+        }
+
+        $metadata = $callLog->metadata ?? [];
+        $conferenceId = $metadata['conference_id'] ?? null;
+        if (! $conferenceId) {
+            return response()->json(['status' => 'ok']);
+        }
+
+        // Throttle: don't allow re-invites more than once per 10s
+        $throttleKey = "telnyx_invite_throttle:{$callLog->id}";
+        if (! Cache::add($throttleKey, true, 10)) {
+            Log::channel('telnyx')->info('DTMF 9: invite throttled', [
+                'call_log_id' => $callLog->id,
+            ]);
+            return response()->json(['status' => 'ok']);
+        }
+
+        $this->inviteRemainingRecipients($callLog);
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Dial all configured call_recipients who have NOT yet joined the
+     * conference for this call log, so they can join via the late-screen flow.
+     */
+    protected function inviteRemainingRecipients(CallLog $callLog): void
+    {
+        $metadata = $callLog->metadata ?? [];
+        $joinedAdminIds = $metadata['joined_admin_ids'] ?? [];
+
+        $vendor = Vendor::find(1);
+        $vendorOptions = $vendor ? (array) $vendor->options : [];
+        $recipientUserIds = (array) data_get($vendorOptions, 'call_recipients', []);
+
+        $remainingIds = array_values(array_diff(
+            array_map('intval', $recipientUserIds),
+            array_map('intval', $joinedAdminIds)
+        ));
+
+        if (empty($remainingIds)) {
+            Log::channel('telnyx')->info('DTMF 9: no remaining recipients to invite', [
+                'call_log_id' => $callLog->id,
+            ]);
+            return;
+        }
+
+        $remainingUsers = User::whereIn('id', $remainingIds)
+            ->whereNotNull('cell_phone')
+            ->where('cell_phone', '!=', '')
+            ->get();
+
+        $apiKey = config('services.telnyx.api_key');
+        $connectionId = config('services.telnyx.connection_id');
+        $telnyxFrom = config('services.telnyx.from');
+        // Show the original caller's number on the recipient's native phone UI
+        // (caller-ID passthrough). Falls back to our Telnyx number if the caller's
+        // number is unavailable. Telnyx allows arbitrary E.164 in `from`; STIR/SHAKEN
+        // attestation will be C since we don't own the number, but the recipient sees
+        // who is actually calling instead of "GS Construction".
+        $callerIdFrom = $callLog->from_number ?: $telnyxFrom;
+        $timeout = 15;
+
+        $newCallControlIds = $metadata['admin_call_control_ids'] ?? [];
+
+        foreach ($remainingUsers as $user) {
+            $phone = $user->cell_phone;
+            if (! str_starts_with($phone, '+')) {
+                $digits = preg_replace('/\D/', '', $phone);
+                if (strlen($digits) === 10) {
+                    $phone = '+1' . $digits;
+                } elseif (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+                    $phone = '+' . $digits;
+                }
+            }
+
+            try {
+                $response = Http::withToken($apiKey)
+                    ->post('https://api.telnyx.com/v2/calls', [
+                        'connection_id' => $connectionId,
+                        'to' => $phone,
+                        'from' => $callerIdFrom,
+                        'from_display_name' => $callLog->caller_name ?: 'Conference Invite',
+                        'timeout_secs' => $timeout,
+                        'client_state' => base64_encode(json_encode([
+                            'action' => 'admin_ring',
+                            'call_log_id' => $callLog->id,
+                            'incoming_call_control_id' => $callLog->call_control_id,
+                            'admin_user_id' => $user->id,
+                        ])),
+                        'webhook_url' => $this->telnyxBaseUrl() . '/webhooks/telnyx/voice',
+                    ]);
+
+                if ($response->successful()) {
+                    $newId = $response->json('data.call_control_id');
+                    if ($newId) {
+                        $newCallControlIds[] = $newId;
+                    }
+                    Log::channel('telnyx')->info('DTMF 9: invited recipient to conference', [
+                        'call_log_id' => $callLog->id,
+                        'admin_user_id' => $user->id,
+                        'phone' => $phone,
+                    ]);
+                } else {
+                    Log::channel('telnyx')->error('DTMF 9: failed to invite recipient', [
+                        'admin_user_id' => $user->id,
+                        'error' => $response->json(),
+                    ]);
+                }
+            } catch (\Exception $e) {
+                Log::channel('telnyx')->error('DTMF 9: exception inviting recipient', [
+                    'admin_user_id' => $user->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        $metadata['admin_call_control_ids'] = array_values(array_unique($newCallControlIds));
+        $callLog->update(['metadata' => $metadata]);
+    }
+
+    /**
      * Handle premium AMD greeting ended event.
      * Logs whether a beep was detected (useful for diagnostics).
      */
@@ -1860,6 +2190,9 @@ class TelnyxWebhookController extends Controller
         $apiKey = config('services.telnyx.api_key');
         $connectionId = config('services.telnyx.connection_id');
         $telnyxFrom = config('services.telnyx.from');
+        // Show the original caller on the recipient's native phone UI (caller-ID
+        // passthrough). Falls back to our Telnyx number when unavailable.
+        $callerIdFrom = $originalCaller ?: ($callLog?->from_number ?: $telnyxFrom);
         // Use a short timeout so admin phones stop ringing well before
         // carrier voicemail picks up (~25s). This ensures callers always
         // reach our Telnyx Voicemail Menu instead of personal voicemail.
@@ -1884,7 +2217,7 @@ class TelnyxWebhookController extends Controller
                     ->post('https://api.telnyx.com/v2/calls', [
                         'connection_id' => $connectionId,
                         'to' => $phone,
-                        'from' => $telnyxFrom,
+                        'from' => $callerIdFrom,
                         'from_display_name' => $callLog?->caller_name ?: ($originalCaller ?? 'Incoming Call'),
                         'timeout_secs' => $timeout,
                         'client_state' => base64_encode(json_encode([
@@ -2699,6 +3032,92 @@ class TelnyxWebhookController extends Controller
         $numbers = array_map('trim', explode(',', $destinations));
 
         return $numbers[0] ?? null;
+    }
+
+    /**
+     * Create a Telnyx conference seeded with the given call leg.
+     * Returns the conference id, or null on failure.
+     */
+    protected function createConference(string $name, string $beneficiaryCallControlId): ?string
+    {
+        $apiKey = config('services.telnyx.api_key');
+        if (! $apiKey) {
+            return null;
+        }
+
+        try {
+            $response = Http::withToken($apiKey)
+                ->post('https://api.telnyx.com/v2/conferences', [
+                    'name' => $name,
+                    'call_control_id' => $beneficiaryCallControlId,
+                    'comfort_noise' => true,
+                    'beep_enabled' => 'on_enter_exit',
+                ]);
+
+            if ($response->successful()) {
+                $id = $response->json('data.id');
+                Log::channel('telnyx')->info('Conference created', [
+                    'name' => $name,
+                    'conference_id' => $id,
+                    'beneficiary_call_control_id' => $beneficiaryCallControlId,
+                ]);
+                return $id;
+            }
+
+            Log::channel('telnyx')->error('Conference create failed', [
+                'name' => $name,
+                'status' => $response->status(),
+                'error' => $response->json(),
+            ]);
+        } catch (\Exception $e) {
+            Log::channel('telnyx')->error('Conference create exception', [
+                'name' => $name,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return null;
+    }
+
+    /**
+     * Join an existing Telnyx conference with a new call leg.
+     */
+    protected function joinConference(string $conferenceId, string $callControlId): bool
+    {
+        $apiKey = config('services.telnyx.api_key');
+        if (! $apiKey) {
+            return false;
+        }
+
+        try {
+            $response = Http::withToken($apiKey)
+                ->post("https://api.telnyx.com/v2/conferences/{$conferenceId}/actions/join", [
+                    'call_control_id' => $callControlId,
+                ]);
+
+            if ($response->successful()) {
+                Log::channel('telnyx')->info('Joined conference', [
+                    'conference_id' => $conferenceId,
+                    'call_control_id' => $callControlId,
+                ]);
+                return true;
+            }
+
+            Log::channel('telnyx')->error('Conference join failed', [
+                'conference_id' => $conferenceId,
+                'call_control_id' => $callControlId,
+                'status' => $response->status(),
+                'error' => $response->json(),
+            ]);
+        } catch (\Exception $e) {
+            Log::channel('telnyx')->error('Conference join exception', [
+                'conference_id' => $conferenceId,
+                'call_control_id' => $callControlId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return false;
     }
 
     /**

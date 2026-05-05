@@ -101,9 +101,27 @@ class SmsConversation extends Component
     /** @return array<string, string> */
     public function getListeners(): array
     {
+        $userId = auth()->id();
+
         return [
             'echo-private:sms.notifications,SmsMessageReceived' => 'handleIncomingMessage',
+            "echo-private:App.Models.User.{$userId},InboundCallJoined" => 'handleInboundCallJoined',
         ];
+    }
+
+    /**
+     * Real-time listener: this user has just joined an inbound conference.
+     * Surface the "On Call ... Add to Call" bar so they can invite others.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public function handleInboundCallJoined(array $payload = []): void
+    {
+        $callLogId = (int) ($payload['call_log_id'] ?? 0);
+        if ($callLogId > 0) {
+            $this->activeCallLogId = $callLogId;
+            unset($this->conferenceInvitableContacts);
+        }
     }
 
     /**
