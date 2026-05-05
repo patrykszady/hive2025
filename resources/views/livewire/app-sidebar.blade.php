@@ -99,7 +99,7 @@
                             <flux:sidebar.item wire:navigate.hover href="/vendor_match" icon="receipt-percent">Vendor Match</flux:sidebar.item>
                         @endif
                         @if($canViewVendorDocs)
-                            <flux:sidebar.item wire:navigate.hover href="/vendor_docs" icon="eye-slash">Vendor Docs</flux:sidebar.item>
+                            <flux:sidebar.item wire:navigate.hover href="/vendor_docs" icon="eye-slash">Vendor Documents</flux:sidebar.item>
                         @endif
                     </flux:sidebar.group>
                 @endif

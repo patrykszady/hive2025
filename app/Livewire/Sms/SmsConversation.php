@@ -202,6 +202,7 @@ class SmsConversation extends Component
     {
         return $this->smsMessages
             ->flatMap(fn (SmsMessage $msg) => $msg->media_urls ?? [])
+            ->filter(fn (string $url) => SmsMessage::isImageUrl($url))
             ->values()
             ->all();
     }

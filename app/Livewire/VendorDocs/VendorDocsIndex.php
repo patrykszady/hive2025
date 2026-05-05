@@ -33,7 +33,7 @@ class VendorDocsIndex extends Component
             ->get();
     }
 
-    #[Title('Certificates')]
+    #[Title('Vendor Documents')]
     public function render()
     {
         $this->authorize('viewAny', VendorDoc::class);

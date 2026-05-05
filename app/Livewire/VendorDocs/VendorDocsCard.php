@@ -31,14 +31,16 @@ class VendorDocsCard extends Component
     public function render()
     {
         $this->authorize('create', VendorDoc::class);
-        $docs = $this->vendor->vendor_docs()
-            ->whereIn('type', ['general', 'workers'])
+        $docs = VendorDoc::withoutGlobalScopes()
+            ->where('vendor_id', $this->vendor->id)
             ->orderByDesc('expiration_date')
             ->with('agent')
             ->get();
 
         $this->vendor_docs = $docs
-            ->groupBy('type')
+            ->groupBy(function (VendorDoc $doc) {
+                return strtolower((string) ($doc->getRawOriginal('type') ?? $doc->type));
+            })
             ->map(fn ($group) => $group->first())
             ->values();
 

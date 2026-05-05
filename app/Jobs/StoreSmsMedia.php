@@ -51,13 +51,28 @@ class StoreSmsMedia implements ShouldQueue
                     continue;
                 }
 
-                $contentType = $response->header('Content-Type');
+                $contentType = strtolower((string) $response->header('Content-Type'));
                 $extension = match (true) {
                     str_contains($contentType, 'jpeg'), str_contains($contentType, 'jpg') => 'jpg',
                     str_contains($contentType, 'png') => 'png',
                     str_contains($contentType, 'gif') => 'gif',
                     str_contains($contentType, 'webp') => 'webp',
+                    str_contains($contentType, 'heic') => 'heic',
+                    str_contains($contentType, 'heif') => 'heif',
                     str_contains($contentType, 'mp4') => 'mp4',
+                    str_contains($contentType, 'quicktime') => 'mov',
+                    str_contains($contentType, '3gpp'), str_contains($contentType, '3gp') => '3gp',
+                    str_contains($contentType, 'webm') => 'webm',
+                    str_contains($contentType, 'matroska') => 'mkv',
+                    str_contains($contentType, 'video/ogg') => 'ogv',
+                    str_contains($contentType, 'video') => 'mp4',
+                    str_contains($contentType, 'mpeg') && str_contains($contentType, 'audio') => 'mp3',
+                    str_contains($contentType, 'audio/mp4') => 'm4a',
+                    str_contains($contentType, 'aac') => 'aac',
+                    str_contains($contentType, 'wav') => 'wav',
+                    str_contains($contentType, 'audio/ogg') => 'ogg',
+                    str_contains($contentType, 'amr') => 'amr',
+                    str_contains($contentType, 'audio') => 'mp3',
                     str_contains($contentType, 'pdf') => 'pdf',
                     default => 'bin',
                 };

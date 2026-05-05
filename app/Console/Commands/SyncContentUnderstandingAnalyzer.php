@@ -8,12 +8,12 @@ use Illuminate\Console\Command;
 class SyncContentUnderstandingAnalyzer extends Command
 {
     protected $signature = 'content-understanding:sync-analyzer
-                            {type=receipt             : Analyzer type to sync: receipt or coi}
+                            {type=receipt             : Analyzer type to sync: receipt, coi, material_order, or state_license}
                             {--base=prebuilt-document  : Prebuilt analyzer to use as base schema}
                             {--model=gpt-4.1           : Completion model name for the analyzer}
                             {--dry-run                 : Print the schema that would be sent without calling the API}';
 
-    protected $description = 'Create or update a Content Understanding analyzer schema (receipt or COI).';
+    protected $description = 'Create or update a Content Understanding analyzer schema (receipt, coi, material_order, or state_license).';
 
     public function handle(ContentUnderstandingService $cu): int
     {
@@ -21,14 +21,15 @@ class SyncContentUnderstandingAnalyzer extends Command
         $baseId    = $this->option('base');
         $model     = $this->option('model');
 
-        if (! in_array($type, ['receipt', 'coi', 'material_order'], true)) {
-            $this->error("Unknown analyzer type '{$type}'. Use 'receipt', 'coi', or 'material_order'.");
+        if (! in_array($type, ['receipt', 'coi', 'material_order', 'state_license'], true)) {
+            $this->error("Unknown analyzer type '{$type}'. Use 'receipt', 'coi', 'material_order', or 'state_license'.");
             return self::FAILURE;
         }
 
         $analyzerId = match ($type) {
             'coi'            => config('services.azure_cu.analyzer_id_coi'),
             'material_order' => config('services.azure_cu.analyzer_id_material_order'),
+            'state_license'  => config('services.azure_cu.analyzer_id_state_license'),
             default          => config('services.azure_cu.analyzer_id'),
         };
 
@@ -41,6 +42,7 @@ class SyncContentUnderstandingAnalyzer extends Command
         $definition = match ($type) {
             'coi'            => $this->buildCoiDefinition($model),
             'material_order' => $this->buildMaterialOrderDefinition($model),
+            'state_license'  => $this->buildStateLicenseDefinition($model),
             default          => $this->buildReceiptDefinition($model, $baseFields),
         };
 
@@ -633,6 +635,84 @@ class SyncContentUnderstandingAnalyzer extends Command
                     'Continuation text = continuation of the previous item, NOT a new item.',
                     'Follow visual reading order across all table columns left-to-right.',
                     'Only create an item when you see a new product row with a product code/SKU and a price.',
+                ]),
+                'fields'      => $fields,
+            ],
+        ];
+    }
+
+    private function buildStateLicenseDefinition(string $model): array
+    {
+        $fields = [
+            'issuing_authority' => [
+                'type'        => 'string',
+                'description' => 'The government body that issued the license, exactly as printed (e.g. "Illinois Department of Public Health", "IDPH"). Return null if not present.',
+                'method'      => 'extract',
+            ],
+            'state' => [
+                'type'        => 'string',
+                'description' => 'Two-letter US state code of the issuing authority (e.g. "IL"). Infer from the issuing authority text if not explicitly printed.',
+                'method'      => 'generate',
+            ],
+            'license_type_code' => [
+                'type'        => 'string',
+                'description' => 'The license-type prefix shown before the dash in the license number. For Illinois plumbing documents this is "055" (Plumbing Contractor Registration) or "058" (Plumber). Examples: license number "058-195348" -> "058"; "055-040182" -> "055". Return only the digits before the first dash.',
+                'method'      => 'generate',
+            ],
+            'license_label' => [
+                'type'        => 'string',
+                'description' => 'Human-readable license type as printed on the document (e.g. "Plumber", "Plumbing Contractor Registration", "Apprentice Plumber"). Return the most descriptive label found.',
+                'method'      => 'extract',
+            ],
+            'category' => [
+                'type'        => 'string',
+                'description' => 'Sub-category, class, or designation if present (e.g. "Category 6A", "Class A"). Return null if not present.',
+                'method'      => 'extract',
+            ],
+            'license_number' => [
+                'type'        => 'string',
+                'description' => 'The full license/registration number including the type prefix and dash (e.g. "058-195348", "055-040182"). Extract exactly as printed.',
+                'method'      => 'extract',
+            ],
+            'licensee_name' => [
+                'type'        => 'string',
+                'description' => 'The full name of the individual or entity the license is issued to, exactly as printed (e.g. "JAROSLAW POTAPA", "ACCOMPLISHED J PLUMBING INC"). For 058 individual licenses this is a person; for 055 contractor registrations this is the company name.',
+                'method'      => 'extract',
+            ],
+            'business_name' => [
+                'type'        => 'string',
+                'description' => 'The legal business / company name if the license belongs to a company (typical for 055 Plumbing Contractor Registrations). For an individual 058 license card, return null unless an employer/company is explicitly printed.',
+                'method'      => 'extract',
+            ],
+            'address' => [
+                'type'        => 'string',
+                'description' => 'Full mailing address printed on the license, combined into one newline-separated string (street, city, state, ZIP). Examples: "737 N GIBBONS AVE\nARLINGTON HTS, IL 60004", "930 E NORTHWEST HWY\nMT PROSPECT, IL 60056".',
+                'method'      => 'extract',
+            ],
+            'issue_date' => [
+                'type'        => 'date',
+                'description' => 'Date the license was originally issued or most recently renewed. Look for labels like "Issue Date", "Issued", "Original Issue Date".',
+                'method'      => 'extract',
+            ],
+            'expiration_date' => [
+                'type'        => 'date',
+                'description' => 'Date the license expires. Look for labels like "Expires", "Expiration Date", "Valid Through".',
+                'method'      => 'extract',
+            ],
+        ];
+
+        return [
+            'description'    => 'Hive State Trade License analyzer (Illinois plumbing 055/058 and similar state-issued trade licenses).',
+            'baseAnalyzerId' => 'prebuilt-document',
+            'models'         => [
+                'completion' => $model,
+            ],
+            'fieldSchema'    => [
+                'name'        => 'HiveStateLicenseSchema',
+                'description' => implode(' ', [
+                    'Schema for state-issued trade licenses (e.g. Illinois IDPH plumbing licenses).',
+                    'Two common variants: an individual plumber ID card (license type 058) and a Plumbing Contractor Registration (license type 055).',
+                    'Always extract the full license number with its type prefix, both the licensee and any business name, the issue and expiration dates, and the issuing authority.',
                 ]),
                 'fields'      => $fields,
             ],

@@ -410,18 +410,22 @@ class Project extends Model
             return $this->latestStatus;
         }
 
-        if ($this->relationLoaded('statuses')) {
-            return $this->statuses
-                ->where('belongs_to_vendor_id', $vendorId)
-                ->sortByDesc(fn ($s) => [$s->start_date?->timestamp ?? 0, $s->id])
-                ->first() ?? $this->latestStatus;
-        }
-
-        return $this->statuses()
+        $latestForVendor = ProjectStatus::withoutGlobalScopes()
+            ->where('project_id', $this->id)
             ->where('belongs_to_vendor_id', $vendorId)
             ->orderByDesc('start_date')
             ->orderByDesc('id')
-            ->first() ?? $this->latestStatus;
+            ->first();
+
+        if ($latestForVendor) {
+            return $latestForVendor;
+        }
+
+        return ProjectStatus::withoutGlobalScopes()
+            ->where('project_id', $this->id)
+            ->orderByDesc('start_date')
+            ->orderByDesc('id')
+            ->first();
     }
 
     public function scopeStatus($query, $status)

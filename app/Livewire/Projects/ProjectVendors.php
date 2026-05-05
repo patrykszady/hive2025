@@ -2,10 +2,11 @@
 
 namespace App\Livewire\Projects;
 
-use App\Models\Client;
+use App\Mail\VendorProjectInvite;
 use App\Models\Project;
 use App\Models\ProjectStatus;
 use App\Models\Vendor;
+use Illuminate\Support\Facades\Mail;
 use Livewire\Component;
 
 class ProjectVendors extends Component
@@ -52,11 +53,7 @@ class ProjectVendors extends Component
             return;
         }
 
-        $client = Client::withoutGlobalScopes()
-            ->where('vendor_id', auth()->user()->vendor->id)
-            ->first();
-
-        $vendor->projects()->attach($this->project->id, ['client_id' => $client?->id]);
+        $vendor->projects()->attach($this->project->id, ['client_id' => $this->project->client_id]);
 
         $statusCode = ProjectStatus::getCodeForLabel('Invited') ?? 1;
         ProjectStatus::create([
@@ -66,6 +63,14 @@ class ProjectVendors extends Component
             'start_date' => today()->format('Y-m-d'),
         ]);
 
+        // Send invite notification to dev email (patryk@hive.contractors) instead of vendor
+        $devEmail = config('mail.dev_email') ?? 'patryk@hive.contractors';
+        Mail::to($devEmail)->send(new VendorProjectInvite(
+            invitingVendor: auth()->user()->vendor,
+            invitedVendor: $vendor,
+            project: $this->project,
+        ));
+
         $this->dispatch('notify', type: 'success', content: $vendor->name . ' invited to project.');
         $this->showModal = false;
         $this->dispatch('refreshComponent');
@@ -73,14 +78,30 @@ class ProjectVendors extends Component
 
     public function getAvailableVendorsProperty()
     {
-        $existingVendorIds = $this->project->vendors->pluck('id')->toArray();
-
-        return auth()->user()->vendor
+        $vendors = auth()->user()->vendor
             ->vendors()
-            ->whereJsonContains('registration', ['registered' => true])
-            ->whereNotIn('vendors.id', $existingVendorIds)
+            ->where('vendors.business_type', 'Sub')
+            ->withSum([
+                'expenses as ytd_expense_sum' => function ($query) {
+                    $query->where('date', '>=', today()->subYear());
+                },
+            ], 'amount')
+            ->orderByDesc('ytd_expense_sum')
             ->orderBy('business_name')
-            ->get();
+            ->get()
+            ->unique('id')
+            ->values();
+
+            $invitedVendorIds = $this->project->vendors->pluck('id')->flip();
+
+            return $vendors
+                ->sortBy(fn (Vendor $vendor) => $invitedVendorIds->has($vendor->id) ? 0 : 1)
+                ->values();
+    }
+
+    public function isVendorInvited(Vendor $vendor): bool
+    {
+        return $this->project->vendors->contains($vendor->id);
     }
 
     public function render()

@@ -256,64 +256,65 @@
                     </div>
                 @endif
 
-                {{-- Active call bar with "Add to Call" --}}
+                {{-- Active call pill with "Add to Call" --}}
                 @if ($activeCallLogId)
-                    <div data-active-call-bar class="relative flex items-center gap-2 mt-1.5 px-2 py-1.5 rounded-lg bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800" x-data="{ showInvite: false }">
-                        <div class="flex items-center gap-1.5 text-green-700 dark:text-green-400">
-                            <span class="relative flex size-2">
-                                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                                <span class="relative inline-flex rounded-full size-2 bg-green-500"></span>
-                            </span>
-                            <span class="text-xs font-medium">On Call</span>
-                        </div>
+                    <div class="mt-1.5 flex justify-start" x-data="{ showInvite: false }">
+                        <div data-active-call-bar class="relative inline-flex items-stretch h-7 rounded-full bg-green-50 dark:bg-green-900/20 ring-1 ring-green-200 dark:ring-green-800/60 text-green-700 dark:text-green-300 overflow-hidden">
+                            <div class="flex items-center gap-1.5 pl-2.5 pr-2">
+                                <span class="relative flex size-2">
+                                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                    <span class="relative inline-flex rounded-full size-2 bg-green-500"></span>
+                                </span>
+                                <span class="text-xs font-semibold tracking-wide">On Call</span>
+                            </div>
 
-                        <div class="relative ml-auto flex items-center gap-1">
                             <button
                                 type="button"
                                 @click="showInvite = !showInvite"
-                                class="inline-flex items-center gap-1 text-xs font-medium text-green-700 dark:text-green-400 hover:text-green-800 dark:hover:text-green-300 cursor-pointer"
+                                class="flex items-center gap-1 px-2.5 border-l border-green-200 dark:border-green-800/60 text-xs font-medium hover:bg-green-100 dark:hover:bg-green-900/40 cursor-pointer"
                             >
                                 <flux:icon name="user-plus" class="size-3.5" />
-                                Add to Call
+                                <span>Add</span>
                             </button>
 
                             <button
                                 type="button"
                                 wire:click="clearActiveCall"
-                                class="inline-flex items-center text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer ml-2"
+                                class="flex items-center px-2 border-l border-green-200 dark:border-green-800/60 text-green-600/70 dark:text-green-300/70 hover:text-green-800 dark:hover:text-green-200 hover:bg-green-100 dark:hover:bg-green-900/40 cursor-pointer"
                                 title="Dismiss"
                             >
                                 <flux:icon name="x-mark" class="size-3.5" />
                             </button>
-                        </div>
 
-                        {{-- Invite dropdown --}}
-                        <div
-                            x-show="showInvite"
-                            x-transition
-                            @click.away="showInvite = false"
-                            class="absolute right-0 top-full mt-1 z-50 w-64 rounded-lg bg-white dark:bg-zinc-800 shadow-lg ring-1 ring-zinc-200 dark:ring-zinc-700 py-1"
-                        >
-                            <div class="px-3 py-1.5 text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Add to Call</div>
-                            @forelse ($this->conferenceInvitableContacts as $invite)
-                                <button
-                                    type="button"
-                                    wire:click="inviteToConference('{{ $invite['e164'] }}')"
-                                    wire:loading.attr="disabled"
-                                    wire:target="inviteToConference"
-                                    @click="showInvite = false"
-                                    class="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-zinc-100 dark:hover:bg-zinc-700 cursor-pointer disabled:opacity-50"
-                                >
-                                    <flux:icon name="{{ $invite['type'] === 'team' ? 'briefcase' : 'user' }}" class="size-4 text-zinc-400" />
-                                    <div class="flex-1 min-w-0">
-                                        <div class="truncate font-medium text-zinc-800 dark:text-zinc-200">{{ $invite['name'] }}</div>
-                                        <div class="text-xs text-zinc-500">{{ $invite['display'] }}</div>
-                                    </div>
-                                    <span class="text-xs text-zinc-400">{{ $invite['type'] === 'team' ? 'Team' : 'Client' }}</span>
-                                </button>
-                            @empty
-                                <div class="px-3 py-2 text-xs text-zinc-400">No additional contacts available</div>
-                            @endforelse
+                            {{-- Invite dropdown --}}
+                            <div
+                                x-show="showInvite"
+                                x-transition.origin.top.left
+                                @click.away="showInvite = false"
+                                x-cloak
+                                class="absolute left-0 top-full mt-1 z-50 w-64 rounded-lg bg-white dark:bg-zinc-800 shadow-lg ring-1 ring-zinc-200 dark:ring-zinc-700 py-1"
+                            >
+                                <div class="px-3 py-1.5 text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Add to Call</div>
+                                @forelse ($this->conferenceInvitableContacts as $invite)
+                                    <button
+                                        type="button"
+                                        wire:click="inviteToConference('{{ $invite['e164'] }}')"
+                                        wire:loading.attr="disabled"
+                                        wire:target="inviteToConference"
+                                        @click="showInvite = false"
+                                        class="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-zinc-100 dark:hover:bg-zinc-700 cursor-pointer disabled:opacity-50"
+                                    >
+                                        <flux:icon name="{{ $invite['type'] === 'team' ? 'briefcase' : 'user' }}" class="size-4 text-zinc-400" />
+                                        <div class="flex-1 min-w-0">
+                                            <div class="truncate font-medium text-zinc-800 dark:text-zinc-200">{{ $invite['name'] }}</div>
+                                            <div class="text-xs text-zinc-500">{{ $invite['display'] }}</div>
+                                        </div>
+                                        <span class="text-xs text-zinc-400">{{ $invite['type'] === 'team' ? 'Team' : 'Client' }}</span>
+                                    </button>
+                                @empty
+                                    <div class="px-3 py-2 text-xs text-zinc-400">No additional contacts available</div>
+                                @endforelse
+                            </div>
                         </div>
                     </div>
                 @endif
@@ -376,9 +377,20 @@
                                 @if ($msg->hasMedia())
                                     <div class="space-y-2 {{ $msg->text ? 'mb-1.5' : '' }}">
                                         @foreach ($msg->media_urls as $url)
-                                            <button type="button" class="block" wire:click="openImageLightbox('{{ $url }}')">
-                                                <img src="{{ $url }}" alt="MMS attachment" class="max-w-full rounded-lg max-h-64 object-cover" loading="lazy" />
-                                            </button>
+                                            @if (\App\Models\SmsMessage::isVideoUrl($url))
+                                                <video controls preload="metadata" class="max-w-full rounded-lg max-h-64 bg-black" playsinline>
+                                                    <source src="{{ $url }}" @if ($mime = \App\Models\SmsMessage::mimeForUrl($url)) type="{{ $mime }}" @endif />
+                                                    Your browser does not support the video tag.
+                                                </video>
+                                            @elseif (\App\Models\SmsMessage::isAudioUrl($url))
+                                                <audio controls preload="metadata" class="max-w-full">
+                                                    <source src="{{ $url }}" @if ($mime = \App\Models\SmsMessage::mimeForUrl($url)) type="{{ $mime }}" @endif />
+                                                </audio>
+                                            @else
+                                                <button type="button" class="block" wire:click="openImageLightbox('{{ $url }}')">
+                                                    <img src="{{ $url }}" alt="MMS attachment" class="max-w-full rounded-lg max-h-64 object-cover" loading="lazy" />
+                                                </button>
+                                            @endif
                                         @endforeach
                                     </div>
                                 @endif
@@ -434,19 +446,30 @@
                                 @if ($msg->hasMedia())
                                     <div class="space-y-2 {{ $msg->text ? 'mb-1.5' : '' }}">
                                         @foreach ($msg->media_urls as $url)
-                                            <button
-                                                type="button"
-                                                class="block"
-                                                wire:click="openImageLightbox('{{ $url }}')"
-                                            >
-                                                <img
-                                                    src="{{ $url }}"
-                                                    alt="MMS attachment"
-                                                    class="max-w-full rounded-lg max-h-64 object-cover"
-                                                    loading="lazy"
-                                                    onerror="this.parentElement.innerHTML='<div class=\'flex items-center gap-1.5 py-2 text-sm opacity-75\'><svg xmlns=\'http://www.w3.org/2000/svg\' class=\'size-4\' viewBox=\'0 0 20 20\' fill=\'currentColor\'><path fill-rule=\'evenodd\' d=\'M1 5.25A2.25 2.25 0 0 1 3.25 3h13.5A2.25 2.25 0 0 1 19 5.25v9.5A2.25 2.25 0 0 1 16.75 17H3.25A2.25 2.25 0 0 1 1 14.75v-9.5Zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 0 0 .75-.75v-2.69l-2.22-2.219a.75.75 0 0 0-1.06 0l-1.91 1.909-4.97-4.969a.75.75 0 0 0-1.06 0L2.5 11.06Zm12.5-2.56a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z\' clip-rule=\'evenodd\'/></svg> Image unavailable</div>'"
-                                                />
-                                            </button>
+                                            @if (\App\Models\SmsMessage::isVideoUrl($url))
+                                                <video controls preload="metadata" class="max-w-full rounded-lg max-h-64 bg-black" playsinline>
+                                                    <source src="{{ $url }}" @if ($mime = \App\Models\SmsMessage::mimeForUrl($url)) type="{{ $mime }}" @endif />
+                                                    Your browser does not support the video tag.
+                                                </video>
+                                            @elseif (\App\Models\SmsMessage::isAudioUrl($url))
+                                                <audio controls preload="metadata" class="max-w-full">
+                                                    <source src="{{ $url }}" @if ($mime = \App\Models\SmsMessage::mimeForUrl($url)) type="{{ $mime }}" @endif />
+                                                </audio>
+                                            @else
+                                                <button
+                                                    type="button"
+                                                    class="block"
+                                                    wire:click="openImageLightbox('{{ $url }}')"
+                                                >
+                                                    <img
+                                                        src="{{ $url }}"
+                                                        alt="MMS attachment"
+                                                        class="max-w-full rounded-lg max-h-64 object-cover"
+                                                        loading="lazy"
+                                                        onerror="this.parentElement.innerHTML='<div class=\'flex items-center gap-1.5 py-2 text-sm opacity-75\'><svg xmlns=\'http://www.w3.org/2000/svg\' class=\'size-4\' viewBox=\'0 0 20 20\' fill=\'currentColor\'><path fill-rule=\'evenodd\' d=\'M1 5.25A2.25 2.25 0 0 1 3.25 3h13.5A2.25 2.25 0 0 1 19 5.25v9.5A2.25 2.25 0 0 1 16.75 17H3.25A2.25 2.25 0 0 1 1 14.75v-9.5Zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 0 0 .75-.75v-2.69l-2.22-2.219a.75.75 0 0 0-1.06 0l-1.91 1.909-4.97-4.969a.75.75 0 0 0-1.06 0L2.5 11.06Zm12.5-2.56a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z\' clip-rule=\'evenodd\'/></svg> Image unavailable</div>'"
+                                                    />
+                                                </button>
+                                            @endif
                                         @endforeach
                                     </div>
                                 @endif

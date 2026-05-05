@@ -35,9 +35,25 @@ trait ProcessesVendorDocs
         $normalizedFilePath = ltrim($filePath, 'files/');
 
         try {
-            // 1. Extract OCR data
-            $insuranceInfo = $this->extractDataFromFile($normalizedFilePath, $docType);
-            
+            // 1. Extract OCR data (auto-classifies COI vs state license)
+            $extraction = $this->extractDataFromFile($normalizedFilePath, $docType);
+            $docKind       = $extraction['kind'];
+            $insuranceInfo = $extraction['fields'];
+
+            // 1b. State license short-circuit — handled by its own pipeline.
+            if ($docKind === 'state_license') {
+                return $this->processStateLicense(
+                    $insuranceInfo,
+                    $normalizedFilePath,
+                    $docType,
+                    $vendorId,
+                    $belongsToVendorId,
+                    $messageId,
+                    $grantId,
+                    $sourceLabel
+                );
+            }
+
             // 2. Validate required fields have sufficient confidence and data
             $requiredFields = [
                 'insured_name' => 'Insured Name',
@@ -145,11 +161,18 @@ trait ProcessesVendorDocs
             if ($newPolicyCreated) {
                 Storage::disk('files')->delete($normalizedFilePath);
                 return true;
-            } else {
-                // No policies created (duplicate) - cleanup permanent file but keep temp file for debugging
-                Storage::disk('files')->delete($newFilePath);
-                return false;
             }
+
+            if (! $missingRequiredFields) {
+                // All parsed policies already existed.
+                Storage::disk('files')->delete($newFilePath);
+                Storage::disk('files')->delete($normalizedFilePath);
+                return 'duplicate';
+            }
+
+            // Parsed policy data was incomplete; keep temp file for debugging.
+            Storage::disk('files')->delete($newFilePath);
+            return false;
 
         } catch (\Exception $e) {
             Log::channel('vendor_docs')->error('Exception during document processing', [
@@ -338,9 +361,9 @@ trait ProcessesVendorDocs
                     'expiration_date' => $expirationDate,
                     'type' => $type,
                     'vendor_id' => $vendorId,
-                    'belongs_to_vendor_id' => $belongsToVendorId,
                 ],
                 [
+                    'belongs_to_vendor_id' => $belongsToVendorId,
                     'effective_date' => $effectiveDate,
                     'doc_filename' => $fileName,
                 ]
@@ -359,15 +382,276 @@ trait ProcessesVendorDocs
         return $result;
     }
 
-    private function extractDataFromFile($filePath, $docType)
+    private function extractDataFromFile($filePath, $docType): array
     {
         /** @var \App\Services\ContentUnderstandingService $cu */
         $cu = app(\App\Services\ContentUnderstandingService::class);
-        $analyzerId = config('services.azure_cu.analyzer_id_coi');
 
-        $result = $cu->analyze($filePath, $docType, 'vendor_docs', $analyzerId);
+        // Run the COI analyzer first — handles the primary case AND gives us
+        // OCR text we can use to classify. The same OCR text is reused for
+        // license detection; we only re-call CU when classification flips.
+        $coiResult  = $cu->analyze($filePath, $docType, 'vendor_docs', config('services.azure_cu.analyzer_id_coi'));
+        $coiFields  = $coiResult['analyzeResult']['documents'][0]['fields'] ?? [];
+        $content    = $coiResult['analyzeResult']['content'] ?? '';
 
-        return $result['analyzeResult']['documents'][0]['fields'];
+        $kind = $this->classifyVendorDoc($content, $coiFields);
+
+        if ($kind === 'state_license') {
+            $licenseResult = $cu->analyze($filePath, $docType, 'vendor_docs', config('services.azure_cu.analyzer_id_state_license'));
+
+            return [
+                'kind'   => 'state_license',
+                'fields' => $licenseResult['analyzeResult']['documents'][0]['fields'] ?? [],
+            ];
+        }
+
+        return [
+            'kind'   => 'coi',
+            'fields' => $coiFields,
+        ];
+    }
+
+    /**
+     * Classify a vendor document as either an ACORD COI or a state-issued trade license
+     * based on OCR text and the COI analyzer's field output.
+     */
+    private function classifyVendorDoc(string $content, array $coiFields): string
+    {
+        $upper = strtoupper($content);
+
+        $licenseHints = [
+            'PLUMBER ID',
+            'ELECTRICAL',
+            'ELECTRICIAN',
+            'ELECTRICAL CONTRACTOR',
+            'DEPARTMENT OF PUBLIC HEALTH',
+            'DEPARTMENT OF PROFESSIONAL REGULATION',
+            'DEPARTMENT OF FINANCIAL AND PROFESSIONAL REGULATION',
+            'STATE BOARD',
+            'PUBLIC HEALTH',
+            'IDPH',
+            'PLUMBING CONTRACTOR',
+            'LICENSE, PERMIT, CERTIFICATION, REGISTRATION',
+            'I.D. NUMBER',
+        ];
+
+        $coiHints = [
+            'ACORD',
+            'CERTIFICATE OF LIABILITY INSURANCE',
+            'GENERAL LIABILITY',
+            "WORKERS COMPENSATION",
+            'CERTIFICATE HOLDER',
+        ];
+
+        $licenseScore = 0;
+        foreach ($licenseHints as $hint) {
+            if (str_contains($upper, $hint)) {
+                $licenseScore++;
+            }
+        }
+
+        $coiScore = 0;
+        foreach ($coiHints as $hint) {
+            if (str_contains($upper, $hint)) {
+                $coiScore++;
+            }
+        }
+
+        // Strong-signal license patterns, including plumbing and other state formats.
+        if (preg_match('/\b0(?:55|58)-\d{4,8}\b/', $upper)) {
+            $licenseScore += 2;
+        }
+
+        if (preg_match('/\b[A-Z0-9]{2,6}-\d{3,10}\b/', $upper)) {
+            $licenseScore += 1;
+        }
+
+        if (str_contains($upper, 'LICENSE') && (str_contains($upper, 'DEPARTMENT') || str_contains($upper, 'BOARD'))) {
+            $licenseScore += 1;
+        }
+
+        if ($licenseScore >= 2 && $licenseScore > $coiScore) {
+            return 'state_license';
+        }
+
+        return 'coi';
+    }
+
+    /**
+     * Process a state-issued trade license document (e.g. Illinois IDPH 055 / 058).
+     */
+    private function processStateLicense(
+        array $licenseFields,
+        string $normalizedFilePath,
+        string $docType,
+        $vendorId,
+        $belongsToVendorId,
+        $messageId,
+        $grantId,
+        $sourceLabel
+    ) {
+        $licenseNumber = $licenseFields['license_number']['valueString'] ?? null;
+        $licenseTypeCode = $licenseFields['license_type_code']['valueString'] ?? null;
+        $licenseLabel = $licenseFields['license_label']['valueString'] ?? null;
+        $expirationDate = $licenseFields['expiration_date']['valueDate']
+            ?? $licenseFields['expiration_date']['valueString']
+            ?? null;
+        $issueDate = $licenseFields['issue_date']['valueDate']
+            ?? $licenseFields['issue_date']['valueString']
+            ?? null;
+        $businessName = $licenseFields['business_name']['valueString'] ?? null;
+        $licenseeName = $licenseFields['licensee_name']['valueString'] ?? null;
+        $address = $licenseFields['address']['valueString'] ?? null;
+
+        if (empty($licenseTypeCode) && ! empty($licenseNumber) && preg_match('/^([A-Z0-9]{2,6})-/', (string) $licenseNumber, $matches)) {
+            $licenseTypeCode = strtoupper($matches[1]);
+        }
+
+        $resolvedLicenseType = $this->resolveStateLicenseType($licenseLabel, $licenseTypeCode);
+
+        if (empty($licenseNumber) || empty($expirationDate)) {
+            Log::channel('vendor_docs')->warning('State license missing required fields - sending to manual review', [
+                'file'              => $normalizedFilePath,
+                'license_number'    => $licenseNumber,
+                'license_type_code' => $licenseTypeCode,
+                'expiration_date'   => $expirationDate,
+                'message_id'        => $messageId,
+            ]);
+
+            if (isset($messageId) && isset($grantId)) {
+                $this->moveEmailBasedOnMatchingResults($messageId, $grantId, null, null);
+            }
+            return false;
+        }
+
+        // Resolve vendor: prefer business_name (055), fall back to licensee_name (058 individual cards).
+        $matchByBusiness = $this->matchBusinessNameAndReturnId(
+            $this->normalizeVendorName($businessName ?? ''),
+            $address ?? ''
+        );
+        $matchByLicensee = $matchByBusiness ?: $this->matchBusinessNameAndReturnId(
+            $this->normalizeVendorName($licenseeName ?? ''),
+            $address ?? ''
+        );
+
+        $matchedVendorId = $matchByLicensee ?: $vendorId;
+
+        if (! is_null($vendorId) && ! is_null($matchByLicensee) && (int) $vendorId !== (int) $matchByLicensee) {
+            Log::channel('vendor_docs')->warning('State license vendor mismatch', [
+                'file'                 => $normalizedFilePath,
+                'provided_vendor_id'   => $vendorId,
+                'matched_vendor_id'    => $matchByLicensee,
+                'business_name'        => $businessName,
+                'licensee_name'        => $licenseeName,
+            ]);
+            return false;
+        }
+
+        if (is_null($matchedVendorId)) {
+            Log::channel('vendor_docs')->error('State license: unable to determine vendor', [
+                'file'           => $normalizedFilePath,
+                'business_name'  => $businessName,
+                'licensee_name'  => $licenseeName,
+            ]);
+            if (isset($messageId) && isset($grantId)) {
+                $this->moveEmailBasedOnMatchingResults($messageId, $grantId, null, null);
+            }
+            return false;
+        }
+
+        // For state licenses the document belongs to the licensee themselves.
+        // If the caller supplied a belongs_to (e.g. UI upload by a GC), keep it,
+        // otherwise default to the licensee vendor.
+        $matchedBelongsToVendorId = $belongsToVendorId ?: $matchedVendorId;
+
+        // Permanent file copy
+        $labelSuffix = $sourceLabel ? '-'.$sourceLabel : '';
+        $typeForFilename = Str::slug($resolvedLicenseType ?: 'state-license');
+        $fileName = "{$matchedBelongsToVendorId}-{$matchedVendorId}-license-{$typeForFilename}-" . now()->format('Y-m-d-H-i-s') . "{$labelSuffix}.{$docType}";
+        $newFilePath = "vendor_docs/{$fileName}";
+
+        if (! $this->copyToPermanentLocation($normalizedFilePath, $newFilePath)) {
+            Log::channel('vendor_docs')->error('State license: failed to copy file to permanent location', [
+                'from' => $normalizedFilePath,
+                'to'   => $newFilePath,
+            ]);
+            return false;
+        }
+
+        $vendorDoc = VendorDoc::withoutGlobalScopes()
+            ->where('number', $licenseNumber)
+            ->where('vendor_id', $matchedVendorId)
+            ->first();
+
+        if (! $vendorDoc) {
+            $vendorDoc = VendorDoc::withoutGlobalScopes()->create([
+                'type'                 => $resolvedLicenseType,
+                'number'               => $licenseNumber,
+                'vendor_id'            => $matchedVendorId,
+                'belongs_to_vendor_id' => $matchedBelongsToVendorId,
+                'effective_date'       => $issueDate,
+                'expiration_date'      => $expirationDate,
+                'doc_filename'         => $fileName,
+            ]);
+        }
+
+        if (isset($messageId) && isset($grantId)) {
+            $this->moveEmailBasedOnMatchingResults($messageId, $grantId, $matchedVendorId, $matchedBelongsToVendorId);
+        }
+
+        if ($vendorDoc->wasRecentlyCreated) {
+            Storage::disk('files')->delete($normalizedFilePath);
+            return true;
+        }
+
+        $newEffectiveDate = ! empty($issueDate) ? substr((string) $issueDate, 0, 10) : null;
+        $newExpirationDate = ! empty($expirationDate) ? substr((string) $expirationDate, 0, 10) : null;
+
+        $currentEffectiveDate = optional($vendorDoc->effective_date)->format('Y-m-d');
+        $currentExpirationDate = optional($vendorDoc->expiration_date)->format('Y-m-d');
+
+        $needsUpdate = ((int) $vendorDoc->belongs_to_vendor_id !== (int) $matchedBelongsToVendorId)
+            || ((string) $vendorDoc->getRawOriginal('type') !== (string) $resolvedLicenseType)
+            || ($newEffectiveDate !== $currentEffectiveDate)
+            || ($newExpirationDate !== $currentExpirationDate);
+
+        if ($needsUpdate) {
+            $vendorDoc->belongs_to_vendor_id = $matchedBelongsToVendorId;
+            $vendorDoc->type = $resolvedLicenseType;
+            $vendorDoc->effective_date = $issueDate;
+            $vendorDoc->expiration_date = $expirationDate;
+            $vendorDoc->doc_filename = $fileName;
+            $vendorDoc->save();
+
+            Storage::disk('files')->delete($normalizedFilePath);
+            return 'updated';
+        }
+
+        // Existing unchanged row => duplicate upload.
+        Storage::disk('files')->delete($newFilePath);
+        Storage::disk('files')->delete($normalizedFilePath);
+        return 'duplicate';
+    }
+
+    private function resolveStateLicenseType(?string $licenseLabel, ?string $licenseTypeCode): string
+    {
+        $normalizedLabel = trim((string) $licenseLabel);
+
+        if ($normalizedLabel !== '') {
+            return Str::of($normalizedLabel)
+                ->replaceMatches('/\s+/', ' ')
+                ->trim()
+                ->title()
+                ->toString();
+        }
+
+        $normalizedCode = trim((string) $licenseTypeCode);
+
+        if ($normalizedCode !== '') {
+            return $normalizedCode;
+        }
+
+        return 'state_license';
     }
 
     //Resolve the vendor ID by name with a fallback to address.

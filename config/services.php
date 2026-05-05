@@ -18,6 +18,7 @@ return [
         'analyzer_id'    => env('AZURE_CU_ANALYZER_ID', 'hive_Receipts_1'),
         'analyzer_id_coi' => env('AZURE_CU_ANALYZER_ID_COI', 'hive_COI_1'),
         'analyzer_id_material_order' => env('AZURE_CU_ANALYZER_ID_MATERIAL_ORDER', 'hive_MaterialOrder_1'),
+        'analyzer_id_state_license' => env('AZURE_CU_ANALYZER_ID_STATE_LICENSE', 'hive_StateLicense_1'),
     ],
 
     'ocr_space' => [

@@ -1,20 +1,27 @@
 <div>
     <x-island-card
-        :heading="$view ? 'Insurance' : $vendor->name"
+        :heading="$view ? 'Vendor Documents' : $vendor->name"
         :href="!$view ? route('vendors.show', $vendor->id) : null"
         class="mt-4"
-        x-data="{ expanded: {{ !$view ? 'true' : 'false' }} }"
+        x-data="{ expanded: true }"
     >
         <x-slot:badge>
             @if(!$vendor_docs->isEmpty())
                 <div x-show="!expanded" x-cloak class="flex items-center gap-2">
                     @php
                         $currentDocs = $vendor_docs->filter(fn($doc) => $doc->expiration_date > today());
+                        $expiredDocs = $vendor_docs->filter(fn($doc) => $doc->expiration_date <= today());
                     @endphp
 
                     @if($currentDocs->count() > 0)
                         <flux:badge size="sm" color="green" inset="top bottom">
                             {{ $currentDocs->count() }} Current
+                        </flux:badge>
+                    @endif
+
+                    @if($expiredDocs->count() > 0)
+                        <flux:badge size="sm" color="red" inset="top bottom">
+                            {{ $expiredDocs->count() }} Expired
                         </flux:badge>
                     @endif
                 </div>
@@ -55,7 +62,7 @@
                                         href="{{ route('expenses.original_receipt', ['vendor_docs', $doc->doc_filename]) }}"
                                         target="_blank"
                                     >
-                                        {{$doc->type}}
+                                        {{$doc->type_label}}
                                     </a>
                                 </flux:table.cell>
                                 <flux:table.cell>

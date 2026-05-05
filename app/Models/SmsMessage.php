@@ -68,6 +68,64 @@ class SmsMessage extends Model
     }
 
     /**
+     * Detect if a media URL is a video by file extension.
+     */
+    public static function isVideoUrl(string $url): bool
+    {
+        $ext = strtolower(pathinfo(parse_url($url, PHP_URL_PATH) ?: $url, PATHINFO_EXTENSION));
+
+        return in_array($ext, ['mp4', 'mov', 'm4v', 'webm', 'ogv', '3gp', '3gpp', 'mkv', 'avi', 'qt'], true);
+    }
+
+    /**
+     * Detect if a media URL is an audio file by extension.
+     */
+    public static function isAudioUrl(string $url): bool
+    {
+        $ext = strtolower(pathinfo(parse_url($url, PHP_URL_PATH) ?: $url, PATHINFO_EXTENSION));
+
+        return in_array($ext, ['mp3', 'm4a', 'aac', 'wav', 'ogg', 'oga', 'amr', 'opus'], true);
+    }
+
+    /**
+     * Detect if a media URL is an image by extension (defaults to true for unknown).
+     */
+    public static function isImageUrl(string $url): bool
+    {
+        $ext = strtolower(pathinfo(parse_url($url, PHP_URL_PATH) ?: $url, PATHINFO_EXTENSION));
+
+        if ($ext === '') {
+            return true;
+        }
+
+        return in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif', 'svg'], true);
+    }
+
+    /**
+     * MIME type guess from a URL extension. Returns null if unknown.
+     */
+    public static function mimeForUrl(string $url): ?string
+    {
+        $ext = strtolower(pathinfo(parse_url($url, PHP_URL_PATH) ?: $url, PATHINFO_EXTENSION));
+
+        return match ($ext) {
+            'mp4', 'm4v' => 'video/mp4',
+            'mov', 'qt' => 'video/quicktime',
+            'webm' => 'video/webm',
+            'ogv' => 'video/ogg',
+            '3gp', '3gpp' => 'video/3gpp',
+            'mkv' => 'video/x-matroska',
+            'mp3' => 'audio/mpeg',
+            'm4a' => 'audio/mp4',
+            'aac' => 'audio/aac',
+            'wav' => 'audio/wav',
+            'ogg', 'oga' => 'audio/ogg',
+            'amr' => 'audio/amr',
+            default => null,
+        };
+    }
+
+    /**
      * Normalise media URLs so legacy absolute URLs become relative paths.
      * This ensures images display correctly regardless of the current domain.
      *
