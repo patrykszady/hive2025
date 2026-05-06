@@ -984,7 +984,7 @@
                 @keydown.left.window="$wire.showImageLightbox && !isZoomed && prev()"
                 @keydown.right.window="$wire.showImageLightbox && !isZoomed && next()"
                 @keydown.escape.window="$wire.showImageLightbox && closeLightbox()"
-                @keydown.space.window.prevent="$wire.showImageLightbox && currentIsVideo && toggleVideoPlayback()"
+                @keydown.space.window="if ($wire.showImageLightbox && currentIsVideo) { $event.preventDefault(); toggleVideoPlayback(); }"
                 class="relative"
                 :style="currentIsVideo
                     ? 'width:auto;max-width:96vw;height:auto;max-height:94vh;'
@@ -1057,7 +1057,7 @@
                         <svg class="size-5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
                     </button>
 
-                    <template x-if="currentIsVideo">
+                    <template x-if="$wire.showImageLightbox && currentIsVideo">
                         <video
                             :key="currentUrl"
                             :src="currentUrl"

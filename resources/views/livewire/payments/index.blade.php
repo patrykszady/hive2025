@@ -1,4 +1,27 @@
-<div class="max-w-4xl" wire:transition>
+<div class="max-w-3xl space-y-2" wire:transition>
+    @if($view === null)
+        <flux:card class="!px-5 !py-2 sm:hidden">
+            <flux:accordion transition>
+                <flux:accordion.item>
+                    <div class="flex items-center">
+                        <div class="flex-1 min-w-0">
+                            <flux:accordion.heading>
+                                <flux:heading size="lg">Filters</flux:heading>
+                            </flux:accordion.heading>
+                        </div>
+                    </div>
+                    <flux:accordion.content>
+                        @include('livewire.payments.partials.filter-fields', ['layout' => 'stacked'])
+                    </flux:accordion.content>
+                </flux:accordion.item>
+            </flux:accordion>
+        </flux:card>
+
+        <x-island-card heading="Filters" :separator="true" class="hidden sm:block">
+            @include('livewire.payments.partials.filter-fields', ['layout' => 'inline'])
+        </x-island-card>
+    @endif
+
     <x-island-card heading="Payments">
         <x-slot:actions>
         @if($view !== 'estimate.pdf')
@@ -58,7 +81,7 @@
                                     wire:navigate.hover
                                     href="{{route('payments.show', $payment->id)}}"
                                     variant="strong"
-                                    class="cursor-pointer"
+                                    class="cursor-pointer transition-colors hover:text-indigo-600 dark:hover:text-indigo-400"
                                     >
                                     {{ money($payment->amount) }}
                                 </flux:table.cell>
@@ -69,7 +92,7 @@
                                     <flux:table.cell
                                         wire:navigate.hover
                                         href="{{route('projects.show', $payment->project->id)}}"
-                                        class="cursor-pointer"
+                                        class="cursor-pointer transition-colors hover:text-indigo-600 dark:hover:text-indigo-400"
                                         >
                                         {{ $payment->project->name }}
                                     </flux:table.cell>
@@ -81,7 +104,7 @@
                                     <flux:table.cell
                                         wire:navigate.hover
                                         href="{{route('clients.show', $payment->project->client->id)}}"
-                                        class="cursor-pointer"
+                                        class="cursor-pointer transition-colors hover:text-indigo-600 dark:hover:text-indigo-400"
                                         >
                                         {{ $payment->project->client->last_names }}
                                     </flux:table.cell>

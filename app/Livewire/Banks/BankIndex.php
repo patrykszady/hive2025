@@ -42,7 +42,7 @@ class BankIndex extends Component
             'language' => 'en',
             'webhook' => env('PLAID_WEBHOOK'),
             'access_token' => $this->bank->plaid_access_token ?? null,
-            'products' => ['transactions'],
+            'products' => ['transactions', 'statements'],
             'statements' => [
                 'start_date' => Carbon::today()->subMonth()->startOfMonth()->format('Y-m-d'),
                 'end_date' => Carbon::today()->subMonth()->endOfMonth()->format('Y-m-d'),

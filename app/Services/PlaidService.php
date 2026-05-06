@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Log;
 
 use GuzzleHttp\Client as GuzzleClient;
 use App\Support\ApiErrorFormatter;
+use Psr\Log\LoggerInterface;
 
 class PlaidService
 {
@@ -45,7 +46,7 @@ class PlaidService
             'error_message' => 'Plaid configuration is incomplete. Check PLAID_ENV, PLAID_CLIENT_ID, and PLAID_SECRET.',
         ];
 
-        Log::error('Plaid configuration is incomplete.', [
+        $this->plaidLogger()->error('Plaid configuration is incomplete.', [
             'base_url' => $this->baseUrl,
             'has_client_id' => filled($this->clientId),
             'has_secret' => filled($this->secret),
@@ -54,7 +55,7 @@ class PlaidService
         return $error;
     }
 
-    private function makeRequest($url, $data): array
+    private function makeRequest($url, $data, array $logContext = [], string $failureMessage = 'Plaid request failed.'): array
     {
         if (! $this->hasValidConfiguration()) {
             return $this->configurationError();
@@ -67,26 +68,59 @@ class PlaidService
 
             return json_decode($response->getBody()->getContents(), true);
         } catch (GuzzleException $e) {
-            Log::error('Plaid request failed.', ApiErrorFormatter::format($e) + [
+            $errorDetails = $this->extractPlaidErrorDetails($e);
+
+            $this->plaidLogger()->error($failureMessage, [
                 'base_url' => $this->baseUrl,
                 'url' => $url,
+                ...$logContext,
+                'exception_class' => $e::class,
+                'code' => $e->getCode(),
+                ...$errorDetails,
             ]);
-
-            if (method_exists($e, 'hasResponse') && $e->hasResponse()) {
-                return [
-                    'error' => true,
-                    'error_code' => $e->getResponse()->getStatusCode(),
-                    'error_message' => $e->getResponse()->getReasonPhrase(),
-                    'error_body' => json_decode($e->getResponse()->getBody()->getContents(), true),
-                ];
-            }
 
             return [
                 'error' => true,
-                'error_code' => $e->getCode(),
-                'error_message' => $e->getMessage(),
+                'error_code' => $errorDetails['status'] ?? $e->getCode(),
+                'error_message' => $errorDetails['plaid_error_message']
+                    ?? $errorDetails['reason_phrase']
+                    ?? $e->getMessage(),
+                'error_body' => $errorDetails['plaid_error_body'] ?? null,
             ];
         }
+    }
+
+    private function plaidLogger(): LoggerInterface
+    {
+        return Log::channel('plaid');
+    }
+
+    private function extractPlaidErrorDetails(GuzzleException $e): array
+    {
+        if (! method_exists($e, 'hasResponse') || ! $e->hasResponse()) {
+            return [];
+        }
+
+        $response = $e->getResponse();
+        $bodyStream = $response->getBody();
+        $rawBody = (string) $bodyStream;
+
+        if ($bodyStream->isSeekable()) {
+            $bodyStream->rewind();
+        }
+
+        $decodedBody = json_decode($rawBody, true);
+        $plaidErrorBody = is_array($decodedBody) ? $decodedBody : null;
+
+        return [
+            'status' => $response->getStatusCode(),
+            'reason_phrase' => $response->getReasonPhrase(),
+            'plaid_error_code' => $plaidErrorBody['error_code'] ?? null,
+            'plaid_error_type' => $plaidErrorBody['error_type'] ?? null,
+            'plaid_error_message' => $plaidErrorBody['error_message'] ?? null,
+            'request_id' => $plaidErrorBody['request_id'] ?? null,
+            'plaid_error_body' => $plaidErrorBody,
+        ];
     }
 
     public function createLinkToken(array $data)
@@ -105,12 +139,12 @@ class PlaidService
             $result = json_decode($response->getBody()->getContents(), true);
 
             if (!isset($result['link_token'])) {
-                Log::error('Plaid link token generation failed.', ['response' => $result]);
+                $this->plaidLogger()->error('Plaid link token generation failed.', ['response' => $result]);
             }
 
             return $result;
         } catch (\Exception $e) {
-            Log::error('Plaid API error during link token creation.', ApiErrorFormatter::format($e));
+            $this->plaidLogger()->error('Plaid API error during link token creation.', ApiErrorFormatter::format($e));
             return [
                 'error' => true,
                 'error_message' => $e->getMessage(),
@@ -132,18 +166,18 @@ class PlaidService
             $result = $this->makeRequest($url, $data);
 
             if (isset($result['error']) && $result['error'] === true) {
-                Log::error('Plaid webhook update failed.', $result);
+                $this->plaidLogger()->error('Plaid webhook update failed.', $result);
                 return $result;
             }
 
-            Log::info('Plaid webhook updated successfully.', [
+            $this->plaidLogger()->info('Plaid webhook updated successfully.', [
                 'item_id' => $result['item']['item_id'] ?? null,
                 'webhook' => $result['item']['webhook'] ?? null,
             ]);
 
             return $result;
         } catch (\Exception $e) {
-            Log::error('Plaid API error during webhook update.', ApiErrorFormatter::format($e));
+            $this->plaidLogger()->error('Plaid API error during webhook update.', ApiErrorFormatter::format($e));
             return [
                 'error' => true,
                 'error_message' => $e->getMessage(),
@@ -220,7 +254,7 @@ class PlaidService
         return $this->makeRequest($url, $data);
     }
 
-    public function getStatements($accessToken, $accountId = null)
+    public function getStatements($accessToken, $accountId = null, array $logContext = [])
     {
         $url = $this->baseUrl . '/statements/list';
         $data = [
@@ -233,10 +267,10 @@ class PlaidService
             $data['account_id'] = $accountId;
         }
 
-        return $this->makeRequest($url, $data);
+        return $this->makeRequest($url, $data, $logContext, 'Plaid statement list failed.');
     }
 
-    public function downloadStatement($accessToken, $statementId)
+    public function downloadStatement($accessToken, $statementId, array $logContext = [])
     {
         $url = $this->baseUrl . '/statements/download';
         $data = [
@@ -257,24 +291,24 @@ class PlaidService
 
             return $response->getBody()->getContents();
         } catch (GuzzleException $e) {
-            Log::error('Plaid statement download failed.', ApiErrorFormatter::format($e) + [
+            $errorDetails = $this->extractPlaidErrorDetails($e);
+
+            $this->plaidLogger()->error('Plaid statement download failed.', [
                 'base_url' => $this->baseUrl,
                 'url' => $url,
+                ...$logContext,
+                'exception_class' => $e::class,
+                'code' => $e->getCode(),
+                ...$errorDetails,
             ]);
-
-            if (method_exists($e, 'hasResponse') && $e->hasResponse()) {
-                return [
-                    'error' => true,
-                    'error_code' => $e->getResponse()->getStatusCode(),
-                    'error_message' => $e->getResponse()->getReasonPhrase(),
-                    'error_body' => json_decode($e->getResponse()->getBody()->getContents(), true),
-                ];
-            }
 
             return [
                 'error' => true,
-                'error_code' => $e->getCode(),
-                'error_message' => $e->getMessage(),
+                'error_code' => $errorDetails['status'] ?? $e->getCode(),
+                'error_message' => $errorDetails['plaid_error_message']
+                    ?? $errorDetails['reason_phrase']
+                    ?? $e->getMessage(),
+                'error_body' => $errorDetails['plaid_error_body'] ?? null,
             ];
         }
     }

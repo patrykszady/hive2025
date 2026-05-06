@@ -23,7 +23,11 @@ class ApiErrorFormatter
             $response = $e->getResponse();
             $decoded = null;
             if ($response) {
-                $body = (string) $response->getBody();
+                $bodyStream = $response->getBody();
+                $body = (string) $bodyStream;
+                if ($bodyStream->isSeekable()) {
+                    $bodyStream->rewind();
+                }
                 $maybe = json_decode($body, true);
                 if (json_last_error() === JSON_ERROR_NONE) {
                     $decoded = $maybe;

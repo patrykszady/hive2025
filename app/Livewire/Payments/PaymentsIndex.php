@@ -3,11 +3,14 @@
 namespace App\Livewire\Payments;
 
 use App\Livewire\Concerns\HasToJsonMethod;
+use App\Models\Client;
 use App\Models\Payment;
 use App\Models\Project;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
 
@@ -17,12 +20,62 @@ class PaymentsIndex extends Component
 
     public Project $project;
 
+    public $clients = [];
+
+    public $projects = [];
+
+    #[Url(except: '')]
+    public $amount = '';
+
+    #[Url(except: '')]
+    public $project_filter = '';
+
+    #[Url(except: '')]
+    public $client_filter = '';
+
+    #[Url(except: '')]
+    public $status_filter = '';
+
     public $view = null;
 
     public $sortBy = 'date';
     public $sortDirection = 'desc';
 
     protected $listeners = ['refreshComponent' => '$refresh'];
+
+    public function updating($field)
+    {
+        $this->resetPage();
+    }
+
+    public function mount(): void
+    {
+        if ($this->view !== null) {
+            return;
+        }
+
+        $vendorId = auth()->user()?->vendor?->id;
+        if (! $vendorId) {
+            return;
+        }
+
+        $this->projects = Cache::remember("filters:v{$vendorId}:payment-projects", 600, function () use ($vendorId) {
+            return Project::where('belongs_to_vendor_id', $vendorId)
+                ->whereHas('payments')
+                ->orderByDesc('created_at')
+                ->get(['id', 'project_name', 'address', 'client_id']);
+        });
+
+        $this->clients = Cache::remember("filters:v{$vendorId}:payment-clients", 600, function () use ($vendorId) {
+            return Client::whereHas('projects.payments', function ($query) use ($vendorId) {
+                $query->where('belongs_to_vendor_id', $vendorId);
+            })
+                ->with('users:id,first_name,last_name')
+                ->orderBy('business_name')
+                ->orderBy('id')
+                ->get(['id', 'business_name']);
+        });
+    }
 
     #[Computed]
     public function hasClientsWithProjects()
@@ -43,6 +96,32 @@ class PaymentsIndex extends Component
         $query = in_array($this->view, ['projects.show', 'estimate.pdf'])
             ? $this->project->payments()
             : Payment::query();
+
+        $amount = trim((string) $this->amount);
+        $projectId = is_numeric($this->project_filter) ? (int) $this->project_filter : null;
+        $clientId = is_numeric($this->client_filter) ? (int) $this->client_filter : null;
+
+        if ($amount !== '') {
+            $query->where('amount', 'like', $amount . '%');
+        }
+
+        if ($projectId) {
+            $query->where('project_id', $projectId);
+        }
+
+        if ($clientId) {
+            $query->whereHas('project', function ($projectQuery) use ($clientId) {
+                $projectQuery->where('client_id', $clientId);
+            });
+        }
+
+        if ($this->status_filter === 'complete') {
+            $query->whereNotNull('transaction_id');
+        } elseif ($this->status_filter === 'missing') {
+            $query->whereNull('transaction_id');
+        }
+
+        $query->with(['project.client']);
 
         // Apply sorting if specified
         if ($this->sortBy) {

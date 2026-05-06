@@ -624,7 +624,11 @@ class AuditShow extends Component
                 $bank = $accounts->first()->bank;
 
                 // Get statements for this bank
-                $statementsResponse = $plaidService->getStatements($bank->plaid_access_token);
+                $statementsResponse = $plaidService->getStatements(
+                    $bank->plaid_access_token,
+                    null,
+                    ['bank_id' => $bank->id],
+                );
                 
                 if (isset($statementsResponse['error'])) {
                     $errorMessage = $statementsResponse['error_message'] ?? 'Unknown error';
@@ -691,6 +695,7 @@ class AuditShow extends Component
                                     $allStatements->push([
                                         'statement_id' => $statement['statement_id'],
                                         'bank_name' => $bank->name,
+                                        'bank_id' => $bank->id,
                                         'account_name' => $bankAccount->account_number,
                                         'statement_date' => $statement['end_date'],
                                         'access_token' => $bank->plaid_access_token,
@@ -811,7 +816,8 @@ class AuditShow extends Component
             try {
                 $pdfContent = $plaidService->downloadStatement(
                     $statement['access_token'], 
-                    $statement['statement_id']
+                    $statement['statement_id'],
+                    ['bank_id' => $statement['bank_id'] ?? null],
                 );
 
                 if (is_array($pdfContent) && isset($pdfContent['error'])) {

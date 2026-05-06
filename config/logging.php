@@ -58,6 +58,13 @@ return [
             'days' => 30,
         ],
 
+        'plaid' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/plaid.log'),
+            'level' => 'debug',
+            'days' => 30,
+        ],
+
         'add_check_id_to_transactions' => [
             'driver' => 'daily',
             'path' => storage_path('logs/add_check_id_to_transactions.log'),
