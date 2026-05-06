@@ -1,0 +1,163 @@
+[90m= [39m[34;4mApp\Models\ExpenseReceipts[39;24m {#10137
+    [34mid[39m: [35m16695[39m,
+    [34mexpense_id[39m: [35m26644[39m,
+    [34mreceipt_html[39m: <<<[32mEOS[39m
+      [32m![FLOOR DECOR &amp;](figures/1.1)[39m
+      
+      [32mFloor &amp; Decor[39m
+      [32m600 E Rand Road[39m
+      [32mArlington Heights, IL 60004[39m
+      [32m(847) 704-7071[39m
+      
+      [32mDate[39m
+      [32m03/25/2026[39m
+      
+      [32mTime 12:34 PM[39m
+      
+      [32mTransaction[39m\t[32mNumber[39m\t[32m1013602611244485[39m
+      
+      [32mStore[39m\t[32m136[39m\t[32mRegister 2[39m
+      
+      [32mAssociate[39m\t[32m94091[39m\t[32mDanah[39m
+      
+      [32mSALE[39m
+      
+      [32mRetail[39m
+      
+      [32mColor 5180F RD VINYL 94in.[39m
+      
+      [32mT[39m
+      
+      [32m100891548[39m
+      
+      [32m1 @ 38.99[39m
+      [32m38.99[39m
+      
+      [32m0 bx 1 ea[39m
+      
+      [32mRetail Subtotal:[39m
+      
+      [32m38.99[39m
+      
+      [32mSales Tax[39m
+      
+      [32m3.90[39m
+      
+      [32mRetail Total[39m
+      
+      [32m42.89[39m
+      
+      [32mGrand Total[39m
+      [32m42.89[39m
+      
+      [32mDebit Card[39m
+      
+      [32m42.89[39m
+      
+      [32m************4849[39m
+      
+      [32mAuth. #: 002788[39m
+      
+      [32mInvoice Number: 12EGHHD123600428[39m
+      
+      [32mEntry: Contactless[39m
+      
+      [32mMode: Issuer/ PIN Verified[39m
+      
+      [32mAID: A0000000042203[39m
+      
+      [32mTVR: 0000048001[39m
+      
+      [32mIAD:[39m
+      
+      [32m0110A04001220000000000000000000000FF[39m
+      
+      [32mARC: 00[39m
+      
+      [32mPRO Premier Rewards[39m
+      
+      [32mPRO Name:[39m\t[32mGregory Szady[39m
+      
+      [32mPRO ID:[39m\t[32m136013197[39m
+      
+      [32mPRO JobName:[39m\t[32m911[39m
+      
+      [32mPoints Earned:[39m
+      [32m38[39m
+      
+      [32mPoints Balance:[39m
+      [32m24,576[39m
+      
+      [32mLow Prices, Everyday[39m
+      
+      [32m![Code128](barcodes/1.1 &quot;X1013602611244485&quot;)[39m
+      
+      [32mX1013602611244485[39m
+      
+      [32mFloor &amp; Decor Return Policy[39m
+      [32mF&amp;D reserves the right to limit or deny[39m
+      [32mreturns.[39m
+      [32mPlease see https://www.flooranddecor.com/[39m
+      [32mpolicies/returns.html[39m
+      [32mFor all returns:[39m
+      
+      [32mAll returned merchandise must be undamaged[39m
+      [32mand in resalable condition. Returns within[39m
+      [32m90 days of purchase will be processed by[39m
+      [32mthe same method of payment from your[39m
+      [32moriginal purchase.[39m
+      
+      [32mReturns over 90 days from original[39m
+      [32mpurchase or without an original sales[39m
+      [32mreceipt are subject to system approval.[39m
+      [32mApproved return transactions over 90 days[39m
+      [32mfrom purchase or without an original sales[39m
+      [32mreceipt will be processed to merchandise[39m
+      [32mcredit.[39m
+      
+      [32mCustom orders are final sales and[39m
+      [32mnon-refundable. Special orders can only be[39m
+      [32mcanceled without penalty prior to shipment[39m
+      
+      [32mFloor and Decor is required by law to[39m
+      [32mcollect a retail delivery fee to all[39m
+      [32mnote that the fee is non-refundable.[39m
+      [32mORIGINAL PACKAGING REQUIRED FOR RETURN[39m
+      [32mIn this location returns must be unopened[39m
+      [32mand in its original purchased packaging[39m
+      [32mand quantity, for example, if tile is[39m
+      [32mpurchased by the box it must be returned[39m
+      [32mby the box except as noted below:[39m
+      
+      [32m1[39m\\[32m. Individual pieces may be returned if[39m
+      [32mpurchased as a sample as indicated on the[39m
+      [32msales receipt.[39m
+      
+      [32m2[39m\\[32m. Decorative mosaics may be returned by[39m
+      [32mthe piece if unopened and still in its[39m
+      [32moriginal packaging (cardboard backing and[39m
+      [32mplastic wrapped).[39m
+      
+      [32mInstalled Merchandise Policy[39m
+      [32mThoroughly inspect and measure all[39m
+      [32mproducts before installation as use will[39m
+      [32mconstitute acceptance. Installed flooring[39m
+      [32mcannot be exchanged or returned for any[39m
+      [32mreason.[39m
+      [32mPlease see https://www.flooranddecor.com/[39m
+      [32mpolicies/installed.html[39m
+      [32mTHANK YOU FOR SHOPPING[39m
+      [32mFLOOR &amp; DECOR[39m
+      
+      [32mNeed help with your project?[39m
+      [32mScan below to schedule a free appointment[39m
+      [32mwith a design expert.[39m
+      
+      [32m![QRCode](barcodes/1.2 &quot;https://qrstud.io/j87td1n&quot;)[39m
+      [32mEOS[39m,
+    [34mreceipt_items[39m: [32m"[39m[32m{[39m\"[32mtip[39m\"[32m: null, [39m\"[32mitems[39m\"[32m: [{[39m\"[32mPrice[39m\"[32m: 38.99, [39m\"[32mQuantity[39m\"[32m: 1, [39m\"[32mTotalPrice[39m\"[32m: 38.99, [39m\"[32mDescription[39m\"[32m: [39m\"[32mColor 5180F RD VINYL 94in.[39m\"[32m, [39m\"[32mProductCode[39m\"[32m: [39m\"[32m100891548[39m\"[32m}], [39m\"[32mtotal[39m\"[32m: 42.89, [39m\"[32msubtotal[39m\"[32m: 38.99, [39m\"[32mmisc_fees[39m\"[32m: null, [39m\"[32mtotal_tax[39m\"[32m: 3.9, [39m\"[32mmerchant_name[39m\"[32m: [39m\"[32mFloor & Decor[39m\"[32m, [39m\"[32minvoice_number[39m\"[32m: [39m\"[32m12EGHHD123600428[39m\"[32m, [39m\"[32mpurchase_order[39m\"[32m: [39m\"\"[32m, [39m\"[32mpayment_methods[39m\"[32m: [{[39m\"[32mtype[39m\"[32m: [39m\"[32mDebit[39m\"[32m, [39m\"[32mamount[39m\"[32m: 42.89, [39m\"[32mlast_four[39m\"[32m: [39m\"[32m4849[39m\"[32m}], [39m\"[32mtransaction_date[39m\"[32m: [39m\"[32m2026-03-25[39m\"[32m, [39m\"[32mhandwritten_notes[39m\"[32m: []}[39m[32m"[39m,
+    [34mis_material_order[39m: [35m0[39m,
+    [34mreceipt_filename[39m: [32m"[39m[32m26644-2026-03-25-17-40-28-94.jpg[39m[32m"[39m,
+    [34mcreated_at[39m: [32m"[39m[32m2026-03-25 17:40:39[39m[32m"[39m,
+    [34mupdated_at[39m: [32m"[39m[32m2026-03-25 17:40:39[39m[32m"[39m,
+  }
