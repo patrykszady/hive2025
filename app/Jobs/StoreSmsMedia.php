@@ -79,9 +79,15 @@ class StoreSmsMedia implements ShouldQueue
 
                 $filename = 'sms-media/' . now()->format('Y/m') . '/' . Str::uuid() . '.' . $extension;
 
-                Storage::disk('public')->put($filename, $response->body());
+                Storage::disk('files')->put($filename, $response->body());
 
-                $storedUrls[] = '/storage/' . $filename;
+                $storedUrls[] = $filename;
+
+                // Queue browser-friendly transcode for video formats that Edge/Chrome
+                // can't play natively (carrier MMS commonly delivers 3GPP/H.263).
+                if (in_array($extension, ['3gp', 'mov', 'avi', 'mkv', 'amr'], true)) {
+                    TranscodeSmsVideo::dispatch($this->messageId, $filename)->afterCommit();
+                }
             } catch (\Exception $e) {
                 Log::channel('telnyx')->error('Exception downloading MMS media', [
                     'message_id' => $this->messageId,

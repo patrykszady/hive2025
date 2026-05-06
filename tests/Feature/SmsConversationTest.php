@@ -23,3 +23,12 @@ it('filters client users down to actual thread participants', function (): void 
 
     expect($filteredUsers->pluck('first_name')->all())->toBe(['Mary']);
 });
+
+it('opens the media lightbox when a video is requested', function (): void {
+    $component = new SmsConversation();
+
+    $component->openVideoLightbox('sms-media/2026/05/demo.mp4');
+
+    expect($component->showImageLightbox)->toBeTrue();
+    expect($component->lightboxImageUrl)->toBe('sms-media/2026/05/demo.mp4');
+});

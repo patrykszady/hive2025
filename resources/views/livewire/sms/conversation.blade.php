@@ -377,18 +377,28 @@
                                 @if ($msg->hasMedia())
                                     <div class="space-y-2 {{ $msg->text ? 'mb-1.5' : '' }}">
                                         @foreach ($msg->media_urls as $url)
+                                            @php $mediaUrl = $this->mediaUrl($url); @endphp
                                             @if (\App\Models\SmsMessage::isVideoUrl($url))
-                                                <video controls preload="metadata" class="max-w-full rounded-lg max-h-64 bg-black" playsinline>
-                                                    <source src="{{ $url }}" @if ($mime = \App\Models\SmsMessage::mimeForUrl($url)) type="{{ $mime }}" @endif />
-                                                    Your browser does not support the video tag.
-                                                </video>
+                                                <button type="button" class="block relative" wire:click="openVideoLightbox('{{ $url }}')">
+                                                    <video preload="metadata" class="max-w-full rounded-lg max-h-64 bg-black pointer-events-none" playsinline>
+                                                        <source src="{{ $mediaUrl }}" @if ($mime = \App\Models\SmsMessage::mimeForUrl($url)) type="{{ $mime }}" @endif />
+                                                        Your browser does not support the video tag.
+                                                    </video>
+                                                    <span class="absolute inset-0 flex items-center justify-center">
+                                                        <span class="inline-flex items-center justify-center size-12 rounded-full bg-black/50 text-white">
+                                                            <svg class="size-6" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                                                <path d="M8 5v14l11-7-11-7z" />
+                                                            </svg>
+                                                        </span>
+                                                    </span>
+                                                </button>
                                             @elseif (\App\Models\SmsMessage::isAudioUrl($url))
                                                 <audio controls preload="metadata" class="max-w-full">
-                                                    <source src="{{ $url }}" @if ($mime = \App\Models\SmsMessage::mimeForUrl($url)) type="{{ $mime }}" @endif />
+                                                    <source src="{{ $mediaUrl }}" @if ($mime = \App\Models\SmsMessage::mimeForUrl($url)) type="{{ $mime }}" @endif />
                                                 </audio>
                                             @else
                                                 <button type="button" class="block" wire:click="openImageLightbox('{{ $url }}')">
-                                                    <img src="{{ $url }}" alt="MMS attachment" class="max-w-full rounded-lg max-h-64 object-cover" loading="lazy" />
+                                                    <img src="{{ $mediaUrl }}" alt="MMS attachment" class="max-w-full rounded-lg max-h-64 object-cover" loading="lazy" />
                                                 </button>
                                             @endif
                                         @endforeach
@@ -446,14 +456,24 @@
                                 @if ($msg->hasMedia())
                                     <div class="space-y-2 {{ $msg->text ? 'mb-1.5' : '' }}">
                                         @foreach ($msg->media_urls as $url)
+                                            @php $mediaUrl = $this->mediaUrl($url); @endphp
                                             @if (\App\Models\SmsMessage::isVideoUrl($url))
-                                                <video controls preload="metadata" class="max-w-full rounded-lg max-h-64 bg-black" playsinline>
-                                                    <source src="{{ $url }}" @if ($mime = \App\Models\SmsMessage::mimeForUrl($url)) type="{{ $mime }}" @endif />
-                                                    Your browser does not support the video tag.
-                                                </video>
+                                                <button type="button" class="block relative" wire:click="openVideoLightbox('{{ $url }}')">
+                                                    <video preload="metadata" class="max-w-full rounded-lg max-h-64 bg-black pointer-events-none" playsinline>
+                                                        <source src="{{ $mediaUrl }}" @if ($mime = \App\Models\SmsMessage::mimeForUrl($url)) type="{{ $mime }}" @endif />
+                                                        Your browser does not support the video tag.
+                                                    </video>
+                                                    <span class="absolute inset-0 flex items-center justify-center">
+                                                        <span class="inline-flex items-center justify-center size-12 rounded-full bg-black/50 text-white">
+                                                            <svg class="size-6" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                                                <path d="M8 5v14l11-7-11-7z" />
+                                                            </svg>
+                                                        </span>
+                                                    </span>
+                                                </button>
                                             @elseif (\App\Models\SmsMessage::isAudioUrl($url))
                                                 <audio controls preload="metadata" class="max-w-full">
-                                                    <source src="{{ $url }}" @if ($mime = \App\Models\SmsMessage::mimeForUrl($url)) type="{{ $mime }}" @endif />
+                                                    <source src="{{ $mediaUrl }}" @if ($mime = \App\Models\SmsMessage::mimeForUrl($url)) type="{{ $mime }}" @endif />
                                                 </audio>
                                             @else
                                                 <button
@@ -462,7 +482,7 @@
                                                     wire:click="openImageLightbox('{{ $url }}')"
                                                 >
                                                     <img
-                                                        src="{{ $url }}"
+                                                        src="{{ $mediaUrl }}"
                                                         alt="MMS attachment"
                                                         class="max-w-full rounded-lg max-h-64 object-cover"
                                                         loading="lazy"
@@ -672,10 +692,19 @@
             }
         </style>
 
-        <flux:modal wire:model="showImageLightbox" name="sms-image-lightbox" :closable="false" class="!p-0 !rounded-xl max-w-lg sm:max-w-xl md:max-w-2xl">
+        <flux:modal
+            wire:model="showImageLightbox"
+            name="sms-image-lightbox"
+            :closable="false"
+            variant="bare"
+            class="!p-0"
+            x-bind:style="currentIsVideo
+                ? 'width:auto;max-width:96vw;height:auto;max-height:94vh;padding:0;'
+                : 'width:fit-content;max-width:96vw;height:fit-content;max-height:94vh;padding:0;'"
+        >
             <div
                 x-data="{
-                    images: @js($this->threadImages),
+                    images: @js($this->threadMedia),
                     currentIndex: 0,
                     activeUrl: '',
                     scale: 1,
@@ -695,10 +724,34 @@
                     lastTouchY: 0,
                     swipeStartX: null,
 
-                    get currentUrl() { return this.activeUrl || this.images[this.currentIndex] || ''; },
+                    convertUrl(url) {
+                        if (url.startsWith('http')) return url;
+                        // Just pass relative paths directly - route() will handle them
+                        const filename = url.startsWith('/storage/')
+                            ? url.substring('/storage/'.length)
+                            : url;
+                        return '{{ route('sms.media', ['filename' => 'XXX']) }}'.replace('XXX', filename);
+                    },
+
+                    get currentUrl() { 
+                        const url = this.activeUrl || this.images[this.currentIndex] || ''; 
+                        return this.convertUrl(url);
+                    },
+                    get currentRawUrl() {
+                        return this.activeUrl || this.images[this.currentIndex] || '';
+                    },
+                    get currentIsVideo() {
+                        return this.isVideoUrl(this.currentRawUrl);
+                    },
                     get hasMultiple() { return this.images.length > 1; },
                     get hasPrev() { return this.currentIndex > 0; },
                     get hasNext() { return this.currentIndex < this.images.length - 1; },
+
+                    isVideoUrl(url) {
+                        if (!url) return false;
+                        const clean = String(url).split('?')[0].toLowerCase();
+                        return /\.(mp4|mov|avi|mkv|3gp|3gpp|webm|m4v|wmv|flv|ogv)$/.test(clean);
+                    },
 
                     goTo(idx) {
                         if (idx < 0 || idx >= this.images.length) return;
@@ -752,6 +805,7 @@
                     },
 
                     handleWheel(e) {
+                        if (this.currentIsVideo) return;
                         e.preventDefault();
                         const delta = e.deltaY > 0 ? 0.9 : 1.1;
                         const newScale = Math.max(this.minScale, Math.min(this.maxScale, this.scale * delta));
@@ -771,6 +825,7 @@
                     },
 
                     handleDoubleTap(e) {
+                        if (this.currentIsVideo) return;
                         if (this.isZoomed) {
                             this.resetZoom();
                         } else {
@@ -788,6 +843,7 @@
                     },
 
                     handleMouseDown(e) {
+                        if (this.currentIsVideo) return;
                         if (!this.isZoomed) return;
                         e.preventDefault();
                         this.isPanning = true;
@@ -807,6 +863,10 @@
                     handleMouseUp() { this.isPanning = false; },
 
                     handleTouchStart(e) {
+                        if (this.currentIsVideo) {
+                            this.swipeStartX = e.touches.length === 1 ? e.touches[0].clientX : null;
+                            return;
+                        }
                         if (e.touches.length === 2) {
                             this.initialPinchDistance = Math.hypot(
                                 e.touches[0].clientX - e.touches[1].clientX,
@@ -857,6 +917,36 @@
                         this.initialPinchDistance = null;
                         this.isPanning = false;
                         if (this.scale < 1.05) this.resetZoom();
+                    },
+
+                    stopLightboxVideo() {
+                        const candidates = [];
+                        if (this.$refs.lightboxVideo) candidates.push(this.$refs.lightboxVideo);
+                        if (this.$root) candidates.push(...this.$root.querySelectorAll('video'));
+                        for (const v of candidates) {
+                            try { v.pause(); } catch (e) {}
+                            try { v.currentTime = 0; } catch (e) {}
+                            try { v.removeAttribute('src'); v.load(); } catch (e) {}
+                        }
+                    },
+
+                    closeLightbox() {
+                        this.stopLightboxVideo();
+                        this.activeUrl = '';
+                        this.resetZoom();
+                        $wire.showImageLightbox = false;
+                    },
+
+                    toggleVideoPlayback() {
+                        if (!this.currentIsVideo) return;
+                        const video = this.$refs.lightboxVideo;
+                        if (!video) return;
+
+                        if (video.paused) {
+                            video.play();
+                        } else {
+                            video.pause();
+                        }
                     }
                 }"
                 x-ref="zoomContainer"
@@ -865,6 +955,7 @@
                         if (v) {
                             syncFromWire($wire.lightboxImageUrl);
                         } else {
+                            stopLightboxVideo();
                             activeUrl = '';
                             resetZoom();
                         }
@@ -872,7 +963,7 @@
                     $watch('$wire.lightboxImageUrl', v => { if (v && $wire.showImageLightbox) syncFromWire(v); });
                 "
                 @lightbox-images-updated.window="if ($event.detail.images) { images = $event.detail.images; syncFromWire(activeUrl); }"
-                :class="isZoomed ? 'cursor-grab active:cursor-grabbing' : ''"
+                :class="(!currentIsVideo && isZoomed) ? 'cursor-grab active:cursor-grabbing' : ''"
                 @wheel.prevent="handleWheel($event)"
                 @dblclick="handleDoubleTap($event)"
                 @mousedown="handleMouseDown($event)"
@@ -884,43 +975,13 @@
                 @touchend="handleTouchEnd($event)"
                 @keydown.left.window="$wire.showImageLightbox && !isZoomed && prev()"
                 @keydown.right.window="$wire.showImageLightbox && !isZoomed && next()"
+                @keydown.escape.window="$wire.showImageLightbox && closeLightbox()"
+                @keydown.space.window.prevent="$wire.showImageLightbox && currentIsVideo && toggleVideoPlayback()"
                 class="relative"
+                :style="currentIsVideo
+                    ? 'width:auto;max-width:96vw;height:auto;max-height:94vh;'
+                    : 'width:fit-content;max-width:96vw;height:fit-content;max-height:94vh;'"
             >
-                {{-- Close button --}}
-                <flux:modal.close>
-                    <button
-                        type="button"
-                        class="absolute right-2 top-2 z-20 rounded-full bg-black/50 p-1.5 text-white/80 hover:bg-black/70 hover:text-white transition"
-                        aria-label="Close image preview"
-                    >
-                        <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                    </button>
-                </flux:modal.close>
-
-                {{-- Previous button --}}
-                <button
-                    x-show="hasMultiple && hasPrev && !isZoomed"
-                    x-transition.opacity
-                    @click.stop="prev()"
-                    type="button"
-                    class="absolute left-2 top-1/2 -translate-y-1/2 z-20 rounded-full bg-black/50 p-2 text-white/80 hover:bg-black/70 hover:text-white transition"
-                    aria-label="Previous image"
-                >
-                    <svg class="size-5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
-                </button>
-
-                {{-- Next button --}}
-                <button
-                    x-show="hasMultiple && hasNext && !isZoomed"
-                    x-transition.opacity
-                    @click.stop="next()"
-                    type="button"
-                    class="absolute right-2 top-1/2 -translate-y-1/2 z-20 rounded-full bg-black/50 p-2 text-white/80 hover:bg-black/70 hover:text-white transition"
-                    aria-label="Next image"
-                >
-                    <svg class="size-5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
-                </button>
-
                 {{-- Image counter --}}
                 <div
                     x-show="hasMultiple && !isZoomed"
@@ -934,7 +995,7 @@
 
                 {{-- Zoom indicator --}}
                 <div
-                    x-show="isZoomed"
+                    x-show="!currentIsVideo && isZoomed"
                     x-transition.opacity
                     class="absolute top-2 left-1/2 -translate-x-1/2 z-20"
                 >
@@ -946,15 +1007,71 @@
                     </div>
                 </div>
 
-                {{-- Image --}}
-                <div class="overflow-hidden rounded-xl select-none" :class="isZoomed ? 'touch-none' : ''">
-                    <img
-                        :src="currentUrl"
-                        alt="MMS attachment"
-                        class="block max-h-[80vh] w-auto max-w-full object-contain select-none transition-transform duration-100 ease-out"
-                        :style="`transform: scale(${scale}) translate(${translateX / scale}px, ${translateY / scale}px); transform-origin: center center;`"
-                        draggable="false"
-                    />
+                {{-- Media (image or video) --}}
+                <div
+                    class="relative overflow-hidden rounded-xl select-none flex items-center justify-center"
+                    :class="[((!currentIsVideo && isZoomed) ? 'touch-none' : ''), (currentIsVideo ? 'bg-black' : 'bg-transparent')]"
+                    :style="currentIsVideo
+                        ? 'width:auto;height:auto;max-width:96vw;max-height:94vh;'
+                        : 'width:fit-content;height:fit-content;max-width:96vw;max-height:94vh;'"
+                >
+                    {{-- Close button (on media frame) --}}
+                    <button
+                        type="button"
+                        @click.stop="closeLightbox()"
+                        class="absolute right-2 top-2 z-20 rounded-full bg-black/50 p-1.5 text-white/80 hover:bg-black/70 hover:text-white transition"
+                        aria-label="Close media preview"
+                    >
+                        <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+
+                    {{-- Previous button (on media frame) --}}
+                    <button
+                        x-show="hasMultiple && hasPrev && !(isZoomed && !currentIsVideo)"
+                        x-transition.opacity
+                        @click.stop="prev()"
+                        type="button"
+                        class="absolute left-2 top-1/2 -translate-y-1/2 z-20 rounded-full bg-black/50 p-2 text-white/80 hover:bg-black/70 hover:text-white transition"
+                        aria-label="Previous media"
+                    >
+                        <svg class="size-5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
+                    </button>
+
+                    {{-- Next button (on media frame) --}}
+                    <button
+                        x-show="hasMultiple && hasNext && !(isZoomed && !currentIsVideo)"
+                        x-transition.opacity
+                        @click.stop="next()"
+                        type="button"
+                        class="absolute right-2 top-1/2 -translate-y-1/2 z-20 rounded-full bg-black/50 p-2 text-white/80 hover:bg-black/70 hover:text-white transition"
+                        aria-label="Next media"
+                    >
+                        <svg class="size-5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
+                    </button>
+
+                    <template x-if="currentIsVideo">
+                        <video
+                            :key="currentUrl"
+                            :src="currentUrl"
+                            x-ref="lightboxVideo"
+                            controls
+                            autoplay
+                            preload="metadata"
+                            class="block object-contain bg-black"
+                            style="display:block;height:90vh;max-height:90vh;width:auto;max-width:96vw;"
+                            playsinline
+                        ></video>
+                    </template>
+
+                    <template x-if="!currentIsVideo">
+                        <img
+                            :src="currentUrl"
+                            alt="MMS attachment"
+                            class="block rounded-xl max-h-[80vh] w-auto max-w-full object-contain select-none transition-transform duration-100 ease-out"
+                            :style="`max-height:90vh;max-width:96vw;width:auto;transform: scale(${scale}) translate(${translateX / scale}px, ${translateY / scale}px); transform-origin: center center;`"
+                            draggable="false"
+                        />
+                    </template>
                 </div>
             </div>
         </flux:modal>

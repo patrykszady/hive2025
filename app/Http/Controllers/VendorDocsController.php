@@ -263,4 +263,110 @@ class VendorDocsController extends Controller
 
         return Image::make($resolvedPath)->response();
     }
+
+    /**
+     * Public (signed) version of smsMedia for sharing via SMS link.
+     * No auth required; URL must carry a valid Laravel signature.
+     */
+    public function smsMediaPublic(\Illuminate\Http\Request $request, $filename)
+    {
+        if (! $request->hasValidSignature()) {
+            return response('Link expired or invalid', 403);
+        }
+
+        return $this->streamSmsMedia($filename);
+    }
+
+    /**
+     * Stream an SMS media file (video, audio, image).
+     * Access restricted to authenticated users.
+     */
+    public function smsMedia($filename)
+    {
+        if (! auth()->check()) {
+            return redirect()->route('login');
+        }
+
+        return $this->streamSmsMedia($filename);
+    }
+
+    /**
+     * Shared streaming logic for SMS media (auth + public signed routes).
+     */
+    protected function streamSmsMedia($filename)
+    {
+        // If filename includes sms-media/ or sms-attachments/ prefix, use as-is
+        // Otherwise, assume it's within sms-media/
+        $basePath = 'sms-media/';
+        if (str_starts_with($filename, 'sms-attachments/')) {
+            $basePath = '';
+        } elseif (str_starts_with($filename, 'sms-media/')) {
+            $basePath = '';
+        }
+
+        $candidates = [
+            $basePath . $filename,
+            strtolower($basePath . $filename),
+            strtoupper($basePath . $filename),
+        ];
+
+        $resolvedPath = null;
+        foreach ($candidates as $name) {
+            $try = storage_path('files/'.$name);
+            if (file_exists($try)) {
+                $resolvedPath = $try;
+                $filename = $name;
+                break;
+            }
+        }
+
+        if (! $resolvedPath) {
+            return response('File not found', 404);
+        }
+
+        $ext = strtolower(File::extension($filename));
+        $mimeMap = [
+            'jpg' => 'image/jpeg',
+            'jpeg' => 'image/jpeg',
+            'png' => 'image/png',
+            'gif' => 'image/gif',
+            'webp' => 'image/webp',
+            'heic' => 'image/heic',
+            'heif' => 'image/heif',
+            'pdf' => 'application/pdf',
+            'mp4' => 'video/mp4',
+            'mov' => 'video/quicktime',
+            '3gp' => 'video/3gpp',
+            'webm' => 'video/webm',
+            'mkv' => 'video/x-matroska',
+            'ogv' => 'video/ogg',
+            'mp3' => 'audio/mpeg',
+            'm4a' => 'audio/mp4',
+            'aac' => 'audio/aac',
+            'wav' => 'audio/wav',
+            'ogg' => 'audio/ogg',
+            'amr' => 'audio/amr',
+        ];
+
+        $mime = $mimeMap[$ext] ?? 'application/octet-stream';
+
+        // For images, use Intervention Image to handle resizing/optimization
+        if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif'], true)) {
+            return Image::make($resolvedPath)->response();
+        }
+
+        // For video/audio/pdf, stream with proper headers and range request support
+        $size = filesize($resolvedPath);
+
+        return response()->stream(function () use ($resolvedPath) {
+            $stream = fopen($resolvedPath, 'rb');
+            fpassthru($stream);
+            fclose($stream);
+        }, 200, [
+            'Content-Type' => $mime,
+            'Content-Length' => $size,
+            'Accept-Ranges' => 'bytes',
+            'Cache-Control' => 'private, max-age=3600',
+        ]);
+    }
 }

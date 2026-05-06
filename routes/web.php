@@ -87,6 +87,13 @@ Route::get('robots.txt', function () {
     return response($content, 200, ['Content-Type' => 'text/plain']);
 })->name('robots');
 
+// Public signed-URL stream of an SMS media file (used in outbound SMS so recipients
+// can view full-quality video/audio/image without authentication, but the link
+// itself is HMAC-signed and time-limited via signedRoute()).
+Route::get('m/sms/{filename}', [VendorDocsController::class, 'smsMediaPublic'])
+    ->where('filename', '.*')
+    ->name('sms.media.public');
+
 // Serve audio files with proper range request support (required for Telnyx streaming)
 Route::get('telnyx-audio/{filename}', function (string $filename) {
     $path = public_path("audio/{$filename}");
@@ -350,6 +357,12 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
 
     // Stream vendor docs with case-insensitive lookup and proper headers
     Route::get('files/vendor_docs/{filename}', [VendorDocsController::class, 'document'])->name('vendor_docs.show');
+
+    // Stream SMS media (authenticated)
+    Route::get('files/sms_media/{filename}', [VendorDocsController::class, 'smsMedia'])
+        ->where('filename', '.*')
+        ->name('sms.media');
+
     //USERS
     //Log In As User for Admins (User id # 1 right now only)
     //Only User #1 / Patryk can access this route / middleware

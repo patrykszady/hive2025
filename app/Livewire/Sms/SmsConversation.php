@@ -187,24 +187,76 @@ class SmsConversation extends Component
 
     public function openImageLightbox(string $url): void
     {
+        $this->openMediaLightbox($url);
+    }
+
+    public function openVideoLightbox(string $url): void
+    {
+        $this->openMediaLightbox($url);
+    }
+
+    public function openMediaLightbox(string $url): void
+    {
         $this->lightboxImageUrl = $url;
         $this->showImageLightbox = true;
-        $this->dispatch('lightbox-images-updated', images: $this->threadImages);
+        $this->dispatch('lightbox-images-updated', images: $this->threadMedia);
     }
 
     /**
-     * Flat list of all media URLs in this thread for lightbox gallery navigation.
+     * Flat list of image+video URLs in this thread for lightbox navigation.
+     *
+     * @return array<int, string>
+     */
+    #[Computed]
+    public function threadMedia(): array
+    {
+        return $this->smsMessages
+            ->flatMap(fn (SmsMessage $msg) => $msg->media_urls ?? [])
+            ->filter(fn (string $url) => SmsMessage::isImageUrl($url) || SmsMessage::isVideoUrl($url))
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Backward-compatible alias used by existing lightbox event naming.
      *
      * @return array<int, string>
      */
     #[Computed]
     public function threadImages(): array
     {
-        return $this->smsMessages
-            ->flatMap(fn (SmsMessage $msg) => $msg->media_urls ?? [])
-            ->filter(fn (string $url) => SmsMessage::isImageUrl($url))
-            ->values()
-            ->all();
+        return $this->threadMedia;
+    }
+
+    /**
+     * Convert a media URL to the proper public streaming URL.
+     * Handles both old /storage/... paths and new relative paths.
+     */
+    public function mediaUrl(string $url): string
+    {
+        // If it's already an absolute HTTP URL, return as-is
+        if (str_starts_with($url, 'http')) {
+            return $url;
+        }
+
+        // If it's an old /storage/sms-media/... path, extract just the path after the prefix
+        if (str_starts_with($url, '/storage/sms-media/')) {
+            $path = substr($url, strlen('/storage/sms-media/'));
+            return route('sms.media', ['filename' => $path]);
+        }
+
+        if (str_starts_with($url, '/storage/sms-attachments/')) {
+            $path = substr($url, strlen('/storage/sms-attachments/'));
+            return route('sms.media', ['filename' => 'sms-attachments/' . $path]);
+        }
+
+        // If it's a relative path starting with sms-media/ or sms-attachments/, use as-is
+        if (str_starts_with($url, 'sms-media/') || str_starts_with($url, 'sms-attachments/')) {
+            return route('sms.media', ['filename' => $url]);
+        }
+
+        // Otherwise assume it's a bare filename that goes in sms-media/
+        return route('sms.media', ['filename' => 'sms-media/' . $url]);
     }
 
     public function loadMoreMessages(): void

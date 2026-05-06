@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Queue\Middleware\ThrottlesExceptions;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 use Intervention\Image\Facades\Image;
 
 class SendGroupMms implements ShouldQueue
@@ -60,11 +61,11 @@ class SendGroupMms implements ShouldQueue
         $participants = $message->to_numbers ?? [];
         $text = $message->text;
 
-        // Compress images for MMS (Telnyx limit: 1 MB total) and build public URLs
-        $mediaUrls = collect($message->media_urls ?? [])
-            ->map(fn (string $url): string => $this->prepareMediaUrl($url))
-            ->filter()
-            ->all();
+        // Split media: videos/audio go out as a public signed link in the text body
+        // (carrier MMS caps make videos useless; recipients get full quality via link).
+        // Images stay as media_urls (Telnyx auto-transcoding handles size).
+        [$mediaUrls, $linkifiedText] = $this->splitMediaForDelivery($message->media_urls ?? [], $text);
+        $text = $linkifiedText;
 
         // In dev, redirect all outbound SMS to the dev number
         if (app()->environment(['local', 'development']) && ($devTo = config('services.telnyx.dev_to'))) {
@@ -181,6 +182,85 @@ class SendGroupMms implements ShouldQueue
         }
 
         return $response->json('data') ?? [];
+    }
+
+    /**
+     * Split a message's media into:
+     *  - $mediaUrls: image URLs that go in the MMS payload (Telnyx will auto-transcode)
+     *  - $newText:   original text plus a public signed link for each video/audio attachment
+     *
+     * @param  array<int, string>  $rawUrls
+     * @return array{0: array<int, string>, 1: string}
+     */
+    protected function splitMediaForDelivery(array $rawUrls, ?string $text): array
+    {
+        $mediaUrls = [];
+        $videoLinks = [];
+
+        foreach ($rawUrls as $url) {
+            if (SmsMessage::isVideoUrl($url) || SmsMessage::isAudioUrl($url)) {
+                $link = $this->buildPublicSignedLink($url);
+                if ($link) {
+                    $videoLinks[] = $link;
+                }
+                continue;
+            }
+
+            $prepared = $this->prepareMediaUrl($url);
+            if ($prepared !== '' && $prepared !== null) {
+                $mediaUrls[] = $prepared;
+            }
+        }
+
+        $newText = (string) $text;
+        if (! empty($videoLinks)) {
+            $prefix = $newText !== '' ? $newText . "\n\n" : '';
+            $label = count($videoLinks) === 1 ? '📹 Watch: ' : '📹 Watch:';
+            $newText = $prefix . $label . (count($videoLinks) === 1 ? $videoLinks[0] : "\n" . implode("\n", $videoLinks));
+        }
+
+        return [$mediaUrls, $newText];
+    }
+
+    /**
+     * Build a 30-day signed URL pointing at the public sms-media endpoint
+     * for any /storage/... or sms-media/... path. Returns null if URL is already external
+     * or not under our private files disk.
+     */
+    protected function buildPublicSignedLink(string $url): ?string
+    {
+        if (str_starts_with($url, 'http')) {
+            return $url;
+        }
+
+        $relative = ltrim(preg_replace('#^/?storage/#', '', $url) ?? '', '/');
+        if ($relative === '') {
+            return null;
+        }
+
+        // Files now live on the 'files' disk; bail if missing
+        if (! Storage::disk('files')->exists($relative)) {
+            Log::channel('telnyx')->warning('Signed link target missing on files disk', ['path' => $relative]);
+            return null;
+        }
+
+        try {
+            $signed = URL::signedRoute('sms.media.public', ['filename' => $relative], now()->addDays(30));
+        } catch (\Throwable $e) {
+            return null;
+        }
+
+        // Force HTTPS public host in dev so the link is reachable from the recipient's phone
+        $appUrl = config('app.url');
+        if (str_contains((string) $appUrl, '127.0.0.1') || str_contains((string) $appUrl, 'localhost')) {
+            $publicUrl = config('services.telnyx.public_url');
+            if ($publicUrl) {
+                $parsed = parse_url($signed);
+                $signed = rtrim($publicUrl, '/') . ($parsed['path'] ?? '') . (isset($parsed['query']) ? '?' . $parsed['query'] : '');
+            }
+        }
+
+        return $signed;
     }
 
     /**
