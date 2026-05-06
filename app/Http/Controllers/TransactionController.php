@@ -976,9 +976,14 @@ class TransactionController extends Controller
             // Check if the assigned vendor's name matches the plaid merchant name
             $vendorName = strtolower($transaction->vendor->business_name);
             $plaidMerchantName = strtolower($transaction->plaid_merchant_name);
+            $plaidMerchantDescription = strtolower($transaction->plaid_merchant_description ?? '');
 
-            // If vendor name is NOT contained in plaid merchant name and vice versa, re-validate
-            if (stripos($plaidMerchantName, $vendorName) === false && stripos($vendorName, $plaidMerchantName) === false) {
+            // If vendor name is NOT contained in plaid merchant name/description and vice versa, re-validate
+            if (
+                stripos($plaidMerchantName, $vendorName) === false &&
+                stripos($vendorName, $plaidMerchantName) === false &&
+                stripos($plaidMerchantDescription, $vendorName) === false
+            ) {
                 // Try to find correct vendor using fuzzy match
                 $correctVendor = app(\App\Http\Controllers\CompanyEmailController::class)->fuzzyMatchVendor($transaction->plaid_merchant_name, $vendors);
 
