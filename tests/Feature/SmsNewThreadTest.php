@@ -3,6 +3,12 @@
 use App\Livewire\Sms\SmsNewThread;
 use App\Models\SmsGroupThread;
 use App\Models\User;
+use App\Models\Vendor;
+use App\Services\GroupSmsService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Livewire\Livewire;
+
+uses(RefreshDatabase::class);
 
 it('builds per-user and combined recipient presets and maps existing thread ids', function (): void {
     $jill = (new User())->forceFill([
@@ -40,4 +46,132 @@ it('builds per-user and combined recipient presets and maps existing thread ids'
 
     expect($jillOption['existingThreadId'])->toBe(12)
         ->and($groupOption['existingThreadId'])->toBeNull();
+});
+
+it('builds vendor recipient presets from business phone and vendor users', function (): void {
+    $vendor = (new Vendor())->forceFill([
+        'business_name' => 'Acme Subs Inc',
+        'business_phone' => '2245559999',
+    ]);
+    $vendor->setRelation('users', collect([
+        (new User())->forceFill([
+            'first_name' => 'Sam',
+            'last_name' => 'Sub',
+            'cell_phone' => '2245558888',
+        ]),
+    ]));
+
+    $existingThread = new SmsGroupThread([
+        'participants' => ['+12245559999'],
+    ]);
+    $existingThread->id = 77;
+
+    $options = (new SmsNewThread())->buildVendorRecipientPresetOptions($vendor, [$existingThread]);
+
+    expect($options)->toHaveCount(3);
+
+    $businessOption = collect($options)->first(
+        fn (array $option): bool => collect($option['recipients'])->pluck('number')->all() === ['+12245559999']
+    );
+    $samOption = collect($options)->first(
+        fn (array $option): bool => collect($option['recipients'])->pluck('number')->all() === ['+12245558888']
+    );
+    $groupOption = collect($options)->first(
+        fn (array $option): bool => count($option['recipients']) === 2
+    );
+
+    expect($businessOption)->not->toBeNull()
+        ->and($businessOption['existingThreadId'])->toBe(77)
+        ->and($samOption['label'])->toBe('Sam Sub')
+        ->and($samOption['existingThreadId'])->toBeNull()
+        ->and($groupOption['existingThreadId'])->toBeNull();
+});
+
+it('sends a vendor thread without validating stale client state', function (): void {
+    $ownerVendor = Vendor::factory()->create();
+    $subjectVendor = Vendor::factory()->create();
+    $user = User::query()->create([
+        'first_name' => 'Patryk',
+        'last_name' => 'Tester',
+        'email' => 'patryk.sms-test@example.com',
+        'cell_phone' => '2245551000',
+        'primary_vendor_id' => $ownerVendor->id,
+    ]);
+
+    $thread = new SmsGroupThread();
+    $thread->id = 123;
+
+    $service = mock(GroupSmsService::class);
+    $service->shouldReceive('sendNewGroup')
+        ->once()
+        ->with(
+            ['+12245550001'],
+            'Vendor consent message',
+            null,
+            null,
+            $user->id,
+            $ownerVendor->id,
+            $subjectVendor->id,
+        )
+        ->andReturn($thread);
+
+    app()->instance(GroupSmsService::class, $service);
+
+    $this->actingAs($user);
+
+    Livewire::test(SmsNewThread::class)
+        ->set('showModal', true)
+        ->set('recipientType', 'vendor')
+        ->set('clientId', 999999)
+        ->set('vendorId', $subjectVendor->id)
+        ->set('recipients', [[
+            'number' => '+12245550001',
+            'display' => '(224) 555-0001',
+            'label' => 'Pawel Bach',
+        ]])
+        ->set('message', 'Vendor consent message')
+        ->call('send')
+        ->assertHasNoErrors()
+        ->assertSet('showModal', false)
+        ->assertDispatched('threadCreated', threadId: 123);
+});
+
+it('sent vendor consent message uses first name for recipient greeting', function (): void {
+    $ownerVendor = Vendor::factory()->create();
+    $subjectVendor = Vendor::factory()->create();
+    $user = User::query()->create([
+        'first_name' => 'Patryk',
+        'last_name' => 'Tester',
+        'email' => 'patryk.sms-test@example.com',
+        'cell_phone' => '2245551000',
+        'primary_vendor_id' => $ownerVendor->id,
+    ]);
+
+    // Mock the service to capture the message being sent
+    $thread = new SmsGroupThread();
+    $thread->id = 456;
+
+    $service = mock(GroupSmsService::class);
+    $service->shouldReceive('sendNewGroup')
+        ->once()
+        ->andReturnUsing(function ($phones, $message) use ($thread) {
+            expect($message)->toContain('Hi Jaroslaw,');
+            return $thread;
+        });
+
+    app()->instance(GroupSmsService::class, $service);
+
+    $this->actingAs($user);
+
+    Livewire::test(SmsNewThread::class)
+        ->set('recipientType', 'vendor')
+        ->set('vendorId', $subjectVendor->id)
+        ->set('recipients', [[
+            'number' => '+12245550001',
+            'display' => '(224) 555-0001',
+            'label' => 'Jaroslaw Potapa',
+        ]])
+        ->set('message', "Hi Jaroslaw,\n" . GroupSmsService::START_CONSENT_TEXT)
+        ->call('send')
+        ->assertHasNoErrors();
 });

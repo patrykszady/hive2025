@@ -74,7 +74,7 @@ class GroupSmsService
      *
      * @param  array<string>  $phoneNumbers  E.164 format
      */
-    public function sendNewGroup(array $phoneNumbers, string $text, ?int $projectId = null, ?int $clientId = null, ?int $sentByUserId = null, ?int $vendorId = null): SmsGroupThread
+    public function sendNewGroup(array $phoneNumbers, string $text, ?int $projectId = null, ?int $clientId = null, ?int $sentByUserId = null, ?int $vendorId = null, ?int $subjectVendorId = null): SmsGroupThread
     {
         $normalizedPhoneNumbers = collect($phoneNumbers)
             ->map(fn (string $phone): string => self::formatE164($phone))
@@ -88,6 +88,7 @@ class GroupSmsService
             'project_id' => $projectId,
             'client_id' => $clientId,
             'vendor_id' => $vendorId,
+            'subject_vendor_id' => $subjectVendorId,
             'last_activity_at' => now(),
         ]);
 
@@ -178,7 +179,7 @@ class GroupSmsService
 
     private function resolveRecipientNames(SmsGroupThread $thread): string
     {
-        $thread->loadMissing('client.users');
+        $thread->loadMissing('client.users', 'subjectVendor.users');
 
         $participants = collect($thread->participants ?? [])
             ->map(fn (string $phone): string => self::formatE164($phone));
@@ -186,31 +187,56 @@ class GroupSmsService
         $names = collect();
 
         $client = $thread->client;
-        if (! $client) {
-            return '';
-        }
-
-        $homePhone = $client->getRawOriginal('home_phone');
-        if (is_string($homePhone) && $homePhone !== '') {
-            $homePhoneE164 = self::formatE164($homePhone);
-            if ($participants->contains($homePhoneE164)) {
-                $names->push($client->name);
-            }
-        }
-
-        foreach ($client->users as $user) {
-            $cellPhone = $user->getRawOriginal('cell_phone');
-            if (! is_string($cellPhone) || $cellPhone === '') {
-                continue;
+        if ($client) {
+            $homePhone = $client->getRawOriginal('home_phone');
+            if (is_string($homePhone) && $homePhone !== '') {
+                $homePhoneE164 = self::formatE164($homePhone);
+                if ($participants->contains($homePhoneE164)) {
+                    $names->push($client->name);
+                }
             }
 
-            $cellPhoneE164 = self::formatE164($cellPhone);
-            if (! $participants->contains($cellPhoneE164)) {
-                continue;
+            foreach ($client->users as $user) {
+                $cellPhone = $user->getRawOriginal('cell_phone');
+                if (! is_string($cellPhone) || $cellPhone === '') {
+                    continue;
+                }
+
+                $cellPhoneE164 = self::formatE164($cellPhone);
+                if (! $participants->contains($cellPhoneE164)) {
+                    continue;
+                }
+
+                if (is_string($user->first_name) && $user->first_name !== '') {
+                    $names->push($user->first_name);
+                }
+            }
+        } elseif ($thread->subjectVendor) {
+            // Handle vendor threads
+            $vendor = $thread->subjectVendor;
+
+            $businessPhone = $vendor->getRawOriginal('business_phone');
+            if (is_string($businessPhone) && $businessPhone !== '') {
+                $businessPhoneE164 = self::formatE164($businessPhone);
+                if ($participants->contains($businessPhoneE164)) {
+                    $names->push($vendor->short_name ?: $vendor->name);
+                }
             }
 
-            if (is_string($user->first_name) && $user->first_name !== '') {
-                $names->push($user->first_name);
+            foreach ($vendor->users as $user) {
+                $cellPhone = $user->getRawOriginal('cell_phone');
+                if (! is_string($cellPhone) || $cellPhone === '') {
+                    continue;
+                }
+
+                $cellPhoneE164 = self::formatE164($cellPhone);
+                if (! $participants->contains($cellPhoneE164)) {
+                    continue;
+                }
+
+                if (is_string($user->first_name) && $user->first_name !== '') {
+                    $names->push($user->first_name);
+                }
             }
         }
 

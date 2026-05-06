@@ -21,6 +21,9 @@ class SmsIndex extends Component
     #[Url(except: 'messages')]
     public string $activeTab = 'messages';
 
+    #[Url(except: 'all')]
+    public string $subjectFilter = 'all';
+
     public bool $isClientUser = false;
 
     protected $listeners = [

@@ -167,12 +167,22 @@
             @endif
 
             <div class="{{ $activeTab === 'messages' ? 'flex flex-col flex-1 min-h-0' : 'hidden' }}">
+                @if (! $isClientUser)
+                    <div class="mb-2">
+                        <flux:tabs wire:model.live="subjectFilter" variant="segmented" size="sm">
+                            <flux:tab name="all">All</flux:tab>
+                            <flux:tab name="client">Clients</flux:tab>
+                            <flux:tab name="vendor">Vendors</flux:tab>
+                        </flux:tabs>
+                    </div>
+                @endif
+
                 <div class="mb-2">
                     <flux:input wire:model.live.debounce.500ms="search" icon="magnifying-glass" placeholder="Search messages..." size="sm" />
                 </div>
 
                 <div class="flex-1 min-h-0">
-                    <livewire:sms.sms-thread-list :search="$search" :selected-thread-id="$threadId" :is-client-user="$isClientUser" />
+                    <livewire:sms.sms-thread-list :search="$search" :subject-filter="$subjectFilter" :selected-thread-id="$threadId" :is-client-user="$isClientUser" />
                 </div>
             </div>
 

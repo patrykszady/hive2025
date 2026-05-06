@@ -70,6 +70,8 @@
                     ->implode(', ');
             } elseif ($this->thread->client) {
                 $headerTitle = $this->thread->client->name;
+            } elseif ($this->thread->subjectVendor) {
+                $headerTitle = $this->thread->subjectVendor->short_name ?: $this->thread->subjectVendor->name;
             } elseif ($this->thread->project) {
                 $headerTitle = $this->thread->project->address;
             } else {
@@ -114,6 +116,10 @@
                     <flux:heading size="lg" class="mb-0 truncate flex-1">
                         <a href="{{ route('clients.show', $this->thread->client_id) }}" wire:navigate.hover class="hover:underline">{{ $headerTitle }}</a>
                     </flux:heading>
+                @elseif ($this->thread->subjectVendor)
+                    <flux:heading size="lg" class="mb-0 truncate flex-1">
+                        <a href="{{ route('vendors.show', $this->thread->subject_vendor_id) }}" wire:navigate.hover class="hover:underline">{{ $headerTitle }}</a>
+                    </flux:heading>
                 @else
                     <flux:heading size="lg" class="mb-0 truncate flex-1">{{ $headerTitle }}</flux:heading>
                 @endif
@@ -136,6 +142,10 @@
                                 </flux:menu.item>
                                 <flux:separator />
                             @endif
+                            <flux:menu.item icon="user" wire:click="openAssignClientModal">
+                                Assign Client / Vendor
+                            </flux:menu.item>
+                            <flux:separator />
                             <flux:menu.item variant="danger" icon="trash" x-on:click="$wire.showDeleteConfirm = true">
                                 Delete Thread
                             </flux:menu.item>
@@ -706,9 +716,7 @@
             :closable="false"
             variant="bare"
             class="!p-0"
-            x-bind:style="currentIsVideo
-                ? 'width:auto;max-width:96vw;height:auto;max-height:94vh;padding:0;'
-                : 'width:fit-content;max-width:96vw;height:fit-content;max-height:94vh;padding:0;'"
+            style="width:auto;max-width:96vw;height:auto;max-height:94vh;padding:0;"
         >
             <div
                 x-data="{
@@ -986,9 +994,7 @@
                 @keydown.escape.window="$wire.showImageLightbox && closeLightbox()"
                 @keydown.space.window="if ($wire.showImageLightbox && currentIsVideo) { $event.preventDefault(); toggleVideoPlayback(); }"
                 class="relative"
-                :style="currentIsVideo
-                    ? 'width:auto;max-width:96vw;height:auto;max-height:94vh;'
-                    : 'width:fit-content;max-width:96vw;height:fit-content;max-height:94vh;'"
+                style="width:auto;max-width:96vw;height:auto;max-height:94vh;"
             >
                 {{-- Image counter --}}
                 <div
@@ -1080,6 +1086,46 @@
                             draggable="false"
                         />
                     </template>
+                </div>
+            </div>
+        </flux:modal>
+
+        {{-- Assign Client --}}
+        <flux:modal wire:model="showAssignClientModal" class="min-w-[22rem]">
+            <div class="space-y-6">
+                <div>
+                    <flux:heading size="lg">Assign client / vendor</flux:heading>
+                    <flux:text class="mt-2">Link this thread to a client or vendor so it appears as a named conversation.</flux:text>
+                </div>
+                <flux:radio.group wire:model.live="assignSubjectType" variant="segmented" size="sm">
+                    <flux:radio value="client" label="Client" icon="user" />
+                    <flux:radio value="vendor" label="Vendor" icon="briefcase" />
+                </flux:radio.group>
+                @if ($assignSubjectType === 'client')
+                    <flux:field>
+                        <flux:label>Client</flux:label>
+                        <flux:select wire:model="assignClientId" variant="listbox" searchable clearable placeholder="No client">
+                            @foreach ($this->allClients as $client)
+                                <flux:select.option value="{{ $client->id }}">{{ $client->name ?: 'Client #'.$client->id }}</flux:select.option>
+                            @endforeach
+                        </flux:select>
+                    </flux:field>
+                @else
+                    <flux:field>
+                        <flux:label>Vendor</flux:label>
+                        <flux:select wire:model="assignVendorId" variant="listbox" searchable clearable placeholder="No vendor">
+                            @foreach ($this->allVendors as $vendor)
+                                <flux:select.option value="{{ $vendor->id }}">{{ $vendor->short_name ?: $vendor->name }}</flux:select.option>
+                            @endforeach
+                        </flux:select>
+                    </flux:field>
+                @endif
+                <div class="flex gap-2">
+                    <flux:spacer />
+                    <flux:modal.close>
+                        <flux:button variant="ghost">Cancel</flux:button>
+                    </flux:modal.close>
+                    <flux:button variant="primary" wire:click="assignClient">Save</flux:button>
                 </div>
             </div>
         </flux:modal>

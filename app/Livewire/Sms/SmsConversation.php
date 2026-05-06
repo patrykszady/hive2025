@@ -49,6 +49,15 @@ class SmsConversation extends Component
 
     public bool $showDeleteConfirm = false;
 
+    public bool $showAssignClientModal = false;
+
+    /** 'client' or 'vendor' */
+    public string $assignSubjectType = 'client';
+
+    public ?int $assignClientId = null;
+
+    public ?int $assignVendorId = null;
+
     public ?int $cancelScheduledId = null;
 
     public bool $showCancelModal = false;
@@ -267,6 +276,60 @@ class SmsConversation extends Component
     public function loadMoreMessages(): void
     {
         $this->messageLimit += 50;
+    }
+
+    public function openAssignClientModal(): void
+    {
+        $thread = SmsGroupThread::find($this->threadId);
+        $this->assignClientId = $thread?->client_id;
+        $this->assignVendorId = $thread?->subject_vendor_id;
+        $this->assignSubjectType = $thread?->subject_vendor_id ? 'vendor' : 'client';
+        $this->showAssignClientModal = true;
+    }
+
+    public function assignClient(): void
+    {
+        if ($this->isClientUser) {
+            abort(403);
+        }
+
+        $this->validate([
+            'assignSubjectType' => 'required|in:client,vendor',
+            'assignClientId' => 'nullable|exists:clients,id',
+            'assignVendorId' => 'nullable|exists:vendors,id',
+        ]);
+
+        $thread = SmsGroupThread::findOrFail($this->threadId);
+
+        if ($this->assignSubjectType === 'client') {
+            $thread->update([
+                'client_id' => $this->assignClientId ?: null,
+                'subject_vendor_id' => null,
+            ]);
+        } else {
+            $thread->update([
+                'client_id' => null,
+                'subject_vendor_id' => $this->assignVendorId ?: null,
+            ]);
+        }
+
+        $this->showAssignClientModal = false;
+
+        unset($this->thread);
+
+        Flux::toast('Thread updated.');
+    }
+
+    #[Computed]
+    public function allClients()
+    {
+        return Client::with('users')->orderBy('created_at', 'desc')->get(['id', 'business_name']);
+    }
+
+    #[Computed]
+    public function allVendors()
+    {
+        return Vendor::orderBy('business_name')->get();
     }
 
     public function deleteThread(): void

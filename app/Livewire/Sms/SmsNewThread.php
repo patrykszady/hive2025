@@ -14,7 +14,12 @@ class SmsNewThread extends Component
 {
     public bool $showModal = false;
 
+    /** 'client' or 'vendor' */
+    public string $recipientType = 'client';
+
     public ?int $clientId = null;
+
+    public ?int $vendorId = null;
 
     public string $message = '';
 
@@ -37,16 +42,22 @@ class SmsNewThread extends Component
 
     public function open(): void
     {
-        $this->reset(['clientId', 'message', 'existingThreadId', 'recipientPreset', 'recipientPresetOptions', 'recipients', 'newNumber']);
+        $this->reset(['recipientType', 'clientId', 'vendorId', 'message', 'existingThreadId', 'recipientPreset', 'recipientPresetOptions', 'recipients', 'newNumber']);
         $this->showModal = true;
     }
 
     public function openWithPhone(string $phone): void
     {
-        $this->reset(['clientId', 'message', 'existingThreadId', 'recipientPreset', 'recipientPresetOptions', 'recipients', 'newNumber']);
+        $this->reset(['recipientType', 'clientId', 'vendorId', 'message', 'existingThreadId', 'recipientPreset', 'recipientPresetOptions', 'recipients', 'newNumber']);
         $this->newNumber = $phone;
         $this->addNumber();
         $this->showModal = true;
+    }
+
+    public function updatedRecipientType(): void
+    {
+        $this->reset(['clientId', 'vendorId', 'existingThreadId', 'recipientPreset', 'recipientPresetOptions', 'recipients', 'message']);
+        $this->resetValidation();
     }
 
     public function updatedClientId(): void
@@ -91,6 +102,163 @@ class SmsNewThread extends Component
     public function updatedRecipientPreset(): void
     {
         $this->applyRecipientPreset($this->recipientPreset);
+    }
+
+    public function updatedVendorId(): void
+    {
+        $this->existingThreadId = null;
+        $this->recipientPreset = null;
+        $this->recipientPresetOptions = [];
+        $this->recipients = [];
+
+        if (! $this->vendorId) {
+            return;
+        }
+
+        $vendor = Vendor::with('users')->find($this->vendorId);
+        if (! $vendor) {
+            return;
+        }
+
+        $existingVendorThreads = SmsGroupThread::query()
+            ->where('subject_vendor_id', $vendor->id)
+            ->get(['id', 'participants']);
+
+        $this->recipientPresetOptions = $this->buildVendorRecipientPresetOptions($vendor, $existingVendorThreads);
+
+        if (! empty($this->recipientPresetOptions)) {
+            $defaultOption = collect($this->recipientPresetOptions)
+                ->sortByDesc(fn (array $option): int => count($option['recipients']))
+                ->first();
+
+            if (is_array($defaultOption)) {
+                $this->recipientPreset = $defaultOption['value'];
+                $this->applyRecipientPreset($this->recipientPreset);
+            }
+        } else {
+            $this->addVendorPhoneNumbers($vendor);
+        }
+
+        $this->setDefaultMessageFromVendor($vendor);
+    }
+
+    /**
+     * Build presets for a vendor: business phone, each user, and a group of all phones.
+     *
+     * @param  iterable<SmsGroupThread>  $threads
+     * @return array<int, array{value: string, label: string, recipients: array<int, array{number: string, display: string, label: string}>, existingThreadId: ?int}>
+     */
+    public function buildVendorRecipientPresetOptions(Vendor $vendor, iterable $threads = []): array
+    {
+        $recipientEntries = collect();
+
+        $businessPhone = $vendor->getRawOriginal('business_phone');
+        if (! is_string($businessPhone) || $businessPhone === '') {
+            $businessPhone = (string) ($vendor->business_phone ?? '');
+        }
+        if (is_string($businessPhone) && $businessPhone !== '') {
+            $recipientEntries->push([
+                'number' => GroupSmsService::formatE164($businessPhone),
+                'display' => $this->formatDisplay($businessPhone),
+                'label' => $vendor->short_name ?: $vendor->name,
+            ]);
+        }
+
+        foreach ($vendor->users as $user) {
+            $entry = $this->buildRecipientEntryFromUser($user);
+            if ($entry) {
+                $recipientEntries->push($entry);
+            }
+        }
+
+        $recipientEntries = $recipientEntries->unique('number')->values();
+
+        if ($recipientEntries->isEmpty()) {
+            return [];
+        }
+
+        $options = [];
+
+        foreach ($recipientEntries as $entry) {
+            $phones = [$entry['number']];
+            $signature = $this->participantSignature($phones);
+
+            $options[] = [
+                'value' => $signature,
+                'label' => $entry['label'] !== '' ? $entry['label'] : $entry['display'],
+                'recipients' => [$entry],
+                'existingThreadId' => $this->resolveExistingThreadIdForParticipants($threads, $phones),
+            ];
+        }
+
+        if ($recipientEntries->count() > 1) {
+            $groupRecipients = $recipientEntries->all();
+            $groupPhones = $recipientEntries->pluck('number')->all();
+            $groupSignature = $this->participantSignature($groupPhones);
+            $groupLabel = $recipientEntries
+                ->pluck('label')
+                ->filter()
+                ->join(', ', ' & ');
+
+            $options[] = [
+                'value' => $groupSignature,
+                'label' => $groupLabel !== '' ? $groupLabel : 'Group',
+                'recipients' => $groupRecipients,
+                'existingThreadId' => $this->resolveExistingThreadIdForParticipants($threads, $groupPhones),
+            ];
+        }
+
+        return collect($options)
+            ->unique('value')
+            ->values()
+            ->all();
+    }
+
+    private function addVendorPhoneNumbers(Vendor $vendor): void
+    {
+        $existingNumbers = collect($this->recipients)->pluck('number')->toArray();
+
+        $businessPhone = $vendor->getRawOriginal('business_phone');
+        if (is_string($businessPhone) && $businessPhone !== '') {
+            $e164 = GroupSmsService::formatE164($businessPhone);
+            if (! in_array($e164, $existingNumbers)) {
+                $this->recipients[] = [
+                    'number' => $e164,
+                    'display' => $this->formatDisplay($businessPhone),
+                    'label' => $vendor->short_name ?: $vendor->name,
+                ];
+                $existingNumbers[] = $e164;
+            }
+        }
+
+        foreach ($vendor->users as $user) {
+            if ($user->getRawOriginal('cell_phone')) {
+                $e164 = GroupSmsService::formatE164($user->getRawOriginal('cell_phone'));
+                if (! in_array($e164, $existingNumbers)) {
+                    $this->recipients[] = [
+                        'number' => $e164,
+                        'display' => $this->formatDisplay($user->getRawOriginal('cell_phone')),
+                        'label' => trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')),
+                    ];
+                }
+            }
+        }
+    }
+
+    private function setDefaultMessageFromVendor(Vendor $vendor): void
+    {
+        $recipientNames = collect($this->recipients)
+            ->pluck('label')
+            ->map(fn ($name) => explode(' ', trim($name))[0])
+            ->filter()
+            ->unique()
+            ->join(', ', ' & ');
+
+        if ($recipientNames === '') {
+            $recipientNames = $vendor->short_name ?: $vendor->name;
+        }
+
+        $this->message = "Hi {$recipientNames},\n" . GroupSmsService::START_CONSENT_TEXT;
     }
 
     /**
@@ -230,6 +398,7 @@ class SmsNewThread extends Component
     {
         $recipientNames = collect($this->recipients)
             ->pluck('label')
+            ->map(fn ($name) => explode(' ', trim($name))[0])
             ->filter()
             ->unique()
             ->join(', ', ' & ');
@@ -375,6 +544,12 @@ class SmsNewThread extends Component
         return Client::orderBy('created_at', 'DESC')->get();
     }
 
+    #[Computed]
+    public function vendors()
+    {
+        return Vendor::orderBy('business_name')->get();
+    }
+
     /**
      * Format a raw phone number as (XXX) XXX-XXXX.
      */
@@ -405,7 +580,9 @@ class SmsNewThread extends Component
     public function send(GroupSmsService $smsService): void
     {
         $this->validate([
-            'clientId' => 'nullable|exists:clients,id',
+            'recipientType' => 'required|in:client,vendor',
+            'clientId' => 'exclude_unless:recipientType,client|nullable|exists:clients,id',
+            'vendorId' => 'exclude_unless:recipientType,vendor|nullable|exists:vendors,id',
             'message' => 'required|string|max:1600',
         ]);
 
@@ -421,7 +598,7 @@ class SmsNewThread extends Component
             return;
         }
 
-        if ($this->clientId) {
+        if ($this->recipientType === 'client' && $this->clientId) {
             $existingThread = SmsGroupThread::query()->where('client_id', $this->clientId);
 
             foreach ($phones as $phone) {
@@ -440,7 +617,34 @@ class SmsNewThread extends Component
             }
         }
 
-        $thread = $smsService->sendNewGroup($phones, $this->message, null, $this->clientId, auth()->id(), auth()->user()->vendor?->id);
+        if ($this->recipientType === 'vendor' && $this->vendorId) {
+            $existingThread = SmsGroupThread::query()->where('subject_vendor_id', $this->vendorId);
+
+            foreach ($phones as $phone) {
+                $existingThread->whereJsonContains('participants', $phone);
+            }
+
+            $existingThread = $existingThread
+                ->whereJsonLength('participants', count($phones))
+                ->first();
+
+            if ($existingThread) {
+                $this->existingThreadId = $existingThread->id;
+                $this->addError('vendorId', 'A thread already exists for this participant group.');
+
+                return;
+            }
+        }
+
+        $thread = $smsService->sendNewGroup(
+            $phones,
+            $this->message,
+            null,
+            $this->recipientType === 'client' ? $this->clientId : null,
+            auth()->id(),
+            auth()->user()->vendor?->id,
+            $this->recipientType === 'vendor' ? $this->vendorId : null,
+        );
 
         $this->showModal = false;
         $this->dispatch('threadCreated', threadId: $thread->id);

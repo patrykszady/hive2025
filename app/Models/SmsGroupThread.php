@@ -18,6 +18,7 @@ class SmsGroupThread extends Model
         'project_id',
         'client_id',
         'vendor_id',
+        'subject_vendor_id',
         'telnyx_message_id',
         'last_activity_at',
         'opt_in_prompt_sent_at',
@@ -48,6 +49,15 @@ class SmsGroupThread extends Model
     public function vendor(): BelongsTo
     {
         return $this->belongsTo(Vendor::class);
+    }
+
+    /**
+     * The vendor (sub) this thread is communicating WITH.
+     * Distinct from $this->vendor, which is the owning tenant.
+     */
+    public function subjectVendor(): BelongsTo
+    {
+        return $this->belongsTo(Vendor::class, 'subject_vendor_id')->withoutGlobalScopes();
     }
 
     /**

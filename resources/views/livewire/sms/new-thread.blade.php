@@ -3,24 +3,48 @@
         <div class="space-y-4">
             <flux:heading size="lg">New Group Message</flux:heading>
 
-            <form wire:submit="send" class="space-y-4">
-                {{-- Client (optional) --}}
-                <flux:field>
-                    <flux:select label="Client (optional)" wire:model.live="clientId" variant="listbox" searchable clearable placeholder="Choose client or leave blank...">
-                        <x-slot name="search">
-                            <flux:select.search placeholder="Search..." />
-                        </x-slot>
+            <form class="space-y-4">
+                {{-- Recipient type --}}
+                <flux:radio.group wire:model.live="recipientType" variant="segmented" size="sm">
+                    <flux:radio value="client" label="Client" icon="user" />
+                    <flux:radio value="vendor" label="Vendor" icon="briefcase" />
+                </flux:radio.group>
 
-                        @foreach($this->clients as $client)
-                            <flux:select.option value="{{ $client->id }}">{{ $client->name }}</flux:select.option>
-                        @endforeach
-                    </flux:select>
-                    @error('clientId')
-                        <flux:error>{{ $message }}</flux:error>
-                    @enderror
-                </flux:field>
+                @if ($recipientType === 'client')
+                    {{-- Client (optional) --}}
+                    <flux:field>
+                        <flux:select label="Client (optional)" wire:model.live="clientId" variant="listbox" searchable clearable placeholder="Choose client or leave blank...">
+                            <x-slot name="search">
+                                <flux:select.search placeholder="Search..." />
+                            </x-slot>
 
-                @if ($clientId && count($recipientPresetOptions) > 0)
+                            @foreach($this->clients as $client)
+                                <flux:select.option value="{{ $client->id }}">{{ $client->name }}</flux:select.option>
+                            @endforeach
+                        </flux:select>
+                        @error('clientId')
+                            <flux:error>{{ $message }}</flux:error>
+                        @enderror
+                    </flux:field>
+                @else
+                    {{-- Vendor (optional) --}}
+                    <flux:field>
+                        <flux:select label="Vendor (optional)" wire:model.live="vendorId" variant="listbox" searchable clearable placeholder="Choose vendor or leave blank...">
+                            <x-slot name="search">
+                                <flux:select.search placeholder="Search..." />
+                            </x-slot>
+
+                            @foreach($this->vendors as $vendor)
+                                <flux:select.option value="{{ $vendor->id }}">{{ $vendor->short_name ?: $vendor->name }}</flux:select.option>
+                            @endforeach
+                        </flux:select>
+                        @error('vendorId')
+                            <flux:error>{{ $message }}</flux:error>
+                        @enderror
+                    </flux:field>
+                @endif
+
+                @if ((($recipientType === 'client' && $clientId) || ($recipientType === 'vendor' && $vendorId)) && count($recipientPresetOptions) > 0)
                     <flux:field>
                         <flux:select label="Conversation" wire:model.live="recipientPreset" variant="listbox" placeholder="Choose recipients...">
                             @foreach($recipientPresetOptions as $option)
@@ -108,7 +132,7 @@
 
                         <div class="flex justify-end gap-2">
                             <flux:button wire:click="$set('showModal', false)">Cancel</flux:button>
-                            <flux:button type="submit" variant="primary" icon="paper-airplane" wire:loading.attr="disabled">
+                            <flux:button wire:click="send" variant="primary" icon="paper-airplane" wire:loading.attr="disabled" wire:target="send">
                                 Send Message
                             </flux:button>
                         </div>

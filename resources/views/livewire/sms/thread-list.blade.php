@@ -96,6 +96,12 @@
                         @endif
                     </p>
 
+                    @if ($thread->subject_vendor_id)
+                        <p class="mt-0.5 text-xs text-zinc-400 dark:text-zinc-500 truncate">
+                            {{ $thread->subjectVendor->business_name }}
+                        </p>
+                    @endif
+
                     {{-- Latest message preview --}}
                     @if ($thread->latestMessage)
                         @php

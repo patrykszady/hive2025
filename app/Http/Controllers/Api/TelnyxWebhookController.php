@@ -3835,6 +3835,12 @@ class TelnyxWebhookController extends Controller
         // Attempt to match to an existing client
         $clientId = $this->resolveClientIdByPhone($normalizedSender);
 
+        // If no client matched, attempt to match to a vendor (sub) instead
+        $subjectVendorId = null;
+        if (! $clientId) {
+            $subjectVendorId = $this->resolveSubjectVendorIdByPhone($normalizedSender);
+        }
+
         // When the client has multiple users, set an explicit thread name
         // so this 1-on-1 thread is visually distinct from group threads.
         $threadName = null;
@@ -3862,6 +3868,7 @@ class TelnyxWebhookController extends Controller
             'participants' => [$normalizedSender],
             'name' => $threadName,
             'client_id' => $clientId,
+            'subject_vendor_id' => $subjectVendorId,
             'vendor_id' => $vendorId,
             'last_activity_at' => now(),
         ]);
@@ -3969,6 +3976,37 @@ class TelnyxWebhookController extends Controller
             $client = $user->clients()->first();
             if ($client) {
                 return $client->id;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Try to find a vendor (sub) by a phone number (checking vendors.business_phone and user cell_phone).
+     *
+     * Phone numbers are stored as digits only, so we strip the E.164 prefix to compare.
+     */
+    protected function resolveSubjectVendorIdByPhone(string $e164Phone): ?int
+    {
+        $digits = preg_replace('/[^0-9]/', '', $e164Phone);
+
+        if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+            $digits = substr($digits, 1);
+        }
+
+        // Check vendor business_phone (may include separators)
+        $vendor = \App\Models\Vendor::whereRaw("REPLACE(REPLACE(REPLACE(business_phone, '-', ''), ' ', ''), '.', '') = ?", [$digits])->first();
+        if ($vendor) {
+            return $vendor->id;
+        }
+
+        // Check user cell_phone — find vendor via pivot
+        $user = User::where('cell_phone', $digits)->first();
+        if ($user) {
+            $vendor = $user->vendors()->first();
+            if ($vendor) {
+                return $vendor->id;
             }
         }
 

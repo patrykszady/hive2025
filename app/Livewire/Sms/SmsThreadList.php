@@ -19,6 +19,10 @@ class SmsThreadList extends Component
     #[Reactive]
     public string $search = '';
 
+    /** 'all', 'client', or 'vendor' */
+    #[Reactive]
+    public string $subjectFilter = 'all';
+
     public ?int $selectedThreadId = null;
 
     #[Reactive]
@@ -61,6 +65,7 @@ class SmsThreadList extends Component
             ->with([
                 'project:id,address',
                 'client',
+                'subjectVendor',
                 'latestMessage.sentByUser:id,first_name',
                 'threadParticipants:id,thread_id,phone_number',
             ])
@@ -82,6 +87,8 @@ class SmsThreadList extends Component
                         ->orWhereHas('messages', fn ($mq) => $mq->where('text', 'like', "%{$search}%"));
                 });
             })
+            ->when($this->subjectFilter === 'client', fn ($q) => $q->whereNotNull('client_id'))
+            ->when($this->subjectFilter === 'vendor', fn ($q) => $q->whereNotNull('subject_vendor_id'))
             ->orderByDesc('last_activity_at')
             ->limit($this->limit)
             ->get();
