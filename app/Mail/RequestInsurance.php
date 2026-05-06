@@ -22,6 +22,8 @@ class RequestInsurance extends Mailable
     // public $agent;
     public $agent_expired_docs;
 
+    public string $requestLabel;
+
     /**
      * Create a new message instance.
      *
@@ -36,6 +38,7 @@ class RequestInsurance extends Mailable
         // $this->agent = $agent;
         $this->vendor = $vendor;
         $this->requesting_vendor = $requesting_vendor;
+        $this->requestLabel = $this->resolveRequestLabel($agent_expired_docs);
 
         $this->withSymfonyMessage(function (\Symfony\Component\Mime\Email $message): void {
             $message->getHeaders()->add(new \Mailtrap\EmailHeader\CategoryHeader('insurance_request'));
@@ -51,7 +54,7 @@ class RequestInsurance extends Mailable
     {
         return new Envelope(
             from: new Address(config('nylas.certificates_email'), 'Hive Contractors'),
-            subject: 'COI Request for '.$this->vendor->name,
+            subject: $this->requestLabel.' for '.$this->vendor->name,
         );
     }
 
@@ -75,5 +78,32 @@ class RequestInsurance extends Mailable
     public function attachments()
     {
         return [];
+    }
+
+    private function resolveRequestLabel($docs): string
+    {
+        $insuranceTypes = ['general', 'professional', 'workers'];
+
+        $hasInsurance = false;
+        $hasLicense = false;
+
+        foreach ($docs as $doc) {
+            $type = (string) ($doc->attributes['type'] ?? $doc->type ?? '');
+            if (in_array($type, $insuranceTypes, true)) {
+                $hasInsurance = true;
+            } else {
+                $hasLicense = true;
+            }
+        }
+
+        if ($hasInsurance && $hasLicense) {
+            return 'Document Request';
+        }
+
+        if ($hasLicense) {
+            return 'License Request';
+        }
+
+        return 'COI Request';
     }
 }

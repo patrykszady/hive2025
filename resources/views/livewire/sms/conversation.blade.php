@@ -573,8 +573,16 @@
             >
                 @if ($attachment && method_exists($attachment, 'temporaryUrl') && $attachment->getRealPath())
                     <div class="mb-2 px-1">
+                        @php
+                            $attachmentMimeType = (string) $attachment->getMimeType();
+                            $isVideoAttachment = str_starts_with($attachmentMimeType, 'video/');
+                        @endphp
                         <div class="relative inline-block border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden">
-                            <img src="{{ $attachment->temporaryUrl() }}" alt="Attachment preview" class="size-16 object-cover" />
+                            @if ($isVideoAttachment)
+                                <video src="{{ $attachment->temporaryUrl() }}" class="size-16 object-cover bg-black" muted playsinline preload="metadata"></video>
+                            @else
+                                <img src="{{ $attachment->temporaryUrl() }}" alt="Attachment preview" class="size-16 object-cover" />
+                            @endif
                             <div class="absolute top-0 right-0 p-0.5">
                                 <button type="button" wire:click="removeAttachment" class="p-0.5 rounded-full bg-zinc-900/50 hover:bg-zinc-900/70 flex justify-center items-center">
                                     <flux:icon icon="x-mark" variant="micro" class="text-white" />
@@ -594,8 +602,8 @@
                     x-on:input="saveDraft($event)"
                 >
                     <x-slot name="actionsLeading">
-                        <flux:button type="button" size="sm" variant="subtle" square icon="paper-clip" x-on:click="$refs.fileInput.click()" aria-label="Attach image"></flux:button>
-                        <input x-ref="fileInput" type="file" wire:model="attachment" accept="image/*" class="hidden" />
+                        <flux:button type="button" size="sm" variant="subtle" square icon="paper-clip" x-on:click="$refs.fileInput.click()" aria-label="Attach media"></flux:button>
+                        <input x-ref="fileInput" type="file" wire:model="attachment" accept="image/*,video/*,.mp4,.mov,.webm,.m4v,.3gp,.avi" class="hidden" />
                         @if ($this->thread?->client_id)
                             <flux:button type="button" size="sm" variant="subtle" square icon="calendar-days" wire:click="$dispatchTo('sms.send-schedule-modal', 'openScheduleModal', { threadId: {{ $threadId }} })" tooltip="Send schedule" aria-label="Send schedule"></flux:button>
                         @endif

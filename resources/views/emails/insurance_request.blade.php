@@ -6,8 +6,8 @@
 @endphp
 
 <div style="text-align: center;">
-<h1 class="title" style="text-align: center;">COI Request</h1>
-<p class="text" style="margin: 6px 0 8px; text-align: center;"><a href="{{ $requestingVendorUrl }}">{{ $requesting_vendor->name }}</a> is requesting updated Certificates of Insurance for <a href="{{ $insuredVendorUrl }}">{{ $vendor->name }}</a>.</p>
+<h1 class="title" style="text-align: center;">{{ $requestLabel }}</h1>
+<p class="text" style="margin: 6px 0 8px; text-align: center;"><a href="{{ $requestingVendorUrl }}">{{ $requesting_vendor->name }}</a> is requesting updated documents for <a href="{{ $insuredVendorUrl }}">{{ $vendor->name }}</a>.</p>
 </div>
 
 <hr style="border: none; border-top: 1px solid #cbd5e1; margin: 6px 0;">
@@ -50,7 +50,7 @@
 	<tbody>
 		@foreach($agent_expired_docs as $agent_expired_doc)
 			<tr>
-				<td style="padding: 8px 0; vertical-align: top;">{{ $agent_expired_doc->type }}</td>
+				<td style="padding: 8px 0; vertical-align: top;">{{ \Illuminate\Support\Str::headline((string) $agent_expired_doc->type) }}</td>
 				<td style="padding: 8px 0; vertical-align: top;">{{ $agent_expired_doc->number }}</td>
 				<td style="padding: 8px 0; vertical-align: top;">{{ $agent_expired_doc->expiration_date->format('m/d/Y') }}</td>
 			</tr>

@@ -32,3 +32,15 @@ it('opens the media lightbox when a video is requested', function (): void {
     expect($component->showImageLightbox)->toBeTrue();
     expect($component->lightboxImageUrl)->toBe('sms-media/2026/05/demo.mp4');
 });
+
+it('allows common video formats in the sms attachment validation rule', function (): void {
+    $rule = SmsConversation::attachmentValidationRule();
+
+    expect($rule)->not->toContain('max:');
+    expect($rule)->toContain('mp4');
+    expect($rule)->toContain('mov');
+    expect($rule)->toContain('webm');
+    expect($rule)->toContain('m4v');
+    expect($rule)->toContain('3gp');
+    expect($rule)->toContain('avi');
+});

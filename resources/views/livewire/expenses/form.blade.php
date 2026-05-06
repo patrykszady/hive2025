@@ -291,8 +291,12 @@
     </form>
 
     <x-slot name="footer">
-        @if($expense->exists && !$expense->transactions()->exists())
-            <flux:button wire:click="remove" variant="danger">Remove</flux:button>
+        @if($expense->exists && (!$expense->transactions()->exists() || auth()->user()->vendor_role === 'Admin'))
+            <flux:button
+                x-on:click="$flux.modal('expense_delete_confirm').show()"
+                variant="danger"
+                type="button"
+            >Delete</flux:button>
         @endif
 
         <flux:spacer />
@@ -300,6 +304,34 @@
         <flux:button type="submit" form="expenses_form_modal_form" variant="primary">{{$view_text['button_text']}}</flux:button>
     </x-slot>
 </x-form-modal>
+
+{{-- DELETE EXPENSE CONFIRM MODAL --}}
+@if($expense->exists && (!$expense->transactions()->exists() || auth()->user()->vendor_role === 'Admin'))
+    <flux:modal name="expense_delete_confirm" class="min-w-[22rem]">
+        <div class="space-y-6">
+            <div>
+                <flux:heading size="lg">Delete Expense?</flux:heading>
+                <flux:text class="mt-2">
+                    <p>You're about to delete this expense.</p>
+                    @if($expense->transactions()->exists())
+                        <p class="mt-2">This expense has {{ $expense->transactions()->count() }} matched {{ \Illuminate\Support\Str::plural('transaction', $expense->transactions()->count()) }}. They will be unlinked from this expense (transactions themselves will not be deleted).</p>
+                    @endif
+                    @if($expense->receipts()->exists())
+                        <p class="mt-2">{{ $expense->receipts()->count() }} {{ \Illuminate\Support\Str::plural('receipt', $expense->receipts()->count()) }} attached to this expense will also be deleted.</p>
+                    @endif
+                </flux:text>
+            </div>
+
+            <div class="flex gap-2">
+                <flux:spacer />
+                <flux:modal.close>
+                    <flux:button variant="ghost">Cancel</flux:button>
+                </flux:modal.close>
+                <flux:button wire:click="remove" x-on:click="$flux.modal('expense_delete_confirm').close()" variant="danger">Delete Expense</flux:button>
+            </div>
+        </div>
+    </flux:modal>
+@endif
 
 {{-- SPLITS MODAL --}}
 <livewire:expenses.expense-splits-create :projects="$this->projects" :distributions="$this->distributions" />

@@ -9,13 +9,14 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Casts\Attribute;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Laravel\Scout\Searchable;
 use Spatie\Activitylog\LogOptions;
 use Spatie\Activitylog\Traits\LogsActivity;
 
 class ExpenseReceipts extends Model
 {
-    use HasFactory, LogsActivity, Searchable;
+    use HasFactory, LogsActivity, Searchable, SoftDeletes;
 
     protected $table = 'expense_receipts_data';
 

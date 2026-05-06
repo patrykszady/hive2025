@@ -64,7 +64,7 @@ class UpcomingClientTasks extends Component
     public function groupedTasks(): Collection
     {
         $today = browser_today();
-        $cutoff = $today->copy()->subDay();
+        $cutoff = $today->copy()->subDays(7);
         $windowEnd = $today->copy()->addDays(6);
 
         $cutoffStr = $cutoff->format('Y-m-d');
@@ -146,7 +146,7 @@ class UpcomingClientTasks extends Component
             })->values();
         });
 
-        // Ensure 8 consecutive days starting from yesterday (browser timezone)
+        // Ensure the near-term window (yesterday through 6 days ahead) has visible buckets.
         for ($i = -1; $i < 7; $i++) {
             $dateStr = $today->copy()->addDays($i)->format('Y-m-d');
             if (! $grouped->has($dateStr)) {
@@ -154,8 +154,8 @@ class UpcomingClientTasks extends Component
             }
         }
 
-        // Keep only the 8-day window (yesterday through 6 days from now)
-        $windowStartStr = $today->copy()->subDay()->format('Y-m-d');
+        // Keep a 14-day display window (7 days back through 6 days ahead).
+        $windowStartStr = $today->copy()->subDays(7)->format('Y-m-d');
         $grouped = $grouped->filter(fn ($tasks, $date) => $date >= $windowStartStr && $date <= $windowEndStr);
 
         return $grouped->sortKeys();
@@ -183,7 +183,7 @@ class UpcomingClientTasks extends Component
     public function taskCount(): int
     {
         $today = browser_today();
-        $startOfWindow = $today->format('Y-m-d');
+        $startOfWindow = $today->copy()->subDays(7)->format('Y-m-d');
         $endOfWindow = $today->copy()->addDays(6)->format('Y-m-d');
 
         $projectIds = $this->getProjectIds();

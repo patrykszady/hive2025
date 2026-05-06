@@ -8,12 +8,12 @@ use Illuminate\Console\Command;
 class SyncContentUnderstandingAnalyzer extends Command
 {
     protected $signature = 'content-understanding:sync-analyzer
-                            {type=receipt             : Analyzer type to sync: receipt, coi, material_order, or state_license}
+                            {type=receipt             : Analyzer type to sync: receipt, receipt_classifier, coi, material_order, or state_license}
                             {--base=prebuilt-document  : Prebuilt analyzer to use as base schema}
                             {--model=gpt-4.1           : Completion model name for the analyzer}
                             {--dry-run                 : Print the schema that would be sent without calling the API}';
 
-    protected $description = 'Create or update a Content Understanding analyzer schema (receipt, coi, material_order, or state_license).';
+    protected $description = 'Create or update a Content Understanding analyzer schema (receipt, receipt_classifier, coi, material_order, or state_license).';
 
     public function handle(ContentUnderstandingService $cu): int
     {
@@ -21,16 +21,17 @@ class SyncContentUnderstandingAnalyzer extends Command
         $baseId    = $this->option('base');
         $model     = $this->option('model');
 
-        if (! in_array($type, ['receipt', 'coi', 'material_order', 'state_license'], true)) {
-            $this->error("Unknown analyzer type '{$type}'. Use 'receipt', 'coi', 'material_order', or 'state_license'.");
+        if (! in_array($type, ['receipt', 'receipt_classifier', 'coi', 'material_order', 'state_license'], true)) {
+            $this->error("Unknown analyzer type '{$type}'. Use 'receipt', 'receipt_classifier', 'coi', 'material_order', or 'state_license'.");
             return self::FAILURE;
         }
 
         $analyzerId = match ($type) {
-            'coi'            => config('services.azure_cu.analyzer_id_coi'),
-            'material_order' => config('services.azure_cu.analyzer_id_material_order'),
-            'state_license'  => config('services.azure_cu.analyzer_id_state_license'),
-            default          => config('services.azure_cu.analyzer_id'),
+            'coi'                => config('services.azure_cu.analyzer_id_coi'),
+            'material_order'     => config('services.azure_cu.analyzer_id_material_order'),
+            'state_license'      => config('services.azure_cu.analyzer_id_state_license'),
+            'receipt_classifier' => config('services.azure_cu.analyzer_id_receipt_classifier'),
+            default              => config('services.azure_cu.analyzer_id'),
         };
 
         $this->info("Syncing '{$type}' analyzer: {$analyzerId}");
@@ -40,10 +41,11 @@ class SyncContentUnderstandingAnalyzer extends Command
         $baseFields = $base['fieldSchema']['fields'] ?? [];
 
         $definition = match ($type) {
-            'coi'            => $this->buildCoiDefinition($model),
-            'material_order' => $this->buildMaterialOrderDefinition($model),
-            'state_license'  => $this->buildStateLicenseDefinition($model),
-            default          => $this->buildReceiptDefinition($model, $baseFields),
+            'coi'                => $this->buildCoiDefinition($model),
+            'material_order'     => $this->buildMaterialOrderDefinition($model),
+            'state_license'      => $this->buildStateLicenseDefinition($model),
+            'receipt_classifier' => $this->buildReceiptClassifierDefinition($model),
+            default              => $this->buildReceiptDefinition($model, $baseFields),
         };
 
         if ($this->option('dry-run')) {
@@ -165,7 +167,7 @@ class SyncContentUnderstandingAnalyzer extends Command
 
             'Shipping' => [
                 'type'        => 'number',
-                'description' => 'Total shipping, handling, and delivery charges. Look ONLY for an explicit numeric dollar amount appearing on the SAME line as one of these labels: "Shipping", "Freight", "Delivery", "Handling", "S&H". Return null if the label is absent, OR if the value next to the label is non-numeric such as "FREE", "Free", "Included", "N/A", "—", or "$0.00". NEVER use a value from a Tax, Subtotal, Total, Tip, or Fees line. Do NOT infer or guess — if no explicit dollar amount appears next to a shipping/delivery/handling/freight label, return null. Do NOT return 0.',
+                'description' => 'Total shipping, handling, and delivery charges. Look ONLY for an explicit numeric dollar amount appearing on the SAME line as one of these labels: "Shipping", "Freight", "Delivery", "Handling", "S&H". Return null if the label is absent, OR if the value next to the label is non-numeric such as "FREE", "Free", "Included", "N/A", "—", or "$0.00". NEVER use a value from a Tax, Subtotal, Total, Tip, or Fees line. NEVER use an Order Number, Invoice Number, PO Number, Account Number, Customer Number, Tracking Number, ZIP code, or any identifier that happens to appear near a shipping label. The value must read as a normal currency amount (typically under $1,000 for ground shipping, under $10,000 for freight). If you would have to return a value larger than the receipt Total/Subtotal, return null. Do NOT infer or guess. Do NOT return 0.',
                 'method'      => 'extract',
             ],
 
@@ -253,6 +255,37 @@ class SyncContentUnderstandingAnalyzer extends Command
                     ],
                 ],
             ],
+
+            // ── Multi-page tracking ────────────────────────────────────────
+            // Used by the auto-receipts importer to recognize when several
+            // attachments in the same email are pages of one receipt.
+            'PageNumber' => [
+                'type'        => 'number',
+                'description' => 'The page number printed on this document. Look for labels like "Page # 1 of 2", "Page 1/2", "Page 1", or "Pg 1". Return only the integer for the current page (e.g. 1 from "Page # 1 of 2"). Return null if no page indicator is printed.',
+                'method'      => 'extract',
+            ],
+            'PageTotal' => [
+                'type'        => 'number',
+                'description' => 'The total page count printed on this document. Look for the second number in labels like "Page # 1 of 2" (return 2). Return null if no total is printed.',
+                'method'      => 'extract',
+            ],
+            'ContinuedFromPrevious' => [
+                'type'        => 'boolean',
+                'description' => 'True if this document is a continuation of a previous page. Indicators include: a "Page # 2 of 2" (or higher) marker, the phrase "Continued from previous page", missing header/totals on what looks like a partial ship-ticket, or signature/notes-only pages that reference an order printed on a prior page. False otherwise.',
+                'method'      => 'extract',
+            ],
+
+            // ── Handwritten note (job-site / project label) ────────────────
+            // Construction crews often handwrite a short note on the receipt
+            // — typically a job-site address, project name, or a single word
+            // like "Office" or "Shop" — to indicate which job the materials
+            // belong to. This is separate from any printed "Sold To" / "Ship
+            // To" / "P/O" form labels and their printed addresses.
+            'HandwrittenNote' => [
+                'type'        => 'string',
+                'description' => 'Any short HANDWRITTEN note added by a person on top of the printed receipt — typically a job-site address (e.g. "215 Lincoln", "1422 Oak St"), a project name, or a single word like "Office", "Shop", or "Warehouse". Use visual cues from the document image: handwriting has irregular stroke widths, varied baseline, slants differently from printed text, and is often written in pen on whitespace or over/next to the printed form. Return ONLY the handwritten text, exactly as written. Do NOT return printed text from any "Sold To", "Ship To", "Bill To", "Customer", "P/O", "Order #", "Invoice #", "Date", or "Signature" label or the printed address that follows them. Do NOT return the merchant name, merchant address, customer name, vendor logo text, or any printed form label. Do NOT return signatures (only printed-style notes count). If there is no clearly handwritten note, return null.',
+                'method'      => 'generate',
+            ],
         ];
 
         return [
@@ -265,6 +298,51 @@ class SyncContentUnderstandingAnalyzer extends Command
                 'name'        => 'HiveReceiptSchema',
                 'description' => 'Schema for construction company receipt and invoice OCR.',
                 'fields'      => $customFields,
+            ],
+        ];
+    }
+
+    /**
+     * Lightweight analyzer used to classify whether a single PDF attachment
+     * is a standalone receipt or a page of a multi-page invoice. Returns just
+     * enough info for the auto-receipts importer to group attachments before
+     * sending the merged document through the full receipt analyzer.
+     */
+    private function buildReceiptClassifierDefinition(string $model): array
+    {
+        $fields = [
+            'InvoiceNumber' => [
+                'type'        => 'string',
+                'description' => 'The invoice / order / ticket number printed on this page (any of: "Invoice #", "Order #", "Ticket #", "Sales Order #", "Document #"). This is the SAME identifier you would see repeated on every page of a multi-page invoice. Return null if no such identifier is printed.',
+                'method'      => 'extract',
+            ],
+            'PageNumber' => [
+                'type'        => 'number',
+                'description' => 'The page number printed on this document. Look for labels like "Page # 1 of 2", "Page 1/2", "Page 1", or "Pg 1". Return only the integer for the current page (e.g. 1 from "Page # 1 of 2"). Return null if no page indicator is printed.',
+                'method'      => 'extract',
+            ],
+            'PageTotal' => [
+                'type'        => 'number',
+                'description' => 'The total page count printed on this document. Look for the second number in labels like "Page # 1 of 2" (return 2). Return null if no total is printed.',
+                'method'      => 'extract',
+            ],
+            'ContinuedFromPrevious' => [
+                'type'        => 'boolean',
+                'description' => 'True if this document is a continuation of a previous page. Indicators include a "Page # 2 of 2" (or higher) marker, the phrase "Continued from previous page", missing header/totals on what looks like a partial ship-ticket, or signature/notes-only pages that reference an order printed on a prior page. False otherwise.',
+                'method'      => 'extract',
+            ],
+        ];
+
+        return [
+            'description'    => 'Hive 2025 receipt page classifier — emits invoice number + page metadata only, used to group multi-page scans before full receipt OCR.',
+            'baseAnalyzerId' => 'prebuilt-document',
+            'models'         => [
+                'completion' => $model,
+            ],
+            'fieldSchema'    => [
+                'name'        => 'HiveReceiptClassifierSchema',
+                'description' => 'Minimal schema for grouping multi-page scanned invoices.',
+                'fields'      => $fields,
             ],
         ];
     }

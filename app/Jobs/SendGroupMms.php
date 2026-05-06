@@ -238,9 +238,11 @@ class SendGroupMms implements ShouldQueue
             return null;
         }
 
-        // Files now live on the 'files' disk; bail if missing
-        if (! Storage::disk('files')->exists($relative)) {
-            Log::channel('telnyx')->warning('Signed link target missing on files disk', ['path' => $relative]);
+        $existsOnFilesDisk = Storage::disk('files')->exists($relative);
+        $existsOnPublicDisk = Storage::disk('public')->exists($relative);
+
+        if (! $existsOnFilesDisk && ! $existsOnPublicDisk) {
+            Log::channel('telnyx')->warning('Signed link target missing on files/public disk', ['path' => $relative]);
             return null;
         }
 

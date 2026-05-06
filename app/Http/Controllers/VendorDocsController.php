@@ -311,12 +311,24 @@ class VendorDocsController extends Controller
         ];
 
         $resolvedPath = null;
+        $resolvedFilename = null;
         foreach ($candidates as $name) {
             $try = storage_path('files/'.$name);
             if (file_exists($try)) {
                 $resolvedPath = $try;
-                $filename = $name;
+                $resolvedFilename = $name;
                 break;
+            }
+        }
+
+        if (! $resolvedPath) {
+            foreach ($candidates as $name) {
+                $try = storage_path('app/public/'.$name);
+                if (file_exists($try)) {
+                    $resolvedPath = $try;
+                    $resolvedFilename = $name;
+                    break;
+                }
             }
         }
 
@@ -324,6 +336,7 @@ class VendorDocsController extends Controller
             return response('File not found', 404);
         }
 
+        $filename = $resolvedFilename ?? $filename;
         $ext = strtolower(File::extension($filename));
         $mimeMap = [
             'jpg' => 'image/jpeg',

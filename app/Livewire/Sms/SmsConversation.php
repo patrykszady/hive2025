@@ -29,6 +29,8 @@ class SmsConversation extends Component
 {
     use WithFileUploads;
 
+    private const ATTACHMENT_VALIDATION_RULE = 'nullable|file|mimes:jpg,jpeg,png,gif,webp,mp4,mov,webm,m4v,3gp,avi';
+
     public ?int $threadId = null;
 
     public string $newMessage = '';
@@ -174,10 +176,13 @@ class SmsConversation extends Component
     public function updatedAttachment(): void
     {
         $this->validate([
-            'attachment' => 'nullable|file|mimes:jpg,jpeg,png,gif,webp|max:15360',
-        ], [
-            'attachment.max' => 'The attachment must not be greater than 15MB.',
+            'attachment' => self::attachmentValidationRule(),
         ]);
+    }
+
+    public static function attachmentValidationRule(): string
+    {
+        return self::ATTACHMENT_VALIDATION_RULE;
     }
 
     public function removeAttachment(): void
@@ -300,10 +305,8 @@ class SmsConversation extends Component
 
         $this->validate([
             'newMessage' => 'required_without:attachment|nullable|string|max:1600',
-            'attachment' => 'nullable|file|mimes:jpg,jpeg,png,gif,webp|max:15360',
+            'attachment' => self::attachmentValidationRule(),
             'threadId' => 'required|exists:sms_group_threads,id',
-        ], [
-            'attachment.max' => 'The attachment must not be greater than 15MB.',
         ]);
 
         $thread = SmsGroupThread::findOrFail($this->threadId);
@@ -351,10 +354,8 @@ class SmsConversation extends Component
 
         $this->validate([
             'newMessage' => 'required_without:attachment|nullable|string|max:1600',
-            'attachment' => 'nullable|file|mimes:jpg,jpeg,png,gif,webp|max:15360',
+            'attachment' => self::attachmentValidationRule(),
             'threadId' => 'required|exists:sms_group_threads,id',
-        ], [
-            'attachment.max' => 'The attachment must not be greater than 15MB.',
         ]);
 
         $thread = SmsGroupThread::findOrFail($this->threadId);

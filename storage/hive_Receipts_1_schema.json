@@ -159,6 +159,21 @@
             }
           }
         }
+      },
+      "PageNumber": {
+        "type": "number",
+        "description": "The page number printed on this document. Look for labels like \"Page # 1 of 2\", \"Page 1/2\", \"Page 1\", or \"Pg 1\". Return only the integer for the current page (e.g. 1 from \"Page # 1 of 2\"). Return null if no page indicator is printed.",
+        "method": "extract"
+      },
+      "PageTotal": {
+        "type": "number",
+        "description": "The total page count printed on this document. Look for the second number in labels like \"Page # 1 of 2\" (return 2). Return null if no total is printed.",
+        "method": "extract"
+      },
+      "ContinuedFromPrevious": {
+        "type": "boolean",
+        "description": "True if this document is a continuation of a previous page. Indicators include: a \"Page # 2 of 2\" (or higher) marker, the phrase \"Continued from previous page\", missing header/totals on what looks like a partial ship-ticket, or signature/notes-only pages that reference an order printed on a prior page. False otherwise.",
+        "method": "extract"
       }
     }
   }

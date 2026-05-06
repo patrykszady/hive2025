@@ -285,6 +285,18 @@ class ExpenseForm extends Form
             $transaction->save();
         }
 
+        //RECEIPTS (soft delete)
+        foreach ($this->expense->receipts as $receipt) {
+            $receipt->delete();
+        }
+
+        //CHECK ASSOCIATIONS (detach pivot + clear legacy check_id)
+        $this->expense->checks()->detach();
+        if ($this->expense->check_id) {
+            $this->expense->check_id = null;
+            $this->expense->save();
+        }
+
         $this->expense->delete();
     }
 

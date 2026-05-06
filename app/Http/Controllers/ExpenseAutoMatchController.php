@@ -82,9 +82,11 @@ class ExpenseAutoMatchController extends Controller
                 })
                 ->all();
 
-            // Build a map of project_id => client name(s) for PO matching.
-            // Uses business_name when available, otherwise falls back to user last names.
-            $clientNameByProjectId = [];
+            // Build a map of project_id => list of client name variants for PO matching.
+            // Includes business_name plus, for each associated user, the first name,
+            // last name, and full name as separate variants so a PO containing any
+            // of those tokens (e.g. just a first name like "Zora") can match.
+            $clientNamesByProjectId = [];
             $projectClientRows = DB::table('project_vendor')
                 ->where('project_vendor.vendor_id', $hiveVendor->id)
                 ->whereIn('project_vendor.project_id', $projects->pluck('id')->all())
@@ -93,29 +95,71 @@ class ExpenseAutoMatchController extends Controller
                 ->select('project_vendor.project_id', 'clients.id as client_id', 'clients.business_name')
                 ->get();
 
+            $clientIdsByProjectId = [];
             foreach ($projectClientRows as $row) {
                 $projectId = (int) $row->project_id;
-                if ($projectId <= 0) {
+                $clientId = (int) ($row->client_id ?? 0);
+                if ($projectId <= 0 || $clientId <= 0) {
                     continue;
                 }
 
+                $clientNamesByProjectId[$projectId] ??= [];
+                $clientIdsByProjectId[$projectId] ??= [];
+                $clientIdsByProjectId[$projectId][] = $clientId;
+
                 $businessName = trim((string) ($row->business_name ?? ''));
                 if ($businessName !== '') {
-                    $clientNameByProjectId[$projectId] = $businessName;
-                } else {
-                    // Fall back to user last names from client_user pivot.
-                    $lastNames = DB::table('client_user')
-                        ->where('client_user.client_id', $row->client_id)
-                        ->join('users', 'users.id', '=', 'client_user.user_id')
-                        ->pluck('users.last_name')
-                        ->filter()
-                        ->unique()
-                        ->implode(' ');
+                    $clientNamesByProjectId[$projectId][] = $businessName;
+                }
+            }
 
-                    if ($lastNames !== '') {
-                        $clientNameByProjectId[$projectId] = $lastNames;
+            $allClientIds = [];
+            foreach ($clientIdsByProjectId as $ids) {
+                foreach ($ids as $id) {
+                    $allClientIds[] = $id;
+                }
+            }
+            $allClientIds = array_values(array_unique($allClientIds));
+
+            $usersByClientId = [];
+            if ($allClientIds !== []) {
+                $userRows = DB::table('client_user')
+                    ->whereIn('client_user.client_id', $allClientIds)
+                    ->join('users', 'users.id', '=', 'client_user.user_id')
+                    ->select('client_user.client_id', 'users.first_name', 'users.last_name')
+                    ->get();
+
+                foreach ($userRows as $userRow) {
+                    $cid = (int) $userRow->client_id;
+                    $usersByClientId[$cid] ??= [];
+                    $usersByClientId[$cid][] = [
+                        'first_name' => trim((string) ($userRow->first_name ?? '')),
+                        'last_name' => trim((string) ($userRow->last_name ?? '')),
+                    ];
+                }
+            }
+
+            foreach ($clientIdsByProjectId as $projectId => $clientIds) {
+                foreach (array_unique($clientIds) as $clientId) {
+                    foreach (($usersByClientId[$clientId] ?? []) as $user) {
+                        $first = $user['first_name'] ?? '';
+                        $last = $user['last_name'] ?? '';
+
+                        if ($first !== '') {
+                            $clientNamesByProjectId[$projectId][] = $first;
+                        }
+                        if ($last !== '') {
+                            $clientNamesByProjectId[$projectId][] = $last;
+                        }
+                        if ($first !== '' && $last !== '') {
+                            $clientNamesByProjectId[$projectId][] = $first.' '.$last;
+                        }
                     }
                 }
+
+                $clientNamesByProjectId[$projectId] = array_values(array_unique(array_filter(
+                    array_map('trim', $clientNamesByProjectId[$projectId])
+                )));
             }
 
             $projectStatuses = ProjectStatus::withoutGlobalScopes()
@@ -156,7 +200,7 @@ class ExpenseAutoMatchController extends Controller
             }
 
             $projectCandidates = $projects
-                ->map(function (Project $project) use ($statusesByProjectId, $clientNameByProjectId): ?array {
+                ->map(function (Project $project) use ($statusesByProjectId, $clientNamesByProjectId): ?array {
                     $variants = [];
 
                     $normalizedAddress = $this->normalizeText((string) ($project->address ?? ''));
@@ -174,10 +218,11 @@ class ExpenseAutoMatchController extends Controller
                         $variants[] = $normalizedName;
                     }
 
-                    // Include the client business_name as a variant for PO matching.
-                    $clientName = $clientNameByProjectId[(int) $project->id] ?? '';
-                    if ($clientName !== '') {
-                        $normalizedClient = $this->normalizeText($clientName);
+                    // Include each client name (business name, first name, last name,
+                    // and full name) as its own variant so a PO containing any of them
+                    // can match the project.
+                    foreach (($clientNamesByProjectId[(int) $project->id] ?? []) as $clientName) {
+                        $normalizedClient = $this->normalizeText((string) $clientName);
                         if ($normalizedClient !== '' && ! in_array($normalizedClient, $variants, true)) {
                             $variants[] = $normalizedClient;
                         }

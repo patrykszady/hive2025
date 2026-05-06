@@ -495,7 +495,9 @@ class ExpenseCreate extends Component
 
     public function remove()
     {
-        if ($this->expense->transactions()->exists()) {
+        $isAdmin = auth()->user()?->vendor_role === 'Admin';
+
+        if ($this->expense->transactions()->exists() && ! $isAdmin) {
             return;
         }
 
