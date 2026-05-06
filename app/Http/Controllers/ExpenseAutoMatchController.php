@@ -363,6 +363,20 @@ class ExpenseAutoMatchController extends Controller
                             continue;
                         }
 
+                        // Cap terminal statuses (7=Complete, 8=Service Call) so a long-finished
+                        // project doesn't keep matching expenses years after it ended. Allow a
+                        // 1-year tail past start_date for legitimate trailing receipts/refunds,
+                        // then expire the segment.
+                        if (in_array($code, [7, 8], true)) {
+                            $segStartObj = \DateTimeImmutable::createFromFormat('Y-m-d', $segmentStart);
+                            if ($segStartObj) {
+                                $cap = $segStartObj->modify('+1 year')->format('Y-m-d');
+                                if ($cap < $segmentEnd) {
+                                    $segmentEnd = $cap;
+                                }
+                            }
+                        }
+
                         // Overlap check: [segmentStart, segmentEnd] overlaps [startDate, endDate].
                         if ($segmentStart <= $endDate && $segmentEnd >= $startDate) {
                             return true;
@@ -1143,6 +1157,23 @@ class ExpenseAutoMatchController extends Controller
         }
 
         if (in_array($normalizedFirst, ['missing po', 'missing purchase order'], true)) {
+            return null;
+        }
+
+        // Reject generic single-word POs that frequently appear on receipts but
+        // carry no project-identifying signal. These tokens cause false positives
+        // because they often happen to be substrings of legitimate project names
+        // or addresses (e.g. PO="stock" matching project address "308 Comstock Dr").
+        $genericSingleWordPos = [
+            'stock', 'instock', 'in stock',
+            'will call', 'willcall', 'pickup', 'pick up', 'pick-up',
+            'cash', 'cashsale', 'cash sale', 'walk in', 'walkin', 'walk-in',
+            'counter', 'counter sale', 'countersale',
+            'none', 'na', 'nan', 'null', 'tba', 'tbd', 'unknown',
+            'office', 'shop', 'warehouse', 'inventory', 'stocking',
+            'sample', 'samples', 'test', 'demo',
+        ];
+        if (in_array($normalizedFirst, $genericSingleWordPos, true)) {
             return null;
         }
 
