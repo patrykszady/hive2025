@@ -1,6 +1,14 @@
 <?php
 
 return [
+    'ffmpeg_path' => env('FFMPEG_PATH', '/usr/bin/ffmpeg'),
+
+    'plaid' => [
+        'env' => env('PLAID_ENV'),
+        'client_id' => env('PLAID_CLIENT_ID'),
+        'secret' => env('PLAID_SECRET'),
+    ],
+
     'openai' => [
         'api_key' => env('OPENAI_API_KEY'),
     ],

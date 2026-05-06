@@ -5,10 +5,10 @@ namespace App\Services;
 use App\Models\Bank;
 use App\Models\BankAccount;
 
+use GuzzleHttp\Exception\GuzzleException;
 use Illuminate\Support\Facades\Log;
 
 use GuzzleHttp\Client as GuzzleClient;
-use GuzzleHttp\Exception\RequestException;
 use App\Support\ApiErrorFormatter;
 
 class PlaidService
@@ -21,22 +21,58 @@ class PlaidService
     public function __construct()
     {
         $this->client = new GuzzleClient();
-        $this->baseUrl = 'https://' . env('PLAID_ENV') . '.plaid.com';
-        $this->clientId = env('PLAID_CLIENT_ID');
-        $this->secret = env('PLAID_SECRET');
+        $environment = trim((string) config('services.plaid.env', ''));
+
+        $this->baseUrl = $environment !== ''
+            ? 'https://' . $environment . '.plaid.com'
+            : null;
+        $this->clientId = config('services.plaid.client_id');
+        $this->secret = config('services.plaid.secret');
     }
 
-    private function makeRequest($url, $data)
+    private function hasValidConfiguration(): bool
     {
+        return filled($this->baseUrl)
+            && filled($this->clientId)
+            && filled($this->secret);
+    }
+
+    private function configurationError(): array
+    {
+        $error = [
+            'error' => true,
+            'error_code' => 'PLAID_MISCONFIGURED',
+            'error_message' => 'Plaid configuration is incomplete. Check PLAID_ENV, PLAID_CLIENT_ID, and PLAID_SECRET.',
+        ];
+
+        Log::error('Plaid configuration is incomplete.', [
+            'base_url' => $this->baseUrl,
+            'has_client_id' => filled($this->clientId),
+            'has_secret' => filled($this->secret),
+        ]);
+
+        return $error;
+    }
+
+    private function makeRequest($url, $data): array
+    {
+        if (! $this->hasValidConfiguration()) {
+            return $this->configurationError();
+        }
+
         try {
             $response = $this->client->post($url, [
                 'json' => $data,
             ]);
 
             return json_decode($response->getBody()->getContents(), true);
-        } catch (RequestException $e) {
-            // Return the error details
-            if ($e->hasResponse()) {
+        } catch (GuzzleException $e) {
+            Log::error('Plaid request failed.', ApiErrorFormatter::format($e) + [
+                'base_url' => $this->baseUrl,
+                'url' => $url,
+            ]);
+
+            if (method_exists($e, 'hasResponse') && $e->hasResponse()) {
                 return [
                     'error' => true,
                     'error_code' => $e->getResponse()->getStatusCode(),
@@ -56,6 +92,10 @@ class PlaidService
     public function createLinkToken(array $data)
     {
         $url = $this->baseUrl . '/link/token/create';
+
+        if (! $this->hasValidConfiguration()) {
+            return $this->configurationError();
+        }
 
         try {
             $response = $this->client->post($url, [
@@ -206,15 +246,23 @@ class PlaidService
             'statement_id' => $statementId,
         ];
 
+        if (! $this->hasValidConfiguration()) {
+            return $this->configurationError();
+        }
+
         try {
             $response = $this->client->post($url, [
                 'json' => $data,
             ]);
 
             return $response->getBody()->getContents();
-        } catch (RequestException $e) {
-            // Return the error details
-            if ($e->hasResponse()) {
+        } catch (GuzzleException $e) {
+            Log::error('Plaid statement download failed.', ApiErrorFormatter::format($e) + [
+                'base_url' => $this->baseUrl,
+                'url' => $url,
+            ]);
+
+            if (method_exists($e, 'hasResponse') && $e->hasResponse()) {
                 return [
                     'error' => true,
                     'error_code' => $e->getResponse()->getStatusCode(),

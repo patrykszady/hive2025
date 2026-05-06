@@ -92,7 +92,9 @@ class TranscodeSmsVideo implements ShouldQueue
             return;
         }
 
-        $ffmpeg = trim((string) shell_exec('which ffmpeg')) ?: '/usr/bin/ffmpeg';
+        $ffmpeg = config('services.ffmpeg_path')
+            ?: trim((string) shell_exec('which ffmpeg 2>/dev/null'))
+            ?: '/usr/bin/ffmpeg';
 
         if (! is_executable($ffmpeg)) {
             Log::channel('telnyx')->error('TranscodeSmsVideo: ffmpeg not available', [
