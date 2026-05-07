@@ -11,7 +11,7 @@
     'failMethod' => null,
 ])
 
-<script src="https://cdn.jsdelivr.net/npm/@laragear/webpass@2/dist/webpass.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@laragear/webpass@2.1.1/dist/webpass.js" defer></script>
 <script>
 (function() {
     // Passkey registration debug logger - sends logs to server
@@ -77,7 +77,7 @@
         }
 
         function showNotCompletedMessage() {
-            showError('Passkey setup was cancelled.', 'If you already have a passkey for this device, remove it from your device settings and try again, or use a different device.');
+            showError('Passkey setup was cancelled.', 'Either you dismissed the prompt, or this device already has a passkey for this account. If a passkey already exists, remove it from your device\'s settings (or your password manager) and try again.');
         }
 
         function resetButton() {

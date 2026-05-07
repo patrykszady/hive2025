@@ -4,6 +4,9 @@
             {{-- USER DETAILS --}}
             <livewire:users.user-details :user="$user" wire:key="user-details-{{ $user->id }}" />
 
+            {{-- PASSKEYS --}}
+            <livewire:users.passkeys :user="$user" wire:key="user-passkeys-{{ $user->id }}" />
+
             {{-- VENDOR DETAILS --}}
             {{-- @if($user->this_vendor)
                  <livewire:vendors.vendor-details :vendor="$user->vendor" :expanded="true">

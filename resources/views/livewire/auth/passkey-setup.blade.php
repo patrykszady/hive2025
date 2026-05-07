@@ -20,8 +20,8 @@
             </div>
 
             <div id="passkey-success" class="hidden">
-                <flux:callout variant="success" icon="check-circle">
-                    Passkey registered successfully! Redirecting...
+                <flux:callout color="green" icon="check-circle">
+                    <flux:callout.text>Passkey registered successfully! Redirecting...</flux:callout.text>
                 </flux:callout>
             </div>
 
