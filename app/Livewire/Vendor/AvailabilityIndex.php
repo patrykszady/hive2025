@@ -62,21 +62,66 @@ class AvailabilityIndex extends Component
         $this->vendorId = $vendor->id;
     }
 
+    protected function baseTaskQuery()
+    {
+        return Task::where('vendor_id', $this->vendorId)
+            ->where(function ($q) {
+                $q->whereIn('vendor_status', [
+                    Task::VENDOR_STATUS_REQUESTED,
+                    Task::VENDOR_STATUS_CONFIRMED,
+                    Task::VENDOR_STATUS_REJECTED,
+                    Task::VENDOR_STATUS_PROPOSED,
+                ])->orWhereNull('vendor_status');
+            })
+            ->with(['project', 'owner']);
+    }
+
+    /**
+     * Upcoming: scheduled tasks (has dates) with future/current end date.
+     */
     public function getTasks()
     {
         if (! $this->vendorId) {
             return collect();
         }
 
-        return Task::where('vendor_id', $this->vendorId)
-            ->whereIn('vendor_status', [
-                Task::VENDOR_STATUS_REQUESTED,
-                Task::VENDOR_STATUS_CONFIRMED,
-                Task::VENDOR_STATUS_REJECTED,
-                Task::VENDOR_STATUS_PROPOSED,
-            ])
-            ->with(['project', 'owner'])
+        return $this->baseTaskQuery()
+            ->whereNotNull('start_date')
+            ->whereNotNull('end_date')
+            ->whereDate('end_date', '>=', Carbon::today())
             ->orderBy('start_date')
+            ->get();
+    }
+
+    /**
+     * Past: scheduled tasks whose end date has passed.
+     */
+    public function getPastTasks()
+    {
+        if (! $this->vendorId) {
+            return collect();
+        }
+
+        return $this->baseTaskQuery()
+            ->whereNotNull('start_date')
+            ->whereNotNull('end_date')
+            ->whereDate('end_date', '<', Carbon::today())
+            ->orderByDesc('start_date')
+            ->get();
+    }
+
+    /**
+     * Pending: unscheduled tasks (missing start or end date).
+     */
+    public function getPendingTasks()
+    {
+        if (! $this->vendorId) {
+            return collect();
+        }
+
+        return $this->baseTaskQuery()
+            ->where(fn ($q) => $q->whereNull('start_date')->orWhereNull('end_date'))
+            ->orderBy('id')
             ->get();
     }
 
@@ -154,7 +199,13 @@ class AvailabilityIndex extends Component
     {
         $task = Task::where('id', $taskId)
             ->where('vendor_id', $this->vendorId)
-            ->whereIn('vendor_status', [Task::VENDOR_STATUS_REQUESTED, Task::VENDOR_STATUS_PROPOSED, Task::VENDOR_STATUS_CONFIRMED])
+            ->where(function ($query) {
+                $query->whereIn('vendor_status', [
+                    Task::VENDOR_STATUS_REQUESTED,
+                    Task::VENDOR_STATUS_PROPOSED,
+                    Task::VENDOR_STATUS_CONFIRMED,
+                ])->orWhereNull('vendor_status');
+            })
             ->first();
 
         if (! $task) {
@@ -220,7 +271,7 @@ class AvailabilityIndex extends Component
 
         try {
             $startTime = Carbon::createFromFormat('H:i', $settings['start_time']);
-            $this->proposedTimeSettings[$date]['end_time'] = $startTime->addHours(2)->format('H:i');
+            $this->proposedTimeSettings[$date]['end_time'] = $startTime->addMinutes(30)->format('H:i');
         } catch (\Exception $e) {
             // Ignore
         }
@@ -242,7 +293,13 @@ class AvailabilityIndex extends Component
 
         $task = Task::where('id', $this->proposingTaskId)
             ->where('vendor_id', $this->vendorId)
-            ->whereIn('vendor_status', [Task::VENDOR_STATUS_REQUESTED, Task::VENDOR_STATUS_PROPOSED, Task::VENDOR_STATUS_CONFIRMED])
+            ->where(function ($query) {
+                $query->whereIn('vendor_status', [
+                    Task::VENDOR_STATUS_REQUESTED,
+                    Task::VENDOR_STATUS_PROPOSED,
+                    Task::VENDOR_STATUS_CONFIRMED,
+                ])->orWhereNull('vendor_status');
+            })
             ->first();
 
         if (! $task) {
@@ -300,6 +357,8 @@ class AvailabilityIndex extends Component
     {
         return view('livewire.vendor.availability-index', [
             'tasks' => $this->getTasks(),
+            'pastTasks' => $this->getPastTasks(),
+            'pendingTasks' => $this->getPendingTasks(),
             'vendor' => $this->getVendor(),
         ])->layout('components.layouts.guest', [
             'title' => 'Tasks',

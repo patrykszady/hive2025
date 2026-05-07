@@ -62,6 +62,16 @@ class SendScheduleModal extends Component
             return Project::where('client_id', $thread->client_id)->pluck('id')->all();
         }
 
+        if ($thread->subject_vendor_id) {
+            return Task::withoutGlobalScopes()
+                ->where('vendor_id', $thread->subject_vendor_id)
+                ->whereNotNull('project_id')
+                ->whereNull('deleted_at')
+                ->distinct()
+                ->pluck('project_id')
+                ->all();
+        }
+
         return [];
     }
 
@@ -84,8 +94,11 @@ class SendScheduleModal extends Component
         $todayStr = $today->format('Y-m-d');
         $endDateStr = $endDate->format('Y-m-d');
 
+        $vendorId = $this->thread?->subject_vendor_id;
+
         return Task::whereIn('project_id', $projectIds)
             ->with(['vendor', 'project.client', 'project.latestStatus'])
+            ->when($vendorId, fn ($q) => $q->where('vendor_id', $vendorId))
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
             ->whereDate('start_date', '<=', $endDateStr)
@@ -167,8 +180,11 @@ class SendScheduleModal extends Component
             return collect();
         }
 
+        $vendorId = $this->thread?->subject_vendor_id;
+
         return Task::whereIn('project_id', $projectIds)
             ->with(['vendor', 'project.client', 'project.latestStatus'])
+            ->when($vendorId, fn ($q) => $q->where('vendor_id', $vendorId))
             ->where(function ($query) {
                 $query->whereNull('start_date')->orWhereNull('end_date');
             })
@@ -213,7 +229,10 @@ class SendScheduleModal extends Component
         $today = Carbon::today(browser_timezone());
         $afterDate = $today->copy()->addDays($this->daysAhead)->format('Y-m-d');
 
+        $vendorId = $this->thread?->subject_vendor_id;
+
         $firstTask = Task::whereIn('project_id', $projectIds)
+            ->when($vendorId, fn ($q) => $q->where('vendor_id', $vendorId))
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
             ->whereDate('start_date', '>=', $afterDate)
@@ -227,6 +246,7 @@ class SendScheduleModal extends Component
 
         return Task::whereIn('project_id', $projectIds)
             ->with(['vendor', 'project.client', 'project.latestStatus'])
+            ->when($vendorId, fn ($q) => $q->where('vendor_id', $vendorId))
             ->whereNotNull('start_date')
             ->whereNotNull('end_date')
             ->whereDate('start_date', $firstTask->start_date)
@@ -293,13 +313,27 @@ class SendScheduleModal extends Component
                 $dateLabel = $shortDate;
             }
 
-            $taskLines = $dayTasks->map(function (Task $task) use ($dateStr) {
+            $showProject = (bool) $this->thread?->subject_vendor_id;
+            $taskLines = $dayTasks->map(function (Task $task) use ($dateStr, $showProject) {
                 $line = '- ' . trim($task->title ?? 'Task');
 
                 // Use the model's getArrivalTimeLabel for consistent time formatting (e.g. 11AM-2PM)
                 $arrivalTime = $task->getArrivalTimeLabel($dateStr);
                 if ($arrivalTime) {
                     $line .= " @ {$arrivalTime}";
+                }
+
+                if ($showProject && $task->project) {
+                    $p = $task->project;
+                    $street = trim((string) $p->address);
+                    $cityLine = collect([$p->city, $p->state ? trim($p->state . ' ' . $p->zip_code) : null])
+                        ->filter()->implode(', ');
+                    if ($street) {
+                        $line .= "\n  {$street}";
+                    }
+                    if ($cityLine) {
+                        $line .= "\n  {$cityLine}";
+                    }
                 }
 
                 return $line;
@@ -313,11 +347,24 @@ class SendScheduleModal extends Component
             $nextDate = Carbon::parse($nextTasks->first()->start_date);
             $dateLabel = $nextDate->format('D n/j');
 
-            $taskLines = $nextTasks->map(function (Task $task) use ($nextDate) {
+            $showProject = (bool) $this->thread?->subject_vendor_id;
+            $taskLines = $nextTasks->map(function (Task $task) use ($nextDate, $showProject) {
                 $line = '- ' . trim($task->title ?? 'Task');
                 $arrivalTime = $task->getArrivalTimeLabel($nextDate->format('Y-m-d'));
                 if ($arrivalTime) {
                     $line .= " @ {$arrivalTime}";
+                }
+                if ($showProject && $task->project) {
+                    $p = $task->project;
+                    $street = trim((string) $p->address);
+                    $cityLine = collect([$p->city, $p->state ? trim($p->state . ' ' . $p->zip_code) : null])
+                        ->filter()->implode(', ');
+                    if ($street) {
+                        $line .= "\n  {$street}";
+                    }
+                    if ($cityLine) {
+                        $line .= "\n  {$cityLine}";
+                    }
                 }
                 return $line;
             })->implode("\n");
@@ -327,8 +374,22 @@ class SendScheduleModal extends Component
 
         // Add pending tasks section
         if ($pendingTasks->isNotEmpty()) {
-            $pendingLines = $pendingTasks->map(function (Task $task) {
-                return '- ' . trim($task->title ?? 'Task');
+            $showProject = (bool) $this->thread?->subject_vendor_id;
+            $pendingLines = $pendingTasks->map(function (Task $task) use ($showProject) {
+                $line = '- ' . trim($task->title ?? 'Task');
+                if ($showProject && $task->project) {
+                    $p = $task->project;
+                    $street = trim((string) $p->address);
+                    $cityLine = collect([$p->city, $p->state ? trim($p->state . ' ' . $p->zip_code) : null])
+                        ->filter()->implode(', ');
+                    if ($street) {
+                        $line .= "\n  {$street}";
+                    }
+                    if ($cityLine) {
+                        $line .= "\n  {$cityLine}";
+                    }
+                }
+                return $line;
             })->implode("\n");
 
             $daySections[] = "Pending:\n{$pendingLines}";
@@ -336,18 +397,25 @@ class SendScheduleModal extends Component
 
         $body = implode("\n\n", $daySections);
 
-        // Single schedule link (use first project with tasks)
+        // Single schedule link — vendor threads link to vendor availability page, others to project schedule
         $linksText = '';
-        $firstProject = $allTasks->first()?->project;
-        if ($firstProject) {
-            $devWebhookUrl = config('app.dev_webhook_url');
-            $baseUrl = $devWebhookUrl ?: rtrim((string) config('app.url'), '/');
-            $token = $firstProject->getOrCreateScheduleToken();
-            $linksText = "\nView Schedule: {$baseUrl}/s/{$token}";
+        $devWebhookUrl = config('app.dev_webhook_url');
+        $baseUrl = $devWebhookUrl ?: rtrim((string) config('app.url'), '/');
+
+        $subjectVendor = $this->thread?->subjectVendor;
+        if ($subjectVendor) {
+            $token = $subjectVendor->getOrCreateAvailabilityToken();
+            $linksText = "\nView Schedule: {$baseUrl}/v/{$token}";
         } else {
-            $link = $this->buildScheduleLink();
-            if ($link) {
-                $linksText = "\n{$link}";
+            $firstProject = $allTasks->first()?->project;
+            if ($firstProject) {
+                $token = $firstProject->getOrCreateScheduleToken();
+                $linksText = "\nView Schedule: {$baseUrl}/s/{$token}";
+            } else {
+                $link = $this->buildScheduleLink();
+                if ($link) {
+                    $linksText = "\n{$link}";
+                }
             }
         }
 

@@ -11,6 +11,10 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (Schema::hasColumn('sms_group_threads', 'subject_vendor_id')) {
+            return;
+        }
+
         Schema::table('sms_group_threads', function (Blueprint $table) {
             $table->unsignedBigInteger('subject_vendor_id')->nullable()->after('vendor_id');
             $table->foreign('subject_vendor_id')->references('id')->on('vendors')->onDelete('set null');
@@ -23,6 +27,10 @@ return new class extends Migration
      */
     public function down(): void
     {
+        if (! Schema::hasColumn('sms_group_threads', 'subject_vendor_id')) {
+            return;
+        }
+
         Schema::table('sms_group_threads', function (Blueprint $table) {
             $table->dropForeign(['subject_vendor_id']);
             $table->dropColumn('subject_vendor_id');

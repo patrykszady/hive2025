@@ -18,19 +18,68 @@
                 </div>
                 <flux:text class="text-zinc-600 dark:text-zinc-400">{{ $message }}</flux:text>
             </flux:card>
-        @elseif($tasks->isEmpty())
-            {{-- No Pending Tasks --}}
+        @elseif($tasks->isEmpty() && $pastTasks->isEmpty() && $pendingTasks->isEmpty())
+            {{-- No Tasks --}}
             <flux:card class="text-center">
                 <div class="w-16 h-16 mx-auto mb-4 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center">
                     <flux:icon.check class="size-8 text-green-600 dark:text-green-400" />
                 </div>
-                <flux:text class="text-zinc-600 dark:text-zinc-400">All done! No pending tasks to confirm.</flux:text>
+                <flux:text class="text-zinc-600 dark:text-zinc-400">All done! No tasks to show.</flux:text>
             </flux:card>
         @else
-            {{-- Pending Tasks List --}}
+            <div class="space-y-4">
+
+            {{-- Past Tasks (collapsed accordion) --}}
+            @if($pastTasks->isNotEmpty())
+                <flux:accordion transition>
+                    <flux:accordion.item>
+                        <flux:accordion.heading>
+                            <div class="flex items-center gap-2">
+                                <span class="text-zinc-500 dark:text-zinc-400">Past Tasks</span>
+                                <flux:badge color="zinc" size="sm">{{ $pastTasks->count() }}</flux:badge>
+                            </div>
+                        </flux:accordion.heading>
+                        <flux:accordion.content>
+                            <div class="space-y-3 mt-2">
+                                @foreach($pastTasks as $task)
+                                    <div wire:key="past-task-{{ $task->id }}" class="bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-zinc-200 dark:border-zinc-700 overflow-hidden opacity-60">
+                                        <div class="p-3">
+                                            <div class="flex items-start justify-between gap-2 min-w-0">
+                                                <flux:heading size="sm" class="min-w-0 truncate line-through text-zinc-400">
+                                                    {{ $task->title }}
+                                                </flux:heading>
+                                                @if($task->vendor_status === 'confirmed')
+                                                    <flux:badge color="green" size="sm" icon="check">Confirmed</flux:badge>
+                                                @elseif($task->vendor_status === 'rejected')
+                                                    <flux:badge color="red" size="sm" icon="x-mark">Declined</flux:badge>
+                                                @else
+                                                    <flux:badge color="zinc" size="sm">Past</flux:badge>
+                                                @endif
+                                            </div>
+                                            <div class="mt-1 flex items-center gap-1.5 text-xs text-zinc-400">
+                                                <flux:icon.clock class="size-3.5 shrink-0" />
+                                                <span>{{ $task->date_with_time }}</span>
+                                            </div>
+                                            @if($task->project?->address)
+                                                <div class="mt-1 flex items-center gap-1.5 text-xs text-zinc-400">
+                                                    <flux:icon.map-pin class="size-3.5 shrink-0" />
+                                                    <span>{{ $task->project->address }}</span>
+                                                </div>
+                                            @endif
+                                        </div>
+                                    </div>
+                                @endforeach
+                            </div>
+                        </flux:accordion.content>
+                    </flux:accordion.item>
+                </flux:accordion>
+            @endif
+
+            {{-- Upcoming Confirmed Tasks --}}
+            @if($tasks->isNotEmpty())
             <div class="space-y-3">
                 @foreach($tasks as $task)
-                    <div class="bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-zinc-200 dark:border-zinc-700 overflow-hidden">
+                    <div wire:key="scheduled-task-{{ $task->id }}" class="bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-zinc-200 dark:border-zinc-700 overflow-hidden">
                         {{-- Task Card Content --}}
                         <div class="p-3">
                             <div class="flex items-start justify-between gap-2 min-w-0">
@@ -157,6 +206,7 @@
                                     wire:click="confirm({{ $task->id }})"
                                     wire:loading.attr="disabled"
                                     wire:loading.class="opacity-60 cursor-wait"
+                                    wire:target="confirm({{ $task->id }})"
                                     class="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors border-r border-zinc-200 dark:border-zinc-700"
                                 >
                                     <flux:icon.check class="size-5" />
@@ -167,6 +217,7 @@
                                     wire:click="openProposeDatesModal({{ $task->id }})"
                                     wire:loading.attr="disabled"
                                     wire:loading.class="opacity-60 cursor-wait"
+                                    wire:target="openProposeDatesModal({{ $task->id }})"
                                     class="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors border-r border-zinc-200 dark:border-zinc-700"
                                 >
                                     <flux:icon.calendar class="size-5" />
@@ -177,6 +228,7 @@
                                     wire:click="reject({{ $task->id }})"
                                     wire:loading.attr="disabled"
                                     wire:loading.class="opacity-60 cursor-wait"
+                                    wire:target="reject({{ $task->id }})"
                                     class="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
                                 >
                                     <flux:icon.x-mark class="size-5" />
@@ -190,6 +242,7 @@
                                     wire:click="openProposeDatesModal({{ $task->id }})"
                                     wire:loading.attr="disabled"
                                     wire:loading.class="opacity-60 cursor-wait"
+                                    wire:target="openProposeDatesModal({{ $task->id }})"
                                     class="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
                                 >
                                     <flux:icon.calendar class="size-5" />
@@ -200,15 +253,119 @@
                     </div>
                 @endforeach
             </div>
+            @endif
+
+            {{-- Pending Tasks: unscheduled (no dates), expanded accordion --}}
+            @if($pendingTasks->isNotEmpty())
+                <flux:accordion transition>
+                    <flux:accordion.item expanded>
+                        <flux:accordion.heading>
+                            <div class="flex items-center gap-2">
+                                <span class="text-orange-600 dark:text-orange-400">Pending Tasks</span>
+                                <flux:badge color="amber" size="sm">{{ $pendingTasks->count() }}</flux:badge>
+                            </div>
+                        </flux:accordion.heading>
+                        <flux:accordion.content>
+                            <div class="space-y-3 mt-2">
+                                @foreach($pendingTasks as $task)
+                                    <div wire:key="pending-task-{{ $task->id }}" class="bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-zinc-200 dark:border-zinc-700 overflow-hidden">
+                                        <div class="p-3">
+                                            <div class="flex items-start justify-between gap-2 min-w-0">
+                                                <flux:heading size="sm" class="min-w-0 truncate">
+                                                    {{ $task->title }}
+                                                </flux:heading>
+                                                <flux:badge color="red" size="sm">No Date</flux:badge>
+                                            </div>
+
+                                            {{-- Address --}}
+                                            @if($task->project?->address)
+                                                @php
+                                                    $pendingCityStateZip = trim(implode(' ', array_filter([
+                                                        collect([$task->project?->city, $task->project?->state])->filter()->implode(', '),
+                                                        $task->project?->zip_code,
+                                                    ])));
+                                                @endphp
+                                                <div class="mt-2 flex items-start gap-1.5 text-sm text-zinc-600 dark:text-zinc-400">
+                                                    <flux:icon.map-pin class="size-4 shrink-0 mt-0.5" />
+                                                    <div>
+                                                        <div class="truncate">{{ $task->project->address }}</div>
+                                                        @if($pendingCityStateZip)
+                                                            <div>{{ $pendingCityStateZip }}</div>
+                                                        @endif
+                                                    </div>
+                                                </div>
+                                            @endif
+
+                                            {{-- Owner --}}
+                                            @if($task->owner)
+                                                <div class="flex items-center gap-2 mt-3 min-w-0">
+                                                    <flux:avatar
+                                                        circle
+                                                        size="xs"
+                                                        name="{{ $task->owner->full_name ?? $task->owner->name }}"
+                                                        color="auto"
+                                                        color:seed="{{ $task->owner->id }}"
+                                                    />
+                                                    <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">
+                                                        {{ $task->owner->short_name ?? $task->owner->name }}
+                                                    </span>
+                                                </div>
+                                            @endif
+                                        </div>
+
+                                        {{-- Footer action --}}
+                                        <div class="flex border-t border-zinc-200 dark:border-zinc-700">
+                                            <button
+                                                wire:click="openProposeDatesModal({{ $task->id }})"
+                                                wire:loading.attr="disabled"
+                                                wire:loading.class="opacity-60 cursor-wait"
+                                                wire:target="openProposeDatesModal({{ $task->id }})"
+                                                class="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
+                                            >
+                                                <flux:icon.calendar class="size-5" />
+                                                Set Dates / Schedule
+                                            </button>
+                                        </div>
+                                    </div>
+                                @endforeach
+                            </div>
+                        </flux:accordion.content>
+                    </flux:accordion.item>
+                </flux:accordion>
+            @endif
+
+            </div>{{-- end space-y-4 --}}
         @endif
 
-        {{-- Footer --}}
-        <div class="text-center mt-8">
-            <a href="{{ url('/') }}" class="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">
-                <img src="{{ asset('favicon.svg') }}" alt="Hive" class="size-4" />
-                <span>Powered by Hive Contractors</span>
-            </a>
-        </div>
+        {{-- Registration CTA --}}
+        @guest
+            @php
+                $ctaCompany = ($tasks->first() ?? $pendingTasks->first() ?? $pastTasks->first())?->owner;
+                $ctaCompanyName = $ctaCompany?->name ?? 'Your contractor';
+            @endphp
+            <div class="mt-6 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20 p-5 text-center">
+                <div class="mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-indigo-100 dark:bg-indigo-900/40">
+                    <img src="{{ asset('favicon.svg') }}" alt="Hive" class="size-7" />
+                </div>
+                <flux:heading size="sm" class="text-indigo-900 dark:text-indigo-100">Join <a href="{{ url('/') }}" class="underline">Hive Contractors</a></flux:heading>
+                <flux:text class="mt-2 text-sm text-indigo-700 dark:text-indigo-300">
+                    {{ $ctaCompanyName }} uses <a href="{{ url('/') }}" class="underline">Hive Contractors</a> to manage projects in one place. Finances, Estimates, Timesheets, Schedules, and so much more.
+                </flux:text>
+                <flux:text class="mt-2 text-sm text-indigo-700 dark:text-indigo-300">
+                    Join <a href="{{ url('/') }}" class="underline">Hive Contractors</a> to connect with {{ $ctaCompanyName }} today to manage your construction projects, better, together.
+                </flux:text>
+                <div class="mt-4 flex items-center justify-center gap-3">
+                    <flux:button variant="primary" href="{{ route('registration') }}">
+                        Register
+                    </flux:button>
+                    <flux:button href="{{ route('login') }}">
+                        Login
+                    </flux:button>
+                </div>
+            </div>
+        @endguest
+
+        <x-public-schedule-footer />
     </div>
 
     {{-- Propose Dates Modal --}}
@@ -252,24 +409,70 @@
                             </div>
 
                             @if($proposedTimeSettings[$date]['use_time'] ?? false)
-                                <div class="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-100 dark:border-zinc-800 [&_[data-flux-time-picker-button]:not(:has([data-flux-time-picker-placeholder]))>[data-flux-icon]:first-child]:hidden">
-                                    <flux:time-picker
-                                        wire:model.live="proposedTimeSettings.{{ $date }}.start_time"
-                                        wire:change="updateEndTime('{{ $date }}')"
-                                        interval="30"
-                                        min="06:00"
-                                        max="23:00"
-                                        open-to="08:00"
-                                        placeholder="Start"
-                                    />
-                                    <flux:time-picker
-                                        wire:model.live="proposedTimeSettings.{{ $date }}.end_time"
-                                        interval="30"
-                                        min="06:00"
-                                        max="23:00"
-                                        open-to="10:00"
-                                        placeholder="End"
-                                    />
+                                <div class="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                                    <div class="relative"
+                                        x-data="{
+                                            get _t() {
+                                                const v = (this.$wire.proposedTimeSettings?.['{{ $date }}']?.start_time) || '08:00';
+                                                const [h, m] = v.split(':').map(Number);
+                                                return { h: isNaN(h) ? 8 : h, m: isNaN(m) ? 0 : m };
+                                            },
+                                            get hour() {
+                                                const a = ((this._t.h % 12) * 30 + this._t.m * 0.5 - 90) * Math.PI / 180;
+                                                return { x: 12 + 4 * Math.cos(a), y: 12 + 4 * Math.sin(a) };
+                                            },
+                                            get minute() {
+                                                const a = (this._t.m * 6 - 90) * Math.PI / 180;
+                                                return { x: 12 + 6 * Math.cos(a), y: 12 + 6 * Math.sin(a) };
+                                            },
+                                        }">
+                                        <flux:time-picker
+                                            wire:model.live="proposedTimeSettings.{{ $date }}.start_time"
+                                            wire:change="updateEndTime('{{ $date }}')"
+                                            interval="30"
+                                            min="06:00"
+                                            max="23:00"
+                                            open-to="08:00"
+                                            placeholder="Start"
+                                        />
+                                        <svg viewBox="0 0 24 24" aria-hidden="true"
+                                            class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-4 text-zinc-500 dark:text-zinc-400">
+                                            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                                            <line x1="12" y1="12" :x2="hour.x" :y2="hour.y" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+                                            <line x1="12" y1="12" :x2="minute.x" :y2="minute.y" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/>
+                                        </svg>
+                                    </div>
+                                    <div class="relative"
+                                        x-data="{
+                                            get _t() {
+                                                const v = (this.$wire.proposedTimeSettings?.['{{ $date }}']?.end_time) || '17:00';
+                                                const [h, m] = v.split(':').map(Number);
+                                                return { h: isNaN(h) ? 17 : h, m: isNaN(m) ? 0 : m };
+                                            },
+                                            get hour() {
+                                                const a = ((this._t.h % 12) * 30 + this._t.m * 0.5 - 90) * Math.PI / 180;
+                                                return { x: 12 + 4 * Math.cos(a), y: 12 + 4 * Math.sin(a) };
+                                            },
+                                            get minute() {
+                                                const a = (this._t.m * 6 - 90) * Math.PI / 180;
+                                                return { x: 12 + 6 * Math.cos(a), y: 12 + 6 * Math.sin(a) };
+                                            },
+                                        }">
+                                        <flux:time-picker
+                                            wire:model.live="proposedTimeSettings.{{ $date }}.end_time"
+                                            interval="30"
+                                            :min="!empty($proposedTimeSettings[$date]['start_time']) ? \Carbon\Carbon::createFromFormat('H:i', $proposedTimeSettings[$date]['start_time'])->addMinutes(30)->format('H:i') : '06:00'"
+                                            max="23:00"
+                                            open-to="17:00"
+                                            placeholder="End"
+                                        />
+                                        <svg viewBox="0 0 24 24" aria-hidden="true"
+                                            class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-4 text-zinc-500 dark:text-zinc-400">
+                                            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                                            <line x1="12" y1="12" :x2="hour.x" :y2="hour.y" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+                                            <line x1="12" y1="12" :x2="minute.x" :y2="minute.y" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/>
+                                        </svg>
+                                    </div>
                                 </div>
                             @endif
                         </div>
@@ -278,15 +481,16 @@
             </flux:field>
         @endif
 
-        <flux:separator variant="subtle" />
-
-        <div class="flex gap-2">
+        <div class="flex gap-2 mb-0!">
             <flux:button wire:click="cancelProposal" variant="ghost" class="flex-1">
                 Cancel
             </flux:button>
             <flux:button 
                 wire:click="saveProposedDates" 
                 variant="primary" 
+                wire:loading.attr="disabled"
+                wire:loading.class="opacity-50"
+                wire:target="saveProposedDates"
                 class="flex-1"
                 :disabled="empty($proposedDates)"
             >
