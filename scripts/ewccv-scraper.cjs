@@ -24,7 +24,11 @@
  *   delayMs        – base delay between actions in ms (default 3000)
  */
 
-const puppeteer = require('puppeteer-extra');
+// EWCCV_USE_REBROWSER=1 (default) wraps rebrowser-puppeteer-core via puppeteer-extra's
+// addExtra(); set EWCCV_USE_REBROWSER=0 to fall back to vanilla puppeteer-extra.
+// rebrowser-puppeteer-core fixes runtime leaks (Object.getOwnPropertyDescriptors,
+// sourceURL, contextId) that Akamai Bot Manager fingerprints — stealth plugin alone
+// doesn't patch these.
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const RecaptchaPlugin = require('puppeteer-extra-plugin-recaptcha');
 const fs = require('fs');
@@ -33,7 +37,41 @@ const https = require('https');
 const http = require('http');
 const { spawn } = require('child_process');
 
+const useRebrowser = process.env.EWCCV_USE_REBROWSER !== '0';
+let puppeteer;
+if (useRebrowser) {
+    const { addExtra } = require('puppeteer-extra');
+    const rebrowser = require('rebrowser-puppeteer-core');
+    puppeteer = addExtra(rebrowser);
+    process.stderr.write('[ewccv] Using rebrowser-puppeteer-core (anti-Akamai)\n');
+} else {
+    puppeteer = require('puppeteer-extra');
+}
+
 puppeteer.use(StealthPlugin());
+
+// ── Proxy config (residential proxy to defeat Akamai IP reputation gating) ──
+// Set EWCCV_PROXY_HOST + EWCCV_PROXY_PORT (and optionally EWCCV_PROXY_USER /
+// EWCCV_PROXY_PASS) to route Chrome through a residential proxy. EWCCV_PROXY_SCHEME
+// defaults to 'http' but can be 'socks5'. When unset, Chrome uses the host network.
+const proxyHost = process.env.EWCCV_PROXY_HOST || '';
+const proxyPort = process.env.EWCCV_PROXY_PORT || '';
+const proxyUser = process.env.EWCCV_PROXY_USER || '';
+const proxyPass = process.env.EWCCV_PROXY_PASS || '';
+const proxyScheme = process.env.EWCCV_PROXY_SCHEME || 'http';
+const proxyServer = (proxyHost && proxyPort)
+    ? `${proxyScheme}://${proxyHost}:${proxyPort}`
+    : '';
+if (proxyServer) {
+    process.stderr.write(`[ewccv] Routing Chrome through proxy: ${proxyScheme}://${proxyHost}:${proxyPort}` +
+        (proxyUser ? ` (auth: ${proxyUser})` : '') + '\n');
+}
+async function applyProxyAuth(page) {
+    if (proxyServer && proxyUser) {
+        try { await page.authenticate({ username: proxyUser, password: proxyPass }); }
+        catch (e) { process.stderr.write(`[ewccv] proxy authenticate failed: ${e.message}\n`); }
+    }
+}
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const configPath = process.argv[2];
@@ -44,24 +82,33 @@ if (!configPath) {
 
 const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 
-// ── Captcha provider setup (prefer anti-captcha, fallback to 2captcha) ────────
+// ── Captcha provider setup ──────────────────────────────────────────────────
+// Order can be flipped via EWCCV_PREFER_ANTICAPTCHA=1 (default: anti-captcha first
+// because 2captcha tokens have been getting low scores against EWCCV verify).
 const captchaProviders = [];
-if (config.captchaApiKey) {
-    captchaProviders.push({
-        name: 'anti-captcha',
-        baseUrl: 'https://api.anti-captcha.com',
-        clientKey: config.captchaApiKey,
-        pluginId: 'anticaptcha',
-    });
-}
-if (config.twoCaptchaKey) {
-    captchaProviders.push({
-        name: '2captcha',
-        baseUrl: 'https://api.2captcha.com',
-        clientKey: config.twoCaptchaKey,
-        pluginId: '2captcha',
-    });
-}
+const preferAntiCaptcha = process.env.EWCCV_PREFER_ANTICAPTCHA !== '0';
+const _addAntiCaptcha = () => {
+    if (config.captchaApiKey) {
+        captchaProviders.push({
+            name: 'anti-captcha',
+            baseUrl: 'https://api.anti-captcha.com',
+            clientKey: config.captchaApiKey,
+            pluginId: 'anticaptcha',
+        });
+    }
+};
+const _add2Captcha = () => {
+    if (config.twoCaptchaKey) {
+        captchaProviders.push({
+            name: '2captcha',
+            baseUrl: 'https://api.2captcha.com',
+            clientKey: config.twoCaptchaKey,
+            pluginId: '2captcha',
+        });
+    }
+};
+if (preferAntiCaptcha) { _addAntiCaptcha(); _add2Captcha(); }
+else { _add2Captcha(); _addAntiCaptcha(); }
 
 const activeCaptchaProvider = captchaProviders[0] || null;
 
@@ -73,7 +120,10 @@ if (activeCaptchaProvider) {
 }
 
 const OUTPUT_DIR = config.outputDir || '/tmp/ewccv-scraper';
+const SCREENSHOT_DIR = config.screenshotDir || OUTPUT_DIR;
 const DELAY = config.delayMs || 3000;
+
+try { fs.mkdirSync(SCREENSHOT_DIR, { recursive: true }); } catch (e) { /* ignore */ }
 const vendors = config.vendors || [];
 const RECAPTCHA_V3_SITEKEY = '6LfsgGkqAAAAAJV4WuznMwTLMn6091VDUYNiIxGG';
 const BASE_URL = 'https://www.ewccv.com';
@@ -97,15 +147,24 @@ const STATE_NAMES = {
 function log(msg)  { process.stderr.write(`[ewccv] ${msg}\n`); }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+let __screenshotSeq = 0;
+function __ts() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
 async function screenshot(page, name) {
-    const p = path.join(OUTPUT_DIR, `_debug_${name}.png`);
+    __screenshotSeq++;
+    const seq = String(__screenshotSeq).padStart(3, '0');
+    const fname = `${__ts()}_${seq}_${name}.png`;
+    const p = path.join(SCREENSHOT_DIR, fname);
     await page.screenshot({ path: p, fullPage: true }).catch(() => {});
-    log(`  screenshot → ${name}.png`);
+    log(`  screenshot → ${fname}`);
 }
 
 async function saveHtml(page, name) {
     const html = await page.content();
-    fs.writeFileSync(path.join(OUTPUT_DIR, `_debug_${name}.html`), html);
+    fs.writeFileSync(path.join(SCREENSHOT_DIR, `_debug_${name}.html`), html);
 }
 
 function httpJsonPost(url, body) {
@@ -136,26 +195,30 @@ function httpJsonPost(url, body) {
 // This avoids --enable-automation and other Puppeteer-specific flags that
 // reCAPTCHA Enterprise uses to detect automated browsers.
 function findChromeBinary() {
-    const candidates = [
-        // Windows Chrome via WSL (real Chrome — not detected by reCAPTCHA)
-        '/mnt/c/Program Files/Google/Chrome/Application/chrome.exe',
-        // System Chrome
-        '/usr/bin/google-chrome',
-        '/usr/bin/google-chrome-stable',
-        '/usr/bin/chromium-browser',
-        '/usr/bin/chromium',
-        '/opt/google/chrome/google-chrome',
-    ];
+    const candidates = [];
 
-    // Also check Puppeteer's cached Chrome (last resort — "Chrome for Testing")
+    // Prefer Puppeteer's bundled Linux Chrome — launches cleanly into its own debug port
+    // even when Windows Chrome is already running. Windows Chrome via WSL hands off
+    // to an existing chrome.exe process, so the new process never opens a debug port.
     const cacheDir = path.join(process.env.HOME || '/tmp', '.cache', 'puppeteer', 'chrome');
     if (fs.existsSync(cacheDir)) {
         const versions = fs.readdirSync(cacheDir).sort().reverse();
         for (const v of versions) {
             const bin = path.join(cacheDir, v, 'chrome-linux64', 'chrome');
-            if (fs.existsSync(bin)) candidates.push(bin); // push to end (lowest priority)
+            if (fs.existsSync(bin)) candidates.push(bin);
         }
     }
+
+    // System Chrome
+    candidates.push(
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/chromium',
+        '/opt/google/chrome/google-chrome',
+        // Windows Chrome (last resort — see note above)
+        '/mnt/c/Program Files/Google/Chrome/Application/chrome.exe',
+    );
 
     for (const c of candidates) {
         if (fs.existsSync(c)) return c;
@@ -190,6 +253,10 @@ async function launchChromeDirectly(headless, userDataDir) {
         '--no-first-run',
         '--no-default-browser-check',
     ];
+
+    if (proxyServer) {
+        args.push(`--proxy-server=${proxyServer}`);
+    }
 
     // Load the reCAPTCHA-solving extension (runs WITHOUT CDP for clean scores)
     const extSrcDir = path.join(__dirname, 'ewccv-extension');
@@ -403,6 +470,16 @@ async function tryExtensionRecaptcha(page, browser, launchInfo) {
 // The EWCCV React app redirects to /cvs/ on any 401 or verify failure.
 // We intercept window.location.href assignments to prevent losing our session.
 async function interceptRedirects(page) {
+    // Forward EWCCV-INTERCEPT console logs from the page to our scraper output
+    if (!page.__consoleHooked) {
+        page.__consoleHooked = true;
+        page.on('console', msg => {
+            const txt = msg.text();
+            if (txt.includes('EWCCV-INTERCEPT')) {
+                log('    ' + txt);
+            }
+        });
+    }
     // Use CDP + JS monkey-patching to intercept navigation requests
     // that go to /cvs/ (the React 401 redirect target).
     const client = await page.createCDPSession();
@@ -451,10 +528,52 @@ async function interceptRedirects(page) {
             console.log('[EWCCV-INTERCEPT] beforeunload event fired');
         });
 
+        // Hook grecaptcha to capture which action/sitekey the EWCCV app actually uses
+        window.__grecaptchaCalls = [];
+        const tryHookGrecaptcha = () => {
+            if (typeof grecaptcha === 'undefined') return false;
+            const ent = grecaptcha.enterprise;
+            if (!ent || ent.__hooked) return false;
+            const origExecute = ent.execute.bind(ent);
+            ent.execute = function(sitekey, opts) {
+                const action = opts && opts.action;
+                console.log('[EWCCV-INTERCEPT] grecaptcha.enterprise.execute called sitekey=' + sitekey + ' action=' + action);
+                window.__grecaptchaCalls.push({ sitekey, action, ts: Date.now() });
+                window.__lastGrecaptchaCall = { sitekey, action, ts: Date.now() };
+                return origExecute(sitekey, opts);
+            };
+            ent.__hooked = true;
+            return true;
+        };
+        if (!tryHookGrecaptcha()) {
+            const hookInt = setInterval(() => {
+                if (tryHookGrecaptcha()) clearInterval(hookInt);
+            }, 200);
+            setTimeout(() => clearInterval(hookInt), 30000);
+        }
+
         // Override the fetch to intercept reCAPTCHA verify responses for debugging
         const origFetch = window.fetch;
         window.fetch = async function(...args) {
             const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
+
+            // Intercept request body for verify calls
+            if (url.includes('/recaptcha/v3/verify')) {
+                try {
+                    const init = args[1] || (typeof args[0] === 'object' ? args[0] : {});
+                    const body = init.body;
+                    const headers = init.headers || (args[0] && args[0].headers) || {};
+                    let headerDump = {};
+                    if (headers && typeof headers.forEach === 'function') {
+                        headers.forEach((v, k) => { headerDump[k] = v; });
+                    } else if (headers && typeof headers === 'object') {
+                        headerDump = headers;
+                    }
+                    console.log('[EWCCV-INTERCEPT] reCAPTCHA verify REQUEST headers:', JSON.stringify(headerDump).substring(0, 800));
+                    console.log('[EWCCV-INTERCEPT] reCAPTCHA verify REQUEST body:', typeof body === 'string' ? body.substring(0, 500) : '(non-string)');
+                } catch (e) {}
+            }
+
             const res = await origFetch.apply(this, args);
 
             // Intercept reCAPTCHA verify response
@@ -482,6 +601,44 @@ async function interceptRedirects(page) {
 
             return res;
         };
+
+        // ── XHR (axios) interception — EWCCV uses axios for verify call ─────
+        const OrigXHR = window.XMLHttpRequest;
+        const origOpen = OrigXHR.prototype.open;
+        const origSend = OrigXHR.prototype.send;
+        const origSetHeader = OrigXHR.prototype.setRequestHeader;
+        OrigXHR.prototype.open = function(method, url, ...rest) {
+            this.__ewccvUrl = url;
+            this.__ewccvMethod = method;
+            this.__ewccvHeaders = {};
+            return origOpen.call(this, method, url, ...rest);
+        };
+        OrigXHR.prototype.setRequestHeader = function(name, value) {
+            if (this.__ewccvHeaders) this.__ewccvHeaders[name] = value;
+            return origSetHeader.call(this, name, value);
+        };
+        OrigXHR.prototype.send = function(body) {
+            const url = this.__ewccvUrl || '';
+            const isVerify = typeof url === 'string' && url.includes('/recaptcha/v3/verify');
+            if (isVerify) {
+                console.log('[EWCCV-INTERCEPT] XHR verify REQUEST url:', url);
+                console.log('[EWCCV-INTERCEPT] XHR verify REQUEST headers:', JSON.stringify(this.__ewccvHeaders));
+                console.log('[EWCCV-INTERCEPT] XHR verify REQUEST body:', typeof body === 'string' ? body.substring(0, 500) : '(' + typeof body + ')');
+                this.addEventListener('load', function() {
+                    console.log('[EWCCV-INTERCEPT] XHR verify RESPONSE status:', this.status);
+                    try {
+                        console.log('[EWCCV-INTERCEPT] XHR verify RESPONSE body:', String(this.responseText).substring(0, 500));
+                        const json = JSON.parse(this.responseText);
+                        window.__lastRecaptchaVerifyResult = json;
+                        if (json.data && json.data.verified === false) {
+                            console.log('[EWCCV-INTERCEPT] XHR verify FAILED — pre-empting redirect');
+                            window.__blockedRedirects.push({ type: 'recaptcha_failed_xhr', url: '/cvs/', ts: Date.now() });
+                        }
+                    } catch (_) {}
+                });
+            }
+            return origSend.call(this, body);
+        };
     });
 
     // Use CDP to intercept navigation at the protocol level
@@ -506,6 +663,43 @@ async function interceptRedirects(page) {
         });
     } catch (e) {
         log(`    [INTERCEPT] CDP Fetch setup warning: ${e.message}`);
+    }
+
+    // ── CDP Network domain — captures verify request/response at protocol level
+    // (works even when EWCCV cached fetch/XHR references before our JS hooks).
+    try {
+        await client.send('Network.enable');
+        const verifyReqs = new Map(); // requestId → { url, method, postData, headers }
+        client.on('Network.requestWillBeSent', (e) => {
+            const url = e.request.url;
+            if (url.includes('/recaptcha/v3/verify')) {
+                verifyReqs.set(e.requestId, {
+                    url,
+                    method: e.request.method,
+                    postData: e.request.postData,
+                    headers: e.request.headers,
+                });
+                log(`    [CDP-VERIFY] REQUEST ${e.request.method} ${url}`);
+                log(`    [CDP-VERIFY] REQ headers: ${JSON.stringify(e.request.headers).substring(0, 800)}`);
+                log(`    [CDP-VERIFY] REQ body: ${(e.request.postData || '').substring(0, 500)}`);
+            }
+        });
+        client.on('Network.responseReceived', async (e) => {
+            if (verifyReqs.has(e.requestId)) {
+                log(`    [CDP-VERIFY] RESPONSE status=${e.response.status} mimeType=${e.response.mimeType}`);
+                // Wait briefly for response body to be available
+                setTimeout(async () => {
+                    try {
+                        const body = await client.send('Network.getResponseBody', { requestId: e.requestId });
+                        log(`    [CDP-VERIFY] RESP body: ${(body.body || '').substring(0, 500)}`);
+                    } catch (err) {
+                        log(`    [CDP-VERIFY] RESP body unavailable: ${err.message}`);
+                    }
+                }, 500);
+            }
+        });
+    } catch (e) {
+        log(`    [INTERCEPT] CDP Network setup warning: ${e.message}`);
     }
 }
 
@@ -1093,8 +1287,68 @@ async function searchViaUI(page, vendor) {
     }
 
     // 5. Click search — triggers reCAPTCHA + search via the React component
+    // Attach one-shot network logger covering the click + first 30s
+    const requestLog = [];
+    const onReq = (req) => {
+        const u = req.url();
+        if (u.startsWith('https://www.ewccv.com/cvs/')) {
+            requestLog.push({ t: 'req', method: req.method(), url: u, ts: Date.now() });
+        }
+    };
+    const onResp = async (resp) => {
+        const u = resp.url();
+        if (u.startsWith('https://www.ewccv.com/cvs/')) {
+            requestLog.push({ t: 'resp', status: resp.status(), url: u, ts: Date.now() });
+        }
+    };
+    page.on('request', onReq);
+    page.on('response', onResp);
+
+    // Snapshot Redux BEFORE click
+    const reduxBefore = await page.evaluate(() => {
+        const s = window.__EWCCV_REDUX_STORE__?.getState();
+        if (!s) return 'no_store';
+        return {
+            recaptcha: s.recaptcha,
+            searchAddress: s.search?.addressSearch ? { loadingStatus: s.search.addressSearch.loadingStatus, hasData: !!s.search.addressSearch.data } : null,
+            sessionAccessToken: !!sessionStorage.getItem('accessToken'),
+        };
+    });
+    log(`    UI: Redux BEFORE click: ${JSON.stringify(reduxBefore)}`);
+
     await searchBtn.click();
     log(`    UI: Clicked address search for "${streetAddress}, ${vendor.city || ''} ${vendor.zip || ''}" — waiting for results…`);
+
+    // Snapshot Redux 1s and 5s after click
+    await sleep(1000);
+    const redux1s = await page.evaluate(() => {
+        const s = window.__EWCCV_REDUX_STORE__?.getState();
+        if (!s) return 'no_store';
+        return {
+            recaptcha: s.recaptcha,
+            searchAddress: s.search?.addressSearch ? { loadingStatus: s.search.addressSearch.loadingStatus, hasData: !!s.search.addressSearch.data, error: s.search.addressSearch.data?.error } : null,
+            blockedRedirects: (window.__blockedRedirects || []).length,
+        };
+    });
+    log(`    UI: Redux +1s: ${JSON.stringify(redux1s)}`);
+
+    await sleep(4000);
+    const redux5s = await page.evaluate(() => {
+        const s = window.__EWCCV_REDUX_STORE__?.getState();
+        if (!s) return 'no_store';
+        return {
+            recaptcha: s.recaptcha,
+            searchAddress: s.search?.addressSearch ? { loadingStatus: s.search.addressSearch.loadingStatus, hasData: !!s.search.addressSearch.data, error: s.search.addressSearch.data?.error } : null,
+            blockedRedirects: (window.__blockedRedirects || []).slice(-5),
+            grecaptchaCalls: (window.__grecaptchaCalls || []).length,
+            lastVerify: window.__lastRecaptchaVerifyResult,
+        };
+    });
+    log(`    UI: Redux +5s: ${JSON.stringify(redux5s)}`);
+    log(`    UI: Network during 5s after click (${requestLog.length} requests):`);
+    for (const r of requestLog.slice(-30)) {
+        log(`      ${r.t.toUpperCase()} ${r.method || r.status} ${r.url.replace('https://www.ewccv.com', '')}`);
+    }
 
     // 6. Wait for results (the app handles reCAPTCHA internally)
     let items = null;
@@ -1201,6 +1455,12 @@ async function searchViaUI(page, vendor) {
 // ── Verify reCAPTCHA v3 and obtain accessToken ────────────────────────────────
 async function obtainAccessToken(page) {
     log('  Obtaining accessToken via reCAPTCHA v3 verify…');
+
+    // Dump any grecaptcha calls the EWCCV app itself made — tells us the action it uses
+    try {
+        const grecaptchaCalls = await page.evaluate(() => window.__grecaptchaCalls || []);
+        log(`    EWCCV native grecaptcha calls so far: ${JSON.stringify(grecaptchaCalls).substring(0, 500)}`);
+    } catch (_) {}
 
     // Build stateTokenString from Redux states (reused across attempts)
     const stateTokenResult = await page.evaluate(() => {
@@ -1626,6 +1886,96 @@ async function enableTracking(page, vendor, matchedItem, searchMeta) {
 }
 
 // ── Request login email ───────────────────────────────────────────────────────
+async function acceptTermsIfPresent(page) {
+    const onToS = await page.evaluate(() =>
+        document.body.innerText.includes('Accept the terms')
+    );
+    if (!onToS) {
+        return true;
+    }
+
+    log('  On Terms of Use page — solving reCAPTCHA…');
+    await screenshot(page, 'tos_before_solve');
+
+    const siteKey = await page.evaluate(() => {
+        const el = document.querySelector('.g-recaptcha, [data-sitekey]');
+        return el ? el.getAttribute('data-sitekey') : null;
+    });
+
+    if (!siteKey) {
+        try {
+            const { solved } = await page.solveRecaptchas();
+            if (solved?.length > 0) {
+                log('  Plugin solved reCAPTCHA');
+                await sleep(2000);
+            }
+        } catch (e) {
+            log(`  Plugin solve failed: ${e.message}`);
+        }
+    } else {
+        log(`  reCAPTCHA v2 sitekey: ${siteKey}`);
+        const token = await solveRecaptchaV2(page, siteKey);
+        if (token) {
+            await page.evaluate((tkn) => {
+                const textarea = document.getElementById('g-recaptcha-response')
+                    || document.querySelector('[name="g-recaptcha-response"]');
+                if (textarea) {
+                    textarea.style.display = 'block';
+                    textarea.value = tkn;
+                }
+                if (typeof window.grecaptcha !== 'undefined') {
+                    try {
+                        if (window.___grecaptcha_cfg?.clients) {
+                            for (const clientId of Object.keys(window.___grecaptcha_cfg.clients)) {
+                                const client = window.___grecaptcha_cfg.clients[clientId];
+                                const findCallback = (obj, depth = 0) => {
+                                    if (depth > 5 || !obj) return null;
+                                    for (const key of Object.keys(obj)) {
+                                        if (typeof obj[key] === 'function' && key !== 'bind') return obj[key];
+                                        if (typeof obj[key] === 'object' && obj[key] !== null) {
+                                            const found = findCallback(obj[key], depth + 1);
+                                            if (found) return found;
+                                        }
+                                    }
+                                    return null;
+                                };
+                                const callback = findCallback(client);
+                                if (callback) callback(tkn);
+                            }
+                        }
+                    } catch (e) { /* ignore */ }
+                }
+            }, token);
+        }
+    }
+
+    await screenshot(page, 'tos_after_solve');
+
+    const acceptClicked = await page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button, [role="button"], a'));
+        const accept = buttons.find(b =>
+            b.textContent.trim().toUpperCase().includes('ACCEPT')
+        );
+        if (accept) { accept.click(); return true; }
+        return false;
+    });
+
+    if (!acceptClicked) {
+        log('  ERROR: Could not find ACCEPT button on ToS page');
+        await saveHtml(page, 'tos_no_accept_button');
+        return false;
+    }
+
+    log('  Clicked ACCEPT');
+    await sleep(DELAY);
+    await screenshot(page, 'tos_after_accept');
+
+    const stillOnToS = await page.evaluate(() =>
+        document.body.innerText.includes('Accept the terms')
+    );
+    return ! stillOnToS;
+}
+
 async function requestLoginEmail(page, email) {
     log('Navigating to EWCCV homepage to request login email…');
 
@@ -1640,41 +1990,60 @@ async function requestLoginEmail(page, email) {
     await sleep(DELAY);
 
     await dismissCookieConsent(page);
-    await screenshot(page, 'login_page');
+    await screenshot(page, 'homepage_loaded');
 
-    let hasEmailInput = await page.$('input[type="email"], input[name="email"], input[placeholder*="email" i], #email, input[type="text"]');
-
-    if (!hasEmailInput) {
-        log('  No email input — clicking Login button…');
-        const loginClicked = await page.evaluate(() => {
-            const loginBtn = document.getElementById('login');
-            if (loginBtn) { loginBtn.click(); return 'id:login'; }
-            const buttons = Array.from(document.querySelectorAll('button, a, [role="button"]'));
-            const btn = buttons.find(b => b.textContent.trim().toUpperCase() === 'LOGIN');
-            if (btn) { btn.click(); return 'text:Login'; }
-            return false;
-        });
-
-        if (!loginClicked) {
-            log('  ERROR: Could not find Login button');
-            return false;
-        }
-        log(`  Clicked Login (${loginClicked})`);
-        await sleep(DELAY);
-
-        hasEmailInput = await page.$('input[type="email"], input[name="email"], input[placeholder*="email" i], #email, input[type="text"]');
-    }
-
-    if (!hasEmailInput) {
-        log('  ERROR: No email input found');
-        await saveHtml(page, 'login_no_email_input');
+    // Accept terms of use if shown on homepage
+    const termsOk = await acceptTermsIfPresent(page);
+    if (! termsOk) {
+        log('  ERROR: Could not accept terms of use');
         return false;
     }
 
-    await hasEmailInput.click({ clickCount: 3 });
+    await screenshot(page, 'before_login_click');
+
+    // Click LOGIN button (top-right header)
+    const loginClicked = await page.evaluate(() => {
+        const loginBtn = document.getElementById('login');
+        if (loginBtn) { loginBtn.click(); return 'id:login'; }
+        const buttons = Array.from(document.querySelectorAll('button, a, [role="button"]'));
+        const btn = buttons.find(b => b.textContent.trim().toUpperCase() === 'LOGIN');
+        if (btn) { btn.click(); return 'text:Login'; }
+        return false;
+    });
+
+    if (!loginClicked) {
+        log('  ERROR: Could not find Login button');
+        await saveHtml(page, 'no_login_button');
+        return false;
+    }
+    log(`  Clicked Login (${loginClicked})`);
+    await sleep(DELAY);
+    await screenshot(page, 'login_dialog_opened');
+
+    // Wait for email input to appear (Material UI dialog can lazy-render)
+    let emailInput = null;
+    for (let i = 0; i < 10; i++) {
+        emailInput = await page.$('input[type="email"], input[name="email"], input[placeholder*="email" i], #email');
+        if (emailInput) break;
+        await sleep(500);
+    }
+    // Fallback: any text input inside an open dialog
+    if (! emailInput) {
+        emailInput = await page.$('[role="dialog"] input[type="text"], .MuiDialog-root input[type="text"], [role="dialog"] input:not([type="hidden"])');
+    }
+
+    if (! emailInput) {
+        log('  ERROR: No email input found in login dialog');
+        await saveHtml(page, 'login_no_email_input');
+        await screenshot(page, 'login_no_email_input');
+        return false;
+    }
+
+    await emailInput.click({ clickCount: 3 });
     await sleep(200);
-    await hasEmailInput.type(email, { delay: 50 });
+    await emailInput.type(email, { delay: 50 });
     log(`  Typed email: ${email}`);
+    await screenshot(page, 'email_typed');
     await sleep(500);
 
     const submitClicked = await page.evaluate(() => {
@@ -1699,6 +2068,7 @@ async function requestLoginEmail(page, email) {
     }
 
     await sleep(DELAY);
+    await screenshot(page, 'after_submit');
     log('  Login email request submitted');
     return true;
 }
@@ -1717,11 +2087,14 @@ async function requestLoginEmail(page, email) {
 
         const browser = await puppeteer.launch({
             headless: config.headless !== false ? 'new' : false,
+            executablePath: findChromeBinary() || undefined,
             args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-                   '--disable-blink-features=AutomationControlled', '--window-size=1366,900'],
+                   '--disable-blink-features=AutomationControlled', '--window-size=1366,900',
+                   ...(proxyServer ? [`--proxy-server=${proxyServer}`] : [])],
             defaultViewport: { width: 1366, height: 900 },
         });
         const page = await browser.newPage();
+        await applyProxyAuth(page);
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36');
 
         try {
@@ -1777,7 +2150,8 @@ async function requestLoginEmail(page, email) {
     } else {
         log('  Direct Chrome launch failed — falling back to puppeteer.launch');
         const launchArgs = ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-                   '--disable-blink-features=AutomationControlled', '--window-size=1366,900'];
+                            '--disable-blink-features=AutomationControlled', '--window-size=1366,900'];
+        if (proxyServer) { launchArgs.push(`--proxy-server=${proxyServer}`); }
 
         // Load extension via puppeteer.launch args
         if (hasExtension) {
@@ -1787,6 +2161,7 @@ async function requestLoginEmail(page, email) {
 
         browser = await puppeteer.launch({
             headless: isHeadless ? 'new' : false,
+            executablePath: findChromeBinary() || undefined,
             args: launchArgs,
             defaultViewport: { width: 1366, height: 900 },
         });
@@ -1798,6 +2173,7 @@ async function requestLoginEmail(page, email) {
         page = await browser.newPage();
     }
 
+    await applyProxyAuth(page);
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36');
 
     const results = { success: [], failed: [], skipped: [] };
@@ -1831,30 +2207,34 @@ async function requestLoginEmail(page, email) {
         // Step 5: Obtain accessToken for API-driven search
         let useApiSearch = false;
 
-        // ── Primary approach: Extension-based reCAPTCHA ──────────────────
-        // Disconnects Puppeteer/CDP so navigator.webdriver = false,
-        // then the Chrome extension executes reCAPTCHA Enterprise v3
-        // with a clean (non-automated) browser fingerprint.
-        if (launchInfo && hasExtension) {
-            log('  Trying extension-based reCAPTCHA (disconnect CDP → extension runs clean)…');
+        // ── Primary approach: stealth puppeteer + 2Captcha plugin ─────────
+        // The extension-based CDP-disconnect approach proved unreliable
+        // (cross-origin localStorage SecurityError after reconnect, plus
+        // verify endpoint returning {verified:false}). We now go straight
+        // to the headless automated path, which uses puppeteer-extra-plugin-
+        // recaptcha with 2Captcha to solve and verify reCAPTCHA v3.
+        // To re-enable the extension trick, set EWCCV_ENABLE_EXTENSION=1.
+        if (process.env.EWCCV_ENABLE_EXTENSION === '1' && launchInfo && hasExtension) {
+            log('  [opt-in] Trying extension-based reCAPTCHA…');
             const extResult = await tryExtensionRecaptcha(page, browser, launchInfo);
 
             if (extResult.ok) {
                 useApiSearch = true;
-                // Update browser/page references (reconnected after disconnect)
                 browser = extResult.browser;
                 page = extResult.page;
                 log('  Extension reCAPTCHA succeeded — will use API search for all vendors');
             } else {
                 log(`  Extension reCAPTCHA failed: ${extResult.reason}`);
-                // Update references if reconnected
                 if (extResult.browser) browser = extResult.browser;
                 if (extResult.page) page = extResult.page;
             }
         }
 
         // ── Fallback: Headless automated approaches ──────────────────────
-        if (!useApiSearch && isHeadless) {
+        // EWCCV_SKIP_API_SEARCH=1 forces UI-driven search (let EWCCV's React app
+        // handle the reCAPTCHA verify call itself — it knows the right headers).
+        const skipApiSearch = process.env.EWCCV_SKIP_API_SEARCH === '1';
+        if (!useApiSearch && isHeadless && !skipApiSearch) {
             log('  Falling back to automated reCAPTCHA approach…');
             await simulateHumanBehavior(page, 20000);
             const tokenResult = await obtainAccessToken(page);
@@ -1864,6 +2244,8 @@ async function requestLoginEmail(page, email) {
             } else {
                 log(`  accessToken failed: ${tokenResult.reason}`);
             }
+        } else if (skipApiSearch) {
+            log('  EWCCV_SKIP_API_SEARCH=1 → going straight to UI-driven search');
         }
 
         if (!useApiSearch) {
@@ -2047,6 +2429,7 @@ async function requestLoginEmail(page, email) {
                     if (!page || page.isClosed()) {
                         log('    Page was closed — opening new tab');
                         page = await browser.newPage();
+                        await applyProxyAuth(page);
                         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36');
                     }
                     await page.goto(`${BASE_URL}/cvs/search`, { waitUntil: 'networkidle2', timeout: 30000 });

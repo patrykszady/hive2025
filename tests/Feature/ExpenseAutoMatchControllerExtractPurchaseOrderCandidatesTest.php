@@ -199,4 +199,58 @@ class ExpenseAutoMatchControllerExtractPurchaseOrderCandidatesTest extends TestC
 
         $this->assertSame(['17 MAIN ST'], $controller->extractCandidates($expense));
     }
+
+    public function test_extracts_meaningful_segment_from_composite_purchase_order_value(): void
+    {
+        $controller = new class extends ExpenseAutoMatchController
+        {
+            /**
+             * @return array<int, string>
+             */
+            public function extractCandidates(Expense $expense): array
+            {
+                return $this->extractPurchaseOrderCandidates($expense);
+            }
+        };
+
+        $expense = new Expense();
+
+        $receipt = new ExpenseReceipts([
+            'receipt_items' => [
+                'purchase_order' => '&, 3952',
+                'handwritten_notes' => [],
+            ],
+        ]);
+
+        $expense->setRelation('receipts', new Collection([$receipt]));
+
+        $this->assertSame(['3952'], $controller->extractCandidates($expense));
+    }
+
+    public function test_ignores_symbol_only_handwritten_note_and_keeps_meaningful_note(): void
+    {
+        $controller = new class extends ExpenseAutoMatchController
+        {
+            /**
+             * @return array<int, string>
+             */
+            public function extractCandidates(Expense $expense): array
+            {
+                return $this->extractPurchaseOrderCandidates($expense);
+            }
+        };
+
+        $expense = new Expense();
+
+        $receipt = new ExpenseReceipts([
+            'receipt_items' => [
+                'purchase_order' => '',
+                'handwritten_notes' => ['&amp;', '3952'],
+            ],
+        ]);
+
+        $expense->setRelation('receipts', new Collection([$receipt]));
+
+        $this->assertSame(['3952'], $controller->extractCandidates($expense));
+    }
 }

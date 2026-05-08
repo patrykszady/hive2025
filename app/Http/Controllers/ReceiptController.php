@@ -678,7 +678,8 @@ class ReceiptController extends Controller
             $handwrittenFromModel = trim($handwrittenFromModel);
             if ($handwrittenFromModel !== ''
                 && strcasecmp($handwrittenFromModel, 'null') !== 0
-                && ! preg_match('/^(sold to|ship to|bill to|p\/o\s*#?|po\s*#?|order\s*#?|invoice\s*#?|date|signature|customer|page|sub\s*total|total|tax)\s*[:#]?$/i', $handwrittenFromModel)) {
+                && ! preg_match('/^(sold to|ship to|bill to|p\/o\s*#?|po\s*#?|order\s*#?|invoice\s*#?|date|signature|customer|page|sub\s*total|total|tax)\s*[:#]?$/i', $handwrittenFromModel)
+                && $this->isMeaningfulHandwrittenNote($handwrittenFromModel)) {
                 $handwrittenNotes[] = $handwrittenFromModel;
             }
         }
@@ -699,6 +700,9 @@ class ReceiptController extends Controller
                 if ($snippet === '') { continue; }
                 // Skip common printed labels that get misclassified as handwriting.
                 if (preg_match('/^(sold to|ship to|bill to|p\/o\s*#?|po\s*#?|order\s*#?|invoice\s*#?|date|signature|customer|page|sub\s*total|total|tax)\s*[:#]?$/i', $snippet)) {
+                    continue;
+                }
+                if (! $this->isMeaningfulHandwrittenNote($snippet)) {
                     continue;
                 }
                 $handwrittenNotes[] = $snippet;
@@ -774,7 +778,7 @@ class ReceiptController extends Controller
         $purchaseOrder = $this->extractFieldStringValue($prefix['PurchaseOrder'] ?? null);
         $jobName = $this->extractFieldStringValue($prefix['JobName'] ?? null);
 
-        $values = array_filter([$purchaseOrder, $jobName], fn ($v) => $v !== '');
+        $values = $this->extractValidPurchaseOrderValues([$purchaseOrder, $jobName]);
         $purchaseOrderNumber = count($values) > 1 ? implode(', ', $values) : implode('', $values);
 
         // Fallback: material-order analyzer uses CustomerPO instead of PurchaseOrder/JobName
@@ -1368,6 +1372,62 @@ class ReceiptController extends Controller
         }
 
         return '';
+    }
+
+    /**
+     * @param  array<int, string>  $values
+     * @return array<int, string>
+     */
+    private function extractValidPurchaseOrderValues(array $values): array
+    {
+        $valid = [];
+
+        foreach ($values as $value) {
+            $decoded = html_entity_decode(trim((string) $value), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            if ($decoded === '') {
+                continue;
+            }
+
+            $parts = preg_split('/[|,]+/', $decoded) ?: [];
+            foreach ($parts as $part) {
+                $part = trim((string) $part);
+                if ($part === '') {
+                    continue;
+                }
+
+                // Ignore symbol-only fragments like "&" or "#".
+                if (! preg_match('/[A-Za-z0-9]/', $part)) {
+                    continue;
+                }
+
+                $key = mb_strtolower($part);
+                if (! in_array($key, array_map('mb_strtolower', $valid), true)) {
+                    $valid[] = $part;
+                }
+            }
+        }
+
+        return $valid;
+    }
+
+    private function isMeaningfulHandwrittenNote(string $note): bool
+    {
+        $note = trim(html_entity_decode($note, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        if ($note === '') {
+            return false;
+        }
+
+        // Reject printed payment/account statement lines that are not job notes.
+        if (preg_match('/^(policy\s*\/\s*account\s*billing\s*#?\s*:|confirmation\s*#?\s*:|payment\s*date\s*:|payment\s*amount\s*:|surcharge\s*fee\s*:|total\s*paid\s*:|payment\s*account\s*number\s*#?\s*:)/i', $note)) {
+            return false;
+        }
+
+        // Reject punctuation-only snippets like "&" that come from OCR style noise.
+        if (! preg_match('/[A-Za-z0-9]/', $note)) {
+            return false;
+        }
+
+        return true;
     }
 
     /**

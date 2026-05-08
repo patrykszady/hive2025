@@ -654,6 +654,7 @@ class ExpenseAutoMatchController extends Controller
                     $bestPurchaseOrder = null;
                     $ambiguousBest = null;
                     $ambiguousPurchaseOrder = null;
+                    $hasCompetingNonAmbiguousMatch = false;
 
                     foreach ($purchaseOrderCandidates as $purchaseOrder) {
                         $distributionMatch = $distributionIndex !== []
@@ -675,14 +676,45 @@ class ExpenseAutoMatchController extends Controller
                             continue;
                         }
 
-                        $best = $candidateBest;
-                        $bestPurchaseOrder = $purchaseOrder;
-                        break;
+                        if ($best === null) {
+                            $best = $candidateBest;
+                            $bestPurchaseOrder = $purchaseOrder;
+                            continue;
+                        }
+
+                        $sameTarget = ($best['type'] ?? null) === ($candidateBest['type'] ?? null)
+                            && ((int) ($best['id'] ?? 0)) === ((int) ($candidateBest['id'] ?? 0));
+
+                        if ($sameTarget) {
+                            if (((float) ($candidateBest['score'] ?? 0.0)) > ((float) ($best['score'] ?? 0.0))) {
+                                $best = $candidateBest;
+                                $bestPurchaseOrder = $purchaseOrder;
+                            }
+                            continue;
+                        }
+
+                        $scoreGap = abs(((float) ($candidateBest['score'] ?? 0.0)) - ((float) ($best['score'] ?? 0.0)));
+
+                        // If two different targets are both plausible from different PO candidates,
+                        // do not auto-link this expense.
+                        if ($scoreGap < 0.06) {
+                            $hasCompetingNonAmbiguousMatch = true;
+                            continue;
+                        }
+
+                        if (((float) ($candidateBest['score'] ?? 0.0)) > ((float) ($best['score'] ?? 0.0))) {
+                            $best = $candidateBest;
+                            $bestPurchaseOrder = $purchaseOrder;
+                        }
                     }
 
                     if (! $best && $ambiguousBest) {
                         $best = $ambiguousBest;
                         $bestPurchaseOrder = $ambiguousPurchaseOrder;
+                    }
+
+                    if ($best && $hasCompetingNonAmbiguousMatch) {
+                        $best['ambiguous'] = true;
                     }
 
                     if (! $best) {
@@ -1122,15 +1154,35 @@ class ExpenseAutoMatchController extends Controller
             return null;
         }
 
-        $text = str_replace('|', ',', $text);
-        $first = trim(explode(',', $text)[0] ?? '');
+        $decoded = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $parts = preg_split('/[|,]+/', $decoded) ?: [];
 
-        if ($first === '') {
+        // Composite values like "&, 3952" should keep the meaningful segment.
+        foreach ($parts as $part) {
+            $candidate = $this->normalizePurchaseOrderSegment((string) $part);
+            if ($candidate !== null) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    protected function normalizePurchaseOrderSegment(string $segment): ?string
+    {
+        $segment = trim($segment);
+
+        if ($segment === '') {
             return null;
         }
 
-        $firstWithoutSpaces = preg_replace('/\s+/', '', $first);
-        $moneyCandidate = $firstWithoutSpaces === null ? '' : $firstWithoutSpaces;
+        // Ignore symbol-only fragments (e.g. "&", "#", "-").
+        if (! preg_match('/[A-Za-z0-9]/', $segment)) {
+            return null;
+        }
+
+        $segmentWithoutSpaces = preg_replace('/\s+/', '', $segment);
+        $moneyCandidate = $segmentWithoutSpaces === null ? '' : $segmentWithoutSpaces;
         $moneyCandidate = str_replace(',', '', $moneyCandidate);
 
         // Reject obvious currency/amount values like "$44.60" or "44.60".
@@ -1138,9 +1190,8 @@ class ExpenseAutoMatchController extends Controller
             return null;
         }
 
-        $normalizedFirst = $this->normalizeText($first);
-
-        $length = mb_strlen($normalizedFirst);
+        $normalizedSegment = $this->normalizeText($segment);
+        $length = mb_strlen($normalizedSegment);
 
         // Too-short POs (e.g. "A", "PP") are almost always noise.
         // Keep 2- or 3-digit numeric POs (e.g. "17", "901"), which are common in this dataset.
@@ -1148,15 +1199,15 @@ class ExpenseAutoMatchController extends Controller
             return null;
         }
 
-        if ($length === 2 && ! preg_match('/^\d{2}$/', $normalizedFirst)) {
+        if ($length === 2 && ! preg_match('/^\d{2}$/', $normalizedSegment)) {
             return null;
         }
 
-        if ($length === 3 && ! preg_match('/^\d{3}$/', $normalizedFirst)) {
+        if ($length === 3 && ! preg_match('/^\d{3}$/', $normalizedSegment)) {
             return null;
         }
 
-        if (in_array($normalizedFirst, ['missing po', 'missing purchase order'], true)) {
+        if (in_array($normalizedSegment, ['missing po', 'missing purchase order'], true)) {
             return null;
         }
 
@@ -1173,11 +1224,11 @@ class ExpenseAutoMatchController extends Controller
             'office', 'shop', 'warehouse', 'inventory', 'stocking',
             'sample', 'samples', 'test', 'demo',
         ];
-        if (in_array($normalizedFirst, $genericSingleWordPos, true)) {
+        if (in_array($normalizedSegment, $genericSingleWordPos, true)) {
             return null;
         }
 
-        return $first;
+        return $segment;
     }
 
     /**

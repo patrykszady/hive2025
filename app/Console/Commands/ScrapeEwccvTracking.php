@@ -14,7 +14,7 @@ class ScrapeEwccvTracking extends Command
 {
     protected $signature = 'ewccv:scrape-tracking
         {--login-url= : JWT magic link URL (auto-fetched from email if omitted)}
-        {--login-email=patryk.szady@live.com : Email address to request EWCCV login link}
+        {--login-email=patryk.szady@live.com : Email address to type into EWCCV (forwarded to a Nylas-monitored mailbox)}
         {--belongs-to-vendor-id= : The belongs_to_vendor_id to scope vendor docs}
         {--vendor-id=* : Specific vendor ID(s) to process (default: all with active WC policies)}
         {--visible : Run browser in visible (non-headless) mode}
@@ -38,8 +38,8 @@ class ScrapeEwccvTracking extends Command
         $dryRun     = $this->option('dry-run');
         $delay      = (int) ($this->option('delay') ?: 3000);
 
-        // ── Auto-fetch login URL if not provided ─────────────────────────
-        if (! $loginUrl) {
+        // ── Auto-fetch login URL if not provided (skipped during dry-run) ─
+        if (! $loginUrl && ! $dryRun) {
             $loginEmail = $this->option('login-email');
 
             // Try cached token first
@@ -164,6 +164,7 @@ class ScrapeEwccvTracking extends Command
             'twoCaptchaKey'   => $twoCaptchaKey ?: '',
             'vendors'         => $searchable->values()->toArray(),
             'outputDir'       => $outputDir,
+            'screenshotDir'   => public_path('EWCCV'),
             'headless'        => $headless,
             'delayMs'         => $delay,
         ];
@@ -304,8 +305,11 @@ class ScrapeEwccvTracking extends Command
             'mode'       => 'request-email',
             'loginEmail' => $loginEmail,
             'outputDir'  => $outputDir,
+            'screenshotDir' => public_path('EWCCV'),
             'headless'   => $headless,
             'delayMs'    => $delay,
+            'captchaApiKey' => env('ANTICAPTCHA_API_KEY', ''),
+            'twoCaptchaKey' => env('TWOCAPTCHA_API_KEY', ''),
         ];
 
         $configFile = tempnam(sys_get_temp_dir(), 'ewccv_email_');
@@ -352,9 +356,8 @@ class ScrapeEwccvTracking extends Command
 
             try {
                 $messages = $nylasService->getMessages($grantId, [
-                    'subject' => 'Sign in to Workers Compensation Coverage Verification',
                     'in'      => $folderId,
-                    'limit'   => 5,
+                    'limit'   => 20,
                     'received_after' => $timestampBefore->timestamp,
                 ]);
 
@@ -364,8 +367,13 @@ class ScrapeEwccvTracking extends Command
                     continue;
                 }
 
-                // Find the most recent matching message
+                // Find the most recent matching message (subject may be prefixed with "FW:" / "Fwd:" from forwarding)
                 foreach ($data as $message) {
+                    $subject = $message['subject'] ?? '';
+                    if (stripos($subject, 'Sign in to Workers Compensation Coverage Verification') === false) {
+                        continue;
+                    }
+
                     $body = $message['body'] ?? '';
 
                     // Extract the magic link from the email body

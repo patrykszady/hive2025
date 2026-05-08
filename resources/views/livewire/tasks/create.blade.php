@@ -302,7 +302,7 @@
                                         </div>
 
                                         @if($form->time_settings[$date]['use_time'] ?? false)
-                                            <div class="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-100 dark:border-zinc-800 [&_[data-flux-time-picker-button]:not(:has([data-flux-time-picker-placeholder]))>[data-flux-icon]:first-child]:hidden">
+                                            <div class="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
                                                 <flux:time-picker
                                                     wire:model.live="form.time_settings['{{ $date }}'].start_time"
                                                     wire:change="updateEndTime('{{ $date }}')"

@@ -10,6 +10,7 @@ use App\Models\Expense;
 use App\Models\LineItem;
 use App\Models\Project;
 use App\Models\Vendor;
+use App\Models\VendorDoc;
 
 use App\Observers\BidObserver;
 use App\Observers\CallLogObserver;
@@ -18,6 +19,7 @@ use App\Observers\EstimateLineItemObserver;
 use App\Observers\ExpenseObserver;
 use App\Observers\LineItemObserver;
 use App\Observers\ProjectObserver;
+use App\Observers\VendorDocObserver;
 use App\Observers\VendorObserver;
 
 use App\Mail\Transport\NylasTransport;
@@ -188,6 +190,7 @@ class AppServiceProvider extends ServiceProvider
         LineItem::observe(LineItemObserver::class);
         Project::observe(ProjectObserver::class);
         Vendor::observe(VendorObserver::class);
+        VendorDoc::observe(VendorDocObserver::class);
     }
 
     public function bootRoute()
