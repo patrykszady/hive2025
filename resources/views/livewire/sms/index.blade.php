@@ -1,5 +1,6 @@
 <div
-    class="flex lg:gap-4 flex-1 min-h-0 lg:p-8 {{ $threadId ? 'px-2 pt-2 pb-3' : 'px-5 pt-4 pb-3' }} lg:!px-8 lg:!pt-8"
+    class="flex lg:gap-4 flex-1 min-h-0 lg:p-8 px-5 pt-4 pb-3 lg:!px-8 lg:!pt-8"
+    x-bind:class="$store.sms.threadId ? '!px-2 !pt-2 !pb-3 lg:!px-8 lg:!pt-8' : ''"
     x-data="{
         initialized: false,
         originalTitle: document.title,

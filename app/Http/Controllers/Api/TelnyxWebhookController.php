@@ -537,6 +537,16 @@ class TelnyxWebhookController extends Controller
             'call_log_id' => $callLogId,
         ]);
 
+        // Set the bridged flag IMMEDIATELY so any in-flight `call.playback.ended`
+        // webhooks for the user's ringback don't re-loop the ringback audio
+        // over the conference. Without this, ringback would keep restarting
+        // for ~30s while we created the conference and bridged in, drowning out
+        // the target's audio (especially noticeable when the target is voicemail).
+        if ($userCallControlId) {
+            Cache::put("telnyx_bridged:{$userCallControlId}", true, now()->addMinutes(60));
+        }
+        Cache::put("telnyx_bridged:{$callControlId}", true, now()->addMinutes(60));
+
         if ($userCallControlId) {
             if (! $callLog) {
                 Log::channel('telnyx')->error('Click-to-call target answered but call log missing', [

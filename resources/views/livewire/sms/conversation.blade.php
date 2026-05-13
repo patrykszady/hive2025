@@ -1181,26 +1181,40 @@
             </div>
         </flux:modal>
     @else
-        {{-- No thread selected — but if we're mid-switch (just tapped a thread on mobile)
-             show a skeleton header + bubbles to mirror the loaded layout, preventing
-             a visual height shift when the server response swaps in the real thread. --}}
-        <template x-if="switching">
-            <div class="flex-1 min-h-0 flex flex-col">
-                {{-- Skeleton header --}}
-                <div class="border-b border-zinc-200 dark:border-zinc-700 px-4 py-2">
-                    <div class="flex items-center gap-1.5" style="padding-left: 2rem" x-bind:style="window.innerWidth >= 1024 ? 'padding-left: 0' : 'padding-left: 2rem'">
-                        <div class="lg:hidden size-8 rounded-md bg-zinc-200/60 dark:bg-zinc-700/40 animate-pulse"></div>
-                        <div class="h-5 w-40 rounded bg-zinc-200/70 dark:bg-zinc-700/50 animate-pulse"></div>
-                    </div>
-                    <div class="h-3 w-24 mt-2 rounded bg-zinc-200/50 dark:bg-zinc-700/30 animate-pulse"></div>
+        {{-- No thread selected on the server. Two visual states are possible here:
+             1. User just tapped a thread on mobile — show a skeleton (header + bubbles)
+                that mirrors the loaded layout, so when the server response swaps in the
+                real thread there's no visual height shift or "No conversation selected"
+                flash between the thread-ready event and the Livewire DOM morph.
+             2. No thread is in flight — show the empty state.
+
+             We treat "pending" as: switching=true OR the global store already has a
+             threadId (means user tapped, server hasn't caught up yet). This eliminates
+             the race where thread-ready fires (switching=false) before the parent
+             component re-renders into the @if branch. --}}
+        <div
+            x-show="switching || $store.sms.threadId"
+            x-cloak
+            class="flex-1 min-h-0 flex flex-col"
+        >
+            {{-- Skeleton header --}}
+            <div class="border-b border-zinc-200 dark:border-zinc-700 px-4 py-2">
+                <div class="flex items-center gap-1.5 pl-8 lg:pl-0">
+                    <div class="lg:hidden size-8 rounded-md bg-zinc-200/60 dark:bg-zinc-700/40 animate-pulse"></div>
+                    <div class="h-5 w-40 rounded bg-zinc-200/70 dark:bg-zinc-700/50 animate-pulse"></div>
                 </div>
-                {{-- Skeleton bubbles, full height --}}
-                <div class="flex-1 min-h-0 flex flex-col">
-                    @include('livewire.sms.conversation_placeholder')
-                </div>
+                <div class="h-3 w-24 mt-2 rounded bg-zinc-200/50 dark:bg-zinc-700/30 animate-pulse"></div>
             </div>
-        </template>
-        <div x-show="!switching" class="flex flex-1 items-center justify-center">
+            {{-- Skeleton bubbles, full height --}}
+            <div class="flex-1 min-h-0 flex flex-col">
+                @include('livewire.sms.conversation_placeholder')
+            </div>
+        </div>
+        <div
+            x-show="!switching && !$store.sms.threadId"
+            x-cloak
+            class="flex flex-1 items-center justify-center"
+        >
             <div class="text-center">
                 <flux:icon name="chat-bubble-left-right" class="mx-auto h-12 w-12 text-zinc-300 dark:text-zinc-600" />
                 <h3 class="mt-3 text-base lg:text-sm font-medium text-zinc-500 dark:text-zinc-400">No conversation selected</h3>
