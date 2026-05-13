@@ -1179,7 +1179,87 @@ class ExpenseAutoMatchController extends Controller
             }
         }
 
+        // Fallback: handwritten labels scribbled at the top of paper receipts
+        // sometimes land in raw_content (or receipt_html) but never make it
+        // into the structured handwritten_notes field. Pull short bare lines
+        // appearing BEFORE the merchant header so values like "Office",
+        // "Shop", "Warehouse" can still match a same-named distribution.
+        foreach ($receipts as $receipt) {
+            $items = $receipt->receipt_items ?? null;
+            $content = (is_array($items) ? ($items['raw_content'] ?? '') : '') ?: ($receipt->receipt_html ?? '');
+            if ($content === '') {
+                continue;
+            }
+
+            foreach ($this->extractLeadingHandwrittenLines((string) $content) as $line) {
+                $candidate = $this->normalizePurchaseOrderCandidate($line, allowGeneric: true);
+                if ($candidate === null) {
+                    continue;
+                }
+                $key = mb_strtolower(trim($candidate));
+                if ($key === '' || isset($seen[$key])) {
+                    continue;
+                }
+                $seen[$key] = true;
+                $candidates[] = $candidate;
+            }
+        }
+
         return $candidates;
+    }
+
+    /**
+     * Pull short bare text lines that appear before the merchant header in
+     * receipt content. These are typically handwritten labels (e.g. "Office",
+     * "Shop") scribbled at the top of a paper receipt.
+     *
+     * @return array<int, string>
+     */
+    protected function extractLeadingHandwrittenLines(string $content): array
+    {
+        $headerOffset = strlen($content);
+        if (preg_match('/!\[[^\]]*\]\([^\)]+\)/', $content, $hm, PREG_OFFSET_CAPTURE)) {
+            $headerOffset = min($headerOffset, (int) $hm[0][1]);
+        }
+        $preHeader = substr($content, 0, $headerOffset);
+        $lines = array_slice(
+            array_values(array_filter(
+                array_map('trim', preg_split('/\r?\n/', $preHeader) ?: []),
+                fn (string $l) => $l !== ''
+            )),
+            0,
+            5
+        );
+
+        $out = [];
+        foreach ($lines as $line) {
+            // Reject merchant header phrases ("THANK YOU FOR SHOPPING AT", "PALATINE TRUE VALUE", etc.).
+            if (mb_strlen($line) > 30) {
+                continue;
+            }
+            // Handwritten labels are typically 1–2 words. Anything longer is
+            // almost always a merchant banner (e.g. "PALATINE TRUE VALUE").
+            $wordCount = preg_match_all('/\b[A-Za-z][A-Za-z\']*\b/', $line);
+            if ($wordCount < 1 || $wordCount > 2) {
+                continue;
+            }
+            // Reject pure numeric junk and store/SKU codes.
+            if (! preg_match('/[A-Za-z]/', $line)) {
+                continue;
+            }
+            // Reject anything containing digits (street numbers, dates, totals).
+            if (preg_match('/\d/', $line)) {
+                continue;
+            }
+            // Strip leading/trailing punctuation noise.
+            $clean = trim($line, " \t\n\r\0\x0B.,:;-_*#");
+            if ($clean === '') {
+                continue;
+            }
+            $out[] = $clean;
+        }
+
+        return $out;
     }
 
     /**
@@ -1240,6 +1320,56 @@ class ExpenseAutoMatchController extends Controller
                 $street = trim($street);
                 if ($street !== '' && ! in_array($street, $addresses, true)) {
                     $addresses[] = $street;
+                }
+            }
+        }
+
+        // Pattern 4: bare house-number street line appearing BEFORE the merchant
+        // header. Handwritten job addresses scribbled at the top of a paper
+        // receipt land in raw_content with no label — e.g. "5328 Ock Grove" on a
+        // Home Depot scan, sitting above the store logo. We scan only the lines
+        // before the first markdown image (`![...]`) or "merchant_name"-style
+        // header line, and pick up anything that looks like a US street address.
+        $headerOffset = strlen($content);
+        if (preg_match('/!\[[^\]]*\]\([^\)]+\)/', $content, $hm, PREG_OFFSET_CAPTURE)) {
+            $headerOffset = min($headerOffset, (int) $hm[0][1]);
+        }
+        $preHeader = substr($content, 0, $headerOffset);
+        $allNonEmptyLines = array_values(array_filter(
+            array_map('trim', preg_split('/\r?\n/', $content) ?: []),
+            fn (string $l) => $l !== ''
+        ));
+        $preHeaderLines = array_values(array_filter(
+            array_map('trim', preg_split('/\r?\n/', $preHeader) ?: []),
+            fn (string $l) => $l !== ''
+        ));
+        $leadingLines = array_slice($preHeaderLines, 0, 5);
+        // Also look ahead within the broader content (not just within slice) so
+        // that store-front detection can see "City, ST zip" even when it sits
+        // beyond the 5-line leading window.
+        $followingByLine = [];
+        foreach ($leadingLines as $idx => $line) {
+            $pos = array_search($line, $allNonEmptyLines, true);
+            $followingByLine[$idx] = ($pos !== false && isset($allNonEmptyLines[$pos + 1]))
+                ? $allNonEmptyLines[$pos + 1]
+                : '';
+        }
+        foreach ($leadingLines as $idx => $line) {
+            // Reject store-style addresses (they typically include a city/state/zip
+            // or unit suffix on the same line). Handwritten job addresses are
+            // usually just "<number> <street name>".
+            if (preg_match('/\b[A-Z]{2}\s+\d{5}(?:-\d{4})?\b/', $line)) {
+                continue;
+            }
+            // Also reject if the next non-empty line looks like "City, ST 12345"
+            // — that means this line is a store-front street address.
+            $next = $followingByLine[$idx] ?? '';
+            if ($next !== '' && preg_match('/^[A-Za-z\.\' \-]+,?\s+[A-Z]{2}\s+\d{5}(?:-\d{4})?\b/', $next)) {
+                continue;
+            }
+            if (preg_match('/^\d{2,6}\s+[A-Za-z][A-Za-z0-9\.\'\-\s]{2,60}$/', $line)) {
+                if (! in_array($line, $addresses, true)) {
+                    $addresses[] = $line;
                 }
             }
         }
