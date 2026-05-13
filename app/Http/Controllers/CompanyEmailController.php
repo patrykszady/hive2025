@@ -2021,34 +2021,33 @@ class CompanyEmailController extends Controller
                             }
                             $expense_duplicate = $duplicates->sortBy('date_diff')->first();
 
-                            // If the latest receipt HTML is different, update; otherwise, skip.
+                            // Epson auto-receipt scans almost always carry handwritten notes
+                            // that the OCR's `content` may not capture (low style confidence,
+                            // cursive too messy, etc.). Two visually identical scans can therefore
+                            // produce identical `content` even though the handwriting differs.
+                            // Always attach the new scan as an additional receipt — the user can
+                            // delete extras manually if truly redundant.
                             if (isset($expense_duplicate->receipts()->latest()->first()->receipt_html)) {
-                                if ($expense_duplicate->receipts()->latest()->first()->receipt_html != $ocr_receipt_data['content']) {
-                                    // Update existing expense fields from OCR data before attaching receipt
-                                    $expense = $expense_duplicate;
-                                    // Remove temporary date_diff property to avoid database save error
-                                    unset($expense->date_diff);
-                                    $newDate = Carbon::parse($ocr_receipt_data['fields']['transaction_date'])->toDateString();
-                                    if ($expense->date !== $newDate) {
-                                        $expense->date = $newDate;
+                                // Update existing expense fields from OCR data before attaching receipt
+                                $expense = $expense_duplicate;
+                                // Remove temporary date_diff property to avoid database save error
+                                unset($expense->date_diff);
+                                $newDate = Carbon::parse($ocr_receipt_data['fields']['transaction_date'])->toDateString();
+                                if ($expense->date !== $newDate) {
+                                    $expense->date = $newDate;
+                                }
+                                $incomingInvoice = trim((string)($ocr_receipt_data['fields']['invoice_number'] ?? ''));
+                                if ($incomingInvoice !== '') {
+                                    // Only set invoice if it's empty to avoid clobbering a known value
+                                    if (empty($expense->invoice)) {
+                                        $expense->invoice = $incomingInvoice;
                                     }
-                                    $incomingInvoice = trim((string)($ocr_receipt_data['fields']['invoice_number'] ?? ''));
-                                    if ($incomingInvoice !== '') {
-                                        // Only set invoice if it's empty to avoid clobbering a known value
-                                        if (empty($expense->invoice)) {
-                                            $expense->invoice = $incomingInvoice;
-                                        }
-                                    }
-                                    $expense->save();
-                                    // Link a single matched transaction to this expense if found earlier
-                                    if (isset($transaction) && $transaction && is_null($transaction->expense_id)) {
-                                        $transaction->expense_id = $expense->id;
-                                        $transaction->save();
-                                    }
-                                } else {
-                                    // Clean up the temporary OCR file before skipping
-                                    Storage::disk('files')->delete($ocr_path);
-                                    continue; // Skip if the receipt is an exact duplicate.
+                                }
+                                $expense->save();
+                                // Link a single matched transaction to this expense if found earlier
+                                if (isset($transaction) && $transaction && is_null($transaction->expense_id)) {
+                                    $transaction->expense_id = $expense->id;
+                                    $transaction->save();
                                 }
                             } else {
                                 // No previous receipts recorded; update and use this expense
@@ -2073,9 +2072,13 @@ class CompanyEmailController extends Controller
                             }
 
                             // Attach the currently processed receipt to the chosen expense.
+                            // Skip the inner duplicate-content check: Epson scans of the same paper
+                            // receipt produce identical OCR content/signature, but the handwritten
+                            // notes can differ. We intentionally want every Epson scan attached so
+                            // the user can see all variants of the handwriting and decide manually.
                             // (saveExpenseReceipt moves the temp file into receipts/ and persists the receipt record)
                             if (isset($expense) && $expense instanceof Expense) {
-                                $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, null, false);
+                                $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, null, true);
                                 $didAttachReceipt = true;
                             }
                         } elseif ($duplicates->isEmpty()) {

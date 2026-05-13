@@ -96,7 +96,15 @@ class SyncContentUnderstandingAnalyzer extends Command
             //    so they survive even if the prebuilt removes them in a later version)
             'MerchantName' => [
                 'type'        => 'string',
-                'description' => 'The name of the merchant or vendor on the receipt.',
+                'description' => 'The brand or business name of the merchant/vendor on the receipt. '
+                    . 'Prefer the prominent BRAND name shown in the logo or store header at the top of '
+                    . 'the receipt (e.g. "THE HOME DEPOT", "MENARDS", "LOWE\'S", "WALMART"). '
+                    . 'IMPORTANT: Do NOT use marketing slogans, taglines, or advertising phrases as the '
+                    . 'merchant name. Examples of taglines to IGNORE: "How doers get more done." (Home Depot), '
+                    . '"Save big money" (Menards), "Save money. Live better." (Walmart). '
+                    . 'If only a logo is visible without printed brand text, infer the brand from visual '
+                    . 'cues (logo shape/color, store layout, receipt format, address) and return the '
+                    . 'canonical brand name. If genuinely unknown, return an empty string.',
                 'method'      => 'extract',
             ],
             'MerchantAddress' => [
