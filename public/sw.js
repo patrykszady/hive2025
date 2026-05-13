@@ -1,9 +1,9 @@
 /**
- * Service Worker — Push Notifications + Offline Messages Cache
+ * Service Worker — Push Notifications
  * Cache version is stamped by `npm run build` so every deploy busts stale assets.
  */
 
-const DEPLOY_VERSION = 'mp4cko0u';
+const DEPLOY_VERSION = 'mp4m8ke5';
 const PAGE_CACHE  = 'hive-pages-' + DEPLOY_VERSION;
 const ASSET_CACHE = 'hive-assets-' + DEPLOY_VERSION;
 
@@ -33,59 +33,12 @@ self.addEventListener('fetch', (event) => {
     const url = new URL(event.request.url);
     if (url.origin !== self.location.origin) return;
 
-    // /messages navigation → network-first with quick timeout, falls back to
-    // cached /messages HTML (ignoreSearch so ?threadId=X still hits the cache).
-    if (event.request.mode === 'navigate' && url.pathname.startsWith('/messages')) {
-        event.respondWith(messagesNavigation(event.request));
-        return;
-    }
-
-    // Cached threads/messages JSON (used for offline & instant paint)
-    if (url.pathname === '/messages/cache.json') {
-        event.respondWith(staleWhileRevalidate(event.request, PAGE_CACHE));
-        return;
-    }
-
     // Build / static assets → cache-first
     if (/^\/(build|js|css|fonts|favicons)\//.test(url.pathname)) {
         event.respondWith(cacheFirst(event.request, ASSET_CACHE));
         return;
     }
 });
-
-async function messagesNavigation(request) {
-    const cache = await caches.open(PAGE_CACHE);
-    const matchOpts = { ignoreSearch: true };
-
-    try {
-        const ctrl  = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 1500);
-        const res   = await fetch(request, { signal: ctrl.signal });
-        clearTimeout(timer);
-        if (res.ok) {
-            // Cache under the bare /messages key so any ?threadId=… request hits.
-            cache.put('/messages', res.clone());
-        }
-        return res;
-    } catch {
-        const cached = (await cache.match(request, matchOpts))
-                    || (await cache.match('/messages'));
-        return cached || offlinePage();
-    }
-}
-
-async function staleWhileRevalidate(request, cacheName) {
-    const cache = await caches.open(cacheName);
-    const cached = await cache.match(request);
-    const network = fetch(request).then((res) => {
-        if (res && res.ok) cache.put(request, res.clone());
-        return res;
-    }).catch(() => null);
-
-    return cached || (await network) || new Response('{}', {
-        headers: { 'Content-Type': 'application/json' },
-    });
-}
 
 async function cacheFirst(request, cacheName) {
     const hit = await caches.match(request);
@@ -100,15 +53,6 @@ async function cacheFirst(request, cacheName) {
     } catch {
         return new Response('', { status: 503, statusText: 'Offline' });
     }
-}
-
-function offlinePage() {
-    return new Response(
-        '<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width"><title>Offline</title></head>'
-      + '<body style="font-family:system-ui;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#18181b;color:#e4e4e7">'
-      + '<div style="text-align:center;padding:2rem"><h2>You\u2019re offline</h2><p>Messages will load once you reconnect.</p></div></body></html>',
-        { headers: { 'Content-Type': 'text/html' } }
-    );
 }
 
 /* ─── Push notifications ─────────────────────────────────────────── */

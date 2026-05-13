@@ -37,6 +37,11 @@ class CallList extends Component
         $this->normalizeCallFilter();
     }
 
+    public function rendered(): void
+    {
+        $this->dispatch('call-list-rendered');
+    }
+
     #[On('openNewCall')]
     public function openNewCall(): void
     {
@@ -58,6 +63,14 @@ class CallList extends Component
     public function updatedCallFilter(): void
     {
         $this->normalizeCallFilter();
+        $this->limit = 25;
+        $this->selectedCallId = null;
+    }
+
+    #[On('calls-tab-opened')]
+    public function callsTabOpened(): void
+    {
+        $this->callFilter = 'all';
         $this->limit = 25;
         $this->selectedCallId = null;
     }

@@ -1,11 +1,5 @@
 <div
     x-data="{
-        selected: (() => {
-            try {
-                const stored = Alpine.store('sms')?.threadId;
-                return stored || @js($selectedThreadId);
-            } catch (e) { return @js($selectedThreadId); }
-        })(),
         pulling: false,
         pullY: 0,
         startY: 0,
@@ -42,7 +36,6 @@
             }
         },
     }"
-    x-on:thread-selected.window="if ($event.detail.threadId) selected = $event.detail.threadId"
     x-on:sms-thread-filter-changed.window="$nextTick(() => $el.scrollTop = 0)"
     x-on:touchstart.passive="onTouchStart($event)"
     x-on:touchmove="onTouchMove($event)"
@@ -71,7 +64,6 @@
         <button
             wire:key="thread-{{ $thread->id }}"
             x-on:click="
-                selected = {{ $thread->id }};
                 /* Optimistic UI: flip the mobile panels immediately so the conversation
                    becomes visible with a skeleton while the server processes selectThread. */
                 $store.sms.threadId = {{ $thread->id }};
@@ -79,7 +71,7 @@
                 Livewire.dispatch('threadSelected', { threadId: {{ $thread->id }} });
             "
             class="w-full text-left px-3 py-2.5 rounded-lg"
-            x-bind:class="selected === {{ $thread->id }}
+            x-bind:class="$store.sms.threadId === {{ $thread->id }}
                 ? 'bg-zinc-100 dark:bg-zinc-700'
                 : 'hover:bg-zinc-50 dark:hover:bg-zinc-800'"
         >

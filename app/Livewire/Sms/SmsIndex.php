@@ -52,6 +52,10 @@ class SmsIndex extends Component
     public function updatedActiveTab(string $value): void
     {
         session(['sms_active_tab' => $value]);
+
+        if ($value === 'calls') {
+            $this->dispatch('calls-tab-opened')->to(CallList::class);
+        }
     }
 
     public function updatedSubjectFilter(string $value): void

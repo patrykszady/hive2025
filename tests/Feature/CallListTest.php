@@ -61,6 +61,19 @@ it('accepts valid filter values', function (string $filter) {
     expect($component->callFilter)->toBe($filter);
 })->with(['all', 'missed', 'voicemail']);
 
+it('resets to all when calls tab is opened', function () {
+    $component = new CallList();
+    $component->callFilter = 'missed';
+    $component->limit = 100;
+    $component->selectedCallId = 999;
+
+    $component->callsTabOpened();
+
+    expect($component->callFilter)->toBe('all')
+        ->and($component->limit)->toBe(25)
+        ->and($component->selectedCallId)->toBeNull();
+});
+
 it('does not use WithPagination trait', function () {
     $traits = class_uses_recursive(CallList::class);
 

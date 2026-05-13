@@ -435,8 +435,6 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
     //MESSAGES
     Route::get('/messages', SmsIndex::class)
         ->name('sms.index');
-    Route::get('/messages/cache.json', \App\Http\Controllers\Sms\SmsCacheController::class)
-        ->name('sms.cache');
 
     //LINE ITEMS
     Route::get('/line_items', LineItemsIndex::class)->name('line_items.index');

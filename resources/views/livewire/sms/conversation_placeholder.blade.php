@@ -1,4 +1,4 @@
-<div class="flex-1 min-h-0 flex flex-col justify-end">
+<div class="h-full min-h-0 flex flex-col justify-end">
     <div class="px-2 pb-6 space-y-3">
         {{-- Left message --}}
         <div class="flex justify-start">

@@ -46,6 +46,7 @@
         $nextTick(() => { switching = false });
     "
 >
+    @island(name: 'sms-conversation-stream', always: true)
     @if ($this->thread)
         {{-- Pull-to-refresh indicator (mobile only) --}}
         <div
@@ -90,13 +91,38 @@
             }
         @endphp
         <div
-            class="border-b border-zinc-200 dark:border-zinc-700 px-4 py-2"
+            x-show="switching"
+            x-cloak
+            class="sms-mobile-header-offset border-b border-zinc-200 dark:border-zinc-700 py-2"
+        >
+            <div class="flex items-center gap-1.5">
+                <flux:button
+                    type="button"
+                    variant="subtle"
+                    size="sm"
+                    square
+                    icon="arrow-left"
+                    class="lg:hidden shrink-0"
+                    x-on:click="
+                        $store.sms.threadId = null;
+                        window.dispatchEvent(new CustomEvent('thread-selected', { detail: { threadId: null } }));
+                        $wire.$parent.clearThread();
+                    "
+                    aria-label="Back to conversations"
+                ></flux:button>
+                <div class="h-5 w-40 rounded animate-pulse bg-zinc-200/70 dark:bg-zinc-700/50"></div>
+            </div>
+        </div>
+
+        <div
+            x-show="!switching"
+            class="sms-mobile-header-offset border-b border-zinc-200 dark:border-zinc-700 py-2"
             x-on:touchstart.passive="onPullStart($event)"
             x-on:touchmove="onPullMove($event)"
             x-on:touchend="onPullEnd()"
         >
             {{-- Title row --}}
-            <div class="flex items-center gap-1.5 pl-8 lg:pl-0">
+            <div class="flex items-center gap-1.5">
                 {{-- Mobile back button: optimistic — flip the panels instantly,
                      then tell the server to clear in the background. --}}
                 <flux:button
@@ -256,8 +282,21 @@
                 @endphp
 
                 @if ($callableContacts->isNotEmpty())
-                    @if ($callableContacts->count() > 1)
-                        <div class="mt-1 flex justify-end">
+                    <div class="flex flex-wrap items-center gap-x-4 gap-y-0.5 mt-1">
+                        @foreach ($callableContacts as $contact)
+                            <button
+                                type="button"
+                                wire:click="initiateCall('{{ $contact['e164'] }}')"
+                                wire:loading.attr="disabled"
+                                wire:target="initiateCall"
+                                class="inline-flex items-center gap-1 text-sm lg:text-xs text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer disabled:opacity-50"
+                                title="Call {{ $contact['name'] ?? $contact['display'] }} via your phone"
+                            >
+                                <flux:icon name="phone" class="size-3" />
+                                {{ $contact['name'] ?? $contact['display'] }}
+                            </button>
+                        @endforeach
+                        @if ($callableContacts->count() > 1)
                             <flux:button
                                 type="button"
                                 size="xs"
@@ -266,31 +305,11 @@
                                 wire:click="initiateCallAll"
                                 wire:loading.attr="disabled"
                                 wire:target="initiateCallAll"
+                                class="ml-auto"
                             >
                                 Call All ({{ $callableContacts->count() }})
                             </flux:button>
-                        </div>
-                    @endif
-
-                    <div class="flex flex-wrap gap-x-4 gap-y-0.5 mt-1">
-                        @foreach ($callableContacts as $contact)
-                            <div class="flex items-center gap-1.5">
-                                @if ($contact['name'] && $contact['name'] !== $headerTitle)
-                                    <span class="text-sm lg:text-xs font-medium text-zinc-600 dark:text-zinc-300">{{ $contact['name'] }}</span>
-                                @endif
-                                <button
-                                    type="button"
-                                    wire:click="initiateCall('{{ $contact['e164'] }}')"
-                                    wire:loading.attr="disabled"
-                                    wire:target="initiateCall"
-                                    class="inline-flex items-center gap-1 text-sm lg:text-xs text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer disabled:opacity-50"
-                                    title="Call {{ $contact['name'] ?? $contact['display'] }} via your phone"
-                                >
-                                    <flux:icon name="phone" class="size-3" />
-                                    {{ $contact['display'] }}
-                                </button>
-                            </div>
-                        @endforeach
+                        @endif
                     </div>
                 @endif
             @endif
@@ -311,56 +330,13 @@
         @endphp
 
         <div class="relative flex-1 min-h-0">
-            {{-- Instant-paint overlay during thread switching: cached snapshot first,
-                 placeholder skeleton if no cache yet. --}}
+            {{-- Loading skeleton during thread switching (transparent overlay, bubbles only) --}}
             <div
                 x-show="switching"
                 x-cloak
-                x-transition:enter="transition-opacity ease-out duration-150"
-                x-transition:enter-start="opacity-0"
-                x-transition:enter-end="opacity-100"
-                x-transition:leave="transition-opacity ease-in duration-200"
-                x-transition:leave-start="opacity-100"
-                x-transition:leave-end="opacity-0"
-                x-data="{
-                    cachedMessages: [],
-                    loadCachedSnapshot(id) {
-                        if (!id) { this.cachedMessages = []; return; }
-                        try {
-                            const raw = localStorage.getItem('hive-sms-thread-' + id);
-                            this.cachedMessages = raw ? JSON.parse(raw) : [];
-                        } catch (e) { this.cachedMessages = []; }
-                    },
-                    fmt(iso) {
-                        if (!iso) return '';
-                        try { return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); }
-                        catch(e) { return ''; }
-                    }
-                }"
-                x-init="loadCachedSnapshot({{ $this->threadId }})"
-                x-on:thread-switching.window="loadCachedSnapshot($event.detail?.threadId || $wire.threadId)"
-                class="absolute inset-0 z-10"
+                class="absolute inset-0 z-10 pointer-events-none"
             >
-                <template x-if="cachedMessages.filter(m => (m.text || '').trim().length > 0).length >= 2">
-                    <div class="h-full overflow-hidden flex flex-col-reverse gap-3 px-2 pt-6 pb-6">
-                        <template x-for="msg in [...cachedMessages].filter(m => (m.text || '').trim().length > 0).reverse()" :key="'cache-' + msg.id">
-                            <div x-bind:class="msg.direction === 'outbound' ? 'flex justify-end' : 'flex justify-start'">
-                                <div class="max-w-[85%] lg:max-w-[75%]">
-                                    <div x-bind:class="msg.direction === 'outbound'
-                                            ? 'bg-indigo-500 text-white rounded-2xl rounded-br-sm'
-                                            : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 rounded-2xl rounded-bl-sm'"
-                                         class="px-3 py-2 text-sm whitespace-pre-wrap break-words" x-text="msg.text"></div>
-                                    <p class="text-[10px] text-zinc-400 mt-0.5"
-                                       x-bind:class="msg.direction === 'outbound' ? 'text-right pr-1' : 'pl-1'"
-                                       x-text="fmt(msg.created_at)"></p>
-                                </div>
-                            </div>
-                        </template>
-                    </div>
-                </template>
-                <template x-if="cachedMessages.filter(m => (m.text || '').trim().length > 0).length < 2">
-                    <div class="h-full flex flex-col">@include('livewire.sms.conversation_placeholder')</div>
-                </template>
+                @include('livewire.sms.conversation_placeholder')
             </div>
 
             <div class="sms-fade-overlay top"></div>
@@ -564,128 +540,6 @@
             @endforelse
         </div>
             <div class="sms-fade-overlay bottom"></div>
-
-            {{-- Snapshot writer: caches the current thread's visible messages to
-                 localStorage so revisiting paints instantly with real content. --}}
-            @php
-                $snapshot = collect($visibleMessages)->take(40)->map(fn ($m) => [
-                    'id' => $m->id,
-                    'direction' => $m->direction,
-                    'text' => (string) $m->text,
-                    'created_at' => optional($m->created_at)->toIso8601String(),
-                ])->values();
-            @endphp
-            <div
-                x-data="{ snap: @js($snapshot) }"
-                x-init="
-                    try { localStorage.setItem('hive-sms-thread-{{ $threadId }}', JSON.stringify(snap)); } catch(e) {}
-                "
-                x-on:thread-ready.window="
-                    try { localStorage.setItem('hive-sms-thread-{{ $threadId }}', JSON.stringify(snap)); } catch(e) {}
-                "
-                style="display:none"
-            ></div>
-        </div>
-
-        {{-- Compose --}}
-        <div class="shrink-0 px-1 pb-1">
-            @if ($isClientUser)
-                <div class="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50 px-4 py-3 text-base lg:text-sm text-zinc-500 dark:text-zinc-400 text-center">
-                    Homeowners are not able to message here yet. Please message us on your phone messaging app.
-                </div>
-            @else
-            @php
-                $pendingOptIn = $this->thread->hasPendingOptIn();
-            @endphp
-            <form wire:submit="sendMessage"
-                x-data="{
-                    draftKey: 'sms-draft-' + {{ $threadId }},
-                    init() {
-                        const saved = localStorage.getItem(this.draftKey);
-                        if (saved) {
-                            $wire.set('newMessage', saved);
-                            this.$nextTick(() => {
-                                const ta = this.$el.querySelector('textarea');
-                                if (ta) ta.dispatchEvent(new Event('input', { bubbles: true }));
-                            });
-                        }
-                    },
-                    saveDraft(e) {
-                        localStorage.setItem(this.draftKey, e.target.value);
-                    },
-                }"
-            >
-                @if ($attachment && method_exists($attachment, 'temporaryUrl') && $attachment->getRealPath())
-                    <div class="mb-2 px-1">
-                        @php
-                            $attachmentMimeType = (string) $attachment->getMimeType();
-                            $isVideoAttachment = str_starts_with($attachmentMimeType, 'video/');
-                        @endphp
-                        <div class="relative inline-block border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden">
-                            @if ($isVideoAttachment)
-                                <video src="{{ $attachment->temporaryUrl() }}" class="size-16 object-cover bg-black" muted playsinline preload="metadata"></video>
-                            @else
-                                <img src="{{ $attachment->temporaryUrl() }}" alt="Attachment preview" class="size-16 object-cover" />
-                            @endif
-                            <div class="absolute top-0 right-0 p-0.5">
-                                <button type="button" wire:click="removeAttachment" class="p-0.5 rounded-full bg-zinc-900/50 hover:bg-zinc-900/70 flex justify-center items-center">
-                                    <flux:icon icon="x-mark" variant="micro" class="text-white" />
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                @endif
-
-                <flux:composer
-                    wire:model="newMessage"
-                    placeholder="Type a message..."
-                    label="Message"
-                    label:sr-only
-                    rows="2"
-                    max-rows="6"
-                    x-on:input="saveDraft($event)"
-                >
-                    <x-slot name="actionsLeading">
-                        <flux:button type="button" size="sm" variant="subtle" square icon="paper-clip" x-on:click="$refs.fileInput.click()" aria-label="Attach media"></flux:button>
-                        <input x-ref="fileInput" type="file" wire:model="attachment" accept="image/*,video/*,.mp4,.mov,.webm,.m4v,.3gp,.avi" class="hidden" />
-                        @if ($this->thread)
-                            <flux:button type="button" size="sm" variant="subtle" square icon="calendar-days" wire:click="$dispatchTo('sms.send-schedule-modal', 'openScheduleModal', { threadId: {{ $threadId }} })" tooltip="Send schedule" aria-label="Send schedule"></flux:button>
-                        @endif
-                    </x-slot>
-
-                    <x-slot name="actionsTrailing">
-                        <flux:dropdown position="top end">
-                            <flux:button size="sm" variant="subtle" square icon="clock" aria-label="Schedule send" :disabled="$pendingOptIn"></flux:button>
-
-                            <flux:menu>
-                                <flux:heading size="xs" class="px-2 pb-1">Schedule send</flux:heading>
-                                <flux:menu.item wire:click="scheduleMessage('1hr')" icon="clock">In 1 hour</flux:menu.item>
-                                <flux:menu.item wire:click="scheduleMessage('2hr')" icon="clock">In 2 hours</flux:menu.item>
-                                <flux:separator />
-                                <flux:menu.item wire:click="scheduleMessage('tomorrow_8am')" icon="sun">Tomorrow 8:00 AM</flux:menu.item>
-                                <flux:menu.item wire:click="scheduleMessage('tomorrow_12pm')" icon="sun">Tomorrow 12:00 PM</flux:menu.item>
-                            </flux:menu>
-                        </flux:dropdown>
-
-                        <flux:button type="submit" size="sm" variant="primary" square icon="paper-airplane" class="data-loading:opacity-50" :disabled="$pendingOptIn" aria-label="Send message"></flux:button>
-                    </x-slot>
-                </flux:composer>
-            </form>
-
-            @error('newMessage')
-                <p class="text-xs text-red-500 mt-1 px-1">{{ $message }}</p>
-            @enderror
-            @error('attachment')
-                <p class="text-xs text-red-500 mt-1 px-1">{{ $message }}</p>
-            @enderror
-
-            @if ($pendingOptIn)
-            <div class="flex items-center justify-end gap-2 px-2 pt-1">
-                <flux:icon name="exclamation-triangle" class="size-4 text-amber-500" />
-                <flux:text class="text-xs text-amber-600 dark:text-amber-400">Awaiting START reply</flux:text>
-            </div>
-            @endif
-            @endif
         </div>
 
         {{-- Manual Opt-In Modal --}}
@@ -737,6 +591,18 @@
         </flux:modal>
 
         <style>
+            .sms-mobile-header-offset {
+                padding-left: 2.5rem;
+                padding-right: 0.5rem;
+            }
+
+            @media (min-width: 1024px) {
+                .sms-mobile-header-offset {
+                    padding-left: 1rem;
+                    padding-right: 1rem;
+                }
+            }
+
             [data-modal="sms-image-lightbox"]::backdrop {
                 background-color: rgba(0, 0, 0, 0.50);
                 backdrop-filter: blur(4px);
@@ -1199,133 +1065,136 @@
             </div>
         </flux:modal>
     @else
-        {{-- No thread selected on the server. Two visual states are possible here:
-             1. User just tapped a thread on mobile — show a skeleton (header + bubbles)
-                that mirrors the loaded layout, so when the server response swaps in the
-                real thread there's no visual height shift or "No conversation selected"
-                flash between the thread-ready event and the Livewire DOM morph.
-             2. No thread is in flight — show the empty state.
-
-             We treat "pending" as: switching=true OR the global store already has a
-             threadId (means user tapped, server hasn't caught up yet). This eliminates
-             the race where thread-ready fires (switching=false) before the parent
-             component re-renders into the @if branch. --}}
-        <div
-            x-show="switching || $store.sms.threadId"
-            x-cloak
-            class="flex-1 min-h-0 flex flex-col"
-            x-data="{
-                cachedMessages: [],
-                cachedThread: null,
-                loadCached(id) {
-                    if (!id) { this.cachedMessages = []; this.cachedThread = null; return; }
-                    try {
-                        const raw = localStorage.getItem('hive-sms-thread-' + id);
-                        this.cachedMessages = raw ? JSON.parse(raw) : [];
-                    } catch (e) { this.cachedMessages = []; }
-                    const cache = $store.sms.smsCache;
-                    this.cachedThread = (cache && cache.threads) ? cache.threads.find(t => t.id == id) : null;
-                    if ((!this.cachedMessages || this.cachedMessages.length === 0) && cache && cache.messages && cache.messages[id]) {
-                        this.cachedMessages = cache.messages[id];
-                    }
-                },
-                cachedTitle() {
-                    const t = this.cachedThread;
-                    if (!t) return '';
-                    if (t.name) return t.name;
-                    if (t.client && t.client.name) return t.client.name;
-                    if (t.subject_vendor && t.subject_vendor.name) return t.subject_vendor.name;
-                    if (t.project && t.project.address) return t.project.address;
-                    if (t.participants && t.participants.length) return t.participants.join(', ');
-                    return '';
-                },
-                fmt(iso) {
-                    if (!iso) return '';
-                    try { return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); }
-                    catch(e) { return ''; }
-                },
-            }"
-            x-init="loadCached($store.sms.threadId)"
-            x-on:thread-switching.window="loadCached($event.detail?.threadId || $store.sms.threadId)"
-        >
-            {{-- Real-looking header (back button works immediately, title from cache when available) --}}
-            <div class="border-b border-zinc-200 dark:border-zinc-700 px-4 py-2">
-                <div class="flex items-center gap-1.5 pl-8 lg:pl-0">
-                    <flux:button
-                        type="button"
-                        variant="subtle"
-                        size="sm"
-                        square
-                        icon="arrow-left"
-                        class="lg:hidden shrink-0"
-                        x-on:click="
-                            $store.sms.threadId = null;
-                            window.dispatchEvent(new CustomEvent('thread-selected', { detail: { threadId: null } }));
-                            $wire.$parent.clearThread();
-                        "
-                        aria-label="Back to conversations"
-                    ></flux:button>
-                    <template x-if="cachedTitle()">
-                        <h2 class="text-base font-semibold text-zinc-900 dark:text-zinc-100 truncate" x-text="cachedTitle()"></h2>
-                    </template>
-                    <template x-if="!cachedTitle()">
-                        <div class="h-5 w-40 rounded bg-zinc-200/70 dark:bg-zinc-700/50 animate-pulse"></div>
-                    </template>
-                </div>
-                <div class="h-3 w-24 mt-2 rounded bg-zinc-200/50 dark:bg-zinc-700/30 animate-pulse"></div>
-            </div>
-            {{-- Cached snapshot bubbles when available, otherwise skeleton --}}
+        {{-- No thread selected on the server. Use template x-if so only one branch
+             ever exists in the DOM — avoids any flash of both states together.
+             Note: composer is rendered OUTSIDE this @if/@else (below) so it
+             persists across thread switches and is visible immediately. --}}
+        <template x-if="switching || $store.sms.threadId">
             <div class="flex-1 min-h-0 flex flex-col">
-                <template x-if="cachedMessages.filter(m => (m.text || '').trim().length > 0).length >= 2">
-                    <div class="h-full overflow-hidden flex flex-col-reverse gap-3 px-2 pt-6 pb-6">
-                        <template x-for="msg in [...cachedMessages].filter(m => (m.text || '').trim().length > 0).reverse()" :key="'cache2-' + msg.id">
-                            <div x-bind:class="msg.direction === 'outbound' ? 'flex justify-end' : 'flex justify-start'">
-                                <div class="max-w-[85%] lg:max-w-[75%]">
-                                    <div x-bind:class="msg.direction === 'outbound'
-                                            ? 'bg-indigo-500 text-white rounded-2xl rounded-br-sm'
-                                            : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 rounded-2xl rounded-bl-sm'"
-                                         class="px-3 py-2 text-sm whitespace-pre-wrap break-words" x-text="msg.text"></div>
-                                    <p class="text-[10px] text-zinc-400 mt-0.5"
-                                       x-bind:class="msg.direction === 'outbound' ? 'text-right pr-1' : 'pl-1'"
-                                       x-text="fmt(msg.created_at)"></p>
-                                </div>
-                            </div>
-                        </template>
+                <div class="sms-mobile-header-offset border-b border-zinc-200 dark:border-zinc-700 py-2">
+                    <div class="flex items-center gap-1.5">
+                        <flux:button
+                            type="button"
+                            variant="subtle"
+                            size="sm"
+                            square
+                            icon="arrow-left"
+                            class="lg:hidden shrink-0"
+                            x-on:click="
+                                $store.sms.threadId = null;
+                                switching = false;
+                                window.dispatchEvent(new CustomEvent('thread-selected', { detail: { threadId: null } }));
+                                $wire.$parent.clearThread();
+                            "
+                            aria-label="Back to conversations"
+                        ></flux:button>
+                        <div class="h-5 w-40 rounded animate-pulse bg-zinc-200/70 dark:bg-zinc-700/50"></div>
                     </div>
-                </template>
-                <template x-if="cachedMessages.filter(m => (m.text || '').trim().length > 0).length < 2">
-                    <div class="h-full flex flex-col">@include('livewire.sms.conversation_placeholder')</div>
-                </template>
+                </div>
+                <div class="relative flex-1 min-h-0">
+                    @include('livewire.sms.conversation_placeholder')
+                </div>
             </div>
-            {{-- Real-looking composer footer --}}
-            <div class="border-t border-zinc-200 dark:border-zinc-700 p-2">
-                <div class="flex items-end gap-2 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800/40 px-2 py-1.5">
-                    <div class="flex items-center gap-1 pb-1">
-                        <flux:icon name="paper-clip" class="size-5 text-zinc-300 dark:text-zinc-600" />
-                        <flux:icon name="calendar-days" class="size-5 text-zinc-300 dark:text-zinc-600" />
-                    </div>
-                    <div class="flex-1 text-sm text-zinc-300 dark:text-zinc-600 py-2">Type a message...</div>
-                    <div class="flex items-center gap-1 pb-1">
-                        <flux:icon name="clock" class="size-5 text-zinc-300 dark:text-zinc-600" />
-                        <div class="size-7 rounded-md bg-indigo-300/60 dark:bg-indigo-500/30 flex items-center justify-center">
-                            <flux:icon name="paper-airplane" class="size-4 text-white/80" />
+        </template>
+        <template x-if="!switching && !$store.sms.threadId">
+            <div class="flex flex-1 items-center justify-center">
+                <div class="text-center">
+                    <flux:icon name="chat-bubble-left-right" class="mx-auto h-12 w-12 text-zinc-300 dark:text-zinc-600" />
+                    <h3 class="mt-3 text-base lg:text-sm font-medium text-zinc-500 dark:text-zinc-400">No conversation selected</h3>
+                    <p class="mt-1 text-sm lg:text-xs text-zinc-400 dark:text-zinc-500">Select a conversation or start a new one.</p>
+                </div>
+            </div>
+        </template>
+    @endif
+    @endisland
+
+    {{-- Composer (always rendered, persists across thread switches).
+         The textarea DOM node is created once and survives every loadThread
+         event because SmsConversation is #[Isolate]. --}}
+    @island(name: 'sms-conversation-composer', always: true)
+    @if ($isClientUser)
+        <div class="shrink-0 px-1 pb-1">
+            <div class="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50 px-4 py-3 text-base lg:text-sm text-zinc-500 dark:text-zinc-400 text-center">
+                Homeowners are not able to message here yet. Please message us on your phone messaging app.
+            </div>
+        </div>
+    @else
+        @php
+            $pendingOptIn = $this->thread ? $this->thread->hasPendingOptIn() : false;
+            $composerDisabled = ! $this->thread || $pendingOptIn;
+        @endphp
+        <div class="shrink-0 px-1 pb-1">
+            <form wire:submit="sendMessage">
+                @if ($attachment && method_exists($attachment, 'temporaryUrl') && $attachment->getRealPath())
+                    <div class="mb-2 px-1">
+                        @php
+                            $attachmentMimeType = (string) $attachment->getMimeType();
+                            $isVideoAttachment = str_starts_with($attachmentMimeType, 'video/');
+                        @endphp
+                        <div class="relative inline-block border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden">
+                            @if ($isVideoAttachment)
+                                <video src="{{ $attachment->temporaryUrl() }}" class="size-16 object-cover bg-black" muted playsinline preload="metadata"></video>
+                            @else
+                                <img src="{{ $attachment->temporaryUrl() }}" alt="Attachment preview" class="size-16 object-cover" />
+                            @endif
+                            <div class="absolute top-0 right-0 p-0.5">
+                                <button type="button" wire:click="removeAttachment" class="p-0.5 rounded-full bg-zinc-900/50 hover:bg-zinc-900/70 flex justify-center items-center">
+                                    <flux:icon icon="x-mark" variant="micro" class="text-white" />
+                                </button>
+                            </div>
                         </div>
                     </div>
+                @endif
+
+                <flux:composer
+                    wire:model="newMessage"
+                    placeholder="Type a message..."
+                    label="Message"
+                    label:sr-only
+                    rows="2"
+                    max-rows="6"
+                >
+                    <x-slot name="actionsLeading">
+                        <flux:button type="button" size="sm" variant="subtle" square icon="paper-clip" x-on:click="$refs.fileInput.click()" aria-label="Attach media" :disabled="! $this->thread"></flux:button>
+                        <input x-ref="fileInput" type="file" wire:model="attachment" accept="image/*,video/*,.mp4,.mov,.webm,.m4v,.3gp,.avi" class="hidden" />
+                        <flux:button type="button" size="sm" variant="subtle" square icon="calendar-days" wire:click="$dispatchTo('sms.send-schedule-modal', 'openScheduleModal', { threadId: {{ $threadId }} })" tooltip="Send schedule" aria-label="Send schedule" :disabled="$composerDisabled"></flux:button>
+                    </x-slot>
+
+                    <x-slot name="actionsTrailing">
+                        <flux:dropdown position="top end">
+                            <flux:button size="sm" variant="subtle" square icon="clock" aria-label="Schedule send" :disabled="$composerDisabled"></flux:button>
+
+                            <flux:menu>
+                                <flux:heading size="xs" class="px-2 pb-1">Schedule send</flux:heading>
+                                <flux:menu.item wire:click="scheduleMessage('1hr')" icon="clock">In 1 hour</flux:menu.item>
+                                <flux:menu.item wire:click="scheduleMessage('2hr')" icon="clock">In 2 hours</flux:menu.item>
+                                <flux:separator />
+                                <flux:menu.item wire:click="scheduleMessage('tomorrow_8am')" icon="sun">Tomorrow 8:00 AM</flux:menu.item>
+                                <flux:menu.item wire:click="scheduleMessage('tomorrow_12pm')" icon="sun">Tomorrow 12:00 PM</flux:menu.item>
+                            </flux:menu>
+                        </flux:dropdown>
+
+                        <flux:button type="submit" size="sm" variant="primary" square icon="paper-airplane" class="data-loading:opacity-50" :disabled="$composerDisabled" aria-label="Send message"></flux:button>
+                    </x-slot>
+                </flux:composer>
+            </form>
+
+            @error('newMessage')
+                <p class="text-xs text-red-500 mt-1 px-1">{{ $message }}</p>
+            @enderror
+            @error('attachment')
+                <p class="text-xs text-red-500 mt-1 px-1">{{ $message }}</p>
+            @enderror
+
+            @if ($pendingOptIn)
+                <div class="flex items-center justify-end gap-2 px-2 pt-1">
+                    <flux:icon name="exclamation-triangle" class="size-4 text-amber-500" />
+                    <flux:text class="text-xs text-amber-600 dark:text-amber-400">Awaiting START reply</flux:text>
                 </div>
-            </div>
-        </div>
-        <div
-            x-show="!switching && !$store.sms.threadId"
-            x-cloak
-            class="flex flex-1 items-center justify-center"
-        >
-            <div class="text-center">
-                <flux:icon name="chat-bubble-left-right" class="mx-auto h-12 w-12 text-zinc-300 dark:text-zinc-600" />
-                <h3 class="mt-3 text-base lg:text-sm font-medium text-zinc-500 dark:text-zinc-400">No conversation selected</h3>
-                <p class="mt-1 text-sm lg:text-xs text-zinc-400 dark:text-zinc-500">Select a conversation or start a new one.</p>
-            </div>
+            @endif
         </div>
     @endif
+    @endisland
 </div>
 
 @script

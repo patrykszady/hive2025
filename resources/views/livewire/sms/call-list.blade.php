@@ -59,8 +59,8 @@
     </div>
 
     {{-- Filter tabs --}}
-    <div class="mb-3 flex items-center gap-2 sticky top-0 z-10 bg-white dark:bg-zinc-800">
-        <flux:tabs wire:model.live="callFilter" variant="segmented" size="sm" class="w-full !flex [&>button]:flex-1">
+    <div class="mb-3 sticky top-0 z-10">
+        <flux:tabs wire:model.live="callFilter" variant="segmented" size="sm" class="w-full !flex [&>button]:flex-1 !rounded-lg !bg-zinc-100 dark:!bg-zinc-800 !p-0.5">
             <flux:tab name="all">All</flux:tab>
             <flux:tab name="missed">Missed</flux:tab>
             <flux:tab name="voicemail">Voice</flux:tab>
@@ -69,6 +69,15 @@
     </div>
 
     {{-- Call list --}}
+    <div class="relative min-h-0">
+        <div
+            wire:loading
+            wire:target="callFilter,$refresh,loadMore"
+            class="absolute inset-0 z-20 pointer-events-none"
+        >
+            @include('livewire.sms.call-list-skeleton')
+        </div>
+
     @forelse ($this->calls as $group)
         @php
             $call = $group['call'];
@@ -242,6 +251,7 @@
             <span wire:loading wire:target="loadMore" class="text-xs text-zinc-400">Loading...</span>
         </div>
     @endif
+    </div>
 
     {{-- New Call Modal --}}
     <flux:modal wire:model="showNewCallModal" class="max-w-sm">
