@@ -2072,13 +2072,12 @@ class CompanyEmailController extends Controller
                             }
 
                             // Attach the currently processed receipt to the chosen expense.
-                            // Skip the inner duplicate-content check: Epson scans of the same paper
-                            // receipt produce identical OCR content/signature, but the handwritten
-                            // notes can differ. We intentionally want every Epson scan attached so
-                            // the user can see all variants of the handwriting and decide manually.
+                            // The inner duplicate-content check (HTML hash + line-items signature
+                            // including handwritten_notes) will drop byte-identical re-scans but
+                            // allow through scans whose handwritten notes differ.
                             // (saveExpenseReceipt moves the temp file into receipts/ and persists the receipt record)
                             if (isset($expense) && $expense instanceof Expense) {
-                                $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, null, true);
+                                $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, null, false);
                                 $didAttachReceipt = true;
                             }
                         } elseif ($duplicates->isEmpty()) {

@@ -603,19 +603,25 @@ class ExpenseAutoMatchController extends Controller
                     $purchaseOrderCandidates = $this->extractPurchaseOrderCandidates($expense);
 
                     if ($purchaseOrderCandidates === []) {
-                        $emitDecision($onDecision, [
-                            'belongs_to_vendor_id' => (int) $hiveVendor->id,
-                            'expense_vendor_id' => (int) $expenseVendorId,
-                            'expense_id' => (int) $expense->id,
-                            'purchase_order' => '',
-                            'result' => 'skipped',
-                            'reason' => 'no_po',
-                        ]);
+                        // Before giving up, see if there are distribution-only
+                        // candidates (e.g. handwritten note "office"). Those
+                        // need a built distribution index.
+                        $distOnlyCandidates = $this->extractDistributionOnlyCandidates($expense);
+                        if ($distOnlyCandidates === []) {
+                            $emitDecision($onDecision, [
+                                'belongs_to_vendor_id' => (int) $hiveVendor->id,
+                                'expense_vendor_id' => (int) $expenseVendorId,
+                                'expense_id' => (int) $expense->id,
+                                'purchase_order' => '',
+                                'result' => 'skipped',
+                                'reason' => 'no_po',
+                            ]);
 
-                        if ($expenseVendorId > 0) {
-                            $statsByExpenseVendorId[$expenseVendorId]['skipped_no_po']++;
+                            if ($expenseVendorId > 0) {
+                                $statsByExpenseVendorId[$expenseVendorId]['skipped_no_po']++;
+                            }
+                            continue;
                         }
-                        continue;
                     }
 
                     if ($expenseVendorId > 0) {
@@ -711,6 +717,48 @@ class ExpenseAutoMatchController extends Controller
                     if (! $best && $ambiguousBest) {
                         $best = $ambiguousBest;
                         $bestPurchaseOrder = $ambiguousPurchaseOrder;
+                    }
+
+                    // Fallback: try distribution-only candidates (allows generic
+                    // tokens like "office" / "shop" that the main extractor
+                    // filters out, since they would cause false positives in
+                    // project matching but are valid distribution names).
+                    if (! $best && $distributionIndex !== []) {
+                        $distOnlyCandidates = array_values(array_diff(
+                            $this->extractDistributionOnlyCandidates($expense),
+                            $purchaseOrderCandidates
+                        ));
+
+                        foreach ($distOnlyCandidates as $purchaseOrder) {
+                            $distributionMatch = $this->matchPurchaseOrderToDistribution($purchaseOrder, $distributionIndex);
+                            if (! $distributionMatch) {
+                                continue;
+                            }
+
+                            $candidateBest = [
+                                'type' => 'distribution',
+                                'id' => (int) $distributionMatch['distribution_id'],
+                                'score' => (float) $distributionMatch['score'],
+                                'ambiguous' => (bool) ($distributionMatch['ambiguous'] ?? false),
+                            ];
+
+                            if (($candidateBest['ambiguous'] ?? false) === true) {
+                                if ($ambiguousBest === null) {
+                                    $ambiguousBest = $candidateBest;
+                                    $ambiguousPurchaseOrder = $purchaseOrder;
+                                }
+                                continue;
+                            }
+
+                            $best = $candidateBest;
+                            $bestPurchaseOrder = $purchaseOrder;
+                            break;
+                        }
+
+                        if (! $best && $ambiguousBest) {
+                            $best = $ambiguousBest;
+                            $bestPurchaseOrder = $ambiguousPurchaseOrder;
+                        }
                     }
 
                     if ($best && $hasCompetingNonAmbiguousMatch) {
@@ -1079,6 +1127,62 @@ class ExpenseAutoMatchController extends Controller
     }
 
     /**
+     * Return PO candidates intended ONLY for distribution matching.
+     *
+     * Same source fields as extractPurchaseOrderCandidates() but bypasses the
+     * generic-single-word blacklist (so values like "office", "shop",
+     * "warehouse" survive and can match a same-named distribution). Never use
+     * these against project matching — they're too noisy.
+     *
+     * @return array<int, string>
+     */
+    protected function extractDistributionOnlyCandidates(Expense $expense): array
+    {
+        if (! $expense->relationLoaded('receipts')) {
+            $expense->load('receipts');
+        }
+
+        $receipts = $expense->receipts
+            ->sortByDesc(fn ($r) => $r->created_at ?? $r->id)
+            ->values();
+
+        $candidates = [];
+        $seen = [];
+
+        foreach (['purchase_order', 'handwritten_notes'] as $field) {
+            foreach ($receipts as $receipt) {
+                $items = $receipt->receipt_items ?? null;
+                if (! is_array($items)) {
+                    continue;
+                }
+
+                $raw = array_key_exists($field, $items) ? $items[$field] : null;
+                if ($raw === null) {
+                    continue;
+                }
+
+                $values = is_array($raw) ? $raw : [$raw];
+                foreach ($values as $value) {
+                    $candidate = $this->normalizePurchaseOrderCandidate($value, allowGeneric: true);
+                    if ($candidate === null) {
+                        continue;
+                    }
+
+                    $key = mb_strtolower(trim($candidate));
+                    if ($key === '' || isset($seen[$key])) {
+                        continue;
+                    }
+
+                    $seen[$key] = true;
+                    $candidates[] = $candidate;
+                }
+            }
+        }
+
+        return $candidates;
+    }
+
+    /**
      * Extract site/job addresses from receipt text content.
      *
      * @return array<int, string>
@@ -1143,7 +1247,7 @@ class ExpenseAutoMatchController extends Controller
         return $addresses;
     }
 
-    protected function normalizePurchaseOrderCandidate(mixed $value): ?string
+    protected function normalizePurchaseOrderCandidate(mixed $value, bool $allowGeneric = false): ?string
     {
         if (is_null($value)) {
             return null;
@@ -1159,7 +1263,7 @@ class ExpenseAutoMatchController extends Controller
 
         // Composite values like "&, 3952" should keep the meaningful segment.
         foreach ($parts as $part) {
-            $candidate = $this->normalizePurchaseOrderSegment((string) $part);
+            $candidate = $this->normalizePurchaseOrderSegment((string) $part, $allowGeneric);
             if ($candidate !== null) {
                 return $candidate;
             }
@@ -1168,7 +1272,7 @@ class ExpenseAutoMatchController extends Controller
         return null;
     }
 
-    protected function normalizePurchaseOrderSegment(string $segment): ?string
+    protected function normalizePurchaseOrderSegment(string $segment, bool $allowGeneric = false): ?string
     {
         $segment = trim($segment);
 
@@ -1215,6 +1319,9 @@ class ExpenseAutoMatchController extends Controller
         // carry no project-identifying signal. These tokens cause false positives
         // because they often happen to be substrings of legitimate project names
         // or addresses (e.g. PO="stock" matching project address "308 Comstock Dr").
+        // The blacklist applies only to PROJECT matching; distribution matching
+        // can opt in via $allowGeneric=true so that e.g. PO="office" can resolve
+        // to a real distribution named "OFFICE".
         $genericSingleWordPos = [
             'stock', 'instock', 'in stock',
             'will call', 'willcall', 'pickup', 'pick up', 'pick-up',
@@ -1224,7 +1331,7 @@ class ExpenseAutoMatchController extends Controller
             'office', 'shop', 'warehouse', 'inventory', 'stocking',
             'sample', 'samples', 'test', 'demo',
         ];
-        if (in_array($normalizedSegment, $genericSingleWordPos, true)) {
+        if (! $allowGeneric && in_array($normalizedSegment, $genericSingleWordPos, true)) {
             return null;
         }
 

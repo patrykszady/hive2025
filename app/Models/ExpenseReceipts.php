@@ -187,10 +187,6 @@ class ExpenseReceipts extends Model
             return [];
         }
 
-        // Note: handwritten_notes are intentionally excluded from duplicate detection
-        // because they're prone to OCR variations (e.g., "Kemida" vs "Kemide").
-        // Handwritten notes are used for project matching, not receipt identity.
-
         // Normalize purchase_order (string, can be empty or missing)
         // Treat "0" as empty since it's a placeholder value from Home Depot receipts
         $purchaseOrder = $receiptItems['purchase_order'] ?? null;
@@ -199,7 +195,26 @@ class ExpenseReceipts extends Model
             $normalizedPo = '';
         }
 
-        // Use only total and transaction_date for duplicate detection.
+        // Normalize handwritten_notes: array of strings → trimmed, lowercased,
+        // sorted, joined. Two scans of the same paper with different handwritten
+        // notes must NOT be considered duplicates (the user wants both attached
+        // so they can see every note variant). Same paper scanned twice with the
+        // same notes IS a duplicate. We accept the rare OCR-variation false
+        // negative (e.g. "Kemida" vs "Kemide") in exchange for not silently
+        // dropping legitimately-different scans.
+        $rawNotes = $receiptItems['handwritten_notes'] ?? [];
+        $notes = [];
+        if (is_array($rawNotes)) {
+            foreach ($rawNotes as $n) {
+                $n = trim((string) $n);
+                if ($n !== '') {
+                    $notes[] = mb_strtolower($n);
+                }
+            }
+            sort($notes);
+        }
+
+        // Use total + transaction_date + purchase_order + handwritten_notes.
         // Line item counts and individual TotalPrice values are too OCR-prone:
         // - OCR can split one item into two or merge items
         // - Individual prices can have OCR errors (e.g., "2.61" vs "24.61")
@@ -208,6 +223,7 @@ class ExpenseReceipts extends Model
             'transaction_date' => static::normalizeValue($receiptItems['transaction_date'] ?? null),
             'total' => static::normalizeValue($total),
             'purchase_order' => $normalizedPo,
+            'handwritten_notes' => $notes,
         ];
 
         return $signature;
