@@ -28,7 +28,7 @@ class VendorDoc extends Model
         'state_license' => 'State License',
     ];
 
-    protected $fillable = ['type', 'vendor_id', 'effective_date', 'expiration_date', 'number', 'belongs_to_vendor_id', 'doc_filename', 'created_at', 'updated_at'];
+    protected $fillable = ['type', 'vendor_id', 'effective_date', 'expiration_date', 'number', 'belongs_to_vendor_id', 'doc_filename', 'options', 'created_at', 'updated_at'];
     // protected $dates = ['effective_date', 'expiration_date'];
 
     /**
@@ -41,6 +41,7 @@ class VendorDoc extends Model
         return [
             'effective_date' => 'date:Y-m-d',
             'expiration_date' => 'date:Y-m-d',
+            'options' => 'array',
         ];
     }
 

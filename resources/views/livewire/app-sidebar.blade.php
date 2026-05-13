@@ -82,6 +82,9 @@
                         <flux:sidebar.item wire:navigate.hover href="/banks" icon="building-library">Banks</flux:sidebar.item>
                         <flux:sidebar.item wire:navigate.hover href="/distributions" icon="receipt-percent">Distributions</flux:sidebar.item>
                         <flux:sidebar.item wire:navigate.hover href="/sheets" icon="document-currency-dollar">Sheets</flux:sidebar.item>
+                        @if($canViewLienWaivers)
+                            <flux:sidebar.item wire:navigate.hover href="/lien-waivers" icon="document-check">Lien Waivers</flux:sidebar.item>
+                        @endif
                         <flux:sidebar.item wire:navigate.hover href="/vendors/categories" icon="tag">Categories</flux:sidebar.item>
                     </flux:sidebar.group>
                 @endif
@@ -106,7 +109,10 @@
 
                 @if($canAdminLogin)
                     <flux:sidebar.group expandable heading="Global Actions" class="grid" icon="eye-slash" :expanded="$globalActionsExpanded">
-                        <flux:sidebar.item wire:navigate.hover href="/transactions/match_vendor">Match Vendor</flux:sidebar.item>
+                        <flux:sidebar.item wire:navigate.hover href="/transactions/match_vendor" icon="arrows-right-left">Match Vendor</flux:sidebar.item>
+                        @if(auth()->id() === 1)
+                            <flux:sidebar.item wire:navigate.hover href="/agents" icon="identification">Agents</flux:sidebar.item>
+                        @endif
                     </flux:sidebar.group>
                 @endif
             @endif

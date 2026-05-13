@@ -369,24 +369,50 @@ class ReOcrReceipts extends Command
      */
     private function reOcrSingleExpense(ReceiptController $receiptController): int
     {
-        $record = ExpenseReceipts::where('expense_id', (int) $this->option('expense'))
+        $records = ExpenseReceipts::where('expense_id', (int) $this->option('expense'))
             ->whereNotNull('receipt_filename')
-            ->first();
+            ->get();
 
-        if (! $record) {
+        if ($records->isEmpty()) {
             $this->warn('No receipt record with a file found for expense ' . $this->option('expense') . '.');
             return self::SUCCESS;
         }
 
+        $lastFields = null;
+        foreach ($records as $record) {
+            $result = $this->reOcrSingleReceipt($receiptController, $record);
+            if ($result['status'] === 'failed') {
+                return self::FAILURE;
+            }
+            if (isset($result['fields'])) {
+                $lastFields = $result['fields'];
+            }
+        }
+
+        // Sync parent expense fields (amount/date/invoice) from the last successfully
+        // OCR'd receipt so re-OCR after a sign-flip / wrong-invoice bug fix actually
+        // corrects the visible Expense Total — not just the receipt JSON.
+        if ($lastFields !== null) {
+            $this->syncExpenseFromFields((int) $this->option('expense'), $lastFields);
+        }
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * @return array{status: 'ok'|'skipped'|'failed', fields?: array<string, mixed>}
+     */
+    private function reOcrSingleReceipt(ReceiptController $receiptController, ExpenseReceipts $record): array
+    {
         $filePath = 'receipts/' . $record->receipt_filename;
         if (! Storage::disk('files')->exists($filePath)) {
             $this->error("File not found: {$filePath}");
-            return self::FAILURE;
+            return ['status' => 'failed'];
         }
 
         if ($this->option('dry-run')) {
             $this->line("Would re-OCR: {$record->receipt_filename}");
-            return self::SUCCESS;
+            return ['status' => 'skipped'];
         }
 
         $this->line("Re-OCR: {$record->receipt_filename}");
@@ -402,7 +428,7 @@ class ReOcrReceipts extends Command
 
         if (isset($result['error'])) {
             $this->error("OCR returned error.");
-            return self::FAILURE;
+            return ['status' => 'failed'];
         }
 
         $fields   = $result['fields'];
@@ -463,6 +489,53 @@ class ReOcrReceipts extends Command
         $itemCount = is_array($fields['items']) ? count($fields['items']) : 0;
         $this->info("Updated: {$itemCount} items (was " . count($oldItems) . ")");
 
-        return self::SUCCESS;
+        return ['status' => 'ok', 'fields' => $fields];
+    }
+
+    /**
+     * Sync parent expense fields (amount/date/invoice) so re-OCR after a sign-flip
+     * bug fix actually corrects the visible Expense Total — not just the receipt JSON.
+     *
+     * @param  array<string, mixed>  $fields
+     */
+    private function syncExpenseFromFields(int $expenseId, array $fields): void
+    {
+        $expense = Expense::find($expenseId);
+        if (! $expense) {
+            return;
+        }
+
+        $changes = [];
+
+        $newTotal = $fields['total'] ?? null;
+        if (is_numeric($newTotal) && (float) $expense->amount !== (float) $newTotal) {
+            $changes['amount'] = ['old' => $expense->amount, 'new' => (float) $newTotal];
+            $expense->amount = (float) $newTotal;
+        }
+
+        $newDate = $fields['transaction_date'] ?? null;
+        if (! empty($newDate)) {
+            $oldDate = $expense->date instanceof \Carbon\Carbon
+                ? $expense->date->format('Y-m-d')
+                : substr((string) $expense->date, 0, 10);
+            $newDateStr = substr((string) $newDate, 0, 10);
+            if ($oldDate !== $newDateStr) {
+                $changes['date'] = ['old' => $oldDate, 'new' => $newDateStr];
+                $expense->date = $newDate;
+            }
+        }
+
+        $newInvoice = $fields['invoice_number'] ?? null;
+        if (! empty($newInvoice) && (string) $expense->invoice !== (string) $newInvoice) {
+            $changes['invoice'] = ['old' => (string) $expense->invoice, 'new' => (string) $newInvoice];
+            $expense->invoice = $newInvoice;
+        }
+
+        if (! empty($changes)) {
+            $expense->save();
+            foreach ($changes as $field => $diff) {
+                $this->info("Expense {$expense->id} {$field}: {$diff['old']} → {$diff['new']}");
+            }
+        }
     }
 }

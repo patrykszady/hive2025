@@ -8,12 +8,12 @@ use Illuminate\Console\Command;
 class SyncContentUnderstandingAnalyzer extends Command
 {
     protected $signature = 'content-understanding:sync-analyzer
-                            {type=receipt             : Analyzer type to sync: receipt, receipt_classifier, coi, material_order, or state_license}
+                            {type=receipt             : Analyzer type to sync: receipt or coi}
                             {--base=prebuilt-document  : Prebuilt analyzer to use as base schema}
                             {--model=gpt-4.1           : Completion model name for the analyzer}
                             {--dry-run                 : Print the schema that would be sent without calling the API}';
 
-    protected $description = 'Create or update a Content Understanding analyzer schema (receipt, receipt_classifier, coi, material_order, or state_license).';
+    protected $description = 'Create or update a Content Understanding analyzer schema (receipt or COI).';
 
     public function handle(ContentUnderstandingService $cu): int
     {
@@ -21,17 +21,15 @@ class SyncContentUnderstandingAnalyzer extends Command
         $baseId    = $this->option('base');
         $model     = $this->option('model');
 
-        if (! in_array($type, ['receipt', 'receipt_classifier', 'coi', 'material_order', 'state_license'], true)) {
-            $this->error("Unknown analyzer type '{$type}'. Use 'receipt', 'receipt_classifier', 'coi', 'material_order', or 'state_license'.");
+        if (! in_array($type, ['receipt', 'coi', 'material_order'], true)) {
+            $this->error("Unknown analyzer type '{$type}'. Use 'receipt', 'coi', or 'material_order'.");
             return self::FAILURE;
         }
 
         $analyzerId = match ($type) {
-            'coi'                => config('services.azure_cu.analyzer_id_coi'),
-            'material_order'     => config('services.azure_cu.analyzer_id_material_order'),
-            'state_license'      => config('services.azure_cu.analyzer_id_state_license'),
-            'receipt_classifier' => config('services.azure_cu.analyzer_id_receipt_classifier'),
-            default              => config('services.azure_cu.analyzer_id'),
+            'coi'            => config('services.azure_cu.analyzer_id_coi'),
+            'material_order' => config('services.azure_cu.analyzer_id_material_order'),
+            default          => config('services.azure_cu.analyzer_id'),
         };
 
         $this->info("Syncing '{$type}' analyzer: {$analyzerId}");
@@ -41,11 +39,9 @@ class SyncContentUnderstandingAnalyzer extends Command
         $baseFields = $base['fieldSchema']['fields'] ?? [];
 
         $definition = match ($type) {
-            'coi'                => $this->buildCoiDefinition($model),
-            'material_order'     => $this->buildMaterialOrderDefinition($model),
-            'state_license'      => $this->buildStateLicenseDefinition($model),
-            'receipt_classifier' => $this->buildReceiptClassifierDefinition($model),
-            default              => $this->buildReceiptDefinition($model, $baseFields),
+            'coi'            => $this->buildCoiDefinition($model),
+            'material_order' => $this->buildMaterialOrderDefinition($model),
+            default          => $this->buildReceiptDefinition($model, $baseFields),
         };
 
         if ($this->option('dry-run')) {
@@ -143,13 +139,13 @@ class SyncContentUnderstandingAnalyzer extends Command
 
             'InvoiceId' => [
                 'type'        => 'string',
-                'description' => 'The primary transaction identifier on the document. Look for labels such as "Transaction Number", "Transaction #", "Invoice Number", "Invoice #", "Receipt Number", "Receipt #", "Order Number", "Order #", "Confirmation Number", or "Trans #". Prefer the Transaction Number if multiple identifiers are present. When the receipt header contains a multi-part number like "1913  00062  49221" (store, register, and transaction), return the FULL string with spaces (e.g. "1913 00062 49221"), not just the last segment.',
+                'description' => 'The primary transaction identifier on the document. Look for labels such as "Transaction Number", "Transaction #", "Invoice Number", "Invoice #", "Receipt Number", "Receipt #", "Order Number", "Order #", "Confirmation Number", or "Trans #". Prefer the Transaction Number if multiple identifiers are present. When the receipt header contains a multi-part number like "1913  00062  49221" (store, register, and transaction), return the FULL string with spaces (e.g. "1913 00062 49221"), not just the last segment. NEVER return a credit-card / EFT processor reference number. Specifically, do NOT return values labeled "Ref#", "Reference", "Auth Code", "Authorization", "Approval Code", "AID", "ARQC", "TC", "TVR", "TSI", "Trace", "Sequence #", "Batch #", "Terminal ID", "Merchant ID", or any number that appears next to a card brand line ("VISA", "MASTERCARD", "DISCOVER", "AMEX", "DEBIT", "EFT", "Contactless"). For Menards-style receipts the printed identifier appears at the very bottom in the form "NNNNN NN NNNN MM/DD/YY HH:MM PM NNNN" (e.g. "89449 07 6674 04/01/26 01:05PM 3254") — return the leading multi-segment number with spaces preserved ("89449 07 6674").',
                 'method'      => 'extract',
             ],
 
             'PurchaseOrder' => [
                 'type'        => 'string',
-                'description' => 'Purchase Order number, PO#, Job Name, Job Number, JobName, PRO JobName, or project reference. This value may appear anywhere on the document including loyalty, rewards, or membership sections. Extract only the short code or number, not the label.',
+                'description' => 'Purchase Order number, PO#, Job Name, Job Number, JobName, PRO JobName, or project reference. This value may appear anywhere on the document including loyalty, rewards, or membership sections. Extract only the short code or number, not the label. Return null when no PO/Job label is present. NEVER infer a PO from unrelated numbers on the receipt. Specifically, do NOT return: rebate receipt numbers (e.g. the number that follows "THE FOLLOWING REBATE RECEIPTS WERE PRINTED FOR THIS TRANSACTION" on Menards receipts), store numbers, register numbers, cashier IDs, the cashier\'s name, item totals, account numbers, transaction numbers, credit-card last-four, EFT references, authorization codes, or any value already extracted as InvoiceId.',
                 'method'      => 'extract',
             ],
 
@@ -167,7 +163,7 @@ class SyncContentUnderstandingAnalyzer extends Command
 
             'Shipping' => [
                 'type'        => 'number',
-                'description' => 'Total shipping, handling, and delivery charges. Look ONLY for an explicit numeric dollar amount appearing on the SAME line as one of these labels: "Shipping", "Freight", "Delivery", "Handling", "S&H". Return null if the label is absent, OR if the value next to the label is non-numeric such as "FREE", "Free", "Included", "N/A", "—", or "$0.00". NEVER use a value from a Tax, Subtotal, Total, Tip, or Fees line. NEVER use an Order Number, Invoice Number, PO Number, Account Number, Customer Number, Tracking Number, ZIP code, or any identifier that happens to appear near a shipping label. The value must read as a normal currency amount (typically under $1,000 for ground shipping, under $10,000 for freight). If you would have to return a value larger than the receipt Total/Subtotal, return null. Do NOT infer or guess. Do NOT return 0.',
+                'description' => 'Total shipping, handling, and delivery charges. Look ONLY for an explicit numeric dollar amount appearing on the SAME line as one of these labels: "Shipping", "Freight", "Delivery", "Handling", "S&H". Return null if the label is absent, OR if the value next to the label is non-numeric such as "FREE", "Free", "Included", "N/A", "—", or "$0.00". NEVER use a value from a Tax, Subtotal, Total, Tip, or Fees line. Do NOT infer or guess — if no explicit dollar amount appears next to a shipping/delivery/handling/freight label, return null. Do NOT return 0.',
                 'method'      => 'extract',
             ],
 
@@ -186,18 +182,18 @@ class SyncContentUnderstandingAnalyzer extends Command
             // ── Line items ─────────────────────────────────────────────────
             'Items' => [
                 'type'        => 'array',
-                'description' => 'List of purchased line items on the receipt. Each physical item should appear exactly once. Some retailers (e.g. Home Depot, Lowe\'s) print a barcode with an abbreviated name on one line and the full product description on the next line — these belong to the SAME item and must be merged into a single entry, not treated as two separate items. Only lines that have a price are actual items.',
+                'description' => 'List of purchased line items on the receipt. Each physical item must appear EXACTLY ONCE. Many retailers print each item across TWO consecutive lines — DESCRIPTION + manufacturer-model on the first line, then VENDOR-SKU + "qty@$price" + line total on the second line. These two lines describe ONE item and MUST be merged into a single entry — do NOT emit one entry with the description and null price plus a second entry with the SKU and price. Examples to merge into a single item: (a) Menards: "1G TANK SPRAYER 70000\\n2631202 1@$10.49      $10.49" → one item {Description:"1G TANK SPRAYER", VendorCode:"2631202", ManufacturerPartNumber:"70000", Quantity:1, Price:10.49, TotalPrice:10.49}. (b) Home Depot: barcode + abbreviated name on one line, full product description on the next. Only emit an item if you can attach a price to it; if a line has no price and the next line clearly continues it, merge them.',
                 'items'       => [
                     'type'       => 'object',
                     'properties' => [
                         'Description' => [
                             'type'        => 'string',
-                            'description' => 'The product name/description ONLY — do NOT include the manufacturer name or manufacturer part number. Example: if the text is "KOHLER K-728-K-NA MASTERSHOWER TRANSFER VALVE", Description is "MASTERSHOWER TRANSFER VALVE" (KOHLER → Manufacturer, K-728-K-NA → ManufacturerPartNumber). If the receipt shows a short/abbreviated name on one line and a longer product description on the next line, concatenate both lines into a single description. Do NOT include the product code, barcode, UPC, or item number — those belong in the VendorCode field. Also strip any single-letter return-policy indicators such as <A>, <B>, <C>, etc. Example: given lines "084305382269 1QT BUCKET <A>" and "1QT HDX ALL PURP MIXING CONTAINER", the Description should be "1QT BUCKET 1QT HDX ALL PURP MIXING CONTAINER".',
+                            'description' => 'The product name/description ONLY — do NOT include the manufacturer name, manufacturer part number, vendor SKU, barcode, or any "qty@$price" fragment. Example A: from "KOHLER K-728-K-NA MASTERSHOWER TRANSFER VALVE", Description is "MASTERSHOWER TRANSFER VALVE" (KOHLER → Manufacturer, K-728-K-NA → ManufacturerPartNumber). Example B (Menards): from "1G TANK SPRAYER 70000" (description+model) followed by "2631202 1@$10.49 $10.49" (SKU+qty/price), Description is "1G TANK SPRAYER" (70000 → ManufacturerPartNumber, 2631202 → VendorCode). NEVER put a numeric SKU, "NNNN N@$N.NN" pricing fragment, or `<A>`/`<B>` return-policy indicator in the Description. If the receipt shows a short/abbreviated name on one line and a longer product description on the next line, concatenate both lines into a single description.',
                             'method'      => 'extract',
                         ],
                         'VendorCode' => [
                             'type'        => 'string',
-                            'description' => 'Vendor SKU, item number, barcode, or product code assigned by this specific retailer/vendor.',
+                            'description' => 'Vendor SKU, item number, barcode, or product code assigned by this specific retailer/vendor. Typically a numeric or short alphanumeric code that appears on its own at the start of the price/quantity line (e.g. "2631202" before "1@$10.49"). Return ONE code per item — never concatenate codes from two adjacent items (e.g. do NOT return "66122544312415"; that is two SKUs, "6612254" and "4312415", from two different items).',
                             'method'      => 'extract',
                         ],
                         'Quantity' => [
@@ -256,9 +252,7 @@ class SyncContentUnderstandingAnalyzer extends Command
                 ],
             ],
 
-            // ── Multi-page tracking ────────────────────────────────────────
-            // Used by the auto-receipts importer to recognize when several
-            // attachments in the same email are pages of one receipt.
+            // ── Pagination & continuation ──────────────────────────────────
             'PageNumber' => [
                 'type'        => 'number',
                 'description' => 'The page number printed on this document. Look for labels like "Page # 1 of 2", "Page 1/2", "Page 1", or "Pg 1". Return only the integer for the current page (e.g. 1 from "Page # 1 of 2"). Return null if no page indicator is printed.',
@@ -275,16 +269,11 @@ class SyncContentUnderstandingAnalyzer extends Command
                 'method'      => 'extract',
             ],
 
-            // ── Handwritten note (job-site / project label) ────────────────
-            // Construction crews often handwrite a short note on the receipt
-            // — typically a job-site address, project name, or a single word
-            // like "Office" or "Shop" — to indicate which job the materials
-            // belong to. This is separate from any printed "Sold To" / "Ship
-            // To" / "P/O" form labels and their printed addresses.
+            // ── Handwritten note (job address, project name, location word) ─
             'HandwrittenNote' => [
                 'type'        => 'string',
-                'description' => 'Any short HANDWRITTEN note added by a person on top of the printed receipt — typically a job-site address (e.g. "215 Lincoln", "1422 Oak St"), a project name, or a single word like "Office", "Shop", or "Warehouse". Use visual cues from the document image: handwriting has irregular stroke widths, varied baseline, slants differently from printed text, and is often written in pen on whitespace or over/next to the printed form. Return ONLY the handwritten text, exactly as written. Do NOT return printed text from any "Sold To", "Ship To", "Bill To", "Customer", "P/O", "Order #", "Invoice #", "Date", or "Signature" label or the printed address that follows them. Do NOT return the merchant name, merchant address, customer name, vendor logo text, or any printed form label. Do NOT return signatures (only printed-style notes count). If there is no clearly handwritten note, return null.',
                 'method'      => 'generate',
+                'description' => 'Any HANDWRITTEN note(s) added by a person on top of the printed receipt — typically a job-site address (e.g. "215 Lincoln", "1422 Oak St", "911 Will"), a project/client name (e.g. "Smith remodel"), or a single short word/letter like "Office", "Shop", "Warehouse", "Garage", "Truck", "Job", "R", "X", "OK".' . "\n\n" . 'IF MULTIPLE separate handwritten notes exist on the same receipt (e.g. an address scrawled across the merchant header AND a circled letter elsewhere on the page), JOIN them with " | " — for example: "911 Will | R".' . "\n\n" . 'DETECTION CUES (use BOTH visual and textual):' . "\n" . '1. VISUAL: handwriting has irregular stroke widths, varied baseline, slants differently from printed text, and is often written in pen on whitespace, in a margin, OVER existing printed text (e.g. across the merchant address), or inside a hand-drawn circle.' . "\n" . '2. TEXTUAL/POSITIONAL — in the OCR text/markdown, a handwritten note often appears as:' . "\n" . '   - A short isolated line (1–4 words OR a single 1–2 character token) that interrupts the normal flow of the printed receipt.' . "\n" . '   - A line near the TOP of the document, BEFORE OR INTERLEAVED WITH the printed merchant name/address/phone (e.g. between the printed street address and "KEEP YOUR RECEIPT").' . "\n" . '   - A line near the BOTTOM of the document, AFTER all totals and payment info.' . "\n" . '   - A token containing slashes/letters in odd combinations like "911W/II", "9/1 Will", "3/15" — these are usually OCR\'s best attempt to read cursive handwriting.' . "\n" . '   - A SINGLE uppercase letter alone on a line (e.g. "R", "X", "P") that is not a label or column header — usually a circled annotation.' . "\n" . '   - A line that does NOT fit the printed receipt\'s structure: not a label, not a price, not an address line of the merchant, not a barcode/SKU, not a date/time stamp, not a register/cashier ID, not a return-policy sentence.' . "\n" . '   - Casing may not match the printed receipt (e.g. lowercase "office" on an otherwise ALL-CAPS receipt is a strong signal it was handwritten).' . "\n\n" . 'WHEN IN DOUBT — if a short word, address-like fragment, or single letter appears alone on its own line and does NOT match any standard printed receipt element, return it as a handwritten note.' . "\n\n" . 'NEVER return: the printed merchant name or address (e.g. "2700 Lake Cook Rd", "Long Grove, IL 60047", "Solid Waste Agency of"), the printed phone/email, store/register/transaction/cashier numbers, dates, times, item descriptions or codes, prices, tax/total/subtotal lines, payment-method labels, card last-four, EFT/Ref#/Auth/AID/ARQC values, return-policy sentences, rebate-receipt numbers (the number that follows "THE FOLLOWING REBATE RECEIPTS WERE PRINTED FOR THIS TRANSACTION"), coupon/promo/loyalty/rewards numbers, signatures, or any printed form label like "Sold To", "Ship To", "Bill To", "Customer", "P/O", "Order #", "Invoice #", "Date", "Signature".' . "\n\n" . 'CRITICAL ANTI-HALLUCINATION RULES:' . "\n" . '   - The FIRST line of a multi-line printed business header (e.g. "Solid Waste Agency of" followed by "Northern Cook County" / "Glenview Transfer Station" / "Operated by" / "Groot Industries, Inc") is the merchant name — it is PRINTED, never handwritten, even though it sits at the very top of the document. If a candidate line flows grammatically into the next printed line (e.g. ends with "of", "&", a comma, or is part of a corporate suffix like "Inc", "LLC", "Co", "Corp", "Ltd"), it is the merchant header — return null.' . "\n" . '   - Do NOT invent or fabricate a handwritten note when no handwriting markers (irregular casing, slashes, single letters, OCR-mangled cursive tokens) are visible in the OCR text. When the only candidate is a clean, properly-cased printed phrase, return null.' . "\n\n" . 'Return ONLY the handwritten text, exactly as the OCR captured it (preserve original casing). If there is no handwritten note, return null.',
             ],
         ];
 
@@ -298,51 +287,6 @@ class SyncContentUnderstandingAnalyzer extends Command
                 'name'        => 'HiveReceiptSchema',
                 'description' => 'Schema for construction company receipt and invoice OCR.',
                 'fields'      => $customFields,
-            ],
-        ];
-    }
-
-    /**
-     * Lightweight analyzer used to classify whether a single PDF attachment
-     * is a standalone receipt or a page of a multi-page invoice. Returns just
-     * enough info for the auto-receipts importer to group attachments before
-     * sending the merged document through the full receipt analyzer.
-     */
-    private function buildReceiptClassifierDefinition(string $model): array
-    {
-        $fields = [
-            'InvoiceNumber' => [
-                'type'        => 'string',
-                'description' => 'The invoice / order / ticket number printed on this page (any of: "Invoice #", "Order #", "Ticket #", "Sales Order #", "Document #"). This is the SAME identifier you would see repeated on every page of a multi-page invoice. Return null if no such identifier is printed.',
-                'method'      => 'extract',
-            ],
-            'PageNumber' => [
-                'type'        => 'number',
-                'description' => 'The page number printed on this document. Look for labels like "Page # 1 of 2", "Page 1/2", "Page 1", or "Pg 1". Return only the integer for the current page (e.g. 1 from "Page # 1 of 2"). Return null if no page indicator is printed.',
-                'method'      => 'extract',
-            ],
-            'PageTotal' => [
-                'type'        => 'number',
-                'description' => 'The total page count printed on this document. Look for the second number in labels like "Page # 1 of 2" (return 2). Return null if no total is printed.',
-                'method'      => 'extract',
-            ],
-            'ContinuedFromPrevious' => [
-                'type'        => 'boolean',
-                'description' => 'True if this document is a continuation of a previous page. Indicators include a "Page # 2 of 2" (or higher) marker, the phrase "Continued from previous page", missing header/totals on what looks like a partial ship-ticket, or signature/notes-only pages that reference an order printed on a prior page. False otherwise.',
-                'method'      => 'extract',
-            ],
-        ];
-
-        return [
-            'description'    => 'Hive 2025 receipt page classifier — emits invoice number + page metadata only, used to group multi-page scans before full receipt OCR.',
-            'baseAnalyzerId' => 'prebuilt-document',
-            'models'         => [
-                'completion' => $model,
-            ],
-            'fieldSchema'    => [
-                'name'        => 'HiveReceiptClassifierSchema',
-                'description' => 'Minimal schema for grouping multi-page scanned invoices.',
-                'fields'      => $fields,
             ],
         ];
     }
@@ -713,84 +657,6 @@ class SyncContentUnderstandingAnalyzer extends Command
                     'Continuation text = continuation of the previous item, NOT a new item.',
                     'Follow visual reading order across all table columns left-to-right.',
                     'Only create an item when you see a new product row with a product code/SKU and a price.',
-                ]),
-                'fields'      => $fields,
-            ],
-        ];
-    }
-
-    private function buildStateLicenseDefinition(string $model): array
-    {
-        $fields = [
-            'issuing_authority' => [
-                'type'        => 'string',
-                'description' => 'The government body that issued the license, exactly as printed (e.g. "Illinois Department of Public Health", "IDPH"). Return null if not present.',
-                'method'      => 'extract',
-            ],
-            'state' => [
-                'type'        => 'string',
-                'description' => 'Two-letter US state code of the issuing authority (e.g. "IL"). Infer from the issuing authority text if not explicitly printed.',
-                'method'      => 'generate',
-            ],
-            'license_type_code' => [
-                'type'        => 'string',
-                'description' => 'The license-type prefix shown before the dash in the license number. For Illinois plumbing documents this is "055" (Plumbing Contractor Registration) or "058" (Plumber). Examples: license number "058-195348" -> "058"; "055-040182" -> "055". Return only the digits before the first dash.',
-                'method'      => 'generate',
-            ],
-            'license_label' => [
-                'type'        => 'string',
-                'description' => 'Human-readable license type as printed on the document (e.g. "Plumber", "Plumbing Contractor Registration", "Apprentice Plumber"). Return the most descriptive label found.',
-                'method'      => 'extract',
-            ],
-            'category' => [
-                'type'        => 'string',
-                'description' => 'Sub-category, class, or designation if present (e.g. "Category 6A", "Class A"). Return null if not present.',
-                'method'      => 'extract',
-            ],
-            'license_number' => [
-                'type'        => 'string',
-                'description' => 'The full license/registration number including the type prefix and dash (e.g. "058-195348", "055-040182"). Extract exactly as printed.',
-                'method'      => 'extract',
-            ],
-            'licensee_name' => [
-                'type'        => 'string',
-                'description' => 'The full name of the individual or entity the license is issued to, exactly as printed (e.g. "JAROSLAW POTAPA", "ACCOMPLISHED J PLUMBING INC"). For 058 individual licenses this is a person; for 055 contractor registrations this is the company name.',
-                'method'      => 'extract',
-            ],
-            'business_name' => [
-                'type'        => 'string',
-                'description' => 'The legal business / company name if the license belongs to a company (typical for 055 Plumbing Contractor Registrations). For an individual 058 license card, return null unless an employer/company is explicitly printed.',
-                'method'      => 'extract',
-            ],
-            'address' => [
-                'type'        => 'string',
-                'description' => 'Full mailing address printed on the license, combined into one newline-separated string (street, city, state, ZIP). Examples: "737 N GIBBONS AVE\nARLINGTON HTS, IL 60004", "930 E NORTHWEST HWY\nMT PROSPECT, IL 60056".',
-                'method'      => 'extract',
-            ],
-            'issue_date' => [
-                'type'        => 'date',
-                'description' => 'Date the license was originally issued or most recently renewed. Look for labels like "Issue Date", "Issued", "Original Issue Date".',
-                'method'      => 'extract',
-            ],
-            'expiration_date' => [
-                'type'        => 'date',
-                'description' => 'Date the license expires. Look for labels like "Expires", "Expiration Date", "Valid Through".',
-                'method'      => 'extract',
-            ],
-        ];
-
-        return [
-            'description'    => 'Hive State Trade License analyzer (Illinois plumbing 055/058 and similar state-issued trade licenses).',
-            'baseAnalyzerId' => 'prebuilt-document',
-            'models'         => [
-                'completion' => $model,
-            ],
-            'fieldSchema'    => [
-                'name'        => 'HiveStateLicenseSchema',
-                'description' => implode(' ', [
-                    'Schema for state-issued trade licenses (e.g. Illinois IDPH plumbing licenses).',
-                    'Two common variants: an individual plumber ID card (license type 058) and a Plumbing Contractor Registration (license type 055).',
-                    'Always extract the full license number with its type prefix, both the licensee and any business name, the issue and expiration dates, and the issuing authority.',
                 ]),
                 'fields'      => $fields,
             ],

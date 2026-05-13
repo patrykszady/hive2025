@@ -69,6 +69,11 @@ class Check extends Model
         return $this->hasMany(Expense::class);
     }
 
+    public function lienWaivers(): HasMany
+    {
+        return $this->hasMany(LienWaiver::class);
+    }
+
     public function expensesMany(): BelongsToMany
     {
         return $this->belongsToMany(Expense::class, 'check_expense')->withTimestamps();

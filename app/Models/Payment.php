@@ -2,13 +2,17 @@
 
 namespace App\Models;
 
+use App\Observers\PaymentObserver;
 use App\Scopes\PaymentScope;
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Support\Collection;
 
+#[ObservedBy([PaymentObserver::class])]
 class Payment extends Model
 {
     protected $fillable = ['distribution_id', 'project_id', 'amount', 'date', 'reference', 'transaction_id', 'belongs_to_vendor_id', 'parent_client_payment_id', 'check_id', 'note', 'created_by_user_id', 'created_at', 'updated_at'];
@@ -43,6 +47,16 @@ class Payment extends Model
     public function transaction(): BelongsTo
     {
         return $this->belongsTo(Transaction::class);
+    }
+
+    public function check(): BelongsTo
+    {
+        return $this->belongsTo(Check::class);
+    }
+
+    public function lienWaiver(): HasOne
+    {
+        return $this->hasOne(LienWaiver::class);
     }
 
     public function payments_grouped(): HasMany

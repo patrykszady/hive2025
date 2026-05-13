@@ -362,9 +362,12 @@ class ExpenseReceipts extends Model
                 continue; // all-caps store name
             }
             // Strip common trademark/copyright symbols and check if remaining text is all-caps
-            // to catch store headers like "MENARDS®" or "HOME DEPOT™"
+            // to catch store headers like "MENARDS®" or "HOME DEPOT™". Only treat as a header
+            // when the line actually CONTAINED a trademark symbol — otherwise short all-caps
+            // handwritten labels like "17 MARCELA" or "OFFICE" would be incorrectly rejected.
             $stripped = trim(preg_replace('/[®™©]/u', '', $line));
-            if ($stripped !== '' && $stripped === strtoupper($stripped) && preg_match('/[A-Z]{3,}/', $stripped)) {
+            $hadTrademark = $stripped !== $line;
+            if ($hadTrademark && $stripped !== '' && $stripped === strtoupper($stripped) && preg_match('/[A-Z]{3,}/', $stripped)) {
                 continue; // store header with trademark symbol
             }
 

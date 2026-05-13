@@ -290,6 +290,16 @@ class Vendor extends Model
         return $this->hasMany(Payment::class, 'belongs_to_vendor_id');
     }
 
+    public function lienWaivers(): HasMany
+    {
+        return $this->hasMany(LienWaiver::class, 'vendor_id');
+    }
+
+    public function lienWaiversIssued(): HasMany
+    {
+        return $this->hasMany(LienWaiver::class, 'belongs_to_vendor_id');
+    }
+
     public function scopeHiveVendors($query)
     {
         return $query->withoutGlobalScopes()->where('business_type', 'Sub')->where('registration->registered', true);

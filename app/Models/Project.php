@@ -392,6 +392,11 @@ class Project extends Model
         return $this->hasMany(Payment::class);
     }
 
+    public function lienWaivers(): HasMany
+    {
+        return $this->hasMany(LienWaiver::class);
+    }
+
     public function statuses(): HasMany
     {
         return $this->hasMany(ProjectStatus::class);

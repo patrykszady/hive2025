@@ -425,7 +425,27 @@ class EstimateDocumentGenerator
             return [];
         }
 
-        $selectedIds = array_values(array_filter(array_map('intval', $estimate->options['contract_template_ids'] ?? [])));
+        $options = (array) ($estimate->options ?? []);
+        $hasExplicitSelection = array_key_exists('contract_template_ids', $options);
+        $selectedIds = array_values(array_filter(array_map('intval', $options['contract_template_ids'] ?? [])));
+
+        // Backfill: when an estimate has never had contract templates configured
+        // (Contract Templates feature was introduced after the estimate was created),
+        // fall back to the vendor's default contract template (first by id) so that
+        // the rendered PDF still includes a contract.
+        if (! $hasExplicitSelection && $selectedIds === []) {
+            $defaultTemplate = EmailTemplate::withoutGlobalScopes()
+                ->where('vendor_id', $vendor->id)
+                ->where('type', 'contract')
+                ->orderBy('id')
+                ->first();
+
+            if (! $defaultTemplate) {
+                return [];
+            }
+
+            $selectedIds = [$defaultTemplate->id];
+        }
 
         if ($selectedIds === []) {
             return [];

@@ -6,8 +6,21 @@ use App\Models\CallLog;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
+use Illuminate\Support\Str;
 
 uses(RefreshDatabase::class);
+
+function makeCallListUser(): User
+{
+    return User::query()->create([
+        'first_name' => 'Test',
+        'last_name' => 'User',
+        'email' => 'call-list-' . Str::random(8) . '@example.test',
+        'cell_phone' => '7' . random_int(100000000, 999999999),
+        'password' => bcrypt('password'),
+        'remember_token' => Str::random(10),
+    ]);
+}
 
 it('has loadMore method that increments limit by 25', function () {
     $component = new CallList();
@@ -55,7 +68,7 @@ it('does not use WithPagination trait', function () {
 });
 
 it('marks an incoming call as spam and adds to blocked callers', function () {
-    $user = User::factory()->create();
+    $user = makeCallListUser();
     $spamNumber = '+12242028716';
 
     $call = CallLog::factory()->create([
@@ -80,7 +93,7 @@ it('marks an incoming call as spam and adds to blocked callers', function () {
 });
 
 it('marks an outgoing call as spam using the to_number', function () {
-    $user = User::factory()->create();
+    $user = makeCallListUser();
     $spamNumber = '+15551234567';
 
     $call = CallLog::factory()->create([
@@ -98,7 +111,7 @@ it('marks an outgoing call as spam using the to_number', function () {
 });
 
 it('updates all calls from the spam number to blocked status', function () {
-    $user = User::factory()->create();
+    $user = makeCallListUser();
     $spamNumber = '+12242028716';
 
     $calls = CallLog::factory()->count(3)->create([
@@ -118,7 +131,7 @@ it('updates all calls from the spam number to blocked status', function () {
 });
 
 it('does not duplicate blocked caller when marking same number twice', function () {
-    $user = User::factory()->create();
+    $user = makeCallListUser();
     $spamNumber = '+12242028716';
 
     BlockedCaller::create([
@@ -139,4 +152,22 @@ it('does not duplicate blocked caller when marking same number twice', function 
         ->call('markAsSpam', $call->id);
 
     expect(BlockedCaller::where('phone_number', $spamNumber)->count())->toBe(1);
+});
+
+it('unblocks a blocked number', function () {
+    $user = makeCallListUser();
+    $blockedNumber = '+17086697081';
+
+    BlockedCaller::create([
+        'phone_number' => $blockedNumber,
+        'reason' => 'Manually marked as spam',
+        'blocked_by_user_id' => $user->id,
+        'auto_blocked' => false,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(CallList::class)
+        ->call('unblockNumber', $blockedNumber);
+
+    expect(BlockedCaller::where('phone_number', $blockedNumber)->exists())->toBeFalse();
 });

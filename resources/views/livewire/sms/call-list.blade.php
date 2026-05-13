@@ -200,7 +200,11 @@
                                 <flux:button size="xs" variant="ghost" icon="chat-bubble-left" wire:click.stop="textBack('{{ $otherNumber }}')">
                                     Text
                                 </flux:button>
-                                @if ($otherNumber && ! $this->isKnownContact($otherNumber) && $effectiveStatus !== 'blocked' && ! in_array($otherNumber, $this->blockedNumbers))
+                                @if ($effectiveStatus === 'blocked' && in_array($otherNumber, $this->blockedNumbers))
+                                    <flux:button size="xs" variant="primary" color="green" icon="shield-check" class="justify-center" wire:click.stop="unblockNumber('{{ $otherNumber }}')">
+                                        Unblock
+                                    </flux:button>
+                                @elseif ($otherNumber && ! $this->isKnownContact($otherNumber) && $effectiveStatus !== 'blocked' && ! in_array($otherNumber, $this->blockedNumbers))
                                     <flux:button size="xs" variant="primary" color="amber" icon="shield-exclamation" class="justify-center" wire:click.stop="markAsSpam({{ $call->id }})">
                                         Mark as Spam
                                     </flux:button>

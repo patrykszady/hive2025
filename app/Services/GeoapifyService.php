@@ -178,6 +178,54 @@ class GeoapifyService
         });
     }
 
+    /**
+     * Look up the U.S. county for a free-form address (e.g. "123 Main St, Springfield, IL 62701").
+     * Returns the bare county name without the trailing "County" suffix, or null if it can't be resolved.
+     * Result is cached for 30 days, keyed by the normalized address.
+     */
+    public function lookupCounty(string $address): ?string
+    {
+        $address = trim($address);
+
+        if ($address === '' || $this->apiKey === '') {
+            return null;
+        }
+
+        $cacheKey = 'geoapify_county_' . md5(strtolower($address));
+
+        return Cache::remember($cacheKey, now()->addDays(30), function () use ($address) {
+            try {
+                $response = $this->httpClient->get('https://api.geoapify.com/v1/geocode/search', [
+                    'query' => [
+                        'text' => $address,
+                        'apiKey' => $this->apiKey,
+                        'format' => 'json',
+                        'limit' => 1,
+                        'filter' => 'countrycode:us',
+                    ],
+                ]);
+
+                $data = json_decode($response->getBody(), true);
+                $first = $data['results'][0] ?? null;
+
+                if (! is_array($first)) {
+                    return null;
+                }
+
+                $county = (string) ($first['county'] ?? '');
+                $county = trim(preg_replace('/\s+County$/i', '', $county));
+
+                return $county !== '' ? $county : null;
+            } catch (RequestException $e) {
+                Log::channel('google_places')->error('Geoapify county lookup error', ApiErrorFormatter::format($e, [
+                    'address' => $address,
+                ]));
+
+                return null;
+            }
+        });
+    }
+
     public static function sortResultsByDistance(array $results, ?string $location): array
     {
         if ($location === null) {

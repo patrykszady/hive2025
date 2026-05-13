@@ -432,6 +432,21 @@ class CallList extends Component
     }
 
     /**
+     * Remove a phone number from the blocked callers list.
+     */
+    public function unblockNumber(string $phone): void
+    {
+        $deleted = BlockedCaller::where('phone_number', $phone)->delete();
+
+        if (! $deleted) {
+            Flux::toast(variant: 'warning', heading: 'Not Blocked', text: $this->formatPhone($phone) . ' is not currently blocked.', duration: 4000, position: 'top right');
+            return;
+        }
+
+        Flux::toast(variant: 'success', heading: 'Unblocked', text: $this->formatPhone($phone) . ' has been removed from the blocked list.', duration: 5000, position: 'top right');
+    }
+
+    /**
      * Resolve a phone number to a contact name (User → Vendor → formatted number).
      */
     /**

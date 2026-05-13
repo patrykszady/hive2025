@@ -27,8 +27,6 @@ use Carbon\Carbon;
 use Spatie\Browsershot\Browsershot;
 use Intervention\Image\Facades\Image;
 
-use setasign\Fpdi\Fpdi;
-
 use Exception;
 use App\Support\ApiErrorFormatter;
 use App\Support\MaterialOrderStatus;
@@ -1904,37 +1902,6 @@ class CompanyEmailController extends Controller
                 $messageId = $message['id'];
 
                 if (!empty($message['attachments'])) {
-                    // Map of normalized invoice_number => expense_id for attachments processed
-                    // earlier in THIS email. Lets us treat multi-page scans (same Order/Invoice
-                    // arriving as separate PDFs) as one expense with multiple receipt pages.
-                    $invoiceIdToExpenseId = [];
-                    // Track the most recently created/updated expense in this email so a
-                    // continuation page that has NO recognizable invoice number can still be
-                    // attached to the previous receipt (analyzer signals: ContinuedFromPrevious
-                    // or PageNumber > 1).
-                    $lastExpenseIdInMessage = null;
-
-                    // ── Multi-page invoice grouping (classify + merge) ──────────
-                    // Epson "Receipt Scans" emails emit one PDF per scanned page.
-                    // A single email may contain N independent invoices PLUS
-                    // multi-page invoices. We can't distinguish pages by
-                    // filename, so we run a lightweight CU "classifier" pass
-                    // on each PDF to read its invoice number / page metadata,
-                    // group by invoice (or continuation chain), and merge each
-                    // group into one PDF before the full CU analyzer runs.
-                    // Result: full OCR happens exactly once per logical
-                    // invoice, regardless of how many physical pages it spans.
-                    $groupedAttachments = $this->classifyAndMergeAttachments(
-                        $message['attachments'],
-                        $grantId,
-                        $messageId,
-                        $company_email->id
-                    );
-
-                    if ($groupedAttachments !== null) {
-                        $message['attachments'] = $groupedAttachments;
-                    }
-
                     foreach ($message['attachments'] as $attachment_key => $attachment) {
                         $doc_type = 'pdf';
 
@@ -1942,16 +1909,12 @@ class CompanyEmailController extends Controller
                         $ocr_filename = date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '.pdf';
                         $ocr_path = '_temp_ocr/' . $ocr_filename;
 
-                        // Use prefetched binary (from the merge path) or download from Nylas.
-                        if (! empty($attachment['_prefetched_content'])) {
-                            $attachmentContent = $attachment['_prefetched_content'];
-                        } else {
-                            $attachmentContent = $this->nylasService->downloadAttachment(
-                                $attachment['id'],
-                                $grantId,
-                                $messageId
-                            );
-                        }
+                        // Download the attachment content.
+                        $attachmentContent = $this->nylasService->downloadAttachment(
+                            $attachment['id'],
+                            $grantId,
+                            $messageId
+                        );
 
                         // Save the attachment to the 'files' disk under _temp_ocr.
                         Storage::disk('files')->put($ocr_path, $attachmentContent);
@@ -1961,51 +1924,6 @@ class CompanyEmailController extends Controller
 
                         if (isset($ocr_receipt_data['error']) && $ocr_receipt_data['error'] === true)
                         {
-                            // Multi-page scan dedup: if this attachment shares an invoice_number
-                            // with a previously-processed attachment in THIS email, treat it as a
-                            // supplemental page of the same receipt instead of dropping it.
-                            $partialInvoice = strtolower(trim((string) ($ocr_receipt_data['partial']['invoice_number'] ?? '')));
-                            $partialIsContinuation = (bool) ($ocr_receipt_data['partial']['continued_from_previous'] ?? false)
-                                || ((int) ($ocr_receipt_data['partial']['page_number'] ?? 0) > 1);
-
-                            $linkedExpenseId = null;
-                            $dedupReason = null;
-                            if ($partialInvoice !== '' && isset($invoiceIdToExpenseId[$partialInvoice])) {
-                                $linkedExpenseId = $invoiceIdToExpenseId[$partialInvoice];
-                                $dedupReason = 'invoice_number_match';
-                            } elseif ($partialIsContinuation && $lastExpenseIdInMessage !== null) {
-                                // Analyzer flagged this as a continuation page and we have a
-                                // prior expense in this same email — attach to it.
-                                $linkedExpenseId = $lastExpenseIdInMessage;
-                                $dedupReason = 'continuation_page_signal';
-                            }
-
-                            if ($linkedExpenseId !== null) {
-                                $stub = [
-                                    'fields'  => ['invoice_number' => $ocr_receipt_data['partial']['invoice_number'] ?? null],
-                                    'content' => '',
-                                ];
-                                $this->saveExpenseReceipt($linkedExpenseId, $stub, $ocr_filename, null, true);
-
-                                Log::channel('nylas')->info('AutoReceipts: attached continuation page to existing expense', [
-                                    'company_email_id' => $company_email->id,
-                                    'expense_id' => $linkedExpenseId,
-                                    'invoice_number' => $ocr_receipt_data['partial']['invoice_number'] ?? null,
-                                    'page_number' => $ocr_receipt_data['partial']['page_number'] ?? null,
-                                    'page_total' => $ocr_receipt_data['partial']['page_total'] ?? null,
-                                    'continued_from_previous' => $ocr_receipt_data['partial']['continued_from_previous'] ?? null,
-                                    'dedup_reason' => $dedupReason,
-                                    'attachment_filename' => $attachment['filename'] ?? 'unknown',
-                                    'reason' => $ocr_receipt_data['reason'] ?? null,
-                                ]);
-
-                                if ($attachment_key === array_key_last($message['attachments'])) {
-                                    $this->nylasService->moveOriginalMessageToHiveFolder($grantId, $messageId, $company_email->id);
-                                }
-
-                                continue;
-                            }
-
                             // Log the failed receipt processing with debug filepath
                             Log::channel('receipt_processing')->error('OCR processing failed', [
                                 'company_email_id' => $company_email->id,
@@ -2050,43 +1968,6 @@ class CompanyEmailController extends Controller
 
                         // Normalize stored value so downstream logic uses the corrected date.
                         $ocr_receipt_data['fields']['transaction_date'] = $resolvedTransactionDate->toDateString();
-
-                        // Multi-page scan dedup: if a previous attachment in this same email
-                        // already produced an expense for this invoice_number, treat the current
-                        // attachment as another page of that receipt and skip duplicate-expense /
-                        // partial-consolidation logic.
-                        $currentInvoiceKey = strtolower(trim((string) ($ocr_receipt_data['fields']['invoice_number'] ?? '')));
-                        $currentIsContinuation = (bool) ($ocr_receipt_data['fields']['continued_from_previous'] ?? false)
-                            || ((int) ($ocr_receipt_data['fields']['page_number'] ?? 0) > 1);
-
-                        $linkedExpenseIdSuccess = null;
-                        if ($currentInvoiceKey !== '' && isset($invoiceIdToExpenseId[$currentInvoiceKey])) {
-                            $linkedExpenseIdSuccess = $invoiceIdToExpenseId[$currentInvoiceKey];
-                        } elseif ($currentIsContinuation && $lastExpenseIdInMessage !== null) {
-                            // Analyzer says this is a continuation page (rare on the success path
-                            // because totals are usually missing on continuation pages, but cover it).
-                            $linkedExpenseIdSuccess = $lastExpenseIdInMessage;
-                        }
-
-                        if ($linkedExpenseIdSuccess !== null) {
-                            $this->saveExpenseReceipt($linkedExpenseIdSuccess, $ocr_receipt_data, $ocr_filename, null, true);
-
-                            Log::channel('nylas')->info('AutoReceipts: deduped attachment as continuation page', [
-                                'company_email_id' => $company_email->id,
-                                'expense_id' => $linkedExpenseIdSuccess,
-                                'invoice_number' => $ocr_receipt_data['fields']['invoice_number'] ?? null,
-                                'page_number' => $ocr_receipt_data['fields']['page_number'] ?? null,
-                                'page_total' => $ocr_receipt_data['fields']['page_total'] ?? null,
-                                'continued_from_previous' => $ocr_receipt_data['fields']['continued_from_previous'] ?? null,
-                                'attachment_filename' => $attachment['filename'] ?? 'unknown',
-                            ]);
-
-                            if ($attachment_key === array_key_last($message['attachments'])) {
-                                $this->nylasService->moveOriginalMessageToHiveFolder($grantId, $messageId, $company_email->id);
-                            }
-
-                            continue;
-                        }
 
                         // Set up the transaction date range.
                         $start_date = Carbon::parse($ocr_receipt_data['fields']['transaction_date'])
@@ -2306,17 +2187,6 @@ class CompanyEmailController extends Controller
                         // Finally, save the expense receipt (this method moves the file from _temp_ocr to receipts).
                         if (! $didAttachReceipt) {
                             $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename);
-                        }
-
-                        // Register this expense under its invoice_number so subsequent attachments
-                        // in this email that share the same invoice are attached as additional pages.
-                        if (isset($expense) && $expense instanceof Expense) {
-                            if ($currentInvoiceKey !== '') {
-                                $invoiceIdToExpenseId[$currentInvoiceKey] = $expense->id;
-                            }
-                            // Always remember the most-recent expense so a later continuation
-                            // page (no invoice number) can fall back to it.
-                            $lastExpenseIdInMessage = $expense->id;
                         }
                     } // end foreach attachment
 
@@ -3196,333 +3066,6 @@ class CompanyEmailController extends Controller
     protected function isDuplicateReceipt(int $expense_id, string $receipt_html, array $receipt_items): bool
     {
         return ExpenseReceipts::isDuplicateForExpense($expense_id, $receipt_html, $receipt_items);
-    }
-
-    /**
-     * Merge multiple PDF binaries into a single PDF.
-     *
-     * Used by fetchAutoReceipts() to consolidate Epson scanner emails that
-     * arrive with one PDF per scanned page into a single multi-page document
-     * before sending to Content Understanding. Returns the merged PDF binary,
-     * or null if any input PDF can't be parsed (encrypted, corrupt, etc.) so
-     * the caller can fall back to per-attachment processing.
-     *
-     * @param  array<int, string>  $pdfBinaries
-     */
-    protected function mergePdfBinaries(array $pdfBinaries): ?string
-    {
-        if (count($pdfBinaries) < 2) {
-            return null;
-        }
-
-        $tempPaths = [];
-
-        try {
-            $merged = new Fpdi();
-
-            foreach ($pdfBinaries as $binary) {
-                if (substr($binary, 0, 5) !== '%PDF-') {
-                    return null; // not a valid PDF
-                }
-
-                $tmp = tempnam(sys_get_temp_dir(), 'cu_merge_');
-                if ($tmp === false) {
-                    return null;
-                }
-                file_put_contents($tmp, $binary);
-                $tempPaths[] = $tmp;
-
-                $pageCount = $merged->setSourceFile($tmp);
-                for ($pageNo = 1; $pageNo <= $pageCount; $pageNo++) {
-                    $tplId = $merged->importPage($pageNo);
-                    $size = $merged->getTemplateSize($tplId);
-                    $orientation = ($size['width'] > $size['height']) ? 'L' : 'P';
-                    $merged->AddPage($orientation, [$size['width'], $size['height']]);
-                    $merged->useTemplate($tplId);
-                }
-            }
-
-            return $merged->Output('S');
-        } catch (\Throwable $e) {
-            Log::channel('nylas')->warning('AutoReceipts: PDF merge failed; falling back to per-attachment processing', [
-                'error' => $e->getMessage(),
-                'attachment_count' => count($pdfBinaries),
-            ]);
-
-            return null;
-        } finally {
-            foreach ($tempPaths as $tmp) {
-                if (is_file($tmp)) {
-                    @unlink($tmp);
-                }
-            }
-        }
-    }
-
-    /**
-     * Classify each PDF attachment with the lightweight CU classifier analyzer,
-     * group attachments that belong to the same multi-page invoice, and merge
-     * each group into a single PDF. Returns a re-shaped attachments list where
-     * each entry corresponds to ONE logical document (single page or merged
-     * multi-page) and carries its raw PDF binary in '_prefetched_content' so
-     * the caller can skip the redundant Nylas download.
-     *
-     * Grouping rules (in order):
-     *   1. Same non-empty InvoiceNumber → same group.
-     *   2. ContinuedFromPrevious=true (and no matching invoice) → attach to the
-     *      immediately preceding group in attachment order.
-     *   3. Otherwise → its own group.
-     *
-     * Returns null if classification or any required download fails for ALL
-     * attachments — caller will then fall through to its existing per-attachment
-     * Nylas-download path. If only the merge step fails for a particular group
-     * we keep that group's attachments separate (each as its own synthetic entry).
-     *
-     * @param  array<int, array<string, mixed>>  $attachments
-     * @return array<int, array<string, mixed>>|null
-     */
-    protected function classifyAndMergeAttachments(
-        array $attachments,
-        string $grantId,
-        string $messageId,
-        ?int $companyEmailId
-    ): ?array {
-        // Only classify when we have at least 2 PDFs — a single attachment is
-        // already its own "group" and doesn't need a classifier round-trip.
-        $pdfIndices = [];
-        foreach ($attachments as $idx => $att) {
-            $isPdf = stripos((string) ($att['filename'] ?? ''), '.pdf') !== false
-                || strcasecmp((string) ($att['content_type'] ?? ''), 'application/pdf') === 0;
-            if ($isPdf) {
-                $pdfIndices[] = $idx;
-            }
-        }
-
-        if (count($pdfIndices) < 2) {
-            return null; // nothing to group; keep original attachments list
-        }
-
-        $classifierAnalyzerId = config('services.azure_cu.analyzer_id_receipt_classifier');
-        if (! $classifierAnalyzerId) {
-            return null;
-        }
-
-        $cu = app(\App\Services\ContentUnderstandingService::class);
-
-        // Phase 1: download every PDF, then classify only those that are
-        // wide enough to plausibly be invoice / A4-style pages. Long-narrow
-        // POS receipts (typical thermal-printer width ≈ 80mm) are always
-        // standalone — never multi-page invoices — so we skip the classifier
-        // round-trip on them entirely. Threshold: 140mm (~5.5in) is
-        // comfortably above any thermal receipt width and below US-Letter
-        // (216mm) / A4 (210mm) page widths.
-        $invoicePageWidthThresholdMm = 140.0;
-
-        $classified = []; // each entry: [original_idx, filename, binary, invoice_key, page_number, page_total, continued, is_invoice_shaped]
-        foreach ($pdfIndices as $idx) {
-            $att = $attachments[$idx];
-
-            try {
-                $binary = $this->nylasService->downloadAttachment($att['id'], $grantId, $messageId);
-            } catch (\Throwable $downloadEx) {
-                Log::channel('nylas')->warning('AutoReceipts: classifier download failed', [
-                    'company_email_id' => $companyEmailId,
-                    'attachment_filename' => $att['filename'] ?? 'unknown',
-                    'error' => $downloadEx->getMessage(),
-                ]);
-                return null; // bail out — let the caller fall back to its own download path
-            }
-
-            // Cheap shape probe via FPDI: read width of page 1.
-            // FPDI's default user unit is mm, so getTemplateSize()['width']
-            // is reported in millimetres. Files we can't parse here are still
-            // passed through classification (safer to classify than skip).
-            $isInvoiceShaped = true;
-            $probeWidthMm = null;
-            $tmpProbe = tempnam(sys_get_temp_dir(), 'cu_probe_');
-            if ($tmpProbe !== false) {
-                try {
-                    file_put_contents($tmpProbe, $binary);
-                    if (substr($binary, 0, 5) === '%PDF-') {
-                        $probe = new Fpdi();
-                        $probe->setSourceFile($tmpProbe);
-                        $tplId = $probe->importPage(1);
-                        $size = $probe->getTemplateSize($tplId);
-                        $probeWidthMm = (float) ($size['width'] ?? 0);
-                        $isInvoiceShaped = $probeWidthMm >= $invoicePageWidthThresholdMm;
-                    }
-                } catch (\Throwable $probeEx) {
-                    // leave $isInvoiceShaped = true (safer to classify than skip)
-                } finally {
-                    @unlink($tmpProbe);
-                }
-            }
-
-            $invoiceKey = '';
-            $pageNumber = null;
-            $pageTotal = null;
-            $continued = false;
-
-            if ($isInvoiceShaped) {
-                $tempName = 'classify-' . date('Y-m-d-H-i-s') . '-' . $idx . '-' . rand(10, 99) . '.pdf';
-                $tempPath = '_temp_ocr/' . $tempName;
-                Storage::disk('files')->put($tempPath, $binary);
-
-                try {
-                    $result = $cu->analyze($tempPath, 'pdf', 'receipt_processing', $classifierAnalyzerId);
-                    $fields = $result['analyzeResult']['documents'][0]['fields'] ?? [];
-
-                    $invoiceRaw = $fields['InvoiceNumber']['valueString']
-                        ?? $fields['InvoiceNumber']['content']
-                        ?? null;
-                    $invoiceKey = strtolower(trim((string) ($invoiceRaw ?? '')));
-
-                    $pageNumber = $fields['PageNumber']['valueNumber'] ?? $fields['PageNumber']['valueInteger'] ?? null;
-                    $pageTotal = $fields['PageTotal']['valueNumber'] ?? $fields['PageTotal']['valueInteger'] ?? null;
-                    $continued = (bool) ($fields['ContinuedFromPrevious']['valueBoolean'] ?? false);
-                } catch (\Throwable $classifyEx) {
-                    Log::channel('receipt_processing')->warning('AutoReceipts: classifier failed for attachment; treating as standalone', [
-                        'company_email_id' => $companyEmailId,
-                        'attachment_filename' => $att['filename'] ?? 'unknown',
-                        'error' => $classifyEx->getMessage(),
-                    ]);
-                } finally {
-                    Storage::disk('files')->delete($tempPath);
-                }
-            }
-
-            $classified[] = [
-                'original_idx'      => $idx,
-                'filename'          => $att['filename'] ?? ('attachment-' . $idx . '.pdf'),
-                'binary'            => $binary,
-                'invoice_key'       => $invoiceKey,
-                'page_number'       => is_numeric($pageNumber) ? (int) $pageNumber : null,
-                'page_total'        => is_numeric($pageTotal) ? (int) $pageTotal : null,
-                'continued'         => $continued,
-                'is_invoice_shaped' => $isInvoiceShaped,
-            ];
-        }
-
-        Log::channel('nylas')->info('AutoReceipts: classifier results', [
-            'company_email_id' => $companyEmailId,
-            'message_id'       => $messageId,
-            'attachments'      => array_map(fn ($e) => [
-                'filename'          => $e['filename'],
-                'invoice_key'       => $e['invoice_key'] ?: null,
-                'page_number'       => $e['page_number'],
-                'page_total'        => $e['page_total'],
-                'continued'         => $e['continued'],
-                'is_invoice_shaped' => $e['is_invoice_shaped'],
-            ], $classified),
-        ]);
-
-        // Phase 2: group by invoice number / continuation chain.
-        // Order matters — continuation pages without an invoice number attach
-        // to the most recently seen group. Receipt-shaped pages (thermal POS)
-        // are never grouped — each is forced into its own standalone group.
-        $groups = []; // groupKey => [classified_entry, ...]
-        $invoiceKeyToGroup = []; // invoice_key => groupKey
-        $lastGroupKey = null;
-        $autoGroupSeq = 0;
-
-        foreach ($classified as $entry) {
-            $groupKey = null;
-
-            if (! $entry['is_invoice_shaped']) {
-                // Long-narrow POS receipt: always its own group, never extends
-                // a prior group.
-                $groupKey = '__group_' . (++$autoGroupSeq);
-                $lastGroupKey = null; // don't let a following continuation page latch onto this
-            } elseif ($entry['invoice_key'] !== '' && isset($invoiceKeyToGroup[$entry['invoice_key']])) {
-                $groupKey = $invoiceKeyToGroup[$entry['invoice_key']];
-            } elseif ($entry['invoice_key'] === '' && $entry['continued'] && $lastGroupKey !== null) {
-                $groupKey = $lastGroupKey;
-            } else {
-                $groupKey = '__group_' . (++$autoGroupSeq);
-                if ($entry['invoice_key'] !== '') {
-                    $invoiceKeyToGroup[$entry['invoice_key']] = $groupKey;
-                }
-            }
-
-            $groups[$groupKey][] = $entry;
-            if ($entry['is_invoice_shaped']) {
-                $lastGroupKey = $groupKey;
-            }
-        }
-
-        // Phase 3: build a re-shaped attachments list. Single-entry groups stay
-        // as-is (with prefetched binary); multi-entry groups get sorted by page
-        // number and merged into one PDF. If merge fails for a group, fall back
-        // to keeping its entries separate so they still get processed.
-        $rebuilt = [];
-        foreach ($groups as $groupKey => $entries) {
-            if (count($entries) === 1) {
-                $entry = $entries[0];
-                $rebuilt[] = [
-                    'id'                  => $attachments[$entry['original_idx']]['id'] ?? null,
-                    'filename'            => $entry['filename'],
-                    'content_type'        => 'application/pdf',
-                    '_prefetched_content' => $entry['binary'],
-                ];
-                continue;
-            }
-
-            // Sort by page_number (entries without one go to the end).
-            usort($entries, function ($a, $b) {
-                $ap = $a['page_number'] ?? PHP_INT_MAX;
-                $bp = $b['page_number'] ?? PHP_INT_MAX;
-                return $ap <=> $bp;
-            });
-
-            $bins = array_column($entries, 'binary');
-            $merged = $this->mergePdfBinaries($bins);
-
-            if ($merged === null) {
-                Log::channel('nylas')->warning('AutoReceipts: merge failed for invoice group; keeping pages as separate attachments', [
-                    'company_email_id' => $companyEmailId,
-                    'group_key' => $groupKey,
-                    'page_count' => count($entries),
-                ]);
-
-                foreach ($entries as $entry) {
-                    $rebuilt[] = [
-                        'id'                  => $attachments[$entry['original_idx']]['id'] ?? null,
-                        'filename'            => $entry['filename'],
-                        'content_type'        => 'application/pdf',
-                        '_prefetched_content' => $entry['binary'],
-                    ];
-                }
-                continue;
-            }
-
-            Log::channel('nylas')->info('AutoReceipts: merged multi-page invoice into single PDF', [
-                'company_email_id' => $companyEmailId,
-                'message_id'       => $messageId,
-                'group_key'        => $groupKey,
-                'invoice_key'      => $entries[0]['invoice_key'] ?: null,
-                'page_count'       => count($entries),
-                'merged_size_bytes' => strlen($merged),
-                'source_filenames' => array_column($entries, 'filename'),
-            ]);
-
-            $rebuilt[] = [
-                'id'                  => null,
-                'filename'            => 'merged-' . ($entries[0]['invoice_key'] !== '' ? $entries[0]['invoice_key'] : $groupKey) . '-' . date('His') . '.pdf',
-                'content_type'        => 'application/pdf',
-                '_prefetched_content' => $merged,
-            ];
-        }
-
-        // Append any non-PDF attachments unchanged so the existing loop still
-        // sees them (it currently always treats attachments as PDFs, but we
-        // preserve them defensively).
-        foreach ($attachments as $idx => $att) {
-            if (! in_array($idx, $pdfIndices, true)) {
-                $rebuilt[] = $att;
-            }
-        }
-
-        return $rebuilt;
     }
 
     protected function resolveAutoReceiptTransactionDate(mixed $rawTransactionDate, string $receiptContent): ?Carbon

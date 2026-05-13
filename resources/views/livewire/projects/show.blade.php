@@ -160,6 +160,13 @@
                             <livewire:projects.project-distributions :project="$project" lazy />
                         </div>
                     @endif
+
+                    @if(in_array($this->project->latestStatus?->title, ['Prep', 'Scheduled', 'Active', 'Complete', 'Service Call', 'VIEW ONLY']))
+                        {{-- LIEN WAIVERS --}}
+                        <div class="col-span-4 order-7">
+                            <livewire:lien-waivers.index :project="$project" lazy />
+                        </div>
+                    @endif
                 @endcan
 
                 @cannot('update', $project)

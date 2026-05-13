@@ -54,7 +54,7 @@ it('renders only selected contract templates for an estimate in the selected ord
         ->and(implode(' ', $bodies))->not->toContain('UNSELECTED BODY');
 });
 
-it('renders no contract templates when none are selected on the estimate', function () {
+it('falls back to the vendor default contract when none are selected on the estimate', function () {
     $vendor = Vendor::withoutGlobalScopes()->create([
         'business_name' => 'Test Vendor LLC',
         'business_type' => 'Sub',
@@ -72,6 +72,32 @@ it('renders no contract templates when none are selected on the estimate', funct
         'project_id' => null,
         'belongs_to_vendor_id' => $vendor->id,
         'options' => [],
+    ]);
+
+    $bodies = EstimateDocumentGenerator::contractBodiesForEstimate($estimate, config('app.timezone'));
+
+    expect($bodies)->toHaveCount(1)
+        ->and($bodies[0])->toContain('DEFAULT CONTRACT BODY');
+});
+
+it('renders no contract templates when the estimate explicitly has none selected', function () {
+    $vendor = Vendor::withoutGlobalScopes()->create([
+        'business_name' => 'Test Vendor LLC',
+        'business_type' => 'Sub',
+    ]);
+
+    EmailTemplate::withoutGlobalScopes()->create([
+        'vendor_id' => $vendor->id,
+        'name' => 'Default Contract',
+        'type' => 'contract',
+        'subject' => null,
+        'body' => '<p>DEFAULT CONTRACT BODY</p>',
+    ]);
+
+    $estimate = Estimate::withoutGlobalScopes()->create([
+        'project_id' => null,
+        'belongs_to_vendor_id' => $vendor->id,
+        'options' => ['contract_template_ids' => []],
     ]);
 
     $bodies = EstimateDocumentGenerator::contractBodiesForEstimate($estimate, config('app.timezone'));

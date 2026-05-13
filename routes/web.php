@@ -64,6 +64,7 @@ use App\Livewire\Timesheets\TimesheetsIndex;
 use App\Livewire\Transactions\MatchVendor;
 use App\Livewire\Users\AdminLoginAsUser;
 use App\Livewire\Users\UserShow;
+use App\Livewire\Agents\AgentsIndex;
 use App\Livewire\VendorDocs\AuditShow;
 use App\Livewire\VendorDocs\VendorDocsIndex;
 use App\Livewire\Vendors\VendorPaymentCreate;
@@ -193,6 +194,9 @@ Route::get('v/{token}', VendorAvailabilityIndex::class)->name('vendor.availabili
 
 // Short URL for client schedule SMS
 Route::get('s/{token}', ClientScheduleIndex::class)->name('client.schedule.short');
+
+// Public lien waiver signing (token-based, no auth)
+Route::get('lw/{token}', \App\Livewire\LienWaivers\Show::class)->name('lien-waivers.public-sign');
 
 
 // Public vendor availability response routes (no auth required)
@@ -398,6 +402,9 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
     Route::get('/audit', AuditShow::class)->name('vendor_docs.audit');
     Route::get('/vendor_docs', VendorDocsIndex::class)->name('vendor_docs.index');
 
+    //INSURANCE AGENTS
+    Route::get('/agents', AgentsIndex::class)->name('agents.index');
+
     //LEADS
     Route::get('/leads', LeadsIndex::class)->name('leads.index');
 
@@ -408,6 +415,11 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
     //CHECKS
     Route::get('/checks', ChecksIndex::class)->name('checks.index');
     Route::get('/checks/{check}', CheckShow::class)->name('checks.show');
+
+    //LIEN WAIVERS
+    Route::get('/lien-waivers', \App\Livewire\LienWaivers\Index::class)->name('lien-waivers.index');
+    Route::get('/lien-waivers/{lienWaiver}', \App\Livewire\LienWaivers\Show::class)->name('lien-waivers.show');
+    Route::get('/lien-waivers/{lienWaiver}/download', [\App\Http\Controllers\LienWaiverController::class, 'download'])->name('lien-waivers.download');
 
     //COMPANY EMAILS
     Route::get('/company_emails', CompanyEmailsIndex::class)->name('company_emails.index');

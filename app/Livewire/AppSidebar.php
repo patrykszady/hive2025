@@ -6,6 +6,7 @@ use App\Models\Bank;
 use App\Models\Check;
 use App\Models\Client;
 use App\Models\CompanyEmail;
+use App\Models\LienWaiver;
 use App\Models\EmailTemplate;
 use App\Models\Expense;
 use App\Models\Hour;
@@ -31,9 +32,9 @@ class AppSidebar extends Component
         });
 
         // Route-dependent state should not be cached — it changes per request.
-        $sidebarData['accountingExpanded'] = request()->is('banks*', 'distributions*', 'sheets*', 'vendors/categories*')
-            || request()->routeIs('banks*', 'distributions*', 'sheets*', 'categories*');
-        $sidebarData['globalActionsExpanded'] = request()->is('transactions/match_vendor');
+        $sidebarData['accountingExpanded'] = request()->is('banks*', 'distributions*', 'sheets*', 'vendors/categories*', 'lien-waivers*')
+            || request()->routeIs('banks*', 'distributions*', 'sheets*', 'categories*', 'lien-waivers*');
+        $sidebarData['globalActionsExpanded'] = request()->is('transactions/match_vendor', 'agents');
         $sidebarData['settingsExpanded'] = request()->is('email_templates*', 'company_emails*', 'vendor_docs*', 'vendor_options*')
             || request()->routeIs('email_templates*', 'company_emails*', 'vendor_docs*', 'vendor_options*');
         // Always set outside cache to handle stale cached entries missing this key.
@@ -77,6 +78,7 @@ class AppSidebar extends Component
             'hasBankErrors' => $hasBankErrors,
             'clientHome' => $clientHome,
             'canViewBanks' => $user->can('viewAny', Bank::class),
+            'canViewLienWaivers' => $user->can('viewAny', LienWaiver::class),
             'canViewLeads' => $user->can('viewAny', Lead::class),
             'canViewExpenses' => $user->can('viewAny', Expense::class) || $user->can('create', Expense::class),
             'canViewPayments' => $user->can('viewAny', Bank::class),
