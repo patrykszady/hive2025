@@ -1,6 +1,56 @@
 import './plaid-link';
 import './timezone';
 import Echo from 'laravel-echo';
+
+// Alpine global store for SMS page state — survives Livewire morphs and component boundaries.
+document.addEventListener('alpine:init', () => {
+    const initialTab = (() => {
+        try { return localStorage.getItem('hive-sms-tab') || 'messages'; } catch (e) { return 'messages'; }
+    })();
+
+    window.Alpine.store('sms', {
+        tab: initialTab,
+        threadId: null,
+        smsOffline: !navigator.onLine,
+        smsCache: null,
+        cacheLoadedAt: null,
+        setTab(value) {
+            this.tab = value;
+            try { localStorage.setItem('hive-sms-tab', value); } catch (e) {}
+        },
+        async loadCache() {
+            try {
+                const res = await fetch('/messages/cache.json', { credentials: 'same-origin' });
+                if (res.ok) {
+                    this.smsCache = await res.json();
+                    this.cacheLoadedAt = Date.now();
+                }
+            } catch (e) { /* offline; SW serves */ }
+        },
+        cachedMessagesForThread(id) {
+            return (this.smsCache && this.smsCache.messages && this.smsCache.messages[id]) || [];
+        },
+        formatCachedTime(iso) {
+            if (!iso) return '';
+            const d = new Date(iso);
+            const now = new Date();
+            if (d.toDateString() === now.toDateString()) {
+                return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+            }
+            return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+        },
+    });
+
+    window.addEventListener('online', () => {
+        const store = window.Alpine.store('sms');
+        store.smsOffline = false;
+        store.loadCache();
+    });
+    window.addEventListener('offline', () => {
+        window.Alpine.store('sms').smsOffline = true;
+    });
+});
+
 import Pusher from 'pusher-js';
 import { Html5Qrcode } from 'html5-qrcode';
 

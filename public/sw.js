@@ -3,7 +3,7 @@
  * Cache version is stamped by `npm run build` so every deploy busts stale assets.
  */
 
-const DEPLOY_VERSION = 'mp3kwch0';
+const DEPLOY_VERSION = 'mp3sgmnq';
 const PAGE_CACHE  = 'hive-pages-' + DEPLOY_VERSION;
 const ASSET_CACHE = 'hive-assets-' + DEPLOY_VERSION;
 
@@ -33,9 +33,16 @@ self.addEventListener('fetch', (event) => {
     const url = new URL(event.request.url);
     if (url.origin !== self.location.origin) return;
 
-    // /messages navigation → network-first, 5 s timeout, cache fallback
+    // /messages navigation → network-first with quick timeout, falls back to
+    // cached /messages HTML (ignoreSearch so ?threadId=X still hits the cache).
     if (event.request.mode === 'navigate' && url.pathname.startsWith('/messages')) {
-        event.respondWith(networkFirst(event.request, PAGE_CACHE, 5000));
+        event.respondWith(messagesNavigation(event.request));
+        return;
+    }
+
+    // Cached threads/messages JSON (used for offline & instant paint)
+    if (url.pathname === '/messages/cache.json') {
+        event.respondWith(staleWhileRevalidate(event.request, PAGE_CACHE));
         return;
     }
 
@@ -46,18 +53,38 @@ self.addEventListener('fetch', (event) => {
     }
 });
 
-async function networkFirst(request, cacheName, timeoutMs) {
-    const cache = await caches.open(cacheName);
+async function messagesNavigation(request) {
+    const cache = await caches.open(PAGE_CACHE);
+    const matchOpts = { ignoreSearch: true };
+
     try {
         const ctrl  = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+        const timer = setTimeout(() => ctrl.abort(), 1500);
         const res   = await fetch(request, { signal: ctrl.signal });
         clearTimeout(timer);
-        if (res.ok) cache.put(request, res.clone());
+        if (res.ok) {
+            // Cache under the bare /messages key so any ?threadId=… request hits.
+            cache.put('/messages', res.clone());
+        }
         return res;
     } catch {
-        return (await cache.match(request)) || offlinePage();
+        const cached = (await cache.match(request, matchOpts))
+                    || (await cache.match('/messages'));
+        return cached || offlinePage();
     }
+}
+
+async function staleWhileRevalidate(request, cacheName) {
+    const cache = await caches.open(cacheName);
+    const cached = await cache.match(request);
+    const network = fetch(request).then((res) => {
+        if (res && res.ok) cache.put(request, res.clone());
+        return res;
+    }).catch(() => null);
+
+    return cached || (await network) || new Response('{}', {
+        headers: { 'Content-Type': 'application/json' },
+    });
 }
 
 async function cacheFirst(request, cacheName) {

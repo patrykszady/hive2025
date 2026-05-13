@@ -36,6 +36,22 @@ class SmsMessage extends Model
         ];
     }
 
+    protected static function booted(): void
+    {
+        // Keep the SmsGroupThread Meili index in sync as conversations evolve.
+        $touch = function (self $message): void {
+            if ($message->thread_id) {
+                $thread = SmsGroupThread::find($message->thread_id);
+                if ($thread) {
+                    $thread->searchable();
+                }
+            }
+        };
+
+        static::saved($touch);
+        static::deleted($touch);
+    }
+
     /**
      * The user who sent this outbound message.
      */
@@ -184,6 +200,9 @@ class SmsMessage extends Model
         'Laughed at' => '😂',
         'Emphasized' => '‼️',
         'Questioned' => '❓',
+        // Newer iOS / RCS reactions (any emoji) — prefix style
+        'Reacted' => null,        // "Reacted 🔥 to ..." — emoji parsed via parseReactedTo()
+        'Emphasised' => '‼️', // British English variant
         // Emoji-prefix variants (e.g. "👍 to" from some carriers/RCS)
         "\u{1F44D} to" => '👍',
         "\u{2764}\u{FE0F} to" => '❤️',
@@ -192,6 +211,14 @@ class SmsMessage extends Model
         "\u{1F602} to" => '😂',
         "\u{203C}\u{FE0F} to" => '‼️',
         "\u{2753} to" => '❓',
+        "\u{1F525} to" => '🔥',     // 🔥 fire
+        "\u{1F389} to" => '🎉',     // 🎉 party
+        "\u{1F44F} to" => '👏',     // 👏 clap
+        "\u{1F4AF} to" => '💯',     // 💯 hundred
+        "\u{1F64F} to" => '🙏',     // 🙏 pray
+        "\u{1F92F} to" => '🤯',     // 🤯 mind blown
+        "\u{1F62D} to" => '😭',     // 😭 crying
+        "\u{1F62E} to" => '😮',     // 😮 wow
         // "Removed" variants (un-react)
         'Removed a like from' => null,
         'Removed a heart from' => null,
@@ -199,6 +226,7 @@ class SmsMessage extends Model
         'Removed a laugh from' => null,
         'Removed an emphasis from' => null,
         'Removed a question from' => null,
+        'Removed a reaction from' => null,
     ];
 
     /**
@@ -211,78 +239,169 @@ class SmsMessage extends Model
     public const REACTION_KEYWORDS = [
         '👍' => [
             'liked', 'like', "j'aime", 'aime', 'aimé',
-            'gustó', 'gusta',                        // Spanish
+            'pouce en haut', 'pouce vers le haut',    // French
+            'gustó', 'gusta', 'pulgar arriba',        // Spanish
             'gefällt', 'daumen hoch',                 // German
-            'curtiu', 'gostou',                       // Portuguese
-            'piace',                                  // Italian
-            'leuk',                                   // Dutch
-            'понравил', 'нравит',                     // Russian
+            'mi piace', 'piace',                      // Italian
+            'curtiu', 'gostou', 'polegar',            // Portuguese
+            'leuk', 'duim omhoog',                    // Dutch
+            'понравил', 'нравит', 'палец вверх',      // Russian
             'いいね',                                  // Japanese
-            '赞',                                      // Chinese
-            '좋아',                                    // Korean
-            'polubi', 'lubię',                        // Polish
-            'أعجب',                                    // Arabic
-            'suka',                                   // Indonesian/Malay
+            '赞', '点赞',                              // Chinese
+            '좋아', '엄지···',                         // Korean
+            'polubi', 'lubię', 'kciuk w gór',         // Polish
+            'أعجب', 'إبهام لأعلى',                    // Arabic
+            'אהבתי', 'אגודל למעלה',                   // Hebrew
+            'pasand', 'पसंद',                         // Hindi
+            'suka', 'jempol',                         // Indonesian/Malay
             'thích',                                  // Vietnamese
             'gillade',                                // Swedish
             'liker',                                  // Norwegian
             'tykkä',                                  // Finnish
             'beğen',                                  // Turkish
+            'kedvel', 'tetszik',                      // Hungarian
+            'líbil', 'palec nahoru',                  // Czech
+            'páčilo',                                 // Slovak
+            'apreciat',                               // Romanian
+            'μου αρέσει',                             // Greek
+            'gostei',                                 // Portuguese (alt)
+            'ถูกใจ',                                 // Thai
         ],
         '❤️' => [
             'loved', 'love', 'cœur', 'coeur', 'adoré',
-            'encantó',                                // Spanish
-            'herz',                                   // German
-            'amou', 'adorou',                         // Portuguese
-            'adorat', 'cuore',                        // Italian
-            'сердц',                                  // Russian
-            'hart',                                   // Dutch
-            '爱',                                      // Chinese
-            '사랑',                                    // Korean
-            'älskat',                                 // Swedish
-            'elsket',                                 // Norwegian
+            'encantó', 'me encant', 'corazón',        // Spanish
+            'herz', 'liebe',                          // German
+            'amou', 'adorou', 'coração',              // Portuguese
+            'adorat', 'cuore', 'amato',               // Italian
+            'сердц', 'полюбил',                       // Russian
+            'hart', 'gehouden',                       // Dutch
+            'serce', 'pokocha',                       // Polish
+            '爱', '心',                                // Chinese
+            '사랑', '하트',                            // Korean
+            'ハート', '愛',                            // Japanese
+            'أحب', 'قلب',                             // Arabic
+            'אהב', 'לב',                              // Hebrew
+            'प्यार', 'dil',                            // Hindi
+            'älskat', 'hjärta',                       // Swedish
+            'elsket', 'hjerte',                       // Norwegian
+            'rakast', 'sydän',                        // Finnish
+            'sevdi', 'kalp',                          // Turkish
+            'szeret', 'szív',                         // Hungarian
+            'miloval', 'srdce',                       // Czech
+            'αγάπησ', 'καρδιά',                       // Greek
+            'iubit', 'inimă',                         // Romanian
+            'หัวใจ', 'รัก',                          // Thai
+            'menyukai', 'mencintai',                  // Indonesian
+            'yêu thích',                              // Vietnamese
         ],
         '👎' => [
             'disliked', 'dislike',
-            'pouce vers le bas',                      // French
-            'no le gustó', 'no me gust',              // Spanish
+            'pouce vers le bas', 'pouce en bas',      // French
+            'no le gustó', 'no me gust', 'pulgar abajo', // Spanish
             'daumen runter',                          // German
-            'não gost',                               // Portuguese
-            'не понравил',                            // Russian
+            'não gost', 'polegar para baixo',         // Portuguese
+            'не понравил', 'палец вниз',              // Russian
             '싫어',                                    // Korean
-            'nie lubi',                               // Polish
-            'ogillade',                               // Swedish
-            '不喜欢',                                  // Chinese
+            'nie lubi', 'kciuk w dół',                // Polish
+            'ogillade', 'tummen ner',                 // Swedish
+            '不喜欢', '差评',                          // Chinese
+            'nesnáš', 'palec dolů',                   // Czech
+            'nevolil',                                // Slovak
+            'δεν μου άρεσε',                          // Greek
+            'tidak suka',                             // Indonesian
         ],
         '😂' => [
-            'laughed', 'laugh', 'ha ha',
-            'rire',                                   // French
-            'reí', 'rió',                             // Spanish
-            'gelacht',                                // German
-            'risata',                                 // Italian
-            'смеял',                                  // Russian
-            '笑',                                      // Chinese/Japanese
+            'laughed', 'laugh', 'ha ha', 'lol',
+            'rire', 'mort de rire', 'mdr',            // French
+            'reí', 'rió', 'reir',                     // Spanish
+            'gelacht', 'lustig',                      // German
+            'risata', 'rise',                         // Italian
+            'riu', 'engraçado',                       // Portuguese
+            'смеял', 'смешно',                        // Russian
+            '笑', '呵呵',                              // Chinese/Japanese
             '웃',                                      // Korean
             'skrattat',                               // Swedish
-            'śmiech',                                 // Polish
+            'śmiech', 'śmieje', 'ha ha ha',           // Polish
+            'gül', 'kahkaha',                         // Turkish
+            'nevetett',                               // Hungarian
+            'smál',                                   // Czech
+            'γέλασ',                                  // Greek
+            'ضحك',                                    // Arabic
+            'צחק',                                    // Hebrew
+            'tertawa',                                // Indonesian
+            'cười',                                   // Vietnamese
+            'หัวเราะ',                               // Thai
         ],
         '‼️' => [
-            'emphasized', 'emphasis',
-            'exclamation',                            // French
-            'enfatiz',                                // Spanish/Italian
-            'betont',                                 // German
-            'выделил',                                // Russian
-            '感叹',                                    // Chinese
+            'emphasized', 'emphasised', 'emphasis',
+            'exclamation', 'souligné',                // French
+            'enfatiz', 'énfasis',                     // Spanish/Italian
+            'betont', 'hervorgehoben',                // German
+            'выделил', 'акцент',                      // Russian
+            'wykrzyknik', 'podkreśli',                // Polish
+            '感叹', '强调',                            // Chinese
             '강조',                                    // Korean
+            'vurgu',                                  // Turkish
+            'הדגיש',                                  // Hebrew
+            'أكد',                                    // Arabic
+            'เน้น',                                  // Thai
         ],
         '❓' => [
             'questioned', 'question',
             'pregunt',                                // Spanish
             'gefragt',                                // German
-            'domanda',                                // Italian
-            'вопрос',                                 // Russian
-            '疑问',                                    // Chinese
+            'domanda', 'chiest',                      // Italian
+            'perguntou',                              // Portuguese
+            'demandé',                                // French
+            'вопрос', 'спросил',                      // Russian
+            'znak zapytania', 'zapytał',              // Polish
+            '疑问', '问号',                            // Chinese
             '질문',                                    // Korean
+            '質問',                                    // Japanese
+            'soru', 'sord',                           // Turkish
+            'שאל',                                    // Hebrew
+            'سؤال',                                   // Arabic
+            'ถาม',                                   // Thai
+        ],
+        '🔥' => [   // 🔥 fire / lit
+            'fire', 'lit', 'feu', 'fuego', 'fogo',
+            'feuer', 'fuoco', '火', 'файер', 'огонь',
+            'ogień', 'płomień',                       // Polish
+        ],
+        '🎉' => [   // 🎉 party / celebrate
+            'celebrated', 'celebrate', 'congrats', 'party',
+            'fête', 'fiesta', 'festa', 'feier',
+            'gratulacje', 'гратулем', 'ฉลอง',
+        ],
+        '👏' => [   // 👏 clap / applaud
+            'clap', 'applauded', 'applause', 'bravo',
+            'aplaud', 'klatsch', 'aplauso', '鼓掌',
+            'oklaski', 'מחיאת כפיים',
+        ],
+        '💯' => [   // 💯 hundred
+            '100', 'hundred', 'cent pourcent', 'cien por cien',
+            'sto procent',
+        ],
+        '🙏' => [   // 🙏 pray / thanks
+            'pray', 'prayed', 'thanks', 'thank you',
+            'merci', 'gracias', 'obrigad', 'danke',
+            'dzięki', 'spasibo', 'спасибо', '谢谢', '感谢',
+            'شكرا', 'todah', 'תודה',
+        ],
+        '🤯' => [   // 🤯 mind blown / wow
+            'mind blown', 'mindblown',
+            'increíble', 'incredibile', 'unglaublich',
+            'niesamowite',
+        ],
+        '😭' => [   // 😭 sad / crying
+            'sad', 'crying', 'cried',
+            'triste', 'traurig', 'piango', 'chor',
+            'smutne', 'płacz', 'grăć', '哭', '울',
+        ],
+        '😮' => [   // 😮 wow / surprised
+            'wow', 'surprised', 'étonn',
+            'sorprend', 'überrasch',
+            'zaskoczon',
         ],
     ];
 
@@ -347,6 +466,16 @@ class SmsMessage extends Model
             }
         }
 
+        // Reacted <emoji> to "..." — newer RCS/iOS arbitrary-emoji format.
+        // The emoji sits between the prefix and the "to ..." segment.
+        if (preg_match('/^Reacted\s+(\X)\s+to\s+[\x{201c}"](.*?)[\x{201d}"]\s*$/su', $text, $matches)) {
+            return [
+                'reaction' => 'Reacted '.$matches[1],
+                'emoji' => $matches[1],
+                'quoted' => $matches[2],
+            ];
+        }
+
         // Generic multi-language fallback: extract quoted text from Unicode quotation
         // marks and match reaction keywords across many languages.
         return self::parseGenericTapback($text);
@@ -366,7 +495,8 @@ class SmsMessage extends Model
         $quoteStyles = [
             ["\u{201c}", "\u{201d}"],  // \u{201c}\u{201d} English/general curly
             ["\u{00ab}", "\u{00bb}"],  // \u{00ab}\u{00bb} French/Russian guillemets
-            ["\u{201e}", "\u{201c}"],  // \u{201e}\u{201c} German/Polish low-high
+            ["\u{201e}", "\u{201c}"],  // \u{201e}\u{201c} German low-high
+            ["\u{201e}", "\u{201d}"],  // \u{201e}\u{201d} Polish low-right
             ["\u{300c}", "\u{300d}"],  // \u{300c}\u{300d} CJK corner brackets
         ];
 
@@ -490,6 +620,14 @@ class SmsMessage extends Model
             "\u{203C}\u{FE0F}" => '‼️',
             "\u{203C}" => '‼️',
             "\u{2753}" => '❓',
+            "\u{1F525}" => '🔥',
+            "\u{1F389}" => '🎉',
+            "\u{1F44F}" => '👏',
+            "\u{1F4AF}" => '💯',
+            "\u{1F64F}" => '🙏',
+            "\u{1F92F}" => '🤯',
+            "\u{1F62D}" => '😭',
+            "\u{1F62E}" => '😮',
         ];
         foreach ($emojiMap as $char => $mappedEmoji) {
             if (str_contains($text, $char)) {

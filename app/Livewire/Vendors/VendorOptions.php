@@ -38,6 +38,7 @@ class VendorOptions extends Component
     public string $ivr_press1_message = '';
     public string $ivr_press2_message = '';
     public string $voicemail_greeting = '';
+    public string $spam_message = '';
 
     /** Business hours — drive after-hours call routing and default user notification window. */
     public string $business_hours_start = '07:00';
@@ -53,6 +54,7 @@ class VendorOptions extends Component
     public const DEFAULT_IVR_PRESS1 = "{name}, no problem! Let me try connecting you again. I also texted you emergency numbers in case you cannot get through again.";
     public const DEFAULT_IVR_PRESS2 = "Got it! We've sent a message to {company} letting them know you called. They should be reaching out to you shortly. Take care!";
     public const DEFAULT_VOICEMAIL_GREETING = "{greeting} {name}, you've reached {company}. We can't get to the phone right now, but leave us a message after the beep and we'll get back to you shortly.";
+    public const DEFAULT_SPAM = "Your call has been identified as spam and will not ring through. If this is not a spam call, please press 2 to send a text on your behalf so the {company} crew knows to call you back as soon as possible. Or stay on the line to leave a voicemail.";
 
     /** @var \Illuminate\Support\Collection<\App\Models\User> Available admin users with cell phones */
     public $adminUsersWithPhones;
@@ -104,6 +106,7 @@ class VendorOptions extends Component
         $this->ivr_press1_message = data_get($this->vendor->options, 'ivr_press1_message', '') ?: self::DEFAULT_IVR_PRESS1;
         $this->ivr_press2_message = data_get($this->vendor->options, 'ivr_press2_message', '') ?: self::DEFAULT_IVR_PRESS2;
         $this->voicemail_greeting = data_get($this->vendor->options, 'voicemail_greeting', '') ?: self::DEFAULT_VOICEMAIL_GREETING;
+        $this->spam_message = data_get($this->vendor->options, 'spam_message', '') ?: self::DEFAULT_SPAM;
 
         $hours = $this->vendor->businessHours();
         $this->business_hours_start = $hours['start'];
@@ -135,6 +138,7 @@ class VendorOptions extends Component
             'ivr_press1_message' => 'nullable|string|max:500',
             'ivr_press2_message' => 'nullable|string|max:500',
             'voicemail_greeting' => 'nullable|string|max:500',
+            'spam_message' => 'nullable|string|max:500',
             'business_hours_start' => 'required|date_format:H:i',
             'business_hours_end' => 'required|date_format:H:i|after:business_hours_start',
             'business_hours_days' => 'array',
@@ -171,6 +175,7 @@ class VendorOptions extends Component
         $options['ivr_press1_message'] = $this->ivr_press1_message ?: null;
         $options['ivr_press2_message'] = $this->ivr_press2_message ?: null;
         $options['voicemail_greeting'] = $this->voicemail_greeting ?: null;
+        $options['spam_message'] = $this->spam_message ?: null;
         $options['business_hours_start'] = $this->business_hours_start;
         $options['business_hours_end'] = $this->business_hours_end;
         $options['business_hours_days'] = array_values(array_map('intval', $this->business_hours_days));
@@ -256,6 +261,7 @@ class VendorOptions extends Component
             'ivr_press1' => $this->ivr_press1_message ?: self::DEFAULT_IVR_PRESS1,
             'ivr_press2' => $this->ivr_press2_message ?: self::DEFAULT_IVR_PRESS2,
             'voicemail_greeting' => $this->voicemail_greeting ?: self::DEFAULT_VOICEMAIL_GREETING,
+            'spam' => $this->spam_message ?: self::DEFAULT_SPAM,
             default => '',
         };
 

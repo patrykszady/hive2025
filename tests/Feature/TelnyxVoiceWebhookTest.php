@@ -265,6 +265,272 @@ it('re-loops ringback for click-to-call waiting', function () {
     });
 });
 
+it('dials all click-to-call targets when target_phones are provided', function () {
+    $caller = User::factory()->create([
+        'first_name' => 'Patryk',
+        'cell_phone' => '2249993880',
+    ]);
+
+    $callLog = CallLog::factory()->create([
+        'status' => CallLog::STATUS_INITIATED,
+        'user_id' => $caller->id,
+        'metadata' => ['type' => 'click_to_call_multi'],
+    ]);
+
+    app()->forgetInstance('Illuminate\\Http\\Client\\Factory');
+    Http::swap(new \Illuminate\Http\Client\Factory());
+    Http::fake([
+        'api.telnyx.com/v2/calls' => Http::sequence()
+            ->push(['data' => ['call_control_id' => 'target-cc-1']], 200)
+            ->push(['data' => ['call_control_id' => 'target-cc-2']], 200),
+        'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
+    ]);
+
+    $response = $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.answered',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'user-cc-id',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'click_to_call',
+                    'call_log_id' => $callLog->id,
+                    'target_phones' => ['+12245550101', '+12245550102'],
+                ])),
+            ],
+        ],
+    ]);
+
+    $response->assertSuccessful();
+
+    Http::assertSent(function ($request) {
+        if (! str_ends_with($request->url(), '/v2/calls') || $request->method() !== 'POST') {
+            return false;
+        }
+
+        return ($request->data()['to'] ?? null) === '+12245550101';
+    });
+
+    Http::assertSent(function ($request) {
+        if (! str_ends_with($request->url(), '/v2/calls') || $request->method() !== 'POST') {
+            return false;
+        }
+
+        return ($request->data()['to'] ?? null) === '+12245550102';
+    });
+
+    $callLog->refresh();
+    expect($callLog->metadata['target_call_control_ids'] ?? [])->toBe(['target-cc-1', 'target-cc-2']);
+});
+
+it('keeps sibling click-to-call legs ringing so they can join when they answer', function () {
+    $callLog = CallLog::factory()->create([
+        'status' => CallLog::STATUS_ANSWERED,
+        'metadata' => [
+            'type' => 'click_to_call_multi',
+            'target_call_control_ids' => ['target-cc-1', 'target-cc-2'],
+        ],
+    ]);
+
+    app()->forgetInstance('Illuminate\\Http\\Client\\Factory');
+    Http::swap(new \Illuminate\Http\Client\Factory());
+    Http::fake([
+        'api.telnyx.com/v2/conferences' => Http::response([
+            'data' => [
+                'id' => 'conf-123',
+            ],
+        ], 200),
+        'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
+    ]);
+
+    $firstAnswer = $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.answered',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'target-cc-1',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'click_to_call_target_ring',
+                    'call_log_id' => $callLog->id,
+                    'user_call_control_id' => 'user-cc-id',
+                ])),
+            ],
+        ],
+    ]);
+
+    $firstAnswer->assertSuccessful();
+
+    Http::assertSent(function ($request) {
+        return str_ends_with($request->url(), '/v2/conferences')
+            && ($request->data()['call_control_id'] ?? null) === 'user-cc-id';
+    });
+
+    Http::assertSent(function ($request) {
+        return str_contains($request->url(), '/v2/conferences/conf-123/actions/join')
+            && ($request->data()['call_control_id'] ?? null) === 'target-cc-1';
+    });
+
+    Http::assertNotSent(function ($request) {
+        return str_contains($request->url(), 'target-cc-2/actions/hangup');
+    });
+
+    $secondAnswer = $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.answered',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'target-cc-2',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'click_to_call_target_ring',
+                    'call_log_id' => $callLog->id,
+                    'user_call_control_id' => 'user-cc-id',
+                ])),
+            ],
+        ],
+    ]);
+
+    $secondAnswer->assertSuccessful();
+
+    Http::assertSent(function ($request) {
+        return str_contains($request->url(), '/v2/conferences/conf-123/actions/join')
+            && ($request->data()['call_control_id'] ?? null) === 'target-cc-2';
+    });
+
+    $callLog->refresh();
+    expect($callLog->status)->toBe(CallLog::STATUS_TRANSFERRED);
+    expect($callLog->metadata['answered_target_call_control_id'] ?? null)->toBe('target-cc-1');
+    expect($callLog->metadata['conference_id'] ?? null)->toBe('conf-123');
+    expect($callLog->metadata['joined_target_call_control_ids'] ?? [])->toContain('target-cc-1', 'target-cc-2');
+});
+
+it('waits for remaining click-to-call targets before playing failure message', function () {
+    $callLog = CallLog::factory()->create([
+        'status' => CallLog::STATUS_ANSWERED,
+        'metadata' => [
+            'type' => 'click_to_call_multi',
+            'target_call_control_ids' => ['target-cc-1', 'target-cc-2'],
+            'failed_target_call_control_ids' => [],
+        ],
+    ]);
+
+    app()->forgetInstance('Illuminate\\Http\\Client\\Factory');
+    Http::swap(new \Illuminate\Http\Client\Factory());
+    Http::fake([
+        'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
+    ]);
+
+    $response = $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.hangup',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'target-cc-1',
+                'hangup_cause' => 'timeout',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'click_to_call_target_ring',
+                    'call_log_id' => $callLog->id,
+                    'user_call_control_id' => 'user-cc-id',
+                ])),
+            ],
+        ],
+    ]);
+
+    $response->assertSuccessful();
+
+    Http::assertNotSent(function ($request) {
+        return str_contains($request->url(), 'user-cc-id/actions/speak');
+    });
+
+    $callLog->refresh();
+    expect($callLog->status)->toBe(CallLog::STATUS_ANSWERED);
+    expect($callLog->metadata['failed_target_call_control_ids'] ?? [])->toContain('target-cc-1');
+});
+
+it('plays failure message after final click-to-call target fails', function () {
+    $callLog = CallLog::factory()->create([
+        'status' => CallLog::STATUS_ANSWERED,
+        'metadata' => [
+            'type' => 'click_to_call_multi',
+            'target_call_control_ids' => ['target-cc-1', 'target-cc-2'],
+            'failed_target_call_control_ids' => ['target-cc-1'],
+        ],
+    ]);
+
+    app()->forgetInstance('Illuminate\\Http\\Client\\Factory');
+    Http::swap(new \Illuminate\Http\Client\Factory());
+    Http::fake([
+        'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
+    ]);
+
+    $response = $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.hangup',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'target-cc-2',
+                'hangup_cause' => 'timeout',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'click_to_call_target_ring',
+                    'call_log_id' => $callLog->id,
+                    'user_call_control_id' => 'user-cc-id',
+                ])),
+            ],
+        ],
+    ]);
+
+    $response->assertSuccessful();
+
+    Http::assertSent(function ($request) {
+        return str_contains($request->url(), 'user-cc-id/actions/speak');
+    });
+
+    $callLog->refresh();
+    expect($callLog->status)->toBe(CallLog::STATUS_MISSED);
+});
+
+it('keeps click-to-call active when one joined target hangs up but another joined target remains', function () {
+    $callLog = CallLog::factory()->create([
+        'status' => CallLog::STATUS_TRANSFERRED,
+        'answered_at' => now()->subSeconds(20),
+        'metadata' => [
+            'type' => 'click_to_call_multi',
+            'conference_id' => 'conf-123',
+            'target_call_control_ids' => ['target-cc-1', 'target-cc-2'],
+            'joined_target_call_control_ids' => ['target-cc-1', 'target-cc-2'],
+            'answered_target_call_control_id' => 'target-cc-1',
+        ],
+    ]);
+
+    app()->forgetInstance('Illuminate\\Http\\Client\\Factory');
+    Http::swap(new \Illuminate\Http\Client\Factory());
+    Http::fake([
+        'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
+    ]);
+
+    $response = $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.hangup',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'target-cc-1',
+                'hangup_cause' => 'normal_clearing',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'click_to_call_target_ring',
+                    'call_log_id' => $callLog->id,
+                    'user_call_control_id' => 'user-cc-id',
+                ])),
+            ],
+        ],
+    ]);
+
+    $response->assertSuccessful();
+
+    $callLog->refresh();
+    expect($callLog->status)->toBe(CallLog::STATUS_TRANSFERRED);
+    expect($callLog->metadata['joined_target_call_control_ids'] ?? [])->toBe(['target-cc-2']);
+    expect($callLog->ended_at)->toBeNull();
+});
+
 // =========================================================================
 // Issue #2: TTS should not use CNAM reverse-lookup names for unknown callers
 // =========================================================================
@@ -692,6 +958,102 @@ it('late admin answering plays screening prompt then on speak.ended joins existi
 
     $callLog->refresh();
     expect($callLog->metadata['joined_admin_ids'] ?? [])->toContain($second->id);
+});
+
+it('keeps other GS recipients ringing after first answer and allows late join', function () {
+    $first = User::factory()->create([
+        'first_name' => 'Patryk',
+        'cell_phone' => '2249993880',
+    ]);
+
+    $second = User::factory()->create([
+        'first_name' => 'Mary',
+        'cell_phone' => '2249991111',
+    ]);
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_ANSWERED,
+        'caller_name' => 'Bob Smith',
+        'metadata' => [
+            'admin_call_control_ids' => ['admin-cc-1', 'admin-cc-2'],
+            'tts_complete' => true,
+            'joined_admin_ids' => [],
+        ],
+    ]);
+
+    app()->forgetInstance('Illuminate\\Http\\Client\\Factory');
+    Http::swap(new \Illuminate\Http\Client\Factory());
+    Http::fake([
+        'api.telnyx.com/v2/conferences' => Http::response(['data' => ['id' => 'conf-uuid-join']], 200),
+        'api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200),
+    ]);
+
+    // First admin answers and confirms screening.
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.speak.ended',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'admin-cc-1',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'admin_screen_done',
+                    'call_log_id' => $callLog->id,
+                    'incoming_call_control_id' => 'incoming-cc',
+                    'admin_user_id' => $first->id,
+                    'conference_id' => null,
+                ])),
+            ],
+        ],
+    ])->assertSuccessful();
+
+    // No sibling hangup should be sent to still-ringing admin-cc-2.
+    Http::assertNotSent(function ($request) {
+        return str_contains($request->url(), 'admin-cc-2/actions/hangup');
+    });
+
+    // Late answerer still gets screening prompt, then joins existing conference.
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.answered',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'admin-cc-2',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'admin_ring',
+                    'call_log_id' => $callLog->id,
+                    'incoming_call_control_id' => 'incoming-cc',
+                    'admin_user_id' => $second->id,
+                ])),
+            ],
+        ],
+    ])->assertSuccessful();
+
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.speak.ended',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'admin-cc-2',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'admin_screen_done',
+                    'call_log_id' => $callLog->id,
+                    'incoming_call_control_id' => 'incoming-cc',
+                    'admin_user_id' => $second->id,
+                    'conference_id' => 'conf-uuid-join',
+                ])),
+            ],
+        ],
+    ])->assertSuccessful();
+
+    Http::assertSent(function ($request) {
+        return str_contains($request->url(), '/v2/conferences/conf-uuid-join/actions/join')
+            && ($request->data()['call_control_id'] ?? null) === 'admin-cc-2';
+    });
+
+    $callLog->refresh();
+    expect($callLog->metadata['joined_admin_ids'] ?? [])->toContain($first->id, $second->id);
+    expect($callLog->status)->toBe(CallLog::STATUS_TRANSFERRED);
 });
 
 it('DTMF 9 from a joined admin invites only not-yet-joined recipients', function () {
@@ -1220,6 +1582,62 @@ it('routes the caller to voicemail when the only joined admin hangs up after ent
     expect($callLog->metadata['admin_call_control_ids'] ?? [])->toBeEmpty();
 });
 
+it('does not route to voicemail when a joined admin hangs up but another recipient is still ringing', function () {
+    $joinedAdmin = User::factory()->create([
+        'first_name' => 'Patryk',
+        'cell_phone' => '2249993880',
+    ]);
+
+    $ringingAdmin = User::factory()->create([
+        'first_name' => 'Alex',
+        'cell_phone' => '2249993881',
+    ]);
+
+    $callLog = CallLog::factory()->create([
+        'call_control_id' => 'incoming-cc',
+        'status' => CallLog::STATUS_TRANSFERRED,
+        'caller_name' => 'Bob Smith',
+        'metadata' => [
+            'admin_call_control_ids' => ['admin-cc-1', 'admin-cc-2'],
+            'joined_admin_ids' => [$joinedAdmin->id],
+            'conference_id' => 'conf-uuid-123',
+            'conference_name' => 'call_999_test',
+            'tts_complete' => true,
+        ],
+    ]);
+
+    app()->forgetInstance('Illuminate\\Http\\Client\\Factory');
+    Http::swap(new \Illuminate\Http\Client\Factory());
+    Http::fake(['api.telnyx.com/*' => Http::response(['data' => ['result' => 'ok']], 200)]);
+
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.hangup',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'admin-cc-1',
+                'hangup_cause' => 'normal_clearing',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'admin_screen',
+                    'call_log_id' => $callLog->id,
+                    'incoming_call_control_id' => 'incoming-cc',
+                    'admin_user_id' => $joinedAdmin->id,
+                ])),
+            ],
+        ],
+    ])->assertSuccessful();
+
+    // Caller should NOT be moved to voicemail while another recipient is still ringing.
+    Http::assertNotSent(function ($request) {
+        return str_contains($request->url(), 'incoming-cc/actions/gather_using_speak');
+    });
+
+    $callLog->refresh();
+    expect($callLog->status)->toBe(CallLog::STATUS_TRANSFERRED);
+    expect($callLog->metadata['joined_admin_ids'] ?? [])->toBeEmpty();
+    expect($callLog->metadata['admin_call_control_ids'] ?? [])->toBe(['admin-cc-2']);
+});
+
 it('sends Azure TTS as SSML with friendly style and trailing break to avoid clipping', function () {
     config([
         'services.telnyx.tts_voice' => 'Azure.en-US-AvaMultilingualNeural',
@@ -1578,5 +1996,80 @@ it('plays the welcome message normally when call answered within business hours'
     });
 
     \Carbon\Carbon::setTestNow();
+});
+
+// =========================================================================
+// Spam call → answer + voicemail prompt (instead of hangup)
+// =========================================================================
+
+it('answers spam-flagged calls and routes them through the voicemail IVR instead of hanging up', function () {
+    // Flag the caller as blocked so the spam filter trips.
+    \App\Models\BlockedCaller::create([
+        'phone_number' => '+19998887777',
+        'vendor_id' => null,
+        'reason' => 'manual',
+        'auto_blocked' => false,
+    ]);
+
+    $this->vendor->update(['options' => (object) [
+        'short_name' => 'GS Construction',
+        'call_recipients' => [],
+        'voicemail_enabled' => true,
+        'spam_message' => 'Your call has been identified as spam. Press 2 to send a text or stay on the line for voicemail.',
+    ]]);
+
+    // call.initiated → should answer with action=spam_voicemail (NOT hangup)
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.initiated',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'spam-cc-id',
+                'direction' => 'incoming',
+                'from' => '+19998887777',
+                'to' => '+12247354200',
+                'call_session_id' => 'spam-session',
+                'call_leg_id' => 'spam-leg',
+                'connection_id' => 'spam-conn',
+            ],
+        ],
+    ])->assertSuccessful();
+
+    Http::assertNotSent(fn ($r) => str_contains($r->url(), 'spam-cc-id/actions/hangup'));
+    Http::assertSent(function ($r) {
+        if (! str_contains($r->url(), 'spam-cc-id/actions/answer')) {
+            return false;
+        }
+        $cs = json_decode(base64_decode($r['client_state']), true);
+        return ($cs['action'] ?? null) === 'spam_voicemail';
+    });
+
+    expect(CallLog::where('call_control_id', 'spam-cc-id')->value('status'))->toBe(CallLog::STATUS_BLOCKED);
+
+    $callLog = CallLog::where('call_control_id', 'spam-cc-id')->first();
+
+    // call.answered → should fire gather_using_speak with the spam prompt and valid_digits='2'
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.answered',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'spam-cc-id',
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'spam_voicemail',
+                    'call_log_id' => $callLog->id,
+                    'original_caller' => '+19998887777',
+                ])),
+            ],
+        ],
+    ])->assertSuccessful();
+
+    Http::assertSent(function ($r) {
+        if (! str_contains($r->url(), 'spam-cc-id/actions/gather_using_speak')) {
+            return false;
+        }
+        return ($r['valid_digits'] ?? null) === '2'
+            && str_contains((string) ($r['payload'] ?? ''), 'identified as spam');
+    });
 });
 

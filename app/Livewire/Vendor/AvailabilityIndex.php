@@ -193,6 +193,35 @@ class AvailabilityIndex extends Component
     }
 
     /**
+     * Revert a confirmed task back to pending/requested for this vendor.
+     */
+    public function markPending(int $taskId): void
+    {
+        $task = Task::where('id', $taskId)
+            ->where('vendor_id', $this->vendorId)
+            ->where('vendor_status', Task::VENDOR_STATUS_CONFIRMED)
+            ->first();
+
+        if (! $task) {
+            Flux::toast(
+                text: 'Task not found or no longer confirmed.',
+                variant: 'danger',
+            );
+
+            return;
+        }
+
+        $task->update([
+            'vendor_status' => Task::VENDOR_STATUS_REQUESTED,
+        ]);
+
+        Flux::toast(
+            text: "You marked \"{$task->title}\" as not available.",
+            variant: 'success',
+        );
+    }
+
+    /**
      * Open the date proposal modal for a task.
      */
     public function openProposeDatesModal(int $taskId): void

@@ -64,10 +64,8 @@
                 Notification.requestPermission();
             }
         },
-        smsOffline: !navigator.onLine,
         initOfflineHandler() {
-            window.addEventListener('online', () => { this.smsOffline = false; });
-            window.addEventListener('offline', () => { this.smsOffline = true; });
+            const store = Alpine.store('sms');
 
             // Suppress Livewire error dialogs when offline
             if (window.Livewire) {
@@ -77,6 +75,12 @@
                     });
                 });
             }
+
+            // Prime cache on mount + refresh every 30s while page is visible.
+            store.loadCache();
+            setInterval(() => {
+                if (!document.hidden && navigator.onLine) store.loadCache();
+            }, 30000);
         },
     }"
     x-on:click.window.once="ensureAudioContext()"
@@ -87,6 +91,13 @@
             initialized = true;
             originalTitle = document.title;
             requestNotificationPermission();
+
+            // Seed the global SMS store from server values (only on first mount).
+            const store = Alpine.store('sms');
+            store.threadId = @js($threadId);
+            // Server-side preference wins only if no local preference exists.
+            const lsTab = (() => { try { return localStorage.getItem('hive-sms-tab'); } catch (e) { return null; } })();
+            if (! lsTab) store.setTab(@js($activeTab));
 
             window.addEventListener('sms-incoming', () => notifyIncoming());
             window.addEventListener('focus', () => stopFlashing());
@@ -135,30 +146,43 @@
     </script>
 
     {{-- Offline indicator --}}
-    <div x-show="smsOffline" x-cloak class="w-full bg-amber-50 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 text-xs text-center py-1.5 px-3 rounded-lg mb-2 lg:col-span-full">
+    <div x-show="$store.sms.smsOffline" x-cloak class="w-full bg-amber-50 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 text-xs text-center py-1.5 px-3 rounded-lg mb-2 lg:col-span-full">
         <span class="font-medium">Offline</span> — showing cached messages
     </div>
 
     {{-- Thread List - Hidden on mobile when thread is selected --}}
-    <div class="w-full lg:w-80 shrink-0 min-w-0 min-h-0 max-w-md mx-auto lg:mx-0 lg:max-w-none lg:flex lg:flex-col {{ $threadId && $activeTab === 'messages' ? 'hidden lg:flex' : '' }}">
+    <div
+        x-on:sms-set-tab.window="$store.sms.setTab($event.detail); $wire.$set('activeTab', $event.detail, false)"
+        x-on:thread-selected.window="$store.sms.threadId = $event.detail.threadId"
+        class="w-full lg:w-80 shrink-0 min-w-0 min-h-0 max-w-md mx-auto lg:mx-0 lg:max-w-none lg:flex lg:flex-col"
+        x-bind:class="($store.sms.threadId && $store.sms.tab === 'messages') ? 'hidden lg:flex' : ''"
+    >
         <x-island-card class="flex flex-col h-full min-h-0 overflow-hidden">
             {{-- Tabs --}}
             @if (! $isClientUser)
                 <div class="flex items-center justify-between">
-                    <flux:tabs wire:model.live="activeTab" variant="segmented" size="sm">
-                        <flux:tab name="messages">Messages</flux:tab>
-                        <flux:tab name="calls">Calls</flux:tab>
-                    </flux:tabs>
+                    {{-- Alpine-driven tab switching: instant, no server roundtrip --}}
+                    <div class="inline-flex rounded-lg bg-zinc-100 dark:bg-zinc-800 p-0.5">
+                        <button type="button"
+                            x-on:click="$store.sms.setTab('messages'); $wire.$set('activeTab', 'messages', false)"
+                            x-bind:class="$store.sms.tab === 'messages' ? 'bg-white dark:bg-zinc-700 shadow text-zinc-900 dark:text-zinc-100' : 'text-zinc-500 dark:text-zinc-400'"
+                            class="px-3 py-1 text-sm font-medium rounded-md transition-colors">
+                            Messages
+                        </button>
+                        <button type="button"
+                            x-on:click="$store.sms.setTab('calls'); $wire.$set('activeTab', 'calls', false)"
+                            x-bind:class="$store.sms.tab === 'calls' ? 'bg-white dark:bg-zinc-700 shadow text-zinc-900 dark:text-zinc-100' : 'text-zinc-500 dark:text-zinc-400'"
+                            class="px-3 py-1 text-sm font-medium rounded-md transition-colors">
+                            Calls
+                        </button>
+                    </div>
 
-                    @if ($activeTab === 'messages')
-                        <flux:button size="sm" wire:click="$dispatchTo('sms.sms-new-thread', 'openNewThread')" icon="plus">
-                            New
-                        </flux:button>
-                    @else
-                        <flux:button size="sm" wire:click="$dispatchTo('sms.call-list', 'openNewCall')" icon="phone">
-                            Call
-                        </flux:button>
-                    @endif
+                    <flux:button x-show="$store.sms.tab === 'messages'" size="sm" wire:click="$dispatchTo('sms.sms-new-thread', 'openNewThread')" icon="plus">
+                        New
+                    </flux:button>
+                    <flux:button x-show="$store.sms.tab === 'calls'" x-cloak size="sm" wire:click="$dispatchTo('sms.call-list', 'openNewCall')" icon="phone">
+                        Call
+                    </flux:button>
                 </div>
             @else
                 <div class="flex items-center justify-between mb-3">
@@ -166,7 +190,7 @@
                 </div>
             @endif
 
-            <div class="{{ $activeTab === 'messages' ? 'flex flex-col flex-1 min-h-0' : 'hidden' }}">
+            <div x-show="$store.sms.tab === 'messages'" class="flex flex-col flex-1 min-h-0">
                 @if (! $isClientUser)
                     <div class="mb-2">
                         <flux:tabs wire:model.live="subjectFilter" variant="segmented" size="sm">
@@ -182,11 +206,30 @@
                 </div>
 
                 <div class="flex-1 min-h-0">
-                    <livewire:sms.sms-thread-list :search="$search" :subject-filter="$subjectFilter" :selected-thread-id="$threadId" :is-client-user="$isClientUser" />
+                    {{-- Offline cached read-only thread list (rendered when network is down) --}}
+                    <div x-show="$store.sms.smsOffline && $store.sms.smsCache" x-cloak class="space-y-1 h-full overflow-y-auto">
+                        <template x-for="t in ($store.sms.smsCache?.threads || [])" :key="t.id">
+                            <a x-bind:href="'/messages?threadId=' + t.id"
+                               class="block w-full text-left px-3 py-2.5 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800">
+                                <p class="text-base lg:text-sm font-medium truncate text-zinc-900 dark:text-zinc-100"
+                                   x-text="t.client?.name || t.subject_vendor?.name || t.project?.address || (t.participants || []).join(', ') || 'Group Message'"></p>
+                                <p x-show="t.latest_message" class="text-sm lg:text-xs text-zinc-400 truncate mt-0.5">
+                                    <span x-show="t.latest_message?.sent_by" x-text="(t.latest_message?.sent_by || '') + ': '"></span><span x-text="(t.latest_message?.text || '').slice(0, 60)"></span>
+                                </p>
+                                <p class="text-xs text-zinc-400 mt-0.5" x-text="$store.sms.formatCachedTime(t.last_activity_at)"></p>
+                            </a>
+                        </template>
+                        <p x-show="!($store.sms.smsCache?.threads || []).length" class="text-center text-sm text-zinc-400 py-8">No cached conversations</p>
+                    </div>
+
+                    {{-- Live Livewire thread list (hidden when offline so cache isn't covered) --}}
+                    <div x-show="!$store.sms.smsOffline" class="h-full">
+                        <livewire:sms.sms-thread-list :search="$search" :subject-filter="$subjectFilter" :selected-thread-id="$threadId" :is-client-user="$isClientUser" />
+                    </div>
                 </div>
             </div>
 
-            <div class="{{ $activeTab === 'calls' ? 'flex flex-col flex-1 min-h-0' : 'hidden' }}">
+            <div x-show="$store.sms.tab === 'calls'" x-cloak class="flex flex-col flex-1 min-h-0">
                 <div class="flex-1 min-h-0 h-full">
                     <livewire:sms.call-list />
                 </div>
@@ -196,7 +239,9 @@
 
     {{-- Conversation - Hidden on mobile when no thread selected, fully hidden on calls tab --}}
     <div id="sms-convo-wrap"
-        class="relative flex-1 min-w-0 flex flex-col min-h-0 max-w-md mx-auto lg:mx-0 lg:max-w-none {{ $activeTab === 'calls' ? 'hidden' : (!$threadId ? 'hidden lg:block' : '') }}">
+        x-on:thread-selected.window="$store.sms.threadId = $event.detail.threadId"
+        x-show="$store.sms.tab !== 'calls' && ($store.sms.threadId || window.matchMedia('(min-width: 1024px)').matches)"
+        class="relative flex-1 min-w-0 flex flex-col min-h-0 max-w-md mx-auto lg:mx-0 lg:max-w-none">
         <div class="flex-1 min-h-0 flex flex-col">
             <livewire:sms.sms-conversation :thread-id="$threadId" :is-client-user="$isClientUser" />
         </div>

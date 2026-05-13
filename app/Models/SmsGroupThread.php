@@ -7,9 +7,11 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Laravel\Scout\Searchable;
 
 class SmsGroupThread extends Model
 {
+    use Searchable;
     protected $fillable = [
         'name',
         'name_data',
@@ -267,5 +269,81 @@ class SmsGroupThread extends Model
             $this->participants,
             fn ($phone) => $phone !== $excludePhone
         ));
+    }
+
+    /* ─── Scout / Meilisearch ──────────────────────────────────────── */
+
+    public function searchableAs(): string
+    {
+        return app()->environment('local') ? 'sms_threads_index_dev' : 'sms_threads_index';
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function toSearchableArray(): array
+    {
+        $this->loadMissing([
+            'project:id,address,belongs_to_vendor_id',
+            'client:id,vendor_id,first_names,last_names,business_name',
+            'client.vendors:id',
+            'client.users:id,first_name,last_name,cell_phone',
+            'subjectVendor:id,business_name,options',
+            'threadParticipants:id,thread_id,phone_number',
+            'messages' => fn ($q) => $q->latest('created_at')->limit(15),
+        ]);
+
+        // Vendors who can see this thread (mirrors scopeVisibleToVendor logic).
+        $vendorVisibility = collect();
+        if ($this->vendor_id) {
+            $vendorVisibility->push((int) $this->vendor_id);
+        } else {
+            if ($this->project?->belongs_to_vendor_id) {
+                $vendorVisibility->push((int) $this->project->belongs_to_vendor_id);
+            }
+            if ($this->client?->vendor_id) {
+                $vendorVisibility->push((int) $this->client->vendor_id);
+            }
+            if ($this->client?->relationLoaded('vendors')) {
+                foreach ($this->client->vendors as $v) {
+                    $vendorVisibility->push((int) $v->id);
+                }
+            }
+        }
+
+        $clientName = trim(
+            (string) ($this->client?->first_names ?? '')
+            . ' ' . (string) ($this->client?->last_names ?? '')
+        );
+        if ($clientName === '' && $this->client) {
+            $clientName = (string) ($this->client->business_name ?? '');
+        }
+
+        $clientUserNames = $this->client?->users
+            ? $this->client->users->map(fn ($u) => trim(($u->first_name ?? '') . ' ' . ($u->last_name ?? '')))
+                ->filter()
+                ->values()
+                ->all()
+            : [];
+
+        $messageText = $this->messages
+            ->pluck('text')
+            ->filter()
+            ->take(15)
+            ->implode(' ');
+
+        return [
+            'id' => (int) $this->id,
+            'participants' => is_array($this->participants) ? array_values($this->participants) : [],
+            'project_address' => (string) ($this->project?->address ?? ''),
+            'client_name' => $clientName,
+            'client_user_names' => $clientUserNames,
+            'vendor_name' => (string) ($this->subjectVendor?->name ?? $this->subjectVendor?->business_name ?? ''),
+            'last_message_text' => mb_substr($messageText, 0, 1500),
+            'vendor_visibility_ids' => $vendorVisibility->unique()->values()->all(),
+            'client_id' => $this->client_id ? (int) $this->client_id : null,
+            'subject_vendor_id' => $this->subject_vendor_id ? (int) $this->subject_vendor_id : null,
+            'last_activity_at_unix' => optional($this->last_activity_at)->timestamp ?? 0,
+        ];
     }
 }

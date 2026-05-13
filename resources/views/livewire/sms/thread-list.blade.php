@@ -38,6 +38,7 @@
         },
     }"
     x-on:thread-selected.window="selected = $event.detail.threadId"
+    x-on:sms-thread-filter-changed.window="$nextTick(() => $el.scrollTop = 0)"
     x-on:touchstart.passive="onTouchStart($event)"
     x-on:touchmove="onTouchMove($event)"
     x-on:touchend="onTouchEnd()"
@@ -64,7 +65,7 @@
     @forelse ($this->threads as $thread)
         <button
             wire:key="thread-{{ $thread->id }}"
-            x-on:click="selected = {{ $thread->id }}; Livewire.dispatch('threadSelected', { threadId: {{ $thread->id }} }); $dispatch('thread-switching')"
+            x-on:click="selected = {{ $thread->id }}; Livewire.dispatch('threadSelected', { threadId: {{ $thread->id }} }); $dispatch('thread-switching', { threadId: {{ $thread->id }} })"
             class="w-full text-left px-3 py-2.5 rounded-lg"
             x-bind:class="selected === {{ $thread->id }}
                 ? 'bg-zinc-100 dark:bg-zinc-700'

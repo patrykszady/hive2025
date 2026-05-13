@@ -2,6 +2,7 @@
     class="flex-1 min-h-0 flex flex-col"
     x-data="{
         switching: false,
+        switchingTimer: null,
         pulling: false,
         pullY: 0,
         startY: 0,
@@ -36,8 +37,14 @@
             }
         },
     }"
-    x-on:thread-switching.window="switching = true"
-    x-on:thread-ready.window="$nextTick(() => { switching = false })"
+    x-on:thread-switching.window="
+        clearTimeout(switchingTimer);
+        switchingTimer = setTimeout(() => { switching = true }, 300);
+    "
+    x-on:thread-ready.window="
+        clearTimeout(switchingTimer);
+        $nextTick(() => { switching = false });
+    "
 >
     @if ($this->thread)
         {{-- Pull-to-refresh indicator (mobile only) --}}
@@ -244,6 +251,22 @@
                 @endphp
 
                 @if ($callableContacts->isNotEmpty())
+                    @if ($callableContacts->count() > 1)
+                        <div class="mt-1 flex justify-end">
+                            <flux:button
+                                type="button"
+                                size="xs"
+                                variant="subtle"
+                                icon="phone"
+                                wire:click="initiateCallAll"
+                                wire:loading.attr="disabled"
+                                wire:target="initiateCallAll"
+                            >
+                                Call All ({{ $callableContacts->count() }})
+                            </flux:button>
+                        </div>
+                    @endif
+
                     <div class="flex flex-wrap gap-x-4 gap-y-0.5 mt-1">
                         @foreach ($callableContacts as $contact)
                             <div class="flex items-center gap-1.5">
@@ -265,69 +288,6 @@
                         @endforeach
                     </div>
                 @endif
-
-                {{-- Active call pill with "Add to Call" --}}
-                @if ($activeCallLogId)
-                    <div class="mt-1.5 flex justify-start" x-data="{ showInvite: false }">
-                        <div data-active-call-bar class="relative inline-flex items-stretch h-7 rounded-full bg-green-50 dark:bg-green-900/20 ring-1 ring-green-200 dark:ring-green-800/60 text-green-700 dark:text-green-300 overflow-hidden">
-                            <div class="flex items-center gap-1.5 pl-2.5 pr-2">
-                                <span class="relative flex size-2">
-                                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                                    <span class="relative inline-flex rounded-full size-2 bg-green-500"></span>
-                                </span>
-                                <span class="text-xs font-semibold tracking-wide">On Call</span>
-                            </div>
-
-                            <button
-                                type="button"
-                                @click="showInvite = !showInvite"
-                                class="flex items-center gap-1 px-2.5 border-l border-green-200 dark:border-green-800/60 text-xs font-medium hover:bg-green-100 dark:hover:bg-green-900/40 cursor-pointer"
-                            >
-                                <flux:icon name="user-plus" class="size-3.5" />
-                                <span>Add</span>
-                            </button>
-
-                            <button
-                                type="button"
-                                wire:click="clearActiveCall"
-                                class="flex items-center px-2 border-l border-green-200 dark:border-green-800/60 text-green-600/70 dark:text-green-300/70 hover:text-green-800 dark:hover:text-green-200 hover:bg-green-100 dark:hover:bg-green-900/40 cursor-pointer"
-                                title="Dismiss"
-                            >
-                                <flux:icon name="x-mark" class="size-3.5" />
-                            </button>
-
-                            {{-- Invite dropdown --}}
-                            <div
-                                x-show="showInvite"
-                                x-transition.origin.top.left
-                                @click.away="showInvite = false"
-                                x-cloak
-                                class="absolute left-0 top-full mt-1 z-50 w-64 rounded-lg bg-white dark:bg-zinc-800 shadow-lg ring-1 ring-zinc-200 dark:ring-zinc-700 py-1"
-                            >
-                                <div class="px-3 py-1.5 text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Add to Call</div>
-                                @forelse ($this->conferenceInvitableContacts as $invite)
-                                    <button
-                                        type="button"
-                                        wire:click="inviteToConference('{{ $invite['e164'] }}')"
-                                        wire:loading.attr="disabled"
-                                        wire:target="inviteToConference"
-                                        @click="showInvite = false"
-                                        class="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-zinc-100 dark:hover:bg-zinc-700 cursor-pointer disabled:opacity-50"
-                                    >
-                                        <flux:icon name="{{ $invite['type'] === 'team' ? 'briefcase' : 'user' }}" class="size-4 text-zinc-400" />
-                                        <div class="flex-1 min-w-0">
-                                            <div class="truncate font-medium text-zinc-800 dark:text-zinc-200">{{ $invite['name'] }}</div>
-                                            <div class="text-xs text-zinc-500">{{ $invite['display'] }}</div>
-                                        </div>
-                                        <span class="text-xs text-zinc-400">{{ $invite['type'] === 'team' ? 'Team' : 'Client' }}</span>
-                                    </button>
-                                @empty
-                                    <div class="px-3 py-2 text-xs text-zinc-400">No additional contacts available</div>
-                                @endforelse
-                            </div>
-                        </div>
-                    </div>
-                @endif
             @endif
         </div>
 
@@ -346,9 +306,50 @@
         @endphp
 
         <div class="relative flex-1 min-h-0">
-            {{-- Skeleton overlay during thread switching --}}
-            <div x-show="switching" x-cloak class="absolute inset-0 z-10 bg-zinc-100 dark:bg-zinc-800">
-                @include('livewire.sms.conversation_placeholder')
+            {{-- Instant-paint overlay during thread switching: cached snapshot first,
+                 placeholder skeleton if no cache yet. --}}
+            <div
+                x-show="switching"
+                x-cloak
+                x-data="{
+                    cachedMessages: [],
+                    loadCachedSnapshot(id) {
+                        if (!id) { this.cachedMessages = []; return; }
+                        try {
+                            const raw = localStorage.getItem('hive-sms-thread-' + id);
+                            this.cachedMessages = raw ? JSON.parse(raw) : [];
+                        } catch (e) { this.cachedMessages = []; }
+                    },
+                    fmt(iso) {
+                        if (!iso) return '';
+                        try { return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); }
+                        catch(e) { return ''; }
+                    }
+                }"
+                x-init="loadCachedSnapshot({{ $this->threadId }})"
+                x-on:thread-switching.window="loadCachedSnapshot($event.detail?.threadId || $wire.threadId)"
+                class="absolute inset-0 z-10"
+            >
+                <template x-if="cachedMessages.filter(m => (m.text || '').trim().length > 0).length >= 2">
+                    <div class="h-full overflow-hidden flex flex-col-reverse gap-3 px-2 pt-6 pb-6">
+                        <template x-for="msg in [...cachedMessages].filter(m => (m.text || '').trim().length > 0).reverse()" :key="'cache-' + msg.id">
+                            <div x-bind:class="msg.direction === 'outbound' ? 'flex justify-end' : 'flex justify-start'">
+                                <div class="max-w-[85%] lg:max-w-[75%]">
+                                    <div x-bind:class="msg.direction === 'outbound'
+                                            ? 'bg-indigo-500 text-white rounded-2xl rounded-br-sm'
+                                            : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 rounded-2xl rounded-bl-sm'"
+                                         class="px-3 py-2 text-sm whitespace-pre-wrap break-words" x-text="msg.text"></div>
+                                    <p class="text-[10px] text-zinc-400 mt-0.5"
+                                       x-bind:class="msg.direction === 'outbound' ? 'text-right pr-1' : 'pl-1'"
+                                       x-text="fmt(msg.created_at)"></p>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+                <template x-if="cachedMessages.filter(m => (m.text || '').trim().length > 0).length < 2">
+                    <div>@include('livewire.sms.conversation_placeholder')</div>
+                </template>
             </div>
 
             <div class="sms-fade-overlay top"></div>

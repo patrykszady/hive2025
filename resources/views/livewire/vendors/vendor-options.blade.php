@@ -231,6 +231,21 @@
                         </div>
                     </div>
 
+                    {{-- Spam Call Prompt --}}
+                    <div class="space-y-2">
+                        <div class="flex items-center justify-between gap-4">
+                            <div>
+                                <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Spam Call Prompt</div>
+                                <div class="text-xs text-zinc-500">Played to callers flagged as spam (blocked list, low STIR/SHAKEN attestation, or high spam score) instead of hanging up. Caller can press 2 to send a text or stay on the line for voicemail — this catches misidentified callers.</div>
+                            </div>
+                            <flux:button size="xs" variant="ghost" icon="play" wire:click="previewTts('spam')" wire:loading.attr="disabled" wire:target="previewTts" title="Preview spam call prompt" />
+                        </div>
+                        <div>
+                            <flux:textarea wire:model="spam_message" rows="3" placeholder="{{ \App\Livewire\Vendors\VendorOptions::DEFAULT_SPAM }}" resize="vertical" />
+                            <div class="text-xs text-zinc-400 mt-1">Placeholders: <code class="text-zinc-500">{company}</code> <code class="text-zinc-500">{greeting}</code></div>
+                        </div>
+                    </div>
+
                     {{-- Voicemail Menu --}}
                     <div class="space-y-2">
                         <div>

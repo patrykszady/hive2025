@@ -54,6 +54,23 @@ class SmsIndex extends Component
         session(['sms_active_tab' => $value]);
     }
 
+    public function updatedSubjectFilter(string $value): void
+    {
+        // Tell the thread list to scroll to the top whenever the filter changes.
+        $this->dispatch('sms-thread-filter-changed');
+
+        // When the subject filter changes, jump to the latest thread that matches it
+        // so the open conversation reflects the current filter (e.g. switching to
+        // "Vendors" should open the most recent vendor thread).
+        $latestThreadId = $this->latestAccessibleThreadId();
+
+        if ($latestThreadId !== null && $latestThreadId !== $this->threadId) {
+            $this->selectThread($latestThreadId);
+        } elseif ($latestThreadId === null) {
+            $this->clearThread();
+        }
+    }
+
     public function selectThread(int|null $threadId): void
     {
         // Client users may only view threads belonging to their client
@@ -156,7 +173,9 @@ class SmsIndex extends Component
                 if ($vendorId) {
                     $query->visibleToVendor($vendorId);
                 }
-            });
+            })
+            ->when($this->subjectFilter === 'client', fn ($q) => $q->whereNotNull('client_id'))
+            ->when($this->subjectFilter === 'vendor', fn ($q) => $q->whereNotNull('subject_vendor_id'));
     }
 
     #[Title('Messages')]

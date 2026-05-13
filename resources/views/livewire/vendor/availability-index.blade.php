@@ -45,9 +45,14 @@
                                     <div wire:key="past-task-{{ $task->id }}" class="bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-zinc-200 dark:border-zinc-700 overflow-hidden opacity-60">
                                         <div class="p-3">
                                             <div class="flex items-start justify-between gap-2 min-w-0">
-                                                <flux:heading size="sm" class="min-w-0 truncate line-through text-zinc-400">
-                                                    {{ $task->title }}
-                                                </flux:heading>
+                                                <div class="flex items-center gap-2 min-w-0">
+                                                    <flux:heading size="sm" class="min-w-0 truncate line-through text-zinc-400">
+                                                        {{ $task->title }}
+                                                    </flux:heading>
+                                                    <flux:badge size="sm" :color="data_get($task->type_ui, 'flux', 'sky')" inset="top bottom">
+                                                        {{ $task->type ?? 'Task' }}
+                                                    </flux:badge>
+                                                </div>
                                                 @if($task->vendor_status === 'confirmed')
                                                     <flux:badge color="green" size="sm" icon="check">Confirmed</flux:badge>
                                                 @elseif($task->vendor_status === 'rejected')
@@ -83,9 +88,14 @@
                         {{-- Task Card Content --}}
                         <div class="p-3">
                             <div class="flex items-start justify-between gap-2 min-w-0">
-                                <flux:heading size="sm" class="min-w-0 truncate">
-                                    {{ $task->title }}
-                                </flux:heading>
+                                <div class="flex items-center gap-2 min-w-0">
+                                    <flux:heading size="sm" class="min-w-0 truncate">
+                                        {{ $task->title }}
+                                    </flux:heading>
+                                    <flux:badge size="sm" :color="data_get($task->type_ui, 'flux', 'sky')" inset="top bottom">
+                                        {{ $task->type ?? 'Task' }}
+                                    </flux:badge>
+                                </div>
                                 @if($task->vendor_status === 'confirmed')
                                     <flux:badge color="green" size="sm" icon="check">Confirmed</flux:badge>
                                 @elseif($task->vendor_status === 'rejected')
@@ -221,7 +231,7 @@
                                     class="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors border-r border-zinc-200 dark:border-zinc-700"
                                 >
                                     <flux:icon.calendar class="size-5" />
-                                    <span class="hidden sm:inline">Different Dates</span>
+                                    <span class="hidden sm:inline">Change Dates</span>
                                     <span class="sm:hidden">Change</span>
                                 </button>
                                 <button 
@@ -243,10 +253,20 @@
                                     wire:loading.attr="disabled"
                                     wire:loading.class="opacity-60 cursor-wait"
                                     wire:target="openProposeDatesModal({{ $task->id }})"
-                                    class="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
+                                    class="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors border-r border-zinc-200 dark:border-zinc-700"
                                 >
                                     <flux:icon.calendar class="size-5" />
                                     Change Dates
+                                </button>
+                                <button 
+                                    wire:click="markPending({{ $task->id }})"
+                                    wire:loading.attr="disabled"
+                                    wire:loading.class="opacity-60 cursor-wait"
+                                    wire:target="markPending({{ $task->id }})"
+                                    class="flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                >
+                                    <flux:icon.x-mark class="size-5" />
+                                    Not Available
                                 </button>
                             </div>
                         @endif
@@ -271,9 +291,14 @@
                                     <div wire:key="pending-task-{{ $task->id }}" class="bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-zinc-200 dark:border-zinc-700 overflow-hidden">
                                         <div class="p-3">
                                             <div class="flex items-start justify-between gap-2 min-w-0">
-                                                <flux:heading size="sm" class="min-w-0 truncate">
-                                                    {{ $task->title }}
-                                                </flux:heading>
+                                                <div class="flex items-center gap-2 min-w-0">
+                                                    <flux:heading size="sm" class="min-w-0 truncate">
+                                                        {{ $task->title }}
+                                                    </flux:heading>
+                                                    <flux:badge size="sm" :color="data_get($task->type_ui, 'flux', 'sky')" inset="top bottom">
+                                                        {{ $task->type ?? 'Task' }}
+                                                    </flux:badge>
+                                                </div>
                                                 <flux:badge color="red" size="sm">No Date</flux:badge>
                                             </div>
 

@@ -42,7 +42,11 @@ class SendScheduleModal extends Component
             return null;
         }
 
-        return SmsGroupThread::with(['project.createdByVendor', 'client.users:id,first_name,last_name'])->find($this->threadId);
+        return SmsGroupThread::with([
+            'project.createdByVendor',
+            'client.users:id,first_name,last_name',
+            'subjectVendor.users:id,first_name,last_name',
+        ])->find($this->threadId);
     }
 
     #[Computed]
@@ -277,16 +281,7 @@ class SendScheduleModal extends Component
             return $this->buildScheduleLinkMessage();
         }
 
-        // Build greeting from all client user first names (e.g. "Hi Katie & Jonathan,")
-        $names = $this->thread?->client?->users
-            ?->pluck('first_name')
-            ->filter()
-            ->values()
-            ->all() ?? [];
-
-        $greeting = count($names) > 0
-            ? 'Hi ' . collect($names)->join(', ', ' & ') . ','
-            : 'Hi,';
+        $greeting = $this->buildRecipientGreeting();
 
         $taskCount = $allTasks->count();
         $taskWord = $taskCount === 1 ? 'task' : 'tasks';
@@ -427,15 +422,7 @@ class SendScheduleModal extends Component
      */
     protected function buildScheduleLinkMessage(): string
     {
-        $names = $this->thread?->client?->users
-            ?->pluck('first_name')
-            ->filter()
-            ->values()
-            ->all() ?? [];
-
-        $greeting = count($names) > 0
-            ? 'Hi ' . collect($names)->join(', ', ' & ') . ','
-            : 'Hi,';
+        $greeting = $this->buildRecipientGreeting();
 
         $linksText = $this->buildScheduleLink();
 
@@ -444,6 +431,34 @@ class SendScheduleModal extends Component
         }
 
         return "{$greeting}\n{$linksText}";
+    }
+
+    /**
+     * Build greeting for the active thread.
+     * Client threads use client users; vendor threads use vendor users.
+     */
+    protected function buildRecipientGreeting(): string
+    {
+        $thread = $this->thread;
+        $names = [];
+
+        if ($thread?->subject_vendor_id) {
+            $names = $thread->subjectVendor?->users
+                ?->pluck('first_name')
+                ->filter()
+                ->values()
+                ->all() ?? [];
+        } else {
+            $names = $thread?->client?->users
+                ?->pluck('first_name')
+                ->filter()
+                ->values()
+                ->all() ?? [];
+        }
+
+        return count($names) > 0
+            ? 'Hi ' . collect($names)->join(', ', ' & ') . ','
+            : 'Hi,';
     }
 
     /**

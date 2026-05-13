@@ -215,15 +215,18 @@ class TelnyxWebhookController extends Controller
         ]);
 
         if ($spamResult['blocked']) {
-            Log::channel('telnyx')->info('Spam call blocked', [
+            Log::channel('telnyx')->info('Spam call detected — answering with spam voicemail prompt', [
                 'call_control_id' => $callControlId,
                 'from' => $incomingFrom,
                 'reason' => $spamResult['reason'],
                 'attestation' => $attestation,
             ]);
 
-            // Log blocked call so it appears in the Calls tab
-            CallLog::create([
+            // Log blocked call so it appears in the Calls tab. Even if the
+            // caller leaves a voicemail or sends an SMS via Press 2, the
+            // STATUS_BLOCKED tag is preserved so legitimate misidentified
+            // callers can still get through while spam is logged for review.
+            $spamCallLog = CallLog::create([
                 'call_id' => $callControlId,
                 'call_control_id' => $callControlId,
                 'call_session_id' => $payload['call_session_id'] ?? null,
@@ -239,7 +242,17 @@ class TelnyxWebhookController extends Controller
                 ],
             ]);
 
-            $this->sendCallCommand($callControlId, 'hangup');
+            // Answer the call so we can play the spam-screening prompt and
+            // give misidentified callers a Press 2 / voicemail escape hatch.
+            $this->sendCallCommand($callControlId, 'answer', [
+                'send_silence_when_idle' => true,
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'spam_voicemail',
+                    'call_log_id' => $spamCallLog->id,
+                    'original_caller' => $payload['from'] ?? null,
+                ])),
+            ]);
+
             return response()->json(['status' => 'ok']);
         }
 
@@ -362,6 +375,11 @@ class TelnyxWebhookController extends Controller
             return $this->handleIncomingAnswered($callControlId, $clientState);
         }
 
+        // ── Spam Voicemail: spam-flagged call answered → play spam prompt + voicemail menu ──
+        if ($action === 'spam_voicemail') {
+            return $this->handleSpamVoicemailAnswered($callControlId, $clientState);
+        }
+
         // ── Admin Ring: an admin answered → bridge with the incoming caller ──
         if ($action === 'admin_ring') {
             return $this->handleAdminRingAnswered($callControlId, $clientState);
@@ -379,16 +397,16 @@ class TelnyxWebhookController extends Controller
     protected function handleClickToCallAnswered(string $callControlId, array $clientState): JsonResponse
     {
         $callLogId = $clientState['call_log_id'] ?? null;
-        $targetPhone = $clientState['target_phone'] ?? null;
         $callLog = $callLogId ? CallLog::find($callLogId) : null;
+        $targetPhones = $this->extractClickToCallTargets($clientState, $callLog);
 
         $callLog?->update([
             'status' => CallLog::STATUS_ANSWERED,
             'answered_at' => now(),
         ]);
 
-        if (! $targetPhone) {
-            Log::channel('telnyx')->error('Click-to-call: no target phone in client_state');
+        if (empty($targetPhones)) {
+            Log::channel('telnyx')->error('Click-to-call: no target phone(s) in client_state');
             $this->sendCallCommand($callControlId, 'hangup');
             $callLog?->update(['status' => CallLog::STATUS_FAILED, 'hangup_cause' => 'no_target_phone']);
             return response()->json(['status' => 'ok']);
@@ -400,7 +418,8 @@ class TelnyxWebhookController extends Controller
 
         Log::channel('telnyx')->info('Click-to-call: user answered → playing ringback and dialing target', [
             'call_control_id' => $callControlId,
-            'target_phone' => $targetPhone,
+            'target_phones' => $targetPhones,
+            'target_count' => count($targetPhones),
             'call_log_id' => $callLogId,
         ]);
 
@@ -415,56 +434,73 @@ class TelnyxWebhookController extends Controller
             ])),
         ]);
 
-        // Dial the target phone number
+        // Dial target phone number(s)
         $apiKey = config('services.telnyx.api_key');
         $connectionId = config('services.telnyx.connection_id');
         $from = config('services.telnyx.from');
 
-        try {
-            $response = Http::withToken($apiKey)
-                ->post('https://api.telnyx.com/v2/calls', [
-                    'connection_id' => $connectionId,
-                    'to' => $targetPhone,
-                    'from' => $from,
-                    'from_display_name' => 'GS Construction',
-                    'timeout_secs' => (int) config('services.telnyx.voice_timeout', 30),
-                    'answering_machine_detection' => 'premium',
-                    'answering_machine_detection_config' => [
-                        'after_greeting_silence_millis' => 800,
-                        'total_analysis_time_millis' => 5000,
-                    ],
-                    'client_state' => base64_encode(json_encode([
-                        'action' => 'click_to_call_target_ring',
-                        'call_log_id' => $callLogId,
-                        'caller_name' => $callerFirstName,
-                        'user_call_control_id' => $callControlId,
-                    ])),
-                    'webhook_url' => $this->telnyxBaseUrl() . '/webhooks/telnyx/voice',
-                ]);
+        $targetCallControlIds = [];
 
-            if ($response->successful()) {
+        try {
+            foreach ($targetPhones as $targetPhone) {
+                $response = Http::withToken($apiKey)
+                    ->post('https://api.telnyx.com/v2/calls', [
+                        'connection_id' => $connectionId,
+                        'to' => $targetPhone,
+                        'from' => $from,
+                        'from_display_name' => 'GS Construction',
+                        'timeout_secs' => (int) config('services.telnyx.voice_timeout', 30),
+                        'answering_machine_detection' => 'premium',
+                        'answering_machine_detection_config' => [
+                            'after_greeting_silence_millis' => 800,
+                            'total_analysis_time_millis' => 5000,
+                        ],
+                        'client_state' => base64_encode(json_encode([
+                            'action' => 'click_to_call_target_ring',
+                            'call_log_id' => $callLogId,
+                            'caller_name' => $callerFirstName,
+                            'target_phone' => $targetPhone,
+                            'target_phones' => $targetPhones,
+                            'user_call_control_id' => $callControlId,
+                        ])),
+                        'webhook_url' => $this->telnyxBaseUrl() . '/webhooks/telnyx/voice',
+                    ]);
+
+                if (! $response->successful()) {
+                    Log::channel('telnyx')->error('Click-to-call: failed to dial target', [
+                        'target_phone' => $targetPhone,
+                        'status' => $response->status(),
+                        'error' => $response->json(),
+                    ]);
+                    continue;
+                }
+
                 $data = $response->json('data') ?? [];
                 $targetCcId = $data['call_control_id'] ?? null;
-
-                if ($callLog) {
-                    $metadata = $callLog->metadata ?? [];
-                    $metadata['target_call_control_id'] = $targetCcId;
-                    $callLog->update([
-                        'forwarded_to' => $targetPhone,
-                        'metadata' => $metadata,
-                    ]);
+                if ($targetCcId) {
+                    $targetCallControlIds[] = $targetCcId;
                 }
 
                 Log::channel('telnyx')->info('Click-to-call: target dialed', [
                     'target_phone' => $targetPhone,
                     'target_call_control_id' => $targetCcId,
                 ]);
-            } else {
-                Log::channel('telnyx')->error('Click-to-call: failed to dial target', [
-                    'status' => $response->status(),
-                    'error' => $response->json(),
+            }
+
+            if ($callLog) {
+                $metadata = $callLog->metadata ?? [];
+                $metadata['target_phone'] = $targetPhones[0] ?? null;
+                $metadata['target_phones'] = $targetPhones;
+                $metadata['target_call_control_id'] = $targetCallControlIds[0] ?? null;
+                $metadata['target_call_control_ids'] = $targetCallControlIds;
+                $metadata['failed_target_call_control_ids'] = [];
+                $callLog->update([
+                    'forwarded_to' => $targetPhones[0] ?? null,
+                    'metadata' => $metadata,
                 ]);
-                // Hang up the user since we can't reach the target
+            }
+
+            if (empty($targetCallControlIds)) {
                 $this->sendCallCommand($callControlId, 'speak', [
                     'payload' => 'Sorry, we could not connect your call. Please try again.',
                     ...$this->ttsVoiceParams(),
@@ -493,6 +529,7 @@ class TelnyxWebhookController extends Controller
     {
         $callLogId = $clientState['call_log_id'] ?? null;
         $userCallControlId = $clientState['user_call_control_id'] ?? null;
+        $callLog = $callLogId ? CallLog::find($callLogId) : null;
 
         Log::channel('telnyx')->info('Click-to-call: target answered — bridging immediately', [
             'target_call_control_id' => $callControlId,
@@ -501,48 +538,98 @@ class TelnyxWebhookController extends Controller
         ]);
 
         if ($userCallControlId) {
-            // Prevent race condition with AMD handler — only one handler should bridge
-            $bridgeLockKey = "telnyx_bridge_lock:{$callLogId}";
-            if (! Cache::add($bridgeLockKey, 'target_answered', 60)) {
-                Log::channel('telnyx')->info('Click-to-call: bridge already initiated by another handler — skipping', [
+            if (! $callLog) {
+                Log::channel('telnyx')->error('Click-to-call target answered but call log missing', [
                     'target_call_control_id' => $callControlId,
-                    'call_log_id' => $callLogId,
-                ]);
-                return response()->json(['status' => 'ok']);
-            }
-
-            // Set cache flag BEFORE bridging to prevent the playback re-loop
-            // (playback.ended can fire before call.bridged webhook arrives)
-            Cache::put("telnyx_bridged:{$userCallControlId}", true, now()->addMinutes(10));
-
-            $bridgeSuccess = $this->bridgeCalls($callControlId, $userCallControlId);
-
-            if (! $bridgeSuccess) {
-                // Check if another handler (AMD) already bridged successfully
-                $callLog = $callLogId ? CallLog::find($callLogId) : null;
-                if ($callLog && $callLog->status === CallLog::STATUS_TRANSFERRED) {
-                    Log::channel('telnyx')->info('Click-to-call: bridge failed but call already transferred — no cleanup needed', [
-                        'target_call_control_id' => $callControlId,
-                        'call_log_id' => $callLogId,
-                    ]);
-                    return response()->json(['status' => 'ok']);
-                }
-
-                // User likely hung up — hang up target and clean up
-                Log::channel('telnyx')->warning('Click-to-call bridge failed — cleaning up', [
-                    'target_call_control_id' => $callControlId,
-                    'user_call_control_id' => $userCallControlId,
                     'call_log_id' => $callLogId,
                 ]);
                 $this->sendCallCommand($callControlId, 'hangup');
-                Cache::forget("telnyx_bridged:{$userCallControlId}");
-                Cache::forget($bridgeLockKey);
-                $callLog?->update(['status' => CallLog::STATUS_FAILED]);
                 return response()->json(['status' => 'ok']);
             }
 
-            $callLog = $callLogId ? CallLog::find($callLogId) : null;
-            $callLog?->update(['status' => CallLog::STATUS_TRANSFERRED]);
+            if (in_array($callLog->status, [CallLog::STATUS_COMPLETED, CallLog::STATUS_MISSED, CallLog::STATUS_FAILED], true)) {
+                Log::channel('telnyx')->info('Click-to-call target answered after call already ended — hanging up target leg', [
+                    'target_call_control_id' => $callControlId,
+                    'call_log_id' => $callLogId,
+                    'status' => $callLog->status,
+                ]);
+                $this->sendCallCommand($callControlId, 'hangup');
+                return response()->json(['status' => 'ok']);
+            }
+
+            $metadata = $callLog->metadata ?? [];
+            $conferenceId = $metadata['conference_id'] ?? null;
+
+            if (! is_string($conferenceId) || $conferenceId === '') {
+                $conferenceLockKey = "telnyx_click_to_call_conference_lock:{$callLogId}";
+                if (Cache::add($conferenceLockKey, 'creating', 30)) {
+                    $conferenceName = "click_to_call_{$callLogId}_" . substr(md5($userCallControlId), 0, 8);
+                    // Stop ringback before conference creation/join.
+                    $this->sendCallCommand($userCallControlId, 'playback_stop');
+                    $this->sendCallCommand($callControlId, 'playback_stop');
+
+                    $conferenceId = $this->createConference($conferenceName, $userCallControlId);
+
+                    if (! $conferenceId) {
+                        Log::channel('telnyx')->error('Click-to-call: failed to create conference', [
+                            'call_log_id' => $callLogId,
+                            'target_call_control_id' => $callControlId,
+                        ]);
+                        $this->sendCallCommand($callControlId, 'hangup');
+                        Cache::forget($conferenceLockKey);
+                        $callLog->update(['status' => CallLog::STATUS_FAILED]);
+                        return response()->json(['status' => 'ok']);
+                    }
+
+                    $metadata['conference_id'] = $conferenceId;
+                    $metadata['conference_name'] = $conferenceName;
+                    $metadata['joined_target_call_control_ids'] = $metadata['joined_target_call_control_ids'] ?? [];
+
+                    $callLog->update(['metadata' => $metadata]);
+                    Cache::forget($conferenceLockKey);
+                }
+
+                $callLog = $callLog->fresh();
+                $metadata = $callLog?->metadata ?? [];
+                $conferenceId = $metadata['conference_id'] ?? null;
+            }
+
+            if (! is_string($conferenceId) || $conferenceId === '') {
+                Log::channel('telnyx')->error('Click-to-call: no conference available after target answered', [
+                    'call_log_id' => $callLogId,
+                    'target_call_control_id' => $callControlId,
+                ]);
+                $this->sendCallCommand($callControlId, 'hangup');
+                return response()->json(['status' => 'ok']);
+            }
+
+            if (! $this->joinConference($conferenceId, $callControlId)) {
+                Log::channel('telnyx')->warning('Click-to-call: target conference join failed', [
+                    'call_log_id' => $callLogId,
+                    'target_call_control_id' => $callControlId,
+                    'conference_id' => $conferenceId,
+                ]);
+                $this->sendCallCommand($callControlId, 'hangup');
+                return response()->json(['status' => 'ok']);
+            }
+
+            Cache::put("telnyx_bridged:{$userCallControlId}", true, now()->addMinutes(60));
+            Cache::put("telnyx_bridged:{$callControlId}", true, now()->addMinutes(60));
+
+            $joinedTargetCallControlIds = collect($metadata['joined_target_call_control_ids'] ?? [])
+                ->filter(fn ($id) => is_string($id) && $id !== '')
+                ->push($callControlId)
+                ->unique()
+                ->values()
+                ->all();
+
+            $metadata['joined_target_call_control_ids'] = $joinedTargetCallControlIds;
+            $metadata['answered_target_call_control_id'] = $metadata['answered_target_call_control_id'] ?? $callControlId;
+
+            $callLog->update([
+                'status' => CallLog::STATUS_TRANSFERRED,
+                'metadata' => $metadata,
+            ]);
         } else {
             Log::channel('telnyx')->error('No user call control ID for bridge', [
                 'call_log_id' => $callLogId,
@@ -562,13 +649,49 @@ class TelnyxWebhookController extends Controller
         $callLogId = $clientState['call_log_id'] ?? null;
         $userCallControlId = $clientState['user_call_control_id'] ?? null;
         $callLog = $callLogId ? CallLog::find($callLogId) : null;
+        $metadata = $callLog ? ($callLog->metadata ?? []) : [];
+        $joinedTargetLegIds = collect($metadata['joined_target_call_control_ids'] ?? [])
+            ->filter(fn ($id) => is_string($id) && $id !== '')
+            ->unique()
+            ->values()
+            ->all();
 
         // STATUS_TRANSFERRED or STATUS_COMPLETED means both parties were talking.
         // STATUS_ANSWERED just means the initiating user picked up their phone,
         // NOT that the target answered — so don't treat it as "was connected".
         $wasConnected = $callLog && in_array($callLog->status, [CallLog::STATUS_TRANSFERRED, CallLog::STATUS_COMPLETED]);
 
+        if ($wasConnected && ! in_array($callControlId, $joinedTargetLegIds, true)) {
+            Log::channel('telnyx')->info('Click-to-call: non-joined sibling target leg ended while active call continues', [
+                'call_control_id' => $callControlId,
+                'hangup_cause' => $hangupCause,
+                'call_log_id' => $callLogId,
+                'joined_target_call_control_ids' => $joinedTargetLegIds,
+            ]);
+
+            return response()->json(['status' => 'ok']);
+        }
+
         if ($wasConnected) {
+            $remainingJoinedTargetLegIds = collect($joinedTargetLegIds)
+                ->reject(fn ($id) => $id === $callControlId)
+                ->values()
+                ->all();
+
+            if (! empty($remainingJoinedTargetLegIds)) {
+                $metadata['joined_target_call_control_ids'] = $remainingJoinedTargetLegIds;
+                $callLog?->update(['metadata' => $metadata]);
+
+                Log::channel('telnyx')->info('Click-to-call: one joined target left, other joined targets remain active', [
+                    'call_control_id' => $callControlId,
+                    'hangup_cause' => $hangupCause,
+                    'call_log_id' => $callLogId,
+                    'remaining_joined_target_call_control_ids' => $remainingJoinedTargetLegIds,
+                ]);
+
+                return response()->json(['status' => 'ok']);
+            }
+
             $duration = $callLog->answered_at
                 ? abs(now()->diffInSeconds($callLog->answered_at))
                 : null;
@@ -595,6 +718,14 @@ class TelnyxWebhookController extends Controller
             'hangup_cause' => $hangupCause,
             'call_log_id' => $callLogId,
         ]);
+
+        if ($callLog && $this->markFailedTargetAndHasRemaining($callLog, $callControlId)) {
+            Log::channel('telnyx')->info('Click-to-call: waiting on remaining target legs', [
+                'call_log_id' => $callLogId,
+                'failed_target_call_control_id' => $callControlId,
+            ]);
+            return response()->json(['status' => 'ok']);
+        }
 
         // If we have the user's call control ID, tell them the target didn't answer.
         // Note: Telnyx Call Control v2 has no 'leave' action for calls in conferences.
@@ -1349,6 +1480,10 @@ class TelnyxWebhookController extends Controller
             $callLog = $callLogId ? CallLog::find($callLogId) : null;
 
             if ($callLog) {
+                if (! in_array($callLog->status, [CallLog::STATUS_TRANSFERRED, CallLog::STATUS_COMPLETED], true)) {
+                    $this->hangupOutstandingClickToCallTargets($callLog);
+                }
+
                 $duration = $callLog->answered_at
                     ? abs(now()->diffInSeconds($callLog->answered_at))
                     : null;
@@ -2261,17 +2396,14 @@ class TelnyxWebhookController extends Controller
         $timeout = 15;
 
         $newCallControlIds = $metadata['admin_call_control_ids'] ?? [];
+        $dialedPhones = [];
 
         foreach ($remainingUsers as $user) {
-            $phone = $user->cell_phone;
-            if (! str_starts_with($phone, '+')) {
-                $digits = preg_replace('/\D/', '', $phone);
-                if (strlen($digits) === 10) {
-                    $phone = '+1' . $digits;
-                } elseif (strlen($digits) === 11 && str_starts_with($digits, '1')) {
-                    $phone = '+' . $digits;
-                }
+            $phone = $this->normalizeDialPhone($user->cell_phone);
+            if (! $phone || GroupSmsService::isOurNumber($phone) || isset($dialedPhones[$phone])) {
+                continue;
             }
+            $dialedPhones[$phone] = true;
 
             try {
                 $response = Http::withToken($apiKey)
@@ -2429,19 +2561,14 @@ class TelnyxWebhookController extends Controller
         // reach our Telnyx Voicemail Menu instead of personal voicemail.
         $timeout = 15;
         $adminCallControlIds = [];
+        $dialedPhones = [];
 
         foreach ($adminUsers as $adminUser) {
-            $phone = $adminUser->cell_phone;
-
-            // Ensure phone is in E.164 format
-            if (! str_starts_with($phone, '+')) {
-                $digits = preg_replace('/\D/', '', $phone);
-                if (strlen($digits) === 10) {
-                    $phone = '+1' . $digits;
-                } elseif (strlen($digits) === 11 && str_starts_with($digits, '1')) {
-                    $phone = '+' . $digits;
-                }
+            $phone = $this->normalizeDialPhone($adminUser->cell_phone);
+            if (! $phone || GroupSmsService::isOurNumber($phone) || isset($dialedPhones[$phone])) {
+                continue;
             }
+            $dialedPhones[$phone] = true;
 
             try {
                 $response = Http::withToken($apiKey)
@@ -2501,6 +2628,50 @@ class TelnyxWebhookController extends Controller
             Log::channel('telnyx')->error('Failed to dial any admins — triggering voicemail');
             $this->triggerVoicemail($incomingCallControlId, $callLogId);
         }
+    }
+
+    /**
+     * Spam-flagged call answered: play the spam screening prompt as a
+     * voicemail-style IVR. Press 2 → send text, stay on line → voicemail.
+     * This gives misidentified callers a way to reach us instead of just
+     * dropping the call.
+     */
+    protected function handleSpamVoicemailAnswered(string $callControlId, array $clientState): JsonResponse
+    {
+        $callLogId = $clientState['call_log_id'] ?? null;
+        $originalCaller = $clientState['original_caller'] ?? null;
+
+        $vendor = Vendor::find(1);
+        $shortName = data_get($vendor?->options ?? [], 'short_name')
+            ?: ($vendor?->business_name ?? 'us');
+
+        $template = data_get($vendor?->options ?? [], 'spam_message')
+            ?: \App\Livewire\Vendors\VendorOptions::DEFAULT_SPAM;
+
+        $ivrPrompt = $this->renderPrompt($template, [
+            '{name}' => '',
+            '{company}' => $shortName,
+            '{greeting}' => $this->buildTimeGreeting(),
+        ]);
+
+        Log::channel('telnyx')->info('Spam voicemail: playing screening prompt + IVR', [
+            'call_control_id' => $callControlId,
+            'call_log_id' => $callLogId,
+        ]);
+
+        // Mark as bridged so other handlers don't try to re-route this call.
+        Cache::put("telnyx_bridged:{$callControlId}", true, now()->addMinutes(10));
+
+        // Reuse the existing voicemail gather — Press 2 → SMS, stay → voicemail.
+        $this->startVoicemailGather($callControlId, [
+            'call_log_id' => $callLogId,
+            'ivr_prompt' => $ivrPrompt,
+            'valid_digits' => '2',
+            'is_known_caller' => false,
+            'original_caller' => $originalCaller,
+        ]);
+
+        return response()->json(['status' => 'ok']);
     }
 
     /**
@@ -3506,6 +3677,143 @@ class TelnyxWebhookController extends Controller
                 $this->sendCallCommand($adminCcId, 'hangup');
             }
         }
+    }
+
+    /**
+     * Build a normalized unique list of click-to-call targets from client_state
+     * and fallback metadata.
+     *
+     * @return array<int, string>
+     */
+    protected function extractClickToCallTargets(array $clientState, ?CallLog $callLog = null): array
+    {
+        $targets = [];
+
+        if (! empty($clientState['target_phone']) && is_string($clientState['target_phone'])) {
+            $targets[] = $clientState['target_phone'];
+        }
+
+        if (! empty($clientState['target_phones']) && is_array($clientState['target_phones'])) {
+            foreach ($clientState['target_phones'] as $phone) {
+                if (is_string($phone)) {
+                    $targets[] = $phone;
+                }
+            }
+        }
+
+        if ($callLog) {
+            $metadata = $callLog->metadata ?? [];
+            if (! empty($metadata['target_phones']) && is_array($metadata['target_phones'])) {
+                foreach ($metadata['target_phones'] as $phone) {
+                    if (is_string($phone)) {
+                        $targets[] = $phone;
+                    }
+                }
+            }
+        }
+
+        return collect($targets)
+            ->map(fn (string $phone) => $this->normalizeDialPhone($phone))
+            ->filter(fn (?string $phone) => is_string($phone) && $phone !== '' && ! GroupSmsService::isOurNumber($phone))
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Record a failed click-to-call target leg and report whether any target legs
+     * are still pending.
+     */
+    protected function markFailedTargetAndHasRemaining(CallLog $callLog, string $failedCallControlId): bool
+    {
+        $metadata = $callLog->metadata ?? [];
+        $allTargetLegIds = collect($metadata['target_call_control_ids'] ?? [])
+            ->filter(fn ($id) => is_string($id) && $id !== '')
+            ->values();
+
+        if ($allTargetLegIds->count() <= 1) {
+            return false;
+        }
+
+        $failedLegIds = collect($metadata['failed_target_call_control_ids'] ?? [])
+            ->filter(fn ($id) => is_string($id) && $id !== '')
+            ->push($failedCallControlId)
+            ->unique()
+            ->values();
+
+        $metadata['failed_target_call_control_ids'] = $failedLegIds->all();
+        $callLog->update(['metadata' => $metadata]);
+
+        $answeredLegId = $metadata['answered_target_call_control_id'] ?? null;
+        if (is_string($answeredLegId) && $answeredLegId !== '') {
+            return false;
+        }
+
+        $remainingLegIds = $allTargetLegIds->diff($failedLegIds);
+
+        return $remainingLegIds->isNotEmpty();
+    }
+
+    /**
+     * Hang up all sibling click-to-call target legs except the one that answered.
+     */
+    protected function hangupOtherClickToCallTargetLegs(CallLog $callLog, string $answeredTargetCallControlId): void
+    {
+        $targetLegIds = collect(($callLog->metadata ?? [])['target_call_control_ids'] ?? [])
+            ->filter(fn ($id) => is_string($id) && $id !== '')
+            ->unique();
+
+        foreach ($targetLegIds as $targetLegId) {
+            if ($targetLegId === $answeredTargetCallControlId) {
+                continue;
+            }
+
+            $this->sendCallCommand($targetLegId, 'hangup');
+        }
+    }
+
+    /**
+     * Hang up all outstanding click-to-call target legs when the user leg ends
+     * before a successful bridge.
+     */
+    protected function hangupOutstandingClickToCallTargets(CallLog $callLog): void
+    {
+        $metadata = $callLog->metadata ?? [];
+        $answeredLegId = $metadata['answered_target_call_control_id'] ?? null;
+
+        $targetLegIds = collect($metadata['target_call_control_ids'] ?? [])
+            ->filter(fn ($id) => is_string($id) && $id !== '')
+            ->unique();
+
+        foreach ($targetLegIds as $targetLegId) {
+            if ($targetLegId === $answeredLegId) {
+                continue;
+            }
+
+            $this->sendCallCommand($targetLegId, 'hangup');
+        }
+    }
+
+    protected function normalizeDialPhone(?string $phone): ?string
+    {
+        if (! is_string($phone) || trim($phone) === '') {
+            return null;
+        }
+
+        $digits = preg_replace('/\D/', '', $phone);
+        if (! is_string($digits) || $digits === '') {
+            return null;
+        }
+
+        if (strlen($digits) === 10) {
+            return '+1' . $digits;
+        }
+
+        if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+            return '+' . $digits;
+        }
+
+        return str_starts_with($phone, '+') ? $phone : ('+' . $digits);
     }
 
     /**

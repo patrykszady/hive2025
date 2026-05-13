@@ -60,6 +60,65 @@ class SmsThreadList extends Component
     public function threads()
     {
         $user = auth()->user();
+        $search = trim($this->search);
+
+        // Fast path: Meilisearch when there's a query.
+        if ($search !== '') {
+            try {
+                $meili = SmsGroupThread::search($search);
+
+                if (! $user->is_browsing_as_client && $user->vendor?->id) {
+                    $meili->where('vendor_visibility_ids', (int) $user->vendor->id);
+                }
+                if ($this->subjectFilter === 'client') {
+                    $meili->whereNotNull('client_id');
+                } elseif ($this->subjectFilter === 'vendor') {
+                    $meili->whereNotNull('subject_vendor_id');
+                }
+
+                $ids = $meili->take(max($this->limit, 50))->keys()->all();
+
+                if (empty($ids)) {
+                    return collect();
+                }
+
+                $orderedIds = implode(',', array_map('intval', $ids));
+
+                $threads = SmsGroupThread::query()
+                    ->with([
+                        'project:id,address',
+                        'client',
+                        'subjectVendor',
+                        'latestMessage.sentByUser:id,first_name',
+                        'threadParticipants:id,thread_id,phone_number',
+                    ])
+                    ->withCount(['messages as scheduled_messages_count' => fn ($q) => $q->where('status', 'scheduled')])
+                    ->whereIn('id', $ids)
+                    ->when($user->is_browsing_as_client, function ($query) use ($user) {
+                        $clientIds = $user->clients()->pluck('clients.id');
+                        $query->whereIn('client_id', $clientIds);
+                    })
+                    ->when(! $user->is_browsing_as_client, function ($query) use ($user) {
+                        $vendorId = $user->vendor?->id;
+                        if ($vendorId) {
+                            $query->visibleToVendor($vendorId);
+                        }
+                    })
+                    ->limit($this->limit)
+                    ->get();
+
+                // Preserve Meili relevance ordering across DB drivers (MySQL FIELD()
+                // is not portable to SQLite). Sort the in-memory collection instead.
+                $position = array_flip($ids);
+
+                return $threads
+                    ->sortBy(fn ($t) => $position[$t->id] ?? PHP_INT_MAX)
+                    ->values();
+            } catch (\Throwable $e) {
+                report($e);
+                // Fall through to SQL fallback below.
+            }
+        }
 
         return SmsGroupThread::query()
             ->with([
@@ -80,7 +139,7 @@ class SmsThreadList extends Component
                     $query->visibleToVendor($vendorId);
                 }
             })
-            ->when(trim($this->search), function ($query, $search) {
+            ->when($search !== '', function ($query) use ($search) {
                 $query->where(function ($q) use ($search) {
                     $q->whereJsonContains('participants', $search)
                         ->orWhereHas('project', fn ($pq) => $pq->where('address', 'like', "%{$search}%"))
@@ -130,56 +189,105 @@ class SmsThreadList extends Component
     }
 
     /**
+     * Per-render cache of phone → display-name lookups, populated lazily and
+     * batched in {@see warmPhoneCache()} to eliminate N+1 user/vendor queries.
+     *
+     * @var array<string, string>
+     */
+    protected array $phoneNameCache = [];
+
+    /**
+     * Pre-fetch user + vendor names for every phone number that will be
+     * rendered, avoiding per-row queries from {@see resolvePhoneDisplay()}.
+     *
+     * @param  iterable<string>  $phones
+     */
+    protected function warmPhoneCache(iterable $phones): void
+    {
+        $normalized = [];
+        $last10s = [];
+
+        foreach ($phones as $phone) {
+            if (! is_string($phone) || $phone === '' || isset($this->phoneNameCache[$phone])) {
+                continue;
+            }
+            $digits = preg_replace('/[^0-9]/', '', $phone);
+            $n = (strlen($digits) === 11 && str_starts_with($digits, '1')) ? substr($digits, 1) : $digits;
+            $last10 = strlen($digits) > 10 ? substr($digits, -10) : $digits;
+            $normalized[$phone] = ['n' => $n, 'd' => $digits, 'l' => $last10];
+            $last10s[] = $last10;
+        }
+
+        if (empty($normalized)) {
+            return;
+        }
+
+        $needles = collect($normalized)
+            ->flatMap(fn ($v) => [$v['n'], '1' . $v['n'], $v['d'], $v['l']])
+            ->unique()
+            ->values()
+            ->all();
+
+        $users = User::whereIn('cell_phone', $needles)
+            ->get(['id', 'first_name', 'last_name', 'cell_phone'])
+            ->keyBy(fn ($u) => preg_replace('/[^0-9]/', '', (string) $u->cell_phone));
+
+        $vendors = Vendor::whereIn('business_phone', $needles)
+            ->get(['id', 'business_name', 'business_phone', 'options'])
+            ->keyBy(fn ($v) => preg_replace('/[^0-9]/', '', (string) $v->business_phone));
+
+        foreach ($normalized as $phone => $parts) {
+            $candidateKeys = array_unique([$parts['n'], '1' . $parts['n'], $parts['d'], $parts['l']]);
+
+            $name = null;
+            foreach ($candidateKeys as $key) {
+                if ($user = $users->get($key)) {
+                    $full = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? ''));
+                    if ($full !== '') {
+                        $name = $full;
+                        break;
+                    }
+                }
+            }
+
+            if (! $name) {
+                foreach ($candidateKeys as $key) {
+                    if ($vendor = $vendors->get($key)) {
+                        $vendorName = $vendor->name ?: $vendor->business_name;
+                        if ($vendorName) {
+                            $name = $vendorName;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (! $name) {
+                $display10 = strlen($parts['n']) === 10 ? $parts['n'] : $parts['l'];
+                $name = strlen($display10) === 10
+                    ? '(' . substr($display10, 0, 3) . ') ' . substr($display10, 3, 3) . '-' . substr($display10, 6)
+                    : $phone;
+            }
+
+            $this->phoneNameCache[$phone] = $name;
+        }
+    }
+
+    /**
      * Resolve a display name for an E.164 phone number.
      * Returns user name, or formatted 10-digit number as fallback.
      */
     public function resolvePhoneDisplay(string $e164): string
     {
-        static $cache = [];
-
-        if (isset($cache[$e164])) {
-            return $cache[$e164];
+        if (isset($this->phoneNameCache[$e164])) {
+            return $this->phoneNameCache[$e164];
         }
 
-        $digits = preg_replace('/[^0-9]/', '', $e164);
+        // Cold path: warm the cache for this single number (rare — most are
+        // pre-warmed in render()).
+        $this->warmPhoneCache([$e164]);
 
-        // Normalize: strip leading 1 for 11-digit US numbers
-        $normalized = $digits;
-        if (strlen($normalized) === 11 && str_starts_with($normalized, '1')) {
-            $normalized = substr($normalized, 1);
-        }
-
-        // Also extract last 10 digits as fallback (handles non-standard E.164)
-        $last10 = strlen($digits) > 10 ? substr($digits, -10) : $digits;
-
-        // Search users by cell_phone (stored as raw digits)
-        $user = User::where('cell_phone', $normalized)
-            ->orWhere('cell_phone', '1' . $normalized)
-            ->orWhere('cell_phone', $digits)
-            ->orWhere('cell_phone', $last10)
-            ->first();
-
-        if ($user && trim($user->first_name . ' ' . $user->last_name) !== '') {
-            return $cache[$e164] = trim($user->first_name . ' ' . $user->last_name);
-        }
-
-        // Search vendors by business_phone
-        $vendor = Vendor::where('business_phone', $normalized)
-            ->orWhere('business_phone', $last10)
-            ->orWhere('business_phone', $digits)
-            ->first();
-
-        if ($vendor && $vendor->short_name) {
-            return $cache[$e164] = $vendor->short_name;
-        }
-
-        // Format as (XXX) XXX-XXXX using best 10-digit version
-        $display10 = strlen($normalized) === 10 ? $normalized : $last10;
-        if (strlen($display10) === 10) {
-            return $cache[$e164] = '(' . substr($display10, 0, 3) . ') ' . substr($display10, 3, 3) . '-' . substr($display10, 6);
-        }
-
-        return $cache[$e164] = $e164;
+        return $this->phoneNameCache[$e164] ?? $e164;
     }
 
     public function resolvePreviewSender(?string $fromNumber, ?SmsGroupThread $thread = null): ?string
@@ -226,6 +334,16 @@ class SmsThreadList extends Component
 
     public function render()
     {
+        // Warm phone-name cache once per render so the per-row helpers stay O(1).
+        $phones = collect();
+        foreach ($this->threads as $thread) {
+            $phones = $phones->merge($thread->threadParticipants->pluck('phone_number'));
+            if ($thread->latestMessage?->from_number) {
+                $phones->push($thread->latestMessage->from_number);
+            }
+        }
+        $this->warmPhoneCache($phones->filter()->unique());
+
         return view('livewire.sms.thread-list');
     }
 

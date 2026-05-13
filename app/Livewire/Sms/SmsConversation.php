@@ -43,8 +43,6 @@ class SmsConversation extends Component
 
     public bool $isClientUser = false;
 
-    public ?int $activeCallLogId = null;
-
     public bool $showOptInModal = false;
 
     public bool $showDeleteConfirm = false;
@@ -99,7 +97,6 @@ class SmsConversation extends Component
         $this->attachment = null;
         $this->showImageLightbox = false;
         $this->lightboxImageUrl = null;
-        $this->activeCallLogId = null;
         $this->showOptInModal = false;
         $this->manualOptInReason = '';
         $this->manualOptInParticipantId = null;
@@ -112,27 +109,9 @@ class SmsConversation extends Component
     /** @return array<string, string> */
     public function getListeners(): array
     {
-        $userId = auth()->id();
-
         return [
             'echo-private:sms.notifications,SmsMessageReceived' => 'handleIncomingMessage',
-            "echo-private:App.Models.User.{$userId},InboundCallJoined" => 'handleInboundCallJoined',
         ];
-    }
-
-    /**
-     * Real-time listener: this user has just joined an inbound conference.
-     * Surface the "On Call ... Add to Call" bar so they can invite others.
-     *
-     * @param  array<string, mixed>  $payload
-     */
-    public function handleInboundCallJoined(array $payload = []): void
-    {
-        $callLogId = (int) ($payload['call_log_id'] ?? 0);
-        if ($callLogId > 0) {
-            $this->activeCallLogId = $callLogId;
-            unset($this->conferenceInvitableContacts);
-        }
     }
 
     /**
@@ -405,7 +384,7 @@ class SmsConversation extends Component
         // Clear memoized computed properties so the re-render fetches fresh data
         unset($this->smsMessages, $this->processedMessages, $this->phoneNameMap);
 
-        $this->js("localStorage.removeItem('sms-draft-' + {$this->threadId}); const ta = document.querySelector('ui-composer textarea'); if (ta) { ta.value = ''; ta.dispatchEvent(new Event('input', { bubbles: true })); }");
+        $this->js("(function(){ localStorage.removeItem('sms-draft-' + {$this->threadId}); const ta = document.querySelector('ui-composer textarea'); if (ta) { ta.value = ''; ta.dispatchEvent(new Event('input', { bubbles: true })); } })()");
         $this->dispatch('messageSent');
     }
 
@@ -460,7 +439,7 @@ class SmsConversation extends Component
             position: 'top right'
         );
 
-        $this->js("localStorage.removeItem('sms-draft-' + {$this->threadId}); const ta = document.querySelector('ui-composer textarea'); if (ta) { ta.value = ''; ta.dispatchEvent(new Event('input', { bubbles: true })); }");
+        $this->js("(function(){ localStorage.removeItem('sms-draft-' + {$this->threadId}); const ta = document.querySelector('ui-composer textarea'); if (ta) { ta.value = ''; ta.dispatchEvent(new Event('input', { bubbles: true })); } })()");
         $this->dispatch('messageSent');
         $this->dispatch('sms-schedule-changed');
     }
@@ -679,6 +658,35 @@ class SmsConversation extends Component
      */
     public function initiateCall(string $targetPhone): void
     {
+        $this->initiateCallWithTargets([$targetPhone]);
+    }
+
+    /**
+     * Initiate click-to-call to all non-company participants in the current thread.
+     */
+    public function initiateCallAll(): void
+    {
+        if (! $this->thread) {
+            Flux::toast(variant: 'danger', heading: 'No Thread', text: 'No conversation selected.', duration: 5000, position: 'top right');
+            return;
+        }
+
+        $targets = $this->thread->threadParticipants
+            ->pluck('phone_number')
+            ->filter(fn ($phone) => is_string($phone) && $phone !== '')
+            ->values()
+            ->all();
+
+        $this->initiateCallWithTargets($targets);
+    }
+
+    /**
+     * Start a click-to-call session for one or more targets.
+     *
+     * @param array<int, string> $targetPhones
+     */
+    private function initiateCallWithTargets(array $targetPhones): void
+    {
         $user = auth()->user();
         $userPhone = $user->routeNotificationForTelnyx();
 
@@ -691,14 +699,20 @@ class SmsConversation extends Component
         $connectionId = config('services.telnyx.connection_id');
         $from = config('services.telnyx.from');
 
-        // Prevent calling our own Telnyx number (loopback)
-        if (GroupSmsService::isOurNumber($targetPhone)) {
-            Log::channel('telnyx')->warning('Click-to-call blocked: target is own Telnyx number', [
-                'target_phone' => $targetPhone,
-            ]);
-            Flux::toast(variant: 'danger', heading: 'Invalid Number', text: 'Cannot call the company phone number.', duration: 5000, position: 'top right');
+        $normalizedTargets = collect($targetPhones)
+            ->map(fn ($phone) => $this->normalizeDialTarget($phone))
+            ->filter(fn ($phone) => is_string($phone) && $phone !== '')
+            ->reject(fn ($phone) => GroupSmsService::isOurNumber($phone))
+            ->unique()
+            ->values();
+
+        if ($normalizedTargets->isEmpty()) {
+            Flux::toast(variant: 'danger', heading: 'No Valid Numbers', text: 'No callable recipients found in this thread.', duration: 5000, position: 'top right');
             return;
         }
+
+        $primaryTarget = $normalizedTargets->first();
+        $targetCount = $normalizedTargets->count();
 
         if (! $apiKey || ! $connectionId) {
             Flux::toast(variant: 'danger', heading: 'Not Configured', text: 'Voice calling is not configured.', duration: 5000, position: 'top right');
@@ -709,12 +723,14 @@ class SmsConversation extends Component
         $callLog = CallLog::create([
             'direction' => 'outgoing',
             'from_number' => $from,
-            'to_number' => $targetPhone,
+            'to_number' => $primaryTarget,
             'status' => CallLog::STATUS_INITIATED,
             'user_id' => $user->id,
             'metadata' => [
-                'type' => 'click_to_call',
-                'target_phone' => $targetPhone,
+                'type' => $targetCount > 1 ? 'click_to_call_multi' : 'click_to_call',
+                'target_phone' => $primaryTarget,
+                'target_phones' => $normalizedTargets->all(),
+                'target_count' => $targetCount,
                 'user_phone' => $userPhone,
             ],
         ]);
@@ -730,7 +746,8 @@ class SmsConversation extends Component
                     'timeout_secs' => (int) config('services.telnyx.voice_timeout', 30),
                     'client_state' => base64_encode(json_encode([
                         'action' => 'click_to_call',
-                        'target_phone' => $targetPhone,
+                        'target_phone' => $primaryTarget,
+                        'target_phones' => $normalizedTargets->all(),
                         'call_log_id' => $callLog->id,
                     ])),
                     'webhook_url' => $this->telnyxWebhookUrl(),
@@ -747,13 +764,20 @@ class SmsConversation extends Component
                 Log::channel('telnyx')->info('Click-to-call initiated', [
                     'call_log_id' => $callLog->id,
                     'user_phone' => $userPhone,
-                    'target_phone' => $targetPhone,
+                    'target_phone' => $primaryTarget,
+                    'target_count' => $targetCount,
                     'call_control_id' => $data['call_control_id'] ?? null,
                 ]);
 
-                $this->activeCallLogId = $callLog->id;
-
-                Flux::toast(variant: 'success', heading: 'Calling', text: 'Your phone will ring shortly...', duration: 8000, position: 'top right');
+                Flux::toast(
+                    variant: 'success',
+                    heading: 'Calling',
+                    text: $targetCount > 1
+                        ? 'Your phone will ring shortly, then all recipients will be called.'
+                        : 'Your phone will ring shortly...',
+                    duration: 8000,
+                    position: 'top right'
+                );
             } else {
                 $callLog->update(['status' => CallLog::STATUS_FAILED]);
                 Log::channel('telnyx')->error('Click-to-call API failed', [
@@ -769,174 +793,26 @@ class SmsConversation extends Component
         }
     }
 
-    /**
-     * Invite another person to the active conference call.
-     */
-    public function inviteToConference(string $targetPhone): void
+    private function normalizeDialTarget(?string $phone): ?string
     {
-        if (! $this->activeCallLogId) {
-            Flux::toast(variant: 'warning', heading: 'No Active Call', text: 'You must be on a call to invite someone.', duration: 4000, position: 'top right');
-            return;
+        if (! is_string($phone) || trim($phone) === '') {
+            return null;
         }
 
-        $callLog = CallLog::find($this->activeCallLogId);
-
-        if (! $callLog) {
-            $this->activeCallLogId = null;
-            Flux::toast(variant: 'warning', heading: 'Call Ended', text: 'The call is no longer active.', duration: 4000, position: 'top right');
-            return;
+        $digits = preg_replace('/\D/', '', $phone);
+        if (! is_string($digits) || $digits === '') {
+            return null;
         }
 
-        // Check if call is still in a connectable state
-        if (in_array($callLog->status, [CallLog::STATUS_COMPLETED, CallLog::STATUS_FAILED, CallLog::STATUS_MISSED])) {
-            $this->activeCallLogId = null;
-            Flux::toast(variant: 'warning', heading: 'Call Ended', text: 'The call has already ended.', duration: 4000, position: 'top right');
-            return;
-        }
-
-        $conferenceName = $callLog->metadata['conference_name'] ?? "outbound-{$callLog->id}";
-
-        $apiKey = config('services.telnyx.api_key');
-        $connectionId = config('services.telnyx.connection_id');
-        $from = config('services.telnyx.from');
-
-        $callerUser = auth()->user();
-        $callerFirstName = $callerUser?->first_name ?? 'Someone';
-
-        try {
-            $response = Http::withToken($apiKey)
-                ->post('https://api.telnyx.com/v2/calls', [
-                    'connection_id' => $connectionId,
-                    'to' => $targetPhone,
-                    'from' => $from,
-                    'from_display_name' => 'GS Construction',
-                    'timeout_secs' => (int) config('services.telnyx.voice_timeout', 30),
-                    'client_state' => base64_encode(json_encode([
-                        'action' => 'conference_invite',
-                        'call_log_id' => $callLog->id,
-                        'conference_name' => $conferenceName,
-                        'caller_name' => $callerFirstName,
-                    ])),
-                    'webhook_url' => $this->telnyxWebhookUrl(),
-                ]);
-
-            if ($response->successful()) {
-                $data = $response->json('data') ?? [];
-
-                // Track the invited call control ID in metadata
-                $metadata = $callLog->metadata ?? [];
-                $invited = $metadata['invited_call_control_ids'] ?? [];
-                $invited[] = $data['call_control_id'] ?? null;
-                $metadata['invited_call_control_ids'] = array_filter($invited);
-                $callLog->update(['metadata' => $metadata]);
-
-                // Resolve a display name for the toast
-                $inviteName = $this->resolvePhoneDisplay($targetPhone);
-
-                Log::channel('telnyx')->info('Conference invite dialed', [
-                    'call_log_id' => $callLog->id,
-                    'conference_name' => $conferenceName,
-                    'target_phone' => $targetPhone,
-                    'invite_call_control_id' => $data['call_control_id'] ?? null,
-                ]);
-
-                Flux::toast(variant: 'success', heading: 'Inviting', text: "Calling {$inviteName} to join the call...", duration: 6000, position: 'top right');
-            } else {
-                Log::channel('telnyx')->error('Conference invite failed', [
-                    'status' => $response->status(),
-                    'error' => $response->json(),
-                ]);
-                Flux::toast(variant: 'danger', heading: 'Invite Failed', text: 'Could not dial the participant.', duration: 5000, position: 'top right');
-            }
-        } catch (\Exception $e) {
-            Log::channel('telnyx')->error('Conference invite exception', ['error' => $e->getMessage()]);
-            Flux::toast(variant: 'danger', heading: 'Invite Failed', text: 'Something went wrong.', duration: 5000, position: 'top right');
-        }
-    }
-
-    /**
-     * Clear the active call state (user dismisses the call bar).
-     */
-    public function clearActiveCall(): void
-    {
-        $this->activeCallLogId = null;
-    }
-
-    /**
-     * Get contacts that can be invited to the active conference.
-     * Includes vendor admin users + thread client users, excluding anyone already on the call.
-     *
-     * @return \Illuminate\Support\Collection<int, array{name: string, e164: string, display: string, type: string}>
-     */
-    #[Computed]
-    public function conferenceInvitableContacts()
-    {
-        if (! $this->activeCallLogId) {
-            return collect();
-        }
-
-        $callLog = CallLog::find($this->activeCallLogId);
-        $calledNumber = $callLog?->to_number;
-        $userPhone = auth()->user()->routeNotificationForTelnyx();
-
-        $contacts = collect();
-
-        // Add vendor admin users (team members)
-        $vendor = Vendor::find(1);
-        if ($vendor) {
-            $adminUsers = User::whereHas('vendors', fn ($q) => $q->where('vendors.id', $vendor->id))
-                ->whereNotNull('cell_phone')
-                ->where('cell_phone', '!=', '')
-                ->where('id', '!=', auth()->id())
-                ->get();
-
-            foreach ($adminUsers as $admin) {
-                $e164 = $admin->routeNotificationForTelnyx();
-                if (! $e164 || $e164 === $calledNumber) {
-                    continue;
-                }
-                $contacts->push([
-                    'name' => trim($admin->first_name . ' ' . $admin->last_name),
-                    'e164' => $e164,
-                    'display' => $this->formatPhoneForDisplay($e164),
-                    'type' => 'team',
-                ]);
-            }
-        }
-
-        // Add client users from thread
-        if ($this->thread?->client) {
-            foreach ($this->threadClientUsersFor($this->thread->client) as $clientUser) {
-                $e164 = $clientUser->routeNotificationForTelnyx();
-                if (! $e164 || $e164 === $calledNumber || $e164 === $userPhone) {
-                    continue;
-                }
-                // Skip if already in the team list
-                if ($contacts->contains('e164', $e164)) {
-                    continue;
-                }
-                $contacts->push([
-                    'name' => trim($clientUser->first_name . ' ' . $clientUser->last_name),
-                    'e164' => $e164,
-                    'display' => $this->formatPhoneForDisplay($e164),
-                    'type' => 'client',
-                ]);
-            }
-        }
-
-        return $contacts;
-    }
-
-    protected function formatPhoneForDisplay(string $phone): string
-    {
-        $digits = preg_replace('/[^0-9]/', '', $phone);
-        if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
-            $digits = substr($digits, 1);
-        }
         if (strlen($digits) === 10) {
-            return '(' . substr($digits, 0, 3) . ') ' . substr($digits, 3, 3) . '-' . substr($digits, 6);
+            return '+1' . $digits;
         }
-        return $phone;
+
+        if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+            return '+' . $digits;
+        }
+
+        return str_starts_with($phone, '+') ? $phone : ('+' . $digits);
     }
 
     #[Computed]
@@ -1111,6 +987,30 @@ class SmsConversation extends Component
 
     public function render()
     {
+        // Snapshot the visible conversation to localStorage so the next time the
+        // user navigates back to this thread we can paint it instantly while
+        // Livewire re-hydrates in the background.
+        if ($this->threadId) {
+            $snapshot = collect($this->processedMessages)
+                ->take(-30)
+                ->map(fn ($m) => [
+                    'id' => $m['id'] ?? null,
+                    'direction' => $m['direction'] ?? null,
+                    'from_number' => $m['from_number'] ?? null,
+                    'text' => mb_substr((string) ($m['text'] ?? $m['display_text'] ?? ''), 0, 500),
+                    'created_at' => isset($m['created_at']) ? (string) $m['created_at'] : null,
+                    'media_urls' => $m['media_urls'] ?? [],
+                ])
+                ->values()
+                ->all();
+
+            $this->js(sprintf(
+                "(function(){ try { localStorage.setItem('hive-sms-thread-%d', JSON.stringify(%s)); } catch(e) {} })()",
+                $this->threadId,
+                json_encode($snapshot, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            ));
+        }
+
         return view('livewire.sms.conversation');
     }
 

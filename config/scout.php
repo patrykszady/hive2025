@@ -4,6 +4,7 @@ use App\Models\Client;
 use App\Models\Expense;
 use App\Models\ExpenseReceipts;
 use App\Models\Project;
+use App\Models\SmsGroupThread;
 use App\Models\Transaction;
 use App\Models\Vendor;
 
@@ -210,6 +211,13 @@ return [
             ExpenseReceipts::class => [
                 'filterableAttributes' => ['expense_id', 'belongs_to_vendor_id'],
                 'searchableAttributes' => ['descriptions', 'product_codes', 'purchase_order', 'invoice_number', 'merchant_name'],
+                'typoTolerance' => ['enabled' => true],
+            ],
+
+            SmsGroupThread::class => [
+                'filterableAttributes' => ['vendor_visibility_ids', 'client_id', 'subject_vendor_id'],
+                'sortableAttributes' => ['last_activity_at_unix'],
+                'searchableAttributes' => ['participants', 'project_address', 'client_name', 'client_user_names', 'vendor_name', 'last_message_text'],
                 'typoTolerance' => ['enabled' => true],
             ],
         ],
