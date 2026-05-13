@@ -107,6 +107,8 @@ class ProcessVendorRegistrationMatching implements ShouldQueue
                     $registeredVendorId => ['client_id' => $client->id],
                 ]);
 
+                $project->searchable();
+
                 $this->ensureViewOnlyProjectStatus($project->id, $registeredVendorId, $project->created_at?->format('Y-m-d'));
             }
 
@@ -364,6 +366,8 @@ class ProcessVendorRegistrationMatching implements ShouldQueue
                                     $registeredVendorId => ['client_id' => $client->id],
                                 ]);
 
+                                $project->searchable();
+
                                 $this->ensureViewOnlyProjectStatus($project->id, $registeredVendorId, $project->created_at?->format('Y-m-d'));
                             }
                         }
@@ -430,6 +434,8 @@ class ProcessVendorRegistrationMatching implements ShouldQueue
                         $project->vendors()->syncWithoutDetaching([
                             $registeredVendorId => ['client_id' => $client->id],
                         ]);
+
+                        $project->searchable();
 
                         $this->ensureViewOnlyProjectStatus($project->id, $registeredVendorId, $project->created_at?->format('Y-m-d'));
                     }

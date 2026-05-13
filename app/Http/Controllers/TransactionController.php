@@ -442,6 +442,24 @@ class TransactionController extends Controller
         $transaction->owner = $new_transaction['account_owner'];
         $transaction->details = $new_transaction;
         
+        // Auto-link to a Check by check_number + bank_account + amount.
+        // Plaid sometimes also stamps a merchant_name on a check transaction (e.g. low-confidence
+        // category matches), so we run this independently of vendor logic. The check wins.
+        if (empty($transaction->check_id) && ! empty($transaction->check_number) && ! empty($transaction->bank_account_id)) {
+            $matchedCheck = \App\Models\Check::withoutGlobalScopes()
+                ->where('bank_account_id', $transaction->bank_account_id)
+                ->where('check_number', $transaction->check_number)
+                ->where('amount', $transaction->amount)
+                ->whereNull('deleted_at')
+                ->get();
+
+            if ($matchedCheck->count() === 1) {
+                $check = $matchedCheck->first();
+                $transaction->check_id = $check->id;
+                $transaction->vendor_id = $check->vendor_id;
+            }
+        }
+
         // Auto-assign vendor based on Plaid merchant data if available and not already set
         // Only do this for new transactions or when updating without a vendor
         // Skip checks - they should not be auto-matched to vendors
@@ -2001,6 +2019,7 @@ class TransactionController extends Controller
             $exactMatch = $checks->where('amount', $expense->amount)->first();
             if ($exactMatch) {
                 $expense->checks()->attach($exactMatch->id);
+                $expense->searchable();
                 continue;
             }
             
@@ -2032,6 +2051,7 @@ class TransactionController extends Controller
                     
                     if (count($stillAvailable) === count($matchingCheckIds)) {
                         $expense->checks()->attach($matchingCheckIds);
+                        $expense->searchable();
                         Log::channel('add_check_id_to_transactions')->info('Matched multiple checks to expense via subset sum', [
                             'expense_id' => $expense->id,
                             'check_ids' => $matchingCheckIds,

@@ -52,6 +52,7 @@ class ExpenseShow extends Component
 
         if ($this->expense->checks()->where('checks.id', $check->id)->exists()) {
             $this->expense->checks()->detach($check->id);
+            $this->expense->searchable();
         }
 
         $check->load(['expenses', 'expensesMany', 'timesheets']);

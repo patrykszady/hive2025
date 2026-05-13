@@ -146,7 +146,7 @@ return [
         'index-settings' => [
             Expense::class => [
                 'filterableAttributes'=> [
-                    'id', 'vendor_id', 'project_id', 'distribution_id', 'check_id', 
+                    'id', 'vendor_id', 'project_id', 'distribution_id', 'check_id', 'check_ids',
                     'has_splits', 'belongs_to_vendor_id', 'expense_status',
                     'paid_by', 'reimbursment', '__soft_deleted', 'amount', 'split_project_ids', 'split_amounts',
                     'split_reimbursments', 'date'
@@ -193,7 +193,8 @@ return [
 
             Project::class => [
                 'filterableAttributes'=> [
-                    'client_id', 'belongs_to_vendor_id', 'vendor_ids', 'latest_status_code', 'vendor_status_codes', 'created_at', '__soft_deleted'
+                    'client_id', 'belongs_to_vendor_id', 'vendor_ids', 'pivot_client_ids', 'vendor_client_pairs',
+                    'latest_status_code', 'vendor_status_codes', 'created_at', '__soft_deleted'
                 ],
                 'sortableAttributes' => ['latest_status_date', 'created_at', 'project_name'],
                 'searchableAttributes' => [

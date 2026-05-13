@@ -66,13 +66,15 @@ it('captures all handwritten notes using offsets against the original CU content
 });
 
 it('ignores low-confidence handwritten styles', function () {
-    $content = "PATRIK HOME\n";
+    // Use content that intentionally fails the leading-label fallback heuristic
+    // (>2 words) so this test isolates the confidence-filter behavior.
+    $content = "PATRIK HOME OFFICE NOTE\n";
     $styles = [
         [
             'isHandwritten' => true,
             'confidence'    => 0.3,
             'spans'         => [
-                ['offset' => 0, 'length' => strlen('PATRIK HOME')],
+                ['offset' => 0, 'length' => strlen('PATRIK HOME OFFICE NOTE')],
             ],
         ],
     ];

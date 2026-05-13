@@ -3593,6 +3593,7 @@ class CompanyEmailController extends Controller
         // Link checks to the new expense via many-to-many relationship
         if (!empty($checkIds)) {
             $consolidatedExpense->checks()->attach($checkIds);
+            $consolidatedExpense->searchable();
             Log::channel('nylas')->info(trim($logPrefix . ' Linked checks to consolidated expense'), [
                 'expense_id' => $consolidatedExpense->id,
                 'check_ids' => $checkIds,

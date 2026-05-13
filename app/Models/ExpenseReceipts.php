@@ -118,13 +118,18 @@ class ExpenseReceipts extends Model
     {
         $newHtmlHash = static::receiptHtmlHash($receiptHtml);
         $newLineItemsHash = static::receiptLineItemsHash($receiptItems);
+        $newCoreSignature = static::normalizeReceiptCoreSignature($receiptItems);
+        $newNotes = static::normalizeHandwrittenNotesForCompare($receiptItems);
+        $newPo = static::normalizePurchaseOrderForCompare($receiptItems);
 
         $existingReceipts = static::query()
             ->where('expense_id', $expenseId)
             ->get(['id', 'receipt_html', 'receipt_items']);
 
         foreach ($existingReceipts as $existingReceipt) {
-            $existingLineItemsHash = static::receiptLineItemsHash($existingReceipt->receipt_items ?? []);
+            $existingItems = $existingReceipt->receipt_items ?? [];
+
+            $existingLineItemsHash = static::receiptLineItemsHash($existingItems);
             if ($newLineItemsHash !== null && $existingLineItemsHash !== null && hash_equals($existingLineItemsHash, $newLineItemsHash)) {
                 return true;
             }
@@ -133,9 +138,97 @@ class ExpenseReceipts extends Model
             if ($newHtmlHash !== '' && $existingHtmlHash !== '' && hash_equals($existingHtmlHash, $newHtmlHash)) {
                 return true;
             }
+
+            // Subset rule: same total/transaction_date/purchase_order, and the
+            // new receipt's handwritten_notes are a subset of (or equal to) the
+            // existing receipt's notes. This catches re-OCRs of the same paper
+            // where Azure missed one of the handwritten labels (e.g. existing
+            // notes ["911W/II","R"] vs new notes ["R"]). The previous receipt
+            // already encodes everything the new one would add, so skip it.
+            if ($newCoreSignature !== null) {
+                $existingCoreSignature = static::normalizeReceiptCoreSignature($existingItems);
+                if ($existingCoreSignature !== null
+                    && $newPo === static::normalizePurchaseOrderForCompare($existingItems)
+                    && hash_equals($existingCoreSignature, $newCoreSignature)
+                ) {
+                    $existingNotes = static::normalizeHandwrittenNotesForCompare($existingItems);
+                    if (static::isNotesSubset($newNotes, $existingNotes)) {
+                        return true;
+                    }
+                }
+            }
         }
 
         return false;
+    }
+
+    /**
+     * Stable hash of just total + transaction_date — used by the subset rule
+     * which evaluates handwritten_notes/purchase_order separately.
+     */
+    private static function normalizeReceiptCoreSignature(array $receiptItems): ?string
+    {
+        $total = $receiptItems['total'] ?? null;
+        if ($total === null) {
+            return null;
+        }
+
+        $core = [
+            'transaction_date' => static::normalizeValue($receiptItems['transaction_date'] ?? null),
+            'total' => static::normalizeValue($total),
+        ];
+
+        return sha1(json_encode($core, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private static function normalizeHandwrittenNotesForCompare(array $receiptItems): array
+    {
+        $raw = $receiptItems['handwritten_notes'] ?? [];
+        if (! is_array($raw)) {
+            return [];
+        }
+
+        $notes = [];
+        foreach ($raw as $n) {
+            $n = trim((string) $n);
+            if ($n !== '') {
+                $notes[] = mb_strtolower($n);
+            }
+        }
+        sort($notes);
+
+        return array_values(array_unique($notes));
+    }
+
+    private static function normalizePurchaseOrderForCompare(array $receiptItems): string
+    {
+        $po = $receiptItems['purchase_order'] ?? null;
+        $normalized = is_string($po) ? trim($po) : '';
+        return $normalized === '0' ? '' : mb_strtolower($normalized);
+    }
+
+    /**
+     * @param  array<int, string>  $needle
+     * @param  array<int, string>  $haystack
+     */
+    private static function isNotesSubset(array $needle, array $haystack): bool
+    {
+        // Empty new notes against an existing receipt with notes is a subset
+        // (the old one is strictly more informative).
+        if ($needle === []) {
+            return true;
+        }
+
+        foreach ($needle as $n) {
+            if (! in_array($n, $haystack, true)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     public static function receiptHtmlHash(?string $html): string

@@ -460,6 +460,7 @@ class ExpenseCreate extends Component
         $this->expense->check_id = null;
         $this->expense->save();
         $this->expense->checks()->detach();
+        $this->expense->searchable();
 
         $this->existing_check_id = null;
         $this->clearCheckFields();

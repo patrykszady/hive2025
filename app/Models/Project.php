@@ -199,6 +199,23 @@ class Project extends Model
             'vendor_ids' => $this->relationLoaded('vendors')
                 ? $this->vendors->pluck('id')->map(fn ($id) => (int) $id)->all()
                 : $this->vendors()->pluck('vendors.id')->map(fn ($id) => (int) $id)->all(),
+            'pivot_client_ids' => \DB::table('project_vendor')
+                ->where('project_id', $this->id)
+                ->whereNotNull('client_id')
+                ->pluck('client_id')
+                ->map(fn ($id) => (int) $id)
+                ->unique()
+                ->values()
+                ->all(),
+            'vendor_client_pairs' => \DB::table('project_vendor')
+                ->where('project_id', $this->id)
+                ->whereNotNull('client_id')
+                ->whereNotNull('vendor_id')
+                ->get(['vendor_id', 'client_id'])
+                ->map(fn ($row) => ((int) $row->vendor_id).'_'.((int) $row->client_id))
+                ->unique()
+                ->values()
+                ->all(),
             'vendor_business_name' => $vendorBusinessName,
             'latest_status_code' => $latestStatusCode,
             'latest_status_date' => $latestStatusDate,

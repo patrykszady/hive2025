@@ -77,6 +77,17 @@ class Expense extends Model
         }
 
         // Index only the fields we actually use for search, filtering, and sorting
+        $checkIds = [];
+        if (! is_null($this->check_id)) {
+            $checkIds[] = (int) $this->check_id;
+        }
+        $pivotCheckIds = \DB::table('check_expense')
+            ->where('expense_id', $this->id)
+            ->pluck('check_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+        $checkIds = array_values(array_unique(array_merge($checkIds, $pivotCheckIds)));
+
         return [
             'id' => (string) $this->id,
             'amount' => (float) $this->amount,
@@ -85,6 +96,7 @@ class Expense extends Model
             'project_id' => $this->project_id,
             'distribution_id' => $this->distribution_id,
             'check_id' => $this->check_id,
+            'check_ids' => $checkIds,
             'has_splits' => $this->splits()->exists(),
             'expense_status' => $status,
             'belongs_to_vendor_id' => (int) $this->belongs_to_vendor_id,

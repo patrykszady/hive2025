@@ -59,6 +59,8 @@ class ProjectForm extends Form
             \DB::table('project_vendor')
                 ->where('project_id', $this->project->id)
                 ->update(['client_id' => $newClientId]);
+
+            $this->project->searchable();
         }
 
         return $this->project;

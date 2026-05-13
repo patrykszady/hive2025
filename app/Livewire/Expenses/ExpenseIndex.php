@@ -98,6 +98,7 @@ class ExpenseIndex extends Component
                 ->where('check_id', $this->check)
                 ->where('expense_id', $expense->id)
                 ->delete();
+            $expense->searchable();
         }
 
         $check = Check::find($this->check);
@@ -210,232 +211,18 @@ class ExpenseIndex extends Component
     #[Computed]
     public function expenses()
     {
-        // Removed manual project merging; now handled by Meilisearch filter (project_id OR split_project_ids)
-
-        // Numeric amount search (exact or prefix): include expenses whose own amount OR split amounts match
-        if ($this->isNumericAmountSearch()) {
-            $perPage = $this->paginate_number;
-            $page = \Illuminate\Pagination\Paginator::resolveCurrentPage('expenses-page');
-            $mode = $this->amountSearchMode(); // 'exact' | 'prefix'
-            $baseExpenses = collect();
-            $splitParents = collect();
-
-            if ($mode === 'exact') {
-                $searchAmount = round((float) $this->amount, 2);
-                
-                // Use Scout for exact amount match on parent expenses
-                // Add amount filter to filterConditions for exact match (both positive and negative)
-                $filterConditions = $this->buildFilterConditions();
-                // Search for both positive and negative amounts with same absolute value
-                $negativeAmount = -abs($searchAmount);
-                $positiveAmount = abs($searchAmount);
-                $filterConditions[] = "(amount = {$positiveAmount} OR amount = {$negativeAmount})";
-                
-                // Pass empty string as search query since we're filtering by amount
-                $baseExpenses = Expense::scopedSearch(
-                    '',
-                    $filterConditions,
-                    $this->sortBy,
-                    $this->sortDirection,
-                    null,
-                    $this->isShowingTrashed()
-                )->take(10000)->get();
-
-                // Parent expenses whose split equals amount (positive or negative)
-                $splitParentsQuery = Expense::query()
-                    ->select(['id','amount','date','vendor_id','project_id','distribution_id','check_id','paid_by'])
-                    ->whereHas('splits', function ($q) use ($positiveAmount, $negativeAmount) {
-                        $q->whereRaw('ROUND(amount, 2) = ? OR ROUND(amount, 2) = ?', [$positiveAmount, $negativeAmount]);
-                    });
-            } else { // prefix
-                [$min, $upperExclusive] = $this->amountPrefixBounds();
-                // Direct Eloquent range query to capture ALL matching amounts regardless of date order
-                // Include both positive and negative amounts in the range
-                $user = auth()->user();
-                $selectColumns = ['id','amount','date','vendor_id','project_id','distribution_id','check_id','paid_by'];
-                if ($this->isShowingTrashed()) {
-                    $selectColumns[] = 'deleted_at';
-                }
-                $baseQuery = Expense::query()
-                    ->select($selectColumns)
-                    ->where('belongs_to_vendor_id', $user->vendor->id);
-
-                if ($this->isShowingTrashed()) {
-                    $baseQuery->onlyTrashed();
-                }
-
-                $baseQuery->where(function ($q) use ($min, $upperExclusive) {
-                        // Positive range
-                        $q->where(function ($q2) use ($min, $upperExclusive) {
-                            $q2->where('amount', '>=', $min)
-                               ->where('amount', '<', $upperExclusive);
-                        })
-                        // Negative range (mirror the positive range)
-                        ->orWhere(function ($q2) use ($min, $upperExclusive) {
-                            $q2->where('amount', '>', -$upperExclusive)
-                               ->where('amount', '<=', -$min);
-                        });
-                    });
-
-                // Member role restriction replicating scopedSearch security
-                if ($user->vendor_role === 'Member') {
-                    $baseQuery->where('paid_by', $user->id);
-                }
-
-                // Vendor filter
-                if (is_numeric($this->expense_vendor)) {
-                    $baseQuery->where('vendor_id', $this->expense_vendor);
-                }
-
-                // Project/distribution/split filters (simple subset)
-                if (is_numeric($this->project_id)) {
-                    $baseQuery->where('project_id', $this->project_id);
-                } elseif ($this->project_id === 'SPLIT') {
-                    $baseQuery->whereHas('splits');
-                } elseif (is_string($this->project_id) && str_starts_with($this->project_id, 'D:')) {
-                    $distributionId = (int) substr($this->project_id, 2);
-                    $baseQuery->where('distribution_id', $distributionId);
-                } elseif ($this->project_id === 'NO_PROJECT') {
-                    $baseQuery->where(function ($q) {
-                        $q->whereNull('project_id')->orWhere('project_id', 0);
-                    })->whereNull('distribution_id')->whereDoesntHave('splits');
-                }
-
-                // Date range filter for prefix search (Eloquent path)
-                $bounds = $this->dateBounds();
-                if ($bounds) {
-                    $baseQuery->whereBetween('date', [
-                        Carbon::createFromTimestamp($bounds[0])->toDateString(),
-                        Carbon::createFromTimestamp($bounds[1])->toDateString(),
-                    ]);
-                }
-
-                // Reimbursement filter (Eloquent path)
-                if ($this->reimbursement_filter !== null && $this->reimbursement_filter !== '') {
-                    $filterVal = $this->reimbursement_filter;
-                    $baseQuery->where(fn ($q) => $q->where('reimbursment', $filterVal)
-                        ->orWhereHas('splits', fn ($sq) => $sq->where('reimbursment', $filterVal)));
-                }
-
-                $baseExpenses = $baseQuery->get();
-
-                $splitParentsQuery = Expense::query()
-                    ->select(['id','amount','date','vendor_id','project_id','distribution_id','check_id','paid_by'])
-                    ->whereHas('splits', function ($q) use ($min, $upperExclusive) {
-                        $q->where(function ($q2) use ($min, $upperExclusive) {
-                            // Positive range
-                            $q2->where(function ($q3) use ($min, $upperExclusive) {
-                                $q3->where('amount', '>=', $min)
-                                   ->where('amount', '<', $upperExclusive);
-                            })
-                            // Negative range
-                            ->orWhere(function ($q3) use ($min, $upperExclusive) {
-                                $q3->where('amount', '>', -$upperExclusive)
-                                   ->where('amount', '<=', -$min);
-                            });
-                        });
-                    });
-            }
-
-            // Apply vendor filter if set
-            if (is_numeric($this->expense_vendor)) {
-                $splitParentsQuery->where('vendor_id', $this->expense_vendor);
-            }
-
-            // Apply distribution filter if user selected a distribution via project selector (D:ID)
-            if (is_string($this->project_id) && str_starts_with($this->project_id, 'D:')) {
-                $distributionId = (int) substr($this->project_id, 2);
-                $splitParentsQuery->where('distribution_id', $distributionId);
-            }
-
-            // Apply reimbursement filter to split parents
-            if ($this->reimbursement_filter !== null && $this->reimbursement_filter !== '') {
-                $filterVal = $this->reimbursement_filter;
-                $splitParentsQuery->where(fn ($q) => $q->where('reimbursment', $filterVal)
-                    ->orWhereHas('splits', fn ($sq) => $sq->where('reimbursment', $filterVal)));
-            }
-
-            $splitParents = $splitParentsQuery->get();
-
-            // Apply status filters in-memory (like unified path)
-            if (! empty($this->expense_statuses)) {
-                $allowed = collect($this->expense_statuses);
-                $splitParents = $splitParents->filter(fn ($e) => $allowed->contains($e->status));
-            }
-
-            $merged = $baseExpenses->concat($splitParents)->unique('id')->sortBy(
-                fn ($e) => $e->{$this->sortBy},
-                SORT_REGULAR,
-                $this->sortDirection === 'desc'
-            )->values();
-
-            $total = $merged->count();
-            $slice = $merged->forPage($page, $perPage)->values();
-
-            if ($slice->count() > 0) {
-                $relations = [];
-                if (! in_array($this->view, ['checks.show', 'vendors.show'])) {
-                    $relations['vendor'] = fn ($q) => $q->select('id','business_name','business_type');
-                }
-                if ($this->view !== 'projects.show') {
-                    $relations['project'] = fn ($q) => $q->select('id','project_name','address');
-                }
-                if ($slice->contains(fn ($e) => ! is_null($e->distribution_id))) {
-                    $relations['distribution'] = fn ($q) => $q->select('id','name');
-                }
-                $relations['splits'] = function ($q) {
-                    $q->select('id','expense_id','amount','project_id','distribution_id','reimbursment')
-                      ->with([
-                          'project:id,project_name,address',
-                          'distribution:id,name'
-                      ]);
-                };
-                $relations['receipts'] = fn ($q) => $q->select('id','expense_id','receipt_items')->latest()->limit(1);
-                $slice->load($relations);
-            }
-
-            $paginator = new LengthAwarePaginator(
-                $slice,
-                $total,
-                $perPage,
-                $page,
-                ['path' => request()->url()]
-            );
-            $paginator->setPageName('expenses-page');
-            $paginator->appends(request()->except('expenses-page'));
-            return $paginator;
-        }
-
-        // Default (no project-specific unification)
+        // All amount handling (parent + split, exact + prefix, positive + negative)
+        // is now expressed as Meilisearch filter conditions in buildFilterConditions().
+        // This collapses what used to be a multi-query merge-in-PHP path into a
+        // single Meilisearch round trip with native pagination.
         $expenses = Expense::scopedSearch(
-            $this->amount,
+            '',
             $this->buildFilterConditions(),
             $this->sortBy,
             $this->sortDirection,
             null,
             $this->isShowingTrashed()
         )->paginateWithSearchData($this->paginate_number, pageName: 'expenses-page');
-
-        // When filtering by check, also include expenses from many-to-many relationship
-        if (is_numeric($this->check)) {
-            $pivotExpenseIds = \Illuminate\Support\Facades\DB::table('check_expense')
-                ->where('check_id', $this->check)
-                ->pluck('expense_id');
-            
-            if ($pivotExpenseIds->isNotEmpty()) {
-                $pivotExpenses = Expense::whereIn('id', $pivotExpenseIds)
-                    ->where('belongs_to_vendor_id', auth()->user()->vendor->id)
-                    ->get();
-                
-                // Merge with existing collection, avoiding duplicates
-                $mergedCollection = $expenses->getCollection()
-                    ->concat($pivotExpenses)
-                    ->unique('id')
-                    ->values();
-                
-                $expenses->setCollection($mergedCollection);
-            }
-        }
 
         if ($expenses->count() > 0) {
             $relations = [];
@@ -615,9 +402,9 @@ class ExpenseIndex extends Component
             $filterConditions[] = "distribution_id = {$distributionId}";
         }
         
-        // Apply check filter if present
+        // Apply check filter if present (covers both direct check_id and many-to-many pivot)
         if (is_numeric($this->check)) {
-            $filterConditions[] = "check_id = {$this->check}";
+            $filterConditions[] = "check_ids = {$this->check}";
         }
 
         // Apply date range filter
@@ -630,6 +417,13 @@ class ExpenseIndex extends Component
         if ($this->reimbursement_filter !== null && $this->reimbursement_filter !== '') {
             $safeValue = addslashes($this->reimbursement_filter);
             $filterConditions[] = "(reimbursment = '{$safeValue}' OR split_reimbursments = '{$safeValue}')";
+        }
+
+        // Apply amount filter (parent OR any split) entirely via Meilisearch.
+        // Both `amount` and `split_amounts` are filterable; ranges work on numeric arrays.
+        $amountFilter = $this->buildAmountFilter();
+        if ($amountFilter !== null) {
+            $filterConditions[] = $amountFilter;
         }
 
         // Apply receipt item search filter
@@ -659,6 +453,45 @@ class ExpenseIndex extends Component
         }
 
         return "date >= {$bounds[0]} AND date <= {$bounds[1]}";
+    }
+
+    /**
+     * Build a Meilisearch amount filter that matches an expense whose own
+     * amount OR any of its split amounts matches the user input. Mirrors the
+     * positive value into the negative range so refunds/credits surface too.
+     *
+     * Returns null when amount input is empty or non-numeric.
+     */
+    private function buildAmountFilter(): ?string
+    {
+        if (! $this->isNumericAmountSearch()) {
+            return null;
+        }
+
+        $mode = $this->amountSearchMode();
+
+        if ($mode === 'exact') {
+            $value = round((float) $this->normalizedAmountInput(), 2);
+            $pos = abs($value);
+            $neg = -$pos;
+
+            return "(amount = {$pos} OR amount = {$neg} OR split_amounts = {$pos} OR split_amounts = {$neg})";
+        }
+
+        if ($mode === 'prefix') {
+            [$min, $upperExclusive] = $this->amountPrefixBounds();
+            $negMin = -$upperExclusive;
+            $negMax = -$min;
+
+            return '('
+                . "(amount >= {$min} AND amount < {$upperExclusive})"
+                . " OR (amount > {$negMin} AND amount <= {$negMax})"
+                . " OR (split_amounts >= {$min} AND split_amounts < {$upperExclusive})"
+                . " OR (split_amounts > {$negMin} AND split_amounts <= {$negMax})"
+                . ')';
+        }
+
+        return null;
     }
 
     /**

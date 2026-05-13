@@ -696,6 +696,19 @@ class ReceiptController extends Controller
             $handwrittenNotes = array_values(array_unique($handwrittenNotes));
         }
 
+        // Fallback: when the OCR's handwriting detector missed it, scrape short
+        // bare label lines (e.g. "Office", "Shop") that appear above the
+        // merchant header. Only fires when no handwritten notes were detected
+        // by Azure CU or the custom analyzer — this is a recovery path for
+        // paper receipts where the scribbled label was transcribed but never
+        // tagged as handwritten.
+        if ($handwrittenNotes === []) {
+            foreach ($this->extractLeadingLabelLines($originalContent, $merchantName) as $label) {
+                $handwrittenNotes[] = $label;
+            }
+            $handwrittenNotes = array_values(array_unique($handwrittenNotes));
+        }
+
         // ── 5. Invoice Number ─────────────────────────────────────────
         $invoiceNumber = null;
         if (isset($prefix['InvoiceId']) && ($prefix['InvoiceId']['confidence'] ?? 0) > 0) {
@@ -1395,6 +1408,88 @@ class ReceiptController extends Controller
         }
 
         return $notes;
+    }
+
+    /**
+     * Recover handwritten labels (e.g. "Office", "Shop") that the OCR
+     * transcribed but never tagged as handwriting. Only the lines BEFORE the
+     * merchant header are considered, and only short 1–2 word alphabetic
+     * tokens that don't overlap with the printed merchant name.
+     *
+     * @return array<int, string>
+     */
+    private function extractLeadingLabelLines(string $content, ?string $merchantName): array
+    {
+        if ($content === '') {
+            return [];
+        }
+
+        $headerOffset = strlen($content);
+        if (preg_match('/!\[[^\]]*\]\([^\)]+\)/', $content, $hm, PREG_OFFSET_CAPTURE)) {
+            $headerOffset = min($headerOffset, (int) $hm[0][1]);
+        }
+
+        $lines = array_slice(
+            array_values(array_filter(
+                array_map('trim', preg_split('/\r?\n/', substr($content, 0, $headerOffset)) ?: []),
+                fn (string $l) => $l !== ''
+            )),
+            0,
+            5
+        );
+
+        $merchantTokens = [];
+        if ($merchantName !== null && $merchantName !== '') {
+            foreach (preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($merchantName)) ?: [] as $tok) {
+                $tok = trim($tok);
+                if (mb_strlen($tok) >= 2) {
+                    $merchantTokens[$tok] = true;
+                }
+            }
+        }
+
+        $out = [];
+        foreach ($lines as $line) {
+            if (mb_strlen($line) > 30) {
+                continue;
+            }
+            if (preg_match('/\d/', $line)) {
+                continue;
+            }
+            $wordCount = preg_match_all('/\b[A-Za-z][A-Za-z\']*\b/', $line);
+            if ($wordCount < 1 || $wordCount > 2) {
+                continue;
+            }
+
+            $clean = trim($line, " \t\n\r\0\x0B.,:;-_*#");
+            if ($clean === '') {
+                continue;
+            }
+
+            // Skip if every alphabetic token also appears in the merchant name.
+            if (! empty($merchantTokens)) {
+                $tokens = array_filter(
+                    preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($clean)) ?: [],
+                    fn ($t) => mb_strlen($t) >= 2
+                );
+                if (! empty($tokens)) {
+                    $allInMerchant = true;
+                    foreach ($tokens as $t) {
+                        if (! isset($merchantTokens[$t])) {
+                            $allInMerchant = false;
+                            break;
+                        }
+                    }
+                    if ($allInMerchant) {
+                        continue;
+                    }
+                }
+            }
+
+            $out[] = $clean;
+        }
+
+        return $out;
     }
 
     /**

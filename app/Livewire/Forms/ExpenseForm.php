@@ -295,6 +295,8 @@ class ExpenseForm extends Form
         if ($this->expense->check_id) {
             $this->expense->check_id = null;
             $this->expense->save();
+        } else {
+            $this->expense->searchable();
         }
 
         $this->expense->delete();
