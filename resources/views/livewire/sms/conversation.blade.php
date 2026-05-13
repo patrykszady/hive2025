@@ -96,7 +96,7 @@
             x-on:touchend="onPullEnd()"
         >
             {{-- Title row --}}
-            <div class="flex items-center gap-1.5" style="padding-left: 2rem" x-bind:style="window.innerWidth >= 1024 ? 'padding-left: 0' : 'padding-left: 2rem'">
+            <div class="flex items-center gap-1.5 pl-8 lg:pl-0">
                 {{-- Mobile back button: optimistic — flip the panels instantly,
                      then tell the server to clear in the background. --}}
                 <flux:button
@@ -367,9 +367,6 @@
         <div
             class="sms-messages h-full overflow-y-auto flex flex-col-reverse gap-3 px-2 pt-6 pb-6"
             x-show="!switching"
-            x-transition:enter="transition-opacity ease-out duration-200 delay-75"
-            x-transition:enter-start="opacity-0"
-            x-transition:enter-end="opacity-100"
             x-on:message-sent.window="$nextTick(() => $el.scrollTop = 0)"
             x-on:sms-new-message-received.window="if ($el.scrollTop < 150) $nextTick(() => $el.scrollTop = 0)"
             x-on:thread-ready.window="$nextTick(() => $el.scrollTop = 0)"
@@ -567,6 +564,27 @@
             @endforelse
         </div>
             <div class="sms-fade-overlay bottom"></div>
+
+            {{-- Snapshot writer: caches the current thread's visible messages to
+                 localStorage so revisiting paints instantly with real content. --}}
+            @php
+                $snapshot = collect($visibleMessages)->take(40)->map(fn ($m) => [
+                    'id' => $m->id,
+                    'direction' => $m->direction,
+                    'text' => (string) $m->text,
+                    'created_at' => optional($m->created_at)->toIso8601String(),
+                ])->values();
+            @endphp
+            <div
+                x-data="{ snap: @js($snapshot) }"
+                x-init="
+                    try { localStorage.setItem('hive-sms-thread-{{ $threadId }}', JSON.stringify(snap)); } catch(e) {}
+                "
+                x-on:thread-ready.window="
+                    try { localStorage.setItem('hive-sms-thread-{{ $threadId }}', JSON.stringify(snap)); } catch(e) {}
+                "
+                style="display:none"
+            ></div>
         </div>
 
         {{-- Compose --}}
@@ -1196,18 +1214,104 @@
             x-show="switching || $store.sms.threadId"
             x-cloak
             class="flex-1 min-h-0 flex flex-col"
+            x-data="{
+                cachedMessages: [],
+                cachedThread: null,
+                loadCached(id) {
+                    if (!id) { this.cachedMessages = []; this.cachedThread = null; return; }
+                    try {
+                        const raw = localStorage.getItem('hive-sms-thread-' + id);
+                        this.cachedMessages = raw ? JSON.parse(raw) : [];
+                    } catch (e) { this.cachedMessages = []; }
+                    const cache = $store.sms.smsCache;
+                    this.cachedThread = (cache && cache.threads) ? cache.threads.find(t => t.id == id) : null;
+                    if ((!this.cachedMessages || this.cachedMessages.length === 0) && cache && cache.messages && cache.messages[id]) {
+                        this.cachedMessages = cache.messages[id];
+                    }
+                },
+                cachedTitle() {
+                    const t = this.cachedThread;
+                    if (!t) return '';
+                    if (t.name) return t.name;
+                    if (t.client && t.client.name) return t.client.name;
+                    if (t.subject_vendor && t.subject_vendor.name) return t.subject_vendor.name;
+                    if (t.project && t.project.address) return t.project.address;
+                    if (t.participants && t.participants.length) return t.participants.join(', ');
+                    return '';
+                },
+                fmt(iso) {
+                    if (!iso) return '';
+                    try { return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); }
+                    catch(e) { return ''; }
+                },
+            }"
+            x-init="loadCached($store.sms.threadId)"
+            x-on:thread-switching.window="loadCached($event.detail?.threadId || $store.sms.threadId)"
         >
-            {{-- Skeleton header --}}
+            {{-- Real-looking header (back button works immediately, title from cache when available) --}}
             <div class="border-b border-zinc-200 dark:border-zinc-700 px-4 py-2">
                 <div class="flex items-center gap-1.5 pl-8 lg:pl-0">
-                    <div class="lg:hidden size-8 rounded-md bg-zinc-200/60 dark:bg-zinc-700/40 animate-pulse"></div>
-                    <div class="h-5 w-40 rounded bg-zinc-200/70 dark:bg-zinc-700/50 animate-pulse"></div>
+                    <flux:button
+                        type="button"
+                        variant="subtle"
+                        size="sm"
+                        square
+                        icon="arrow-left"
+                        class="lg:hidden shrink-0"
+                        x-on:click="
+                            $store.sms.threadId = null;
+                            window.dispatchEvent(new CustomEvent('thread-selected', { detail: { threadId: null } }));
+                            $wire.$parent.clearThread();
+                        "
+                        aria-label="Back to conversations"
+                    ></flux:button>
+                    <template x-if="cachedTitle()">
+                        <h2 class="text-base font-semibold text-zinc-900 dark:text-zinc-100 truncate" x-text="cachedTitle()"></h2>
+                    </template>
+                    <template x-if="!cachedTitle()">
+                        <div class="h-5 w-40 rounded bg-zinc-200/70 dark:bg-zinc-700/50 animate-pulse"></div>
+                    </template>
                 </div>
                 <div class="h-3 w-24 mt-2 rounded bg-zinc-200/50 dark:bg-zinc-700/30 animate-pulse"></div>
             </div>
-            {{-- Skeleton bubbles, full height --}}
+            {{-- Cached snapshot bubbles when available, otherwise skeleton --}}
             <div class="flex-1 min-h-0 flex flex-col">
-                @include('livewire.sms.conversation_placeholder')
+                <template x-if="cachedMessages.filter(m => (m.text || '').trim().length > 0).length >= 2">
+                    <div class="h-full overflow-hidden flex flex-col-reverse gap-3 px-2 pt-6 pb-6">
+                        <template x-for="msg in [...cachedMessages].filter(m => (m.text || '').trim().length > 0).reverse()" :key="'cache2-' + msg.id">
+                            <div x-bind:class="msg.direction === 'outbound' ? 'flex justify-end' : 'flex justify-start'">
+                                <div class="max-w-[85%] lg:max-w-[75%]">
+                                    <div x-bind:class="msg.direction === 'outbound'
+                                            ? 'bg-indigo-500 text-white rounded-2xl rounded-br-sm'
+                                            : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 rounded-2xl rounded-bl-sm'"
+                                         class="px-3 py-2 text-sm whitespace-pre-wrap break-words" x-text="msg.text"></div>
+                                    <p class="text-[10px] text-zinc-400 mt-0.5"
+                                       x-bind:class="msg.direction === 'outbound' ? 'text-right pr-1' : 'pl-1'"
+                                       x-text="fmt(msg.created_at)"></p>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+                <template x-if="cachedMessages.filter(m => (m.text || '').trim().length > 0).length < 2">
+                    <div class="h-full flex flex-col">@include('livewire.sms.conversation_placeholder')</div>
+                </template>
+            </div>
+            {{-- Real-looking composer footer --}}
+            <div class="border-t border-zinc-200 dark:border-zinc-700 p-2">
+                <div class="flex items-end gap-2 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800/40 px-2 py-1.5">
+                    <div class="flex items-center gap-1 pb-1">
+                        <flux:icon name="paper-clip" class="size-5 text-zinc-300 dark:text-zinc-600" />
+                        <flux:icon name="calendar-days" class="size-5 text-zinc-300 dark:text-zinc-600" />
+                    </div>
+                    <div class="flex-1 text-sm text-zinc-300 dark:text-zinc-600 py-2">Type a message...</div>
+                    <div class="flex items-center gap-1 pb-1">
+                        <flux:icon name="clock" class="size-5 text-zinc-300 dark:text-zinc-600" />
+                        <div class="size-7 rounded-md bg-indigo-300/60 dark:bg-indigo-500/30 flex items-center justify-center">
+                            <flux:icon name="paper-airplane" class="size-4 text-white/80" />
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
         <div

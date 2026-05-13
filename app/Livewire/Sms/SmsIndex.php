@@ -81,6 +81,11 @@ class SmsIndex extends Component
 
     public function selectThread(int|null $threadId): void
     {
+        // Tapping the already-open thread is a no-op (avoids a wasted roundtrip + re-render).
+        if ($threadId !== null && $threadId === $this->threadId) {
+            return;
+        }
+
         // Client users may only view threads belonging to their client
         if ($this->isClientUser && $threadId !== null) {
             $clientIds = auth()->user()->clients()->pluck('clients.id');

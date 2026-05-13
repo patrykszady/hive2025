@@ -1,6 +1,11 @@
 <div
     x-data="{
-        selected: @js($selectedThreadId),
+        selected: (() => {
+            try {
+                const stored = Alpine.store('sms')?.threadId;
+                return stored || @js($selectedThreadId);
+            } catch (e) { return @js($selectedThreadId); }
+        })(),
         pulling: false,
         pullY: 0,
         startY: 0,
@@ -37,7 +42,7 @@
             }
         },
     }"
-    x-on:thread-selected.window="selected = $event.detail.threadId"
+    x-on:thread-selected.window="if ($event.detail.threadId) selected = $event.detail.threadId"
     x-on:sms-thread-filter-changed.window="$nextTick(() => $el.scrollTop = 0)"
     x-on:touchstart.passive="onTouchStart($event)"
     x-on:touchmove="onTouchMove($event)"

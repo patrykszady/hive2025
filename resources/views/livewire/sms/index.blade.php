@@ -174,7 +174,7 @@
         <x-island-card class="flex flex-col h-full min-h-0 overflow-hidden">
             {{-- Tabs --}}
             @if (! $isClientUser)
-                <div class="flex items-center justify-between">
+                <div class="flex items-center justify-between pl-8 lg:pl-0">
                     {{-- Alpine-driven tab switching: instant, no server roundtrip --}}
                     <div class="inline-flex rounded-lg bg-zinc-100 dark:bg-zinc-800 p-0.5">
                         <button type="button"
@@ -199,7 +199,7 @@
                     </flux:button>
                 </div>
             @else
-                <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center justify-between mb-3 pl-8 lg:pl-0">
                     <flux:heading size="lg">Conversations</flux:heading>
                 </div>
             @endif

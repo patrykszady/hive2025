@@ -1078,11 +1078,14 @@ class CompanyEmailController extends Controller
                 // Some OCR providers / failure modes can return a partial payload without a "fields" key.
                 // This method is executed by the scheduler; avoid crashing the whole run.
                 if (! is_array($ocr_receipt_data) || ($ocr_receipt_data['error'] ?? false) === true) {
-                    Log::channel('nylas')->warning('OCR extract returned error or non-array payload', [
+                    if (! empty($folderMap['Error'])) {
+                        $this->nylasService->moveEmailToFolder($messageId, $folderMap['Error'], $grantId, $companyEmail->id);
+                    }
+                    Log::channel('nylas')->warning('OCR extract returned error or non-array payload — moved to Error folder', [
                         'receipt_id' => $receipt->id,
                         'company_email_id' => $companyEmail->id,
                         'message_id' => $messageId,
-                        'ocr_error' => $ocr_receipt_data['error'] ?? null,
+                        'ocr_error' => is_array($ocr_receipt_data) ? ($ocr_receipt_data['error'] ?? null) : null,
                     ]);
                     continue;
                 }

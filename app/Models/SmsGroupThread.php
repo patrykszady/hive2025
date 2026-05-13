@@ -285,7 +285,7 @@ class SmsGroupThread extends Model
     {
         $this->loadMissing([
             'project:id,address,belongs_to_vendor_id',
-            'client:id,vendor_id,first_names,last_names,business_name',
+            'client:id,vendor_id,business_name',
             'client.vendors:id',
             'client.users:id,first_name,last_name,cell_phone',
             'subjectVendor:id,business_name,options',
