@@ -39,7 +39,7 @@
     }"
     x-on:thread-switching.window="
         clearTimeout(switchingTimer);
-        switchingTimer = setTimeout(() => { switching = true }, 300);
+        switching = true;
     "
     x-on:thread-ready.window="
         clearTimeout(switchingTimer);
@@ -97,7 +97,8 @@
         >
             {{-- Title row --}}
             <div class="flex items-center gap-1.5" style="padding-left: 2rem" x-bind:style="window.innerWidth >= 1024 ? 'padding-left: 0' : 'padding-left: 2rem'">
-                {{-- Mobile back button --}}
+                {{-- Mobile back button: optimistic — flip the panels instantly,
+                     then tell the server to clear in the background. --}}
                 <flux:button
                     type="button"
                     variant="subtle"
@@ -105,7 +106,11 @@
                     square
                     icon="arrow-left"
                     class="lg:hidden shrink-0"
-                    wire:click="$parent.clearThread()"
+                    x-on:click="
+                        $store.sms.threadId = null;
+                        window.dispatchEvent(new CustomEvent('thread-selected', { detail: { threadId: null } }));
+                        $wire.$parent.clearThread();
+                    "
                     aria-label="Back to conversations"
                 ></flux:button>
                 @if (! empty($this->thread->name_data))
@@ -311,6 +316,12 @@
             <div
                 x-show="switching"
                 x-cloak
+                x-transition:enter="transition-opacity ease-out duration-150"
+                x-transition:enter-start="opacity-0"
+                x-transition:enter-end="opacity-100"
+                x-transition:leave="transition-opacity ease-in duration-200"
+                x-transition:leave-start="opacity-100"
+                x-transition:leave-end="opacity-0"
                 x-data="{
                     cachedMessages: [],
                     loadCachedSnapshot(id) {
@@ -348,13 +359,17 @@
                     </div>
                 </template>
                 <template x-if="cachedMessages.filter(m => (m.text || '').trim().length > 0).length < 2">
-                    <div>@include('livewire.sms.conversation_placeholder')</div>
+                    <div class="h-full flex flex-col">@include('livewire.sms.conversation_placeholder')</div>
                 </template>
             </div>
 
             <div class="sms-fade-overlay top"></div>
         <div
             class="sms-messages h-full overflow-y-auto flex flex-col-reverse gap-3 px-2 pt-6 pb-6"
+            x-show="!switching"
+            x-transition:enter="transition-opacity ease-out duration-200 delay-75"
+            x-transition:enter-start="opacity-0"
+            x-transition:enter-end="opacity-100"
             x-on:message-sent.window="$nextTick(() => $el.scrollTop = 0)"
             x-on:sms-new-message-received.window="if ($el.scrollTop < 150) $nextTick(() => $el.scrollTop = 0)"
             x-on:thread-ready.window="$nextTick(() => $el.scrollTop = 0)"
@@ -1166,8 +1181,26 @@
             </div>
         </flux:modal>
     @else
-        {{-- No thread selected --}}
-        <div class="flex flex-1 items-center justify-center">
+        {{-- No thread selected — but if we're mid-switch (just tapped a thread on mobile)
+             show a skeleton header + bubbles to mirror the loaded layout, preventing
+             a visual height shift when the server response swaps in the real thread. --}}
+        <template x-if="switching">
+            <div class="flex-1 min-h-0 flex flex-col">
+                {{-- Skeleton header --}}
+                <div class="border-b border-zinc-200 dark:border-zinc-700 px-4 py-2">
+                    <div class="flex items-center gap-1.5" style="padding-left: 2rem" x-bind:style="window.innerWidth >= 1024 ? 'padding-left: 0' : 'padding-left: 2rem'">
+                        <div class="lg:hidden size-8 rounded-md bg-zinc-200/60 dark:bg-zinc-700/40 animate-pulse"></div>
+                        <div class="h-5 w-40 rounded bg-zinc-200/70 dark:bg-zinc-700/50 animate-pulse"></div>
+                    </div>
+                    <div class="h-3 w-24 mt-2 rounded bg-zinc-200/50 dark:bg-zinc-700/30 animate-pulse"></div>
+                </div>
+                {{-- Skeleton bubbles, full height --}}
+                <div class="flex-1 min-h-0 flex flex-col">
+                    @include('livewire.sms.conversation_placeholder')
+                </div>
+            </div>
+        </template>
+        <div x-show="!switching" class="flex flex-1 items-center justify-center">
             <div class="text-center">
                 <flux:icon name="chat-bubble-left-right" class="mx-auto h-12 w-12 text-zinc-300 dark:text-zinc-600" />
                 <h3 class="mt-3 text-base lg:text-sm font-medium text-zinc-500 dark:text-zinc-400">No conversation selected</h3>

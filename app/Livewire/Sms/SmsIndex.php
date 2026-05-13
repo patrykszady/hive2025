@@ -59,9 +59,17 @@ class SmsIndex extends Component
         // Tell the thread list to scroll to the top whenever the filter changes.
         $this->dispatch('sms-thread-filter-changed');
 
-        // When the subject filter changes, jump to the latest thread that matches it
-        // so the open conversation reflects the current filter (e.g. switching to
-        // "Vendors" should open the most recent vendor thread).
+        // When the subject filter changes on DESKTOP, jump to the latest thread that
+        // matches it so the open conversation reflects the current filter. On MOBILE
+        // we don't want to surprise the user by opening a thread (which would push
+        // them off the thread list into the conversation panel) — so the client-side
+        // dispatches `sms-subject-filter-changed` and only calls
+        // `autoSelectLatestForFilter` when on desktop.
+        $this->dispatch('sms-subject-filter-changed');
+    }
+
+    public function autoSelectLatestForFilter(): void
+    {
         $latestThreadId = $this->latestAccessibleThreadId();
 
         if ($latestThreadId !== null && $latestThreadId !== $this->threadId) {

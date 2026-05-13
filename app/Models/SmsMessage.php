@@ -599,6 +599,9 @@ class SmsMessage extends Model
             "'",
             trim($text)
         );
+        // Collapse all Unicode whitespace (NBSP, narrow NBSP, etc.) to a regular space
+        // so keywords like "kciuk w gór" match when the source uses U+00A0.
+        $normalized = preg_replace('/\s+/u', ' ', $normalized);
         $lower = mb_strtolower($normalized);
 
         // Bare punctuation marks used across many languages for emphasis/question

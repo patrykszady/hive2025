@@ -65,7 +65,14 @@
     @forelse ($this->threads as $thread)
         <button
             wire:key="thread-{{ $thread->id }}"
-            x-on:click="selected = {{ $thread->id }}; Livewire.dispatch('threadSelected', { threadId: {{ $thread->id }} }); $dispatch('thread-switching', { threadId: {{ $thread->id }} })"
+            x-on:click="
+                selected = {{ $thread->id }};
+                /* Optimistic UI: flip the mobile panels immediately so the conversation
+                   becomes visible with a skeleton while the server processes selectThread. */
+                $store.sms.threadId = {{ $thread->id }};
+                window.dispatchEvent(new CustomEvent('thread-switching', { detail: { threadId: {{ $thread->id }} } }));
+                Livewire.dispatch('threadSelected', { threadId: {{ $thread->id }} });
+            "
             class="w-full text-left px-3 py-2.5 rounded-lg"
             x-bind:class="selected === {{ $thread->id }}
                 ? 'bg-zinc-100 dark:bg-zinc-700'
