@@ -60,7 +60,7 @@ class HourCreate extends Component
         $this->selectedDate(browser_today()->format('Y-m-d'));
 
         // Get the start of the week containing the min date to include all relevant timesheets
-        $minDateWeekStart = browser_today()->subMonths(3)->startOfMonth()->startOfWeek(Carbon::MONDAY);
+        $minDateWeekStart = browser_today()->subMonths(12)->startOfMonth()->startOfWeek(Carbon::MONDAY);
 
         $confirmed_weeks =
             Timesheet::orderBy('date', 'DESC')
@@ -158,7 +158,7 @@ class HourCreate extends Component
     #[Computed]
     public function minDate(): string
     {
-        return browser_today()->subMonths(3)->startOfMonth()->format('Y-m-d');
+        return browser_today()->subMonths(12)->startOfMonth()->format('Y-m-d');
     }
 
     #[Computed]
