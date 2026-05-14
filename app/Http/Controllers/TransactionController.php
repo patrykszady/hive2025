@@ -1708,6 +1708,16 @@ class TransactionController extends Controller
 
             $bank_account_ids = $check->bank_account_id ? $check->bank_account->bank->accounts->pluck('id') : NULL;
 
+            // For Transfer checks, prefer grouped subset-sum matches first (e.g. 2x$100)
+            // so date-close grouped transfers win over a far-away single exact amount.
+            if ($check->check_type === 'Transfer') {
+                $this->matchTransactionsToCheckBySubsetSum($check, $check_number, $bank_account_ids, $add_days, $sub_days);
+
+                if ($check->fresh()->transactions()->exists()) {
+                    continue;
+                }
+            }
+
             //$transactions match the check amount.
             $transactions = Transaction::withoutGlobalScopes()
                 ->whereNull('deleted_at')
