@@ -1,7 +1,8 @@
 <?php
 
-use Illuminate\Support\Facades\Artisan;
-use Illuminate\Support\Facades\DB;
+use App\Jobs\DispatchIncompleteReceiptImageScrapesJob;
+use App\Jobs\PruneFailedJobsJob;
+use App\Jobs\RunScheduledTask;
 use Illuminate\Support\Facades\Schedule;
 
 Schedule::timezone('America/Chicago');
@@ -13,9 +14,7 @@ Schedule::timezone('America/Chicago');
 //   ->withoutOverlapping()
 //   ->onOneServer();
 
-Schedule::call(function () {
-    app(\App\Http\Controllers\CompanyEmailController::class)->fetchAutoReceipts();
-    })
+Schedule::job(new RunScheduledTask(\App\Http\Controllers\CompanyEmailController::class, 'fetchAutoReceipts'))
     ->everyTenMinutes()
     // ->between('7:00', '22:00')
     ->name('fetch-auto-receipts')
@@ -23,9 +22,7 @@ Schedule::call(function () {
     ->withoutOverlapping()
     ->onOneServer();
 
-Schedule::call(function () {
-    app(\App\Http\Controllers\CompanyEmailController::class)->forwardRecentReceiptEmailsToCentral();
-    })
+Schedule::job(new RunScheduledTask(\App\Http\Controllers\CompanyEmailController::class, 'forwardRecentReceiptEmailsToCentral'))
     ->everyTenMinutes()
     // ->between('7:00', '22:00')
     ->name('forward-recent-receipts-to-central')
@@ -33,19 +30,16 @@ Schedule::call(function () {
     ->withoutOverlapping()
     ->onOneServer();
 
-Schedule::call(function () {
-  app(\App\Http\Controllers\CompanyEmailController::class)->fetchReceiptMessages();
-  })
-  ->everyTenMinutes()
-  // ->between('7:00', '22:00')
-  ->name('fetch-receipt-messages')
-  ->environments(['production'])
-  ->withoutOverlapping()
-  ->onOneServer();
+Schedule::job(new RunScheduledTask(\App\Http\Controllers\CompanyEmailController::class, 'fetchReceiptMessages'))
+    ->everyTenMinutes()
+    // ->between('7:00', '22:00')
+    ->name('fetch-receipt-messages')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer();
 
-Schedule::call(function () {
-    app(\App\Http\Controllers\VendorDocsController::class)->fetchMessagesFromInsuranceMailbox();
-    })->hourly()
+Schedule::job(new RunScheduledTask(\App\Http\Controllers\VendorDocsController::class, 'fetchMessagesFromInsuranceMailbox'))
+    ->hourly()
     // ->between('7:00', '20:00')
     ->name('fetch-insurance-mailbox')
     ->environments(['production'])
@@ -74,13 +68,11 @@ Schedule::command('sms:send-scheduled')
     ->withoutOverlapping()
     ->onOneServer();
 
-Schedule::call(function () {
-    Artisan::call('queue:prune-failed', ['--hours' => 4320]);
-    DB::statement('OPTIMIZE TABLE failed_jobs');
-})->weeklyOn(0, '03:00')
-  ->name('prune-failed-jobs')
-  ->withoutOverlapping()
-  ->onOneServer();
+Schedule::job(new PruneFailedJobsJob)
+    ->weeklyOn(0, '03:00')
+    ->name('prune-failed-jobs')
+    ->withoutOverlapping()
+    ->onOneServer();
 
 // ─── Unified Task Notifications ─────────────────────────
 // Shared notification schedule config
@@ -108,13 +100,12 @@ Schedule::job(new \App\Jobs\SendDigestNotifications('evening'))
 
 // Plaid/Transaction tasks
 // Fallback status check in case webhook delivery fails or is delayed
-Schedule::call(function () {
-    app(\App\Http\Controllers\TransactionController::class)->plaid_item_status();
-})->hourly()
-  ->name('plaid-item-status')
-  ->environments(['production'])
-  ->withoutOverlapping()
-  ->onOneServer();
+Schedule::job(new RunScheduledTask(\App\Http\Controllers\TransactionController::class, 'plaid_item_status'))
+    ->hourly()
+    ->name('plaid-item-status')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer();
 
 // Daily fallback for Plaid transaction sync (in case webhooks miss updates)
 // Schedule::command('plaid:sync-transactions --all')
@@ -124,101 +115,84 @@ Schedule::call(function () {
 //   ->withoutOverlapping()
 //   ->onOneServer();
 
-Schedule::call(function () {
-    app(\App\Http\Controllers\TransactionController::class)->add_check_deposit_to_transactions();
-})->everyTenMinutes()
-  ->name('add-check-deposits')
-  ->withoutOverlapping()
-  ->onOneServer();
+Schedule::job(new RunScheduledTask(\App\Http\Controllers\TransactionController::class, 'add_check_deposit_to_transactions'))
+    ->everyTenMinutes()
+    ->name('add-check-deposits')
+    ->withoutOverlapping()
+    ->onOneServer();
 
-Schedule::call(function () {
-    app(\App\Http\Controllers\TransactionController::class)->add_vendor_to_transactions();
-})->everyTenMinutes()
-  ->name('add-vendor-to-transactions')
-  ->withoutOverlapping()
-  ->onOneServer();
+Schedule::job(new RunScheduledTask(\App\Http\Controllers\TransactionController::class, 'add_vendor_to_transactions'))
+    ->everyTenMinutes()
+    ->name('add-vendor-to-transactions')
+    ->withoutOverlapping()
+    ->onOneServer();
 
-Schedule::call(function () {
-    app(\App\Http\Controllers\TransactionController::class)->add_expense_to_transactions();
-})->everyTenMinutes()
-  ->name('add-expense-to-transactions')
-  ->withoutOverlapping()
-  ->onOneServer();
+Schedule::job(new RunScheduledTask(\App\Http\Controllers\TransactionController::class, 'add_expense_to_transactions'))
+    ->everyTenMinutes()
+    ->name('add-expense-to-transactions')
+    ->withoutOverlapping()
+    ->onOneServer();
 
-Schedule::call(function () {
-    app(\App\Http\Controllers\TransactionController::class)->add_transaction_to_multi_expenses();
-})->everyTenMinutes()
-  ->name('add-transaction-to-multi-expenses')
-  ->withoutOverlapping()
-  ->onOneServer();
+Schedule::job(new RunScheduledTask(\App\Http\Controllers\TransactionController::class, 'add_transaction_to_multi_expenses'))
+    ->everyTenMinutes()
+    ->name('add-transaction-to-multi-expenses')
+    ->withoutOverlapping()
+    ->onOneServer();
 
-Schedule::call(function () {
-    app(\App\Http\Controllers\TransactionController::class)->add_check_id_to_transactions();
-})->everyTenMinutes()
-  ->name('add-check-id-to-transactions')
-  ->withoutOverlapping()
-  ->onOneServer();
+Schedule::job(new RunScheduledTask(\App\Http\Controllers\TransactionController::class, 'add_check_id_to_transactions'))
+    ->everyTenMinutes()
+    ->name('add-check-id-to-transactions')
+    ->withoutOverlapping()
+    ->onOneServer();
 
-Schedule::call(function () {
-    app(\App\Http\Controllers\TransactionController::class)->add_payments_to_transaction();
-})->everyTenMinutes()
-  ->name('add-payments-to-transactions')
-  ->withoutOverlapping()
-  ->onOneServer();
+Schedule::job(new RunScheduledTask(\App\Http\Controllers\TransactionController::class, 'add_payments_to_transaction'))
+    ->everyTenMinutes()
+    ->name('add-payments-to-transactions')
+    ->withoutOverlapping()
+    ->onOneServer();
 
-Schedule::call(function () {
-    app(\App\Http\Controllers\TransactionController::class)->add_transaction_to_expenses_sin_vendor();
-})->everyTenMinutes()
-  ->name('add-transactions-to-expenses')
-  ->withoutOverlapping()
-  ->onOneServer();
+Schedule::job(new RunScheduledTask(\App\Http\Controllers\TransactionController::class, 'add_transaction_to_expenses_sin_vendor'))
+    ->everyTenMinutes()
+    ->name('add-transactions-to-expenses')
+    ->withoutOverlapping()
+    ->onOneServer();
 
-Schedule::call(function () {
-    app(\App\Http\Controllers\TransactionController::class)->find_credit_payments_on_debit();
-})->everyTenMinutes()
-  ->name('find-credit-payments')
-  ->withoutOverlapping()
-  ->onOneServer();
+Schedule::job(new RunScheduledTask(\App\Http\Controllers\TransactionController::class, 'find_credit_payments_on_debit'))
+    ->everyTenMinutes()
+    ->name('find-credit-payments')
+    ->withoutOverlapping()
+    ->onOneServer();
 
-Schedule::call(function () {
-    app(\App\Http\Controllers\TransactionController::class)->match_associated_expenses();
-})->everyTenMinutes()
-  ->name('match-associated-expenses')
-  ->withoutOverlapping()
-  ->onOneServer();
+Schedule::job(new RunScheduledTask(\App\Http\Controllers\TransactionController::class, 'match_associated_expenses'))
+    ->everyTenMinutes()
+    ->name('match-associated-expenses')
+    ->withoutOverlapping()
+    ->onOneServer();
 
-Schedule::call(function () {
-    app(\App\Http\Controllers\TransactionController::class)->add_category_to_expense();
-})->hourly()
-  ->name('add-category-to-expense')
-  ->withoutOverlapping()
-  ->onOneServer();
+Schedule::job(new RunScheduledTask(\App\Http\Controllers\TransactionController::class, 'add_category_to_expense'))
+    ->hourly()
+    ->name('add-category-to-expense')
+    ->withoutOverlapping()
+    ->onOneServer();
 
-Schedule::call(function () {
-    app(\App\Http\Controllers\TransactionController::class)->transaction_vendor_bulk_match();
-})->everyTenMinutes()
-  ->name('transaction-vendor-bulk-match')
-  ->withoutOverlapping()
-  ->onOneServer();
+Schedule::job(new RunScheduledTask(\App\Http\Controllers\TransactionController::class, 'transaction_vendor_bulk_match'))
+    ->everyTenMinutes()
+    ->name('transaction-vendor-bulk-match')
+    ->withoutOverlapping()
+    ->onOneServer();
 
-Schedule::call(function () {
-  app(\App\Http\Controllers\ExpenseAutoMatchController::class)->runNoProjectExpenseAutoMatch(
-      null,
-      null,
-      null,
-      false,
-      true,
-      true,
-  );
-})->everyTenMinutes()
-  ->name('match-expense-po-to-project')
-  ->withoutOverlapping()
-  ->onOneServer();
+Schedule::job(new RunScheduledTask(
+    \App\Http\Controllers\ExpenseAutoMatchController::class,
+    'runNoProjectExpenseAutoMatch',
+    [null, null, null, false, true, true],
+))
+    ->everyTenMinutes()
+    ->name('match-expense-po-to-project')
+    ->withoutOverlapping()
+    ->onOneServer();
 
 // External API tasks
-Schedule::call(function () {
-    app(\App\Http\Controllers\ReceiptController::class)->amazon_orders_api();
-    })
+Schedule::job(new RunScheduledTask(\App\Http\Controllers\ReceiptController::class, 'amazon_orders_api'))
     ->everyTwoHours()
     ->between('6:00', '22:00')
     ->name('amazon-orders-api')
@@ -227,9 +201,7 @@ Schedule::call(function () {
     ->onOneServer();
 
 // Nightly full sync for Amazon orders (catches cancellations/returns)
-Schedule::call(function () {
-    app(\App\Http\Controllers\ReceiptController::class)->amazon_orders_api();
-    })
+Schedule::job(new RunScheduledTask(\App\Http\Controllers\ReceiptController::class, 'amazon_orders_api'))
     ->dailyAt('2:00')
     ->timezone('America/Chicago')
     ->name('amazon-orders-api-full-sync')
@@ -261,29 +233,13 @@ foreach (['08:05', '12:05', '16:05', '20:05'] as $time) {
 
 // Retry scraping product images for material-order receipt items that are missing them
 // Covers items where the initial scrape failed (API timeout, bad search query, etc.)
-Schedule::call(function () {
-    $receipts = \App\Models\ExpenseReceipts::where('is_material_order', true)
-        ->where('created_at', '>=', now()->subDays(14))
-        ->get()
-        ->filter(function ($receipt) {
-            $items = $receipt->receipt_items['items'] ?? [];
-            foreach ($items as $item) {
-                if (! empty($item['Description']) && empty($item['image_url'])) {
-                    return true;
-                }
-            }
-            return false;
-        });
-
-    foreach ($receipts as $receipt) {
-        \App\Jobs\ScrapeReceiptItemImagesV2::dispatch($receipt);
-    }
-})->twiceDaily(10, 18)
-  ->timezone('America/Chicago')
-  ->name('retry-incomplete-receipt-images')
-  ->environments(['production'])
-  ->withoutOverlapping()
-  ->onOneServer();
+Schedule::job(new DispatchIncompleteReceiptImageScrapesJob)
+    ->twiceDaily(10, 18)
+    ->timezone('America/Chicago')
+    ->name('retry-incomplete-receipt-images')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer();
 
 // System maintenance
 Schedule::command('horizon:snapshot')

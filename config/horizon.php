@@ -206,6 +206,21 @@ return [
             'timeout' => 2100,
             'nice' => 0,
         ],
+        'background' => [
+            'connection' => 'redis',
+            'queue' => ['background'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 1,
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 256,
+            'tries' => 1,
+            'timeout' => 1800,
+            // Run scheduled background work at lower OS priority so it never
+            // starves PHP-FPM serving end-user requests on the same box.
+            'nice' => 10,
+        ],
     ],
 
     'environments' => [
@@ -218,6 +233,11 @@ return [
             'long-running' => [
                 'maxProcesses' => 1,
             ],
+            'background' => [
+                'maxProcesses' => 3,
+                'balanceMaxShift' => 1,
+                'balanceCooldown' => 3,
+            ],
         ],
 
         'local' => [
@@ -225,6 +245,9 @@ return [
                 'maxProcesses' => 3,
             ],
             'long-running' => [
+                'maxProcesses' => 1,
+            ],
+            'background' => [
                 'maxProcesses' => 1,
             ],
         ],
