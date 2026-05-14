@@ -5,13 +5,13 @@
         <pre style="background-color:transparent; overflow: auto;">{!! $receipt->receipt_html !!}</pre>
     </div>
 @else
-    <div class="overflow-hidden -mx-5">
+    <div>
         <flux:table class="table-fixed w-full">
             <flux:table.columns>
-                <flux:table.column class="w-[45%] !pl-5 pr-5">Desc</flux:table.column>
+                <flux:table.column class="w-[45%]">Desc</flux:table.column>
                 <flux:table.column class="w-[20%]" align="end">Price</flux:table.column>
                 <flux:table.column class="w-[10%]" align="end">Qty</flux:table.column>
-                <flux:table.column class="w-[25%] !pr-5" align="end">Total</flux:table.column>
+                <flux:table.column class="w-[25%]" align="end">Total</flux:table.column>
             </flux:table.columns>
 
             <flux:table.rows>
@@ -20,7 +20,7 @@
                         wire:key="receipt-desc-{{ $index }}"
                         class="transition-colors duration-150 {{ $loop->first ? '!border-none' : 'border-t border-zinc-800/15 dark:border-white/20 !border-b-0' }} {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) === true)) ? 'bg-indigo-50 dark:bg-indigo-900/10 print:!bg-transparent' : '' }}"
                     >
-                        <flux:table.cell colspan="4" class="!pl-5 !pr-5 !py-1" title="{{$line_item['Description'] ?? ''}}">
+                        <flux:table.cell colspan="4" class="!py-1" title="{{$line_item['Description'] ?? ''}}">
                             <div class="flex items-center gap-2 transition-opacity transition-colors duration-150 {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) !== true)) ? 'text-gray-300 line-through opacity-50' : '' }}">
                                 @if(!empty($line_item['image_url']))
                                     <button
@@ -43,7 +43,7 @@
                     <flux:table.row 
                         wire:key="receipt-data-{{ $index }}"
                         class="receipt-row-data transition-colors duration-150 !py-0 !border-none {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) === true)) ? 'bg-indigo-50 dark:bg-indigo-900/10 print:!bg-transparent' : '' }}">
-                        <flux:table.cell class="!pl-5">
+                        <flux:table.cell>
                             <div class="flex items-center gap-2">
                                 <div class="shrink-0 w-10"></div>
                                 <span class="transition-opacity transition-colors duration-150 {{ ($selectedSplit && isset($selectedSplit->receipt_items[$index]) && (($selectedSplit->receipt_items[$index]['checkbox'] ?? false) !== true)) ? 'text-gray-300 line-through opacity-50' : '' }}">

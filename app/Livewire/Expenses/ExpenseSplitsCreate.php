@@ -235,7 +235,7 @@ class ExpenseSplitsCreate extends Component
         if ($this->expense && ! $this->expense->splits->isEmpty()) {
             // Normalize existing splits to plain arrays (no Eloquent models)
             $normalized = [];
-            foreach ($expense->splits->values() as $sidx => $split) {
+            foreach ($this->expense->splits->values() as $sidx => $split) {
                 // Normalize items
                 if (is_array($split->receipt_items)) {
                     $mappedItems = [];

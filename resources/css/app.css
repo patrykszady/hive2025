@@ -43,6 +43,88 @@
     scroll-padding-top: 80px;
   }
 
+  /* Global Flux table cell padding: mirror the Expenses card's table classes
+     ([&_th]:!px-4 [&_td]:!px-3 [&_th:first-child]:!ps-6 [&_th:last-child]:!pe-6
+      [&_td:first-child]:!ps-6 [&_td:last-child]:!pe-6) so cells extend to the
+     card edge and the row hover bg fills the full width. Flux's cell stub
+     applies `first:ps-0 last:pe-0` utilities, so we need !important to win. */
+  [data-flux-table] th,
+  [data-flux-columns] th {
+    padding-inline: calc(var(--spacing) * 4) !important;
+  }
+  [data-flux-table] td,
+  [data-flux-cell] {
+    padding-inline: calc(var(--spacing) * 3) !important;
+  }
+  [data-flux-table] th:first-child,
+  [data-flux-table] td:first-child,
+  [data-flux-columns] th:first-child,
+  [data-flux-row] > [data-flux-cell]:first-child {
+    padding-inline-start: calc(var(--spacing) * 6) !important;
+  }
+  [data-flux-table] th:last-child,
+  [data-flux-table] td:last-child,
+  [data-flux-columns] th:last-child,
+  [data-flux-row] > [data-flux-cell]:last-child {
+    padding-inline-end: calc(var(--spacing) * 6) !important;
+  }
+
+  /* Flux tables inside Flux cards: bleed the table out past the card's
+     horizontal padding so row hover backgrounds reach the card edges.
+     Cards expose their inline padding via --flux-card-px (defaults to 1.5rem
+     to match Flux's `p-6`; overridden by island-card to 1.25rem for `px-5`). */
+  [data-flux-card] {
+    --flux-card-px: 1.5rem;
+  }
+  [data-flux-card] ui-table-scroll-area {
+    margin-inline: calc(var(--flux-card-px) * -1);
+  }
+
+  /* Global table row hover: light indigo across the app.
+     Flux tables use `border-separate` with `border-spacing`, so cells paint
+     their own background over the row. Apply the hover color to cells too
+     via `tr:hover > td`, and use a wide inset box-shadow on the first/last
+     cells to bleed the color through the table's edge spacing. */
+  tr[data-flux-row]:hover,
+  tr[data-flux-row]:hover > td,
+  tbody tr:hover,
+  tbody tr:hover > td {
+    background-color: var(--color-indigo-50);
+  }
+  tr[data-flux-row]:hover > td:first-child,
+  tbody tr:hover > td:first-child {
+    box-shadow: inset 9999px 0 0 0 var(--color-indigo-50);
+    clip-path: inset(0 0 0 -9999px);
+  }
+  tr[data-flux-row]:hover > td:last-child,
+  tbody tr:hover > td:last-child {
+    box-shadow: inset -9999px 0 0 0 var(--color-indigo-50);
+    clip-path: inset(0 -9999px 0 0);
+  }
+  .dark tr[data-flux-row]:hover,
+  .dark tr[data-flux-row]:hover > td,
+  .dark tbody tr:hover,
+  .dark tbody tr:hover > td {
+    background-color: color-mix(in oklab, var(--color-indigo-500) 12%, transparent);
+  }
+  .dark tr[data-flux-row]:hover > td:first-child,
+  .dark tbody tr:hover > td:first-child {
+    box-shadow: inset 9999px 0 0 0 color-mix(in oklab, var(--color-indigo-500) 12%, transparent);
+  }
+  .dark tr[data-flux-row]:hover > td:last-child,
+  .dark tbody tr:hover > td:last-child {
+    box-shadow: inset -9999px 0 0 0 color-mix(in oklab, var(--color-indigo-500) 12%, transparent);
+  }
+
+  /* Global link hover: indigo text, no underline. */
+  a:hover {
+    color: var(--color-indigo-600);
+    text-decoration: none;
+  }
+  .dark a:hover {
+    color: var(--color-indigo-400);
+  }
+
   .sms-messages {
     scrollbar-width: thin;
     scrollbar-color: rgba(0, 0, 0, 0.15) transparent;

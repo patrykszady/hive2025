@@ -41,6 +41,18 @@
     @if($view !== 'projects.show' || $this->expenses->isNotEmpty())
     <x-island-card :heading="!in_array($view, ['projects.show', 'vendors.show']) ? 'Expenses' : null" class="overflow-hidden" x-data="{
         filtersOpen: false,
+        bulkMode: false,
+        refreshAfterDeleteTimer: null,
+        exitBulkMode() {
+            this.bulkMode = false;
+            $wire.clearSelection();
+        },
+        refreshAfterDelete() {
+            clearTimeout(this.refreshAfterDeleteTimer);
+            this.refreshAfterDeleteTimer = setTimeout(() => {
+                $wire.$refresh();
+            }, 350);
+        },
         init() {
             window.addEventListener('remove-expense-row', (event) => {
                 const expenseId = event.detail.id;
@@ -57,9 +69,35 @@
                     splitRow.style.opacity = '0';
                     setTimeout(() => splitRow.remove(), 300);
                 });
+
+                this.refreshAfterDelete();
             });
         }
     }">
+        @if($view === null)
+            <x-slot:badge>
+                <flux:badge as="button" size="sm" color="zinc" icon="cursor-arrow-rays" x-show="!bulkMode" x-on:click="bulkMode = true">Select Items</flux:badge>
+                <div class="flex items-center gap-2" x-show="bulkMode" x-cloak>
+                    <flux:badge color="indigo" size="sm">
+                        <span x-text="$wire.selected.length"></span>&nbsp;Selected
+                    </flux:badge>
+                    <flux:button size="xs" variant="ghost" x-on:click="exitBulkMode()">Clear</flux:button>
+                    <flux:dropdown align="end">
+                        <flux:button size="xs" icon-trailing="chevron-down">Bulk actions</flux:button>
+                        <flux:menu>
+                            <flux:menu.item
+                                icon="trash"
+                                variant="danger"
+                                wire:click="bulkDelete"
+                                x-bind:disabled="$wire.selected.length === 0"
+                            >
+                                Delete selected
+                            </flux:menu.item>
+                        </flux:menu>
+                    </flux:dropdown>
+                </div>
+            </x-slot:badge>
+        @endif
         @if(in_array($view, ['projects.show', 'vendors.show']))
             <button type="button" @click="filtersOpen = !filtersOpen" class="flex w-full items-center justify-between">
                 <flux:heading size="lg" class="mb-0">Expenses</flux:heading>
@@ -75,16 +113,19 @@
         @endif
 
         <div class="space-y-4">
-            <div class="-mx-5 -mb-2 overflow-x-auto">
+            <div class="-mb-2">
                 <flux:table
-                    wire:loading.class="opacity-50 text-opacity-50"
-                    wire:target.except="loadTransactions"
-                    class="table-fixed {{ in_array($view, ['projects.show', 'vendors.show']) ? 'min-w-0' : 'min-w-[640px]' }} w-full [:where(&)]:p-0 [:where(&)]:space-y-0 [&_th]:!px-4 [&_td]:!px-3 [&_th:first-child]:!ps-6 [&_th:last-child]:!pe-6 [&_td:first-child]:!ps-6 [&_td:last-child]:!pe-6"
+                    wire:loading.class.delay.shortest="opacity-50 pointer-events-none"
+                    wire:target="bulkDelete"
+                    class="transition-opacity duration-150 table-fixed {{ in_array($view, ['projects.show', 'vendors.show']) ? 'min-w-0' : 'min-w-[640px]' }} w-full [:where(&)]:p-0 [:where(&)]:space-y-0"
                 >
                 <flux:table.columns>
-                    <flux:table.column class="w-[14%] min-w-[5.5rem] !pe-8">
-                        <div class="pe-4">Amount</div>
-                    </flux:table.column>
+                    @if($view === null)
+                        <flux:table.column class="w-10 !px-3" x-show="bulkMode" x-cloak>
+                            <span class="sr-only">Select</span>
+                        </flux:table.column>
+                    @endif
+                    <flux:table.column class="w-[14%] min-w-[5.5rem]">Amount</flux:table.column>
                     <flux:table.column
                         sortable
                         :sorted="$sortBy === 'date'"
@@ -108,7 +149,12 @@
                 <flux:table.rows>
                     @foreach ($this->expenses as $expense)
                         <flux:table.row :key="$expense->id" data-expense-row="{{ $expense->id }}">
-                            <flux:table.cell variant="strong" class="w-[14%] min-w-[5.5rem] !pe-8">
+                            @if($view === null)
+                                <flux:table.cell class="w-10 !px-3" x-show="bulkMode" x-cloak>
+                                    <flux:checkbox size="sm" wire:model="selected" value="{{ $expense->id }}" />
+                                </flux:table.cell>
+                            @endif
+                        <flux:table.cell variant="strong" class="w-[14%] min-w-[5.5rem]">
                                 <div class="pe-4 flex items-center gap-1">
                                     <a href="{{ route('expenses.show', $expense->id) }}" wire:navigate.hover>{{ display_money($expense->amount) }}</a>
                                     @if($expense->reimbursment)
@@ -180,6 +226,9 @@
                             @endphp
                             @foreach($filteredSplits as $split)
                                 <flux:table.row :key="'split-' . $split->id" class="bg-gray-50 dark:bg-gray-800/50 [&_td]:!py-2" data-expense-split-parent="{{ $expense->id }}">
+                                    @if($view === null)
+                                        <flux:table.cell class="w-10 !px-3" x-show="bulkMode" x-cloak></flux:table.cell>
+                                    @endif
                                     <flux:table.cell class="text-sm text-gray-600 dark:text-gray-400 tabular-nums w-[14%] min-w-[5.5rem] !pl-10 !pe-8">
                                         <div class="pe-4 flex items-center gap-1">
                                             {{ display_money($split->amount) }}
@@ -242,7 +291,8 @@
                                                 $totalCols = 2
                                                     + (!in_array($view, ['checks.show', 'vendors.show']) ? 1 : 0)
                                                     + ($view != 'projects.show' ? 1 : 0)
-                                                    + 1;
+                                                    + 1
+                                                    + ($view === null ? 1 : 0);
                                             @endphp
                                             <flux:table.cell :colspan="$totalCols" class="!pl-10 !pr-5 !pb-0">
                                                 <div class="truncate text-xs text-gray-600 dark:text-gray-400" title="{{ strip_tags($desc) }}">{!! strip_tags($desc, '<mark>') !!}</div>

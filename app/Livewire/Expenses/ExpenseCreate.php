@@ -485,13 +485,7 @@ class ExpenseCreate extends Component
         $this->dispatch('refreshComponent')->to('expenses.expense-index');
         $this->dispatch('refreshComponent')->to('checks.check-show');
 
-        Flux::toast(
-            duration: 5000,
-            position: 'top right',
-            variant: 'success',
-            heading: 'Expense removed from check.',
-            text: '',
-        );
+        Flux::toast('', 'Expense removed from check.', 5000, 'success', 'top right');
     }
 
     public function remove()
@@ -503,20 +497,21 @@ class ExpenseCreate extends Component
         }
 
         $expenseId = $this->expense->id;
+        $referer = (string) request()->header('Referer', '');
+        $onShowPage = (bool) preg_match('~/expenses/\d+(?:[/?#]|$)~', $referer);
         $this->form->delete();
         $this->modal('expenses_form_modal')->close();
 
         // Optimistically remove row immediately
         $this->js('window.dispatchEvent(new CustomEvent("remove-expense-row", { detail: { id: ' . $expenseId . ' } }))');
 
-        Flux::toast(
-            duration: 5000,
-            position: 'top right',
-            variant: 'success',
-            heading: 'Expense Deleted.',
-            // route / href / wire:click
-            text: '',
-        );
+        if ($onShowPage) {
+            Flux::toast('', 'Expense Deleted.', 5000, 'success', 'top right');
+
+            return $this->redirectRoute('expenses.index', navigate: true);
+        }
+
+        Flux::toast('', 'Expense Deleted.', 5000, 'success', 'top right');
 
         $this->dispatch('refreshComponent')->to('expenses.expense-index');
     }

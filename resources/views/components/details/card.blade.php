@@ -25,7 +25,7 @@
 <div x-data="{ open: @js($expanded) }">
 @endif
 
-<flux:card class="!px-5 !py-2">
+<flux:card class="!px-5 !py-2" style="--flux-card-px: calc(var(--spacing) * 5);">
     {{-- HEADER - Uses shared island-card.header component --}}
     <x-island-card.header :heading="html_entity_decode((string) $title, ENT_QUOTES, 'UTF-8')" :href="$title_href" :subheading="$subheading" :clickable="$useInlineToggle">
         <x-slot:badge>

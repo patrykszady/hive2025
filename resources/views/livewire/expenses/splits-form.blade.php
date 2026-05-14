@@ -17,23 +17,24 @@
                 </div>
 
                 @if ($expense_line_items)
-                    <div class="overflow-x-hidden overflow-y-visible -mx-6">
+                    <div>
                         <flux:table class="table-fixed w-full">
                             <flux:table.columns>
-                                <flux:table.column class="w-[6%] !pl-5 pr-5"></flux:table.column>
+                                <flux:table.column class="w-14"></flux:table.column>
                                 <flux:table.column class="w-[49%]">Desc</flux:table.column>
                                 <flux:table.column class="w-[15%]" align="end">Price</flux:table.column>
                                 <flux:table.column class="w-[10%]" align="end">Qty</flux:table.column>
-                                <flux:table.column class="w-[20%] !pr-5" align="end">Total</flux:table.column>
+                                <flux:table.column class="w-[20%]" align="end">Total</flux:table.column>
                             </flux:table.columns>
 
                             <flux:table.rows>
                             @if(!is_array($expense_line_items))
                                 @foreach($expense_line_items->items as $line_item_index => $line_item)
                                     <flux:table.row class="transition-colors duration-150 {{ (isset($split['items']) && isset($split['items'][$line_item_index]['checkbox']) && $split['items'][$line_item_index]['checkbox'] == true) ? 'bg-indigo-50 dark:bg-indigo-900/10' : '' }}">
-                                        <flux:table.cell class="!pl-5 pr-5 text-center">
+                                        <flux:table.cell class="text-center">
                                             <flux:checkbox
                                                 wire:model.live="expense_splits.{{$index}}.items.{{$line_item_index}}.checkbox"
+                                                :disabled="isset($line_item->split_index) && $line_item->split_index !== null && $line_item->split_index != $index"
                                                 class="{{ (isset($line_item->split_index) && $line_item->split_index !== null && $line_item->split_index != $index) ? 'opacity-50 cursor-not-allowed' : '' }}"
                                             />
                                         </flux:table.cell>
@@ -46,7 +47,7 @@
                                         <flux:table.cell align="end">
                                             <span class="transition-opacity transition-colors duration-150 {{ (isset($line_item->split_index) && $line_item->split_index !== null && $line_item->split_index != $index) ? 'text-gray-300 line-through opacity-50' : '' }}">{{$line_item->Quantity}}</span>
                                         </flux:table.cell>
-                                        <flux:table.cell variant="strong" class="whitespace-nowrap !pr-5" align="end">
+                                        <flux:table.cell variant="strong" class="whitespace-nowrap" align="end">
                                             <span class="transition-opacity transition-colors duration-150 {{ (isset($line_item->split_index) && $line_item->split_index !== null && $line_item->split_index != $index) ? 'text-gray-300 line-through opacity-50' : '' }}">{{ money($line_item->TotalPrice) }}</span>
                                         </flux:table.cell>
                                     </flux:table.row>

@@ -169,14 +169,14 @@
                     details_text="Split Details"
                 >
                     <x-slot:details>
-                        <div class="-mx-5">
+                        <div>
                             <flux:table class="w-full">
                                 <flux:table.columns>
                                     @if($this->hasReceiptLineItems)
-                                        <flux:table.column class="w-[20%] !pl-5 pr-5" title="Highlight this Split receipt items below">Items</flux:table.column>
+                                        <flux:table.column class="w-[20%]" title="Highlight this Split receipt items below">Items</flux:table.column>
                                         <flux:table.column class="w-[20%]">Amount</flux:table.column>
                                     @else
-                                        <flux:table.column class="!pl-5 pr-5">Amount</flux:table.column>
+                                        <flux:table.column>Amount</flux:table.column>
                                     @endif
                                     <flux:table.column class="w-[35%]">Project</flux:table.column>
                                 </flux:table.columns>

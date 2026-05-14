@@ -98,24 +98,17 @@
             </div>
         </flux:main>
 
-        <flux:toast position="top end" />
+        @persist('toast')
+            <flux:toast position="top end" />
+        @endpersist
 
         @fluxScripts
 
-        {{-- Close stale modals/toasts and sidebar on wire:navigate --}}
+        {{-- Close stale modals and sidebar on wire:navigate --}}
         <script>
-            function flushStaleToasts() {
-                document.querySelectorAll('ui-toast[popover], ui-toast-group[popover]').forEach(el => {
-                    el.querySelectorAll('[data-flux-toast-dialog]').forEach(t => t.remove());
-                    try { el.hidePopover(); } catch (e) {}
-                });
-            }
-
-            {{-- Strip toasts and close modals BEFORE the page gets cached --}}
             document.addEventListener('livewire:navigating', () => {
                 document.querySelectorAll('dialog[open]').forEach(d => d.close());
                 document.dispatchEvent(new CustomEvent('modal-close', { detail: {} }));
-                flushStaleToasts();
 
                 const sidebar = document.querySelector('ui-sidebar');
                 if (sidebar && sidebar.hasAttribute('data-flux-sidebar-on-mobile') && !sidebar.hasAttribute('data-flux-sidebar-collapsed-mobile')) {
@@ -123,20 +116,8 @@
                 }
             });
 
-            {{-- Safety net: clean up after the cached page is restored --}}
             document.addEventListener('livewire:navigated', () => {
                 document.querySelectorAll('dialog[open]').forEach(d => d.close());
-                flushStaleToasts();
-                {{-- Delayed pass in case Livewire replays effects after navigated --}}
-                setTimeout(flushStaleToasts, 50);
-            });
-
-            {{-- Handle bfcache page restoration --}}
-            window.addEventListener('pageshow', (event) => {
-                if (event.persisted) {
-                    document.querySelectorAll('dialog[open]').forEach(d => d.close());
-                    flushStaleToasts();
-                }
             });
         </script>
     </body>

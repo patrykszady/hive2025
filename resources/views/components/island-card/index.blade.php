@@ -5,7 +5,7 @@
     'separator' => false,
 ])
 
-<flux:card {{ $attributes->class('space-y-1 !px-5 !py-2') }}>
+<flux:card {{ $attributes->class('space-y-1 !px-5 !py-2') }} style="--flux-card-px: calc(var(--spacing) * 5);">
     @if($heading || isset($badge) || isset($actions))
     <x-island-card.header
         :heading="$heading"

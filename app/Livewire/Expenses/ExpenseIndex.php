@@ -13,6 +13,7 @@ use Flux\DateRange;
 use App\Models\Transaction;
 use App\Models\Vendor;
 use App\Models\Check;
+use Flux\Flux;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -66,12 +67,105 @@ class ExpenseIndex extends Component
     public array $matchedReceiptItems = [];
     public string $upcProductName = '';
 
+    /** @var array<int> Selected expense IDs for bulk actions. */
+    public array $selected = [];
+
+    /** @var array<int> Recently deleted expense IDs to hide while Meilisearch reindexes. */
+    public array $recentlyDeletedExpenseIds = [];
+
     protected $listeners = ['refreshComponent' => '$refresh'];
 
     public function updating()
     {
         $this->resetPage('expenses-page');
         $this->resetPage('transactions-page');
+        $this->recentlyDeletedExpenseIds = [];
+    }
+
+    public function clearSelection(): void
+    {
+        $this->selected = [];
+    }
+
+    public function updatedPaginators($page, $pageName): void
+    {
+        // Selections are scoped to the current page; clear them on page change.
+        $this->selected = [];
+    }
+
+    public function bulkDelete(): void
+    {
+        if (empty($this->selected)) {
+            return;
+        }
+
+        $isAdmin = auth()->user()?->vendor_role === 'Admin';
+
+        $expenses = Expense::whereIn('id', $this->selected)->get();
+        $deletedIds = [];
+        $skipped = 0;
+
+        foreach ($expenses as $expense) {
+            // Mirror single-delete rule from ExpenseCreate::remove():
+            // non-admins cannot delete an expense that has matched transactions.
+            if (! $isAdmin && $expense->transactions()->exists()) {
+                $skipped++;
+                continue;
+            }
+
+            $this->cascadeDeleteExpense($expense);
+            $deletedIds[] = $expense->id;
+        }
+
+        $this->selected = [];
+
+        // Hide deleted rows immediately even if Meilisearch hasn't reindexed yet.
+        $this->recentlyDeletedExpenseIds = array_values(array_unique(
+            array_merge($this->recentlyDeletedExpenseIds, $deletedIds)
+        ));
+
+        unset($this->expenses);
+
+        $count = count($deletedIds);
+        $heading = $count === 1 ? '1 expense deleted.' : "{$count} expenses deleted.";
+        $text = $skipped > 0 ? "{$skipped} skipped (admin-only: has transactions)." : '';
+        Flux::toast($text, $heading, 5000, 'success', 'top right');
+    }
+
+    /**
+     * Cascade-delete an expense the same way ExpenseForm::delete() does:
+     * detach associations, soft-delete splits/receipts, null transactions, drop check pivots.
+     */
+    private function cascadeDeleteExpense(Expense $expense): void
+    {
+        foreach ($expense->associated as $child) {
+            $child->parent_expense_id = null;
+            $child->save();
+        }
+
+        foreach ($expense->splits as $split) {
+            $split->delete();
+        }
+
+        foreach ($expense->transactions as $transaction) {
+            $transaction->expense_id = null;
+            $transaction->vendor_id = null;
+            $transaction->save();
+        }
+
+        foreach ($expense->receipts as $receipt) {
+            $receipt->delete();
+        }
+
+        $expense->checks()->detach();
+        if ($expense->check_id) {
+            $expense->check_id = null;
+            $expense->save();
+        } else {
+            $expense->searchable();
+        }
+
+        $expense->delete();
     }
 
     public function updatedReimbursementFilter($value): void
@@ -223,6 +317,22 @@ class ExpenseIndex extends Component
             null,
             $this->isShowingTrashed()
         )->paginateWithSearchData($this->paginate_number, pageName: 'expenses-page');
+
+        // If the requested page is past the last page (e.g. deep-linked URL or
+        // filters narrowed results), bounce back to page 1 instead of showing
+        // an empty table. Strip the expenses-page query string from the URL
+        // so the address bar reflects page 1.
+        if ($expenses->isEmpty() && $expenses->currentPage() > 1) {
+            $this->resetPage('expenses-page');
+
+            $cleanQuery = collect(request()->query())
+                ->except('expenses-page')
+                ->toArray();
+            $cleanUrl = url()->current() . (empty($cleanQuery) ? '' : '?' . http_build_query($cleanQuery));
+            $this->js("window.history.replaceState({}, '', " . json_encode($cleanUrl) . ")");
+
+            return $this->expenses();
+        }
 
         if ($expenses->count() > 0) {
             $relations = [];
@@ -424,6 +534,12 @@ class ExpenseIndex extends Component
         $amountFilter = $this->buildAmountFilter();
         if ($amountFilter !== null) {
             $filterConditions[] = $amountFilter;
+        }
+
+        // Hide rows that were just bulk-deleted (Meilisearch may lag behind the DB).
+        if (! empty($this->recentlyDeletedExpenseIds)) {
+            $excludeList = implode(', ', array_map('intval', $this->recentlyDeletedExpenseIds));
+            $filterConditions[] = "NOT id IN [{$excludeList}]";
         }
 
         // Apply receipt item search filter
