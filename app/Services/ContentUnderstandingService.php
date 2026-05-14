@@ -187,6 +187,7 @@ class ContentUnderstandingService
         ];
     }
 
+
     /**
      * Detect MIME type from file header magic bytes, falling back to $docType.
      */

@@ -110,11 +110,14 @@ class HourCreate extends Component
 
     public function updatedSelectedDate($value)
     {
-        if($value){
+        if ($value) {
             $this->selectedDate($value);
             $this->validate();
-        }else{
-            $this->selectedDate(browser_today());
+        } else {
+            // Date selection cannot be cleared. Revert to the previously selected
+            // date (or today, if for some reason none is set).
+            $fallback = $this->selected_date?->format('Y-m-d') ?? browser_today()->format('Y-m-d');
+            $this->selectedDate($fallback);
         }
 
         unset($this->hours_count);
@@ -129,7 +132,11 @@ class HourCreate extends Component
             ? collect($this->projects)->pluck('id') 
             : $this->projects->pluck('id');
             
-        $other_projects = Project::whereNotIn('id', $projectIds)->whereYear('created_at', '>=', Carbon::now()->subYears(3)->year)->orderBy('created_at', 'DESC')->get();
+        $other_projects = Project::whereNotIn('id', $projectIds)
+            ->whereYear('created_at', '>=', Carbon::now()->subYears(3)->year)
+            ->with('latestStatus')
+            ->orderBy('created_at', 'DESC')
+            ->get();
         return $other_projects;
     }
 
@@ -194,8 +201,8 @@ class HourCreate extends Component
             ->where('date', $dateForQuery)
             ->get();
 
-        // Get Active and Service Call projects (using status codes: 6 = Active, 8 = Service Call)
-        $projects = Project::status([6, 8])->get();
+        // Get projects whose status was Active (6) or Service Call (8) on the selected date
+        $projects = Project::statusOnDate([6, 8], $dateForQuery)->get();
 
         // Get projects that have tasks for the selected date (without user filter for now)
         $planner_projects_day = Task::where('start_date', '<=', $dateForQuery)
@@ -277,9 +284,7 @@ class HourCreate extends Component
     public function incrementHours($index): void
     {
         $currentHours = (float) ($this->form->projects[$index]['hours'] ?? 0);
-        if ($currentHours < 16) {
-            $this->form->projects[$index]['hours'] = $currentHours + 0.5;
-        }
+        $this->form->projects[$index]['hours'] = min(16, $currentHours + 1);
         unset($this->hours_count);
         $this->dispatch('hours-count-updated', count: $this->hours_count);
     }
@@ -287,9 +292,7 @@ class HourCreate extends Component
     public function decrementHours($index): void
     {
         $currentHours = (float) ($this->form->projects[$index]['hours'] ?? 0);
-        if ($currentHours >= 0.5) {
-            $this->form->projects[$index]['hours'] = $currentHours - 0.5;
-        }
+        $this->form->projects[$index]['hours'] = max(0, $currentHours - 1);
         unset($this->hours_count);
         $this->dispatch('hours-count-updated', count: $this->hours_count);
     }

@@ -12,6 +12,11 @@
         td[data-date-variant='hours'][data-selected] button {
             outline: none;
         }
+        ui-calendar.hours-create-calendar {
+            display: inline-block;
+            width: max-content;
+            max-width: 100%;
+        }
     </style>
 	<div class="grid max-w-xl grid-cols-4 gap-4 xl:relative lg:max-w-5xl sm:px-6">
 		{{-- FLOAT CALENDAR --}}
@@ -27,11 +32,15 @@
                     </flux:button>
                 </x-slot:actions>
                 <div
+                    class="flex justify-center"
                     x-data="{ datesWithHours: @js($this->datesWithHours) }"
-                    x-init="$nextTick(() => {
+                    x-init="(async () => {
+                        await customElements.whenDefined('ui-calendar');
                         const cal = $el.querySelector('ui-calendar');
-                        if (cal && cal.appendMetadata) cal.appendMetadata(datesWithHours);
-                    })"
+                        if (!cal) return;
+                        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+                        if (cal.appendMetadata) cal.appendMetadata(datesWithHours);
+                    })()"
                     @update-hours-metadata.window="
                         datesWithHours = $event.detail.metadata;
                         $nextTick(() => {
@@ -41,9 +50,11 @@
                     "
                 >
                     <flux:calendar
+                        class="hours-create-calendar"
                         wire:model.live="selected_date"
+                        with-today
                         min="{{$this->minDate}}"
-                        ::max="$store.timezone.today"
+                        max="{{ browser_today()->format('Y-m-d') }}"
                         start-day="1"
                         unavailable="{{$this->days}}"
                     />
@@ -74,8 +85,8 @@
 
                 {{-- PROJECT HOUR AMOUNT --}}
                 @foreach ($this->projects as $index => $project)
-                    <flux:field wire:key="project-{{ $project->id }}" wire:transition>
-                        <div class="grid gap-2 grid-cols-2">
+                    <flux:field wire:key="project-{{ $project->id }}">
+                        <div class="grid grid-cols-2 items-center gap-2">
                             <div>
                                 <flux:label><a href="{{route('projects.show', $project->id)}}" target="_blank">{{ $project->short_address }}</a></flux:label>
                                 <flux:description><i>{{$project->project_name}}</i></flux:description>
@@ -83,7 +94,7 @@
                             <div>
                                 <flux:button.group class="w-full">
                                     <flux:button 
-                                        wire:click="decrementHours({{ $index }})" 
+                                        wire:click.preserve-scroll="decrementHours({{ $index }})" 
                                         wire:loading.attr="disabled"
                                         wire:target="decrementHours({{ $index }})"
                                         icon="minus" 
@@ -94,14 +105,14 @@
                                         wire:model.live.debounce.150ms="form.projects.{{ $index }}.hours"
                                         type="number" 
                                         inputmode="decimal" 
-                                        step="0.5" 
+                                        step="0.25" 
                                         min="0" 
                                         max="16"
                                         placeholder="Hours"
-                                        class="flex-1 text-center"
+                                        class="flex-1 self-center text-center"
                                     />
                                     <flux:button 
-                                        wire:click="incrementHours({{ $index }})" 
+                                        wire:click.preserve-scroll="incrementHours({{ $index }})" 
                                         wire:loading.attr="disabled"
                                         wire:target="incrementHours({{ $index }})"
                                         icon="plus" 
@@ -125,19 +136,19 @@
                 </x-island-card>
 
             <x-island-card heading="Different Project">
+                @island(name: 'add-project', always: true)
                 <flux:input.group>
-                    <flux:select wire:model.live="new_project_id" variant="listbox" searchable placeholder="Choose project...">
-                        <x-slot name="search">
-                            <flux:select.search placeholder="Search..." />
-                        </x-slot>
-
-                        @foreach($this->other_projects as $project)
-                            <flux:select.option value="{{$project->id}}"><div>{{ $project->short_address }} <br> <i class="font-normal">{{$project->project_name}}</i></div></flux:select.option>
-                        @endforeach
-                    </flux:select>
+                    <x-forms.project-select
+                        :projects="$this->other_projects"
+                        model="new_project_id"
+                        :show-label="false"
+                        :show-status-badge="true"
+                        in-input-group
+                    />
 
                     <flux:button variant="primary" wire:click="add_project" icon="plus-circle" wire:loading.attr="disabled" wire:target="add_project">Add</flux:button>
                 </flux:input.group>
+                @endisland
             </x-island-card>
             @endif
             </div>

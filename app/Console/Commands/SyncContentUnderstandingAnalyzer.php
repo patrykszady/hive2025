@@ -153,7 +153,13 @@ class SyncContentUnderstandingAnalyzer extends Command
 
             'PurchaseOrder' => [
                 'type'        => 'string',
-                'description' => 'Purchase Order number, PO#, Job Name, Job Number, JobName, PRO JobName, or project reference. This value may appear anywhere on the document including loyalty, rewards, or membership sections. Extract only the short code or number, not the label. Return null when no PO/Job label is present. NEVER infer a PO from unrelated numbers on the receipt. Specifically, do NOT return: rebate receipt numbers (e.g. the number that follows "THE FOLLOWING REBATE RECEIPTS WERE PRINTED FOR THIS TRANSACTION" on Menards receipts), store numbers, register numbers, cashier IDs, the cashier\'s name, item totals, account numbers, transaction numbers, credit-card last-four, EFT references, authorization codes, or any value already extracted as InvoiceId.',
+                'description' => 'Purchase Order number, PO#, Job Name, Job Number, JobName, PRO JobName, or project reference. This value may appear anywhere on the document including loyalty, rewards, or membership sections. Extract only the short code or number, not the label. Return null when no PO/Job label is present. NEVER infer a PO from unrelated numbers on the receipt. Specifically, do NOT return: rebate receipt numbers (e.g. the number that follows "THE FOLLOWING REBATE RECEIPTS WERE PRINTED FOR THIS TRANSACTION" on Menards receipts), store numbers, register numbers, cashier IDs, the cashier\'s name, item totals, account numbers, transaction numbers, credit-card last-four, EFT references, authorization codes, or any value already extracted as InvoiceId. Do NOT return billing-summary labels or amounts such as "Discounts: 0.00", "Credits: 0.00", "Tax: 0.00", "Subtotal", "Total", "Charges", or "Balance Due". If the text on or near a PO label is clearly a billing-summary field, return null for PurchaseOrder.',
+                'method'      => 'extract',
+            ],
+
+            'CustomerPO' => [
+                'type'        => 'string',
+                'description' => 'Customer PO value for invoices that explicitly label a field as "Customer PO", "Customer PO Number", "Customer P.O.", or similar. Extract ONLY the value associated with that PO label. If the Customer PO field is blank, return null. NEVER take values from adjacent summary columns on the same row (for example in lines like "Customer PO Number:    Discounts: 0.00", do NOT return "Discounts: 0.00"). Do NOT return billing-summary labels or amounts such as "Discounts", "Credits", "Tax", "Subtotal", "Total", "Charges", or "Balance Due".',
                 'method'      => 'extract',
             ],
 
@@ -448,6 +454,7 @@ class SyncContentUnderstandingAnalyzer extends Command
                     'If the table cell text is mangled or merged (e.g. "EGGER EGGER" + "RESI" in adjacent cells), still combine unique words.',
                     'Do NOT confuse these header-table columns with product item data.',
                     'Do NOT return just the PO#/JOB value if the CUST column has a non-empty value.',
+                    'Do NOT return billing-summary labels or amounts such as "Discounts", "Credits", "Tax", "Subtotal", "Total", "Charges", or "Balance Due".',
                 ]),
                 'method'      => 'generate',
             ],

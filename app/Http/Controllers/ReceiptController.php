@@ -663,6 +663,9 @@ class ReceiptController extends Controller
             ?? $prefix['MerchantName']['content']
             ?? $prefix['VendorName']['valueString']
             ?? null;
+        $merchantAddress = $prefix['MerchantAddress']['valueString']
+            ?? $prefix['MerchantAddress']['content']
+            ?? null;
 
         if ($merchantName !== null) {
             $merchantName = str_replace("\n", '', $merchantName);
@@ -677,7 +680,7 @@ class ReceiptController extends Controller
         // Stylized printed logos (e.g. "Lady Gregory's" script) get false-positive
         // flagged as handwriting by CU. Drop notes that are part of the printed
         // merchant name to keep only true on-paper annotations.
-        $handwrittenNotes = $this->extractHandwrittenNotes($styles, $originalContent, $merchantName);
+        $handwrittenNotes = $this->extractHandwrittenNotes($styles, $originalContent, $merchantName, $merchantAddress);
 
         // Custom CU analyzers (e.g. hive_Receipts_1) extract a dedicated
         // HandwrittenNote field. Merge its value when present — the styles[]
@@ -689,7 +692,7 @@ class ReceiptController extends Controller
         if (is_string($handwrittenField) && trim($handwrittenField) !== '') {
             foreach (preg_split('/\s*\|\s*/', $handwrittenField) as $part) {
                 $part = trim($part);
-                if ($part !== '') {
+                if ($part !== '' && ! $this->isPrintedHeaderTokenMatch($part, $merchantName, $merchantAddress)) {
                     $handwrittenNotes[] = $part;
                 }
             }
@@ -703,7 +706,7 @@ class ReceiptController extends Controller
         // paper receipts where the scribbled label was transcribed but never
         // tagged as handwritten.
         if ($handwrittenNotes === []) {
-            foreach ($this->extractLeadingLabelLines($originalContent, $merchantName) as $label) {
+            foreach ($this->extractLeadingLabelLines($originalContent, $merchantName, $merchantAddress) as $label) {
                 $handwrittenNotes[] = $label;
             }
             $handwrittenNotes = array_values(array_unique($handwrittenNotes));
@@ -1332,8 +1335,24 @@ class ReceiptController extends Controller
             return '';
         }
 
-        if (preg_match('/(?:PO\s*\/\s*JOB\s*NAME|PO\s*NUMBER|PO\s*#|P\.?O\.?\s*#?|JOB\s*NAME|PRO\s*JobName)\s*:\s*([^\r\n]{1,80})/i', $rawContent, $match)) {
-            return trim($match[1]);
+        $labels = '(?:PO\s*\/\s*JOB\s*NAME|PO\s*NUMBER|PO\s*#|P\.?O\.?\s*#?|JOB\s*NAME|PRO\s*JobName|Customer\s*PO\s*Number|Customer\s*PO|Customer\s*P\.?O\.?)';
+
+        foreach (preg_split('/\r?\n/', $rawContent) ?: [] as $line) {
+            if (!preg_match('/' . $labels . '\s*:\s*([^\t\r\n]*)/i', $line, $match)) {
+                continue;
+            }
+
+            $candidate = trim($match[1]);
+            $candidate = rtrim($candidate, ":; ");
+            if ($candidate === '') {
+                return '';
+            }
+
+            if (preg_match('/^(discounts?|credits?|tax|subtotal|total|charges?|balance(?:\s+due)?|shipping|deposit|tip|fees?)$/i', $candidate)) {
+                return '';
+            }
+
+            return $candidate;
         }
 
         return '';
@@ -1348,20 +1367,9 @@ class ReceiptController extends Controller
      * @param  array<int, array<string, mixed>>  $styles
      * @return array<int, string>
      */
-    private function extractHandwrittenNotes(array $styles, string $originalContent, ?string $merchantName): array
+    private function extractHandwrittenNotes(array $styles, string $originalContent, ?string $merchantName, ?string $merchantAddress = null): array
     {
-        $merchantTokens = [];
-        if ($merchantName !== null && $merchantName !== '') {
-            // Tokenize merchant name into individual words so partial overlaps
-            // (e.g. "Lady" inside "Lady Gregory's") are also rejected.
-            $tokens = preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($merchantName)) ?: [];
-            foreach ($tokens as $token) {
-                $token = trim($token);
-                if (mb_strlen($token) >= 2) {
-                    $merchantTokens[$token] = true;
-                }
-            }
-        }
+        $merchantTokens = $this->buildPrintedHeaderTokens($merchantName, $merchantAddress);
 
         $notes = [];
         foreach ($styles as $style) {
@@ -1385,22 +1393,8 @@ class ReceiptController extends Controller
                 // Reject when every alphanumeric token in the note also exists
                 // in the printed merchant name. Catches cases like "Lady" being
                 // flagged inside "Lady Gregory's" stylized printed logo.
-                if (! empty($merchantTokens)) {
-                    $noteTokens = preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($note)) ?: [];
-                    $noteTokens = array_filter($noteTokens, fn ($t) => mb_strlen($t) >= 2);
-
-                    if (! empty($noteTokens)) {
-                        $allInMerchant = true;
-                        foreach ($noteTokens as $t) {
-                            if (! isset($merchantTokens[$t])) {
-                                $allInMerchant = false;
-                                break;
-                            }
-                        }
-                        if ($allInMerchant) {
-                            continue;
-                        }
-                    }
+                if (! empty($merchantTokens) && $this->isPrintedHeaderTokenMatch($note, $merchantName, $merchantAddress, $merchantTokens)) {
+                    continue;
                 }
 
                 $notes[] = $note;
@@ -1418,7 +1412,7 @@ class ReceiptController extends Controller
      *
      * @return array<int, string>
      */
-    private function extractLeadingLabelLines(string $content, ?string $merchantName): array
+    private function extractLeadingLabelLines(string $content, ?string $merchantName, ?string $merchantAddress = null): array
     {
         if ($content === '') {
             return [];
@@ -1438,15 +1432,7 @@ class ReceiptController extends Controller
             5
         );
 
-        $merchantTokens = [];
-        if ($merchantName !== null && $merchantName !== '') {
-            foreach (preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($merchantName)) ?: [] as $tok) {
-                $tok = trim($tok);
-                if (mb_strlen($tok) >= 2) {
-                    $merchantTokens[$tok] = true;
-                }
-            }
-        }
+        $merchantTokens = $this->buildPrintedHeaderTokens($merchantName, $merchantAddress);
 
         $out = [];
         foreach ($lines as $line) {
@@ -1490,6 +1476,56 @@ class ReceiptController extends Controller
         }
 
         return $out;
+    }
+
+    /**
+     * @return array<string, bool>
+     */
+    private function buildPrintedHeaderTokens(?string $merchantName, ?string $merchantAddress = null): array
+    {
+        $tokens = [];
+
+        foreach ([$merchantName, $merchantAddress] as $source) {
+            if (! is_string($source) || trim($source) === '') {
+                continue;
+            }
+
+            foreach (preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($source)) ?: [] as $token) {
+                $token = trim($token);
+                if (mb_strlen($token) >= 2) {
+                    $tokens[$token] = true;
+                }
+            }
+        }
+
+        return $tokens;
+    }
+
+    /**
+     * Reject note candidates that are fully composed of printed merchant header/address tokens.
+     *
+     * @param array<string, bool>|null $cachedTokens
+     */
+    private function isPrintedHeaderTokenMatch(string $candidate, ?string $merchantName, ?string $merchantAddress = null, ?array $cachedTokens = null): bool
+    {
+        $merchantTokens = $cachedTokens ?? $this->buildPrintedHeaderTokens($merchantName, $merchantAddress);
+        if ($merchantTokens === []) {
+            return false;
+        }
+
+        $candidateTokens = preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($candidate)) ?: [];
+        $candidateTokens = array_values(array_filter($candidateTokens, fn ($t) => mb_strlen($t) >= 2));
+        if ($candidateTokens === []) {
+            return false;
+        }
+
+        foreach ($candidateTokens as $token) {
+            if (! isset($merchantTokens[$token])) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

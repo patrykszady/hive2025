@@ -457,6 +457,39 @@ class Project extends Model
         });
     }
 
+    /**
+     * Filter projects whose status as of the given date is in the given status codes.
+     *
+     * "Status as of date" = the most recent project_status row with start_date <= $date
+     * (ties broken by id desc). If a project has no status row on or before the given
+     * date, it is excluded.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder  $query
+     * @param  array<int>  $statusCodes
+     * @param  \DateTimeInterface|string  $date
+     */
+    public function scopeStatusOnDate($query, array $statusCodes, $date): Builder
+    {
+        $dateString = $date instanceof \DateTimeInterface
+            ? $date->format('Y-m-d')
+            : (string) $date;
+
+        return $query->whereHas('statuses', function ($q) use ($statusCodes, $dateString) {
+            $q->whereIn('status_code', $statusCodes)
+                ->where('start_date', '<=', $dateString)
+                ->whereRaw(
+                    'project_status.id = (
+                        select ps.id from project_status as ps
+                        where ps.project_id = project_status.project_id
+                            and ps.start_date <= ?
+                        order by ps.start_date desc, ps.id desc
+                        limit 1
+                    )',
+                    [$dateString]
+                );
+        });
+    }
+
     public function scopeNotCancelled(Builder $query): Builder
     {
         return $query->whereHas('latestStatus', function ($q) {

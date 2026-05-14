@@ -402,7 +402,16 @@ class ExpenseReceipts extends Model
                 if (! $hasMeaningfulPurchaseOrder) {
                     $rawContent = (string) ($this->receipt_items['raw_content'] ?? '');
                     if ($rawContent !== '' && preg_match('/(?:PO\s*\/\s*JOB\s*NAME|PO\s*NUMBER|PO\s*#|P\.?O\.?\s*#?|JOB\s*NAME|PRO\s*JobName)\s*:\s*([^\r\n]{1,80})/i', $rawContent, $match)) {
-                        $purchase_order = [trim($match[1])];
+                        $candidate = trim($match[1]);
+
+                        // For tabular invoices, keep only the same-cell token and
+                        // reject adjacent billing summary labels (e.g. "Discounts").
+                        $candidate = trim(explode("\t", $candidate)[0] ?? '');
+                        $candidate = rtrim($candidate, ':; ');
+
+                        if (! preg_match('/^(discounts?|credits?|tax|subtotal|total|charges?|balance(?:\s+due)?|shipping|deposit|tip|fees?)$/i', $candidate)) {
+                            $purchase_order = [$candidate];
+                        }
                     }
                 }
 

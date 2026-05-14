@@ -61,4 +61,17 @@ class ExpenseReceiptsNotesAccessorTest extends TestCase
 
         $this->assertSame('', $receipt->notes);
     }
+
+    public function test_notes_ignores_billing_summary_value_on_customer_po_row(): void
+    {
+        $receipt = new ExpenseReceipts([
+            'receipt_items' => [
+                'purchase_order' => '',
+                'handwritten_notes' => [],
+                'raw_content' => "Customer PO Number:\t\tDiscounts:\t0.00\nOrder Number:\t0f504a20-a493-4cfe-ad5f-1590391ffd18",
+            ],
+        ]);
+
+        $this->assertSame('', $receipt->notes);
+    }
 }

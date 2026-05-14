@@ -10,13 +10,16 @@ use App\Services\ContentUnderstandingService;
  * silently corrupted offsets and dropped notes (e.g. only "Lady" survived
  * from a receipt that also had "PATRIK HOME" handwritten on it).
  */
-function fakeCuResultWithHandwriting(string $content, array $styles, ?string $merchantName = null): array
+function fakeCuResultWithHandwriting(string $content, array $styles, ?string $merchantName = null, ?string $merchantAddress = null): array
 {
     $fields = [
         'Total' => ['valueNumber' => 1.0],
     ];
     if ($merchantName !== null) {
         $fields['MerchantName'] = ['valueString' => $merchantName];
+    }
+    if ($merchantAddress !== null) {
+        $fields['MerchantAddress'] = ['valueString' => $merchantAddress];
     }
 
     return [
@@ -30,12 +33,12 @@ function fakeCuResultWithHandwriting(string $content, array $styles, ?string $me
     ];
 }
 
-function runExtractWithHandwriting(string $content, array $styles, ?string $merchantName = null): array
+function runExtractWithHandwriting(string $content, array $styles, ?string $merchantName = null, ?string $merchantAddress = null): array
 {
     $mock = Mockery::mock(ContentUnderstandingService::class);
     $mock->shouldReceive('analyze')
         ->once()
-        ->andReturn(fakeCuResultWithHandwriting($content, $styles, $merchantName));
+        ->andReturn(fakeCuResultWithHandwriting($content, $styles, $merchantName, $merchantAddress));
     app()->instance(ContentUnderstandingService::class, $mock);
 
     return app(ReceiptController::class)
@@ -106,4 +109,25 @@ it('rejects handwritten spans whose tokens all appear in the printed merchant na
     $notes  = $result['fields']['handwritten_notes'] ?? [];
 
     expect($notes)->toBe(['PATRIK HOME']);
+});
+
+it('rejects handwritten spans whose tokens appear in the printed merchant address', function () {
+    $content = "MENARDS\nLONG GROVE\nJob # or Name : 400\n";
+    $merchant = 'MENARDS';
+    $merchantAddress = '2700 LAKE COOK RD LONG GROVE, IL 60047';
+
+    $styles = [
+        [
+            'isHandwritten' => true,
+            'confidence'    => 0.95,
+            'spans'         => [
+                ['offset' => strpos($content, 'LONG GROVE'), 'length' => strlen('LONG GROVE')],
+            ],
+        ],
+    ];
+
+    $result = runExtractWithHandwriting($content, $styles, $merchant, $merchantAddress);
+    $notes  = $result['fields']['handwritten_notes'] ?? [];
+
+    expect($notes)->toBe([]);
 });
