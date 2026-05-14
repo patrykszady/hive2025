@@ -2121,6 +2121,21 @@ class TransactionController extends Controller
                 return $this->extractPayeeNameFromDescription($t->plaid_merchant_description);
             });
 
+            // When the check has a known vendor, only consider payee groups whose extracted
+            // name matches the vendor's business name. This prevents subset-sum from greedily
+            // grabbing same-amount transactions sent to a *different* person before the real
+            // single-transaction match has had a chance to land (e.g., a $1,250 check to
+            // "Morenos Drywall" being matched to $150+$1,100 of Zelle transfers to "Grzegorz"
+            // because the check ran through the matcher hours before the real Morenos
+            // transaction posted). If no payee group matches the vendor, we leave the check
+            // unmatched so a later cron pass can match it correctly.
+            $vendorBusinessName = $check->vendor?->business_name;
+            if ($vendorBusinessName) {
+                $transactionsByPayee = $transactionsByPayee->filter(
+                    fn ($_payeeTransactions, $payeeName) => $this->payeeNameMatchesVendor($payeeName, $vendorBusinessName)
+                );
+            }
+
             // Try each payee group separately
             foreach ($transactionsByPayee as $payeeName => $payeeTransactions) {
                 if ($payeeTransactions->count() < 2) {
@@ -2166,6 +2181,48 @@ class TransactionController extends Controller
         // For other transfers, use the full description as identifier
         // This ensures different transactions don't get mixed
         return strtoupper(trim($description));
+    }
+
+    /**
+     * Decide whether a payee name extracted from a transaction description plausibly
+     * refers to the same party as a check's vendor business name. Used to gate
+     * Transfer-check subset-sum matching so we don't link a check for vendor X to
+     * transactions actually sent to vendor Y.
+     *
+     * Strategy: tokenize both sides, drop short tokens and common business suffixes,
+     * and require at least one shared token of length >= 4 (case-insensitive).
+     */
+    protected function payeeNameMatchesVendor(string $payeeName, string $vendorBusinessName): bool
+    {
+        $tokenize = function (string $value): array {
+            $value = strtoupper($value);
+            // Replace any non-letter character with a space so "Morenos Drywall, Inc"
+            // and "MORENOS-DRYWALL" tokenize the same way.
+            $value = preg_replace('/[^A-Z]+/', ' ', $value);
+            $tokens = preg_split('/\s+/', trim($value)) ?: [];
+
+            $stopwords = [
+                'INC', 'LLC', 'LTD', 'CORP', 'CORPORATION', 'CO', 'COMPANY',
+                'THE', 'AND', 'OF', 'A', 'AN',
+                'NAME', 'ID', 'ORG', 'REF', 'CONF', 'PAY', 'PAYMENT',
+                'ZELLE', 'VENMO', 'CASHOUT', 'DEBIT', 'CREDIT', 'TRANSFER',
+                'CTI', 'JPM', 'BOA', 'CHASE',
+            ];
+
+            return array_values(array_filter(
+                $tokens,
+                fn ($t) => strlen($t) >= 4 && !in_array($t, $stopwords, true)
+            ));
+        };
+
+        $payeeTokens = $tokenize($payeeName);
+        $vendorTokens = $tokenize($vendorBusinessName);
+
+        if (empty($payeeTokens) || empty($vendorTokens)) {
+            return false;
+        }
+
+        return !empty(array_intersect($payeeTokens, $vendorTokens));
     }
 
     /**
