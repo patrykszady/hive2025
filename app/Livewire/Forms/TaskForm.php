@@ -22,6 +22,67 @@ class TaskForm extends Form
     #[Validate('nullable|array')]
     public $time_settings = [];
 
+    /**
+     * Mirror start_time to end_time when start changes and end is not yet set,
+     * then propagate the (start, end) pair to every other date that has use_time on.
+     * Fires for any nested update on time_settings via wire:model.live.
+     *
+     * @param  mixed  $value
+     */
+    public function updatedTimeSettings($value, ?string $key = null): void
+    {
+        if (! is_string($key)) {
+            return;
+        }
+
+        if (! str_ends_with($key, '.start_time') && ! str_ends_with($key, '.end_time')) {
+            return;
+        }
+
+        [$date, $field] = explode('.', $key, 2);
+
+        if ($date === '' || ! isset($this->time_settings[$date])) {
+            return;
+        }
+
+        if ($field === 'start_time') {
+            if (is_string($value) && trim($value) !== '') {
+                $this->time_settings[$date]['end_time'] = $value;
+            }
+        }
+
+        $this->propagateTimesFrom($date);
+    }
+
+    /**
+     * Copy the source date's start_time and end_time to every other date that
+     * already has use_time enabled.
+     */
+    private function propagateTimesFrom(string $sourceDate): void
+    {
+        $source = $this->time_settings[$sourceDate] ?? null;
+
+        if (! is_array($source)) {
+            return;
+        }
+
+        $start = $source['start_time'] ?? null;
+        $end = $source['end_time'] ?? null;
+
+        foreach ($this->time_settings as $date => $settings) {
+            if ($date === $sourceDate) {
+                continue;
+            }
+
+            if (! ($settings['use_time'] ?? false)) {
+                continue;
+            }
+
+            $this->time_settings[$date]['start_time'] = $start;
+            $this->time_settings[$date]['end_time'] = $end;
+        }
+    }
+
     #[Validate('required')]
     public $project_id = null;
 

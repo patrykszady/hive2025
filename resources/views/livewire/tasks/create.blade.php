@@ -303,24 +303,64 @@
 
                                         @if($form->time_settings[$date]['use_time'] ?? false)
                                             <div class="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
-                                                <flux:time-picker
-                                                    wire:model.live="form.time_settings['{{ $date }}'].start_time"
-                                                    wire:change="updateEndTime('{{ $date }}')"
-                                                    interval="30"
-                                                    min="06:00"
-                                                    max="23:00"
-                                                    open-to="08:00"
-                                                    placeholder="Start"
-                                                />
-                                                <flux:time-picker
-                                                    wire:model.live="form.time_settings['{{ $date }}'].end_time"
-                                                    wire:change="applyTimeToAllDates('{{ $date }}')"
-                                                    interval="30"
-                                                    min="06:00"
-                                                    max="23:00"
-                                                    open-to="10:00"
-                                                    placeholder="End"
-                                                />
+                                                @foreach (['start_time' => 'Start', 'end_time' => 'End'] as $field => $placeholder)
+                                                    @php
+                                                        $isEnd = $field === 'end_time';
+                                                        $startTimeValue = data_get($form->time_settings, $date . '.start_time');
+                                                        $fieldValue = data_get($form->time_settings, $date . '.' . $field);
+                                                        $fieldValueToken = is_string($fieldValue) && $fieldValue !== ''
+                                                            ? str_replace(':', '-', $fieldValue)
+                                                            : 'empty';
+                                                        $minTime = $isEnd && is_string($startTimeValue) && $startTimeValue !== ''
+                                                            ? $startTimeValue
+                                                            : '06:00';
+                                                        $openTo = $isEnd ? '10:00' : '08:00';
+                                                    @endphp
+                                                    <div
+                                                        wire:key="time-{{ $date }}-{{ $field }}-{{ $fieldValueToken }}"
+                                                        class="relative"
+                                                        x-data="{
+                                                            get time() { return $wire.form?.time_settings?.[@js($date)]?.[@js($field)] ?? '' },
+                                                            get hourAngle() {
+                                                                if (!this.time) return 0;
+                                                                const [h, m] = this.time.split(':').map(Number);
+                                                                return ((h % 12) + (m || 0) / 60) * 30;
+                                                            },
+                                                            get minuteAngle() {
+                                                                if (!this.time) return 0;
+                                                                const [, m] = this.time.split(':').map(Number);
+                                                                return (m || 0) * 6;
+                                                            },
+                                                        }"
+                                                    >
+                                                        <flux:time-picker
+                                                            wire:model.live="form.time_settings.{{ $date }}.{{ $field }}"
+                                                            interval="30"
+                                                            min="{{ $minTime }}"
+                                                            max="23:00"
+                                                            open-to="{{ $openTo }}"
+                                                            :placeholder="$placeholder"
+                                                        />
+                                                        <div class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-500">
+                                                            <svg class="size-4" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                                                <circle cx="8" cy="8" r="6.25" stroke="currentColor" stroke-width="1.25" />
+                                                                <line
+                                                                    x1="8" y1="8" x2="8" y2="4.5"
+                                                                    stroke="currentColor" stroke-width="1.25" stroke-linecap="round"
+                                                                    style="transform-origin: 8px 8px; transition: transform 200ms ease;"
+                                                                    :style="`transform-origin: 8px 8px; transform: rotate(${hourAngle}deg); transition: transform 200ms ease;`"
+                                                                />
+                                                                <line
+                                                                    x1="8" y1="8" x2="8" y2="3"
+                                                                    stroke="currentColor" stroke-width="1" stroke-linecap="round"
+                                                                    style="transform-origin: 8px 8px; transition: transform 200ms ease;"
+                                                                    :style="`transform-origin: 8px 8px; transform: rotate(${minuteAngle}deg); transition: transform 200ms ease;`"
+                                                                />
+                                                                <circle cx="8" cy="8" r="0.75" fill="currentColor" />
+                                                            </svg>
+                                                        </div>
+                                                    </div>
+                                                @endforeach
                                             </div>
                                         @endif
                                     </div>

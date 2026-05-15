@@ -531,6 +531,31 @@ class TaskCreate extends Component
     }
 
     /**
+     * Ensure end_time is mirrored whenever a start_time changes.
+     *
+     * @param  mixed  $value
+     */
+    public function updated($property, $value): void
+    {
+        if (! is_string($property) || ! str_starts_with($property, 'form.time_settings.') || ! str_ends_with($property, '.start_time')) {
+            return;
+        }
+
+        if (! is_string($value) || trim($value) === '') {
+            return;
+        }
+
+        $date = substr($property, strlen('form.time_settings.'), -strlen('.start_time'));
+
+        if ($date === '' || ! isset($this->form->time_settings[$date])) {
+            return;
+        }
+
+        $this->form->time_settings[$date]['end_time'] = $value;
+        $this->applyTimeToAllDates($date);
+    }
+
+    /**
      * Sync meeting participants: keep any manually-added emails and merge in resolved defaults.
      */
     private function syncMeetingParticipants(): void
@@ -700,7 +725,7 @@ class TaskCreate extends Component
     }
 
     /**
-     * Update end time to 2 hours after start time
+     * Update end time to match start time, unless end time is already set
      */
     public function updateEndTime($date)
     {
@@ -709,13 +734,20 @@ class TaskCreate extends Component
         }
 
         $startTime = $this->form->time_settings[$date]['start_time'];
-        
+        $existingEnd = $this->form->time_settings[$date]['end_time'] ?? null;
+
+        if (is_string($existingEnd) && trim($existingEnd) !== '') {
+            // End time is already set; preserve it.
+            $this->applyTimeToAllDates($date);
+            return;
+        }
+
         try {
             $endTime = Carbon::createFromFormat('H:i', $startTime)
                 ->format('H:i');
-            
+
             $this->form->time_settings[$date]['end_time'] = $endTime;
-            
+
             // Apply same times to all other dates
             $this->applyTimeToAllDates($date);
         } catch (\Exception $e) {

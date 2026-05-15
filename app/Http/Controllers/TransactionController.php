@@ -2893,9 +2893,11 @@ class TransactionController extends Controller
                         //create new expense foreach transaction
                         foreach($transactions as $transaction){
                             //Find Duplicates $expense = $duplicate
-                            //date diff
-                            $duplicate_start_date = $transaction->transaction_date->subDays(1)->format('Y-m-d');
-                            $duplicate_end_date = $transaction->transaction_date->addDays(4)->format('Y-m-d');
+                            //date diff — use copy() to avoid mutating the cached Carbon instance on the model.
+                            //Window is intentionally wider on the lookback side because manually-entered
+                            //expenses (invoice received in hand) usually predate the bank posting by several days.
+                            $duplicate_start_date = $transaction->transaction_date->copy()->subDays(7)->format('Y-m-d');
+                            $duplicate_end_date = $transaction->transaction_date->copy()->addDays(4)->format('Y-m-d');
 
                             //find duplicate expenses
                             $duplicates =
