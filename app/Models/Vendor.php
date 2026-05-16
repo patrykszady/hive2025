@@ -257,6 +257,11 @@ class Vendor extends Model
         return $this->hasMany(Transaction::class);
     }
 
+    public function vendorTransactions(): HasMany
+    {
+        return $this->hasMany(VendorTransaction::class)->withoutGlobalScopes();
+    }
+
     public function checks(): HasMany
     {
         return $this->hasMany(Check::class);

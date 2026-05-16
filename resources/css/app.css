@@ -80,39 +80,32 @@
     margin-inline: calc(var(--flux-card-px) * -1);
   }
 
-  /* Global table row hover: light indigo across the app.
+  /* Flux table row hover: light indigo. Scoped to Flux rows only so plain
+     <table> elements (e.g. footer totals) are not affected.
      Flux tables use `border-separate` with `border-spacing`, so cells paint
      their own background over the row. Apply the hover color to cells too
      via `tr:hover > td`, and use a wide inset box-shadow on the first/last
      cells to bleed the color through the table's edge spacing. */
   tr[data-flux-row]:hover,
-  tr[data-flux-row]:hover > td,
-  tbody tr:hover,
-  tbody tr:hover > td {
+  tr[data-flux-row]:hover > td {
     background-color: var(--color-indigo-50);
   }
-  tr[data-flux-row]:hover > td:first-child,
-  tbody tr:hover > td:first-child {
+  tr[data-flux-row]:hover > td:first-child {
     box-shadow: inset 9999px 0 0 0 var(--color-indigo-50);
     clip-path: inset(0 0 0 -9999px);
   }
-  tr[data-flux-row]:hover > td:last-child,
-  tbody tr:hover > td:last-child {
+  tr[data-flux-row]:hover > td:last-child {
     box-shadow: inset -9999px 0 0 0 var(--color-indigo-50);
     clip-path: inset(0 -9999px 0 0);
   }
   .dark tr[data-flux-row]:hover,
-  .dark tr[data-flux-row]:hover > td,
-  .dark tbody tr:hover,
-  .dark tbody tr:hover > td {
+  .dark tr[data-flux-row]:hover > td {
     background-color: color-mix(in oklab, var(--color-indigo-500) 12%, transparent);
   }
-  .dark tr[data-flux-row]:hover > td:first-child,
-  .dark tbody tr:hover > td:first-child {
+  .dark tr[data-flux-row]:hover > td:first-child {
     box-shadow: inset 9999px 0 0 0 color-mix(in oklab, var(--color-indigo-500) 12%, transparent);
   }
-  .dark tr[data-flux-row]:hover > td:last-child,
-  .dark tbody tr:hover > td:last-child {
+  .dark tr[data-flux-row]:hover > td:last-child {
     box-shadow: inset -9999px 0 0 0 color-mix(in oklab, var(--color-indigo-500) 12%, transparent);
   }
 

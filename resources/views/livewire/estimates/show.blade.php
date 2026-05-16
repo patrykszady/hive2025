@@ -31,7 +31,7 @@
 
                             <flux:accordion.content>
                                 <flux:separator variant="subtle" />
-                                <flux:table>
+                                <flux:table class="max-w-full">
                                     <flux:table.columns>
                                         <flux:table.column></flux:table.column>
                                         <flux:table.column>Amount</flux:table.column>
@@ -74,87 +74,49 @@
         @cannot('update', $estimate)
             <div class="space-y-2">
                 @foreach($sections as $index => $section)
-                    <flux:card class="space-y-2">
-                        {{-- HEADING --}}
-                        <flux:heading>
-                            <span class="text-base font-semibold">{{ $section['name'] ?: 'Unnamed Section' }}</span>
-                        </flux:heading>
+                    <flux:card class="space-y-2 overflow-x-auto">
+                        <flux:table class="max-w-full">
+                            <flux:table.columns>
+                                <flux:table.column class="w-6"></flux:table.column>
+                                <flux:table.column class="w-1/3">Item</flux:table.column>
+                                <flux:table.column>Quantity</flux:table.column>
+                                <flux:table.column>Unit</flux:table.column>
+                                <flux:table.column>Cost</flux:table.column>
+                                <flux:table.column>Total</flux:table.column>
+                            </flux:table.columns>
 
-                        <flux:accordion transition>
-                            <flux:accordion.item :expanded="true">
-                                <flux:accordion.heading>
-                                    {{-- only when accordion closed --}}
-                                </flux:accordion.heading>
-
-                                <flux:accordion.content>
-                                    <flux:separator variant="subtle"/>
-                                    <flux:table>
-                                        <flux:table.columns>
-                                            <flux:table.column class="w-6"></flux:table.column>
-                                            <flux:table.column class="w-1/3">Item</flux:table.column>
-                                            <flux:table.column>Quantity</flux:table.column>
-                                            <flux:table.column>Unit</flux:table.column>
-                                            <flux:table.column>Cost</flux:table.column>
-                                            <flux:table.column>Total</flux:table.column>
-                                        </flux:table.columns>
-
-                                        <flux:table.rows>
-                                            @foreach($estimate->estimate_sections->find($section['id'])->estimate_line_items->sortBy($sortBy, SORT_REGULAR, $sortDirection === 'desc') as $line_item_index => $line_item)
-                                                <flux:table.row wire:key="line-item-{{$line_item->id}}" wire:transition>
-                                                    <flux:table.cell class="align-top">{{$index + 1}}.{{$line_item_index + 1}}</flux:table.cell>
-                                                    <flux:table.cell variant="strong" class="align-top">
-                                                        <div class="flex flex-col">
-                                                            <div class="leading-5"><b>{{$line_item->name}}</b></div>
-                                                            <div class="leading-5"><i>{{$line_item->category}}@if($line_item->sub_category)/@endif{{$line_item->sub_category}}</i></div>
-                                                            @foreach($line_item->allowances as $allowance)
-                                                                <div class="leading-5 text-xs italic text-gray-400">Allowance: {{ $allowance->description }}</div>
-                                                            @endforeach
-                                                        </div>
-                                                    </flux:table.cell>
-                                                    <flux:table.cell class="align-top">{{$line_item->unit_type !== 'no_unit' ? $line_item->quantity : ''}}</flux:table.cell>
-                                                    <flux:table.cell class="align-top">{{$line_item->unit_type !== 'no_unit' ? $line_item->unit_type : ''}}</flux:table.cell>
-                                                    <flux:table.cell class="align-top">{{$line_item->unit_type !== 'no_unit' ? money($line_item->cost) : ''}}</flux:table.cell>
-                                                    <flux:table.cell variant="strong" class="align-top">
-                                                        <div class="flex flex-col">
-                                                            <div class="leading-5">{{money($line_item->total)}}</div>
-                                                            @if($line_item->allowances->isNotEmpty())
-                                                                <div class="leading-5">&nbsp;</div>
-                                                                @foreach($line_item->allowances as $allowance)
-                                                                    <div class="leading-5 text-xs italic text-gray-400">{{ money($allowance->amount) }}</div>
-                                                                @endforeach
-                                                                <div class="leading-5 text-xs font-semibold text-gray-500 border-t border-gray-200 pt-0.5 mt-0.5">{{ money($line_item->total + $line_item->allowances->sum('amount')) }}</div>
-                                                            @endif
-                                                        </div>
-                                                    </flux:table.cell>
-                                                </flux:table.row>
-                                            @endforeach
-                                        </flux:table.rows>
-                                    </flux:table>
-                                </flux:accordion.content>
-                            </flux:accordion.item>
-                        </flux:accordion>
-
-                        {{-- FOOTER --}}
-                        <flux:separator variant="subtle"/>
-                        @php
-                            $sectionAllowanceTotal = $estimate->estimate_sections->find($section['id'])->estimate_line_items->sum(fn ($li) => $li->allowances->sum('amount'));
-                        @endphp
-                        <table class="w-full whitespace-nowrap">
-                            <tr>
-                                <td class="w-full text-sm font-semibold text-zinc-800 dark:text-white text-right pr-3 py-0.5">Total:</td>
-                                <td class="text-sm font-semibold text-zinc-800 dark:text-white py-0.5 ps-3 pe-4">{{money($section['total'])}}</td>
-                            </tr>
-                            @if($sectionAllowanceTotal > 0)
-                                <tr>
-                                    <td class="w-full text-xs italic text-gray-400 text-right pr-3 py-0.5">Allowances:</td>
-                                    <td class="text-xs italic text-gray-400 py-0.5 ps-3 pe-4">{{ money($sectionAllowanceTotal) }}</td>
-                                </tr>
-                                <tr>
-                                    <td class="w-full text-xs font-semibold text-gray-500 text-right pr-3 pt-1 pb-0.5"><span class="border-t border-gray-200 pt-1">Total + Allowances:</span></td>
-                                    <td class="text-xs font-semibold text-gray-500 pt-1 pb-0.5 ps-3 pe-4 border-t border-gray-200">{{ money($section['total'] + $sectionAllowanceTotal) }}</td>
-                                </tr>
-                            @endif
-                        </table>
+                            <flux:table.rows>
+                                @foreach($estimate->estimate_sections->find($section['id'])->estimate_line_items->sortBy($sortBy, SORT_REGULAR, $sortDirection === 'desc') as $line_item_index => $line_item)
+                                    <flux:table.row wire:key="line-item-{{$line_item->id}}" wire:transition>
+                                        <flux:table.cell class="align-top !pl-6">{{$index + 1}}.{{$line_item_index + 1}}</flux:table.cell>
+                                        <flux:table.cell variant="strong" class="align-top !whitespace-normal break-words">
+                                            <div class="flex flex-col min-w-0">
+                                                <div class="leading-5"><b>{{$line_item->name}}</b></div>
+                                                <div class="leading-5"><i>{{$line_item->category}}@if($line_item->sub_category)/@endif{{$line_item->sub_category}}</i></div>
+                                            </div>
+                                        </flux:table.cell>
+                                        <flux:table.cell class="align-top">{{$line_item->unit_type !== 'no_unit' ? $line_item->quantity : ''}}</flux:table.cell>
+                                        <flux:table.cell class="align-top">{{$line_item->unit_type !== 'no_unit' ? $line_item->unit_type : ''}}</flux:table.cell>
+                                        <flux:table.cell class="align-top">{{$line_item->unit_type !== 'no_unit' ? money($line_item->cost) : ''}}</flux:table.cell>
+                                        <flux:table.cell variant="strong" class="align-top">{{money($line_item->total)}}</flux:table.cell>
+                                    </flux:table.row>
+                                    @foreach($line_item->allowances as $allowance)
+                                        <flux:table.row wire:key="line-item-{{$line_item->id}}-allowance-{{$allowance->id}}">
+                                            <flux:table.cell></flux:table.cell>
+                                            <flux:table.cell colspan="4" class="text-xs italic text-gray-400 !whitespace-normal break-words">Allowance: {{ $allowance->description }}</flux:table.cell>
+                                            <flux:table.cell class="text-xs italic text-gray-400">{{ money($allowance->amount) }}</flux:table.cell>
+                                        </flux:table.row>
+                                    @endforeach
+                                    @if($line_item->allowances->isNotEmpty())
+                                        <flux:table.row wire:key="line-item-{{$line_item->id}}-allowance-total">
+                                            <flux:table.cell></flux:table.cell>
+                                            <flux:table.cell colspan="4" class="text-xs font-semibold text-gray-500 text-right">Total + Allowances:</flux:table.cell>
+                                            <flux:table.cell class="text-xs font-semibold text-gray-500">{{ money($line_item->total + $line_item->allowances->sum('amount')) }}</flux:table.cell>
+                                        </flux:table.row>
+                                    @endif
+                                @endforeach
+                            </flux:table.rows>
+                        </flux:table>
                     </flux:card>
                 @endforeach
             </div>
@@ -162,7 +124,7 @@
         @can('update', $estimate)
             <div wire:sort="sort_sections" class="space-y-2">
                 @foreach($sections as $index => $section)
-                    <flux:card class="!py-3 !px-6" wire:sort:item="{{$section['id']}}" wire:key="section-{{$section['id']}}" wire:transition>
+                    <flux:card class="!py-3 !px-6 overflow-hidden" wire:sort:item="{{$section['id']}}" wire:key="section-{{$section['id']}}" wire:transition>
                     <flux:accordion transition>
                         <flux:accordion.item class="!pt-0 !pb-0 !border-b-0">
                             <flux:accordion.heading>
@@ -287,9 +249,9 @@
                                                     </flux:table.row>
                                                 @else
                                                 <flux:table.row wire:sort:item="{{$line_item->id}}" wire:key="line-item-{{$line_item->id}}" wire:transition :class="$liChanged ? 'bg-yellow-50!' : ''">
-                                                    <flux:table.cell wire:sort:handle class="cursor-grab active:cursor-grabbing align-top !pl-6">{{$index + 1}}.{{$activeNumber}}</flux:table.cell>
-                                                        <flux:table.cell variant="strong" class="align-top">
-                                                            <div class="flex flex-col">
+                                                    <flux:table.cell wire:sort:handle class="cursor-grab active:cursor-grabbing align-top !pl-16">{{$index + 1}}.{{$activeNumber}}</flux:table.cell>
+                                                        <flux:table.cell variant="strong" class="align-top !whitespace-normal break-words">
+                                                            <div class="flex flex-col min-w-0">
                                                                 <div class="leading-5">
                                                                     <a
                                                                         class="cursor-pointer"
@@ -302,80 +264,88 @@
                                                                     @endif
                                                                 </div>
                                                                 <div class="leading-5"><i>{{$line_item->category}}@if($line_item->sub_category)/@endif{{$line_item->sub_category}}</i></div>
-                                                                @foreach($line_item->allowances as $allowance)
-                                                                    <div class="leading-5 text-xs italic text-gray-400">Allowance: {{ $allowance->description }}</div>
-                                                                @endforeach
                                                             </div>
                                                         </flux:table.cell>
                                                         <flux:table.cell class="align-top">{{$line_item->unit_type !== 'no_unit' ? $line_item->quantity : ''}}</flux:table.cell>
                                                         <flux:table.cell class="align-top">{{$line_item->unit_type !== 'no_unit' ? $line_item->unit_type : ''}}</flux:table.cell>
                                                         <flux:table.cell class="align-top">{{$line_item->unit_type !== 'no_unit' ? money($line_item->cost) : ''}}</flux:table.cell>
-                                                    <flux:table.cell variant="strong" class="align-top !pr-6">
-                                                        <div class="flex flex-col">
-                                                            <div class="leading-5">{{money($line_item->total)}}</div>
-                                                            @if($line_item->allowances->isNotEmpty())
-                                                                <div class="leading-5">&nbsp;</div>
-                                                                @foreach($line_item->allowances as $allowance)
-                                                                    <div class="leading-5 text-xs italic text-gray-400">{{ money($allowance->amount) }}</div>
-                                                                @endforeach
-                                                                <div class="leading-5 text-xs font-semibold text-gray-500 border-t border-gray-200 pt-0.5 mt-0.5">{{ money($line_item->total + $line_item->allowances->sum('amount')) }}</div>
-                                                            @endif
-                                                        </div>
-                                                    </flux:table.cell>
+                                                    <flux:table.cell variant="strong" class="align-top !pr-6">{{money($line_item->total)}}</flux:table.cell>
                                                 </flux:table.row>
+                                                @foreach($line_item->allowances as $allowance)
+                                                    <flux:table.row wire:key="line-item-{{$line_item->id}}-allowance-{{$allowance->id}}" :class="$liChanged ? 'bg-yellow-50!' : ''">
+                                                        <flux:table.cell class="!pl-16"></flux:table.cell>
+                                                        <flux:table.cell colspan="4" class="text-xs italic text-gray-400 !whitespace-normal break-words">Allowance: {{ $allowance->description }}</flux:table.cell>
+                                                        <flux:table.cell class="text-xs italic text-gray-400 !pr-6">{{ money($allowance->amount) }}</flux:table.cell>
+                                                    </flux:table.row>
+                                                @endforeach
+                                                @if($line_item->allowances->isNotEmpty())
+                                                    <flux:table.row wire:key="line-item-{{$line_item->id}}-allowance-total" :class="$liChanged ? 'bg-yellow-50!' : ''">
+                                                        <flux:table.cell class="!pl-16"></flux:table.cell>
+                                                        <flux:table.cell colspan="4" class="text-xs font-semibold text-gray-500 text-right">Total + Allowances:</flux:table.cell>
+                                                        <flux:table.cell class="text-xs font-semibold text-gray-500 !pr-6">{{ money($line_item->total + $line_item->allowances->sum('amount')) }}</flux:table.cell>
+                                                    </flux:table.row>
+                                                @endif
                                                 @endif
                                             @endforeach
                                         </flux:table.rows>
+                                        @php
+                                            $adminSectionAllowanceTotal = $estimate->estimate_sections->find($section['id'])->estimate_line_items->sum(fn ($li) => $li->allowances->sum('amount'));
+                                        @endphp
+                                        <tfoot>
+                                            <tr>
+                                                <td colspan="6" class="!p-0 border-none">
+                                                    <div class="w-full">
+                                                        <flux:separator variant="subtle" />
+                                                        <flux:separator variant="subtle" class="-mt-2" />
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td colspan="6" class="!p-0 border-none">
+                                                    <div class="flex items-center w-full">
+                                                        <div class="flex items-center gap-2">
+                                                            <flux:button.group>
+                                                                <flux:button
+                                                                    wire:click="$dispatchTo('line-items.estimate-line-item-create', 'addToEstimate', { section_id: {{$section['id']}} })"
+                                                                    icon="plus"
+                                                                >
+                                                                    Item
+                                                                </flux:button>
+                                                                @if(!empty($trashedLineItems[$section['id']]))
+                                                                    <flux:dropdown>
+                                                                        <flux:button icon="arrow-path"></flux:button>
+                                                                        <flux:menu>
+                                                                            <flux:menu.heading>Restore Deleted Items</flux:menu.heading>
+                                                                            @foreach($trashedLineItems[$section['id']] as $trashedLineItem)
+                                                                                <flux:menu.item wire:click="lineItemRestore({{ $trashedLineItem['id'] }})">
+                                                                                    {{ $trashedLineItem['name'] }} — {{ money($trashedLineItem['total']) }}
+                                                                                </flux:menu.item>
+                                                                            @endforeach
+                                                                        </flux:menu>
+                                                                    </flux:dropdown>
+                                                                @endif
+                                                            </flux:button.group>
+                                                        </div>
+                                                        <div class="flex-1"></div>
+                                                        <div class="flex items-center gap-2">
+                                                            <span class="text-sm font-semibold text-zinc-800 dark:text-white text-right pr-3 py-0.5">Total:</span>
+                                                            <span class="text-sm font-semibold text-zinc-800 dark:text-white py-0.5 ps-3 pe-4">{{money($section['total'])}}</span>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                            @if($adminSectionAllowanceTotal > 0)
+                                                <tr>
+                                                    <td colspan="5" class="text-xs italic text-gray-400 text-right pr-3 py-0.5">Allowances:</td>
+                                                    <td class="text-xs italic text-gray-400 py-0.5 ps-3 pe-4">{{ money($adminSectionAllowanceTotal) }}</td>
+                                                </tr>
+                                                <tr>
+                                                    <td colspan="5" class="text-xs font-semibold text-gray-500 text-right pr-3 pt-1 pb-0.5"><span class="border-t border-gray-200 pt-1">Total + Allowances:</span></td>
+                                                    <td class="text-xs font-semibold text-gray-500 pt-1 pb-0.5 ps-3 pe-4 border-t border-gray-200">{{ money($section['total'] + $adminSectionAllowanceTotal) }}</td>
+                                                </tr>
+                                            @endif
+                                        </tfoot>
                                     </flux:table>
-                                </div>
-
-                                {{-- FOOTER --}}
-                                <flux:separator variant="subtle"/>
-                                <div class="relative px-6">
-                                    <div class="absolute left-6 top-0">
-                            <flux:button.group>
-                                <flux:button
-                                    wire:click="$dispatchTo('line-items.estimate-line-item-create', 'addToEstimate', { section_id: {{$section['id']}} })"
-                                    icon="plus"
-                                    >
-                                    Item
-                                </flux:button>
-
-                                @if(!empty($trashedLineItems[$section['id']]))
-                                    <flux:dropdown>
-                                        <flux:button icon="arrow-path"></flux:button>
-
-                                        <flux:menu>
-                                            <flux:menu.heading>Restore Deleted Items</flux:menu.heading>
-                                            @foreach($trashedLineItems[$section['id']] as $trashedLineItem)
-                                                <flux:menu.item wire:click="lineItemRestore({{ $trashedLineItem['id'] }})">
-                                                    {{ $trashedLineItem['name'] }} — {{ money($trashedLineItem['total']) }}
-                                                </flux:menu.item>
-                                            @endforeach
-                                        </flux:menu>
-                                    </flux:dropdown>
-                                @endif
-                            </flux:button.group>
-                        </div>
-                        @php
-                            $adminSectionAllowanceTotal = $estimate->estimate_sections->find($section['id'])->estimate_line_items->sum(fn ($li) => $li->allowances->sum('amount'));
-                        @endphp
-                        <table class="w-full whitespace-nowrap">
-                            <tr>
-                                <td class="w-full text-sm font-semibold text-zinc-800 dark:text-white text-right pr-3 py-0.5">Total:</td>
-                                <td class="text-sm font-semibold text-zinc-800 dark:text-white py-0.5 ps-3 pe-4">{{money($section['total'])}}</td>
-                            </tr>
-                            @if($adminSectionAllowanceTotal > 0)
-                                <tr>
-                                    <td class="w-full text-xs italic text-gray-400 text-right pr-3 py-0.5">Allowances:</td>
-                                    <td class="text-xs italic text-gray-400 py-0.5 ps-3 pe-4">{{ money($adminSectionAllowanceTotal) }}</td>
-                                </tr>
-                                <tr>
-                                    <td class="w-full text-xs font-semibold text-gray-500 text-right pr-3 pt-1 pb-0.5"><span class="border-t border-gray-200 pt-1">Total + Allowances:</span></td>
-                                    <td class="text-xs font-semibold text-gray-500 pt-1 pb-0.5 ps-3 pe-4 border-t border-gray-200">{{ money($section['total'] + $adminSectionAllowanceTotal) }}</td>
-                                </tr>
-                            @endif
-                        </table>
                                 </div>
                             </flux:accordion.content>
                         </flux:accordion.item>

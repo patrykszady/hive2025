@@ -2,11 +2,9 @@
 
 namespace App\Livewire\Transactions;
 
-use App\Models\BankAccount;
 use App\Models\Expense;
 use App\Models\Transaction;
 use App\Models\Vendor;
-use App\Models\VendorTransaction;
 use App\Models\TransactionBulkMatch;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Title;
@@ -46,28 +44,65 @@ class MatchVendor extends Component
 
     public function mount()
     {
-        $this->vendors = Vendor::withoutGlobalScopes()->orderBy('business_name', 'ASC')->get();
-        $this->expense_receipt_merchants =
-            Expense::withoutGlobalScopes()
-                ->with('receipts')
-                ->whereNull('deleted_at')
-                ->where('vendor_id', 0)
-                ->get()
-                ->each(function ($expense, $key) {
-                    $receipt = $expense->receipts()->latest()->first();
-                    if (is_array($receipt->receipt_items) && isset($receipt->receipt_items['merchant_name'])) {
-                        $expense->merchant_name = $receipt->receipt_items['merchant_name'];
-                    }
-                })
-                ->groupBy('merchant_name')
-                ->toBase();
-        // dd($this->expense_receipt_merchants);
-        $this->match_vendor_names = Transaction::transactionsSinVendor()->get()->groupBy('plaid_merchant_name')->values()->toArray();
+        $this->vendors = Vendor::withoutGlobalScopes()
+            ->select(['id', 'business_name'])
+            ->orderBy('business_name', 'ASC')
+            ->get();
+        $this->loadExpenseReceiptMerchants();
+        $this->loadMerchantNames();
+        $this->match_vendor_names = Transaction::transactionsSinVendor()
+            ->select(['id', 'plaid_merchant_name'])
+            ->get()
+            ->groupBy('plaid_merchant_name')
+            ->values()
+            ->toArray();
     }
 
     public function updated($field)
     {
         $this->validateOnly($field);
+    }
+
+    protected function loadExpenseReceiptMerchants(): void
+    {
+        $this->expense_receipt_merchants = Expense::withoutGlobalScopes()
+            ->with(['receipts' => fn ($query) => $query->latest('id')])
+            ->whereNull('deleted_at')
+            ->where('vendor_id', 0)
+            ->get()
+            ->each(function ($expense): void {
+                $receipt = $expense->receipts->first();
+
+                if (is_array($receipt?->receipt_items) && isset($receipt->receipt_items['merchant_name'])) {
+                    $expense->merchant_name = $receipt->receipt_items['merchant_name'];
+                }
+            })
+            ->groupBy('merchant_name')
+            ->toBase();
+    }
+
+    protected function loadMerchantNames(): void
+    {
+        $this->merchant_names = Transaction::transactionsSinVendor()
+            ->select([
+                'id',
+                'amount',
+                'transaction_date',
+                'plaid_merchant_description',
+                'plaid_merchant_name',
+                'bank_account_id',
+            ])
+            ->with([
+                'bank_account' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'bank_id', 'type'])->with([
+                    'bank' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'vendor_id', 'name'])->with([
+                        'vendor' => fn ($query) => $query->withoutGlobalScopes()->select(['id', 'business_name']),
+                    ]),
+                ]),
+            ])
+            ->orderBy('plaid_merchant_description')
+            ->get()
+            ->groupBy('plaid_merchant_description')
+            ->toBase();
     }
 
     public function store_expense_vendors()
@@ -192,24 +227,9 @@ class MatchVendor extends Component
     {
         $this->authorize('viewAny', TransactionBulkMatch::class);
 
-        //->whereNull('deleted_at')
-        $transaction_bank_accounts = BankAccount::withoutGlobalScopes()->pluck('id')->toArray();
-        $this->merchant_names =
-            Transaction::transactionsSinVendor()
-                ->whereIn('bank_account_id', $transaction_bank_accounts)
-                ->with([
-                    'bank_account' => fn ($query) => $query->withoutGlobalScopes()->with([
-                        'bank' => fn ($query) => $query->withoutGlobalScopes()->with([
-                            'vendor' => fn ($query) => $query->withoutGlobalScopes(),
-                        ]),
-                    ]),
-                ])
-                ->get()
-                ->groupBy('plaid_merchant_description')
-                ->toBase();
-
         return view('livewire.transactions.match-vendor', [
             'merchant_names' => $this->merchant_names,
+            'vendors' => $this->vendors,
         ]);
     }
 }

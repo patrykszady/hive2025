@@ -17,6 +17,11 @@ class VendorTransaction extends Model
         return $this->belongsTo(Vendor::class)->withoutGlobalScopes();
     }
 
+    public function bank(): BelongsTo
+    {
+        return $this->belongsTo(Bank::class, 'plaid_inst_id', 'plaid_ins_id')->withoutGlobalScopes();
+    }
+
     public function setDescAttribute($value)
     {
         $this->attributes['desc'] = trim(addcslashes($value, '/'));
