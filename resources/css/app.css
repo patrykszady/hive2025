@@ -41,6 +41,9 @@
   html {
     scroll-behavior: smooth;
     scroll-padding-top: 80px;
+    /* Reserve scrollbar space so opening Flux dropdowns/modals
+       (which lock body scroll) doesn't reflow the layout horizontally. */
+    scrollbar-gutter: stable;
   }
 
   /* Global Flux table cell padding: mirror the Expenses card's table classes
@@ -124,6 +127,28 @@
   }
   .dark .sms-messages {
     scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+  }
+
+  .forward-modal-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+  }
+  .forward-modal-scroll::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .forward-modal-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .forward-modal-scroll::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 3px;
+  }
+  .dark .forward-modal-scroll {
+    scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+  }
+  .dark .forward-modal-scroll::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
   }
 
   .sms-fade-overlay {

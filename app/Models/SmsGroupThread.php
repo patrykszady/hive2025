@@ -332,9 +332,35 @@ class SmsGroupThread extends Model
             ->take(15)
             ->implode(' ');
 
+        // Build phone-digit variants for substring/partial searches
+        // (e.g. "6349" should match a participant whose phone ends in 6349).
+        $participantDigits = collect(is_array($this->participants) ? $this->participants : [])
+            ->flatMap(function ($phone) {
+                $digits = preg_replace('/\D/', '', (string) $phone);
+                if (! is_string($digits) || $digits === '') {
+                    return [];
+                }
+                $variants = [$digits];
+                $len = strlen($digits);
+                if ($len > 10) {
+                    $variants[] = substr($digits, -10);
+                }
+                if ($len >= 7) {
+                    $variants[] = substr($digits, -7);
+                }
+                if ($len >= 4) {
+                    $variants[] = substr($digits, -4);
+                }
+                return $variants;
+            })
+            ->unique()
+            ->values()
+            ->all();
+
         return [
             'id' => (int) $this->id,
             'participants' => is_array($this->participants) ? array_values($this->participants) : [],
+            'participant_digits' => $participantDigits,
             'project_address' => (string) ($this->project?->address ?? ''),
             'client_name' => $clientName,
             'client_user_names' => $clientUserNames,

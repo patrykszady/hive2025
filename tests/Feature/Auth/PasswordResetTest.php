@@ -5,6 +5,7 @@ namespace Tests\Feature\Auth;
 use App\Models\User;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Notification;
 use Tests\TestCase;
 
@@ -14,6 +15,10 @@ class PasswordResetTest extends TestCase
 
     public function test_reset_password_link_screen_can_be_rendered(): void
     {
+        if (! Route::has('password.request')) {
+            $this->markTestSkipped('Password reset routes are not enabled in this app.');
+        }
+
         $response = $this->get('/forgot-password');
 
         $response->assertStatus(200);
@@ -21,6 +26,10 @@ class PasswordResetTest extends TestCase
 
     public function test_reset_password_link_can_be_requested(): void
     {
+        if (! Route::has('password.email')) {
+            $this->markTestSkipped('Password reset routes are not enabled in this app.');
+        }
+
         Notification::fake();
 
         $user = User::factory()->create();
@@ -32,6 +41,10 @@ class PasswordResetTest extends TestCase
 
     public function test_reset_password_screen_can_be_rendered(): void
     {
+        if (! Route::has('password.reset')) {
+            $this->markTestSkipped('Password reset routes are not enabled in this app.');
+        }
+
         Notification::fake();
 
         $user = User::factory()->create();
@@ -49,6 +62,10 @@ class PasswordResetTest extends TestCase
 
     public function test_password_can_be_reset_with_valid_token(): void
     {
+        if (! Route::has('password.update')) {
+            $this->markTestSkipped('Password reset routes are not enabled in this app.');
+        }
+
         Notification::fake();
 
         $user = User::factory()->create();

@@ -84,10 +84,22 @@
                             GS Construciton
                         @elseif ($thread->name)
                             {{ $thread->name }}
-                        @elseif ($thread->client && $thread->threadParticipants->count() < $thread->client->users->count())
-                            {{ $thread->threadParticipants->pluck('phone_number')->map(fn ($p) => $this->resolvePhoneDisplay($p))->implode(', ') }}
                         @elseif ($thread->client)
-                            {{ $thread->client->name }}
+                            @php
+                                $clientUserPhones = $thread->client->users
+                                    ->map(fn ($u) => $u->routeNotificationForTelnyx())
+                                    ->filter()
+                                    ->values();
+                                $partPhones = $thread->threadParticipants->pluck('phone_number')->filter()->values();
+                                $extraPhones = $partPhones->diff($clientUserPhones)->values();
+                                $missingClientUsers = $clientUserPhones->diff($partPhones)->isNotEmpty();
+                            @endphp
+                            @if ($missingClientUsers && $extraPhones->isEmpty())
+                                {{-- Subset of client users only — list participants --}}
+                                {{ $partPhones->map(fn ($p) => $this->resolvePhoneDisplay($p))->implode(', ') }}
+                            @else
+                                {{ $thread->client->name }}@if ($extraPhones->isNotEmpty())<span class="text-zinc-400 dark:text-zinc-500">, {{ $extraPhones->map(fn ($p) => $this->resolvePhoneDisplay($p))->implode(', ') }}</span>@endif
+                            @endif
                         @elseif ($thread->project)
                             {{ $thread->project->address }}
                         @else

@@ -152,7 +152,7 @@ class ExpenseReceipts extends Model
                     && hash_equals($existingCoreSignature, $newCoreSignature)
                 ) {
                     $existingNotes = static::normalizeHandwrittenNotesForCompare($existingItems);
-                    if (static::isNotesSubset($newNotes, $existingNotes)) {
+                    if (($newNotes !== [] || $existingNotes !== []) && static::isNotesSubset($newNotes, $existingNotes)) {
                         return true;
                     }
                 }
@@ -307,16 +307,37 @@ class ExpenseReceipts extends Model
             sort($notes);
         }
 
-        // Use total + transaction_date + purchase_order + handwritten_notes.
-        // Line item counts and individual TotalPrice values are too OCR-prone:
-        // - OCR can split one item into two or merge items
-        // - Individual prices can have OCR errors (e.g., "2.61" vs "24.61")
-        // The receipt total is the most reliably OCR'd value.
+        $itemSignatures = [];
+        foreach (($receiptItems['items'] ?? []) as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+
+            $itemSignatures[] = [
+                'vendor_code' => static::normalizeValue($item['VendorCode'] ?? $item['ProductCode'] ?? null),
+                'mpn' => static::normalizeValue($item['ManufacturerPartNumber'] ?? null),
+                'qty' => static::normalizeValue($item['Quantity'] ?? $item['quantity'] ?? null),
+                'line_total' => static::normalizeValue($item['TotalPrice'] ?? $item['Amount'] ?? null),
+            ];
+        }
+
+        usort($itemSignatures, static function (array $a, array $b): int {
+            return strcmp(
+                json_encode($a, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                json_encode($b, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            );
+        });
+
+        // Use total + transaction_date + purchase_order + handwritten_notes +
+        // stable item signatures (qty/code/line_total). This still ignores
+        // merchant_name and noisy OCR-only text while differentiating changed
+        // line quantities.
         $signature = [
             'transaction_date' => static::normalizeValue($receiptItems['transaction_date'] ?? null),
             'total' => static::normalizeValue($total),
             'purchase_order' => $normalizedPo,
             'handwritten_notes' => $notes,
+            'items' => $itemSignatures,
         ];
 
         return $signature;

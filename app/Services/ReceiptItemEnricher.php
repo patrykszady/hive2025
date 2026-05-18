@@ -74,6 +74,7 @@ class ReceiptItemEnricher
                 $supMpn = trim((string) ($sup['ManufacturerPartNumber']
                     ?? $sup['VendorCode']
                     ?? ''));
+                $supMpn = $this->sanitizeMpn($supMpn, $supMfg);
 
                 $newMfg = $existingMfg === '' && $supMfg !== '' ? $supMfg : null;
                 $newMpn = $existingMpn === '' && $supMpn !== '' ? $supMpn : null;
@@ -83,6 +84,39 @@ class ReceiptItemEnricher
                 $row['new_manufacturer'] = $newMfg;
                 $row['new_mpn']          = $newMpn;
                 $row['changed']          = $newMfg !== null || $newMpn !== null;
+            } elseif ($qty > 0) {
+                // Fallback for terse quotation lines that do not share enough
+                // lexical overlap with supplement descriptions: pick the first
+                // unused supplement row with matching quantity.
+                foreach ($supplementItems as $i => $sup) {
+                    if (isset($usedSupplement[$i])) {
+                        continue;
+                    }
+                    if ((int) ($sup['Quantity'] ?? 0) !== $qty) {
+                        continue;
+                    }
+
+                    $supMfg = trim((string) ($sup['Manufacturer'] ?? ''));
+                    $supMpn = trim((string) ($sup['ManufacturerPartNumber'] ?? $sup['VendorCode'] ?? ''));
+                    $supMpn = $this->sanitizeMpn($supMpn, $supMfg);
+
+                    if ($supMfg === '' && $supMpn === '') {
+                        continue;
+                    }
+
+                    $usedSupplement[$i] = true;
+
+                    $newMfg = $existingMfg === '' && $supMfg !== '' ? $supMfg : null;
+                    $newMpn = $existingMpn === '' && $supMpn !== '' ? $supMpn : null;
+
+                    $row['supplement_index'] = $i;
+                    $row['similarity'] = null;
+                    $row['new_manufacturer'] = $newMfg;
+                    $row['new_mpn'] = $newMpn;
+                    $row['changed'] = $newMfg !== null || $newMpn !== null;
+
+                    break;
+                }
             }
 
             $updates[] = $row;
@@ -146,5 +180,99 @@ class ReceiptItemEnricher
         $union = count($ai) + count($bi) - $intersect;
 
         return $union > 0 ? $intersect / $union : 0.0;
+    }
+
+    public function sanitizeMpn(string $mpn, string $manufacturer): string
+    {
+        $normalizedMpn = strtoupper((string) preg_replace('/[^A-Z0-9]+/i', '', trim($mpn)));
+        if ($normalizedMpn === '') {
+            return '';
+        }
+
+        $normalizedManufacturer = strtoupper((string) preg_replace('/[^A-Z0-9]+/i', '', trim($manufacturer)));
+
+        if ($normalizedManufacturer !== '' && strlen($normalizedManufacturer) >= 3 && str_starts_with($normalizedMpn, $normalizedManufacturer)) {
+            $stripped = substr($normalizedMpn, strlen($normalizedManufacturer));
+            if ($stripped !== '') {
+                return $stripped;
+            }
+        }
+
+        return $normalizedMpn;
+    }
+
+    /**
+     * @param array<int,array<string,mixed>> $existingItems
+     * @param array<int,array<string,mixed>> $supplementItems
+     * @param array<int,array<string,mixed>> $updates
+     * @return array<int,array<string,mixed>>
+     */
+    public function unmatchedSupplementItems(array $existingItems, array $supplementItems, array $updates): array
+    {
+        $matchedSupplementIndexes = [];
+        foreach ($updates as $update) {
+            $supplementIndex = $update['supplement_index'] ?? null;
+            if (is_int($supplementIndex)) {
+                $matchedSupplementIndexes[$supplementIndex] = true;
+            }
+        }
+
+        $existingMpnSet = [];
+        $existingDescriptionTokens = [];
+        foreach ($existingItems as $item) {
+            $existingMpn = $this->sanitizeMpn(
+                (string) ($item['ManufacturerPartNumber'] ?? ''),
+                (string) ($item['Manufacturer'] ?? ''),
+            );
+            if ($existingMpn !== '') {
+                $existingMpnSet[$existingMpn] = true;
+            }
+
+            $existingDescriptionTokens[] = $this->tokenize((string) ($item['Description'] ?? ''));
+        }
+
+        $appended = [];
+        $appendedMpnSet = [];
+
+        foreach ($supplementItems as $index => $supplementItem) {
+            if (isset($matchedSupplementIndexes[$index])) {
+                continue;
+            }
+
+            $manufacturer = trim((string) ($supplementItem['Manufacturer'] ?? ''));
+            $rawMpn = trim((string) ($supplementItem['ManufacturerPartNumber'] ?? $supplementItem['VendorCode'] ?? ''));
+            $sanitizedMpn = $this->sanitizeMpn($rawMpn, $manufacturer);
+
+            if ($sanitizedMpn !== '' && (isset($existingMpnSet[$sanitizedMpn]) || isset($appendedMpnSet[$sanitizedMpn]))) {
+                continue;
+            }
+
+            $supplementTokens = $this->tokenize((string) ($supplementItem['Description'] ?? ''));
+            $isDescriptionDuplicate = false;
+            foreach ($existingDescriptionTokens as $tokens) {
+                if ($this->jaccard($supplementTokens, $tokens) >= 0.34) {
+                    $isDescriptionDuplicate = true;
+                    break;
+                }
+            }
+
+            if ($isDescriptionDuplicate) {
+                continue;
+            }
+
+            $row = $supplementItem;
+            $row['Manufacturer'] = $manufacturer;
+            $row['ManufacturerPartNumber'] = $sanitizedMpn;
+            $row['product_url'] = $row['product_url'] ?? null;
+            $row['image_url'] = $row['image_url'] ?? null;
+
+            if ($sanitizedMpn !== '') {
+                $appendedMpnSet[$sanitizedMpn] = true;
+            }
+
+            $appended[] = $row;
+        }
+
+        return $appended;
     }
 }

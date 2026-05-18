@@ -5,7 +5,6 @@ use Livewire\Livewire;
 
 it('does not error when toggling checklist before task exists', function (): void {
     Livewire::test(TaskCreate::class)
-        ->withoutRendering()
         ->set('form.checklist', [
             ['text' => 'First', 'completed' => false],
         ])

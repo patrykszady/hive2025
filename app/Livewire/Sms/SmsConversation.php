@@ -68,6 +68,17 @@ class SmsConversation extends Component
 
     public int $messageLimit = 30;
 
+    public bool $selectionMode = false;
+
+    /** @var array<int, int> */
+    public array $selectedMessageIds = [];
+
+    public bool $showForwardModal = false;
+
+    public ?int $forwardTargetThreadId = null;
+
+    public string $forwardThreadSearch = '';
+
     public function mount(): void
     {
         $this->isClientUser = (bool) auth()->user()->is_browsing_as_client;
@@ -101,6 +112,11 @@ class SmsConversation extends Component
         $this->manualOptInReason = '';
         $this->manualOptInParticipantId = null;
         $this->lastMarkedMessageId = null;
+        $this->selectionMode = false;
+        $this->selectedMessageIds = [];
+        $this->showForwardModal = false;
+        $this->forwardTargetThreadId = null;
+        $this->forwardThreadSearch = '';
 
         $this->markThreadAsRead();
         $this->dispatch('thread-ready');
@@ -337,6 +353,263 @@ class SmsConversation extends Component
     public function updatedThreadId(): void
     {
         $this->markThreadAsRead();
+    }
+
+    public function enterSelectionMode(): void
+    {
+        if ($this->isClientUser) {
+            abort(403);
+        }
+
+        $this->selectionMode = true;
+        $this->selectedMessageIds = [];
+        $this->dispatch('sms-selection-started');
+    }
+
+    public function exitSelectionMode(): void
+    {
+        $this->selectionMode = false;
+        $this->selectedMessageIds = [];
+        $this->dispatch('sms-selection-cleared');
+    }
+
+    public function toggleSelectionMode(): void
+    {
+        if ($this->selectionMode) {
+            $this->exitSelectionMode();
+        } else {
+            $this->enterSelectionMode();
+        }
+    }
+
+    public function toggleSelectMessage(int $messageId): void
+    {
+        if ($this->isClientUser) {
+            abort(403);
+        }
+
+        if (in_array($messageId, $this->selectedMessageIds, true)) {
+            $this->selectedMessageIds = array_values(array_diff($this->selectedMessageIds, [$messageId]));
+        } else {
+            $this->selectedMessageIds[] = $messageId;
+        }
+    }
+
+    public function openForwardModal(): void
+    {
+        if ($this->isClientUser) {
+            abort(403);
+        }
+
+        if (empty($this->selectedMessageIds)) {
+            Flux::toast(variant: 'warning', text: 'Select at least one message to forward.', duration: 4000, position: 'top right');
+            return;
+        }
+
+        $this->forwardTargetThreadId = null;
+        $this->forwardThreadSearch = '';
+        $this->showForwardModal = true;
+        Flux::modal('forward-messages')->show();
+    }
+
+    /**
+     * Accept selected IDs from Alpine and open the forward modal in one
+     * Livewire request to avoid intermediate reflows.
+     *
+     * @param  array<int, int|string>  $messageIds
+     */
+    public function openForwardModalWithSelection(array $messageIds): void
+    {
+        // Ignore stale/delayed client clicks once selection mode has ended.
+        if (! $this->selectionMode) {
+            return;
+        }
+
+        $this->selectedMessageIds = collect($messageIds)
+            ->map(static fn ($id) => (int) $id)
+            ->filter(static fn ($id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+
+        $this->openForwardModal();
+    }
+
+    /**
+     * Threads the current user can forward messages to (excludes the current thread).
+     */
+    #[Computed]
+    public function forwardableThreads(): \Illuminate\Support\Collection
+    {
+        $user = auth()->user();
+
+        if ($this->isClientUser) {
+            $clientIds = $user->clients()->pluck('clients.id');
+            $query = SmsGroupThread::query()->whereIn('client_id', $clientIds);
+        } else {
+            $vendorId = $user->vendor?->id;
+            if (! $vendorId) {
+                return collect();
+            }
+            $query = SmsGroupThread::query()->visibleToVendor($vendorId);
+        }
+
+        return $query
+            ->when($this->threadId, fn ($q) => $q->where('id', '!=', $this->threadId))
+            ->when($this->forwardThreadSearch !== '', function ($q) {
+                $term = '%' . trim($this->forwardThreadSearch) . '%';
+                $q->where(function ($inner) use ($term) {
+                    $inner->where('name', 'like', $term)
+                        ->orWhereHas('client', fn ($c) => $c->where('business_name', 'like', $term))
+                        ->orWhereHas('subjectVendor', fn ($v) => $v->where('business_name', 'like', $term))
+                        ->orWhereHas('project', fn ($p) => $p->where('address', 'like', $term));
+                });
+            })
+            ->with(['client:id,business_name', 'subjectVendor:id,business_name,options', 'project:id,address'])
+            ->orderByDesc('last_activity_at')
+            ->limit(100)
+            ->get();
+    }
+
+    public function forwardThreadLabel(SmsGroupThread $thread): string
+    {
+        if ($thread->name) {
+            return $this->decodeEntities($thread->name);
+        }
+        if ($thread->client) {
+            $clientLabel = $thread->client->name ?: ($thread->client->business_name ?: ('Client #' . $thread->client_id));
+
+            return $this->decodeEntities((string) $clientLabel);
+        }
+        if ($thread->subjectVendor) {
+            $vendorLabel = $thread->subjectVendor->short_name ?: $thread->subjectVendor->business_name;
+
+            return $this->decodeEntities((string) $vendorLabel);
+        }
+        if ($thread->project) {
+            return $this->decodeEntities((string) $thread->project->address);
+        }
+
+        $participants = is_array($thread->participants) ? $thread->participants : [];
+
+        return collect($participants)
+            ->map(fn (string $p) => $this->resolvePhoneDisplay($p))
+            ->take(3)
+            ->join(', ', ' & ') ?: ('Thread #' . $thread->id);
+    }
+
+    /**
+     * Repeatedly decode HTML entities until the string stops changing so that
+     * double-encoded values (e.g. "&amp;amp;") collapse all the way to "&".
+     */
+    private function decodeEntities(string $value): string
+    {
+        for ($i = 0; $i < 3; $i++) {
+            $decoded = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            if ($decoded === $value) {
+                return $value;
+            }
+            $value = $decoded;
+        }
+
+        return $value;
+    }
+
+    public function forwardMessages(GroupSmsService $smsService): void
+    {
+        if ($this->isClientUser) {
+            abort(403, 'Client users cannot forward messages.');
+        }
+
+        $this->validate([
+            'forwardTargetThreadId' => 'required|integer|exists:sms_group_threads,id',
+            'selectedMessageIds' => 'required|array|min:1',
+            'selectedMessageIds.*' => 'integer',
+        ]);
+
+        if ((int) $this->forwardTargetThreadId === (int) $this->threadId) {
+            $this->addError('forwardTargetThreadId', 'Pick a different conversation than the current one.');
+            return;
+        }
+
+        $allowedThreadIds = $this->forwardableThreads->pluck('id')->all();
+        if (! in_array((int) $this->forwardTargetThreadId, $allowedThreadIds, true)) {
+            abort(403, 'You do not have access to the selected conversation.');
+        }
+
+        $targetThread = SmsGroupThread::findOrFail($this->forwardTargetThreadId);
+
+        if ($targetThread->hasPendingOptIn()) {
+            Flux::toast(
+                variant: 'warning',
+                heading: 'Awaiting START Replies',
+                text: 'The target conversation has participants who have not replied START yet.',
+                duration: 5000,
+                position: 'top right'
+            );
+            return;
+        }
+
+        $messages = SmsMessage::where('thread_id', $this->threadId)
+            ->whereIn('id', $this->selectedMessageIds)
+            ->where('status', '!=', 'scheduled')
+            ->orderBy('created_at')
+            ->orderBy('id')
+            ->get();
+
+        if ($messages->isEmpty()) {
+            $this->addError('selectedMessageIds', 'The selected messages could not be found.');
+            return;
+        }
+
+        $forwardedCount = $messages->count();
+        $forwardedSections = [];
+        $forwardedMediaUrls = [];
+
+        foreach ($messages as $message) {
+            $body = trim((string) $message->display_text);
+            if ($body !== '') {
+                $forwardedSections[] = $body;
+            }
+
+            $mediaUrls = collect(is_array($message->media_urls) ? $message->media_urls : [])
+                ->merge(collect(data_get($message->raw_payload, 'media', []))->pluck('url')->all())
+                ->filter(static fn ($url) => is_string($url) && trim($url) !== '')
+                ->map(static fn (string $url) => trim($url))
+                ->values()
+                ->all();
+
+            if (! empty($mediaUrls)) {
+                $forwardedMediaUrls = array_merge($forwardedMediaUrls, $mediaUrls);
+            }
+        }
+
+        $forwardedMediaUrls = array_values(array_unique($forwardedMediaUrls));
+        $forwardedBody = implode("\n\n", $forwardedSections);
+        $forwardedText = $forwardedBody === ''
+            ? 'Forwarded'
+            : "Forwarded\n\n{$forwardedBody}";
+
+        $smsService->sendToThread($targetThread, $forwardedText, $forwardedMediaUrls, auth()->id());
+
+        $this->showForwardModal = false;
+        $this->forwardTargetThreadId = null;
+        $this->forwardThreadSearch = '';
+
+        // Close the Flux modal and clear selection state via the single source
+        // of truth so the message checkboxes/toolbar visually reset.
+        Flux::modal('forward-messages')->close();
+        $this->exitSelectionMode();
+
+        Flux::toast(
+            variant: 'success',
+            heading: 'Forwarded',
+            text: $forwardedCount === 1
+                ? '1 message forwarded.'
+                : "{$forwardedCount} messages forwarded.",
+            duration: 4000,
+            position: 'top right'
+        );
     }
 
     public function sendMessage(GroupSmsService $smsService): void

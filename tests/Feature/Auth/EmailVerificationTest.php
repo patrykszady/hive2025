@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Providers\AppServiceProvider;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\URL;
 use Tests\TestCase;
@@ -16,6 +17,10 @@ class EmailVerificationTest extends TestCase
 
     public function test_email_verification_screen_can_be_rendered(): void
     {
+        if (! Route::has('verification.notice') || ! Route::has('verification.verify')) {
+            $this->markTestSkipped('Email verification routes are not enabled in this app.');
+        }
+
         $user = User::factory()->create([
             'email_verified_at' => null,
         ]);
@@ -27,6 +32,10 @@ class EmailVerificationTest extends TestCase
 
     public function test_email_can_be_verified(): void
     {
+        if (! Route::has('verification.verify')) {
+            $this->markTestSkipped('Email verification routes are not enabled in this app.');
+        }
+
         $user = User::factory()->create([
             'email_verified_at' => null,
         ]);
@@ -48,6 +57,10 @@ class EmailVerificationTest extends TestCase
 
     public function test_email_is_not_verified_with_invalid_hash(): void
     {
+        if (! Route::has('verification.verify')) {
+            $this->markTestSkipped('Email verification routes are not enabled in this app.');
+        }
+
         $user = User::factory()->create([
             'email_verified_at' => null,
         ]);

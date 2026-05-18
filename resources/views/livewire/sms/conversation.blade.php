@@ -68,16 +68,33 @@
 
         {{-- Header --}}
         @php
-            $participantPhones = $this->thread->threadParticipants->pluck('phone_number');
+            $participantPhones = $this->thread->threadParticipants->pluck('phone_number')->filter()->values();
             $headerTitle = 'Group Message';
+            // When set, the header renders these parts individually so only the
+            // client-user portions are wrapped in the client link.
+            $headerParts = null;
             if ($this->thread->name) {
                 $headerTitle = $this->thread->name;
-            } elseif ($this->thread->client && $participantPhones->count() < $this->thread->client->users->count()) {
-                $headerTitle = $participantPhones
-                    ->map(fn ($p) => $this->resolvePhoneDisplay($p))
-                    ->implode(', ');
             } elseif ($this->thread->client) {
-                $headerTitle = $this->thread->client->name;
+                $clientUserByPhone = $this->thread->client->users
+                    ->mapWithKeys(fn ($u) => [$u->routeNotificationForTelnyx() => $u])
+                    ->filter(fn ($u, $phone) => is_string($phone) && $phone !== '');
+                $participantsMatchClientUsers = $participantPhones->count() === $clientUserByPhone->count()
+                    && $participantPhones->diff($clientUserByPhone->keys())->isEmpty();
+
+                if ($participantsMatchClientUsers) {
+                    $headerTitle = $this->thread->client->name;
+                } else {
+                    $headerParts = $participantPhones->map(function ($phone) use ($clientUserByPhone) {
+                        $user = $clientUserByPhone->get($phone);
+                        return [
+                            'label' => $user
+                                ? trim($user->first_name . ' ' . $user->last_name)
+                                : $this->resolvePhoneDisplay($phone),
+                            'linkToClient' => (bool) $user,
+                        ];
+                    })->values()->all();
+                }
             } elseif ($this->thread->subjectVendor) {
                 $headerTitle = $this->thread->subjectVendor->short_name ?: $this->thread->subjectVendor->name;
             } elseif ($this->thread->project) {
@@ -152,7 +169,18 @@
                     </flux:heading>
                 @elseif ($this->thread->client)
                     <flux:heading size="lg" class="mb-0 truncate flex-1">
-                        <a href="{{ route('clients.show', $this->thread->client_id) }}" wire:navigate.hover class="hover:underline">{{ $headerTitle }}</a>
+                        @if ($headerParts)
+                            @foreach ($headerParts as $i => $part)
+                                @if ($i > 0)<span class="text-zinc-400">,</span> @endif
+                                @if ($part['linkToClient'])
+                                    <a href="{{ route('clients.show', $this->thread->client_id) }}" wire:navigate.hover class="hover:underline">{{ $part['label'] }}</a>
+                                @else
+                                    <span>{{ $part['label'] }}</span>
+                                @endif
+                            @endforeach
+                        @else
+                            <a href="{{ route('clients.show', $this->thread->client_id) }}" wire:navigate.hover class="hover:underline">{{ $headerTitle }}</a>
+                        @endif
                     </flux:heading>
                 @elseif ($this->thread->subjectVendor)
                     <flux:heading size="lg" class="mb-0 truncate flex-1">
@@ -182,6 +210,9 @@
                             @endif
                             <flux:menu.item icon="user" wire:click="openAssignClientModal">
                                 Assign Client / Vendor
+                            </flux:menu.item>
+                            <flux:menu.item icon="arrow-right-circle" wire:click="toggleSelectionMode">
+                                Forward messages
                             </flux:menu.item>
                             <flux:separator />
                             <flux:menu.item variant="danger" icon="trash" x-on:click="$wire.showDeleteConfirm = true">
@@ -258,26 +289,27 @@
                         }
                     }
 
-                    // Fallback: if still no contacts, use raw participants
-                    if ($callableContacts->isEmpty()) {
-                        foreach ($participantPhones as $phone) {
-                            if (\App\Services\GroupSmsService::isOurNumber($phone)) continue;
-                            $name = $this->resolvePhoneDisplay($phone);
-                            $digits = preg_replace('/[^0-9]/', '', $phone);
-                            if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
-                                $d10 = substr($digits, 1);
-                            } else {
-                                $d10 = $digits;
-                            }
-                            $displayPhone = strlen($d10) === 10
-                                ? '(' . substr($d10, 0, 3) . ') ' . substr($d10, 3, 3) . '-' . substr($d10, 6)
-                                : $phone;
-                            $callableContacts->push([
-                                'name' => $name !== $displayPhone ? $name : null,
-                                'e164' => $phone,
-                                'display' => $displayPhone,
-                            ]);
+                    // Always include any thread participant phones not yet covered
+                    // by client users (e.g. an external number added to a client group).
+                    foreach ($participantPhones as $phone) {
+                        if (\App\Services\GroupSmsService::isOurNumber($phone)) continue;
+                        if (isset($seenE164[$phone])) continue;
+                        $seenE164[$phone] = true;
+                        $name = $this->resolvePhoneDisplay($phone);
+                        $digits = preg_replace('/[^0-9]/', '', $phone);
+                        if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+                            $d10 = substr($digits, 1);
+                        } else {
+                            $d10 = $digits;
                         }
+                        $displayPhone = strlen($d10) === 10
+                            ? '(' . substr($d10, 0, 3) . ') ' . substr($d10, 3, 3) . '-' . substr($d10, 6)
+                            : $phone;
+                        $callableContacts->push([
+                            'name' => $name !== $displayPhone ? $name : null,
+                            'e164' => $phone,
+                            'display' => $displayPhone,
+                        ]);
                     }
                 @endphp
 
@@ -329,6 +361,21 @@
             $yesterdayDate = $now->copy()->subDay()->toDateString();
         @endphp
 
+        <div
+            class="contents"
+            x-data="{
+                selectionMode: @js((bool) $selectionMode),
+                selected: @js(array_values($selectedMessageIds)),
+                toggle(id) {
+                    const i = this.selected.indexOf(id);
+                    if (i === -1) { this.selected.push(id); } else { this.selected.splice(i, 1); }
+                },
+                has(id) { return this.selected.includes(id); },
+                clear() { this.selected = []; this.selectionMode = false; },
+            }"
+            x-on:sms-selection-cleared.window="clear()"
+            x-on:sms-selection-started.window="selectionMode = true"
+        >
         <div class="relative flex-1 min-h-0">
             {{-- Loading skeleton during thread switching (transparent overlay, bubbles only) --}}
             <div
@@ -436,8 +483,23 @@
                     }
                     $msgReactions = $reactionsMap[$msg->id] ?? [];
                 @endphp
-                <div wire:key="msg-{{ $msg->id }}" class="flex {{ $msg->isOutbound() ? 'justify-end' : 'justify-start' }}">
-                    <div class="max-w-[85%] lg:max-w-[75%] {{ $msg->isOutbound() ? 'order-last' : '' }}">
+                <div wire:key="msg-{{ $msg->id }}" class="flex items-center"
+                    x-bind:class="selectionMode ? '' : '{{ $msg->isOutbound() ? 'justify-end' : 'justify-start' }}'">
+                    <div class="flex-shrink-0 pr-2" x-show="selectionMode" x-cloak>
+                        <flux:checkbox
+                            x-bind:checked="has({{ $msg->id }})"
+                            x-on:click.stop="toggle({{ $msg->id }})"
+                        />
+                    </div>
+                    <div
+                        class="max-w-[85%] lg:max-w-[75%]"
+                        x-bind:class="{
+                            'ml-auto': selectionMode && {{ $msg->isOutbound() ? 'true' : 'false' }},
+                            'order-last': !selectionMode && {{ $msg->isOutbound() ? 'true' : 'false' }},
+                            'cursor-pointer': selectionMode,
+                        }"
+                        x-on:click="if (selectionMode) toggle({{ $msg->id }})"
+                    >
                         @if ($msg->isInbound())
                             <p class="text-xs lg:text-[10px] text-zinc-400 dark:text-zinc-500 mb-0.5 px-1">
                                 {{ $phoneNameMap[$msg->from_number] ?? $msg->from_number }}
@@ -541,6 +603,89 @@
         </div>
             <div class="sms-fade-overlay bottom"></div>
         </div>
+
+        <div class="sticky bottom-0 z-20 border-t border-zinc-200 bg-transparent dark:border-zinc-700 px-4 py-3 flex items-center justify-between gap-3"
+            x-show="selectionMode" x-cloak>
+            <div class="text-sm font-medium text-zinc-700 dark:text-zinc-200">
+                <span x-text="selected.length"></span>
+                <span x-text="selected.length === 1 ? 'message' : 'messages'"></span> selected
+            </div>
+            <div class="flex items-center gap-2">
+                <flux:button size="sm" variant="ghost" x-on:click="clear(); $wire.exitSelectionMode()">Cancel</flux:button>
+                <flux:button
+                    size="sm"
+                    variant="primary"
+                    icon="arrow-right-circle"
+                    x-on:click="$wire.openForwardModalWithSelection(selected)"
+                    x-bind:disabled="selected.length === 0"
+                >
+                    Forward
+                </flux:button>
+            </div>
+        </div>
+        </div>{{-- /alpine selection wrapper --}}
+
+        {{-- Forward Messages Modal --}}
+        <flux:modal
+            wire:key="forward-messages-modal"
+            name="forward-messages"
+            @close="$wire.set('showForwardModal', false, false)"
+            class="max-w-lg w-full max-h-[85vh] flex flex-col overflow-hidden !p-0"
+        >
+            <form wire:submit="forwardMessages" class="flex flex-col min-h-0 min-w-0 flex-1 w-full" x-data="{ q: '' }">
+                <div class="px-6 pt-6 pb-4 space-y-4 border-b border-zinc-200 dark:border-zinc-700">
+                    <div>
+                        <flux:heading size="lg">Forward {{ count($selectedMessageIds) }} {{ \Illuminate\Support\Str::plural('message', count($selectedMessageIds)) }}</flux:heading>
+                        <flux:text class="mt-1">Pick a conversation to forward the selected messages to.</flux:text>
+                    </div>
+
+                    <flux:field>
+                        <flux:label>Search conversations</flux:label>
+                        <flux:input x-model="q" placeholder="Search by name, client, vendor, address..." />
+                    </flux:field>
+                </div>
+
+                <div class="flex-1 min-h-0 min-w-0 overflow-auto forward-modal-scroll px-6 py-4">
+                    <flux:field>
+                        <flux:label>Destination</flux:label>
+                        @if ($this->forwardableThreads->isEmpty())
+                            <div class="px-3 py-6 text-sm text-zinc-500 dark:text-zinc-400 text-center border border-zinc-200 dark:border-zinc-700 rounded-lg">
+                                No matching conversations.
+                            </div>
+                        @else
+                            <flux:radio.group wire:model="forwardTargetThreadId" variant="cards" class="flex-col gap-1" :indicator="true">
+                                @foreach ($this->forwardableThreads as $candidate)
+                                    @php
+                                        $label = $this->forwardThreadLabel($candidate);
+                                        $desc = $candidate->last_activity_at ? 'Last activity ' . $candidate->last_activity_at->diffForHumans() : '';
+                                        $haystack = mb_strtolower($label . ' ' . $desc);
+                                    @endphp
+                                    <div
+                                        wire:key="forward-thread-{{ $candidate->id }}"
+                                        x-show="q === '' || @js($haystack).includes(q.toLowerCase())"
+                                    >
+                                        <flux:radio
+                                            :value="$candidate->id"
+                                            :label="$label"
+                                            :description="$desc ?: null"
+                                        >{{ $label }}</flux:radio>
+                                    </div>
+                                @endforeach
+                            </flux:radio.group>
+                        @endif
+                        <flux:error name="forwardTargetThreadId" />
+                        <flux:error name="selectedMessageIds" />
+                    </flux:field>
+                </div>
+
+                <div class="flex justify-end gap-2 px-6 py-4 border-t border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/50">
+                    <flux:button type="button" variant="ghost" x-on:click="$flux.modal('forward-messages').close()">Cancel</flux:button>
+                    <flux:button type="submit" variant="primary" icon="arrow-right-circle">
+                        Forward
+                    </flux:button>
+                </div>
+            </form>
+        </flux:modal>
 
         {{-- Manual Opt-In Modal --}}
         <flux:modal wire:model="showOptInModal" name="manual-opt-in" class="max-w-md space-y-6">

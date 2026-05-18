@@ -271,6 +271,16 @@ class SendGroupMms implements ShouldQueue
     protected function prepareMediaUrl(string $url): string
     {
         // Already an absolute external URL — pass through
+        if (str_starts_with($url, 'http')) {
+            return $url;
+        }
+
+        // Private relative media paths must be converted to a public signed URL
+        // so Telnyx can fetch the image.
+        if (str_starts_with($url, 'sms-media/') || str_starts_with($url, 'sms-attachments/')) {
+            return $this->buildPublicSignedLink($url) ?? '';
+        }
+
         if (! str_starts_with($url, '/')) {
             return $url;
         }
@@ -280,9 +290,8 @@ class SendGroupMms implements ShouldQueue
         $disk = Storage::disk('public');
 
         if (! $disk->exists($relativePath)) {
-            Log::channel('telnyx')->warning('MMS attachment not found on disk', ['path' => $relativePath]);
-
-            return '';
+            // Attachment may live on the private files disk (e.g. sms-media).
+            return $this->buildPublicSignedLink($url) ?? '';
         }
 
         $fullPath = $disk->path($relativePath);

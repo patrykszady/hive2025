@@ -88,6 +88,7 @@ class SmsThreadList extends Component
                     ->with([
                         'project:id,address',
                         'client',
+                        'client.users:id,first_name,last_name,cell_phone',
                         'subjectVendor',
                         'latestMessage.sentByUser:id,first_name',
                         'threadParticipants:id,thread_id,phone_number',
@@ -124,6 +125,7 @@ class SmsThreadList extends Component
             ->with([
                 'project:id,address',
                 'client',
+                'client.users:id,first_name,last_name,cell_phone',
                 'subjectVendor',
                 'latestMessage.sentByUser:id,first_name',
                 'threadParticipants:id,thread_id,phone_number',
@@ -144,6 +146,14 @@ class SmsThreadList extends Component
                     $q->whereJsonContains('participants', $search)
                         ->orWhereHas('project', fn ($pq) => $pq->where('address', 'like', "%{$search}%"))
                         ->orWhereHas('messages', fn ($mq) => $mq->where('text', 'like', "%{$search}%"));
+
+                    // Phone digit search — match participants by trailing digits
+                    // (e.g. "6349" matches +18473376349).
+                    $digits = preg_replace('/\D/', '', $search);
+                    if (is_string($digits) && strlen($digits) >= 4) {
+                        $q->orWhereHas('threadParticipants', fn ($pq) => $pq
+                            ->where('phone_number', 'like', "%{$digits}%"));
+                    }
                 });
             })
             ->when($this->subjectFilter === 'client', fn ($q) => $q->whereNotNull('client_id'))

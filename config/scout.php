@@ -217,7 +217,7 @@ return [
             SmsGroupThread::class => [
                 'filterableAttributes' => ['vendor_visibility_ids', 'client_id', 'subject_vendor_id'],
                 'sortableAttributes' => ['last_activity_at_unix'],
-                'searchableAttributes' => ['participants', 'project_address', 'client_name', 'client_user_names', 'vendor_name', 'last_message_text'],
+                'searchableAttributes' => ['participants', 'participant_digits', 'project_address', 'client_name', 'client_user_names', 'vendor_name', 'last_message_text'],
                 'typoTolerance' => ['enabled' => true],
             ],
         ],

@@ -4,6 +4,10 @@ use App\Http\Controllers\CompanyEmailController;
 use App\Models\User;
 use App\Models\UserVendor;
 use App\Models\Vendor;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+
+uses(RefreshDatabase::class);
 
 /*
 |--------------------------------------------------------------------------
@@ -25,17 +29,17 @@ function callProtected(object $object, string $method, array $args = []): mixed
 
 function fakeVendors(array $vendors): void
 {
-    $collection = collect($vendors)->map(fn ($v) => new Vendor($v));
+    Vendor::query()->withoutGlobalScopes()->delete();
 
-    Vendor::shouldReceive('whereNotNull')
-        ->with('business_name')
-        ->andReturnSelf();
-    Vendor::shouldReceive('where')
-        ->with('business_name', '!=', '')
-        ->andReturnSelf();
-    Vendor::shouldReceive('get')
-        ->with(['id', 'business_name'])
-        ->andReturn($collection);
+    $now = now();
+
+    foreach ($vendors as $vendor) {
+        DB::table('vendors')->insert(array_merge([
+            'business_type' => 'Subcontractor',
+            'created_at' => $now,
+            'updated_at' => $now,
+        ], $vendor));
+    }
 }
 
 it('detects vendor from BILL TO label', function () {
@@ -106,26 +110,22 @@ it('returns null for empty OCR content', function () {
 */
 
 it('resolves forwarding email to vendor via user_vendor', function () {
-    $user = new User(['id' => 37]);
-    $user->id = 37;
-    $userVendor = new UserVendor(['vendor_id' => 60]);
+    $user = User::query()->create([
+        'first_name' => 'Jenn',
+        'last_name' => 'Peterson',
+        'email' => 'jenn@jpeterson-design.com',
+        'cell_phone' => '2245551000',
+    ]);
 
-    User::shouldReceive('where')->with('email', 'jenn@jpeterson-design.com')->andReturnSelf();
-    User::shouldReceive('first')->with(['id'])->andReturn($user);
-
-    $mockQuery = Mockery::mock();
-    $mockQuery->shouldReceive('first')->with(['vendor_id'])->andReturn($userVendor);
-
-    UserVendor::shouldReceive('where')->with('user_id', 37)->andReturnSelf();
-    UserVendor::shouldReceive('when')->withAnyArgs()->andReturn($mockQuery);
+    UserVendor::query()->create([
+        'user_id' => $user->id,
+        'vendor_id' => 60,
+    ]);
 
     expect(callProtected(makeController(), 'detectBelongsToVendorFromEmail', ['jenn@jpeterson-design.com', null]))->toBe(60);
 });
 
 it('returns null for unknown email address', function () {
-    User::shouldReceive('where')->with('email', 'nobody@nowhere.com')->andReturnSelf();
-    User::shouldReceive('first')->with(['id'])->andReturn(null);
-
     expect(callProtected(makeController(), 'detectBelongsToVendorFromEmail', ['nobody@nowhere.com', null]))->toBeNull();
 });
 

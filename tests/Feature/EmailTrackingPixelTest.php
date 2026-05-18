@@ -2,6 +2,10 @@
 
 use App\Models\EmailTracking;
 use App\Services\EmailTrackingService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+
+uses(RefreshDatabase::class);
 
 it('returns a transparent gif pixel for valid tracking request', function () {
     $trackingService = app(EmailTrackingService::class);
@@ -46,7 +50,17 @@ it('records open event with project_id when provided', function () {
 
     $messageId = 'test-message-' . uniqid();
     $recipientEmail = 'recipient@example.com';
-    $projectId = 999;  // Use a static ID, no factory needed
+    $projectId = DB::table('projects')->insertGetId([
+        'project_name' => 'Tracking Project',
+        'client_id' => 1,
+        'belongs_to_vendor_id' => 1,
+        'address' => '123 Main St',
+        'city' => 'Chicago',
+        'state' => 'IL',
+        'zip_code' => 60601,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
 
     $url = $trackingService->generateTrackingUrl(
         messageId: $messageId,

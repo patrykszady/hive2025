@@ -1905,6 +1905,8 @@ class CompanyEmailController extends Controller
                 $messageId = $message['id'];
 
                 if (!empty($message['attachments'])) {
+                    $lastExpenseForMessage = null;
+
                     foreach ($message['attachments'] as $attachment_key => $attachment) {
                         $doc_type = 'pdf';
 
@@ -1927,6 +1929,48 @@ class CompanyEmailController extends Controller
 
                         if (isset($ocr_receipt_data['error']) && $ocr_receipt_data['error'] === true)
                         {
+                            $partial = is_array($ocr_receipt_data['partial'] ?? null) ? $ocr_receipt_data['partial'] : [];
+                            $partialInvoice = trim((string) ($partial['invoice_number'] ?? ''));
+                            $isContinuationPage = (bool) ($partial['continued_from_previous'] ?? false)
+                                && (int) ($partial['page_number'] ?? 0) > 1;
+
+                            $continuationExpense = null;
+
+                            if ($partialInvoice !== '') {
+                                $continuationExpense = Expense::withoutGlobalScopes()
+                                    ->where('belongs_to_vendor_id', $email_vendor->id)
+                                    ->where('invoice', $partialInvoice)
+                                    ->latest('id')
+                                    ->first();
+                            }
+
+                            if (! $continuationExpense && $isContinuationPage && $lastExpenseForMessage instanceof Expense) {
+                                $continuationExpense = $lastExpenseForMessage;
+                            }
+
+                            if ($continuationExpense) {
+                                if (($partial['invoice_number'] ?? null) === null || trim((string) $partial['invoice_number']) === '') {
+                                    $partial['invoice_number'] = $continuationExpense->invoice;
+                                }
+
+                                $this->saveExpenseReceipt(
+                                    $continuationExpense->id,
+                                    [
+                                        'fields' => $partial,
+                                        'content' => (string) ($ocr_receipt_data['content'] ?? ''),
+                                    ],
+                                    $ocr_filename,
+                                    null,
+                                    true,
+                                );
+
+                                if ($attachment_key === array_key_last($message['attachments'])) {
+                                    $this->nylasService->moveOriginalMessageToHiveFolder($grantId, $messageId, $company_email->id);
+                                }
+
+                                continue;
+                            }
+
                             // Log the failed receipt processing with debug filepath
                             Log::channel('receipt_processing')->error('OCR processing failed', [
                                 'company_email_id' => $company_email->id,
@@ -2187,6 +2231,10 @@ class CompanyEmailController extends Controller
                                 'created_by_user_id'   => 0,
                                 'invoice'              => $ocr_receipt_data['fields']['invoice_number'] ?: null,
                             ]);
+                        }
+
+                        if (isset($expense) && $expense instanceof Expense) {
+                            $lastExpenseForMessage = $expense;
                         }
 
                         // Finally, save the expense receipt (this method moves the file from _temp_ocr to receipts).
@@ -3788,7 +3836,7 @@ class CompanyEmailController extends Controller
             return trim(preg_replace('/\s+/', ' ', $name));
         };
 
-        $vendors = Vendor::whereNotNull('business_name')
+        $vendors = Vendor::withoutGlobalScopes()->whereNotNull('business_name')
             ->where('business_name', '!=', '')
             ->get(['id', 'business_name']);
 

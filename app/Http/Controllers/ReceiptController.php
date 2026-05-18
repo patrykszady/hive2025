@@ -1529,6 +1529,31 @@ class ReceiptController extends Controller
     }
 
     /**
+     * Basic quality filter for a single handwritten-note candidate.
+     */
+    private function isMeaningfulHandwrittenNote(string $note): bool
+    {
+        $decoded = html_entity_decode($note, ENT_QUOTES | ENT_HTML5);
+        $clean = trim((string) preg_replace('/\s+/', ' ', strip_tags($decoded)));
+
+        if ($clean === '') {
+            return false;
+        }
+
+        // Drop symbol-only noise (e.g. "&", "***", punctuation clusters).
+        if (! preg_match('/[A-Za-z0-9]/', $clean)) {
+            return false;
+        }
+
+        // Reject common policy/account billing reference strings.
+        if (preg_match('/\b(policy|account)\b/i', $clean) && preg_match('/\bbilling\b/i', $clean)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
      * Extract a store Transaction Number from raw OCR content.
      * Some vendors (e.g. Floor & Decor) label their store transaction as "Transaction Number"
      * separately from the payment terminal "Invoice Number:" that Azure picks up.
