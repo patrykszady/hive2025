@@ -1,4 +1,7 @@
-<div>
+<div @class([
+    'min-w-0 max-w-full',
+    'overflow-x-hidden' => $embedded ?? false,
+])>
 <x-form-modal name="expenses_form_modal" :title="$view_text['card_title']" :inline="$embedded ?? false">
     <x-slot name="headerActions">
         @if(isset($expense->id))
@@ -9,7 +12,7 @@
     <form
         id="expenses_form_modal_form"
         wire:submit="{{$view_text['form_submit']}}"
-        class="space-y-4"
+        class="space-y-4 min-w-0 max-w-full"
     >
         {{-- AMOUNT --}}
         <div

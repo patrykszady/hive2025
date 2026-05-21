@@ -1,4 +1,4 @@
-<div class="px-4 sm:px-6 lg:px-8 py-4 h-screen flex flex-col overflow-hidden max-w-full">
+<div class="px-4 sm:px-6 lg:px-8 py-4 h-full min-h-0 flex flex-col overflow-hidden w-full max-w-full min-w-0">
     @php
         $receipt = $this->currentReceipt;
         $total = $this->total;
@@ -7,8 +7,8 @@
     @endphp
 
     {{-- Top bar: title + navigation --}}
-    <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between shrink-0">
-        <div class="flex items-center gap-3 flex-wrap">
+    <div class="mb-4 flex items-center justify-between gap-3 shrink-0 min-w-0 max-w-full overflow-x-auto overflow-y-hidden whitespace-nowrap">
+        <div class="flex items-center gap-3 min-w-0">
             <flux:heading size="lg" class="mb-0">Recent Auto Receipts</flux:heading>
             @if($total > 0)
                 <flux:badge color="zinc" size="sm">Receipt {{ $position }} of {{ $total }}</flux:badge>
@@ -23,7 +23,7 @@
             @endif
         </div>
 
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2 shrink-0 flex-nowrap">
             @php
                 $prevPos = max(1, $position - 1);
                 $nextPos = $total > 0 ? min($total, $position + 1) : 1;
@@ -159,9 +159,9 @@
             </div>
 
             {{-- RIGHT: inline editable expense form --}}
-            <div class="lg:col-span-2 h-full min-h-0 min-w-0 overflow-y-auto overflow-x-hidden pr-1 space-y-4">
+            <div class="lg:col-span-2 h-full min-h-0 min-w-0 max-w-full overflow-y-auto overflow-x-hidden pr-1 space-y-4">
                 @if($expense)
-                    <div class="space-y-3">
+                    <div class="space-y-3 min-w-0 max-w-full overflow-x-hidden">
                         @can('update', $expense)
                             @livewire('expenses.expense-create', ['expenseId' => $expense->id, 'embedded' => true], key('auto-receipt-ec-'.$receipt->id))
                         @else

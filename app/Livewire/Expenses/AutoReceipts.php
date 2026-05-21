@@ -206,6 +206,8 @@ class AutoReceipts extends Component
     #[Title('Recent Auto Receipts')]
     public function render()
     {
-        return view('livewire.expenses.auto-receipts');
+        return view('livewire.expenses.auto-receipts')->layout('components.layouts.app', [
+            'fullscreenClasses' => '!p-0 h-full overflow-hidden flex flex-col',
+        ]);
     }
 }
