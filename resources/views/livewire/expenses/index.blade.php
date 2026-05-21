@@ -25,6 +25,7 @@
             <x-slot:actions>
                 @can('create', App\Models\Expense::class)
                     @if($view == NULL)
+                        <flux:button size="sm" variant="ghost" icon="document-text" href="{{ route('expenses.auto-receipts') }}" wire:navigate>Recent Auto Receipts</flux:button>
                         <flux:button size="sm" icon="arrow-up-tray" wire:click="$dispatchTo('expenses.expense-create', 'openUploadReceipt')">Upload Receipt</flux:button>
                     @endif
                     @if($amount && $view == NULL)

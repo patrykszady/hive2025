@@ -953,8 +953,20 @@ class TransactionController extends Controller
             }
 
             if ($vendor_match) {
-                $transaction->vendor_id = $vendor_match->id;
-                $transaction->save();
+                // Sanity check: don't assign a vendor whose name doesn't appear in the
+                // plaid merchant name/description. Without this, PART 2 below would just
+                // clear it again on the next run, causing an infinite oscillation
+                // (see "Cleared mismatched vendor" log spam).
+                $vName = strtolower($vendor_match->business_name);
+                $pName = strtolower($transaction->plaid_merchant_name ?? '');
+                $pDesc = strtolower($transaction->plaid_merchant_description ?? '');
+                $namesOverlap = ($vName !== '' && $pName !== '' && (stripos($pName, $vName) !== false || stripos($vName, $pName) !== false))
+                    || ($vName !== '' && $pDesc !== '' && stripos($pDesc, $vName) !== false);
+
+                if ($namesOverlap) {
+                    $transaction->vendor_id = $vendor_match->id;
+                    $transaction->save();
+                }
             }
         }
 
@@ -1019,7 +1031,7 @@ class TransactionController extends Controller
                     $transaction->save();
                 } elseif (!$correctVendor) {
                     // No vendor matches at all - clear the wrong assignment so it shows on Match Vendor
-                    Log::channel('plaid_adds')->info('Cleared mismatched vendor (no better match found)', [
+                    Log::channel('plaid_adds')->debug('Cleared mismatched vendor (no better match found)', [
                         'transaction_id' => $transaction->id,
                         'old_vendor_id' => $transaction->vendor_id,
                         'old_vendor_name' => $vendorName,

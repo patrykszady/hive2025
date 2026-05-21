@@ -1,5 +1,5 @@
 <div>
-<x-form-modal name="expenses_form_modal" :title="$view_text['card_title']">
+<x-form-modal name="expenses_form_modal" :title="$view_text['card_title']" :inline="$embedded ?? false">
     <x-slot name="headerActions">
         @if(isset($expense->id))
             <flux:button wire:navigate.hover href="{{route('expenses.show', $expense->id)}}">Show Expense</flux:button>
@@ -334,7 +334,7 @@
 @endif
 
 {{-- SPLITS MODAL --}}
-<livewire:expenses.expense-splits-create :projects="$this->projects" :distributions="$this->distributions" />
+<livewire:expenses.expense-splits-create :projects="$this->projects" :distributions="$this->distributions" :wire:key="'splits-'.($expense?->id ?? 'new').'-'.($embedded ? 'emb' : 'mod')" />
 
 {{-- UPLOAD RECEIPT MODAL --}}
 <flux:modal name="upload_receipt_modal" class="sm:max-w-md space-y-4">

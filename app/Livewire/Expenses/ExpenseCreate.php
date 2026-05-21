@@ -41,6 +41,8 @@ class ExpenseCreate extends Component
 
     public $upload_belongs_to_vendor_id = null;
 
+    public bool $embedded = false;
+
     public $view_text = [
         'card_title' => 'Create Expense',
         'button_text' => 'Create',
@@ -68,10 +70,17 @@ class ExpenseCreate extends Component
         );
     }
 
-    public function mount()
+    public function mount(?int $expenseId = null, bool $embedded = false): void
     {
+        $this->embedded = $embedded;
         $this->expense = Expense::make();
-        // No data loading here - we'll use computed properties instead
+
+        if ($expenseId) {
+            $loaded = Expense::find($expenseId);
+            if ($loaded) {
+                $this->editExpense($loaded);
+            }
+        }
     }
 
     #[Computed]
@@ -245,7 +254,9 @@ class ExpenseCreate extends Component
             'form_submit' => 'edit',
         ];
 
-        $this->modal('expenses_form_modal')->show();
+        if (! $this->embedded) {
+            $this->modal('expenses_form_modal')->show();
+        }
     }
 
     public function resetModal()
@@ -262,7 +273,9 @@ class ExpenseCreate extends Component
         // $this->dispatch('resetSplits')->to('expenses.expenses-splits-form');
         // $this->dispatch('refreshComponent')->to('expenses.expenses-splits-form');
         // $this->dispatch('resetSplits');
-        $this->modal('expenses_form_modal')->close();
+        if (! $this->embedded) {
+            $this->modal('expenses_form_modal')->close();
+        }
 
         // $this->transaction = NULL;
         // $this->check = Check::make();
@@ -419,7 +432,9 @@ class ExpenseCreate extends Component
             $this->form->vendor_id = $transaction->vendor_id;
         }
 
-        $this->modal('expenses_form_modal')->show();
+        if (! $this->embedded) {
+            $this->modal('expenses_form_modal')->show();
+        }
     }
 
     public function edit()
@@ -431,7 +446,9 @@ class ExpenseCreate extends Component
 
         $expenseId = $this->expense->id;
         $expense = $this->form->update();
-        $this->modal('expenses_form_modal')->close();
+        if (! $this->embedded) {
+            $this->modal('expenses_form_modal')->close();
+        }
 
         // Optimistically remove row before server refresh (will be re-added with updated data)
         $this->js('window.dispatchEvent(new CustomEvent("remove-expense-row", { detail: { id: ' . $expenseId . ' } }))');
@@ -441,6 +458,10 @@ class ExpenseCreate extends Component
         $this->dispatch('resetSplits')->to('expenses.expense-splits-create');
         $this->dispatch('refreshComponent')->to('expenses.expense-index');
         $this->dispatch('refreshComponent')->to('expenses.expense-show');
+
+        if ($this->embedded) {
+            $this->dispatch('embedded-expense-updated', expenseId: $expenseId);
+        }
     }
 
     public function removeCheckAssociation(): void
@@ -500,7 +521,9 @@ class ExpenseCreate extends Component
         $referer = (string) request()->header('Referer', '');
         $onShowPage = (bool) preg_match('~/expenses/\d+(?:[/?#]|$)~', $referer);
         $this->form->delete();
-        $this->modal('expenses_form_modal')->close();
+        if (! $this->embedded) {
+            $this->modal('expenses_form_modal')->close();
+        }
 
         // Optimistically remove row immediately
         $this->js('window.dispatchEvent(new CustomEvent("remove-expense-row", { detail: { id: ' . $expenseId . ' } }))');
@@ -535,7 +558,9 @@ class ExpenseCreate extends Component
             $check->save();
         }
         
-        $this->modal('expenses_form_modal')->close();
+        if (! $this->embedded) {
+            $this->modal('expenses_form_modal')->close();
+        }
 
         $this->toastExpenseSuccess($expense, 'Expense Created.');
 
@@ -626,7 +651,9 @@ class ExpenseCreate extends Component
             'button_text' => 'Update',
             'form_submit' => 'edit',
         ];
-        $this->modal('expenses_form_modal')->show();
+        if (! $this->embedded) {
+            $this->modal('expenses_form_modal')->show();
+        }
 
         $this->dispatch('refreshComponent')->to(ExpenseIndex::class);
     }

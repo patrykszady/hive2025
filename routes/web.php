@@ -40,6 +40,7 @@ use App\Livewire\Estimates\EstimateSign;
 use App\Models\Estimate;
 use App\Support\EstimateDocumentGenerator;
 use App\Livewire\Estimates\EstimatesIndex;
+use App\Livewire\Expenses\AutoReceipts as ExpensesAutoReceipts;
 use App\Livewire\Expenses\ExpenseIndex;
 use App\Livewire\Expenses\ExpenseShow;
 use App\Livewire\Hours\HourCreate;
@@ -374,6 +375,7 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
 
     //EXPENSES
     Route::get('/expenses', ExpenseIndex::class)->name('expenses.index');
+    Route::get('/expenses/auto-receipts', ExpensesAutoReceipts::class)->name('expenses.auto-receipts');
     Route::get('/expenses/{expense}', ExpenseShow::class)->name('expenses.show');
     // Route::resource('expenses', ExpenseController::class);
 

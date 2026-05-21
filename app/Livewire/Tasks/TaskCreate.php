@@ -552,7 +552,6 @@ class TaskCreate extends Component
         }
 
         $this->form->time_settings[$date]['end_time'] = $value;
-        $this->applyTimeToAllDates($date);
     }
 
     /**
@@ -738,7 +737,6 @@ class TaskCreate extends Component
 
         if (is_string($existingEnd) && trim($existingEnd) !== '') {
             // End time is already set; preserve it.
-            $this->applyTimeToAllDates($date);
             return;
         }
 
@@ -747,9 +745,6 @@ class TaskCreate extends Component
                 ->format('H:i');
 
             $this->form->time_settings[$date]['end_time'] = $endTime;
-
-            // Apply same times to all other dates
-            $this->applyTimeToAllDates($date);
         } catch (\Exception $e) {
             // If parsing fails, do nothing
         }

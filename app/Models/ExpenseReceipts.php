@@ -459,12 +459,27 @@ class ExpenseReceipts extends Model
     {
         // First check if receipts have line items, then sort by ID (oldest first)
         // This ensures receipt 1 is the first receipt, not the newest
+        $driver = $query->getConnection()->getDriverName();
+
+        if ($driver === 'mysql' || $driver === 'mariadb') {
+            return $query->orderByRaw("
+                CASE
+                    WHEN JSON_CONTAINS_PATH(receipt_items, 'one', '$.items')
+                    AND JSON_LENGTH(JSON_EXTRACT(receipt_items, '$.items')) > 0
+                    THEN 1
+                    ELSE 0
+                END DESC
+            ")->oldest('id');
+        }
+
+        // SQLite (and other drivers used in tests) — fall back to a portable check.
         return $query->orderByRaw("
-            CASE 
-                WHEN JSON_CONTAINS_PATH(receipt_items, 'one', '$.items') 
-                AND JSON_LENGTH(JSON_EXTRACT(receipt_items, '$.items')) > 0 
-                THEN 1 
-                ELSE 0 
+            CASE
+                WHEN receipt_items IS NOT NULL
+                AND json_extract(receipt_items, '$.items') IS NOT NULL
+                AND json_array_length(json_extract(receipt_items, '$.items')) > 0
+                THEN 1
+                ELSE 0
             END DESC
         ")->oldest('id');
     }
