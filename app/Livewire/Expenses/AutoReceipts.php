@@ -17,9 +17,10 @@ class AutoReceipts extends Component
 
     /**
      * Receipts created within this many minutes of each other are
-     * treated as belonging to the same upload / email batch.
+        * treated as belonging to the same upload / email batch when
+        * explicit message metadata is unavailable (legacy rows).
      */
-    protected const BATCH_GAP_MINUTES = 5;
+        protected const BATCH_GAP_MINUTES = 30;
 
     /**
      * 1-based position within the auto-receipts batch list (newest first).
@@ -126,17 +127,71 @@ class AutoReceipts extends Component
     #[Computed]
     public function batches(): array
     {
-        $rows = $this->baseQuery()->get(['id', 'created_at']);
+        $rows = $this->baseQuery()->get([
+            'id',
+            'created_at',
+            'auto_receipt_message_id',
+            'auto_receipt_attachment_index',
+            'auto_receipt_email_received_at',
+        ]);
 
-        $batches = [];
+        if ($rows->isEmpty()) {
+            return [];
+        }
+
+        $scoredBatches = [];
+
+        $rowsWithMessage = $rows->filter(fn ($row) => ! empty($row->auto_receipt_message_id));
+        $messageGroups = $rowsWithMessage->groupBy('auto_receipt_message_id');
+
+        foreach ($messageGroups as $groupRows) {
+            $ordered = $groupRows
+                ->sort(function ($a, $b) {
+                    $aIdx = $a->auto_receipt_attachment_index;
+                    $bIdx = $b->auto_receipt_attachment_index;
+
+                    if ($aIdx === null && $bIdx === null) {
+                        return $a->created_at <=> $b->created_at;
+                    }
+
+                    if ($aIdx === null) {
+                        return 1;
+                    }
+
+                    if ($bIdx === null) {
+                        return -1;
+                    }
+
+                    if ((int) $aIdx === (int) $bIdx) {
+                        return $a->created_at <=> $b->created_at;
+                    }
+
+                    return (int) $aIdx <=> (int) $bIdx;
+                })
+                ->values();
+
+            $batchTimestamp = $ordered->firstWhere('auto_receipt_email_received_at', '!=', null)?->auto_receipt_email_received_at
+                ?? $ordered->max('created_at');
+
+            $scoredBatches[] = [
+                'ids' => $ordered->pluck('id')->all(),
+                'ts' => $batchTimestamp,
+            ];
+        }
+
+        $legacyRows = $rows->filter(fn ($row) => empty($row->auto_receipt_message_id))->values();
+
         $current = [];
         $prevTs = null;
 
-        foreach ($rows as $row) {
+        foreach ($legacyRows as $row) {
             $ts = $row->created_at;
 
             if ($prevTs !== null && abs($prevTs->diffInMinutes($ts)) > self::BATCH_GAP_MINUTES) {
-                $batches[] = $current;
+                $scoredBatches[] = [
+                    'ids' => $current,
+                    'ts' => $prevTs,
+                ];
                 $current = [];
             }
 
@@ -145,10 +200,17 @@ class AutoReceipts extends Component
         }
 
         if (! empty($current)) {
-            $batches[] = $current;
+            $scoredBatches[] = [
+                'ids' => $current,
+                'ts' => $prevTs,
+            ];
         }
 
-        return $batches;
+        usort($scoredBatches, function (array $a, array $b): int {
+            return $b['ts'] <=> $a['ts'];
+        });
+
+        return array_values(array_map(fn (array $batch) => $batch['ids'], $scoredBatches));
     }
 
     /**

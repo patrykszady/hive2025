@@ -28,7 +28,14 @@ function autoReceiptsUser(): User
     return $user;
 }
 
-function makeReceiptFor(User $user, string $filename, int $minutesAgo): ExpenseReceipts
+function makeReceiptFor(
+    User $user,
+    string $filename,
+    int $minutesAgo,
+    ?string $messageId = null,
+    ?int $attachmentIndex = null,
+    ?\Carbon\CarbonInterface $emailReceivedAt = null,
+): ExpenseReceipts
 {
     $expense = Expense::query()->create([
         'amount' => 12.34,
@@ -42,6 +49,9 @@ function makeReceiptFor(User $user, string $filename, int $minutesAgo): ExpenseR
         'expense_id' => $expense->id,
         'receipt_filename' => $filename,
         'is_material_order' => false,
+        'auto_receipt_message_id' => $messageId,
+        'auto_receipt_attachment_index' => $attachmentIndex,
+        'auto_receipt_email_received_at' => $emailReceivedAt,
     ]);
     $receipt->timestamps = false;
     $receipt->created_at = now()->subMinutes($minutesAgo);
@@ -61,8 +71,7 @@ it('lists auto-fetched receipts newest first and paginates one at a time', funct
 
     Livewire::test(AutoReceipts::class)
         ->assertSet('position', 1)
-        ->assertSee('Receipt 1 of 3', false)
-        ->assertSee('Batch 1 of 3', false)
+        ->assertSee('Batch 1 | 1/1', false)
         ->assertSee('newest.pdf')
         ->call('next')
         ->assertSet('position', 2)
@@ -99,3 +108,22 @@ it('does not show receipts belonging to other vendors', function () {
         ->assertSee('No auto-fetched receipts found')
         ->assertDontSee('other-vendor.pdf');
 });
+
+    it('groups receipts by source email and keeps attachment order within the batch', function () {
+        $user = autoReceiptsUser();
+        $this->actingAs($user);
+
+        $receivedAt = now()->subHour();
+
+        makeReceiptFor($user, 'email-1-attachment-3.pdf', 1, 'msg-abc', 3, $receivedAt);
+        makeReceiptFor($user, 'email-1-attachment-2.pdf', 6, 'msg-abc', 2, $receivedAt);
+        makeReceiptFor($user, 'email-1-attachment-1.pdf', 12, 'msg-abc', 1, $receivedAt);
+
+        Livewire::test(AutoReceipts::class)
+        ->assertSee('Batch 1 | 1/3', false)
+        ->assertSee('email-1-attachment-1.pdf')
+        ->call('next')
+        ->assertSee('email-1-attachment-2.pdf')
+        ->call('next')
+        ->assertSee('email-1-attachment-3.pdf');
+    });

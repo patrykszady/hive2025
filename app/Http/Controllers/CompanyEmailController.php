@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Client;
+use App\Models\AutoReceiptEmailBatch;
 use App\Models\CompanyEmail;
 use App\Models\Expense;
 use App\Models\ExpenseReceipts;
@@ -1905,6 +1906,22 @@ class CompanyEmailController extends Controller
                 $messageId = $message['id'];
 
                 if (!empty($message['attachments'])) {
+                    $receivedAt = isset($message['date'])
+                        ? Carbon::createFromTimestamp((int) $message['date'])
+                        : now();
+
+                    $batch = AutoReceiptEmailBatch::query()->updateOrCreate(
+                        ['message_id' => $messageId],
+                        [
+                            'company_email_id' => $company_email->id,
+                            'belongs_to_vendor_id' => $email_vendor->id,
+                            'from_email' => $message['from'][0]['email'] ?? null,
+                            'subject' => $message['subject'] ?? null,
+                            'email_received_at' => $receivedAt,
+                            'attachment_count' => count($message['attachments']),
+                        ]
+                    );
+
                     $lastExpenseForMessage = null;
 
                     foreach ($message['attachments'] as $attachment_key => $attachment) {
@@ -1962,6 +1979,12 @@ class CompanyEmailController extends Controller
                                     $ocr_filename,
                                     null,
                                     true,
+                                    false,
+                                    [
+                                        'message_id' => $batch->message_id,
+                                        'attachment_index' => $attachment_key + 1,
+                                        'email_received_at' => $batch->email_received_at,
+                                    ],
                                 );
 
                                 if ($attachment_key === array_key_last($message['attachments'])) {
@@ -2124,7 +2147,19 @@ class CompanyEmailController extends Controller
                             // allow through scans whose handwritten notes differ.
                             // (saveExpenseReceipt moves the temp file into receipts/ and persists the receipt record)
                             if (isset($expense) && $expense instanceof Expense) {
-                                $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename, null, false);
+                                $this->saveExpenseReceipt(
+                                    $expense->id,
+                                    $ocr_receipt_data,
+                                    $ocr_filename,
+                                    null,
+                                    false,
+                                    false,
+                                    [
+                                        'message_id' => $batch->message_id,
+                                        'attachment_index' => $attachment_key + 1,
+                                        'email_received_at' => $batch->email_received_at,
+                                    ],
+                                );
                                 $didAttachReceipt = true;
                             }
                         } elseif ($duplicates->isEmpty()) {
@@ -2239,7 +2274,19 @@ class CompanyEmailController extends Controller
 
                         // Finally, save the expense receipt (this method moves the file from _temp_ocr to receipts).
                         if (! $didAttachReceipt) {
-                            $this->saveExpenseReceipt($expense->id, $ocr_receipt_data, $ocr_filename);
+                            $this->saveExpenseReceipt(
+                                $expense->id,
+                                $ocr_receipt_data,
+                                $ocr_filename,
+                                null,
+                                false,
+                                false,
+                                [
+                                    'message_id' => $batch->message_id,
+                                    'attachment_index' => $attachment_key + 1,
+                                    'email_received_at' => $batch->email_received_at,
+                                ],
+                            );
                         }
                     } // end foreach attachment
 
@@ -2372,8 +2419,20 @@ class CompanyEmailController extends Controller
         }
     }
 
-    public function saveExpenseReceipt($expense_id, $ocr_receipt_data, $ocr_filename, $message = NULL, bool $skipDuplicateCheck = false, bool $isMaterialOrder = false)
+    public function saveExpenseReceipt(
+        $expense_id,
+        $ocr_receipt_data,
+        $ocr_filename,
+        $message = NULL,
+        bool $skipDuplicateCheck = false,
+        bool $isMaterialOrder = false,
+        array $autoReceiptContext = []
+    )
     {
+        $autoReceiptMessageId = $autoReceiptContext['message_id'] ?? null;
+        $autoReceiptAttachmentIndex = $autoReceiptContext['attachment_index'] ?? null;
+        $autoReceiptEmailReceivedAt = $autoReceiptContext['email_received_at'] ?? null;
+
         if ($message) {
             if (!empty($message['attachments'])) {
                 //TEMP HARD CODED FOR HOME DEPOT. REPLACE
@@ -2513,8 +2572,17 @@ class CompanyEmailController extends Controller
                         $expense_receipt->receipt_html = $receipt_html;
                         $expense_receipt->receipt_items = $receipt_items;
                         $expense_receipt->is_material_order = $isMaterialOrder;
+                        $expense_receipt->auto_receipt_message_id = $autoReceiptMessageId;
+                        $expense_receipt->auto_receipt_attachment_index = $autoReceiptAttachmentIndex;
+                        $expense_receipt->auto_receipt_email_received_at = $autoReceiptEmailReceivedAt;
 
                         $expense_receipt->save();
+
+                        if ($autoReceiptMessageId) {
+                            AutoReceiptEmailBatch::query()
+                                ->where('message_id', $autoReceiptMessageId)
+                                ->increment('processed_receipt_count');
+                        }
 
                         if ($isMaterialOrder && !empty($receipt_items['items'])) {
                             \App\Jobs\ScrapeReceiptItemImagesV2::dispatch($expense_receipt);
@@ -2576,7 +2644,16 @@ class CompanyEmailController extends Controller
         $expense_receipt->receipt_html = $receiptContent;
         $expense_receipt->receipt_items = $receiptFields;
         $expense_receipt->is_material_order = $isMaterialOrder;
+        $expense_receipt->auto_receipt_message_id = $autoReceiptMessageId;
+        $expense_receipt->auto_receipt_attachment_index = $autoReceiptAttachmentIndex;
+        $expense_receipt->auto_receipt_email_received_at = $autoReceiptEmailReceivedAt;
         $expense_receipt->save();
+
+        if ($autoReceiptMessageId) {
+            AutoReceiptEmailBatch::query()
+                ->where('message_id', $autoReceiptMessageId)
+                ->increment('processed_receipt_count');
+        }
 
         if ($isMaterialOrder && !empty($receiptFields['items'])) {
             \App\Jobs\ScrapeReceiptItemImagesV2::dispatch($expense_receipt);

@@ -1,8 +1,16 @@
 <div @class([
     'min-w-0 max-w-full',
     'overflow-x-hidden' => $embedded ?? false,
+    'h-full min-h-0 flex flex-col' => $embedded ?? false,
 ])>
-<x-form-modal name="expenses_form_modal" :title="$view_text['card_title']" :inline="$embedded ?? false">
+<x-form-modal
+    name="expenses_form_modal"
+    :title="$view_text['card_title']"
+    :inline="$embedded ?? false"
+    @class([
+        'h-full min-h-0 flex flex-col' => $embedded ?? false,
+    ])
+>
     <x-slot name="headerActions">
         @if(isset($expense->id))
             <flux:button wire:navigate.hover href="{{route('expenses.show', $expense->id)}}">Show Expense</flux:button>

@@ -11,8 +11,8 @@
 @endphp
 
 @if($inline)
-    <div {{ $attributes->merge(['class' => 'rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900']) }}>
-        <div class="flex flex-col">
+    <div {{ $attributes->merge(['class' => 'rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 h-full min-h-0 overflow-hidden']) }}>
+        <div class="flex flex-col h-full min-h-0">
             {{-- Header --}}
             <div class="p-4 pb-2 space-y-2 shrink-0">
                 @if(isset($header))
@@ -36,7 +36,7 @@
             </div>
 
             {{-- Content --}}
-            <div class="px-4 pb-4">
+            <div class="px-4 pb-4 flex-1 min-h-0 overflow-y-auto">
                 {{ $slot }}
             </div>
 

@@ -10,16 +10,10 @@
     <div class="mb-4 flex items-center justify-between gap-3 shrink-0 min-w-0 max-w-full overflow-x-auto overflow-y-hidden whitespace-nowrap">
         <div class="flex items-center gap-3 min-w-0">
             <flux:heading size="lg" class="mb-0">Recent Auto Receipts</flux:heading>
-            @if($total > 0)
-                <flux:badge color="zinc" size="sm">Receipt {{ $position }} of {{ $total }}</flux:badge>
-                @if($batchInfo)
-                    <flux:badge color="blue" size="sm">
-                        Batch {{ $batchInfo['batch'] }} of {{ $batchInfo['totalBatches'] }}
-                        @if($batchInfo['batchSize'] > 1)
-                            &middot; {{ $batchInfo['positionInBatch'] }}/{{ $batchInfo['batchSize'] }}
-                        @endif
-                    </flux:badge>
-                @endif
+            @if($batchInfo)
+                <flux:badge color="blue" size="sm">
+                    Batch {{ $batchInfo['batch'] }} | {{ $batchInfo['positionInBatch'] }}/{{ $batchInfo['batchSize'] }}
+                </flux:badge>
             @endif
         </div>
 
@@ -161,7 +155,7 @@
             {{-- RIGHT: inline editable expense form --}}
             <div class="lg:col-span-2 h-full min-h-0 min-w-0 max-w-full overflow-y-auto overflow-x-hidden pr-1 space-y-4">
                 @if($expense)
-                    <div class="space-y-3 min-w-0 max-w-full overflow-x-hidden">
+                    <div class="h-full min-h-0 min-w-0 max-w-full overflow-x-hidden">
                         @can('update', $expense)
                             @livewire('expenses.expense-create', ['expenseId' => $expense->id, 'embedded' => true], key('auto-receipt-ec-'.$receipt->id))
                         @else

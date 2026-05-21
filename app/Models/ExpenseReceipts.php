@@ -20,11 +20,23 @@ class ExpenseReceipts extends Model
 
     protected $table = 'expense_receipts_data';
 
-    protected $fillable = ['expense_id', 'receipt_filename', 'receipt_html', 'receipt_items', 'is_material_order', 'created_at', 'updated_at'];
+    protected $fillable = [
+        'expense_id',
+        'receipt_filename',
+        'receipt_html',
+        'receipt_items',
+        'is_material_order',
+        'auto_receipt_message_id',
+        'auto_receipt_attachment_index',
+        'auto_receipt_email_received_at',
+        'created_at',
+        'updated_at',
+    ];
 
     protected $casts = [
         'receipt_items' => 'array',
         'is_material_order' => 'boolean',
+        'auto_receipt_email_received_at' => 'datetime',
     ];
 
     public function searchableAs(): string
