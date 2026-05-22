@@ -157,7 +157,7 @@
                                                         <img
                                                             src="{{ $panelSrc }}"
                                                             alt="Receipt {{ $expenseReceipt->id }}"
-                                                            class="max-w-full h-auto object-contain"
+                                                            class="w-full h-auto object-contain"
                                                         />
                                                     </div>
                                                 @endif
@@ -208,7 +208,7 @@
                                             <img
                                                 src="{{ $src }}"
                                                 alt="Receipt {{ $receipt->id }}"
-                                                class="max-w-full h-auto object-contain"
+                                                class="w-full h-auto object-contain"
                                             />
                                         </div>
                                     @endif
