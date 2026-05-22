@@ -1,14 +1,11 @@
 <div class="max-w-lg">
     <x-island-card :heading="$view_text['card_title']" class="space-y-4">
-        </div>
-
         <flux:separator variant="subtle" />
 
         <form wire:submit="{{$view_text['form_submit']}}" class="space-y-6">
             <flux:select 
-                wire:model.live.debounce.250ms="user_id"
+                wire:model="user_id"
                 label="Select User"
-                variant="listbox" 
                 placeholder="Select User to Login As..."
                 variant="combobox"
             >
