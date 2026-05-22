@@ -153,11 +153,11 @@
                                                         title="Receipt {{ $expenseReceipt->id }}"
                                                     ></iframe>
                                                 @else
-                                                    <div class="flex-1 min-h-0 bg-zinc-50 dark:bg-zinc-900 overflow-auto">
+                                                    <div class="flex-1 min-h-0 bg-zinc-50 dark:bg-zinc-900 overflow-auto flex justify-center">
                                                         <img
                                                             src="{{ $panelSrc }}"
                                                             alt="Receipt {{ $expenseReceipt->id }}"
-                                                            class="block w-full h-auto"
+                                                            class="h-full w-auto max-w-none"
                                                         />
                                                     </div>
                                                 @endif
@@ -204,11 +204,11 @@
                                             title="Receipt {{ $receipt->id }}"
                                         ></iframe>
                                     @else
-                                        <div class="flex-1 min-h-0 bg-zinc-50 dark:bg-zinc-900 overflow-auto">
+                                        <div class="flex-1 min-h-0 bg-zinc-50 dark:bg-zinc-900 overflow-auto flex justify-center">
                                             <img
                                                 src="{{ $src }}"
                                                 alt="Receipt {{ $receipt->id }}"
-                                                class="block w-full h-auto"
+                                                class="h-full w-auto max-w-none"
                                             />
                                         </div>
                                     @endif
