@@ -221,6 +221,19 @@ return [
             // starves PHP-FPM serving end-user requests on the same box.
             'nice' => 10,
         ],
+        'auto-receipts' => [
+            'connection' => 'redis',
+            'queue' => ['auto-receipts'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 1,
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 256,
+            'tries' => 2,
+            'timeout' => 1800,
+            'nice' => 10,
+        ],
     ],
 
     'environments' => [
@@ -238,6 +251,11 @@ return [
                 'balanceMaxShift' => 1,
                 'balanceCooldown' => 3,
             ],
+            'auto-receipts' => [
+                'maxProcesses' => 6,
+                'balanceMaxShift' => 1,
+                'balanceCooldown' => 3,
+            ],
         ],
 
         'local' => [
@@ -248,6 +266,9 @@ return [
                 'maxProcesses' => 1,
             ],
             'background' => [
+                'maxProcesses' => 1,
+            ],
+            'auto-receipts' => [
                 'maxProcesses' => 1,
             ],
         ],

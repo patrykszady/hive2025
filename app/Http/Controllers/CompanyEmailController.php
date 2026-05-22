@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\ProcessAutoReceiptMailboxJob;
 use App\Models\Client;
 use App\Models\AutoReceiptEmailBatch;
 use App\Models\CompanyEmail;
@@ -1864,15 +1865,31 @@ class CompanyEmailController extends Controller
         \App\Jobs\AutoMatchNoProjectExpenses::dispatch();
     }
 
-    public function fetchAutoReceipts()
+    public function dispatchAutoReceiptMailboxJobs(): void
+    {
+        $companyEmailIds = CompanyEmail::withoutGlobalScopes()
+            ->whereNotNull('grant_id')
+            ->pluck('id');
+
+        foreach ($companyEmailIds as $companyEmailId) {
+            ProcessAutoReceiptMailboxJob::dispatch((int) $companyEmailId);
+        }
+    }
+
+    public function fetchAutoReceipts(?int $companyEmailId = null)
     {
         ignore_user_abort(true);
         set_time_limit(0);
 
+        $companyEmailsQuery = CompanyEmail::withoutGlobalScopes()
+            ->whereNotNull('grant_id');
+
+        if ($companyEmailId !== null) {
+            $companyEmailsQuery->whereKey($companyEmailId);
+        }
+
         // Fetch company emails with the specified conditions.
-        $company_emails = CompanyEmail::withoutGlobalScopes()
-            ->whereNotNull('grant_id')
-            ->get();
+        $company_emails = $companyEmailsQuery->get();
 
         foreach ($company_emails as $company_email) {
             $grantId = $company_email->grant_id;
@@ -1930,19 +1947,39 @@ class CompanyEmailController extends Controller
                         // Generate a unique filename and create the temporary file path.
                         $ocr_filename = date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '.pdf';
                         $ocr_path = '_temp_ocr/' . $ocr_filename;
+                        $attachmentContent = null;
 
-                        // Download the attachment content.
-                        $attachmentContent = $this->nylasService->downloadAttachment(
-                            $attachment['id'],
-                            $grantId,
-                            $messageId
-                        );
+                        try {
+                            // Download the attachment content.
+                            $attachmentContent = $this->nylasService->downloadAttachment(
+                                $attachment['id'],
+                                $grantId,
+                                $messageId
+                            );
 
-                        // Save the attachment to the 'files' disk under _temp_ocr.
-                        Storage::disk('files')->put($ocr_path, $attachmentContent);
+                            // Save the attachment to the 'files' disk under _temp_ocr.
+                            Storage::disk('files')->put($ocr_path, $attachmentContent);
 
-                        // Process the attachment using ReceiptController.
-                        $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->extractReceipt($ocr_path, $doc_type, null, true);
+                            // Process the attachment using ReceiptController.
+                            $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->extractReceipt($ocr_path, $doc_type, null, true);
+                        } catch (\Throwable $exception) {
+                            Log::channel('receipt_processing')->error('AutoReceipts: attachment processing failed; continuing with next attachment', [
+                                'company_email_id' => $company_email->id,
+                                'message_id' => $messageId,
+                                'attachment_index' => $attachment_key + 1,
+                                'attachment_filename' => $attachment['filename'] ?? 'unknown',
+                                'attachment_id' => $attachment['id'] ?? null,
+                                'error' => $exception->getMessage(),
+                                'timestamp' => now()->toISOString(),
+                            ]);
+
+                            if (is_string($attachmentContent) && $attachmentContent !== '') {
+                                Storage::disk('files')->put('auto_receipts_failed/'. $company_email->vendor_id . '-' .$ocr_filename, $attachmentContent);
+                            }
+
+                            Storage::disk('files')->delete($ocr_path);
+                            continue;
+                        }
 
                         if (isset($ocr_receipt_data['error']) && $ocr_receipt_data['error'] === true)
                         {

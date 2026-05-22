@@ -14,7 +14,7 @@ Schedule::timezone('America/Chicago');
 //   ->withoutOverlapping()
 //   ->onOneServer();
 
-Schedule::job(new RunScheduledTask(\App\Http\Controllers\CompanyEmailController::class, 'fetchAutoReceipts'))
+Schedule::job(new RunScheduledTask(\App\Http\Controllers\CompanyEmailController::class, 'dispatchAutoReceiptMailboxJobs'))
     ->everyTenMinutes()
     // ->between('7:00', '22:00')
     ->name('fetch-auto-receipts')

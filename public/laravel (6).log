@@ -1,0 +1,766 @@
+[2026-05-17 00:00:08] production.INFO: SendDigestNotifications: Starting evening digest for 2026-05-18  
+[2026-05-17 00:00:08] production.INFO: SendDigestNotifications: Found 3 tasks, 9 recipients  
+[2026-05-17 00:00:10] production.INFO: SendDigestNotifications: Completed evening digest  
+[2026-05-17 00:30:11] production.INFO: Multi-expense match found {"transaction_id":28766,"transaction_amount":"4.72","expense_ids":[26950],"expenses_sum":4.72} 
+[2026-05-17 06:01:53] production.ERROR: ReceiptController@amazon_orders_api has been attempted too many times. {"exception":"[object] (Illuminate\\Queue\\MaxAttemptsExceededException(code: 0): ReceiptController@amazon_orders_api has been attempted too many times. at /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/MaxAttemptsExceededException.php:24)
+[stacktrace]
+#0 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(872): Illuminate\\Queue\\MaxAttemptsExceededException::forJob()
+#1 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(581): Illuminate\\Queue\\Worker->maxAttemptsExceededException()
+#2 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(482): Illuminate\\Queue\\Worker->markJobAsFailedIfAlreadyExceedsMaxAttempts()
+#3 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(443): Illuminate\\Queue\\Worker->process()
+#4 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(208): Illuminate\\Queue\\Worker->runJob()
+#5 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(148): Illuminate\\Queue\\Worker->daemon()
+#6 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(131): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#7 /home/forge/hive.contractors/vendor/laravel/horizon/src/Console/WorkCommand.php(52): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#8 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Laravel\\Horizon\\Console\\WorkCommand->handle()
+#9 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#10 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#11 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#12 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#13 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate\\Container\\Container->call()
+#14 /home/forge/hive.contractors/vendor/symfony/console/Command/Command.php(341): Illuminate\\Console\\Command->execute()
+#15 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony\\Component\\Console\\Command\\Command->run()
+#16 /home/forge/hive.contractors/vendor/symfony/console/Application.php(1117): Illuminate\\Console\\Command->run()
+#17 /home/forge/hive.contractors/vendor/symfony/console/Application.php(356): Symfony\\Component\\Console\\Application->doRunCommand()
+#18 /home/forge/hive.contractors/vendor/symfony/console/Application.php(195): Symfony\\Component\\Console\\Application->doRun()
+#19 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#20 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1235): Illuminate\\Foundation\\Console\\Kernel->handle()
+#21 /home/forge/hive.contractors/artisan(13): Illuminate\\Foundation\\Application->handleCommand()
+#22 {main}
+"} 
+[2026-05-17 12:00:07] production.INFO: SendDigestNotifications: Starting morning digest for 2026-05-17  
+[2026-05-17 12:00:07] production.INFO: SendDigestNotifications: No tasks found for 2026-05-17  
+[2026-05-17 21:02:49] production.INFO: PasskeyJS: Passkey registration component initialized {"level":"info","data":[],"timestamp":"2026-05-17T21:02:49.383Z","url":"https://hive.contractors/users/1"} 
+[2026-05-17 21:03:15] production.INFO: PasskeyJS: Create passkey button clicked {"level":"info","data":[],"timestamp":"2026-05-17T21:03:15.281Z","url":"https://hive.contractors/users/1"} 
+[2026-05-17 21:03:15] production.INFO: PasskeyJS: Livewire component found {"level":"info","data":[],"timestamp":"2026-05-17T21:03:15.284Z","url":"https://hive.contractors/users/1"} 
+[2026-05-17 21:03:15] production.INFO: PasskeyJS: Starting Webpass.attest {"level":"info","data":[],"timestamp":"2026-05-17T21:03:15.285Z","url":"https://hive.contractors/users/1"} 
+[2026-05-17 21:03:15] production.INFO: PasskeyJS: Webpass loaded, calling attest... {"level":"info","data":[],"timestamp":"2026-05-17T21:03:15.285Z","url":"https://hive.contractors/users/1"} 
+[2026-05-17 21:03:19] production.INFO: WebAuthn register: Request received {"user_id":1,"session_id":"zevDhozpQe3OgPsL7CZeL9UPDu4tk814HBq7BhA4","auth_check":true} 
+[2026-05-17 21:03:19] production.INFO: PasskeyJS: Calling onRegistered... {"level":"info","data":[],"timestamp":"2026-05-17T21:03:19.319Z","url":"https://hive.contractors/users/1"} 
+[2026-05-17 21:03:19] production.INFO: PasskeyJS: Webpass.attest completed {"level":"info","data":{"success":true},"timestamp":"2026-05-17T21:03:19.318Z","url":"https://hive.contractors/users/1"} 
+[2026-05-17 21:03:19] production.INFO: PasskeyJS: Passkey registration successful {"level":"info","data":[],"timestamp":"2026-05-17T21:03:19.318Z","url":"https://hive.contractors/users/1"} 
+[2026-05-17 21:03:19] production.INFO: PasskeyJS: onRegistered completed {"level":"info","data":[],"timestamp":"2026-05-17T21:03:19.489Z","url":"https://hive.contractors/users/1"} 
+[2026-05-17 23:20:11] production.INFO: Multi-expense match found {"transaction_id":28772,"transaction_amount":"17.12","expense_ids":[26976],"expenses_sum":17.12} 
+[2026-05-18 00:00:09] production.INFO: SendDigestNotifications: Starting evening digest for 2026-05-19  
+[2026-05-18 00:00:09] production.INFO: SendDigestNotifications: No tasks found for 2026-05-19  
+[2026-05-18 06:01:54] production.ERROR: ReceiptController@amazon_orders_api has been attempted too many times. {"exception":"[object] (Illuminate\\Queue\\MaxAttemptsExceededException(code: 0): ReceiptController@amazon_orders_api has been attempted too many times. at /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/MaxAttemptsExceededException.php:24)
+[stacktrace]
+#0 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(872): Illuminate\\Queue\\MaxAttemptsExceededException::forJob()
+#1 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(581): Illuminate\\Queue\\Worker->maxAttemptsExceededException()
+#2 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(482): Illuminate\\Queue\\Worker->markJobAsFailedIfAlreadyExceedsMaxAttempts()
+#3 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(443): Illuminate\\Queue\\Worker->process()
+#4 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(208): Illuminate\\Queue\\Worker->runJob()
+#5 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(148): Illuminate\\Queue\\Worker->daemon()
+#6 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(131): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#7 /home/forge/hive.contractors/vendor/laravel/horizon/src/Console/WorkCommand.php(52): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#8 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Laravel\\Horizon\\Console\\WorkCommand->handle()
+#9 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#10 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#11 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#12 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#13 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate\\Container\\Container->call()
+#14 /home/forge/hive.contractors/vendor/symfony/console/Command/Command.php(341): Illuminate\\Console\\Command->execute()
+#15 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony\\Component\\Console\\Command\\Command->run()
+#16 /home/forge/hive.contractors/vendor/symfony/console/Application.php(1117): Illuminate\\Console\\Command->run()
+#17 /home/forge/hive.contractors/vendor/symfony/console/Application.php(356): Symfony\\Component\\Console\\Application->doRunCommand()
+#18 /home/forge/hive.contractors/vendor/symfony/console/Application.php(195): Symfony\\Component\\Console\\Application->doRun()
+#19 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#20 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1235): Illuminate\\Foundation\\Console\\Kernel->handle()
+#21 /home/forge/hive.contractors/artisan(13): Illuminate\\Foundation\\Application->handleCommand()
+#22 {main}
+"} 
+[2026-05-18 12:00:11] production.INFO: SendDigestNotifications: Starting morning digest for 2026-05-18  
+[2026-05-18 12:00:11] production.INFO: SendDigestNotifications: Found 3 tasks, 9 recipients  
+[2026-05-18 12:00:12] production.INFO: SendDigestNotifications: Completed morning digest  
+[2026-05-18 20:51:34] production.ERROR: CompanyEmailController@fetchAutoReceipts has been attempted too many times. {"exception":"[object] (Illuminate\\Queue\\MaxAttemptsExceededException(code: 0): CompanyEmailController@fetchAutoReceipts has been attempted too many times. at /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/MaxAttemptsExceededException.php:24)
+[stacktrace]
+#0 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(872): Illuminate\\Queue\\MaxAttemptsExceededException::forJob()
+#1 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(581): Illuminate\\Queue\\Worker->maxAttemptsExceededException()
+#2 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(482): Illuminate\\Queue\\Worker->markJobAsFailedIfAlreadyExceedsMaxAttempts()
+#3 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(443): Illuminate\\Queue\\Worker->process()
+#4 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(208): Illuminate\\Queue\\Worker->runJob()
+#5 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(148): Illuminate\\Queue\\Worker->daemon()
+#6 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(131): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#7 /home/forge/hive.contractors/vendor/laravel/horizon/src/Console/WorkCommand.php(52): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#8 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Laravel\\Horizon\\Console\\WorkCommand->handle()
+#9 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#10 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#11 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#12 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#13 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate\\Container\\Container->call()
+#14 /home/forge/hive.contractors/vendor/symfony/console/Command/Command.php(341): Illuminate\\Console\\Command->execute()
+#15 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony\\Component\\Console\\Command\\Command->run()
+#16 /home/forge/hive.contractors/vendor/symfony/console/Application.php(1117): Illuminate\\Console\\Command->run()
+#17 /home/forge/hive.contractors/vendor/symfony/console/Application.php(356): Symfony\\Component\\Console\\Application->doRunCommand()
+#18 /home/forge/hive.contractors/vendor/symfony/console/Application.php(195): Symfony\\Component\\Console\\Application->doRun()
+#19 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#20 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1235): Illuminate\\Foundation\\Console\\Kernel->handle()
+#21 /home/forge/hive.contractors/artisan(13): Illuminate\\Foundation\\Application->handleCommand()
+#22 {main}
+"} 
+[2026-05-18 20:51:37] production.ERROR: CompanyEmailController@forwardRecentReceiptEmailsToCentral has been attempted too many times. {"exception":"[object] (Illuminate\\Queue\\MaxAttemptsExceededException(code: 0): CompanyEmailController@forwardRecentReceiptEmailsToCentral has been attempted too many times. at /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/MaxAttemptsExceededException.php:24)
+[stacktrace]
+#0 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(872): Illuminate\\Queue\\MaxAttemptsExceededException::forJob()
+#1 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(581): Illuminate\\Queue\\Worker->maxAttemptsExceededException()
+#2 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(482): Illuminate\\Queue\\Worker->markJobAsFailedIfAlreadyExceedsMaxAttempts()
+#3 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(443): Illuminate\\Queue\\Worker->process()
+#4 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(208): Illuminate\\Queue\\Worker->runJob()
+#5 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(148): Illuminate\\Queue\\Worker->daemon()
+#6 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(131): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#7 /home/forge/hive.contractors/vendor/laravel/horizon/src/Console/WorkCommand.php(52): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#8 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Laravel\\Horizon\\Console\\WorkCommand->handle()
+#9 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#10 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#11 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#12 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#13 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate\\Container\\Container->call()
+#14 /home/forge/hive.contractors/vendor/symfony/console/Command/Command.php(341): Illuminate\\Console\\Command->execute()
+#15 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony\\Component\\Console\\Command\\Command->run()
+#16 /home/forge/hive.contractors/vendor/symfony/console/Application.php(1117): Illuminate\\Console\\Command->run()
+#17 /home/forge/hive.contractors/vendor/symfony/console/Application.php(356): Symfony\\Component\\Console\\Application->doRunCommand()
+#18 /home/forge/hive.contractors/vendor/symfony/console/Application.php(195): Symfony\\Component\\Console\\Application->doRun()
+#19 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#20 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1235): Illuminate\\Foundation\\Console\\Kernel->handle()
+#21 /home/forge/hive.contractors/artisan(13): Illuminate\\Foundation\\Application->handleCommand()
+#22 {main}
+"} 
+[2026-05-19 00:00:05] production.INFO: SendDigestNotifications: Starting evening digest for 2026-05-20  
+[2026-05-19 00:00:05] production.INFO: SendDigestNotifications: Found 4 tasks, 9 recipients  
+[2026-05-19 00:00:06] production.INFO: SendDigestNotifications: Completed evening digest  
+[2026-05-19 06:01:54] production.ERROR: ReceiptController@amazon_orders_api has been attempted too many times. {"exception":"[object] (Illuminate\\Queue\\MaxAttemptsExceededException(code: 0): ReceiptController@amazon_orders_api has been attempted too many times. at /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/MaxAttemptsExceededException.php:24)
+[stacktrace]
+#0 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(872): Illuminate\\Queue\\MaxAttemptsExceededException::forJob()
+#1 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(581): Illuminate\\Queue\\Worker->maxAttemptsExceededException()
+#2 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(482): Illuminate\\Queue\\Worker->markJobAsFailedIfAlreadyExceedsMaxAttempts()
+#3 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(443): Illuminate\\Queue\\Worker->process()
+#4 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(208): Illuminate\\Queue\\Worker->runJob()
+#5 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(148): Illuminate\\Queue\\Worker->daemon()
+#6 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(131): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#7 /home/forge/hive.contractors/vendor/laravel/horizon/src/Console/WorkCommand.php(52): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#8 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Laravel\\Horizon\\Console\\WorkCommand->handle()
+#9 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#10 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#11 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#12 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#13 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate\\Container\\Container->call()
+#14 /home/forge/hive.contractors/vendor/symfony/console/Command/Command.php(341): Illuminate\\Console\\Command->execute()
+#15 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony\\Component\\Console\\Command\\Command->run()
+#16 /home/forge/hive.contractors/vendor/symfony/console/Application.php(1117): Illuminate\\Console\\Command->run()
+#17 /home/forge/hive.contractors/vendor/symfony/console/Application.php(356): Symfony\\Component\\Console\\Application->doRunCommand()
+#18 /home/forge/hive.contractors/vendor/symfony/console/Application.php(195): Symfony\\Component\\Console\\Application->doRun()
+#19 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#20 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1235): Illuminate\\Foundation\\Console\\Kernel->handle()
+#21 /home/forge/hive.contractors/artisan(13): Illuminate\\Foundation\\Application->handleCommand()
+#22 {main}
+"} 
+[2026-05-19 12:00:05] production.INFO: SendDigestNotifications: Starting morning digest for 2026-05-19  
+[2026-05-19 12:00:05] production.INFO: SendDigestNotifications: Found 4 tasks, 10 recipients  
+[2026-05-19 12:00:06] production.INFO: SendDigestNotifications: Completed morning digest  
+[2026-05-19 21:41:37] production.ERROR: CompanyEmailController@forwardRecentReceiptEmailsToCentral has been attempted too many times. {"exception":"[object] (Illuminate\\Queue\\MaxAttemptsExceededException(code: 0): CompanyEmailController@forwardRecentReceiptEmailsToCentral has been attempted too many times. at /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/MaxAttemptsExceededException.php:24)
+[stacktrace]
+#0 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(872): Illuminate\\Queue\\MaxAttemptsExceededException::forJob()
+#1 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(581): Illuminate\\Queue\\Worker->maxAttemptsExceededException()
+#2 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(482): Illuminate\\Queue\\Worker->markJobAsFailedIfAlreadyExceedsMaxAttempts()
+#3 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(443): Illuminate\\Queue\\Worker->process()
+#4 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(208): Illuminate\\Queue\\Worker->runJob()
+#5 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(148): Illuminate\\Queue\\Worker->daemon()
+#6 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(131): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#7 /home/forge/hive.contractors/vendor/laravel/horizon/src/Console/WorkCommand.php(52): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#8 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Laravel\\Horizon\\Console\\WorkCommand->handle()
+#9 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#10 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#11 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#12 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#13 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate\\Container\\Container->call()
+#14 /home/forge/hive.contractors/vendor/symfony/console/Command/Command.php(341): Illuminate\\Console\\Command->execute()
+#15 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony\\Component\\Console\\Command\\Command->run()
+#16 /home/forge/hive.contractors/vendor/symfony/console/Application.php(1117): Illuminate\\Console\\Command->run()
+#17 /home/forge/hive.contractors/vendor/symfony/console/Application.php(356): Symfony\\Component\\Console\\Application->doRunCommand()
+#18 /home/forge/hive.contractors/vendor/symfony/console/Application.php(195): Symfony\\Component\\Console\\Application->doRun()
+#19 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#20 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1235): Illuminate\\Foundation\\Console\\Kernel->handle()
+#21 /home/forge/hive.contractors/artisan(13): Illuminate\\Foundation\\Application->handleCommand()
+#22 {main}
+"} 
+[2026-05-20 00:00:07] production.INFO: SendDigestNotifications: Starting evening digest for 2026-05-21  
+[2026-05-20 00:00:07] production.INFO: SendDigestNotifications: Found 4 tasks, 7 recipients  
+[2026-05-20 00:00:08] production.INFO: SendDigestNotifications: Completed evening digest  
+[2026-05-20 11:20:11] production.INFO: Multi-expense match found {"transaction_id":28787,"transaction_amount":"135.48","expense_ids":[26992],"expenses_sum":135.48} 
+[2026-05-20 12:00:07] production.INFO: SendDigestNotifications: Starting morning digest for 2026-05-20  
+[2026-05-20 12:00:07] production.INFO: SendDigestNotifications: Found 4 tasks, 9 recipients  
+[2026-05-20 12:00:08] production.INFO: SendDigestNotifications: Completed morning digest  
+[2026-05-20 22:31:37] production.ERROR: CompanyEmailController@fetchAutoReceipts has been attempted too many times. {"exception":"[object] (Illuminate\\Queue\\MaxAttemptsExceededException(code: 0): CompanyEmailController@fetchAutoReceipts has been attempted too many times. at /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/MaxAttemptsExceededException.php:24)
+[stacktrace]
+#0 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(872): Illuminate\\Queue\\MaxAttemptsExceededException::forJob()
+#1 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(581): Illuminate\\Queue\\Worker->maxAttemptsExceededException()
+#2 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(482): Illuminate\\Queue\\Worker->markJobAsFailedIfAlreadyExceedsMaxAttempts()
+#3 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(443): Illuminate\\Queue\\Worker->process()
+#4 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(208): Illuminate\\Queue\\Worker->runJob()
+#5 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(148): Illuminate\\Queue\\Worker->daemon()
+#6 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(131): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#7 /home/forge/hive.contractors/vendor/laravel/horizon/src/Console/WorkCommand.php(52): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#8 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Laravel\\Horizon\\Console\\WorkCommand->handle()
+#9 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#10 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#11 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#12 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#13 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate\\Container\\Container->call()
+#14 /home/forge/hive.contractors/vendor/symfony/console/Command/Command.php(341): Illuminate\\Console\\Command->execute()
+#15 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony\\Component\\Console\\Command\\Command->run()
+#16 /home/forge/hive.contractors/vendor/symfony/console/Application.php(1117): Illuminate\\Console\\Command->run()
+#17 /home/forge/hive.contractors/vendor/symfony/console/Application.php(356): Symfony\\Component\\Console\\Application->doRunCommand()
+#18 /home/forge/hive.contractors/vendor/symfony/console/Application.php(195): Symfony\\Component\\Console\\Application->doRun()
+#19 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#20 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1235): Illuminate\\Foundation\\Console\\Kernel->handle()
+#21 /home/forge/hive.contractors/artisan(13): Illuminate\\Foundation\\Application->handleCommand()
+#22 {main}
+"} 
+[2026-05-20 22:31:37] production.ERROR: CompanyEmailController@forwardRecentReceiptEmailsToCentral has been attempted too many times. {"exception":"[object] (Illuminate\\Queue\\MaxAttemptsExceededException(code: 0): CompanyEmailController@forwardRecentReceiptEmailsToCentral has been attempted too many times. at /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/MaxAttemptsExceededException.php:24)
+[stacktrace]
+#0 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(872): Illuminate\\Queue\\MaxAttemptsExceededException::forJob()
+#1 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(581): Illuminate\\Queue\\Worker->maxAttemptsExceededException()
+#2 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(482): Illuminate\\Queue\\Worker->markJobAsFailedIfAlreadyExceedsMaxAttempts()
+#3 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(443): Illuminate\\Queue\\Worker->process()
+#4 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(208): Illuminate\\Queue\\Worker->runJob()
+#5 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(148): Illuminate\\Queue\\Worker->daemon()
+#6 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(131): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#7 /home/forge/hive.contractors/vendor/laravel/horizon/src/Console/WorkCommand.php(52): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#8 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Laravel\\Horizon\\Console\\WorkCommand->handle()
+#9 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#10 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#11 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#12 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#13 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate\\Container\\Container->call()
+#14 /home/forge/hive.contractors/vendor/symfony/console/Command/Command.php(341): Illuminate\\Console\\Command->execute()
+#15 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony\\Component\\Console\\Command\\Command->run()
+#16 /home/forge/hive.contractors/vendor/symfony/console/Application.php(1117): Illuminate\\Console\\Command->run()
+#17 /home/forge/hive.contractors/vendor/symfony/console/Application.php(356): Symfony\\Component\\Console\\Application->doRunCommand()
+#18 /home/forge/hive.contractors/vendor/symfony/console/Application.php(195): Symfony\\Component\\Console\\Application->doRun()
+#19 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#20 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1235): Illuminate\\Foundation\\Console\\Kernel->handle()
+#21 /home/forge/hive.contractors/artisan(13): Illuminate\\Foundation\\Application->handleCommand()
+#22 {main}
+"} 
+[2026-05-20 22:41:50] production.ERROR: CompanyEmailController@fetchAutoReceipts has been attempted too many times. {"exception":"[object] (Illuminate\\Queue\\MaxAttemptsExceededException(code: 0): CompanyEmailController@fetchAutoReceipts has been attempted too many times. at /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/MaxAttemptsExceededException.php:24)
+[stacktrace]
+#0 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(872): Illuminate\\Queue\\MaxAttemptsExceededException::forJob()
+#1 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(581): Illuminate\\Queue\\Worker->maxAttemptsExceededException()
+#2 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(482): Illuminate\\Queue\\Worker->markJobAsFailedIfAlreadyExceedsMaxAttempts()
+#3 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(443): Illuminate\\Queue\\Worker->process()
+#4 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(208): Illuminate\\Queue\\Worker->runJob()
+#5 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(148): Illuminate\\Queue\\Worker->daemon()
+#6 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(131): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#7 /home/forge/hive.contractors/vendor/laravel/horizon/src/Console/WorkCommand.php(52): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#8 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Laravel\\Horizon\\Console\\WorkCommand->handle()
+#9 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#10 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#11 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#12 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#13 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate\\Container\\Container->call()
+#14 /home/forge/hive.contractors/vendor/symfony/console/Command/Command.php(341): Illuminate\\Console\\Command->execute()
+#15 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony\\Component\\Console\\Command\\Command->run()
+#16 /home/forge/hive.contractors/vendor/symfony/console/Application.php(1117): Illuminate\\Console\\Command->run()
+#17 /home/forge/hive.contractors/vendor/symfony/console/Application.php(356): Symfony\\Component\\Console\\Application->doRunCommand()
+#18 /home/forge/hive.contractors/vendor/symfony/console/Application.php(195): Symfony\\Component\\Console\\Application->doRun()
+#19 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#20 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1235): Illuminate\\Foundation\\Console\\Kernel->handle()
+#21 /home/forge/hive.contractors/artisan(13): Illuminate\\Foundation\\Application->handleCommand()
+#22 {main}
+"} 
+[2026-05-20 22:41:50] production.ERROR: CompanyEmailController@forwardRecentReceiptEmailsToCentral has been attempted too many times. {"exception":"[object] (Illuminate\\Queue\\MaxAttemptsExceededException(code: 0): CompanyEmailController@forwardRecentReceiptEmailsToCentral has been attempted too many times. at /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/MaxAttemptsExceededException.php:24)
+[stacktrace]
+#0 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(872): Illuminate\\Queue\\MaxAttemptsExceededException::forJob()
+#1 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(581): Illuminate\\Queue\\Worker->maxAttemptsExceededException()
+#2 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(482): Illuminate\\Queue\\Worker->markJobAsFailedIfAlreadyExceedsMaxAttempts()
+#3 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(443): Illuminate\\Queue\\Worker->process()
+#4 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(208): Illuminate\\Queue\\Worker->runJob()
+#5 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(148): Illuminate\\Queue\\Worker->daemon()
+#6 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(131): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#7 /home/forge/hive.contractors/vendor/laravel/horizon/src/Console/WorkCommand.php(52): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#8 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Laravel\\Horizon\\Console\\WorkCommand->handle()
+#9 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#10 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#11 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#12 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#13 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate\\Container\\Container->call()
+#14 /home/forge/hive.contractors/vendor/symfony/console/Command/Command.php(341): Illuminate\\Console\\Command->execute()
+#15 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony\\Component\\Console\\Command\\Command->run()
+#16 /home/forge/hive.contractors/vendor/symfony/console/Application.php(1117): Illuminate\\Console\\Command->run()
+#17 /home/forge/hive.contractors/vendor/symfony/console/Application.php(356): Symfony\\Component\\Console\\Application->doRunCommand()
+#18 /home/forge/hive.contractors/vendor/symfony/console/Application.php(195): Symfony\\Component\\Console\\Application->doRun()
+#19 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#20 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1235): Illuminate\\Foundation\\Console\\Kernel->handle()
+#21 /home/forge/hive.contractors/artisan(13): Illuminate\\Foundation\\Application->handleCommand()
+#22 {main}
+"} 
+[2026-05-21 00:00:08] production.INFO: SendDigestNotifications: Starting evening digest for 2026-05-22  
+[2026-05-21 00:00:08] production.INFO: SendDigestNotifications: No tasks found for 2026-05-22  
+[2026-05-21 01:09:41] production.INFO: PasskeyJS: Passkey registration component initialized {"level":"info","data":[],"timestamp":"2026-05-21T01:09:41.441Z","url":"https://hive.contractors/users/1"} 
+[2026-05-21 11:20:10] production.INFO: Multi-expense match found {"transaction_id":28804,"transaction_amount":"49.48","expense_ids":[27000],"expenses_sum":49.48} 
+[2026-05-21 12:00:03] production.INFO: SendDigestNotifications: Starting morning digest for 2026-05-21  
+[2026-05-21 12:00:03] production.INFO: SendDigestNotifications: Found 3 tasks, 6 recipients  
+[2026-05-21 12:00:04] production.INFO: SendDigestNotifications: Completed morning digest  
+[2026-05-21 12:10:12] production.INFO: Multi-expense match found {"transaction_id":28803,"transaction_amount":"44.85","expense_ids":[27001],"expenses_sum":44.85} 
+[2026-05-21 13:05:32] production.ERROR: Menards scraper failed {"exit_code":1,"output_dir":"/home/forge/hive.contractors/storage/files/_temp_menards","stderr_tail":"rds]   Plugin result — captchas: 0, solved: 0, error: none
+[menards]   Entered Imperva iframe — waiting for hCaptcha widget…
+[menards]   Plugin retry after iframe wait — solved: 0
+[menards]   hCaptcha sitekey: dd6e16a7-972e-47d2-93d0-96642fb6d8de
+[menards]   API key length: 32, starts with: e8f0…
+[menards]   Checking anti-captcha balance…
+[menards]   Anti-captcha balance: $9.45521
+[menards]   Submitting hCaptcha to anti-captcha…
+[menards]   createTask response: {\"errorId\":2,\"errorCode\":\"ERROR_NO_SLOT_AVAILABLE\",\"errorDescription\":\"No idle workers are available at the moment. Please try a bit later or increase your maximum bid in menu Settings - API Setup in Anti-Captcha Customers Area.\"}
+[menards]   Manual hCaptcha solve failed: createTask failed: ERROR_NO_SLOT_AVAILABLE — No idle workers are available at the moment. Please try a bit later or increase your maximum bid in menu Settings - API Setup in Anti-Captcha Customers Area.
+[menards]   WARNING: Imperva challenge could not be solved automatically
+[menards]   URL after wait: https://www.menards.com/main/login.html
+[menards]   screenshot → 01_login_page.png
+[menards]   Found 0 input(s): []
+[menards]   Primary selectors failed — trying label-based fallback…
+[menards]   screenshot → 01b_email_field_not_found.png
+[menards]   Page body text (first 2000 chars): (empty)
+[menards]   Current URL: https://www.menards.com/main/login.html
+[menards]   Cookies: [\"reese84\",\"nlbi_145735_2147483392\",\"incap_ses_1700_145735\",\"visid_incap_145735\"]
+[menards] FATAL: Cannot find email/username field on login page. Inputs found: []
+[menards] Stack: Error: Cannot find email/username field on login page. Inputs found: []
+    at login (/home/forge/hive.contractors/scripts/menards-scraper.cjs:496:15)
+    at async /home/forge/hive.contractors/scripts/menards-scraper.cjs:809:9
+[menards]   screenshot → XX_fatal_error.png
+[menards]   Error page URL: https://www.menards.com/main/login.html
+[menards]   Error page title: 
+"} 
+[2026-05-21 22:21:33] production.ERROR: CompanyEmailController@fetchAutoReceipts has been attempted too many times. {"exception":"[object] (Illuminate\\Queue\\MaxAttemptsExceededException(code: 0): CompanyEmailController@fetchAutoReceipts has been attempted too many times. at /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/MaxAttemptsExceededException.php:24)
+[stacktrace]
+#0 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(883): Illuminate\\Queue\\MaxAttemptsExceededException::forJob()
+#1 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(592): Illuminate\\Queue\\Worker->maxAttemptsExceededException()
+#2 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(493): Illuminate\\Queue\\Worker->markJobAsFailedIfAlreadyExceedsMaxAttempts()
+#3 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(454): Illuminate\\Queue\\Worker->process()
+#4 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(212): Illuminate\\Queue\\Worker->runJob()
+#5 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#6 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#7 /home/forge/hive.contractors/vendor/laravel/horizon/src/Console/WorkCommand.php(53): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#8 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Laravel\\Horizon\\Console\\WorkCommand->handle()
+#9 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#10 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#11 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#12 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#13 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate\\Container\\Container->call()
+#14 /home/forge/hive.contractors/vendor/symfony/console/Command/Command.php(341): Illuminate\\Console\\Command->execute()
+#15 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony\\Component\\Console\\Command\\Command->run()
+#16 /home/forge/hive.contractors/vendor/symfony/console/Application.php(1117): Illuminate\\Console\\Command->run()
+#17 /home/forge/hive.contractors/vendor/symfony/console/Application.php(356): Symfony\\Component\\Console\\Application->doRunCommand()
+#18 /home/forge/hive.contractors/vendor/symfony/console/Application.php(195): Symfony\\Component\\Console\\Application->doRun()
+#19 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#20 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1235): Illuminate\\Foundation\\Console\\Kernel->handle()
+#21 /home/forge/hive.contractors/artisan(13): Illuminate\\Foundation\\Application->handleCommand()
+#22 {main}
+"} 
+[2026-05-21 23:11:33] production.ERROR: CompanyEmailController@fetchAutoReceipts has been attempted too many times. {"exception":"[object] (Illuminate\\Queue\\MaxAttemptsExceededException(code: 0): CompanyEmailController@fetchAutoReceipts has been attempted too many times. at /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/MaxAttemptsExceededException.php:24)
+[stacktrace]
+#0 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(883): Illuminate\\Queue\\MaxAttemptsExceededException::forJob()
+#1 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(592): Illuminate\\Queue\\Worker->maxAttemptsExceededException()
+#2 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(493): Illuminate\\Queue\\Worker->markJobAsFailedIfAlreadyExceedsMaxAttempts()
+#3 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(454): Illuminate\\Queue\\Worker->process()
+#4 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(212): Illuminate\\Queue\\Worker->runJob()
+#5 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#6 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#7 /home/forge/hive.contractors/vendor/laravel/horizon/src/Console/WorkCommand.php(53): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#8 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Laravel\\Horizon\\Console\\WorkCommand->handle()
+#9 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#10 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#11 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#12 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#13 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate\\Container\\Container->call()
+#14 /home/forge/hive.contractors/vendor/symfony/console/Command/Command.php(341): Illuminate\\Console\\Command->execute()
+#15 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony\\Component\\Console\\Command\\Command->run()
+#16 /home/forge/hive.contractors/vendor/symfony/console/Application.php(1117): Illuminate\\Console\\Command->run()
+#17 /home/forge/hive.contractors/vendor/symfony/console/Application.php(356): Symfony\\Component\\Console\\Application->doRunCommand()
+#18 /home/forge/hive.contractors/vendor/symfony/console/Application.php(195): Symfony\\Component\\Console\\Application->doRun()
+#19 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#20 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1235): Illuminate\\Foundation\\Console\\Kernel->handle()
+#21 /home/forge/hive.contractors/artisan(13): Illuminate\\Foundation\\Application->handleCommand()
+#22 {main}
+"} 
+[2026-05-22 00:00:04] production.INFO: SendDigestNotifications: Starting evening digest for 2026-05-23  
+[2026-05-22 00:00:04] production.INFO: SendDigestNotifications: No tasks found for 2026-05-23  
+[2026-05-22 00:18:46] production.INFO: PasskeyJS: Passkey registration component initialized {"level":"info","data":[],"timestamp":"2026-05-22T00:18:46.688Z","url":"https://hive.contractors/passkey/setup"} 
+[2026-05-22 00:18:54] production.INFO: PasskeyJS: Starting Webpass.attest {"level":"info","data":[],"timestamp":"2026-05-22T00:18:54.598Z","url":"https://hive.contractors/passkey/setup"} 
+[2026-05-22 00:18:54] production.INFO: PasskeyJS: Webpass loaded, calling attest... {"level":"info","data":[],"timestamp":"2026-05-22T00:18:54.598Z","url":"https://hive.contractors/passkey/setup"} 
+[2026-05-22 00:18:54] production.INFO: PasskeyJS: Livewire component found {"level":"info","data":[],"timestamp":"2026-05-22T00:18:54.597Z","url":"https://hive.contractors/passkey/setup"} 
+[2026-05-22 00:18:54] production.INFO: PasskeyJS: Create passkey button clicked {"level":"info","data":[],"timestamp":"2026-05-22T00:18:54.596Z","url":"https://hive.contractors/passkey/setup"} 
+[2026-05-22 00:19:36] production.INFO: WebAuthn register: Request received {"user_id":3,"session_id":"eYukOFnHcyrC0mpb7nkAdW8oaiuiC4jrKx1lkwNe","auth_check":true} 
+[2026-05-22 00:19:36] production.INFO: PasskeyJS: Passkey registration successful {"level":"info","data":[],"timestamp":"2026-05-22T00:19:36.830Z","url":"https://hive.contractors/passkey/setup"} 
+[2026-05-22 00:19:36] production.INFO: PasskeyJS: Redirecting to https://hive.contractors/hub {"level":"info","data":[],"timestamp":"2026-05-22T00:19:36.831Z","url":"https://hive.contractors/passkey/setup"} 
+[2026-05-22 00:19:36] production.INFO: PasskeyJS: Webpass.attest completed {"level":"info","data":{"success":true},"timestamp":"2026-05-22T00:19:36.829Z","url":"https://hive.contractors/passkey/setup"} 
+[2026-05-22 00:21:12] production.ERROR: cURL error 28: Operation timed out after 30004 milliseconds with 0 bytes received (see https://curl.haxx.se/libcurl/c/libcurl-errors.html) for https://api.us.nylas.com/v3/grants/023bfe85-9c79-4afa-9569-d53c8cccf25f/attachments/AAkALgAAAAAAHYQDEapmEc2byACqAC-EWg0A23n86TJcJU_kYhT4djVwqgALLZy8rgAAARIAEADAlgDhS_j9SKMRxmLpCKs_/download?message_id=AAkALgAAAAAAHYQDEapmEc2byACqAC-EWg0A23n86TJcJU_kYhT4djVwqgALLZy8rgAA {"exception":"[object] (Illuminate\\Http\\Client\\ConnectionException(code: 0): cURL error 28: Operation timed out after 30004 milliseconds with 0 bytes received (see https://curl.haxx.se/libcurl/c/libcurl-errors.html) for https://api.us.nylas.com/v3/grants/023bfe85-9c79-4afa-9569-d53c8cccf25f/attachments/AAkALgAAAAAAHYQDEapmEc2byACqAC-EWg0A23n86TJcJU_kYhT4djVwqgALLZy8rgAAARIAEADAlgDhS_j9SKMRxmLpCKs_/download?message_id=AAkALgAAAAAAHYQDEapmEc2byACqAC-EWg0A23n86TJcJU_kYhT4djVwqgALLZy8rgAA at /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Http/Client/PendingRequest.php:1805)
+[stacktrace]
+#0 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Http/Client/PendingRequest.php(1081): Illuminate\\Http\\Client\\PendingRequest->marshalConnectionException()
+#1 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Support/helpers.php(328): Illuminate\\Http\\Client\\PendingRequest->Illuminate\\Http\\Client\\{closure}()
+#2 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Http/Client/PendingRequest.php(1041): retry()
+#3 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Http/Client/PendingRequest.php(849): Illuminate\\Http\\Client\\PendingRequest->send()
+#4 /home/forge/hive.contractors/app/Services/NylasService.php(892): Illuminate\\Http\\Client\\PendingRequest->get()
+#5 /home/forge/hive.contractors/app/Http/Controllers/CompanyEmailController.php(1935): App\\Services\\NylasService->downloadAttachment()
+#6 /home/forge/hive.contractors/app/Jobs/RunScheduledTask.php(52): App\\Http\\Controllers\\CompanyEmailController->fetchAutoReceipts()
+#7 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Jobs\\RunScheduledTask->handle()
+#8 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#9 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#10 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#11 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#12 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(129): Illuminate\\Container\\Container->call()
+#13 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(180): Illuminate\\Bus\\Dispatcher->Illuminate\\Bus\\{closure}()
+#14 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(137): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#15 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(133): Illuminate\\Pipeline\\Pipeline->then()
+#16 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(136): Illuminate\\Bus\\Dispatcher->dispatchNow()
+#17 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(180): Illuminate\\Queue\\CallQueuedHandler->Illuminate\\Queue\\{closure}()
+#18 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(137): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#19 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(129): Illuminate\\Pipeline\\Pipeline->then()
+#20 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(70): Illuminate\\Queue\\CallQueuedHandler->dispatchThroughMiddleware()
+#21 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Jobs/Job.php(102): Illuminate\\Queue\\CallQueuedHandler->call()
+#22 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(504): Illuminate\\Queue\\Jobs\\Job->fire()
+#23 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(454): Illuminate\\Queue\\Worker->process()
+#24 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(212): Illuminate\\Queue\\Worker->runJob()
+#25 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#26 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#27 /home/forge/hive.contractors/vendor/laravel/horizon/src/Console/WorkCommand.php(53): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#28 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Laravel\\Horizon\\Console\\WorkCommand->handle()
+#29 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#30 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#31 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#32 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#33 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate\\Container\\Container->call()
+#34 /home/forge/hive.contractors/vendor/symfony/console/Command/Command.php(341): Illuminate\\Console\\Command->execute()
+#35 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony\\Component\\Console\\Command\\Command->run()
+#36 /home/forge/hive.contractors/vendor/symfony/console/Application.php(1117): Illuminate\\Console\\Command->run()
+#37 /home/forge/hive.contractors/vendor/symfony/console/Application.php(356): Symfony\\Component\\Console\\Application->doRunCommand()
+#38 /home/forge/hive.contractors/vendor/symfony/console/Application.php(195): Symfony\\Component\\Console\\Application->doRun()
+#39 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#40 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1235): Illuminate\\Foundation\\Console\\Kernel->handle()
+#41 /home/forge/hive.contractors/artisan(13): Illuminate\\Foundation\\Application->handleCommand()
+#42 {main}
+
+[previous exception] [object] (GuzzleHttp\\Exception\\ConnectException(code: 0): cURL error 28: Operation timed out after 30004 milliseconds with 0 bytes received (see https://curl.haxx.se/libcurl/c/libcurl-errors.html) for https://api.us.nylas.com/v3/grants/023bfe85-9c79-4afa-9569-d53c8cccf25f/attachments/AAkALgAAAAAAHYQDEapmEc2byACqAC-EWg0A23n86TJcJU_kYhT4djVwqgALLZy8rgAAARIAEADAlgDhS_j9SKMRxmLpCKs_/download?message_id=AAkALgAAAAAAHYQDEapmEc2byACqAC-EWg0A23n86TJcJU_kYhT4djVwqgALLZy8rgAA at /home/forge/hive.contractors/vendor/guzzlehttp/guzzle/src/Handler/CurlFactory.php:360)
+[stacktrace]
+#0 /home/forge/hive.contractors/vendor/guzzlehttp/guzzle/src/Handler/CurlFactory.php(290): GuzzleHttp\\Handler\\CurlFactory::createRejection()
+#1 /home/forge/hive.contractors/vendor/guzzlehttp/guzzle/src/Handler/CurlFactory.php(242): GuzzleHttp\\Handler\\CurlFactory::finishError()
+#2 /home/forge/hive.contractors/vendor/guzzlehttp/guzzle/src/Handler/CurlHandler.php(47): GuzzleHttp\\Handler\\CurlFactory::finish()
+#3 /home/forge/hive.contractors/vendor/guzzlehttp/guzzle/src/Handler/Proxy.php(28): GuzzleHttp\\Handler\\CurlHandler->__invoke()
+#4 /home/forge/hive.contractors/vendor/guzzlehttp/guzzle/src/Handler/Proxy.php(48): GuzzleHttp\\Handler\\Proxy::GuzzleHttp\\Handler\\{closure}()
+#5 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Http/Client/PendingRequest.php(1523): GuzzleHttp\\Handler\\Proxy::GuzzleHttp\\Handler\\{closure}()
+#6 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Http/Client/PendingRequest.php(1480): Illuminate\\Http\\Client\\PendingRequest->Illuminate\\Http\\Client\\{closure}()
+#7 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Http/Client/PendingRequest.php(1466): Illuminate\\Http\\Client\\PendingRequest->Illuminate\\Http\\Client\\{closure}()
+#8 /home/forge/hive.contractors/vendor/laravel/nightwatch/src/Hooks/GuzzleMiddleware.php(45): Illuminate\\Http\\Client\\PendingRequest->Illuminate\\Http\\Client\\{closure}()
+#9 /home/forge/hive.contractors/vendor/guzzlehttp/guzzle/src/PrepareBodyMiddleware.php(35): Laravel\\Nightwatch\\Hooks\\GuzzleMiddleware->Laravel\\Nightwatch\\Hooks\\{closure}()
+#10 /home/forge/hive.contractors/vendor/guzzlehttp/guzzle/src/Middleware.php(38): GuzzleHttp\\PrepareBodyMiddleware->__invoke()
+#11 /home/forge/hive.contractors/vendor/guzzlehttp/guzzle/src/RedirectMiddleware.php(71): GuzzleHttp\\Middleware::GuzzleHttp\\{closure}()
+#12 /home/forge/hive.contractors/vendor/guzzlehttp/guzzle/src/Middleware.php(63): GuzzleHttp\\RedirectMiddleware->__invoke()
+#13 /home/forge/hive.contractors/vendor/guzzlehttp/guzzle/src/HandlerStack.php(75): GuzzleHttp\\Middleware::GuzzleHttp\\{closure}()
+#14 /home/forge/hive.contractors/vendor/guzzlehttp/guzzle/src/Client.php(338): GuzzleHttp\\HandlerStack->__invoke()
+#15 /home/forge/hive.contractors/vendor/guzzlehttp/guzzle/src/Client.php(169): GuzzleHttp\\Client->transfer()
+#16 /home/forge/hive.contractors/vendor/guzzlehttp/guzzle/src/Client.php(189): GuzzleHttp\\Client->requestAsync()
+#17 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Http/Client/PendingRequest.php(1306): GuzzleHttp\\Client->request()
+#18 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Http/Client/PendingRequest.php(1043): Illuminate\\Http\\Client\\PendingRequest->sendRequest()
+#19 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Support/helpers.php(328): Illuminate\\Http\\Client\\PendingRequest->Illuminate\\Http\\Client\\{closure}()
+#20 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Http/Client/PendingRequest.php(1041): retry()
+#21 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Http/Client/PendingRequest.php(849): Illuminate\\Http\\Client\\PendingRequest->send()
+#22 /home/forge/hive.contractors/app/Services/NylasService.php(892): Illuminate\\Http\\Client\\PendingRequest->get()
+#23 /home/forge/hive.contractors/app/Http/Controllers/CompanyEmailController.php(1935): App\\Services\\NylasService->downloadAttachment()
+#24 /home/forge/hive.contractors/app/Jobs/RunScheduledTask.php(52): App\\Http\\Controllers\\CompanyEmailController->fetchAutoReceipts()
+#25 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Jobs\\RunScheduledTask->handle()
+#26 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#27 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#28 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#29 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#30 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(129): Illuminate\\Container\\Container->call()
+#31 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(180): Illuminate\\Bus\\Dispatcher->Illuminate\\Bus\\{closure}()
+#32 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(137): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#33 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(133): Illuminate\\Pipeline\\Pipeline->then()
+#34 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(136): Illuminate\\Bus\\Dispatcher->dispatchNow()
+#35 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(180): Illuminate\\Queue\\CallQueuedHandler->Illuminate\\Queue\\{closure}()
+#36 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(137): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#37 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(129): Illuminate\\Pipeline\\Pipeline->then()
+#38 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(70): Illuminate\\Queue\\CallQueuedHandler->dispatchThroughMiddleware()
+#39 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Jobs/Job.php(102): Illuminate\\Queue\\CallQueuedHandler->call()
+#40 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(504): Illuminate\\Queue\\Jobs\\Job->fire()
+#41 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(454): Illuminate\\Queue\\Worker->process()
+#42 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(212): Illuminate\\Queue\\Worker->runJob()
+#43 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#44 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#45 /home/forge/hive.contractors/vendor/laravel/horizon/src/Console/WorkCommand.php(53): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#46 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Laravel\\Horizon\\Console\\WorkCommand->handle()
+#47 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#48 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#49 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#50 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#51 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate\\Container\\Container->call()
+#52 /home/forge/hive.contractors/vendor/symfony/console/Command/Command.php(341): Illuminate\\Console\\Command->execute()
+#53 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony\\Component\\Console\\Command\\Command->run()
+#54 /home/forge/hive.contractors/vendor/symfony/console/Application.php(1117): Illuminate\\Console\\Command->run()
+#55 /home/forge/hive.contractors/vendor/symfony/console/Application.php(356): Symfony\\Component\\Console\\Application->doRunCommand()
+#56 /home/forge/hive.contractors/vendor/symfony/console/Application.php(195): Symfony\\Component\\Console\\Application->doRun()
+#57 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#58 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1235): Illuminate\\Foundation\\Console\\Kernel->handle()
+#59 /home/forge/hive.contractors/artisan(13): Illuminate\\Foundation\\Application->handleCommand()
+#60 {main}
+"} 
+[2026-05-22 00:31:34] production.ERROR: CompanyEmailController@fetchAutoReceipts has been attempted too many times. {"exception":"[object] (Illuminate\\Queue\\MaxAttemptsExceededException(code: 0): CompanyEmailController@fetchAutoReceipts has been attempted too many times. at /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/MaxAttemptsExceededException.php:24)
+[stacktrace]
+#0 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(883): Illuminate\\Queue\\MaxAttemptsExceededException::forJob()
+#1 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(592): Illuminate\\Queue\\Worker->maxAttemptsExceededException()
+#2 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(493): Illuminate\\Queue\\Worker->markJobAsFailedIfAlreadyExceedsMaxAttempts()
+#3 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(454): Illuminate\\Queue\\Worker->process()
+#4 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(212): Illuminate\\Queue\\Worker->runJob()
+#5 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#6 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#7 /home/forge/hive.contractors/vendor/laravel/horizon/src/Console/WorkCommand.php(53): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#8 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Laravel\\Horizon\\Console\\WorkCommand->handle()
+#9 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#10 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#11 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#12 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#13 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate\\Container\\Container->call()
+#14 /home/forge/hive.contractors/vendor/symfony/console/Command/Command.php(341): Illuminate\\Console\\Command->execute()
+#15 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony\\Component\\Console\\Command\\Command->run()
+#16 /home/forge/hive.contractors/vendor/symfony/console/Application.php(1117): Illuminate\\Console\\Command->run()
+#17 /home/forge/hive.contractors/vendor/symfony/console/Application.php(356): Symfony\\Component\\Console\\Application->doRunCommand()
+#18 /home/forge/hive.contractors/vendor/symfony/console/Application.php(195): Symfony\\Component\\Console\\Application->doRun()
+#19 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#20 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1235): Illuminate\\Foundation\\Console\\Kernel->handle()
+#21 /home/forge/hive.contractors/artisan(13): Illuminate\\Foundation\\Application->handleCommand()
+#22 {main}
+"} 
+[2026-05-22 01:21:35] production.ERROR: CompanyEmailController@forwardRecentReceiptEmailsToCentral has been attempted too many times. {"exception":"[object] (Illuminate\\Queue\\MaxAttemptsExceededException(code: 0): CompanyEmailController@forwardRecentReceiptEmailsToCentral has been attempted too many times. at /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/MaxAttemptsExceededException.php:24)
+[stacktrace]
+#0 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(883): Illuminate\\Queue\\MaxAttemptsExceededException::forJob()
+#1 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(592): Illuminate\\Queue\\Worker->maxAttemptsExceededException()
+#2 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(493): Illuminate\\Queue\\Worker->markJobAsFailedIfAlreadyExceedsMaxAttempts()
+#3 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(454): Illuminate\\Queue\\Worker->process()
+#4 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(212): Illuminate\\Queue\\Worker->runJob()
+#5 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#6 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#7 /home/forge/hive.contractors/vendor/laravel/horizon/src/Console/WorkCommand.php(53): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#8 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Laravel\\Horizon\\Console\\WorkCommand->handle()
+#9 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#10 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#11 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#12 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#13 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate\\Container\\Container->call()
+#14 /home/forge/hive.contractors/vendor/symfony/console/Command/Command.php(341): Illuminate\\Console\\Command->execute()
+#15 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony\\Component\\Console\\Command\\Command->run()
+#16 /home/forge/hive.contractors/vendor/symfony/console/Application.php(1117): Illuminate\\Console\\Command->run()
+#17 /home/forge/hive.contractors/vendor/symfony/console/Application.php(356): Symfony\\Component\\Console\\Application->doRunCommand()
+#18 /home/forge/hive.contractors/vendor/symfony/console/Application.php(195): Symfony\\Component\\Console\\Application->doRun()
+#19 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#20 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1235): Illuminate\\Foundation\\Console\\Kernel->handle()
+#21 /home/forge/hive.contractors/artisan(13): Illuminate\\Foundation\\Application->handleCommand()
+#22 {main}
+"} 
+[2026-05-22 03:41:35] production.ERROR: CompanyEmailController@fetchAutoReceipts has been attempted too many times. {"exception":"[object] (Illuminate\\Queue\\MaxAttemptsExceededException(code: 0): CompanyEmailController@fetchAutoReceipts has been attempted too many times. at /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/MaxAttemptsExceededException.php:24)
+[stacktrace]
+#0 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(883): Illuminate\\Queue\\MaxAttemptsExceededException::forJob()
+#1 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(592): Illuminate\\Queue\\Worker->maxAttemptsExceededException()
+#2 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(493): Illuminate\\Queue\\Worker->markJobAsFailedIfAlreadyExceedsMaxAttempts()
+#3 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(454): Illuminate\\Queue\\Worker->process()
+#4 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(212): Illuminate\\Queue\\Worker->runJob()
+#5 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#6 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#7 /home/forge/hive.contractors/vendor/laravel/horizon/src/Console/WorkCommand.php(53): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#8 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Laravel\\Horizon\\Console\\WorkCommand->handle()
+#9 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#10 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#11 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#12 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#13 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate\\Container\\Container->call()
+#14 /home/forge/hive.contractors/vendor/symfony/console/Command/Command.php(341): Illuminate\\Console\\Command->execute()
+#15 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony\\Component\\Console\\Command\\Command->run()
+#16 /home/forge/hive.contractors/vendor/symfony/console/Application.php(1117): Illuminate\\Console\\Command->run()
+#17 /home/forge/hive.contractors/vendor/symfony/console/Application.php(356): Symfony\\Component\\Console\\Application->doRunCommand()
+#18 /home/forge/hive.contractors/vendor/symfony/console/Application.php(195): Symfony\\Component\\Console\\Application->doRun()
+#19 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#20 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1235): Illuminate\\Foundation\\Console\\Kernel->handle()
+#21 /home/forge/hive.contractors/artisan(13): Illuminate\\Foundation\\Application->handleCommand()
+#22 {main}
+"} 
+[2026-05-22 09:21:34] production.ERROR: CompanyEmailController@fetchAutoReceipts has been attempted too many times. {"exception":"[object] (Illuminate\\Queue\\MaxAttemptsExceededException(code: 0): CompanyEmailController@fetchAutoReceipts has been attempted too many times. at /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/MaxAttemptsExceededException.php:24)
+[stacktrace]
+#0 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(883): Illuminate\\Queue\\MaxAttemptsExceededException::forJob()
+#1 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(592): Illuminate\\Queue\\Worker->maxAttemptsExceededException()
+#2 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(493): Illuminate\\Queue\\Worker->markJobAsFailedIfAlreadyExceedsMaxAttempts()
+#3 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(454): Illuminate\\Queue\\Worker->process()
+#4 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(212): Illuminate\\Queue\\Worker->runJob()
+#5 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#6 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#7 /home/forge/hive.contractors/vendor/laravel/horizon/src/Console/WorkCommand.php(53): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#8 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Laravel\\Horizon\\Console\\WorkCommand->handle()
+#9 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#10 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#11 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#12 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#13 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate\\Container\\Container->call()
+#14 /home/forge/hive.contractors/vendor/symfony/console/Command/Command.php(341): Illuminate\\Console\\Command->execute()
+#15 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony\\Component\\Console\\Command\\Command->run()
+#16 /home/forge/hive.contractors/vendor/symfony/console/Application.php(1117): Illuminate\\Console\\Command->run()
+#17 /home/forge/hive.contractors/vendor/symfony/console/Application.php(356): Symfony\\Component\\Console\\Application->doRunCommand()
+#18 /home/forge/hive.contractors/vendor/symfony/console/Application.php(195): Symfony\\Component\\Console\\Application->doRun()
+#19 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#20 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1235): Illuminate\\Foundation\\Console\\Kernel->handle()
+#21 /home/forge/hive.contractors/artisan(13): Illuminate\\Foundation\\Application->handleCommand()
+#22 {main}
+"} 
+[2026-05-22 12:00:04] production.INFO: SendDigestNotifications: Starting morning digest for 2026-05-22  
+[2026-05-22 12:00:04] production.INFO: SendDigestNotifications: Found 2 tasks, 5 recipients  
+[2026-05-22 12:00:04] production.INFO: SendDigestNotifications: Completed morning digest  
+[2026-05-22 15:01:35] production.ERROR: CompanyEmailController@forwardRecentReceiptEmailsToCentral has been attempted too many times. {"exception":"[object] (Illuminate\\Queue\\MaxAttemptsExceededException(code: 0): CompanyEmailController@forwardRecentReceiptEmailsToCentral has been attempted too many times. at /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/MaxAttemptsExceededException.php:24)
+[stacktrace]
+#0 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(883): Illuminate\\Queue\\MaxAttemptsExceededException::forJob()
+#1 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(592): Illuminate\\Queue\\Worker->maxAttemptsExceededException()
+#2 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(493): Illuminate\\Queue\\Worker->markJobAsFailedIfAlreadyExceedsMaxAttempts()
+#3 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(454): Illuminate\\Queue\\Worker->process()
+#4 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(212): Illuminate\\Queue\\Worker->runJob()
+#5 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#6 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#7 /home/forge/hive.contractors/vendor/laravel/horizon/src/Console/WorkCommand.php(53): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#8 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Laravel\\Horizon\\Console\\WorkCommand->handle()
+#9 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#10 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#11 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#12 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#13 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate\\Container\\Container->call()
+#14 /home/forge/hive.contractors/vendor/symfony/console/Command/Command.php(341): Illuminate\\Console\\Command->execute()
+#15 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony\\Component\\Console\\Command\\Command->run()
+#16 /home/forge/hive.contractors/vendor/symfony/console/Application.php(1117): Illuminate\\Console\\Command->run()
+#17 /home/forge/hive.contractors/vendor/symfony/console/Application.php(356): Symfony\\Component\\Console\\Application->doRunCommand()
+#18 /home/forge/hive.contractors/vendor/symfony/console/Application.php(195): Symfony\\Component\\Console\\Application->doRun()
+#19 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#20 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1235): Illuminate\\Foundation\\Console\\Kernel->handle()
+#21 /home/forge/hive.contractors/artisan(13): Illuminate\\Foundation\\Application->handleCommand()
+#22 {main}
+"} 
+[2026-05-22 15:41:35] production.ERROR: CompanyEmailController@fetchAutoReceipts has been attempted too many times. {"exception":"[object] (Illuminate\\Queue\\MaxAttemptsExceededException(code: 0): CompanyEmailController@fetchAutoReceipts has been attempted too many times. at /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/MaxAttemptsExceededException.php:24)
+[stacktrace]
+#0 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(883): Illuminate\\Queue\\MaxAttemptsExceededException::forJob()
+#1 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(592): Illuminate\\Queue\\Worker->maxAttemptsExceededException()
+#2 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(493): Illuminate\\Queue\\Worker->markJobAsFailedIfAlreadyExceedsMaxAttempts()
+#3 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(454): Illuminate\\Queue\\Worker->process()
+#4 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(212): Illuminate\\Queue\\Worker->runJob()
+#5 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#6 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#7 /home/forge/hive.contractors/vendor/laravel/horizon/src/Console/WorkCommand.php(53): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#8 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Laravel\\Horizon\\Console\\WorkCommand->handle()
+#9 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#10 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#11 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#12 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#13 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate\\Container\\Container->call()
+#14 /home/forge/hive.contractors/vendor/symfony/console/Command/Command.php(341): Illuminate\\Console\\Command->execute()
+#15 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony\\Component\\Console\\Command\\Command->run()
+#16 /home/forge/hive.contractors/vendor/symfony/console/Application.php(1117): Illuminate\\Console\\Command->run()
+#17 /home/forge/hive.contractors/vendor/symfony/console/Application.php(356): Symfony\\Component\\Console\\Application->doRunCommand()
+#18 /home/forge/hive.contractors/vendor/symfony/console/Application.php(195): Symfony\\Component\\Console\\Application->doRun()
+#19 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#20 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1235): Illuminate\\Foundation\\Console\\Kernel->handle()
+#21 /home/forge/hive.contractors/artisan(13): Illuminate\\Foundation\\Application->handleCommand()
+#22 {main}
+"} 
+[2026-05-22 16:11:36] production.ERROR: CompanyEmailController@forwardRecentReceiptEmailsToCentral has been attempted too many times. {"exception":"[object] (Illuminate\\Queue\\MaxAttemptsExceededException(code: 0): CompanyEmailController@forwardRecentReceiptEmailsToCentral has been attempted too many times. at /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/MaxAttemptsExceededException.php:24)
+[stacktrace]
+#0 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(883): Illuminate\\Queue\\MaxAttemptsExceededException::forJob()
+#1 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(592): Illuminate\\Queue\\Worker->maxAttemptsExceededException()
+#2 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(493): Illuminate\\Queue\\Worker->markJobAsFailedIfAlreadyExceedsMaxAttempts()
+#3 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(454): Illuminate\\Queue\\Worker->process()
+#4 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(212): Illuminate\\Queue\\Worker->runJob()
+#5 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#6 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#7 /home/forge/hive.contractors/vendor/laravel/horizon/src/Console/WorkCommand.php(53): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#8 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Laravel\\Horizon\\Console\\WorkCommand->handle()
+#9 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#10 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#11 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#12 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#13 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate\\Container\\Container->call()
+#14 /home/forge/hive.contractors/vendor/symfony/console/Command/Command.php(341): Illuminate\\Console\\Command->execute()
+#15 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony\\Component\\Console\\Command\\Command->run()
+#16 /home/forge/hive.contractors/vendor/symfony/console/Application.php(1117): Illuminate\\Console\\Command->run()
+#17 /home/forge/hive.contractors/vendor/symfony/console/Application.php(356): Symfony\\Component\\Console\\Application->doRunCommand()
+#18 /home/forge/hive.contractors/vendor/symfony/console/Application.php(195): Symfony\\Component\\Console\\Application->doRun()
+#19 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#20 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1235): Illuminate\\Foundation\\Console\\Kernel->handle()
+#21 /home/forge/hive.contractors/artisan(13): Illuminate\\Foundation\\Application->handleCommand()
+#22 {main}
+"} 
+[2026-05-22 18:41:37] production.ERROR: CompanyEmailController@forwardRecentReceiptEmailsToCentral has been attempted too many times. {"exception":"[object] (Illuminate\\Queue\\MaxAttemptsExceededException(code: 0): CompanyEmailController@forwardRecentReceiptEmailsToCentral has been attempted too many times. at /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/MaxAttemptsExceededException.php:24)
+[stacktrace]
+#0 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(883): Illuminate\\Queue\\MaxAttemptsExceededException::forJob()
+#1 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(592): Illuminate\\Queue\\Worker->maxAttemptsExceededException()
+#2 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(493): Illuminate\\Queue\\Worker->markJobAsFailedIfAlreadyExceedsMaxAttempts()
+#3 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(454): Illuminate\\Queue\\Worker->process()
+#4 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(212): Illuminate\\Queue\\Worker->runJob()
+#5 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#6 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#7 /home/forge/hive.contractors/vendor/laravel/horizon/src/Console/WorkCommand.php(53): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#8 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Laravel\\Horizon\\Console\\WorkCommand->handle()
+#9 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#10 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#11 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#12 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#13 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate\\Container\\Container->call()
+#14 /home/forge/hive.contractors/vendor/symfony/console/Command/Command.php(341): Illuminate\\Console\\Command->execute()
+#15 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony\\Component\\Console\\Command\\Command->run()
+#16 /home/forge/hive.contractors/vendor/symfony/console/Application.php(1117): Illuminate\\Console\\Command->run()
+#17 /home/forge/hive.contractors/vendor/symfony/console/Application.php(356): Symfony\\Component\\Console\\Application->doRunCommand()
+#18 /home/forge/hive.contractors/vendor/symfony/console/Application.php(195): Symfony\\Component\\Console\\Application->doRun()
+#19 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#20 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1235): Illuminate\\Foundation\\Console\\Kernel->handle()
+#21 /home/forge/hive.contractors/artisan(13): Illuminate\\Foundation\\Application->handleCommand()
+#22 {main}
+"} 
+[2026-05-22 20:21:35] production.ERROR: CompanyEmailController@fetchAutoReceipts has been attempted too many times. {"exception":"[object] (Illuminate\\Queue\\MaxAttemptsExceededException(code: 0): CompanyEmailController@fetchAutoReceipts has been attempted too many times. at /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/MaxAttemptsExceededException.php:24)
+[stacktrace]
+#0 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(883): Illuminate\\Queue\\MaxAttemptsExceededException::forJob()
+#1 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(592): Illuminate\\Queue\\Worker->maxAttemptsExceededException()
+#2 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(493): Illuminate\\Queue\\Worker->markJobAsFailedIfAlreadyExceedsMaxAttempts()
+#3 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(454): Illuminate\\Queue\\Worker->process()
+#4 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(212): Illuminate\\Queue\\Worker->runJob()
+#5 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#6 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#7 /home/forge/hive.contractors/vendor/laravel/horizon/src/Console/WorkCommand.php(53): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#8 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Laravel\\Horizon\\Console\\WorkCommand->handle()
+#9 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#10 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#11 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#12 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#13 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate\\Container\\Container->call()
+#14 /home/forge/hive.contractors/vendor/symfony/console/Command/Command.php(341): Illuminate\\Console\\Command->execute()
+#15 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony\\Component\\Console\\Command\\Command->run()
+#16 /home/forge/hive.contractors/vendor/symfony/console/Application.php(1117): Illuminate\\Console\\Command->run()
+#17 /home/forge/hive.contractors/vendor/symfony/console/Application.php(356): Symfony\\Component\\Console\\Application->doRunCommand()
+#18 /home/forge/hive.contractors/vendor/symfony/console/Application.php(195): Symfony\\Component\\Console\\Application->doRun()
+#19 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#20 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1235): Illuminate\\Foundation\\Console\\Kernel->handle()
+#21 /home/forge/hive.contractors/artisan(13): Illuminate\\Foundation\\Application->handleCommand()
+#22 {main}
+"} 
+[2026-05-22 20:31:34] production.ERROR: CompanyEmailController@fetchAutoReceipts has been attempted too many times. {"exception":"[object] (Illuminate\\Queue\\MaxAttemptsExceededException(code: 0): CompanyEmailController@fetchAutoReceipts has been attempted too many times. at /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/MaxAttemptsExceededException.php:24)
+[stacktrace]
+#0 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(883): Illuminate\\Queue\\MaxAttemptsExceededException::forJob()
+#1 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(592): Illuminate\\Queue\\Worker->maxAttemptsExceededException()
+#2 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(493): Illuminate\\Queue\\Worker->markJobAsFailedIfAlreadyExceedsMaxAttempts()
+#3 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(454): Illuminate\\Queue\\Worker->process()
+#4 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(212): Illuminate\\Queue\\Worker->runJob()
+#5 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#6 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#7 /home/forge/hive.contractors/vendor/laravel/horizon/src/Console/WorkCommand.php(53): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#8 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Laravel\\Horizon\\Console\\WorkCommand->handle()
+#9 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#10 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate\\Container\\Util::unwrapIfClosure()
+#11 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#12 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate\\Container\\BoundMethod::call()
+#13 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate\\Container\\Container->call()
+#14 /home/forge/hive.contractors/vendor/symfony/console/Command/Command.php(341): Illuminate\\Console\\Command->execute()
+#15 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony\\Component\\Console\\Command\\Command->run()
+#16 /home/forge/hive.contractors/vendor/symfony/console/Application.php(1117): Illuminate\\Console\\Command->run()
+#17 /home/forge/hive.contractors/vendor/symfony/console/Application.php(356): Symfony\\Component\\Console\\Application->doRunCommand()
+#18 /home/forge/hive.contractors/vendor/symfony/console/Application.php(195): Symfony\\Component\\Console\\Application->doRun()
+#19 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#20 /home/forge/hive.contractors/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1235): Illuminate\\Foundation\\Console\\Kernel->handle()
+#21 /home/forge/hive.contractors/artisan(13): Illuminate\\Foundation\\Application->handleCommand()
+#22 {main}
+"} 

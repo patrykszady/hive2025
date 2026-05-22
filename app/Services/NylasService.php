@@ -885,17 +885,45 @@ class NylasService
     {
         $url = $this->baseUrl . "/grants/{$grantId}/attachments/{$attachmentId}/download?message_id={$messageId}";
 
-        // Make the GET request
-        $response = Http::withHeaders([
-            'Authorization' => "Bearer {$this->apiKey}",
-            'Accept' => 'application/octet-stream',
-        ])->get($url);
+        $maxAttempts = 3;
+        $delayMs = 2000;
 
-        if ($response->successful()) {
-            return $response->body(); // Return the downloaded attachment content
-        } else {
-            throw new Exception('Failed to download attachment: ' . $response->status());
+        for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            try {
+                $response = Http::withHeaders([
+                    'Authorization' => "Bearer {$this->apiKey}",
+                    'Accept' => 'application/octet-stream',
+                ])
+                    ->connectTimeout(10)
+                    ->timeout(120)
+                    ->get($url);
+
+                if ($response->successful()) {
+                    return $response->body();
+                }
+
+                $status = $response->status();
+                $retryableStatus = in_array($status, [408, 425, 429, 500, 502, 503, 504], true);
+
+                if ($retryableStatus && $attempt < $maxAttempts) {
+                    usleep($delayMs * 1000);
+                    $delayMs *= 2;
+                    continue;
+                }
+
+                throw new Exception('Failed to download attachment: ' . $status);
+            } catch (\Throwable $exception) {
+                if ($attempt < $maxAttempts) {
+                    usleep($delayMs * 1000);
+                    $delayMs *= 2;
+                    continue;
+                }
+
+                throw $exception;
+            }
         }
+
+        throw new Exception('Failed to download attachment after retries.');
     }
 
     /**
