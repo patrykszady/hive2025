@@ -153,11 +153,11 @@
                                                         title="Receipt {{ $expenseReceipt->id }}"
                                                     ></iframe>
                                                 @else
-                                                    <div class="flex-1 min-h-0 bg-zinc-50 dark:bg-zinc-900 flex justify-center items-start overflow-auto">
+                                                    <div class="flex-1 min-h-0 bg-zinc-50 dark:bg-zinc-900 overflow-auto">
                                                         <img
                                                             src="{{ $panelSrc }}"
                                                             alt="Receipt {{ $expenseReceipt->id }}"
-                                                            class="w-full h-auto object-contain"
+                                                            class="block w-full h-auto"
                                                         />
                                                     </div>
                                                 @endif
@@ -204,11 +204,11 @@
                                             title="Receipt {{ $receipt->id }}"
                                         ></iframe>
                                     @else
-                                        <div class="flex-1 min-h-0 bg-zinc-50 dark:bg-zinc-900 flex justify-center items-start overflow-auto">
+                                        <div class="flex-1 min-h-0 bg-zinc-50 dark:bg-zinc-900 overflow-auto">
                                             <img
                                                 src="{{ $src }}"
                                                 alt="Receipt {{ $receipt->id }}"
-                                                class="w-full h-auto object-contain"
+                                                class="block w-full h-auto"
                                             />
                                         </div>
                                     @endif
