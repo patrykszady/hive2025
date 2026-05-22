@@ -699,19 +699,6 @@ class ReceiptController extends Controller
             $handwrittenNotes = array_values(array_unique($handwrittenNotes));
         }
 
-        // Fallback: when the OCR's handwriting detector missed it, scrape short
-        // bare label lines (e.g. "Office", "Shop") that appear above the
-        // merchant header. Only fires when no handwritten notes were detected
-        // by Azure CU or the custom analyzer — this is a recovery path for
-        // paper receipts where the scribbled label was transcribed but never
-        // tagged as handwritten.
-        if ($handwrittenNotes === []) {
-            foreach ($this->extractLeadingLabelLines($originalContent, $merchantName, $merchantAddress) as $label) {
-                $handwrittenNotes[] = $label;
-            }
-            $handwrittenNotes = array_values(array_unique($handwrittenNotes));
-        }
-
         // ── 5. Invoice Number ─────────────────────────────────────────
         $invoiceNumber = null;
         if (isset($prefix['InvoiceId']) && ($prefix['InvoiceId']['confidence'] ?? 0) > 0) {
@@ -1405,80 +1392,6 @@ class ReceiptController extends Controller
     }
 
     /**
-     * Recover handwritten labels (e.g. "Office", "Shop") that the OCR
-     * transcribed but never tagged as handwriting. Only the lines BEFORE the
-     * merchant header are considered, and only short 1–2 word alphabetic
-     * tokens that don't overlap with the printed merchant name.
-     *
-     * @return array<int, string>
-     */
-    private function extractLeadingLabelLines(string $content, ?string $merchantName, ?string $merchantAddress = null): array
-    {
-        if ($content === '') {
-            return [];
-        }
-
-        $headerOffset = strlen($content);
-        if (preg_match('/!\[[^\]]*\]\([^\)]+\)/', $content, $hm, PREG_OFFSET_CAPTURE)) {
-            $headerOffset = min($headerOffset, (int) $hm[0][1]);
-        }
-
-        $lines = array_slice(
-            array_values(array_filter(
-                array_map('trim', preg_split('/\r?\n/', substr($content, 0, $headerOffset)) ?: []),
-                fn (string $l) => $l !== ''
-            )),
-            0,
-            5
-        );
-
-        $merchantTokens = $this->buildPrintedHeaderTokens($merchantName, $merchantAddress);
-
-        $out = [];
-        foreach ($lines as $line) {
-            if (mb_strlen($line) > 30) {
-                continue;
-            }
-            if (preg_match('/\d/', $line)) {
-                continue;
-            }
-            $wordCount = preg_match_all('/\b[A-Za-z][A-Za-z\']*\b/', $line);
-            if ($wordCount < 1 || $wordCount > 2) {
-                continue;
-            }
-
-            $clean = trim($line, " \t\n\r\0\x0B.,:;-_*#");
-            if ($clean === '') {
-                continue;
-            }
-
-            // Skip if every alphabetic token also appears in the merchant name.
-            if (! empty($merchantTokens)) {
-                $tokens = array_filter(
-                    preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($clean)) ?: [],
-                    fn ($t) => mb_strlen($t) >= 2
-                );
-                if (! empty($tokens)) {
-                    $allInMerchant = true;
-                    foreach ($tokens as $t) {
-                        if (! isset($merchantTokens[$t])) {
-                            $allInMerchant = false;
-                            break;
-                        }
-                    }
-                    if ($allInMerchant) {
-                        continue;
-                    }
-                }
-            }
-
-            $out[] = $clean;
-        }
-
-        return $out;
-    }
-
-    /**
      * @return array<string, bool>
      */
     private function buildPrintedHeaderTokens(?string $merchantName, ?string $merchantAddress = null): array
@@ -1493,12 +1406,36 @@ class ReceiptController extends Controller
             foreach (preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($source)) ?: [] as $token) {
                 $token = trim($token);
                 if (mb_strlen($token) >= 2) {
-                    $tokens[$token] = true;
+                    foreach ($this->expandLocationAbbreviations($token) as $variant) {
+                        $tokens[$variant] = true;
+                    }
                 }
             }
         }
 
         return $tokens;
+    }
+
+    /**
+     * Expand common US address abbreviations both ways so token comparisons
+     * treat "MT" and "MOUNT" (or "FT" and "FORT") as the same location.
+     *
+     * @return array<int, string>
+     */
+    private function expandLocationAbbreviations(string $token): array
+    {
+        static $map = [
+            'mt' => 'mount',
+            'mount' => 'mt',
+            'ft' => 'fort',
+            'fort' => 'ft',
+            'pt' => 'point',
+            'point' => 'pt',
+            'hwy' => 'highway',
+            'highway' => 'hwy',
+        ];
+
+        return isset($map[$token]) ? [$token, $map[$token]] : [$token];
     }
 
     /**
@@ -1520,7 +1457,15 @@ class ReceiptController extends Controller
         }
 
         foreach ($candidateTokens as $token) {
-            if (! isset($merchantTokens[$token])) {
+            $variants = $this->expandLocationAbbreviations($token);
+            $matched = false;
+            foreach ($variants as $variant) {
+                if (isset($merchantTokens[$variant])) {
+                    $matched = true;
+                    break;
+                }
+            }
+            if (! $matched) {
                 return false;
             }
         }

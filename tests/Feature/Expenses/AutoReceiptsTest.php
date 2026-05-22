@@ -65,9 +65,11 @@ it('lists auto-fetched receipts newest first and paginates one at a time', funct
     $user = autoReceiptsUser();
     $this->actingAs($user);
 
-    $oldest = makeReceiptFor($user, 'oldest.pdf', 300);
-    $middle = makeReceiptFor($user, 'middle.pdf', 200);
-    $newest = makeReceiptFor($user, 'newest.pdf', 100);
+    $receivedAt = now()->subHour();
+
+    $oldest = makeReceiptFor($user, 'oldest.pdf', 300, 'msg-old', 1, $receivedAt->copy()->subMinutes(10));
+    $middle = makeReceiptFor($user, 'middle.pdf', 200, 'msg-mid', 1, $receivedAt->copy()->subMinutes(5));
+    $newest = makeReceiptFor($user, 'newest.pdf', 100, 'msg-new', 1, $receivedAt);
 
     Livewire::test(AutoReceipts::class)
         ->assertSet('position', 1)
@@ -107,6 +109,55 @@ it('does not show receipts belonging to other vendors', function () {
     Livewire::test(AutoReceipts::class)
         ->assertSee('No auto-fetched receipts found')
         ->assertDontSee('other-vendor.pdf');
+});
+
+it('ignores receipts without auto-receipt message id', function () {
+    $user = autoReceiptsUser();
+    $this->actingAs($user);
+
+    makeReceiptFor($user, 'manual-or-legacy.pdf', 5, null, null, null);
+
+    Livewire::test(AutoReceipts::class)
+        ->assertSee('No auto-fetched receipts found')
+        ->assertDontSee('manual-or-legacy.pdf');
+});
+
+it('shows tabs for all receipts on the same expense', function () {
+    $user = autoReceiptsUser();
+    $this->actingAs($user);
+
+    $expense = Expense::query()->create([
+        'amount' => 44.44,
+        'date' => now()->subDay(),
+        'vendor_id' => $user->vendor->id,
+        'belongs_to_vendor_id' => $user->vendor->id,
+        'created_by_user_id' => $user->id,
+    ]);
+
+    $receivedAt = now()->subHour();
+
+    foreach ([
+        ['name' => 'expense-26828-r1.pdf', 'idx' => 1, 'minutes' => 12],
+        ['name' => 'expense-26828-r2.pdf', 'idx' => 2, 'minutes' => 6],
+    ] as $data) {
+        $receipt = new ExpenseReceipts([
+            'expense_id' => $expense->id,
+            'receipt_filename' => $data['name'],
+            'is_material_order' => false,
+            'auto_receipt_message_id' => 'msg-multi',
+            'auto_receipt_attachment_index' => $data['idx'],
+            'auto_receipt_email_received_at' => $receivedAt,
+        ]);
+        $receipt->timestamps = false;
+        $receipt->created_at = now()->subMinutes($data['minutes']);
+        $receipt->updated_at = now()->subMinutes($data['minutes']);
+        $receipt->save();
+    }
+
+    Livewire::test(AutoReceipts::class)
+        ->assertSee('Batch 1 | 1/2', false)
+        ->assertSee('Receipt 1')
+        ->assertSee('Receipt 2');
 });
 
     it('groups receipts by source email and keeps attachment order within the batch', function () {

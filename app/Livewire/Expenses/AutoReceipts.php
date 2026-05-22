@@ -16,22 +16,23 @@ class AutoReceipts extends Component
     use AuthorizesRequests;
 
     /**
-     * Receipts created within this many minutes of each other are
-        * treated as belonging to the same upload / email batch when
-        * explicit message metadata is unavailable (legacy rows).
-     */
-        protected const BATCH_GAP_MINUTES = 30;
-
-    /**
      * 1-based position within the auto-receipts batch list (newest first).
      */
     #[Url(as: 'p', except: 1)]
     public int $position = 1;
 
     /**
-     * Which tab is active on the receipt card (receipt | ocr).
+     * Per-receipt active tab name bound to Flux tabs (e.g. "receipt-123" or "ocr-123").
      */
     public string $activeTab = 'receipt';
+
+    /**
+     * Which kind of subtab is selected ("receipt" | "ocr"). This is the value that
+     * persists when the user switches between sibling ExpenseReceipts (and across
+     * prev/next page navigations via the session).
+     */
+    #[\Livewire\Attributes\Session]
+    public string $subtab = 'receipt';
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 
@@ -66,6 +67,24 @@ class AutoReceipts extends Component
     public function goTo(int $position): void
     {
         $this->position = max(1, min($position, max(1, $this->total)));
+    }
+
+    public function selectExpenseReceiptTab(int $receiptId): void
+    {
+        $this->activeTab = $this->subtab . '-' . $receiptId;
+    }
+
+    /**
+     * Keep `$subtab` in sync whenever the inner Flux tab group updates
+     * `$activeTab` (e.g. user clicks "Receipt" or "Processed Receipt").
+     */
+    public function updatedActiveTab(string $value): void
+    {
+        if (str_starts_with($value, 'ocr-')) {
+            $this->subtab = 'ocr';
+        } elseif (str_starts_with($value, 'receipt-')) {
+            $this->subtab = 'receipt';
+        }
     }
 
     /**
@@ -141,8 +160,7 @@ class AutoReceipts extends Component
 
         $scoredBatches = [];
 
-        $rowsWithMessage = $rows->filter(fn ($row) => ! empty($row->auto_receipt_message_id));
-        $messageGroups = $rowsWithMessage->groupBy('auto_receipt_message_id');
+        $messageGroups = $rows->groupBy('auto_receipt_message_id');
 
         foreach ($messageGroups as $groupRows) {
             $ordered = $groupRows
@@ -151,7 +169,7 @@ class AutoReceipts extends Component
                     $bIdx = $b->auto_receipt_attachment_index;
 
                     if ($aIdx === null && $bIdx === null) {
-                        return $a->created_at <=> $b->created_at;
+                        return $b->created_at <=> $a->created_at;
                     }
 
                     if ($aIdx === null) {
@@ -163,7 +181,7 @@ class AutoReceipts extends Component
                     }
 
                     if ((int) $aIdx === (int) $bIdx) {
-                        return $a->created_at <=> $b->created_at;
+                        return $b->created_at <=> $a->created_at;
                     }
 
                     return (int) $aIdx <=> (int) $bIdx;
@@ -176,33 +194,6 @@ class AutoReceipts extends Component
             $scoredBatches[] = [
                 'ids' => $ordered->pluck('id')->all(),
                 'ts' => $batchTimestamp,
-            ];
-        }
-
-        $legacyRows = $rows->filter(fn ($row) => empty($row->auto_receipt_message_id))->values();
-
-        $current = [];
-        $prevTs = null;
-
-        foreach ($legacyRows as $row) {
-            $ts = $row->created_at;
-
-            if ($prevTs !== null && abs($prevTs->diffInMinutes($ts)) > self::BATCH_GAP_MINUTES) {
-                $scoredBatches[] = [
-                    'ids' => $current,
-                    'ts' => $prevTs,
-                ];
-                $current = [];
-            }
-
-            $current[] = $row->id;
-            $prevTs = $ts;
-        }
-
-        if (! empty($current)) {
-            $scoredBatches[] = [
-                'ids' => $current,
-                'ts' => $prevTs,
             ];
         }
 
@@ -235,6 +226,7 @@ class AutoReceipts extends Component
                 'expense.vendor',
                 'expense.project',
                 'expense.distribution',
+                'expense.receipts',
             ])
             ->find($id);
 
@@ -256,6 +248,7 @@ class AutoReceipts extends Component
         $vendorId = auth()->user()?->vendor?->id;
 
         return ExpenseReceipts::query()
+            ->whereNotNull('auto_receipt_message_id')
             ->whereHas('expense', function ($q) use ($vendorId) {
                 if ($vendorId) {
                     $q->where('belongs_to_vendor_id', $vendorId);
@@ -268,6 +261,14 @@ class AutoReceipts extends Component
     #[Title('Recent Auto Receipts')]
     public function render()
     {
+        // Make sure the inner Flux tab group has a matching tab name. We bind
+        // `wire:model.live="activeTab"` per-receipt, so we always rebuild the
+        // name from the persisted subtab kind + the currently-rendered receipt.
+        $current = $this->currentReceipt;
+        if ($current) {
+            $this->activeTab = $this->subtab . '-' . $current->id;
+        }
+
         return view('livewire.expenses.auto-receipts')->layout('components.layouts.app', [
             'fullscreenClasses' => '!p-0 h-full overflow-hidden flex flex-col',
         ]);

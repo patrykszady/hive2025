@@ -131,3 +131,14 @@ it('rejects handwritten spans whose tokens appear in the printed merchant addres
 
     expect($notes)->toBe([]);
 });
+
+it('does not scrape handwritten notes from leading raw_content lines when CU returned none', function () {
+    // The OCR's printed text — including the merchant header — must never be
+    // promoted to handwritten notes. Only CU's styles-derived spans count.
+    $content = "17 MARCELA\nMENARDS\nMOUNT PROSPECT\n740 E RAND RD\nMT PROSPECT, IL 60056\n![ITF](barcodes/1.1 \"3131042526127204\")\n";
+
+    $result = runExtractWithHandwriting($content, [], 'MENARDS', null);
+    $notes = $result['fields']['handwritten_notes'] ?? [];
+
+    expect($notes)->toBe([]);
+});

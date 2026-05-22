@@ -2557,10 +2557,13 @@ class CompanyEmailController extends Controller
                             ? ($ocr_receipt_data['fields'] ?? $current_ocr_data['fields'] ?? [])
                             : ($current_ocr_data['fields'] ?? []);
 
-                        // Check for duplicate receipts based on content and invoice number
+                        // Check for duplicate receipts based on content and invoice number.
+                        // For auto-receipt emails we still create the receipt row (attached
+                        // to the matched expense) so the batch view reflects every scanned
+                        // attachment from the source email.
                         $isDuplicate = $skipDuplicateCheck ? false : $this->isDuplicateReceipt($expense_id, $receipt_html, $receipt_items);
 
-                        if ($isDuplicate) {
+                        if ($isDuplicate && !$autoReceiptMessageId) {
                             Storage::disk('files')->delete($ocr_path);
                             continue;
                         }
@@ -2628,10 +2631,12 @@ class CompanyEmailController extends Controller
         $receiptContent = $ocr_receipt_data['content'] ?? '';
         $receiptFields = $ocr_receipt_data['fields'] ?? [];
 
-        // Check for duplicate receipts based on content and invoice number
+        // Check for duplicate receipts based on content and invoice number.
+        // For auto-receipt emails we still create the receipt row (attached to the
+        // matched expense) so the batch view reflects every scanned attachment.
         $isDuplicate = $skipDuplicateCheck ? false : $this->isDuplicateReceipt($expense_id, $receiptContent, $receiptFields);
-        
-        if ($isDuplicate) {
+
+        if ($isDuplicate && !$autoReceiptMessageId) {
             // Skip saving this duplicate receipt and clean up temp file
             Storage::disk('files')->delete($sourcePath);
             return [];
