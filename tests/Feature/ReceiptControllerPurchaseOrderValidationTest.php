@@ -48,3 +48,19 @@ it('includes billing-summary exclusions in material-order CustomerPO analyzer fi
     expect($description)->toContain('Credits');
     expect($description)->toContain('Tax');
 });
+
+it('keeps handwritten notes focused on ink annotations and excludes merchant location lines', function () {
+    $command = app(SyncContentUnderstandingAnalyzer::class);
+
+    $reflection = new ReflectionClass($command);
+    $method = $reflection->getMethod('buildReceiptDefinition');
+    $method->setAccessible(true);
+
+    $definition = $method->invoke($command, 'gpt-4.1', []);
+    $description = (string) data_get($definition, 'fieldSchema.fields.HandwrittenNote.description', '');
+
+    expect($description)->toContain('NEVER return: the printed merchant name or address');
+    expect($description)->toContain('MOUNT PROSPECT');
+    expect($description)->toContain('MOUNT PROSPECT, IL 60056');
+    expect($description)->toContain('added by a person on top of the printed receipt');
+});

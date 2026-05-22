@@ -1377,6 +1377,10 @@ class ReceiptController extends Controller
                     continue;
                 }
 
+                if (! $this->isMeaningfulHandwrittenNote($note) || $this->isPrintedLocationLine($note, $originalContent)) {
+                    continue;
+                }
+
                 // Reject when every alphanumeric token in the note also exists
                 // in the printed merchant name. Catches cases like "Lady" being
                 // flagged inside "Lady Gregory's" stylized printed logo.
@@ -1496,6 +1500,85 @@ class ReceiptController extends Controller
         }
 
         return true;
+    }
+
+    private function isPrintedLocationLine(string $candidate, string $originalContent): bool
+    {
+        $needle = trim((string) preg_replace('/\s+/', ' ', strip_tags(html_entity_decode($candidate, ENT_QUOTES | ENT_HTML5))));
+        if ($needle === '') {
+            return false;
+        }
+
+        $lines = preg_split('/\R/u', $originalContent) ?: [];
+        foreach ($lines as $index => $line) {
+            $normalizedLine = trim((string) preg_replace('/\s+/', ' ', strip_tags(html_entity_decode($line, ENT_QUOTES | ENT_HTML5))));
+            if ($normalizedLine !== $needle) {
+                continue;
+            }
+
+            $previousLine = trim((string) preg_replace('/\s+/', ' ', strip_tags(html_entity_decode($lines[$index - 1] ?? '', ENT_QUOTES | ENT_HTML5))));
+            $nextLine = trim((string) preg_replace('/\s+/', ' ', strip_tags(html_entity_decode($lines[$index + 1] ?? '', ENT_QUOTES | ENT_HTML5))));
+            $nextNextLine = trim((string) preg_replace('/\s+/', ' ', strip_tags(html_entity_decode($lines[$index + 2] ?? '', ENT_QUOTES | ENT_HTML5))));
+
+            if ($this->looksLikeAddressBlockLine($needle, $previousLine, $nextLine, $nextNextLine)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function looksLikeAddressBlockLine(string $candidate, string $previousLine, string $nextLine, string $nextNextLine): bool
+    {
+        if (preg_match('/\d/', $candidate)) {
+            return false;
+        }
+
+        if (! preg_match('/^[\p{L}][\p{L}\s\'\.-]*$/u', $candidate)) {
+            return false;
+        }
+
+        $candidateWordCount = count(array_filter(preg_split('/\s+/u', $candidate) ?: [], fn ($part) => $part !== ''));
+        if ($candidateWordCount < 2 || $candidateWordCount > 4) {
+            return false;
+        }
+
+        if ($this->looksLikeStreetAddressLine($nextLine) || $this->looksLikeCityStateZipLine($nextLine) || $this->looksLikeCityStateZipLine($nextNextLine)) {
+            return true;
+        }
+
+        if ($previousLine !== '' && $this->looksLikeMerchantHeaderLine($previousLine) && $this->looksLikeStreetAddressLine($nextLine)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function looksLikeStreetAddressLine(string $line): bool
+    {
+        if ($line === '') {
+            return false;
+        }
+
+        return (bool) preg_match('/^\d+\s+.*\b(?:st|street|rd|road|ave|avenue|blvd|boulevard|ln|lane|dr|drive|ct|court|hwy|highway|pkwy|parkway|pl|place|cir|circle|way)\b/i', $line);
+    }
+
+    private function looksLikeCityStateZipLine(string $line): bool
+    {
+        if ($line === '') {
+            return false;
+        }
+
+        return (bool) preg_match('/^[\p{L}\s\'\.-]+,?\s+[A-Z]{2}\s+\d{5}(?:-\d{4})?$/u', $line);
+    }
+
+    private function looksLikeMerchantHeaderLine(string $line): bool
+    {
+        if ($line === '') {
+            return false;
+        }
+
+        return (bool) preg_match('/^[\p{L}\d][\p{L}\d\s&\'\.-]{2,}$/u', $line);
     }
 
     /**

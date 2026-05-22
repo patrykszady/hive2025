@@ -142,3 +142,21 @@ it('does not scrape handwritten notes from leading raw_content lines when CU ret
 
     expect($notes)->toBe([]);
 });
+
+it('rejects printed city lines that CU mislabels as handwritten notes', function () {
+    $content = "17 MARCELA\nMENARDS\nMOUNT PROSPECT\n740 E RAND RD\nMT PROSPECT, IL 60056\n";
+    $styles = [
+        [
+            'isHandwritten' => true,
+            'confidence'    => 0.96,
+            'spans'         => [
+                ['offset' => strpos($content, 'MOUNT PROSPECT'), 'length' => strlen('MOUNT PROSPECT')],
+            ],
+        ],
+    ];
+
+    $result = runExtractWithHandwriting($content, $styles, 'MENARDS', '740 E RAND RD MOUNT PROSPECT, IL 60056');
+    $notes = $result['fields']['handwritten_notes'] ?? [];
+
+    expect($notes)->toBe([]);
+});
