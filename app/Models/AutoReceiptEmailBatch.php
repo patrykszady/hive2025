@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class AutoReceiptEmailBatch extends Model
 {
@@ -23,4 +24,9 @@ class AutoReceiptEmailBatch extends Model
     protected $casts = [
         'email_received_at' => 'datetime',
     ];
+
+    public function items(): HasMany
+    {
+        return $this->hasMany(AutoReceiptEmailBatchItem::class, 'batch_id');
+    }
 }

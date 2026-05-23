@@ -9,8 +9,20 @@ use App\Models\Vendor;
 use App\Services\NylasService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
+use setasign\Fpdi\Fpdi;
 
 uses(RefreshDatabase::class);
+
+function fakePdfBytes(string $text): string
+{
+    $pdf = new Fpdi();
+    $pdf->AddPage();
+    $pdf->SetFont('Helvetica');
+    $pdf->SetXY(10, 10);
+    $pdf->Write(8, $text);
+
+    return $pdf->Output('S');
+}
 
 it('treats two attachments with the same invoice_number as one expense with multiple receipt pages', function () {
     Storage::fake('files');
@@ -45,7 +57,12 @@ it('treats two attachments with the same invoice_number as one expense with mult
             ],
         ],
     ]);
-    $nylasMock->shouldReceive('downloadAttachment')->andReturn('%PDF-fake-bytes');
+    $nylasMock->shouldReceive('downloadAttachment')->andReturnUsing(function (...$args) {
+        static $index = 0;
+        $index++;
+
+        return fakePdfBytes('Continuation test page ' . $index);
+    });
     $nylasMock->shouldReceive('moveOriginalMessageToHiveFolder')->andReturnNull();
     app()->instance(NylasService::class, $nylasMock);
 
@@ -106,10 +123,15 @@ it('treats two attachments with the same invoice_number as one expense with mult
     expect($exp428)->not->toBeNull();
     expect($exp492)->not->toBeNull();
 
-    // Multi-page Order has two receipt rows attached to the same expense
-    expect(ExpenseReceipts::where('expense_id', $exp428->id)->count())->toBe(2);
+    // Multi-page Order is merged into a single receipt row
+    expect(ExpenseReceipts::where('expense_id', $exp428->id)->count())->toBe(1);
     // Standalone Order has one
     expect(ExpenseReceipts::where('expense_id', $exp492->id)->count())->toBe(1);
+
+    $mergedReceipt = ExpenseReceipts::where('expense_id', $exp428->id)->first();
+    expect($mergedReceipt)->not->toBeNull();
+    expect($mergedReceipt->receipt_items['is_multi_page'] ?? false)->toBeTrue();
+    expect($mergedReceipt->receipt_items['page_files'] ?? [])->toHaveCount(2);
 
     // The continuation page must NOT be moved to the failed-debug folder
     expect(Storage::disk('files')->files('auto_receipts_failed'))->toBeEmpty();
@@ -253,7 +275,13 @@ it('attaches a continuation page to the prior expense when the analyzer flags co
 
     $exp = Expense::withoutGlobalScopes()->where('invoice', 'S9464428.002')->first();
     expect($exp)->not->toBeNull();
-    expect(ExpenseReceipts::where('expense_id', $exp->id)->count())->toBe(2);
+    expect(ExpenseReceipts::where('expense_id', $exp->id)->count())->toBe(1);
+
+    $receipt = ExpenseReceipts::where('expense_id', $exp->id)->first();
+    expect($receipt)->not->toBeNull();
+    expect($receipt->receipt_items['is_multi_page'] ?? false)->toBeTrue();
+    expect($receipt->receipt_items['page_total'] ?? null)->toBe(2);
+    expect($receipt->receipt_items['page_files'] ?? [])->toHaveCount(2);
     expect(Storage::disk('files')->files('auto_receipts_failed'))->toBeEmpty();
 });
 
@@ -289,7 +317,12 @@ it('attaches same-message adjacent detail page without invoice_number to prior e
             ],
         ],
     ]);
-    $nylasMock->shouldReceive('downloadAttachment')->andReturn('%PDF-fake-bytes');
+    $nylasMock->shouldReceive('downloadAttachment')->andReturnUsing(function (...$args) {
+        static $index = 0;
+        $index++;
+
+        return fakePdfBytes('Detail test page ' . $index);
+    });
     $nylasMock->shouldReceive('moveOriginalMessageToHiveFolder')->andReturnNull();
     app()->instance(NylasService::class, $nylasMock);
 
@@ -307,6 +340,15 @@ it('attaches same-message adjacent detail page without invoice_number to prior e
                         'merchant_name' => 'DSP MOTORSPORTS',
                         'transaction_date' => '2026-05-12',
                         'total' => 178.24,
+                        'items' => [
+                            [
+                                'Description' => 'MOUNT AND BALANCE FRONT TIRE',
+                                'Price' => 163.95,
+                                'Quantity' => 1,
+                                'TotalPrice' => 163.95,
+                                'VendorCode' => null,
+                            ],
+                        ],
                         'raw_content' => 'DSP MOTORSPORTS Repair Order Doc Number: 106552',
                     ],
                     'content' => 'DSP MOTORSPORTS Repair Order Doc Number: 106552',
@@ -319,6 +361,22 @@ it('attaches same-message adjacent detail page without invoice_number to prior e
                     'merchant_name' => 'DSP MOTORSPORTS',
                     'transaction_date' => '2026-05-22',
                     'total' => 178.24,
+                    'items' => [
+                        [
+                            'Description' => 'VALVE STEM TR412 STD',
+                            'Price' => 4.95,
+                            'Quantity' => 1,
+                            'TotalPrice' => 4.95,
+                            'VendorCode' => '0360-0003EA',
+                        ],
+                        [
+                            'Description' => 'MOUNT AND BALANCE FRONT TIRE',
+                            'Price' => 159.00,
+                            'Quantity' => 1,
+                            'TotalPrice' => 159.00,
+                            'VendorCode' => null,
+                        ],
+                    ],
                     'raw_content' => '# Detail Description: MOUNT AND BALANCE FRONT TIRE Resolve Concern',
                 ],
                 'content' => '# Detail Description: MOUNT AND BALANCE FRONT TIRE Resolve Concern',
@@ -333,14 +391,112 @@ it('attaches same-message adjacent detail page without invoice_number to prior e
 
     $expense = Expense::withoutGlobalScopes()->first();
     expect($expense)->not->toBeNull();
-    expect(ExpenseReceipts::where('expense_id', $expense->id)->count())->toBe(2);
+    expect(ExpenseReceipts::where('expense_id', $expense->id)->count())->toBe(1);
 
-    $receipts = ExpenseReceipts::where('expense_id', $expense->id)
-        ->orderBy('id')
-        ->get();
+    $receipt = ExpenseReceipts::where('expense_id', $expense->id)->first();
+    expect($receipt)->not->toBeNull();
+    expect((string) $receipt->auto_receipt_message_id)->toBe('msg-1');
+    expect((int) $receipt->auto_receipt_attachment_index)->toBe(1);
+    expect($receipt->receipt_items['is_multi_page'] ?? false)->toBeTrue();
+    expect($receipt->receipt_items['attachment_indexes'] ?? [])->toBe([1, 2]);
+    expect($receipt->receipt_items['page_files'] ?? [])->toHaveCount(2);
+    expect($receipt->receipt_items['items'] ?? [])->toHaveCount(2);
 
-    expect((string) $receipts[0]->auto_receipt_message_id)->toBe('msg-1');
-    expect((int) $receipts[0]->auto_receipt_attachment_index)->toBe(1);
-    expect((string) $receipts[1]->auto_receipt_message_id)->toBe('msg-1');
-    expect((int) $receipts[1]->auto_receipt_attachment_index)->toBe(2);
+    $lineDescriptions = collect($receipt->receipt_items['items'] ?? [])->pluck('Description')->all();
+    expect($lineDescriptions)->toBe([
+        'VALVE STEM TR412 STD',
+        'MOUNT AND BALANCE FRONT TIRE',
+    ]);
+
+    $mergedPdf = new Fpdi();
+    $pageCount = $mergedPdf->setSourceFile(Storage::disk('files')->path('receipts/' . $receipt->receipt_filename));
+    expect($pageCount)->toBe(2);
+});
+
+it('dedups exact-duplicate attachments delivered in separate Epson emails but lists the receipt in both batches', function () {
+    Storage::fake('files');
+
+    $vendor = Vendor::factory()->create([
+        'business_name' => "MUNCH'S SUPPLY",
+        'business_type' => 'Retail',
+    ]);
+
+    CompanyEmail::create([
+        'vendor_id' => $vendor->id,
+        'email' => 'patryk@gs.construction',
+        'grant_id' => 'grant-test',
+        'api_json' => [
+            'INBOX_FOLDER' => 'inbox-fld',
+            'HIVE_RECEIPTS_FOLDER' => 'hive-fld',
+        ],
+    ]);
+
+    $nylasMock = Mockery::mock(NylasService::class);
+    $nylasMock->shouldReceive('syncMessages')->andReturn([
+        'messages' => [
+            [
+                'id' => 'msg-A',
+                'date' => 1716412044,
+                'from' => [['email' => 'noreply@print.epsonconnect.com']],
+                'subject' => 'Receipt Scans',
+                'attachments' => [
+                    ['id' => 'att-A0', 'filename' => 'scan.pdf'],
+                ],
+            ],
+            [
+                'id' => 'msg-B',
+                'date' => 1716412144,
+                'from' => [['email' => 'noreply@print.epsonconnect.com']],
+                'subject' => 'Receipt Scans',
+                'attachments' => [
+                    ['id' => 'att-B0', 'filename' => 'scan.pdf'],
+                ],
+            ],
+        ],
+    ]);
+    $nylasMock->shouldReceive('downloadAttachment')->andReturn(fakePdfBytes('Same content'));
+    $nylasMock->shouldReceive('moveOriginalMessageToHiveFolder')->andReturnNull();
+    app()->instance(NylasService::class, $nylasMock);
+
+    // Both OCR calls return identical content/fields → second one must be detected
+    // as a duplicate and skipped (no new ExpenseReceipts row), but a batch_item
+    // must still link the second batch to the original receipt.
+    $rcMock = Mockery::mock(ReceiptController::class)->makePartial();
+    $rcMock->shouldReceive('extractReceipt')->andReturn([
+        'fields' => [
+            'invoice_number' => 'S0000001.001',
+            'merchant_name' => "MUNCH'S SUPPLY",
+            'transaction_date' => '2026-03-24',
+            'total' => 42.00,
+        ],
+        'content' => 'Same content for both emails',
+    ]);
+    app()->instance(ReceiptController::class, $rcMock);
+
+    $controller = new CompanyEmailController($nylasMock);
+    $controller->fetchAutoReceipts();
+
+    // Exactly one expense and one underlying receipt row
+    expect(Expense::withoutGlobalScopes()->count())->toBe(1);
+    expect(ExpenseReceipts::count())->toBe(1);
+
+    // Two batches were processed, each one carrying a batch_item that points
+    // at the same receipt id.
+    $batches = \App\Models\AutoReceiptEmailBatch::orderBy('id')->get();
+    expect($batches)->toHaveCount(2);
+
+    $items = \App\Models\AutoReceiptEmailBatchItem::orderBy('id')->get();
+    expect($items)->toHaveCount(2);
+
+    $receiptId = ExpenseReceipts::first()->id;
+    expect($items->pluck('expense_receipt_id')->unique()->all())->toBe([$receiptId]);
+    expect($items->pluck('batch_id')->all())->toBe($batches->pluck('id')->all());
+
+    // Livewire batches() output: the same receipt id appears in both batches,
+    // ordered newest batch first.
+    $component = new \App\Livewire\Expenses\AutoReceipts();
+    $rendered = $component->batches();
+    expect($rendered)->toHaveCount(2);
+    expect($rendered[0])->toBe([$receiptId]);
+    expect($rendered[1])->toBe([$receiptId]);
 });

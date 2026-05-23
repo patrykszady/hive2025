@@ -126,47 +126,88 @@ class ExpenseReceipts extends Model
         return $this->hasMany(ReceiptLineItemDesc::class, 'expense_receipt_id');
     }
 
+    public function autoReceiptBatchItems(): HasMany
+    {
+        return $this->hasMany(AutoReceiptEmailBatchItem::class, 'expense_receipt_id');
+    }
+
     public static function isDuplicateForExpense(int $expenseId, ?string $receiptHtml, array $receiptItems): bool
     {
-        $newHtmlHash = static::receiptHtmlHash($receiptHtml);
-        $newLineItemsHash = static::receiptLineItemsHash($receiptItems);
-        $newCoreSignature = static::normalizeReceiptCoreSignature($receiptItems);
-        $newNotes = static::normalizeHandwrittenNotesForCompare($receiptItems);
-        $newPo = static::normalizePurchaseOrderForCompare($receiptItems);
+        return static::findDuplicateForExpense($expenseId, $receiptHtml, $receiptItems) !== null;
+    }
 
+    /**
+     * Return the existing receipt that matches the given content for the
+     * provided expense, or null if there's no duplicate.
+     */
+    public static function findDuplicateForExpense(int $expenseId, ?string $receiptHtml, array $receiptItems): ?self
+    {
         $existingReceipts = static::query()
             ->where('expense_id', $expenseId)
             ->get(['id', 'receipt_html', 'receipt_items']);
 
         foreach ($existingReceipts as $existingReceipt) {
-            $existingItems = $existingReceipt->receipt_items ?? [];
-
-            $existingLineItemsHash = static::receiptLineItemsHash($existingItems);
-            if ($newLineItemsHash !== null && $existingLineItemsHash !== null && hash_equals($existingLineItemsHash, $newLineItemsHash)) {
-                return true;
+            if (static::matchesAsDuplicate(
+                $existingReceipt->receipt_html,
+                $existingReceipt->receipt_items ?? [],
+                $receiptHtml,
+                $receiptItems,
+            )) {
+                return $existingReceipt;
             }
+        }
 
-            $existingHtmlHash = static::receiptHtmlHash($existingReceipt->receipt_html);
-            if ($newHtmlHash !== '' && $existingHtmlHash !== '' && hash_equals($existingHtmlHash, $newHtmlHash)) {
-                return true;
-            }
+        return null;
+    }
 
-            // Subset rule: same total/transaction_date/purchase_order, and the
-            // new receipt's handwritten_notes are a subset of (or equal to) the
-            // existing receipt's notes. This catches re-OCRs of the same paper
-            // where Azure missed one of the handwritten labels (e.g. existing
-            // notes ["911W/II","R"] vs new notes ["R"]). The previous receipt
-            // already encodes everything the new one would add, so skip it.
-            if ($newCoreSignature !== null) {
-                $existingCoreSignature = static::normalizeReceiptCoreSignature($existingItems);
-                if ($existingCoreSignature !== null
-                    && $newPo === static::normalizePurchaseOrderForCompare($existingItems)
-                    && hash_equals($existingCoreSignature, $newCoreSignature)
+    /**
+     * Pair-wise duplicate check between an "existing" receipt and a
+     * "candidate" receipt's html + items payload. Extracted so that batch
+     * cleanup commands can dedup within an expense without re-querying.
+     *
+     * Rules (any match → duplicate):
+     *  1) Identical line-items hash.
+     *  2) Identical normalized html hash.
+     *  3) Subset rule: same total + transaction_date + normalized
+     *     purchase_order, and the candidate's handwritten_notes are a subset
+     *     of (or equal to) the existing receipt's notes.
+     */
+    public static function matchesAsDuplicate(
+        ?string $existingHtml,
+        array $existingItems,
+        ?string $candidateHtml,
+        array $candidateItems,
+    ): bool {
+        $existingLineItemsHash = static::receiptLineItemsHash($existingItems);
+        $candidateLineItemsHash = static::receiptLineItemsHash($candidateItems);
+        if ($existingLineItemsHash !== null && $candidateLineItemsHash !== null
+            && hash_equals($existingLineItemsHash, $candidateLineItemsHash)
+        ) {
+            return true;
+        }
+
+        $existingHtmlHash = static::receiptHtmlHash($existingHtml);
+        $candidateHtmlHash = static::receiptHtmlHash($candidateHtml);
+        if ($existingHtmlHash !== '' && $candidateHtmlHash !== ''
+            && hash_equals($existingHtmlHash, $candidateHtmlHash)
+        ) {
+            return true;
+        }
+
+        $candidateCoreSignature = static::normalizeReceiptCoreSignature($candidateItems);
+        if ($candidateCoreSignature !== null) {
+            $existingCoreSignature = static::normalizeReceiptCoreSignature($existingItems);
+            if ($existingCoreSignature !== null
+                && static::normalizePurchaseOrderForCompare($candidateItems)
+                    === static::normalizePurchaseOrderForCompare($existingItems)
+                && hash_equals($existingCoreSignature, $candidateCoreSignature)
+            ) {
+                $existingNotes = static::normalizeHandwrittenNotesForCompare($existingItems);
+                $candidateNotes = static::normalizeHandwrittenNotesForCompare($candidateItems);
+                if (($candidateNotes !== [] || $existingNotes !== [])
+                    && static::isNotesSubset($candidateNotes, $existingNotes)
                 ) {
-                    $existingNotes = static::normalizeHandwrittenNotesForCompare($existingItems);
-                    if (($newNotes !== [] || $existingNotes !== []) && static::isNotesSubset($newNotes, $existingNotes)) {
-                        return true;
-                    }
+                    return true;
                 }
             }
         }

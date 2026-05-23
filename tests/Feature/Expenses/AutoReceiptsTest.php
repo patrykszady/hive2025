@@ -1,6 +1,8 @@
 <?php
 
 use App\Livewire\Expenses\AutoReceipts;
+use App\Models\AutoReceiptEmailBatch;
+use App\Models\AutoReceiptEmailBatchItem;
 use App\Models\Expense;
 use App\Models\ExpenseReceipts;
 use App\Models\User;
@@ -57,6 +59,26 @@ function makeReceiptFor(
     $receipt->created_at = now()->subMinutes($minutesAgo);
     $receipt->updated_at = now()->subMinutes($minutesAgo);
     $receipt->save();
+
+    if ($messageId && $attachmentIndex !== null) {
+        $batch = AutoReceiptEmailBatch::firstOrCreate(
+            ['message_id' => $messageId],
+            [
+                'company_email_id' => null,
+                'belongs_to_vendor_id' => $user->vendor->id,
+                'from_email' => 'noreply@print.epsonconnect.com',
+                'subject' => 'Receipt Scans',
+                'email_received_at' => $emailReceivedAt,
+                'attachment_count' => 0,
+                'processed_receipt_count' => 0,
+            ],
+        );
+
+        AutoReceiptEmailBatchItem::updateOrCreate(
+            ['batch_id' => $batch->id, 'attachment_index' => $attachmentIndex],
+            ['expense_receipt_id' => $receipt->id],
+        );
+    }
 
     return $receipt;
 }
@@ -136,6 +158,17 @@ it('shows tabs for all receipts on the same expense', function () {
 
     $receivedAt = now()->subHour();
 
+    $batch = AutoReceiptEmailBatch::create([
+        'message_id' => 'msg-multi',
+        'company_email_id' => null,
+        'belongs_to_vendor_id' => $user->vendor->id,
+        'from_email' => 'noreply@print.epsonconnect.com',
+        'subject' => 'Receipt Scans',
+        'email_received_at' => $receivedAt,
+        'attachment_count' => 0,
+        'processed_receipt_count' => 0,
+    ]);
+
     foreach ([
         ['name' => 'expense-26828-r1.pdf', 'idx' => 1, 'minutes' => 12],
         ['name' => 'expense-26828-r2.pdf', 'idx' => 2, 'minutes' => 6],
@@ -152,6 +185,12 @@ it('shows tabs for all receipts on the same expense', function () {
         $receipt->created_at = now()->subMinutes($data['minutes']);
         $receipt->updated_at = now()->subMinutes($data['minutes']);
         $receipt->save();
+
+        AutoReceiptEmailBatchItem::create([
+            'batch_id' => $batch->id,
+            'expense_receipt_id' => $receipt->id,
+            'attachment_index' => $data['idx'],
+        ]);
     }
 
     Livewire::test(AutoReceipts::class)

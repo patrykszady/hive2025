@@ -59,6 +59,20 @@
                     </button>
                     <button
                         type="button"
+                        @click="activeTab = 'dependencies'"
+                        :class="activeTab === 'dependencies' ? activeClasses : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                        class="py-2 px-1 border-b-2 font-medium text-sm flex items-center gap-1.5"
+                    >
+                        Dependencies
+                        @php
+                            $depCount = $form->task->predecessorDependencies->count() + $form->task->successorDependencies->count();
+                        @endphp
+                        @if($depCount > 0)
+                            <flux:badge size="sm" color="zinc">{{ $depCount }}</flux:badge>
+                        @endif
+                    </button>
+                    <button
+                        type="button"
                         @click="activeTab = 'history'"
                         :class="activeTab === 'history' ? activeClasses : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
                         class="py-2 px-1 border-b-2 font-medium text-sm"
@@ -508,6 +522,13 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        @endif
+
+        <!-- Dependencies Panel -->
+        @if($view_text['form_submit'] === 'edit' && $form->task)
+            <div x-show="activeTab === 'dependencies'" x-cloak>
+                @include('livewire.tasks._dependencies-panel')
             </div>
         @endif
 

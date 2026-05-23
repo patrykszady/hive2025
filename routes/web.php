@@ -50,7 +50,6 @@ use App\Livewire\Payments\PaymentCreate;
 use App\Livewire\Payments\PaymentShow;
 use App\Livewire\Payments\PaymentsIndex;
 use App\Livewire\Planner\CardsIndex;
-use App\Livewire\Planner\GanttIndex;
 use App\Livewire\Receipts\ReceiptsIndex;
 use App\Livewire\Projects\ProjectShow;
 use App\Livewire\Projects\ProjectsIndex;
@@ -476,7 +475,6 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
     Route::get('/sheet_show', SheetShow::class)->name('sheets.show');
 
     //PLANNER
-    Route::get('/planner/gantt', GanttIndex::class)->name('planner.gantt');
     Route::get('/planner/cards', CardsIndex::class)->name('planner.cards');
     
     //TEMPLATES

@@ -50,7 +50,7 @@
         <flux:heading size="sm" class="min-w-0 truncate {{ $taskTypeTextClasses }} {{ $task->trashed() ? 'line-through' : '' }}">
             {{ $task->title }}
         </flux:heading>
-        @if ($arrivalTimeLabel)
+        @if ($arrivalTimeLabel && ! ($hideArrivalTime ?? false))
             <span class="shrink-0 text-xs whitespace-nowrap">
                 <span class="text-zinc-500 dark:text-zinc-400">{{ $arrivalTimeLabel }}</span>
                 @if ($previousArrivalTimeLabel ?? null)
@@ -59,7 +59,7 @@
             </span>
         @endif
     </div>
-    @if($showDayCounter)
+    @if($showDayCounter && ! ($hideDayCounter ?? false))
         <span class="text-xs text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
             {{ $currentDay }}/{{ $totalDays }}
         </span>
@@ -121,9 +121,9 @@
                         size="sm"
                         :color="$statusUi['flux'] ?? 'zinc'"
                         :icon="$statusUi['icon'] ?? null"
-                    >
-                        {{ $statusUi['label'] ?? ucfirst($task->vendor_status) }}
-                    </flux:badge>
+                        :title="$statusUi['label'] ?? ucfirst($task->vendor_status)"
+                        class="aspect-square !px-1 justify-center"
+                    />
                 @endif
             @endif
         @endif

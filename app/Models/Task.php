@@ -311,13 +311,9 @@ class Task extends Model
 
         // Get siblings and parent/children to check
         if ($this->parent_task_id) {
-            // This is a child task - check parent and other children
-            $parent = Task::find($this->parent_task_id);
-            if ($parent && $parent->start_date && $parent->end_date) {
-                $tasksToCheck->push($parent);
-            }
-
-            // Also check other children of the same parent
+            // This is a child task - check other children of the same parent.
+            // The parent itself is intentionally excluded: a child sitting
+            // inside its parent's range is expected, not a conflict.
             $siblings = Task::where('project_id', $this->project_id)
                            ->where('id', '!=', $this->id ?? 0)
                            ->where('parent_task_id', $this->parent_task_id)
@@ -327,14 +323,9 @@ class Task extends Model
             $tasksToCheck = $tasksToCheck->merge($siblings);
 
         } elseif ($this->exists && $this->children()->exists()) {
-            // This is a parent task - check its children
-            $children = Task::where('project_id', $this->project_id)
-                           ->where('id', '!=', $this->id ?? 0)
-                           ->where('parent_task_id', $this->id)
-                           ->whereNotNull('start_date')
-                           ->whereNotNull('end_date')
-                           ->get();
-            $tasksToCheck = $tasksToCheck->merge($children);
+            // Parent tasks are not blocked by their own children's ranges; a
+            // parent encompassing its children is the normal case.
+            return false;
 
         } else {
             return false;

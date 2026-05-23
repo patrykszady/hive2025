@@ -125,7 +125,34 @@
                 :class="$viewMode === 'table' ? 'bg-zinc-200/80 dark:bg-zinc-700/80' : ''"
                 aria-label="Table view"
             />
+            <flux:button
+                wire:click="$set('viewMode', 'gantt')"
+                variant="subtle"
+                square
+                inset
+                icon="chart-bar"
+                :class="$viewMode === 'gantt' ? 'bg-zinc-200/80 dark:bg-zinc-700/80' : ''"
+                aria-label="Gantt view"
+            />
         </div>
+
+        @if ($viewMode === 'gantt')
+            {{-- Zoom switcher (only visible on gantt) --}}
+            <div class="flex bg-white/60 dark:bg-zinc-900/50 backdrop-blur-[2px] border border-zinc-200/60 dark:border-zinc-700/60 shadow-sm rounded-lg overflow-hidden">
+                @foreach (['day' => 'Day', 'week' => 'Week', 'month' => 'Month'] as $zoomKey => $zoomLabel)
+                    <flux:button
+                        wire:click="$set('ganttZoom', '{{ $zoomKey }}')"
+                        variant="subtle"
+                        size="sm"
+                        inset
+                        :class="$ganttZoom === $zoomKey ? 'bg-zinc-200/80 dark:bg-zinc-700/80 font-semibold' : ''"
+                    >
+                        {{ $zoomLabel }}
+                    </flux:button>
+                @endforeach
+            </div>
+        @endif
+
         <flux:button
             wire:click="$toggle('showMobileFilters')"
             variant="subtle"
@@ -492,28 +519,11 @@
                                                 </x-slot>
                                             </flux:kanban.column.header>
                                             <flux:kanban.column.cards>
-                                                @if (($projectColumn->undated_tasks_count ?? 0) > 0)
-                                                    <flux:kanban.card
-                                                        x-show="firstVisibleDayIndex === {{ $dayIndex }}"
-                                                        x-cloak
-                                                        as="button"
-                                                        class="min-w-0 w-full"
-                                                        wire:key="undated-tasks-{{ $projectColumn->id }}-idx{{ $dayIndex }}"
-                                                        wire:click="openUndatedTasksModal({{ $projectColumn->id }})"
-                                                        wire:target="openUndatedTasksModal({{ $projectColumn->id }})"
-                                                        wire:loading.attr="disabled"
-                                                        wire:loading.class="opacity-60 cursor-wait"
-                                                    >
-                                                        <div class="flex items-center justify-between gap-2 min-w-0">
-                                                            <flux:heading size="sm" class="min-w-0 truncate text-orange-600 dark:text-orange-400">
-                                                                Pending Tasks
-                                                            </flux:heading>
-                                                            <span class="text-xs text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
-                                                                {{ $projectColumn->undated_tasks_count }}
-                                                            </span>
-                                                        </div>
-                                                    </flux:kanban.card>
-                                                @endif
+                                                @include('livewire.planner._pending-tasks-card', [
+                                                    'projectId' => $projectColumn->id,
+                                                    'count'     => $projectColumn->undated_tasks_count ?? 0,
+                                                    'dayIndex'  => $dayIndex,
+                                                ])
 
                                                 @foreach ($projectColumn->cards as $task)
                                                     <livewire:planner.planner-task-card
@@ -538,7 +548,6 @@
     </div>
     @endif
 
-    {{-- Table View --}}
     @if ($viewMode === 'table')
     @php
         $weekdayCount = $dayHeaders->filter(fn($h) => !$h->isWeekend)->count();
@@ -573,7 +582,7 @@
             </div>
         </div>
 
-    <div x-ref="tableScrollContainer" @scroll="onScroll($event)" class="h-full overflow-auto bg-white dark:bg-zinc-900">
+    <div x-ref="tableScrollContainer" @scroll.passive="onInfiniteScroll()" class="h-full overflow-auto bg-white dark:bg-zinc-900">
         <table class="border-collapse table-fixed" style="width: {{ $tableWidth }}px;">
             <colgroup>
                 <col style="width: 224px;">
@@ -605,86 +614,84 @@
             </thead>
             <tbody>
                 @forelse ($projectRows as $row)
-                    <tr wire:key="table-row-{{ $row->id }}" class="group">
-                        {{-- Project name (sticky left) --}}
-                        <td class="sticky left-0 z-10 bg-white dark:bg-zinc-900 px-4 py-2 border-b border-zinc-200 dark:border-zinc-700 align-top" style="box-shadow: inset -2px 0 0 0 #cbd5e1;">
-                            <div class="flex items-center gap-2 min-w-0">
-                                <a
-                                    href="{{ route('projects.show', $row->project) }}"
-                                    target="_blank"
-                                    class="flex-1 min-w-0 font-medium text-sm text-zinc-900 dark:text-zinc-100 truncate hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
-                                >
-                                    {{ $row->title }}
-                                </a>
-                                @if ($row->project->latestStatus)
-                                    <flux:badge :color="$row->project->latestStatus->badge_color" size="sm" inset="top bottom" class="shrink-0">
-                                        {{ $row->project->latestStatus->title }}
-                                    </flux:badge>
-                                @endif
-                                <flux:button
-                                    variant="subtle"
-                                    icon="plus"
-                                    size="xs"
-                                    class="shrink-0"
-                                    wire:click="addTask({{ $row->id }})"
-                                />
-                            </div>
-                            <div class="text-xs text-zinc-500 dark:text-zinc-400 truncate">
-                                {{ $row->project->client->last_names ?? '' }}{{ $row->project->project_name ? ' | ' . $row->project->project_name : '' }}
-                            </div>
-                            @if ($row->undated_tasks_count > 0)
-                                <button
-                                    wire:click="openUndatedTasksModal({{ $row->id }})"
-                                    class="mt-1 inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50 transition-colors"
-                                >
-                                    {{ $row->undated_tasks_count }} pending
-                                </button>
+                    @php $laneCount = count($row->laneRows); @endphp
+                    @foreach ($row->laneRows as $laneIdx => $laneEntries)
+                        <tr wire:key="table-row-{{ $row->id }}-lane-{{ $laneIdx }}" class="group">
+                            {{-- Project name (sticky left) — rendered once per project with rowspan covering all lanes --}}
+                            @if ($laneIdx === 0)
+                                <td rowspan="{{ $laneCount }}" class="sticky left-0 z-10 bg-white dark:bg-zinc-900 px-4 py-2 border-b border-zinc-200 dark:border-zinc-700 align-top" style="box-shadow: inset -2px 0 0 0 #cbd5e1;">
+                                    @include('livewire.planner._project-sidebar', [
+                                        'project'      => $row->project,
+                                        'projectId'    => $row->id,
+                                        'title'        => $row->title,
+                                        'undatedCount' => $row->undated_tasks_count ?? 0,
+                                    ])
+                                </td>
                             @endif
-                        </td>
 
-                        {{-- Day cells --}}
-                        @foreach ($row->dayCells as $cell)
-                            <td
-                                wire:key="table-cell-{{ $row->id }}-{{ $cell->dayFormat }}"
-                                x-data="{ hover: false }"
-                                x-on:mouseenter="hover = true"
-                                x-on:mouseleave="hover = false"
-                                class="px-2 py-1.5 border-b border-r border-zinc-200 dark:border-zinc-700 align-top cursor-pointer
-                                    {{ $cell->isWeekend ? 'bg-zinc-50 dark:bg-zinc-800' : '' }}
-                                    {{ $cell->isToday ? 'bg-indigo-50/50 dark:bg-indigo-900/10' : '' }}"
-                                wire:click="addTask({{ $row->id }}, '{{ $cell->dayFormat }}')"
-                            >
-                                @if ($cell->cards->count() > 0)
-                                    <div class="space-y-1" wire:click.stop>
-                                        @foreach ($cell->cards as $task)
-                                            <flux:kanban.card
-                                                as="button"
-                                                class="min-w-0 w-full {{ $task->trashed() ? 'opacity-50' : '' }}"
-                                                wire:key="table-task-{{ $task->id }}-{{ $cell->dayFormat }}"
-                                                wire:click="editTask({{ $task->id }}, '{{ $cell->dayFormat }}', {{ $row->id }})"
-                                                wire:loading.attr="disabled"
-                                                wire:loading.class="opacity-60 cursor-wait"
-                                            >
+                            {{-- Day cells (lane-aware): segments span via colspan; covered cells are skipped --}}
+                            @foreach ($laneEntries as $entry)
+                                @if ($entry === 'covered')
+                                    {{-- absorbed by an earlier colspan in this lane --}}
+                                @elseif ($entry->type === 'segment')
+                                    @php $task = $entry->task; @endphp
+                                    <td
+                                        colspan="{{ $entry->span }}"
+                                        wire:key="table-seg-{{ $row->id }}-{{ $laneIdx }}-{{ $task->id }}-{{ $entry->first_day_format }}"
+                                        class="px-2 py-1.5 border-b border-r border-zinc-200 dark:border-zinc-700 align-top
+                                            {{ $entry->is_weekend ? 'bg-zinc-50 dark:bg-zinc-800' : '' }}
+                                            {{ $entry->is_today ? 'bg-indigo-50/50 dark:bg-indigo-900/10' : '' }}"
+                                        style="overflow: visible;"
+                                        wire:click.stop
+                                    >
+                                        {{-- Spanning bar: the kanban-card fills the colspan (the visible bar).
+                                             Inside it, an inner wrapper uses position:sticky so the title/time/
+                                             avatars stay pinned to the right edge of the sticky project sidebar
+                                             as the page scrolls horizontally — until the bar's own right edge
+                                             eventually slides past, at which point the text scrolls off with it. --}}
+                                        <flux:kanban.card
+                                            as="button"
+                                            class="min-w-0 w-full {{ $task->trashed() ? 'opacity-50' : '' }}"
+                                            style="overflow: visible;"
+                                            wire:click="editTask({{ $task->id }}, '{{ $entry->first_day_format }}', {{ $row->id }})"
+                                            wire:loading.attr="disabled"
+                                            wire:loading.class="opacity-60 cursor-wait"
+                                        >
+                                            <div style="position: sticky; left: 232px; display: inline-block; min-width: 0; max-width: 100%; text-align: left;">
                                                 @include('components.upcoming-tasks-list-card-content', [
-                                                    'task' => $task,
-                                                    'date' => $cell->dayFormat,
-                                                    'isWeekend' => $cell->isWeekend,
+                                                    'task'           => $task,
+                                                    'date'           => $entry->first_day_format,
+                                                    'isWeekend'      => false,
+                                                    'hideDayCounter' => $entry->span > 1,
                                                 ])
-                                            </flux:kanban.card>
-                                        @endforeach
-                                    </div>
+                                            </div>
+                                        </flux:kanban.card>
+                                    </td>
+                                @else
+                                    @php $cell = $entry->cell; @endphp
+                                    <td
+                                        wire:key="table-cell-{{ $row->id }}-{{ $laneIdx }}-{{ $cell->dayFormat }}"
+                                        x-data="{ hover: false }"
+                                        x-on:mouseenter="hover = true"
+                                        x-on:mouseleave="hover = false"
+                                        class="px-2 py-1.5 border-b border-r border-zinc-200 dark:border-zinc-700 align-top cursor-pointer
+                                            {{ $cell->isWeekend ? 'bg-zinc-50 dark:bg-zinc-800' : '' }}
+                                            {{ $cell->isToday ? 'bg-indigo-50/50 dark:bg-indigo-900/10' : '' }}"
+                                        wire:click="addTask({{ $row->id }}, '{{ $cell->dayFormat }}')"
+                                    >
+                                        <div
+                                            x-show="hover"
+                                            x-cloak
+                                            x-transition.opacity.duration.150ms
+                                            class="flex justify-center pt-1"
+                                        >
+                                            <flux:icon.plus class="size-4 text-zinc-300 dark:text-zinc-600" />
+                                        </div>
+                                    </td>
                                 @endif
-                                <div
-                                    x-show="hover"
-                                    x-cloak
-                                    x-transition.opacity.duration.150ms
-                                    class="flex justify-center pt-1"
-                                >
-                                    <flux:icon.plus class="size-4 text-zinc-300 dark:text-zinc-600" />
-                                </div>
-                            </td>
-                        @endforeach
-                    </tr>
+                            @endforeach
+                        </tr>
+                    @endforeach
                 @empty
                     <tr>
                         <td colspan="{{ $dayHeaders->count() + 1 }}" class="px-4 py-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
@@ -696,6 +703,17 @@
         </table>
     </div>
     </div>
+    @endif
+
+    {{-- Gantt View --}}
+    @if ($viewMode === 'gantt')
+        @include('livewire.planner._gantt', [
+            'ganttRows' => $ganttRows,
+            'ganttLinks' => $ganttLinks,
+            'ganttArrowPaths' => $ganttArrowPaths,
+            'pxPerDay' => $pxPerDay,
+            'days' => $this->days,
+        ])
     @endif
 
     {{-- Task Create Modal --}}
@@ -788,90 +806,21 @@
 @script
 <script>
 Alpine.data('plannerTableScroll', () => ({
-    isLoadingPrevious: false,
-    isLoadingFuture: false,
-    loadCooldown: false,
-    pendingScroll: null,
-    
+    ...window.plannerInfiniteScroll('tableScrollContainer'),
+
     init() {
-        Livewire.on('planner-scroll-to', (data) => {
-            this.handleScrollAfterLoad(data.direction);
-        });
-    },
-    
-    handleScrollAfterLoad(direction) {
-        this.$nextTick(() => {
-            setTimeout(() => {
-                const container = this.$refs.tableScrollContainer;
-                if (!container || !this.pendingScroll) return;
-                
-                const oldScrollWidth = this.pendingScroll.scrollWidth;
-                const newScrollWidth = container.scrollWidth;
-                const deltaWidth = newScrollWidth - oldScrollWidth;
-                
-                if (direction === 'start' && deltaWidth > 0) {
-                    container.scrollLeft = this.pendingScroll.scrollLeft + deltaWidth;
-                }
-                
-                this.pendingScroll = null;
-                this.isLoadingPrevious = false;
-                this.isLoadingFuture = false;
-                
-                setTimeout(() => {
-                    this.loadCooldown = false;
-                }, 300);
-            }, 100);
-        });
-    },
-    
-    prepareForLoad(direction) {
-        const container = this.$refs.tableScrollContainer;
-        if (!container) return;
-        
-        this.pendingScroll = {
-            direction,
-            scrollLeft: container.scrollLeft,
-            scrollWidth: container.scrollWidth,
-        };
-    },
-    
-    onScroll(e) {
-        if (this.loadCooldown) return;
-        
-        const container = this.$refs.tableScrollContainer;
-        if (!container) return;
-        
-        const threshold = 50;
-        const maxScroll = container.scrollWidth - container.clientWidth;
-        const atLeft = container.scrollLeft <= threshold;
-        const atRight = container.scrollLeft >= maxScroll - threshold;
-        
-        if (atLeft && !this.isLoadingPrevious) {
-            this.isLoadingPrevious = true;
-            this.loadCooldown = true;
-            this.prepareForLoad('start');
-            this.$wire.loadPreviousDays();
-        }
-        
-        if (atRight && !this.isLoadingFuture) {
-            this.isLoadingFuture = true;
-            this.loadCooldown = true;
-            this.prepareForLoad('end');
-            this.$wire.loadFutureDays();
-        }
+        this._initInfiniteScroll();
     },
 }));
 
 Alpine.data('plannerScroll', () => ({
+    ...window.plannerInfiniteScroll('scrollContainer'),
+
     firstVisibleDayIndex: 0,
     atLeftEdge: true,
     atRightEdge: false,
     ready: false,
-    pendingScroll: null,
-    isLoadingPrevious: false,
-    isLoadingFuture: false,
-    loadCooldown: false,
-    
+
     // Axis locking state for touch scrolling
     touchStartX: null,
     touchStartY: null,
@@ -881,17 +830,19 @@ Alpine.data('plannerScroll', () => ({
     axisLockThreshold: 10, // pixels to determine direction
     
     init() {
+        this._initInfiniteScroll();
         this.$nextTick(() => {
             this.updateFirstVisible();
             this.updateEdgeState();
             this.setupAxisLocking();
             this.ready = true;
         });
-        
-        // Listen for scroll events from Livewire
-        Livewire.on('planner-scroll-to', (data) => {
-            this.handleScrollAfterLoad(data.direction);
-        });
+    },
+
+    // Called by the shared infinite-scroll mixin after a load completes.
+    onInfiniteLoad() {
+        this.updateFirstVisible();
+        this.updateEdgeState();
     },
     
     setupAxisLocking() {
@@ -955,69 +906,6 @@ Alpine.data('plannerScroll', () => ({
         this.lockedAxis = null;
     },
     
-    handleScrollAfterLoad(direction) {
-        this.$nextTick(() => {
-            setTimeout(() => {
-                const container = this.$refs.scrollContainer;
-                if (!container || !this.pendingScroll) return;
-                
-                const oldScrollWidth = this.pendingScroll.scrollWidth;
-                const newScrollWidth = container.scrollWidth;
-                const deltaWidth = newScrollWidth - oldScrollWidth;
-                
-                if (direction === 'start' && deltaWidth > 0) {
-                    // Adjust scroll position to keep the same content visible
-                    container.scrollLeft = this.pendingScroll.scrollLeft + deltaWidth;
-                }
-                // For 'end': new columns added at end, no adjustment needed
-                
-                this.pendingScroll = null;
-                this.isLoadingPrevious = false;
-                this.isLoadingFuture = false;
-                
-                this.updateFirstVisible();
-                this.updateEdgeState();
-                
-                // Cooldown prevents immediate re-trigger
-                setTimeout(() => {
-                    this.loadCooldown = false;
-                }, 300);
-            }, 100);
-        });
-    },
-
-    prepareForLoad(direction) {
-        const container = this.$refs.scrollContainer;
-        if (!container) {
-            this.pendingScroll = null;
-            return;
-        }
-
-        this.pendingScroll = {
-            direction,
-            scrollLeft: container.scrollLeft,
-            scrollWidth: container.scrollWidth,
-        };
-    },
-    
-    autoLoadIfNeeded() {
-        if (this.loadCooldown) return;
-        
-        if (this.atLeftEdge && !this.isLoadingPrevious) {
-            this.isLoadingPrevious = true;
-            this.loadCooldown = true;
-            this.prepareForLoad('start');
-            this.$wire.loadPreviousDays();
-        }
-        
-        if (this.atRightEdge && !this.isLoadingFuture) {
-            this.isLoadingFuture = true;
-            this.loadCooldown = true;
-            this.prepareForLoad('end');
-            this.$wire.loadFutureDays();
-        }
-    },
-    
     updateFirstVisible() {
         const container = this.$refs.scrollContainer;
         if (!container) return;
@@ -1075,7 +963,7 @@ Alpine.data('plannerScroll', () => ({
     onScroll(e) {
         this.updateFirstVisible();
         this.updateEdgeState();
-        this.autoLoadIfNeeded();
+        this.onInfiniteScroll();
     },
     
     getOpacityClass(isWeekend, hasTasks, hasUndatedTasks, dayIndex) {

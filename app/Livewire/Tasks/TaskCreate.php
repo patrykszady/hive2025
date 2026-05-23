@@ -10,7 +10,6 @@ use App\Models\User;
 use App\Models\Vendor;
 use App\Models\TaskDependency;
 use App\Livewire\Forms\TaskForm;
-use App\Livewire\Planner\GanttIndex;
 use App\Livewire\Planner\CardsIndex;
 use App\Livewire\Planner\PlannerTaskCard;
 use App\Livewire\Projects\UpcomingTasks;
@@ -823,11 +822,11 @@ class TaskCreate extends Component
     private function handleTaskOperation(string $operation, ?Task $task = null)
     {
         if ($operation === 'start' && $task) {
-            $this->dispatch('task-operation-started', taskId: $task->id)->to(GanttIndex::class);
+            $this->dispatch('task-operation-started', taskId: $task->id)->to(CardsIndex::class);
         } elseif ($operation === 'complete') {
             $this->refreshPlannerComponents();
             $this->modal('task_create_form_modal')->close();
-            $this->dispatch('task-operation-completed')->to(GanttIndex::class);
+            $this->dispatch('task-operation-completed')->to(CardsIndex::class);
         }
     }
 
@@ -864,7 +863,6 @@ class TaskCreate extends Component
      */
     private function refreshPlannerComponents()
     {
-        $this->dispatch('refreshComponent')->to(GanttIndex::class);
         $this->dispatch('refreshComponent')->to(CardsIndex::class);
         $this->dispatch('refreshComponent')->to(PlannerTaskCard::class);
         $this->dispatch('refreshComponent')->to(UpcomingTasks::class);
@@ -1107,6 +1105,7 @@ class TaskCreate extends Component
         
         // Refresh planner components
         $this->refreshPlannerComponents();
+        $this->dispatch('gantt-links-changed');
         
         $this->showNotification('dependency_added');
     }
@@ -1120,6 +1119,7 @@ class TaskCreate extends Component
         
         // Refresh planner components
         $this->refreshPlannerComponents();
+        $this->dispatch('gantt-links-changed');
         
         $this->showNotification('dependency_removed');
     }

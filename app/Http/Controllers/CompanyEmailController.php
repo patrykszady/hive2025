@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Jobs\ProcessAutoReceiptMailboxJob;
 use App\Models\Client;
 use App\Models\AutoReceiptEmailBatch;
+use App\Models\AutoReceiptEmailBatchItem;
 use App\Models\CompanyEmail;
 use App\Models\Expense;
 use App\Models\ExpenseReceipts;
@@ -28,6 +29,7 @@ use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
 use Spatie\Browsershot\Browsershot;
 use Intervention\Image\Facades\Image;
+use setasign\Fpdi\Fpdi;
 
 use Exception;
 use App\Support\ApiErrorFormatter;
@@ -2015,16 +2017,13 @@ class CompanyEmailController extends Controller
                                     $partial['invoice_number'] = $continuationExpense->invoice;
                                 }
 
-                                $this->saveExpenseReceipt(
-                                    $continuationExpense->id,
+                                $this->mergeContinuationReceiptPage(
+                                    $continuationExpense,
                                     [
                                         'fields' => $partial,
                                         'content' => (string) ($ocr_receipt_data['content'] ?? ''),
                                     ],
                                     $ocr_filename,
-                                    null,
-                                    true,
-                                    false,
                                     [
                                         'message_id' => $batch->message_id,
                                         'attachment_index' => $attachmentIndex,
@@ -2090,13 +2089,10 @@ class CompanyEmailController extends Controller
                             (string) $batch->message_id,
                             $attachment_key + 1,
                         )) {
-                            $this->saveExpenseReceipt(
-                                $lastExpenseForMessage->id,
+                            $this->mergeContinuationReceiptPage(
+                                $lastExpenseForMessage,
                                 $ocr_receipt_data,
                                 $ocr_filename,
-                                null,
-                                true,
-                                false,
                                 [
                                     'message_id' => $batch->message_id,
                                     'attachment_index' => $attachmentIndex,
@@ -2464,6 +2460,271 @@ class CompanyEmailController extends Controller
             || preg_match('/page\s*#?\s*\d+\s*(?:of|\/)\s*\d+/i', $rawContent) === 1;
     }
 
+    protected function mergeContinuationReceiptPage(
+        Expense $expense,
+        array $ocrReceiptData,
+        string $ocrFilename,
+        array $autoReceiptContext = []
+    ): void {
+        $messageId = $autoReceiptContext['message_id'] ?? null;
+        $attachmentIndex = isset($autoReceiptContext['attachment_index']) ? (int) $autoReceiptContext['attachment_index'] : null;
+        $emailReceivedAt = $autoReceiptContext['email_received_at'] ?? null;
+
+        $existingReceiptQuery = ExpenseReceipts::withoutGlobalScopes()
+            ->where('expense_id', $expense->id);
+
+        if (is_string($messageId) && $messageId !== '') {
+            $existingReceiptQuery->where('auto_receipt_message_id', $messageId);
+        }
+
+        $existingReceipt = $existingReceiptQuery->latest('id')->first();
+
+        if (! $existingReceipt) {
+            $this->saveExpenseReceipt(
+                $expense->id,
+                $ocrReceiptData,
+                $ocrFilename,
+                null,
+                true,
+                false,
+                $autoReceiptContext,
+            );
+
+            return;
+        }
+
+        $sourcePath = '_temp_ocr/' . $ocrFilename;
+        $targetFilename = $expense->id . '-' . $ocrFilename;
+        $destinationPath = 'receipts/' . $targetFilename;
+        $currentReceiptFilename = is_string($existingReceipt->receipt_filename) ? $existingReceipt->receipt_filename : '';
+
+        if (Storage::disk('files')->move($sourcePath, $destinationPath)) {
+            // Success case
+        } elseif (Storage::disk('files')->copy($sourcePath, $destinationPath)) {
+            Storage::disk('files')->delete($sourcePath);
+        }
+
+        $existingItems = is_array($existingReceipt->receipt_items)
+            ? $existingReceipt->receipt_items
+            : (array) ($existingReceipt->receipt_items ?? []);
+        $incomingItems = is_array($ocrReceiptData['fields'] ?? null)
+            ? $ocrReceiptData['fields']
+            : [];
+
+        $existingPageFiles = array_values(array_filter((array) ($existingItems['page_files'] ?? [])));
+        if ($existingPageFiles === [] && $currentReceiptFilename !== '') {
+            $existingPageFiles[] = $currentReceiptFilename;
+        }
+        $existingPageFiles[] = $targetFilename;
+        $existingItems['page_files'] = array_values(array_unique($existingPageFiles));
+
+        $existingAttachmentIndexes = array_map('intval', array_filter((array) ($existingItems['attachment_indexes'] ?? [])));
+        $currentAttachmentIndexes = $existingAttachmentIndexes;
+        $lastAttachmentIndex = (int) ($existingReceipt->auto_receipt_attachment_index ?? 0);
+        if ($lastAttachmentIndex > 0) {
+            $currentAttachmentIndexes[] = $lastAttachmentIndex;
+        }
+        if ($attachmentIndex !== null && $attachmentIndex > 0) {
+            $currentAttachmentIndexes[] = $attachmentIndex;
+        }
+        sort($currentAttachmentIndexes);
+        $existingItems['attachment_indexes'] = array_values(array_unique($currentAttachmentIndexes));
+
+        $existingItems['is_multi_page'] = true;
+
+        $incomingRawContent = trim((string) ($incomingItems['raw_content'] ?? $ocrReceiptData['content'] ?? ''));
+        $existingRawContent = trim((string) ($existingItems['raw_content'] ?? $existingReceipt->receipt_html ?? ''));
+        if ($incomingRawContent !== '') {
+            if ($existingRawContent === '') {
+                $existingItems['raw_content'] = $incomingRawContent;
+            } elseif (! str_contains($existingRawContent, $incomingRawContent)) {
+                $existingItems['raw_content'] = $existingRawContent . "\n\n" . $incomingRawContent;
+            }
+        }
+
+        $incomingContent = trim((string) ($ocrReceiptData['content'] ?? ''));
+        $existingHtml = trim((string) ($existingReceipt->receipt_html ?? ''));
+        if ($incomingContent !== '' && $incomingContent !== $existingHtml && ! str_contains($existingHtml, $incomingContent)) {
+            $existingReceipt->receipt_html = $existingHtml === ''
+                ? $incomingContent
+                : $existingHtml . "\n\n" . $incomingContent;
+        }
+
+        $existingItems['items'] = $this->mergeContinuationLineItems($existingItems, $incomingItems);
+
+        if (($existingItems['page_total'] ?? null) === null && isset($incomingItems['page_total'])) {
+            $existingItems['page_total'] = $incomingItems['page_total'];
+        } elseif (isset($incomingItems['page_total'])) {
+            $existingItems['page_total'] = max((int) $existingItems['page_total'], (int) $incomingItems['page_total']);
+        }
+
+        foreach ([
+            'invoice_number',
+            'merchant_name',
+            'purchase_order',
+            'total',
+            'subtotal',
+            'total_tax',
+            'balance_due',
+            'taxes',
+            'shipping',
+            'tip',
+            'misc_fees',
+            'handwritten_notes',
+        ] as $fieldKey) {
+            if (($existingItems[$fieldKey] ?? null) === null || $existingItems[$fieldKey] === '') {
+                if (array_key_exists($fieldKey, $incomingItems)) {
+                    $existingItems[$fieldKey] = $incomingItems[$fieldKey];
+                }
+            }
+        }
+
+        $mergedReceiptFilename = trim((string) ($existingItems['merged_receipt_filename'] ?? ''));
+        if ($mergedReceiptFilename === '') {
+            $mergedReceiptFilename = $expense->id . '-multi-page-' . $existingReceipt->id . '.pdf';
+            $existingItems['merged_receipt_filename'] = $mergedReceiptFilename;
+        }
+
+        if ($this->rebuildMergedReceiptPdf($existingItems['page_files'], $mergedReceiptFilename)) {
+            $existingReceipt->receipt_filename = $mergedReceiptFilename;
+        }
+
+        $existingReceipt->receipt_items = $existingItems;
+        $existingReceipt->auto_receipt_email_received_at = $emailReceivedAt ?: $existingReceipt->auto_receipt_email_received_at;
+        $existingReceipt->save();
+    }
+
+    protected function mergeContinuationLineItems(array $existingItems, array $incomingItems): array
+    {
+        $existingLineItems = is_array($existingItems['items'] ?? null) ? $existingItems['items'] : [];
+        $incomingLineItems = is_array($incomingItems['items'] ?? null) ? $incomingItems['items'] : [];
+
+        if ($incomingLineItems === []) {
+            return $existingLineItems;
+        }
+
+        if ($existingLineItems === []) {
+            return $incomingLineItems;
+        }
+
+        if ($this->incomingLineItemsSupersedeSummary($existingLineItems, $incomingLineItems)) {
+            return $incomingLineItems;
+        }
+
+        $merged = $existingLineItems;
+        $seen = [];
+
+        foreach ($existingLineItems as $lineItem) {
+            $seen[$this->receiptLineItemSignature($lineItem)] = true;
+        }
+
+        foreach ($incomingLineItems as $lineItem) {
+            $signature = $this->receiptLineItemSignature($lineItem);
+            if (! isset($seen[$signature])) {
+                $merged[] = $lineItem;
+                $seen[$signature] = true;
+            }
+        }
+
+        return array_values($merged);
+    }
+
+    protected function incomingLineItemsSupersedeSummary(array $existingLineItems, array $incomingLineItems): bool
+    {
+        if (count($existingLineItems) !== 1 || count($incomingLineItems) < 2) {
+            return false;
+        }
+
+        $existingTotal = $this->receiptLineItemTotal($existingLineItems[0]);
+        if ($existingTotal === null) {
+            return false;
+        }
+
+        $incomingTotal = collect($incomingLineItems)
+            ->map(fn (array $lineItem): float => $this->receiptLineItemTotal($lineItem) ?? 0.0)
+            ->sum();
+
+        if (abs($incomingTotal - $existingTotal) > 0.01) {
+            return false;
+        }
+
+        $existingDescription = strtoupper(trim((string) ($existingLineItems[0]['Description'] ?? '')));
+        if ($existingDescription === '') {
+            return false;
+        }
+
+        foreach ($incomingLineItems as $incomingLineItem) {
+            $incomingDescription = strtoupper(trim((string) ($incomingLineItem['Description'] ?? '')));
+            if ($incomingDescription !== '' && str_contains($incomingDescription, $existingDescription)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function receiptLineItemSignature(array $lineItem): string
+    {
+        return sha1(json_encode([
+            'description' => trim((string) ($lineItem['Description'] ?? '')),
+            'vendor_code' => trim((string) ($lineItem['VendorCode'] ?? '')),
+            'price' => $this->receiptLineItemTotal($lineItem),
+            'quantity' => (float) ($lineItem['Quantity'] ?? 0),
+            'unit' => trim((string) ($lineItem['Unit'] ?? '')),
+        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+    }
+
+    protected function receiptLineItemTotal(array $lineItem): ?float
+    {
+        foreach (['TotalPrice', 'Price'] as $field) {
+            if (isset($lineItem[$field]) && is_numeric($lineItem[$field])) {
+                return (float) $lineItem[$field];
+            }
+        }
+
+        return null;
+    }
+
+    protected function rebuildMergedReceiptPdf(array $pageFiles, string $mergedFilename): bool
+    {
+        $pageFiles = array_values(array_filter(array_unique($pageFiles)));
+        if (count($pageFiles) < 2) {
+            return false;
+        }
+
+        try {
+            $pdf = new Fpdi();
+
+            foreach ($pageFiles as $pageFile) {
+                $path = Storage::disk('files')->path('receipts/' . $pageFile);
+                if (! is_file($path)) {
+                    return false;
+                }
+
+                $pageCount = $pdf->setSourceFile($path);
+                for ($pageNumber = 1; $pageNumber <= $pageCount; $pageNumber++) {
+                    $templateId = $pdf->importPage($pageNumber);
+                    $size = $pdf->getTemplateSize($templateId);
+                    $orientation = ($size['width'] > $size['height']) ? 'L' : 'P';
+                    $pdf->AddPage($orientation, [$size['width'], $size['height']]);
+                    $pdf->useTemplate($templateId);
+                }
+            }
+
+            Storage::disk('files')->put('receipts/' . $mergedFilename, $pdf->Output('S'));
+
+            return true;
+        } catch (\Throwable $e) {
+            Log::channel('receipt_processing')->warning('Failed to rebuild merged receipt PDF', [
+                'merged_filename' => $mergedFilename,
+                'page_files' => $pageFiles,
+                'error' => $e->getMessage(),
+            ]);
+
+            return false;
+        }
+    }
+
     /**
      * Merge status/ETA from a new material-order OCR into the existing receipt items.
      * Only items that were previously pending (BO, open, partial) are updated.
@@ -2720,13 +2981,24 @@ class CompanyEmailController extends Controller
                             : ($current_ocr_data['fields'] ?? []);
 
                         // Check for duplicate receipts based on content and invoice number.
-                        // For auto-receipt emails we still create the receipt row (attached
-                        // to the matched expense) so the batch view reflects every scanned
-                        // attachment from the source email.
-                        $isDuplicate = $skipDuplicateCheck ? false : $this->isDuplicateReceipt($expense_id, $receipt_html, $receipt_items);
+                        // For auto-receipt emails we still want the batch view to
+                        // reflect every scanned attachment, but we don't duplicate the
+                        // underlying receipt row — we just record a batch_item that
+                        // points back to the existing receipt.
+                        $existingDuplicate = $skipDuplicateCheck
+                            ? null
+                            : ExpenseReceipts::findDuplicateForExpense($expense_id, $receipt_html, $receipt_items);
 
-                        if ($isDuplicate && !$autoReceiptMessageId) {
+                        if ($existingDuplicate) {
                             Storage::disk('files')->delete($ocr_path);
+
+                            if ($autoReceiptMessageId) {
+                                $this->recordAutoReceiptBatchItem($autoReceiptMessageId, $autoReceiptAttachmentIndex, $existingDuplicate->id);
+                                AutoReceiptEmailBatch::query()
+                                    ->where('message_id', $autoReceiptMessageId)
+                                    ->increment('processed_receipt_count');
+                                $processedFiles[] = $existingDuplicate->receipt_filename;
+                            }
                             continue;
                         }
 
@@ -2744,6 +3016,7 @@ class CompanyEmailController extends Controller
                         $expense_receipt->save();
 
                         if ($autoReceiptMessageId) {
+                            $this->recordAutoReceiptBatchItem($autoReceiptMessageId, $autoReceiptAttachmentIndex, $expense_receipt->id);
                             AutoReceiptEmailBatch::query()
                                 ->where('message_id', $autoReceiptMessageId)
                                 ->increment('processed_receipt_count');
@@ -2794,13 +3067,24 @@ class CompanyEmailController extends Controller
         $receiptFields = $ocr_receipt_data['fields'] ?? [];
 
         // Check for duplicate receipts based on content and invoice number.
-        // For auto-receipt emails we still create the receipt row (attached to the
-        // matched expense) so the batch view reflects every scanned attachment.
-        $isDuplicate = $skipDuplicateCheck ? false : $this->isDuplicateReceipt($expense_id, $receiptContent, $receiptFields);
+        // For auto-receipt emails we still record the delivery in the batch
+        // view (via auto_receipt_email_batch_items), but we don't duplicate
+        // the receipt row itself.
+        $existingDuplicate = $skipDuplicateCheck
+            ? null
+            : ExpenseReceipts::findDuplicateForExpense($expense_id, $receiptContent, $receiptFields);
 
-        if ($isDuplicate && !$autoReceiptMessageId) {
-            // Skip saving this duplicate receipt and clean up temp file
+        if ($existingDuplicate) {
             Storage::disk('files')->delete($sourcePath);
+
+            if ($autoReceiptMessageId) {
+                $this->recordAutoReceiptBatchItem($autoReceiptMessageId, $autoReceiptAttachmentIndex, $existingDuplicate->id);
+                AutoReceiptEmailBatch::query()
+                    ->where('message_id', $autoReceiptMessageId)
+                    ->increment('processed_receipt_count');
+                return [$existingDuplicate->receipt_filename];
+            }
+
             return [];
         }
 
@@ -2817,6 +3101,7 @@ class CompanyEmailController extends Controller
         $expense_receipt->save();
 
         if ($autoReceiptMessageId) {
+            $this->recordAutoReceiptBatchItem($autoReceiptMessageId, $autoReceiptAttachmentIndex, $expense_receipt->id);
             AutoReceiptEmailBatch::query()
                 ->where('message_id', $autoReceiptMessageId)
                 ->increment('processed_receipt_count');
@@ -3363,6 +3648,28 @@ class CompanyEmailController extends Controller
     protected function isDuplicateReceipt(int $expense_id, string $receipt_html, array $receipt_items): bool
     {
         return ExpenseReceipts::isDuplicateForExpense($expense_id, $receipt_html, $receipt_items);
+    }
+
+    /**
+     * Record this attachment as part of an auto-receipt email batch so the
+     * "Recent Auto Receipts" view shows it in the correct slot, even when
+     * the receipt itself is a content-level duplicate of a prior delivery.
+     */
+    protected function recordAutoReceiptBatchItem(?string $messageId, mixed $attachmentIndex, int $expenseReceiptId): void
+    {
+        if (! $messageId || $attachmentIndex === null) {
+            return;
+        }
+
+        $batchId = AutoReceiptEmailBatch::query()->where('message_id', $messageId)->value('id');
+        if (! $batchId) {
+            return;
+        }
+
+        AutoReceiptEmailBatchItem::updateOrCreate(
+            ['batch_id' => $batchId, 'attachment_index' => (int) $attachmentIndex],
+            ['expense_receipt_id' => $expenseReceiptId],
+        );
     }
 
     protected function resolveAutoReceiptTransactionDate(mixed $rawTransactionDate, string $receiptContent): ?Carbon

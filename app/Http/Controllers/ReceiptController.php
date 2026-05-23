@@ -643,7 +643,6 @@ class ReceiptController extends Controller
         $rawContent = strip_tags($rawContent);
         $rawContent = preg_replace('/\n{3,}/', "\n\n", $rawContent);
         $content = htmlspecialchars(trim($rawContent), ENT_QUOTES, 'UTF-8');
-        $styles  = $analyzeResult['analyzeResult']['styles'] ?? [];
 
         $keyValuePairs = null;
         if (isset($analyzeResult['analyzeResult']['keyValuePairs'])) {
@@ -672,27 +671,18 @@ class ReceiptController extends Controller
         }
 
         // ── 3. Handwritten notes ──────────────────────────────────────
-        // Span offsets reference the ORIGINAL Azure CU content (before our
-        // preg_replace/strip_tags/trim mutations). Slice against $originalContent
-        // — using the post-transform $content corrupts the offsets and yields
-        // wrong fragments (e.g. only "Lady" instead of "PATRIK HOME" + "Lady").
-        //
-        // Stylized printed logos (e.g. "Lady Gregory's" script) get false-positive
-        // flagged as handwriting by CU. Drop notes that are part of the printed
-        // merchant name to keep only true on-paper annotations.
-        $handwrittenNotes = $this->extractHandwrittenNotes($styles, $originalContent, $merchantName, $merchantAddress);
-
-        // Custom CU analyzers (e.g. hive_Receipts_1) extract a dedicated
-        // HandwrittenNote field. Merge its value when present — the styles[]
-        // array is often empty for these analyzers. Multiple notes may be
-        // joined with " | " by the analyzer (e.g. "911 Will | R").
+        // Trust the CU analyzer's HandwrittenNote field verbatim. All quality
+        // control (filtering printed headers, cashier labels, city lines,
+        // single-letter noise, etc.) lives in the analyzer prompt — not here.
+        // Multiple notes may be joined with " | " by the analyzer.
+        $handwrittenNotes = [];
         $handwrittenField = $prefix['HandwrittenNote']['valueString']
             ?? $prefix['HandwrittenNote']['content']
             ?? null;
         if (is_string($handwrittenField) && trim($handwrittenField) !== '') {
             foreach (preg_split('/\s*\|\s*/', $handwrittenField) as $part) {
                 $part = trim($part);
-                if ($part !== '' && ! $this->isPrintedHeaderTokenMatch($part, $merchantName, $merchantAddress)) {
+                if ($part !== '') {
                     $handwrittenNotes[] = $part;
                 }
             }
@@ -740,6 +730,14 @@ class ReceiptController extends Controller
         // Fallback: parse raw OCR content for labels like "PRO JobName" / "PO #".
         if ($purchaseOrderNumber === '') {
             $purchaseOrderNumber = $this->extractPurchaseOrderFromRawContent($rawContent);
+        }
+
+        // Drop sentinel / placeholder PO values that contractors / store
+        // clerks type when there is no real PO (e.g. "0", "0000", "NA",
+        // "N/A", "none", "-"). These aren't real purchase orders and would
+        // otherwise pollute the field and break PO-based matching.
+        if ($this->isPlaceholderPurchaseOrder($purchaseOrderNumber)) {
+            $purchaseOrderNumber = '';
         }
 
         // ── 7. Total Tax ──────────────────────────────────────────────
@@ -1131,7 +1129,7 @@ class ReceiptController extends Controller
         if (is_array($totalTax)) { $totalTax = $totalTax[0]; }
 
         if ($amount === null && $subtotal !== null && $totalTax !== null) {
-            $amount = $subtotal + $totalTax;
+            $amount = round($subtotal + $totalTax, 2);
         }
 
         if (empty($totalTax) && empty($subtotal) && isset($amount)) {
@@ -1166,6 +1164,20 @@ class ReceiptController extends Controller
             $formattedItems = $this->deduplicateLineItems($formattedItems);
             $formattedItems = $this->reorderItemsByContentPosition($formattedItems, (string) ($rawContent ?? ''));
         }
+
+        // ── 11c. Reconcile missing subtotal / tax / total from line items ─
+        // When Azure CU misses one of the summary fields (e.g. "Subtotal"
+        // label not detected) but the line items + the other summary fields
+        // are present, we can safely fill it in. Each branch verifies the
+        // arithmetic matches before writing, so we never invent numbers.
+        [$subtotal, $totalTax, $amount] = $this->reconcileReceiptTotals(
+            $subtotal,
+            $totalTax,
+            $amount,
+            $formattedItems,
+            $tip,
+            $shipping
+        );
 
         // If shipping is already baked into the subtotal, subtract it so the
         // stored subtotal reflects only product/material cost.
@@ -1230,6 +1242,84 @@ class ReceiptController extends Controller
                 'continued_from_previous' => $this->extractBooleanFieldValue($prefix['ContinuedFromPrevious'] ?? null),
             ],
         ];
+    }
+
+
+    /**
+     * Fill in subtotal / tax / total when Azure CU misses one of them but
+     * the remaining summary fields plus the line items make the missing
+     * value unambiguously derivable. Each branch verifies the arithmetic
+     * matches within $0.02 before writing — if the numbers don't line up
+     * we leave the field null rather than invent a value.
+     *
+     * @param  list<array<string,mixed>>|array<int,array<string,mixed>>  $items
+     * @return array{0: ?float, 1: ?float, 2: ?float}  [subtotal, totalTax, amount]
+     */
+    private function reconcileReceiptTotals(
+        ?float $subtotal,
+        ?float $totalTax,
+        ?float $amount,
+        array $items,
+        ?float $tip,
+        ?float $shipping
+    ): array {
+        $itemsSum = 0.0;
+        $itemsCount = 0;
+        foreach ($items as $item) {
+            if (!is_array($item) || !array_key_exists('TotalPrice', $item)) {
+                continue;
+            }
+            $price = $item['TotalPrice'];
+            if ($price === null || $price === '') {
+                continue;
+            }
+            if (!is_numeric($price)) {
+                continue;
+            }
+            $itemsSum += (float) $price;
+            $itemsCount++;
+        }
+        $itemsSum = round($itemsSum, 2);
+        $tolerance = 0.02;
+        $sideAdjustments = round(($tip ?? 0) + ($shipping ?? 0), 2);
+
+        // Fill subtotal from line items when the remaining summary math
+        // confirms the items sum is the missing piece.
+        if ($subtotal === null && $itemsCount > 0 && $itemsSum > 0) {
+            if ($amount !== null && $totalTax !== null) {
+                $expected = round($amount - $totalTax - $sideAdjustments, 2);
+                if (abs($expected - $itemsSum) <= $tolerance) {
+                    $subtotal = $itemsSum;
+                }
+            } elseif ($amount === null && $totalTax === null) {
+                // No other summary fields at all → safe to trust items as subtotal.
+                $subtotal = $itemsSum;
+            }
+        }
+
+        // Fill tax when subtotal + total are present and items confirm subtotal.
+        if ($totalTax === null && $subtotal !== null && $amount !== null) {
+            $itemsAgreeWithSubtotal = $itemsCount === 0 || abs($itemsSum - $subtotal) <= $tolerance;
+            if ($itemsAgreeWithSubtotal) {
+                $gap = round($amount - $subtotal - $sideAdjustments, 2);
+                if ($gap > $tolerance) {
+                    $totalTax = $gap;
+                }
+            }
+        }
+
+        // Fill total when subtotal + tax are present and items confirm subtotal.
+        // (Note: a similar fallback exists below for the subtotal+tax case, but
+        // doing it here keeps the reconciled values consistent before the misc
+        // fees gap calculation runs.)
+        if ($amount === null && $subtotal !== null && $totalTax !== null) {
+            $itemsAgreeWithSubtotal = $itemsCount === 0 || abs($itemsSum - $subtotal) <= $tolerance;
+            if ($itemsAgreeWithSubtotal) {
+                $amount = round($subtotal + $totalTax + $sideAdjustments, 2);
+            }
+        }
+
+        return [$subtotal, $totalTax, $amount];
     }
 
 
@@ -1381,6 +1471,27 @@ class ReceiptController extends Controller
         return null;
     }
 
+    /**
+     * Returns true when a purchase-order string is a placeholder / sentinel
+     * value (e.g. "0", "0000", "NA", "N/A", "none", "-") rather than a real PO.
+     */
+    private function isPlaceholderPurchaseOrder(string $value): bool
+    {
+        $trimmed = trim($value);
+        if ($trimmed === '') {
+            return true;
+        }
+
+        // All zeros (possibly with dashes/dots/spaces): "0", "0000", "00-00".
+        if (preg_match('/^[0\-\.\s]+$/', $trimmed) === 1) {
+            return true;
+        }
+
+        $normalized = strtolower(preg_replace('/[\s\.\/\-]+/', '', $trimmed) ?? '');
+
+        return in_array($normalized, ['na', 'none', 'null', 'nil', 'nopo', 'noponumber', 'tbd', 'unknown'], true);
+    }
+
     private function extractPurchaseOrderFromRawContent(string $rawContent): string
     {
         if ($rawContent === '') {
@@ -1388,7 +1499,6 @@ class ReceiptController extends Controller
         }
 
         $labels = '(?:PO\s*\/\s*JOB\s*NAME|PO\s*NUMBER|PO\s*#|P\.?O\.?\s*#?|JOB\s*NAME|PRO\s*JobName|Customer\s*PO\s*Number|Customer\s*PO|Customer\s*P\.?O\.?)';
-
         foreach (preg_split('/\r?\n/', $rawContent) ?: [] as $line) {
             if (!preg_match('/' . $labels . '\s*:\s*([^\t\r\n]*)/i', $line, $match)) {
                 continue;
@@ -1408,242 +1518,6 @@ class ReceiptController extends Controller
         }
 
         return '';
-    }
-
-    /**
-     * Extract handwritten notes from CU `styles` while filtering out false
-     * positives (printed logos / stylized fonts that CU misclassifies as
-     * handwriting). A span is dropped when its text appears inside the
-     * extracted MerchantName/VendorName — those are printed by definition.
-     *
-     * @param  array<int, array<string, mixed>>  $styles
-     * @return array<int, string>
-     */
-    private function extractHandwrittenNotes(array $styles, string $originalContent, ?string $merchantName, ?string $merchantAddress = null): array
-    {
-        $merchantTokens = $this->buildPrintedHeaderTokens($merchantName, $merchantAddress);
-
-        $notes = [];
-        foreach ($styles as $style) {
-            if (! ($style['isHandwritten'] ?? false) || ($style['confidence'] ?? 0) <= 0.6) {
-                continue;
-            }
-
-            foreach ($style['spans'] ?? [] as $span) {
-                $offset = (int) ($span['offset'] ?? 0);
-                $length = (int) ($span['length'] ?? 0);
-                if ($length <= 0) {
-                    continue;
-                }
-
-                $note = mb_substr($originalContent, $offset, $length);
-                $note = trim(preg_replace('/\s+/', ' ', strip_tags($note)) ?? '');
-                if ($note === '') {
-                    continue;
-                }
-
-                if (! $this->isMeaningfulHandwrittenNote($note) || $this->isPrintedLocationLine($note, $originalContent)) {
-                    continue;
-                }
-
-                // Reject when every alphanumeric token in the note also exists
-                // in the printed merchant name. Catches cases like "Lady" being
-                // flagged inside "Lady Gregory's" stylized printed logo.
-                if (! empty($merchantTokens) && $this->isPrintedHeaderTokenMatch($note, $merchantName, $merchantAddress, $merchantTokens)) {
-                    continue;
-                }
-
-                $notes[] = $note;
-            }
-        }
-
-        return $notes;
-    }
-
-    /**
-     * @return array<string, bool>
-     */
-    private function buildPrintedHeaderTokens(?string $merchantName, ?string $merchantAddress = null): array
-    {
-        $tokens = [];
-
-        foreach ([$merchantName, $merchantAddress] as $source) {
-            if (! is_string($source) || trim($source) === '') {
-                continue;
-            }
-
-            foreach (preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($source)) ?: [] as $token) {
-                $token = trim($token);
-                if (mb_strlen($token) >= 2) {
-                    foreach ($this->expandLocationAbbreviations($token) as $variant) {
-                        $tokens[$variant] = true;
-                    }
-                }
-            }
-        }
-
-        return $tokens;
-    }
-
-    /**
-     * Expand common US address abbreviations both ways so token comparisons
-     * treat "MT" and "MOUNT" (or "FT" and "FORT") as the same location.
-     *
-     * @return array<int, string>
-     */
-    private function expandLocationAbbreviations(string $token): array
-    {
-        static $map = [
-            'mt' => 'mount',
-            'mount' => 'mt',
-            'ft' => 'fort',
-            'fort' => 'ft',
-            'pt' => 'point',
-            'point' => 'pt',
-            'hwy' => 'highway',
-            'highway' => 'hwy',
-        ];
-
-        return isset($map[$token]) ? [$token, $map[$token]] : [$token];
-    }
-
-    /**
-     * Reject note candidates that are fully composed of printed merchant header/address tokens.
-     *
-     * @param array<string, bool>|null $cachedTokens
-     */
-    private function isPrintedHeaderTokenMatch(string $candidate, ?string $merchantName, ?string $merchantAddress = null, ?array $cachedTokens = null): bool
-    {
-        $merchantTokens = $cachedTokens ?? $this->buildPrintedHeaderTokens($merchantName, $merchantAddress);
-        if ($merchantTokens === []) {
-            return false;
-        }
-
-        $candidateTokens = preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($candidate)) ?: [];
-        $candidateTokens = array_values(array_filter($candidateTokens, fn ($t) => mb_strlen($t) >= 2));
-        if ($candidateTokens === []) {
-            return false;
-        }
-
-        foreach ($candidateTokens as $token) {
-            $variants = $this->expandLocationAbbreviations($token);
-            $matched = false;
-            foreach ($variants as $variant) {
-                if (isset($merchantTokens[$variant])) {
-                    $matched = true;
-                    break;
-                }
-            }
-            if (! $matched) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /**
-     * Basic quality filter for a single handwritten-note candidate.
-     */
-    private function isMeaningfulHandwrittenNote(string $note): bool
-    {
-        $decoded = html_entity_decode($note, ENT_QUOTES | ENT_HTML5);
-        $clean = trim((string) preg_replace('/\s+/', ' ', strip_tags($decoded)));
-
-        if ($clean === '') {
-            return false;
-        }
-
-        // Drop symbol-only noise (e.g. "&", "***", punctuation clusters).
-        if (! preg_match('/[A-Za-z0-9]/', $clean)) {
-            return false;
-        }
-
-        // Reject common policy/account billing reference strings.
-        if (preg_match('/\b(policy|account)\b/i', $clean) && preg_match('/\bbilling\b/i', $clean)) {
-            return false;
-        }
-
-        return true;
-    }
-
-    private function isPrintedLocationLine(string $candidate, string $originalContent): bool
-    {
-        $needle = trim((string) preg_replace('/\s+/', ' ', strip_tags(html_entity_decode($candidate, ENT_QUOTES | ENT_HTML5))));
-        if ($needle === '') {
-            return false;
-        }
-
-        $lines = preg_split('/\R/u', $originalContent) ?: [];
-        foreach ($lines as $index => $line) {
-            $normalizedLine = trim((string) preg_replace('/\s+/', ' ', strip_tags(html_entity_decode($line, ENT_QUOTES | ENT_HTML5))));
-            if ($normalizedLine !== $needle) {
-                continue;
-            }
-
-            $previousLine = trim((string) preg_replace('/\s+/', ' ', strip_tags(html_entity_decode($lines[$index - 1] ?? '', ENT_QUOTES | ENT_HTML5))));
-            $nextLine = trim((string) preg_replace('/\s+/', ' ', strip_tags(html_entity_decode($lines[$index + 1] ?? '', ENT_QUOTES | ENT_HTML5))));
-            $nextNextLine = trim((string) preg_replace('/\s+/', ' ', strip_tags(html_entity_decode($lines[$index + 2] ?? '', ENT_QUOTES | ENT_HTML5))));
-
-            if ($this->looksLikeAddressBlockLine($needle, $previousLine, $nextLine, $nextNextLine)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private function looksLikeAddressBlockLine(string $candidate, string $previousLine, string $nextLine, string $nextNextLine): bool
-    {
-        if (preg_match('/\d/', $candidate)) {
-            return false;
-        }
-
-        if (! preg_match('/^[\p{L}][\p{L}\s\'\.-]*$/u', $candidate)) {
-            return false;
-        }
-
-        $candidateWordCount = count(array_filter(preg_split('/\s+/u', $candidate) ?: [], fn ($part) => $part !== ''));
-        if ($candidateWordCount < 2 || $candidateWordCount > 4) {
-            return false;
-        }
-
-        if ($this->looksLikeStreetAddressLine($nextLine) || $this->looksLikeCityStateZipLine($nextLine) || $this->looksLikeCityStateZipLine($nextNextLine)) {
-            return true;
-        }
-
-        if ($previousLine !== '' && $this->looksLikeMerchantHeaderLine($previousLine) && $this->looksLikeStreetAddressLine($nextLine)) {
-            return true;
-        }
-
-        return false;
-    }
-
-    private function looksLikeStreetAddressLine(string $line): bool
-    {
-        if ($line === '') {
-            return false;
-        }
-
-        return (bool) preg_match('/^\d+\s+.*\b(?:st|street|rd|road|ave|avenue|blvd|boulevard|ln|lane|dr|drive|ct|court|hwy|highway|pkwy|parkway|pl|place|cir|circle|way)\b/i', $line);
-    }
-
-    private function looksLikeCityStateZipLine(string $line): bool
-    {
-        if ($line === '') {
-            return false;
-        }
-
-        return (bool) preg_match('/^[\p{L}\s\'\.-]+,?\s+[A-Z]{2}\s+\d{5}(?:-\d{4})?$/u', $line);
-    }
-
-    private function looksLikeMerchantHeaderLine(string $line): bool
-    {
-        if ($line === '') {
-            return false;
-        }
-
-        return (bool) preg_match('/^[\p{L}\d][\p{L}\d\s&\'\.-]{2,}$/u', $line);
     }
 
     /**

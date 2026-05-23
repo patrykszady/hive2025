@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Expenses;
 
+use App\Models\AutoReceiptEmailBatch;
 use App\Models\ExpenseReceipts;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Collection;
@@ -140,68 +141,50 @@ class AutoReceipts extends Component
 
     /**
      * All batches as arrays of receipt ids, newest batch first.
+     * A single receipt id may appear in multiple batches when the same
+     * paper receipt is rescanned/re-emailed — each batch shows the
+     * delivery in its own slot.
      *
      * @return array<int, array<int, int>>
      */
     #[Computed]
     public function batches(): array
     {
-        $rows = $this->baseQuery()->get([
-            'id',
-            'created_at',
-            'auto_receipt_message_id',
-            'auto_receipt_attachment_index',
-            'auto_receipt_email_received_at',
-        ]);
+        $vendorId = auth()->user()?->vendor?->id;
 
-        if ($rows->isEmpty()) {
-            return [];
-        }
+        $batches = AutoReceiptEmailBatch::query()
+            ->with(['items' => function ($q) {
+                $q->orderBy('attachment_index')->orderBy('id');
+            }, 'items.expenseReceipt:id,expense_id', 'items.expenseReceipt.expense:id,belongs_to_vendor_id'])
+            ->orderByDesc('email_received_at')
+            ->orderByDesc('id')
+            ->get();
 
-        $scoredBatches = [];
-
-        $messageGroups = $rows->groupBy('auto_receipt_message_id');
-
-        foreach ($messageGroups as $groupRows) {
-            $ordered = $groupRows
-                ->sort(function ($a, $b) {
-                    $aIdx = $a->auto_receipt_attachment_index;
-                    $bIdx = $b->auto_receipt_attachment_index;
-
-                    if ($aIdx === null && $bIdx === null) {
-                        return $b->created_at <=> $a->created_at;
+        $out = [];
+        foreach ($batches as $batch) {
+            $ids = $batch->items
+                ->filter(function ($item) use ($vendorId) {
+                    $receipt = $item->expenseReceipt;
+                    if (! $receipt) {
+                        return false;
                     }
-
-                    if ($aIdx === null) {
-                        return 1;
+                    if (! $vendorId) {
+                        return true;
                     }
-
-                    if ($bIdx === null) {
-                        return -1;
-                    }
-
-                    if ((int) $aIdx === (int) $bIdx) {
-                        return $b->created_at <=> $a->created_at;
-                    }
-
-                    return (int) $aIdx <=> (int) $bIdx;
+                    return $receipt->expense?->belongs_to_vendor_id === $vendorId;
                 })
-                ->values();
+                ->sortBy('attachment_index')
+                ->values()
+                ->pluck('expense_receipt_id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
 
-            $batchTimestamp = $ordered->firstWhere('auto_receipt_email_received_at', '!=', null)?->auto_receipt_email_received_at
-                ?? $ordered->max('created_at');
-
-            $scoredBatches[] = [
-                'ids' => $ordered->pluck('id')->all(),
-                'ts' => $batchTimestamp,
-            ];
+            if (! empty($ids)) {
+                $out[] = $ids;
+            }
         }
 
-        usort($scoredBatches, function (array $a, array $b): int {
-            return $b['ts'] <=> $a['ts'];
-        });
-
-        return array_values(array_map(fn (array $batch) => $batch['ids'], $scoredBatches));
+        return $out;
     }
 
     /**
@@ -235,27 +218,6 @@ class AutoReceipts extends Component
         }
 
         return $receipt;
-    }
-
-    /**
-     * Base query: receipts attached to expenses the current user owns,
-     * newest first.
-     *
-     * @return \Illuminate\Database\Eloquent\Builder<ExpenseReceipts>
-     */
-    protected function baseQuery()
-    {
-        $vendorId = auth()->user()?->vendor?->id;
-
-        return ExpenseReceipts::query()
-            ->whereNotNull('auto_receipt_message_id')
-            ->whereHas('expense', function ($q) use ($vendorId) {
-                if ($vendorId) {
-                    $q->where('belongs_to_vendor_id', $vendorId);
-                }
-            })
-            ->orderByDesc('created_at')
-            ->orderByDesc('id');
     }
 
     #[Title('Recent Auto Receipts')]
