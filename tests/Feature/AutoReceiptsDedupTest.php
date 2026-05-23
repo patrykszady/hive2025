@@ -256,3 +256,91 @@ it('attaches a continuation page to the prior expense when the analyzer flags co
     expect(ExpenseReceipts::where('expense_id', $exp->id)->count())->toBe(2);
     expect(Storage::disk('files')->files('auto_receipts_failed'))->toBeEmpty();
 });
+
+it('attaches same-message adjacent detail page without invoice_number to prior expense', function () {
+    Storage::fake('files');
+
+    $vendor = Vendor::factory()->create([
+        'business_name' => 'DSP MOTORSPORTS',
+        'business_type' => 'Retail',
+    ]);
+
+    CompanyEmail::create([
+        'vendor_id' => $vendor->id,
+        'email' => 'patryk@gs.construction',
+        'grant_id' => 'grant-test',
+        'api_json' => [
+            'INBOX_FOLDER' => 'inbox-fld',
+            'HIVE_RECEIPTS_FOLDER' => 'hive-fld',
+        ],
+    ]);
+
+    $nylasMock = Mockery::mock(NylasService::class);
+    $nylasMock->shouldReceive('syncMessages')->andReturn([
+        'messages' => [
+            [
+                'id' => 'msg-1',
+                'from' => [['email' => 'noreply@print.epsonconnect.com']],
+                'subject' => 'Receipt Scans',
+                'attachments' => [
+                    ['id' => 'att-0', 'filename' => 'header-page.pdf'],
+                    ['id' => 'att-1', 'filename' => 'detail-page.pdf'],
+                ],
+            ],
+        ],
+    ]);
+    $nylasMock->shouldReceive('downloadAttachment')->andReturn('%PDF-fake-bytes');
+    $nylasMock->shouldReceive('moveOriginalMessageToHiveFolder')->andReturnNull();
+    app()->instance(NylasService::class, $nylasMock);
+
+    $callIndex = 0;
+    $rcMock = Mockery::mock(ReceiptController::class)->makePartial();
+    $rcMock->shouldReceive('extractReceipt')
+        ->times(2)
+        ->andReturnUsing(function () use (&$callIndex) {
+            $callIndex++;
+
+            if ($callIndex === 1) {
+                return [
+                    'fields' => [
+                        'invoice_number' => '106552',
+                        'merchant_name' => 'DSP MOTORSPORTS',
+                        'transaction_date' => '2026-05-12',
+                        'total' => 178.24,
+                        'raw_content' => 'DSP MOTORSPORTS Repair Order Doc Number: 106552',
+                    ],
+                    'content' => 'DSP MOTORSPORTS Repair Order Doc Number: 106552',
+                ];
+            }
+
+            return [
+                'fields' => [
+                    'invoice_number' => null,
+                    'merchant_name' => 'DSP MOTORSPORTS',
+                    'transaction_date' => '2026-05-22',
+                    'total' => 178.24,
+                    'raw_content' => '# Detail Description: MOUNT AND BALANCE FRONT TIRE Resolve Concern',
+                ],
+                'content' => '# Detail Description: MOUNT AND BALANCE FRONT TIRE Resolve Concern',
+            ];
+        });
+    app()->instance(ReceiptController::class, $rcMock);
+
+    $controller = new CompanyEmailController($nylasMock);
+    $controller->fetchAutoReceipts();
+
+    expect(Expense::withoutGlobalScopes()->count())->toBe(1);
+
+    $expense = Expense::withoutGlobalScopes()->first();
+    expect($expense)->not->toBeNull();
+    expect(ExpenseReceipts::where('expense_id', $expense->id)->count())->toBe(2);
+
+    $receipts = ExpenseReceipts::where('expense_id', $expense->id)
+        ->orderBy('id')
+        ->get();
+
+    expect((string) $receipts[0]->auto_receipt_message_id)->toBe('msg-1');
+    expect((int) $receipts[0]->auto_receipt_attachment_index)->toBe(1);
+    expect((string) $receipts[1]->auto_receipt_message_id)->toBe('msg-1');
+    expect((int) $receipts[1]->auto_receipt_attachment_index)->toBe(2);
+});

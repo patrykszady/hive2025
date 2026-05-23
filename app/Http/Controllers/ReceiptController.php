@@ -1225,6 +1225,9 @@ class ReceiptController extends Controller
                 'handwritten_notes' => $handwrittenNotes,
                 'payment_methods'   => $this->extractPaymentMethods($prefix),
                 'raw_content'       => $rawContent,
+                'page_number'       => $this->extractIntegerFieldValue($prefix['PageNumber'] ?? null),
+                'page_total'        => $this->extractIntegerFieldValue($prefix['PageTotal'] ?? null),
+                'continued_from_previous' => $this->extractBooleanFieldValue($prefix['ContinuedFromPrevious'] ?? null),
             ],
         ];
     }
@@ -1314,6 +1317,68 @@ class ReceiptController extends Controller
         }
 
         return '';
+    }
+
+    private function extractIntegerFieldValue(mixed $field): ?int
+    {
+        if (is_array($field)) {
+            if (isset($field['valueNumber']) && is_numeric($field['valueNumber'])) {
+                return (int) $field['valueNumber'];
+            }
+
+            if (isset($field['valueInteger']) && is_numeric($field['valueInteger'])) {
+                return (int) $field['valueInteger'];
+            }
+
+            if (isset($field['valueString']) && is_numeric($field['valueString'])) {
+                return (int) $field['valueString'];
+            }
+
+            if (isset($field['content']) && is_numeric($field['content'])) {
+                return (int) $field['content'];
+            }
+        }
+
+        if (is_numeric($field)) {
+            return (int) $field;
+        }
+
+        return null;
+    }
+
+    private function extractBooleanFieldValue(mixed $field): ?bool
+    {
+        if (is_array($field)) {
+            if (array_key_exists('valueBoolean', $field)) {
+                return (bool) $field['valueBoolean'];
+            }
+
+            if (isset($field['valueString'])) {
+                $value = strtolower(trim((string) $field['valueString']));
+                if ($value === 'true' || $value === 'yes') {
+                    return true;
+                }
+                if ($value === 'false' || $value === 'no') {
+                    return false;
+                }
+            }
+
+            if (isset($field['content'])) {
+                $value = strtolower(trim((string) $field['content']));
+                if ($value === 'true' || $value === 'yes') {
+                    return true;
+                }
+                if ($value === 'false' || $value === 'no') {
+                    return false;
+                }
+            }
+        }
+
+        if (is_bool($field)) {
+            return $field;
+        }
+
+        return null;
     }
 
     private function extractPurchaseOrderFromRawContent(string $rawContent): string

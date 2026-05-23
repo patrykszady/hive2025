@@ -1941,8 +1941,16 @@ class CompanyEmailController extends Controller
 
                     $lastExpenseForMessage = null;
 
-                    foreach ($message['attachments'] as $attachment_key => $attachment) {
+                    // Multi-page receipts split across multiple attachments are stitched together
+                    // AFTER OCR using the analyzer's confirmed signals (page_number,
+                    // page_total, continued_from_previous) via the continuation/dedup path
+                    // below. We do NOT merge pre-OCR — that would require guessing which
+                    // attachments belong together, and the analyzer is the source of truth.
+                    $attachmentsToProcess = $message['attachments'];
+
+                    foreach ($attachmentsToProcess as $attachment_key => $attachment) {
                         $doc_type = 'pdf';
+                        $attachmentIndex = (int) ($attachment['__attachment_index'] ?? ($attachment_key + 1));
 
                         // Generate a unique filename and create the temporary file path.
                         $ocr_filename = date('Y-m-d-H-i-s') . '-' . rand(10, 99) . '.pdf';
@@ -1966,7 +1974,7 @@ class CompanyEmailController extends Controller
                             Log::channel('receipt_processing')->error('AutoReceipts: attachment processing failed; continuing with next attachment', [
                                 'company_email_id' => $company_email->id,
                                 'message_id' => $messageId,
-                                'attachment_index' => $attachment_key + 1,
+                                'attachment_index' => $attachmentIndex,
                                 'attachment_filename' => $attachment['filename'] ?? 'unknown',
                                 'attachment_id' => $attachment['id'] ?? null,
                                 'error' => $exception->getMessage(),
@@ -2019,12 +2027,12 @@ class CompanyEmailController extends Controller
                                     false,
                                     [
                                         'message_id' => $batch->message_id,
-                                        'attachment_index' => $attachment_key + 1,
+                                        'attachment_index' => $attachmentIndex,
                                         'email_received_at' => $batch->email_received_at,
                                     ],
                                 );
 
-                                if ($attachment_key === array_key_last($message['attachments'])) {
+                                if ($attachment_key === array_key_last($attachmentsToProcess)) {
                                     $this->nylasService->moveOriginalMessageToHiveFolder($grantId, $messageId, $company_email->id);
                                 }
 
@@ -2044,7 +2052,7 @@ class CompanyEmailController extends Controller
                             Storage::disk('files')->put('auto_receipts_failed/'. $company_email->vendor_id . '-' .$ocr_filename, $attachmentContent);
                             Storage::disk('files')->delete($ocr_path);
 
-                            if ($attachment_key === array_key_last($message['attachments'])) {
+                            if ($attachment_key === array_key_last($attachmentsToProcess)) {
                                 $this->nylasService->moveOriginalMessageToHiveFolder($grantId, $messageId, $company_email->id);
                             }
 
@@ -2066,7 +2074,7 @@ class CompanyEmailController extends Controller
 
                             Storage::disk('files')->delete($ocr_path);
 
-                            if ($attachment_key === array_key_last($message['attachments'])) {
+                            if ($attachment_key === array_key_last($attachmentsToProcess)) {
                                 $this->nylasService->moveOriginalMessageToHiveFolder($grantId, $messageId, $company_email->id);
                             }
 
@@ -2075,6 +2083,29 @@ class CompanyEmailController extends Controller
 
                         // Normalize stored value so downstream logic uses the corrected date.
                         $ocr_receipt_data['fields']['transaction_date'] = $resolvedTransactionDate->toDateString();
+
+                        if ($this->shouldAttachToPreviousExpenseInSameMessage(
+                            $ocr_receipt_data,
+                            $lastExpenseForMessage,
+                            (string) $batch->message_id,
+                            $attachment_key + 1,
+                        )) {
+                            $this->saveExpenseReceipt(
+                                $lastExpenseForMessage->id,
+                                $ocr_receipt_data,
+                                $ocr_filename,
+                                null,
+                                true,
+                                false,
+                                [
+                                    'message_id' => $batch->message_id,
+                                    'attachment_index' => $attachmentIndex,
+                                    'email_received_at' => $batch->email_received_at,
+                                ],
+                            );
+
+                            continue;
+                        }
 
                         // Set up the transaction date range.
                         $start_date = Carbon::parse($ocr_receipt_data['fields']['transaction_date'])
@@ -2193,7 +2224,7 @@ class CompanyEmailController extends Controller
                                     false,
                                     [
                                         'message_id' => $batch->message_id,
-                                        'attachment_index' => $attachment_key + 1,
+                                        'attachment_index' => $attachmentIndex,
                                         'email_received_at' => $batch->email_received_at,
                                     ],
                                 );
@@ -2320,7 +2351,7 @@ class CompanyEmailController extends Controller
                                 false,
                                 [
                                     'message_id' => $batch->message_id,
-                                    'attachment_index' => $attachment_key + 1,
+                                    'attachment_index' => $attachmentIndex,
                                     'email_received_at' => $batch->email_received_at,
                                 ],
                             );
@@ -2337,6 +2368,100 @@ class CompanyEmailController extends Controller
                 }
             }
         }
+    }
+
+    protected function shouldAttachToPreviousExpenseInSameMessage(array $ocrReceiptData, mixed $lastExpenseForMessage, string $messageId, int $attachmentIndex): bool
+    {
+        if (! $lastExpenseForMessage instanceof Expense) {
+            return false;
+        }
+
+        $fields = is_array($ocrReceiptData['fields'] ?? null) ? $ocrReceiptData['fields'] : [];
+
+        $lastReceipt = ExpenseReceipts::withoutGlobalScopes()
+            ->where('expense_id', $lastExpenseForMessage->id)
+            ->latest('id')
+            ->first();
+
+        if (! $lastReceipt) {
+            return false;
+        }
+
+        if ((string) ($lastReceipt->auto_receipt_message_id ?? '') !== $messageId) {
+            return false;
+        }
+
+        $lastAttachmentIndex = (int) ($lastReceipt->auto_receipt_attachment_index ?? 0);
+        if ($lastAttachmentIndex <= 0 || $attachmentIndex !== ($lastAttachmentIndex + 1)) {
+            return false;
+        }
+
+        $lastItems = is_array($lastReceipt->receipt_items) ? $lastReceipt->receipt_items : (array) ($lastReceipt->receipt_items ?? []);
+
+        // ── Primary signal: analyzer-reported continuation ────────────────
+        // Hive's CU analyzer extracts PageNumber/PageTotal/ContinuedFromPrevious
+        // from any "Page X of Y" / "Continued from previous page" markers on
+        // the document. When present, these are the most reliable indicator
+        // that this attachment is page N of a multi-page receipt.
+        $continuedFromPrevious = $fields['continued_from_previous'] ?? null;
+        $pageNumber = isset($fields['page_number']) ? (int) $fields['page_number'] : null;
+        $pageTotal = isset($fields['page_total']) ? (int) $fields['page_total'] : null;
+
+        $lastPageTotal = isset($lastItems['page_total']) ? (int) $lastItems['page_total'] : null;
+        $lastPageNumber = isset($lastItems['page_number']) ? (int) $lastItems['page_number'] : null;
+
+        $analyzerSaysContinuation = ($continuedFromPrevious === true)
+            || ($pageNumber !== null && $pageNumber > 1)
+            || ($lastPageTotal !== null && $lastPageTotal > 1)
+            || ($pageTotal !== null && $pageTotal > 1 && $lastPageNumber !== null);
+
+        if ($analyzerSaysContinuation) {
+            $normalize = fn (?string $value): string => preg_replace('/\s+/', ' ', strtoupper(trim((string) $value))) ?? '';
+            $currentMerchant = $normalize((string) ($fields['merchant_name'] ?? ''));
+            $lastMerchant = $normalize((string) ($lastItems['merchant_name'] ?? ''));
+
+            // When merchant is present on both sides, require it to match.
+            if ($currentMerchant !== '' && $lastMerchant !== '' && $currentMerchant !== $lastMerchant) {
+                return false;
+            }
+
+            return true;
+        }
+
+        // ── Secondary signal: structural heuristic ────────────────────────
+        // Fallback for analyzers that don't emit page markers (or scans
+        // without printed "Page X of Y"): missing invoice number + same
+        // merchant + same total + detail-page text markers.
+        $invoiceNumber = trim((string) ($fields['invoice_number'] ?? ''));
+        if ($invoiceNumber !== '') {
+            return false;
+        }
+
+        $currentTotal = isset($fields['total']) ? (float) $fields['total'] : null;
+        if ($currentTotal === null || $currentTotal <= 0) {
+            return false;
+        }
+
+        $lastTotal = isset($lastItems['total']) ? (float) $lastItems['total'] : null;
+        if ($lastTotal === null || abs($lastTotal - $currentTotal) > 0.01) {
+            return false;
+        }
+
+        $normalize = fn (?string $value): string => preg_replace('/\s+/', ' ', strtoupper(trim((string) $value))) ?? '';
+        $currentMerchant = $normalize((string) ($fields['merchant_name'] ?? ''));
+        $lastMerchant = $normalize((string) ($lastItems['merchant_name'] ?? ''));
+        if ($currentMerchant === '' || $lastMerchant === '' || $currentMerchant !== $lastMerchant) {
+            return false;
+        }
+
+        $rawContent = strtolower((string) ($fields['raw_content'] ?? $ocrReceiptData['content'] ?? ''));
+
+        return str_contains($rawContent, '# detail')
+            || str_contains($rawContent, 'description:')
+            || str_contains($rawContent, 'resolve concern')
+            || str_contains($rawContent, 'mount and balance')
+            || str_contains($rawContent, 'continued from previous')
+            || preg_match('/page\s*#?\s*\d+\s*(?:of|\/)\s*\d+/i', $rawContent) === 1;
     }
 
     /**
