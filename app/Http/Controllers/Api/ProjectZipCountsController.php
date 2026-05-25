@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Cache;
 class ProjectZipCountsController extends Controller
 {
     /**
-     * Return aggregated project counts grouped by ZIP code.
+     * Return project counts grouped by (zip, city, state).
      *
      * Projects are scoped automatically to the authenticated user's vendor
      * via App\Scopes\ProjectScope. The token used to call this endpoint
@@ -19,7 +19,7 @@ class ProjectZipCountsController extends Controller
      *
      * Response shape:
      * [
-     *   { "zip": "60067", "count": 12 },
+     *   { "zip": "60067", "city": "Palatine", "state": "IL", "count": 105 },
      *   ...
      * ]
      */
@@ -34,12 +34,14 @@ class ProjectZipCountsController extends Controller
             return Project::query()
                 ->whereNotNull('zip_code')
                 ->where('zip_code', '>', 0)
-                ->selectRaw('zip_code, COUNT(*) as count')
-                ->groupBy('zip_code')
+                ->selectRaw('zip_code, city, state, COUNT(*) as count')
+                ->groupBy('zip_code', 'city', 'state')
                 ->orderByDesc('count')
                 ->get()
                 ->map(fn ($row) => [
                     'zip' => str_pad((string) $row->zip_code, 5, '0', STR_PAD_LEFT),
+                    'city' => trim((string) $row->city) ?: null,
+                    'state' => trim((string) $row->state) ?: null,
                     'count' => (int) $row->count,
                 ])
                 ->values()
