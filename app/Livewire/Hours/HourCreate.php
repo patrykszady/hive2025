@@ -299,18 +299,29 @@ class HourCreate extends Component
 
     public function add_project()
     {
-        //return with error
         if (is_null($this->new_project_id)) {
             $this->addError('select_new_project', 'Please select another project.');
-        } else {
-            $project = $this->other_projects->where('id', $this->new_project_id);
-            $this->projects->add($project->first());
-
-            $this->form->projects[] = $project->first()->toArray();
-
-            $this->other_projects->forget($project->keys()->first());
-            $this->new_project_id = null;
+            return;
         }
+
+        $project = $this->other_projects->firstWhere('id', (int) $this->new_project_id);
+        if (! $project) {
+            $this->addError('select_new_project', 'Selected project is not available.');
+            return;
+        }
+
+        // Re-assign the full collection so Livewire detects the state change
+        // and re-renders the Project Hours list immediately.
+        $updatedProjects = collect($this->projects)->keyBy('id');
+        if (! $updatedProjects->has($project->id)) {
+            $updatedProjects->put($project->id, $project);
+        }
+
+        $this->projects = $updatedProjects;
+        $this->form->setProjects($this->projects->toArray());
+        $this->day_project_tasks[$project->id] = $this->day_project_tasks[$project->id] ?? [];
+        $this->new_project_id = null;
+        $this->resetErrorBag('select_new_project');
     }
 
     public function save()

@@ -136,7 +136,6 @@
                 </x-island-card>
 
             <x-island-card heading="Different Project">
-                @island(name: 'add-project', always: true)
                 <flux:input.group>
                     <x-forms.project-select
                         :projects="$this->other_projects"
@@ -148,7 +147,6 @@
 
                     <flux:button variant="primary" wire:click="add_project" icon="plus-circle" wire:loading.attr="disabled" wire:target="add_project">Add</flux:button>
                 </flux:input.group>
-                @endisland
             </x-island-card>
             @endif
             </div>

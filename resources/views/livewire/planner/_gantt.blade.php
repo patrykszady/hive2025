@@ -5,14 +5,16 @@
 @php
     $rowHeight = 74;              // bar (64) + 10px gap; arrows route through the gap
     $rowPadding = 6;              // vertical padding inside each project row
-    $projectColumnWidth = 280;    // px sticky left column
-    $headerHeight = 56;           // px sticky top header
+    $projectColumnWidth = 224;    // px sticky left column (matches table view)
+    $headerHeight = 56;           // px sticky top header (24px month + 32px day cells)
     $totalDays = $days->count();
     $timelineWidth = $totalDays * $pxPerDay;
     $today = browser_today();
     $firstDay = $days->first();
     $todayOffsetPx = (int) $firstDay->diffInDays($today) * $pxPerDay;
 @endphp
+
+@php require resource_path('views/livewire/planner/_day-classes.php'); @endphp
 
 <div
     x-data="plannerGantt({
@@ -55,6 +57,19 @@
             </div>
         </div>
 
+        {{-- Subtle "Saving…" pill for gantt mutations. Hidden under 200ms so fast
+             requests don't flash the indicator. --}}
+        <div
+            wire:loading.delay
+            wire:target="updateTaskDates,createDependencyLink,onDependenciesUpdated"
+            class="absolute top-2 left-1/2 -translate-x-1/2 z-40 pointer-events-none"
+        >
+            <div class="flex items-center gap-2 rounded-full bg-white/90 dark:bg-zinc-800/90 backdrop-blur-sm px-3 py-1 shadow-lg ring-1 ring-zinc-200/60 dark:ring-zinc-700/60">
+                <flux:icon.arrow-path class="size-3.5 text-zinc-500 animate-spin" />
+                <span class="text-xs font-medium text-zinc-600 dark:text-zinc-300">Saving…</span>
+            </div>
+        </div>
+
         <div
             class="relative"
             :style="`width: {{ $projectColumnWidth + $timelineWidth }}px;`"
@@ -66,8 +81,8 @@
                 style="height: {{ $headerHeight }}px;"
             >
                 <div
-                    class="sticky left-0 z-40 bg-zinc-50 dark:bg-zinc-800/95 border-r border-zinc-200 dark:border-zinc-700 flex items-center px-3"
-                    style="width: {{ $projectColumnWidth }}px; min-width: {{ $projectColumnWidth }}px;"
+                    class="sticky left-0 z-40 bg-zinc-50 dark:bg-zinc-800/95 flex items-center px-3"
+                    style="width: {{ $projectColumnWidth }}px; min-width: {{ $projectColumnWidth }}px; box-shadow: inset -2px 0 0 0 #cbd5e1;"
                 >
                     <flux:heading size="sm" class="text-zinc-700 dark:text-zinc-200">Project</flux:heading>
                 </div>
@@ -84,15 +99,19 @@
                                 $label = \Carbon\Carbon::create((int) $year, (int) $month, 1)->format('M Y');
                             @endphp
                             <div
-                                class="flex items-center px-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400 border-r border-zinc-200/60 dark:border-zinc-700/60 overflow-hidden"
-                                style="width: {{ $count * $pxPerDay }}px;"
+                                class="flex items-center text-xs font-semibold text-zinc-500 dark:text-zinc-400 border-r border-zinc-200/60 dark:border-zinc-700/60"
+                                style="width: {{ $count * $pxPerDay }}px; overflow: visible;"
                             >
-                                {{ $label }}
+                                <span
+                                    style="position: sticky; left: {{ $projectColumnWidth + 8 }}px; display: inline-block; padding-left: 8px; padding-right: 8px;"
+                                >
+                                    {{ $label }}
+                                </span>
                             </div>
                         @endforeach
                     </div>
                     {{-- Day cells --}}
-                    <div class="flex h-[30px]">
+                    <div class="flex" style="height: {{ $headerHeight - 24 }}px;">
                         @foreach ($days as $i => $day)
                             @php
                                 $isWeekend = $day->isWeekend();
@@ -100,16 +119,21 @@
                             @endphp
                             <div
                                 class="flex flex-col items-center justify-center border-r text-[10px] tabular-nums select-none
-                                    {{ $isWeekend ? 'bg-zinc-50 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500' : 'text-zinc-600 dark:text-zinc-300' }}
-                                    {{ $isToday ? '!text-indigo-600 dark:!text-indigo-400 font-bold' : '' }}
-                                    border-zinc-200/60 dark:border-zinc-700/60"
+                                    {{ $isWeekend ? $dayWeekendBgClass . ' ' . $dayWeekendTextClass : $dayWeekdayTextClass }}
+                                    {{ $isToday ? $dayTodayTextClass : '' }}
+                                    {{ $dayBorderClass }}"
                                 style="width: {{ $pxPerDay }}px; min-width: {{ $pxPerDay }}px;"
                                 data-date="{{ $day->format('Y-m-d') }}"
                                 @if ($isToday) data-today @endif
                             >
                                 @if ($pxPerDay >= 60)
                                     <span>{{ $day->format('D') }}</span>
-                                    <span class="font-semibold">{{ $day->format('j') }}</span>
+                                    <div class="flex items-center gap-1">
+                                        <span class="font-semibold">{{ $day->format('j') }}</span>
+                                        @if ($isToday)
+                                            <span class="{{ $dayTodayPillClass }}">Today</span>
+                                        @endif
+                                    </div>
                                 @elseif ($pxPerDay >= 24)
                                     <span class="font-semibold">{{ $day->format('j') }}</span>
                                 @else
@@ -137,9 +161,9 @@
                             $isToday = $day->isSameDay($today);
                         @endphp
                         <div
-                            class="absolute top-0 bottom-0 border-r border-zinc-200/60 dark:border-zinc-700/60
-                                {{ $isWeekend ? 'bg-zinc-50 dark:bg-zinc-800' : '' }}
-                                {{ $isToday ? 'bg-indigo-50/50 dark:bg-indigo-900/10' : '' }}"
+                            class="absolute top-0 bottom-0 border-r {{ $dayBorderClass }}
+                                {{ $isWeekend ? $dayWeekendBgClass : '' }}
+                                {{ $isToday ? $dayTodayBgClass : '' }}"
                             style="left: {{ $i * $pxPerDay }}px; width: {{ $pxPerDay }}px;"
                         ></div>
                     @endforeach
@@ -148,6 +172,8 @@
                 {{-- Today vertical line (extends across entire body) --}}
                 @if ($todayOffsetPx >= 0 && $todayOffsetPx <= $timelineWidth)
                     <div
+                        x-ref="todayLine"
+                        data-today-offset="{{ $todayOffsetPx }}"
                         class="absolute top-0 bottom-0 w-px bg-indigo-500/60 dark:bg-indigo-400/60 pointer-events-none z-20"
                         style="left: {{ $projectColumnWidth + $todayOffsetPx }}px;"
                     ></div>
@@ -159,14 +185,14 @@
                         $projectHeight = ($rowsCount * $rowHeight) + (2 * $rowPadding);
                     @endphp
                     <div
-                        class="relative z-10 flex border-b border-zinc-200/60 dark:border-zinc-700/60 group"
+                        class="relative z-10 flex border-b {{ $dayBorderClass }} group"
                         style="height: {{ $projectHeight }}px;"
                         wire:key="gantt-project-{{ $projectRow->id }}"
                     >
                         {{-- Sticky project sidebar (shared partial — matches table view) --}}
                         <div
-                            class="sticky left-0 z-10 bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-700 flex flex-col justify-center gap-1 px-3 py-2 group/cell"
-                            style="width: {{ $projectColumnWidth }}px; min-width: {{ $projectColumnWidth }}px;"
+                            class="sticky left-0 z-20 bg-white dark:bg-zinc-900 flex items-center px-3 py-2 group/cell"
+                            style="width: {{ $projectColumnWidth }}px; min-width: {{ $projectColumnWidth }}px; box-shadow: inset -2px 0 0 0 #cbd5e1;"
                         >
                             @php
                                 $project = $projectRow->project;
@@ -207,7 +233,10 @@
                                         wire:key="gantt-bar-{{ $task->id }}-{{ $bar['segment_index'] ?? 0 }}"
                                         style="display: contents;"
                                     >
-                                        {{-- Actual bar (stays in place during drag; dims for visual feedback) --}}
+                                        {{-- Actual bar (stays in place during drag; dims for visual feedback)
+                                             Note: overflow is visible so the sticky child below can pin to the
+                                             sidebar edge during horizontal scroll (matching table view). The
+                                             colored rail is intentionally a sibling overlay so we don't clip. --}}
                                         <div
                                             x-ref="bar"
                                             @mouseenter="hovered = true; $dispatch('gantt-bar-hover', { taskId: {{ $task->id }} })"
@@ -218,9 +247,9 @@
                                             data-end-date="{{ $bar['end_date'] }}"
                                             data-segment-start="{{ $bar['start_date'] }}"
                                             data-segment-end="{{ $bar['end_date'] }}"
-                                            class="group/bar absolute rounded-md overflow-hidden bg-white/80 dark:bg-zinc-800/80 ring-1 ring-zinc-200 dark:ring-zinc-700 shadow-sm select-none cursor-grab active:cursor-grabbing hover:bg-white dark:hover:bg-zinc-800 hover:shadow-md hover:ring-zinc-300 dark:hover:ring-zinc-600 {{ $task->trashed() ? 'opacity-50' : '' }}"
+                                            class="group/bar absolute rounded-md bg-white/80 dark:bg-zinc-800/80 ring-1 ring-zinc-200 dark:ring-zinc-700 shadow-sm select-none cursor-grab active:cursor-grabbing hover:bg-white dark:hover:bg-zinc-800 hover:shadow-md hover:ring-zinc-300 dark:hover:ring-zinc-600 {{ $task->trashed() ? 'opacity-50' : '' }}"
                                             :class="{
-                                                'opacity-30': dragging,
+                                                'opacity-20': dragging,
                                                 'opacity-60 cursor-wait pointer-events-none': saving,
                                                 'transition-[left,width] duration-150 ease-out': !dragging,
                                             }"
@@ -230,59 +259,44 @@
                                                 left: {{ $barLeftPx }}px;
                                                 width: {{ $barWidthPx }}px;
                                                 touch-action: none;
+                                                overflow: visible;
                                             "
                                             @pointerdown.self="startDrag($event)"
                                             @click="if (!justDragged) $wire.editTask({{ $task->id }})"
                                             title="{{ $task->title }}{{ $vendor ? ' · ' . $vendor->name : '' }} · {{ $bar['start_date'] }} → {{ $bar['end_date'] }}"
                                         >
-                                            {{-- Colored left rail (type color) --}}
-                                            <div class="absolute left-0 top-0 bottom-0 w-1 {{ $ui['bg'] }} pointer-events-none"></div>
+                                            {{-- Colored left rail (type color) — rounded-l-md so it matches bar corners --}}
+                                            <div class="absolute left-0 top-0 bottom-0 w-1 rounded-l-md {{ $ui['bg'] }} pointer-events-none"></div>
 
                                             {{-- Left resize handle --}}
                                             <div
                                                 @pointerdown.stop="startResize($event, 'left')"
-                                                class="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize opacity-0 group-hover/bar:opacity-100 {{ $ui['bg_strong'] }} z-10"
+                                                class="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize opacity-0 group-hover/bar:opacity-100 {{ $ui['bg_strong'] }} z-10 rounded-l-md"
                                                 style="touch-action: none;"
                                             ></div>
 
-                                            {{-- Card content placeholder INSIDE the bar — kept for layout/click target,
-                                                 but the actual visible text lives in the sibling sticky overlay below
-                                                 (the bar uses overflow-hidden which traps position:sticky inside it). --}}
-                                            <div class="h-full pl-3 pr-2 py-1 pointer-events-none"></div>
+                                            {{-- Card content INSIDE the bar — sticky pins it to the right edge of
+                                                 the project sidebar during horizontal scroll, until the bar's
+                                                 right edge slides past. Identical technique to the table view's
+                                                 `<td>` + sticky child. Shares the upcoming-tasks-list-card-content
+                                                 partial (one source of truth). --}}
+                                            <div class="h-full flex items-center pointer-events-none" style="overflow: visible;">
+                                                <div style="position: sticky; left: {{ $projectColumnWidth + 8 }}px; display: inline-block; min-width: 0; max-width: 100%; padding-left: 12px; padding-right: 8px; text-align: left;">
+                                                    @include('components.upcoming-tasks-list-card-content', [
+                                                        'task'           => $task,
+                                                        'date'           => $bar['start_date'],
+                                                        'isWeekend'      => false,
+                                                        'hideDayCounter' => $bar['start_date'] !== $bar['end_date'],
+                                                    ])
+                                                </div>
+                                            </div>
 
                                             {{-- Right resize handle --}}
                                             <div
                                                 @pointerdown.stop="startResize($event, 'right')"
-                                                class="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize opacity-0 group-hover/bar:opacity-100 {{ $ui['bg_strong'] }} z-10"
+                                                class="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize opacity-0 group-hover/bar:opacity-100 {{ $ui['bg_strong'] }} z-10 rounded-r-md"
                                                 style="touch-action: none;"
                                             ></div>
-                                        </div>
-
-                                        {{-- Sticky text overlay: same absolute box as the bar, but overflow-visible
-                                             so the inner sticky div can pin the title/time/avatars at the right edge
-                                             of the project sidebar while the bar's body scrolls horizontally past. --}}
-                                        <div
-                                            class="absolute flex flex-col justify-center pointer-events-none"
-                                            style="
-                                                top: {{ $barTop }}px;
-                                                height: {{ $barHeight }}px;
-                                                left: {{ $barLeftPx }}px;
-                                                width: {{ $barWidthPx }}px;
-                                                padding-left: 12px;
-                                                padding-right: 8px;
-                                                z-index: 5;
-                                            "
-                                        >
-                                            <div style="position: sticky; left: {{ $projectColumnWidth + 8 }}px; display: inline-block; max-width: 100%; min-width: 0;">
-                                                @include('components.upcoming-tasks-list-card-content', [
-                                                    'task' => $task,
-                                                    'date' => $bar['start_date'],
-                                                    'isWeekend' => false,
-                                                    'showVendorInfo' => false,
-                                                    'hideArrivalTime' => $bar['width_px'] < 160,
-                                                    'hideDayCounter' => $bar['width_px'] < 160,
-                                                ])
-                                            </div>
                                         </div>
 
                                         {{-- Dependency link handles — rendered as SIBLINGS of the bar so they
@@ -294,7 +308,7 @@
                                             @pointerdown.stop.prevent="$dispatch('gantt-link-start', { taskId: {{ $task->id }}, edge: 'start', event: $event })"
                                             data-link-target="{{ $task->id }}"
                                             data-link-target-edge="start"
-                                            class="gantt-link-handle absolute w-3 h-3 rounded-full bg-indigo-500 ring-2 ring-white dark:ring-zinc-900 hover:scale-125 transition cursor-crosshair z-30"
+                                            class="gantt-link-handle absolute w-3 h-3 rounded-full bg-indigo-500 ring-2 ring-white dark:ring-zinc-900 hover:scale-125 transition cursor-crosshair z-0"
                                             :class="hovered ? 'opacity-100' : 'opacity-0'"
                                             style="
                                                 left: {{ $barLeftPx - 6 }}px;
@@ -309,7 +323,7 @@
                                             @pointerdown.stop.prevent="$dispatch('gantt-link-start', { taskId: {{ $task->id }}, edge: 'finish', event: $event })"
                                             data-link-target="{{ $task->id }}"
                                             data-link-target-edge="finish"
-                                            class="gantt-link-handle absolute w-3 h-3 rounded-full bg-indigo-500 ring-2 ring-white dark:ring-zinc-900 hover:scale-125 transition cursor-crosshair z-30"
+                                            class="gantt-link-handle absolute w-3 h-3 rounded-full bg-indigo-500 ring-2 ring-white dark:ring-zinc-900 hover:scale-125 transition cursor-crosshair z-0"
                                             :class="hovered ? 'opacity-100' : 'opacity-0'"
                                             style="
                                                 left: {{ $barLeftPx + $barWidthPx - 6 }}px;
@@ -321,12 +335,15 @@
 
 
 
-                                        {{-- Ghost preview (shown while dragging/resizing) --}}
+                                        {{-- Ghost preview (shown while dragging/resizing).
+                                             Uses the task-type accent (border + tinted fill) so the ghost
+                                             stays clearly visible even when its footprint is entirely
+                                             inside the original bar (i.e. when shrinking from either edge). --}}
                                         <div
                                             x-ref="ghost"
                                             x-show="dragging"
                                             x-cloak
-                                            class="absolute rounded-md border-2 border-dashed {{ $ui['border'] }} bg-white/40 dark:bg-zinc-900/40 pointer-events-none z-40 flex items-center justify-center"
+                                            class="absolute rounded-md border-2 border-dashed {{ $ui['border'] }} {{ $ui['bg'] }}/30 pointer-events-none z-40 flex items-center justify-center shadow-lg"
                                             style="
                                                 display: none;
                                                 top: {{ $barTop }}px;
@@ -335,7 +352,7 @@
                                                 width: {{ $barWidthPx }}px;
                                             "
                                         >
-                                            <span class="text-[11px] font-semibold {{ $ui['text'] }} bg-white/90 dark:bg-zinc-900/90 px-2 py-0.5 rounded shadow-sm whitespace-nowrap" x-text="ghostLabel"></span>
+                                            <span class="text-[11px] font-semibold {{ $ui['text'] }} bg-white/95 dark:bg-zinc-900/95 px-2 py-0.5 rounded shadow-sm whitespace-nowrap" x-text="ghostLabel"></span>
                                         </div>
                                     </div>
                                 @endforeach
@@ -514,9 +531,16 @@
 
         // Clip the SVG arrow layer so it never paints under the sticky project sidebar.
         updateArrowClip() {
-            if (!this.$refs.arrows || !this.$refs.scroller) return;
+            if (!this.$refs.scroller) return;
             const cutoff = this.$refs.scroller.scrollLeft + this.projectColumnWidth;
-            this.$refs.arrows.style.clipPath = `inset(0 0 0 ${cutoff}px)`;
+            if (this.$refs.arrows) {
+                this.$refs.arrows.style.clipPath = `inset(0 0 0 ${cutoff}px)`;
+            }
+            if (this.$refs.todayLine) {
+                const todayOffset = parseFloat(this.$refs.todayLine.dataset.todayOffset) || 0;
+                const todayLeft = this.projectColumnWidth + todayOffset;
+                this.$refs.todayLine.style.visibility = todayLeft < cutoff ? 'hidden' : 'visible';
+            }
         },
 
         scrollToToday() {
@@ -772,13 +796,16 @@
                 this._ghostLeft  = this._initialLeft + snappedDx;
                 this._ghostWidth = this._initialWidth;
             } else if (this._mode === 'left') {
-                const newWidth = this._initialWidth - snappedDx;
-                if (newWidth < snap) return;
-                this._ghostLeft  = this._initialLeft + snappedDx;
+                // Clamp so the ghost never goes below 1 day; pin the right edge.
+                const rightEdge = this._initialLeft + this._initialWidth;
+                let   newWidth  = this._initialWidth - snappedDx;
+                if (newWidth < snap) { newWidth = snap; }
+                this._ghostLeft  = rightEdge - newWidth;
                 this._ghostWidth = newWidth;
             } else if (this._mode === 'right') {
-                const newWidth = this._initialWidth + snappedDx;
-                if (newWidth < snap) return;
+                // Clamp so the ghost never goes below 1 day; pin the left edge.
+                let newWidth = this._initialWidth + snappedDx;
+                if (newWidth < snap) { newWidth = snap; }
                 this._ghostLeft  = this._initialLeft;
                 this._ghostWidth = newWidth;
             }
@@ -850,6 +877,20 @@
 
             this.saving = true;
             this.$wire.updateTaskDates(this._taskId, newStart, newEnd, oldStart, oldEnd)
+                .then(() => {
+                    // Server skipped render so dependency arrows still point to the
+                    // OLD bar positions. Schedule a debounced arrow-only refresh
+                    // (targets the parent's onDependenciesUpdated listener, which
+                    // unsets just the arrow computeds). If another drag starts
+                    // within the window we cancel and reschedule.
+                    if (window.__ganttArrowRefreshTimer) {
+                        clearTimeout(window.__ganttArrowRefreshTimer);
+                    }
+                    window.__ganttArrowRefreshTimer = setTimeout(() => {
+                        window.__ganttArrowRefreshTimer = null;
+                        Livewire.dispatch('dependenciesUpdated');
+                    }, 350);
+                })
                 .finally(() => { this.saving = false; });
         },
         _addDays(ymd, n) {

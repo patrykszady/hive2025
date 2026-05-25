@@ -12,6 +12,7 @@
     $latestStatus = $project->latestStatus;
 @endphp
 
+<div class="flex flex-col gap-1 w-full min-w-0">
 <div class="flex items-center gap-2 min-w-0">
     <a
         href="{{ route('projects.show', $project) }}"
@@ -46,8 +47,9 @@
     <button
         type="button"
         wire:click="openUndatedTasksModal({{ $projectId }})"
-        class="mt-1 self-start inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50 transition-colors"
+        class="self-start inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50 transition-colors"
     >
         {{ $undatedCount }} pending
     </button>
 @endif
+</div>

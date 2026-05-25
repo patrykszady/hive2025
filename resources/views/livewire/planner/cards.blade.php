@@ -9,7 +9,7 @@
         <div class="flex items-center gap-3">
             {{-- Project Filter (Multi-select) --}}
             <flux:select
-                wire:model.live="filterProjectIds"
+                wire:model.live.debounce.400ms="filterProjectIds"
                 placeholder="All Projects"
                 variant="listbox"
                 searchable
@@ -33,7 +33,7 @@
 
             {{-- Status Filter (Multi-select with badges) --}}
             <flux:select
-                wire:model.live="filterStatusCodes"
+                wire:model.live.debounce.400ms="filterStatusCodes"
                 placeholder="All Statuses"
                 variant="listbox"
                 multiple
@@ -51,7 +51,7 @@
 
             {{-- Vendor Filter (with avatars) --}}
             <flux:select
-                wire:model.live="filterVendorId"
+                wire:model.live.debounce.400ms="filterVendorId"
                 placeholder="All Vendors"
                 variant="listbox"
                 searchable
@@ -71,7 +71,7 @@
 
             {{-- Team Member Filter (Multi-select with avatars) --}}
             <flux:select
-                wire:model.live="filterUserIds"
+                wire:model.live.debounce.400ms="filterUserIds"
                 placeholder="All Team Members"
                 variant="listbox"
                 searchable
@@ -173,7 +173,7 @@
             <flux:field>
                 <flux:label>Projects</flux:label>
                 <flux:select
-                    wire:model.live="filterProjectIds"
+                    wire:model.live.debounce.400ms="filterProjectIds"
                     placeholder="All Projects"
                     variant="listbox"
                     searchable
@@ -198,7 +198,7 @@
             <flux:field>
                 <flux:label>Status</flux:label>
                 <flux:select
-                    wire:model.live="filterStatusCodes"
+                    wire:model.live.debounce.400ms="filterStatusCodes"
                     placeholder="All Statuses"
                     variant="listbox"
                     multiple
@@ -217,7 +217,7 @@
             <flux:field>
                 <flux:label>Vendor</flux:label>
                 <flux:select
-                    wire:model.live="filterVendorId"
+                    wire:model.live.debounce.400ms="filterVendorId"
                     placeholder="All Vendors"
                     variant="listbox"
                     searchable
@@ -238,7 +238,7 @@
             <flux:field>
                 <flux:label>Team Members</flux:label>
                 <flux:select
-                    wire:model.live="filterUserIds"
+                    wire:model.live.debounce.400ms="filterUserIds"
                     placeholder="All Team Members"
                     variant="listbox"
                     searchable
@@ -583,6 +583,7 @@
         </div>
 
     <div x-ref="tableScrollContainer" @scroll.passive="onInfiniteScroll()" class="h-full overflow-auto bg-white dark:bg-zinc-900">
+        @php require resource_path('views/livewire/planner/_day-classes.php'); @endphp
         <table class="border-collapse table-fixed" style="width: {{ $tableWidth }}px;">
             <colgroup>
                 <col style="width: 224px;">
@@ -590,23 +591,57 @@
                     <col style="width: {{ $dayHeader->isWeekend ? '140' : '200' }}px;">
                 @endforeach
             </colgroup>
-            <thead class="sticky top-0 z-20 bg-white dark:bg-zinc-900">
+            @php
+                // Group day headers into month spans for the super-header row (matches gantt view).
+                $monthSpans = collect($dayHeaders)
+                    ->groupBy(fn ($dh) => $dh->day->format('Y-m'))
+                    ->map(fn ($group) => [
+                        'count' => $group->count(),
+                        'label' => $group->first()->day->format('M Y'),
+                    ])
+                    ->values();
+            @endphp
+            <thead class="sticky top-0 z-20 bg-zinc-50 dark:bg-zinc-800/95">
+                {{-- Month super-header row --}}
                 <tr>
-                    <th class="sticky left-0 z-30 bg-white dark:bg-zinc-900 px-4 py-3 text-left text-sm font-medium text-zinc-600 dark:text-zinc-300 border-b border-zinc-200 dark:border-zinc-700" style="box-shadow: inset -2px 0 0 0 #cbd5e1;">
-                        Project
+                    <th
+                        rowspan="2"
+                        class="sticky left-0 z-30 bg-zinc-50 dark:bg-zinc-800/95 px-3 text-left align-middle border-b {{ $dayBorderClass }}"
+                        style="box-shadow: inset -2px 0 0 0 #cbd5e1;"
+                    >
+                        <flux:heading size="sm" class="text-zinc-700 dark:text-zinc-200">Project</flux:heading>
                     </th>
+                    @foreach ($monthSpans as $span)
+                        <th
+                            colspan="{{ $span['count'] }}"
+                            class="h-6 px-2 text-left text-xs font-semibold text-zinc-500 dark:text-zinc-400 border-b border-r border-zinc-200/60 dark:border-zinc-700/60"
+                            style="overflow: visible;"
+                        >
+                            <span style="position: sticky; left: 232px; display: inline-block; padding: 0 8px;">
+                                {{ $span['label'] }}
+                            </span>
+                        </th>
+                    @endforeach
+                </tr>
+                {{-- Day cells row --}}
+                <tr>
                     @foreach ($dayHeaders as $dayHeader)
                         <th
                             wire:key="table-header-{{ $dayHeader->day->format('Y-m-d') }}"
-                            class="px-3 py-3 text-left text-sm font-medium border-b border-r border-zinc-200 dark:border-zinc-700
-                                {{ $dayHeader->isWeekend ? 'bg-zinc-50 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500' : 'text-zinc-600 dark:text-zinc-300' }}
-                                {{ $dayHeader->isToday ? '!text-indigo-600 dark:!text-indigo-400' : '' }}"
+                            class="px-2 text-center align-middle text-[10px] tabular-nums font-normal border-b border-r {{ $dayBorderClass }}
+                                {{ $dayHeader->isWeekend ? $dayWeekendBgClass . ' ' . $dayWeekendTextClass : $dayWeekdayTextClass }}
+                                {{ $dayHeader->isToday ? $dayTodayTextClass : '' }}"
+                            style="height: 32px;"
+                            @if ($dayHeader->isToday) data-today @endif
                         >
-                            <div>
-                                <span class="whitespace-nowrap">{{ $dayHeader->title }}</span>
-                                @if ($dayHeader->isToday)
-                                    <flux:badge color="indigo" size="sm" class="mt-1">Today</flux:badge>
-                                @endif
+                            <div class="flex flex-col items-center leading-tight">
+                                <span class="{{ $dayHeader->isToday ? 'font-bold' : '' }}">{{ $dayHeader->day->format('D') }}</span>
+                                <div class="flex items-center gap-1">
+                                    <span class="font-semibold">{{ $dayHeader->day->format('j') }}</span>
+                                    @if ($dayHeader->isToday)
+                                        <span class="{{ $dayTodayPillClass }}">Today</span>
+                                    @endif
+                                </div>
                             </div>
                         </th>
                     @endforeach
@@ -619,7 +654,7 @@
                         <tr wire:key="table-row-{{ $row->id }}-lane-{{ $laneIdx }}" class="group">
                             {{-- Project name (sticky left) — rendered once per project with rowspan covering all lanes --}}
                             @if ($laneIdx === 0)
-                                <td rowspan="{{ $laneCount }}" class="sticky left-0 z-10 bg-white dark:bg-zinc-900 px-4 py-2 border-b border-zinc-200 dark:border-zinc-700 align-top" style="box-shadow: inset -2px 0 0 0 #cbd5e1;">
+                                <td rowspan="{{ $laneCount }}" class="sticky left-0 z-10 bg-white dark:bg-zinc-900 px-3 py-2 border-b {{ $dayBorderClass }} align-middle" style="box-shadow: inset -2px 0 0 0 #cbd5e1;">
                                     @include('livewire.planner._project-sidebar', [
                                         'project'      => $row->project,
                                         'projectId'    => $row->id,
@@ -638,9 +673,9 @@
                                     <td
                                         colspan="{{ $entry->span }}"
                                         wire:key="table-seg-{{ $row->id }}-{{ $laneIdx }}-{{ $task->id }}-{{ $entry->first_day_format }}"
-                                        class="px-2 py-1.5 border-b border-r border-zinc-200 dark:border-zinc-700 align-top
-                                            {{ $entry->is_weekend ? 'bg-zinc-50 dark:bg-zinc-800' : '' }}
-                                            {{ $entry->is_today ? 'bg-indigo-50/50 dark:bg-indigo-900/10' : '' }}"
+                                        class="px-2 py-1.5 border-b border-r {{ $dayBorderClass }} align-top
+                                            {{ $entry->is_weekend ? $dayWeekendBgClass : '' }}
+                                            {{ $entry->is_today ? $dayTodayBgClass : '' }}"
                                         style="overflow: visible;"
                                         wire:click.stop
                                     >
@@ -651,7 +686,7 @@
                                              eventually slides past, at which point the text scrolls off with it. --}}
                                         <flux:kanban.card
                                             as="button"
-                                            class="min-w-0 w-full {{ $task->trashed() ? 'opacity-50' : '' }}"
+                                            class="min-w-0 w-full p-2! {{ $task->trashed() ? 'opacity-50' : '' }}"
                                             style="overflow: visible;"
                                             wire:click="editTask({{ $task->id }}, '{{ $entry->first_day_format }}', {{ $row->id }})"
                                             wire:loading.attr="disabled"
@@ -674,9 +709,9 @@
                                         x-data="{ hover: false }"
                                         x-on:mouseenter="hover = true"
                                         x-on:mouseleave="hover = false"
-                                        class="px-2 py-1.5 border-b border-r border-zinc-200 dark:border-zinc-700 align-top cursor-pointer
-                                            {{ $cell->isWeekend ? 'bg-zinc-50 dark:bg-zinc-800' : '' }}
-                                            {{ $cell->isToday ? 'bg-indigo-50/50 dark:bg-indigo-900/10' : '' }}"
+                                        class="px-2 py-1.5 border-b border-r {{ $dayBorderClass }} align-top cursor-pointer
+                                            {{ $cell->isWeekend ? $dayWeekendBgClass : '' }}
+                                            {{ $cell->isToday ? $dayTodayBgClass : '' }}"
                                         wire:click="addTask({{ $row->id }}, '{{ $cell->dayFormat }}')"
                                     >
                                         <div
@@ -810,6 +845,18 @@ Alpine.data('plannerTableScroll', () => ({
 
     init() {
         this._initInfiniteScroll();
+        this.$nextTick(() => this._scrollToTodayInitial());
+    },
+
+    _scrollToTodayInitial() {
+        const container = this.$refs.tableScrollContainer;
+        if (!container) return;
+        const todayCell = container.querySelector('[data-today]');
+        if (!todayCell) return;
+        // Offset so ~2 prior days are visible to the left of today.
+        const cellWidth = todayCell.getBoundingClientRect().width || 0;
+        const target = todayCell.offsetLeft - (cellWidth * 2);
+        container.scrollLeft = Math.max(0, target);
     },
 }));
 
@@ -835,8 +882,21 @@ Alpine.data('plannerScroll', () => ({
             this.updateFirstVisible();
             this.updateEdgeState();
             this.setupAxisLocking();
+            this._scrollToTodayInitial();
             this.ready = true;
         });
+    },
+
+    _scrollToTodayInitial() {
+        const container = this.$refs.scrollContainer;
+        if (!container) return;
+        const todayCol = container.querySelector('[data-today]');
+        if (!todayCol) return;
+        const colWidth = todayCol.getBoundingClientRect().width || 0;
+        const target = todayCol.offsetLeft - (colWidth * 2);
+        container.scrollLeft = Math.max(0, target);
+        this.updateFirstVisible();
+        this.updateEdgeState();
     },
 
     // Called by the shared infinite-scroll mixin after a load completes.

@@ -872,6 +872,15 @@ class TaskCreate extends Component
     }
 
     /**
+     * Lightweight refresh for dependency-only changes. Only the gantt arrows
+     * depend on dependency data, so skip the heavy full-component refresh chain.
+     */
+    private function refreshDependencyComponents(): void
+    {
+        $this->dispatch('dependenciesUpdated')->to(CardsIndex::class);
+    }
+
+    /**
      * Copy task data for duplication
      */
     private function copyTaskData(Task $task)
@@ -1103,8 +1112,8 @@ class TaskCreate extends Component
         // Refresh task data with eager loading
         $this->form->refreshTaskWithDependencies($this->form->task->id);
         
-        // Refresh planner components
-        $this->refreshPlannerComponents();
+        // Lightweight refresh: only gantt arrows depend on deps
+        $this->refreshDependencyComponents();
         $this->dispatch('gantt-links-changed');
         
         $this->showNotification('dependency_added');
@@ -1117,8 +1126,8 @@ class TaskCreate extends Component
         // Refresh task data with eager loading
         $this->form->refreshTaskWithDependencies($this->form->task->id);
         
-        // Refresh planner components
-        $this->refreshPlannerComponents();
+        // Lightweight refresh: only gantt arrows depend on deps
+        $this->refreshDependencyComponents();
         $this->dispatch('gantt-links-changed');
         
         $this->showNotification('dependency_removed');

@@ -5,6 +5,7 @@ namespace App\Livewire\Transactions;
 use App\Models\Expense;
 use App\Models\Transaction;
 use App\Models\Vendor;
+use App\Models\VendorTransaction;
 use App\Models\TransactionBulkMatch;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Title;

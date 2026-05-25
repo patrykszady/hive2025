@@ -71,7 +71,24 @@ class CardsIndex extends Component
     private const PLANNER_PROJECT_STATUS_CODES = [4, 5, 6, 8]; // Prep, Scheduled, Active, Service Call
     private const PLANNER_STATUS_PRIORITY = [8 => 1, 6 => 2, 4 => 3, 5 => 4]; // Service Call, Active, Prep, Scheduled
 
-    protected $listeners = ['refreshComponent' => '$refresh'];
+    protected $listeners = [
+        'refreshComponent' => '$refresh',
+        'dependenciesUpdated' => 'onDependenciesUpdated',
+    ];
+
+    /**
+     * Lightweight refresh when only task dependencies changed (e.g. from edit-task modal).
+     * Only the gantt arrows depend on dep data; in other views skip the round-trip entirely.
+     */
+    public function onDependenciesUpdated(): void
+    {
+        if ($this->viewMode !== 'gantt') {
+            $this->skipRender();
+            return;
+        }
+
+        unset($this->ganttDependencyLinks, $this->ganttArrowPaths, $this->criticalPathTaskIds);
+    }
 
     public function mount()
     {
@@ -837,7 +854,7 @@ class CardsIndex extends Component
         $rowHeight          = 74;
         $rowPadding         = 6;
         $barHeight          = $rowHeight - 10;
-        $projectColumnWidth = 280;
+        $projectColumnWidth = 224;
         $headerHeight       = 56;
         $halfGap            = ($rowHeight - $barHeight) / 2; // 5 px
 
@@ -980,7 +997,7 @@ class CardsIndex extends Component
      *
      * @return array<int>
      */
-    #[Computed]
+    #[Computed(persist: true, seconds: 300)]
     public function criticalPathTaskIds(): array
     {
         $projectIds = $this->activeProjects->pluck('id')->all();
@@ -1362,17 +1379,16 @@ class CardsIndex extends Component
             'options'    => $newOptions,
         ]);
 
-        // Bust every computed cache that depends on task dates so the gantt
-        // re-renders with the new position instead of snapping back to stale data.
-        unset(
-            $this->activeProjects,
-            $this->kanbanColumns,
-            $this->projectRows,
-            $this->ganttRows,
-            $this->ganttDependencyLinks,
-            $this->ganttArrowPaths,
-            $this->criticalPathTaskIds,
-        );
+        // SNAPPY DRAG: the gantt bar is already positioned optimistically by Alpine
+        // (see _gantt.blade.php startResize/startDrag handlers). Skipping the
+        // re-render avoids a 200-500ms morph cycle (ganttRows + dependency arrows
+        // + critical path recompute) on every drag/resize. Dependency arrows
+        // become slightly stale until the next real interaction; that's an
+        // acceptable tradeoff for the responsiveness gain.
+        // Invalidate persisted critical-path cache so the next real render
+        // recomputes (date changes can re-route the critical path).
+        unset($this->criticalPathTaskIds);
+        $this->skipRender();
 
         Flux::toast(
             duration: 2000,
@@ -1444,8 +1460,9 @@ class CardsIndex extends Component
             'lag_days'            => 0,
         ]);
 
+        // Only dependency-derived caches need invalidation; bar geometry
+        // (ganttRows) is unchanged when adding a link, so leave it cached.
         unset(
-            $this->ganttRows,
             $this->ganttDependencyLinks,
             $this->ganttArrowPaths,
             $this->criticalPathTaskIds,
@@ -1574,13 +1591,16 @@ class CardsIndex extends Component
 
     public function render()
     {
+        $isGantt = $this->viewMode === 'gantt';
+        $needsKanban = ! $isGantt; // cards + table views need kanbanColumns / dayHeaders / projectRows
+
         return view('livewire.planner.cards', [
-            'kanbanColumns' => $this->kanbanColumns,
-            'dayHeaders'    => $this->dayHeaders,
-            'projectRows'   => $this->projectRows,
-            'ganttRows'        => $this->viewMode === 'gantt' ? $this->ganttRows : collect(),
-            'ganttLinks'       => $this->viewMode === 'gantt' ? $this->ganttDependencyLinks : [],
-            'ganttArrowPaths'  => $this->viewMode === 'gantt' ? $this->ganttArrowPaths : [],
+            'kanbanColumns' => $needsKanban ? $this->kanbanColumns : collect(),
+            'dayHeaders'    => $needsKanban ? $this->dayHeaders : collect(),
+            'projectRows'   => $needsKanban ? $this->projectRows : collect(),
+            'ganttRows'        => $isGantt ? $this->ganttRows : collect(),
+            'ganttLinks'       => $isGantt ? $this->ganttDependencyLinks : [],
+            'ganttArrowPaths'  => $isGantt ? $this->ganttArrowPaths : [],
             'pxPerDay'         => $this->ganttPxPerDay,
         ])->layout('components.layouts.app', [
             'title' => 'Planner',
