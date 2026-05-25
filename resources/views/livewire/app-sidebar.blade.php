@@ -20,7 +20,7 @@
             @else
                 {{-- BANK ERRORS --}}
                 @if($canViewBanks && $hasBankErrors)
-                    <flux:sidebar.item wire:navigate.hover icon="building-library" href="/banks" badge="Error">Banks</flux:sidebar.item>
+                    <flux:sidebar.item wire:navigate.hover icon="building-library" href="/banks" badge="Error" badge:color="red">Banks</flux:sidebar.item>
                     <flux:separator class="my-2" />
                 @endif
 
@@ -79,7 +79,11 @@
 
                 @if($canViewBanks)
                     <flux:sidebar.group expandable heading="Accounting" class="grid" icon="document-currency-dollar" :expanded="$accountingExpanded">
-                        <flux:sidebar.item wire:navigate.hover href="/banks" icon="building-library">Banks</flux:sidebar.item>
+                        @if($hasBankErrors)
+                            <flux:sidebar.item wire:navigate.hover href="/banks" icon="building-library" badge="Error" badge:color="red">Banks</flux:sidebar.item>
+                        @else
+                            <flux:sidebar.item wire:navigate.hover href="/banks" icon="building-library">Banks</flux:sidebar.item>
+                        @endif
                         <flux:sidebar.item wire:navigate.hover href="/distributions" icon="receipt-percent">Distributions</flux:sidebar.item>
                         <flux:sidebar.item wire:navigate.hover href="/sheets" icon="document-currency-dollar">Sheets</flux:sidebar.item>
                         @if($canViewLienWaivers)

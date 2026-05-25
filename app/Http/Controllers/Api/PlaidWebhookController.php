@@ -4,10 +4,12 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Jobs\ProcessPlaidTransactionSync;
+use App\Mail\BankErrorAlert;
 use App\Models\Bank;
 use App\Services\PlaidService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 
 class PlaidWebhookController extends Controller
 {
@@ -198,6 +200,12 @@ class PlaidWebhookController extends Controller
             $plaidOptions['error'] = $error;
             $bank->plaid_options = $plaidOptions;
             $bank->save();
+
+            $this->notifyAdminsOfBankError(
+                $bank,
+                $error['error_code'] ?? 'UNKNOWN',
+                $error['error_message'] ?? $error['display_message'] ?? 'An error occurred with this bank connection.',
+            );
         }
     }
     
@@ -245,6 +253,32 @@ class PlaidWebhookController extends Controller
         ];
         $bank->plaid_options = $plaidOptions;
         $bank->save();
+
+        $this->notifyAdminsOfBankError(
+            $bank,
+            'USER_PERMISSION_REVOKED',
+            'User revoked access to this bank connection.',
+        );
+    }
+
+    /**
+     * Send a BankErrorAlert email to all admin users of the bank's vendor.
+     */
+    private function notifyAdminsOfBankError(Bank $bank, string $errorCode, string $errorMessage): void
+    {
+        if (!$bank->vendor) {
+            return;
+        }
+
+        $admins = $bank->vendor->users()
+            ->wherePivot('role_id', 1)
+            ->whereNotNull('email')
+            ->where('email', '!=', '')
+            ->get();
+
+        foreach ($admins as $admin) {
+            Mail::to($admin->email)->queue(new BankErrorAlert($bank, $errorCode, $errorMessage));
+        }
     }
 
     /**
