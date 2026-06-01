@@ -15,7 +15,7 @@ class Lead extends Model
 {
     use HasFactory, SoftDeletes;
 
-    protected $fillable = ['date', 'origin', 'notes', 'user_id', 'lead_data', 'belongs_to_vendor_id', 'created_by_user_id', 'created_at', 'updated_at', 'deleted_at'];
+    protected $fillable = ['date', 'origin', 'external_source', 'external_id', 'notes', 'user_id', 'lead_data', 'belongs_to_vendor_id', 'created_by_user_id', 'created_at', 'updated_at', 'deleted_at'];
 
     protected function casts(): array
     {
