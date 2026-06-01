@@ -14,6 +14,19 @@
             <flux:error name="name" />
         </flux:field>
 
+        {{-- Type (only for email-family templates) --}}
+        @if ($type !== 'contract')
+            <flux:field>
+                <flux:label>Template Type</flux:label>
+                <flux:select wire:model.live="type" variant="listbox">
+                    <flux:select.option value="estimate">Estimate</flux:select.option>
+                    <flux:select.option value="invoice">Invoice</flux:select.option>
+                    <flux:select.option value="lead">Lead Reply</flux:select.option>
+                </flux:select>
+                <flux:error name="type" />
+            </flux:field>
+        @endif
+
         {{-- Placeholder Pills --}}
         <div>
             <flux:description class="mb-2">

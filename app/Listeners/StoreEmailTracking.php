@@ -115,6 +115,11 @@ class StoreEmailTracking
                 ->value('project_id');
         }
 
+        $leadId = $metadata['lead_id'] ?? null;
+        if ($leadId !== null) {
+            $leadId = (int) $leadId ?: null;
+        }
+
         // Get recipients
         $recipients = [];
         if ($to = $message->getTo()) {
@@ -160,6 +165,7 @@ class StoreEmailTracking
             EmailTracking::create([
                 'belongs_to_vendor_id' => $belongsToVendorId,
                 'project_id' => $projectId,
+                'lead_id' => $leadId,
                 'message_id' => $correlationId,
                 'thread_id' => $threadId,
                 'email_template_name' => $emailTemplateName,

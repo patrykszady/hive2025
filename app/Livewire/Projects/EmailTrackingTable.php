@@ -20,6 +20,8 @@ class EmailTrackingTable extends Component
     public $clientId = null;
     #[Reactive]
     public $projectId = null;
+    #[Reactive]
+    public $leadId = null;
     protected string $pageName = 'email_page';
 
     public function updatingClientId(): void
@@ -28,6 +30,11 @@ class EmailTrackingTable extends Component
     }
 
     public function updatingProjectId(): void
+    {
+        $this->resetPage($this->pageName);
+    }
+
+    public function updatingLeadId(): void
     {
         $this->resetPage($this->pageName);
     }
@@ -43,7 +50,10 @@ class EmailTrackingTable extends Component
             ->when($this->projectId, function ($query) {
                 $query->where('project_id', $this->projectId);
             })
-            ->when(! $this->projectId && $this->clientId, function ($query) {
+            ->when($this->leadId, function ($query) {
+                $query->where('lead_id', $this->leadId);
+            })
+            ->when(! $this->projectId && ! $this->leadId && $this->clientId, function ($query) {
                 $query->whereHas('project', function ($q) {
                     $q->where('client_id', $this->clientId);
                 });

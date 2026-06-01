@@ -1,17 +1,18 @@
 <div>
-@if(!$projectId || $this->emailTrackingEvents->isNotEmpty())
 @php
-    $projectEvents = $projectId ? collect($this->emailTrackingEvents->items()) : collect();
-    $latestEvent = $projectId ? $projectEvents->first() : null;
-    $olderEvents = $projectId ? $projectEvents->slice(1)->values() : collect();
+    $scopedId = $projectId ?? $leadId ?? null;
+    $projectEvents = $scopedId ? collect($this->emailTrackingEvents->items()) : collect();
+    $latestEvent = $scopedId ? $projectEvents->first() : null;
+    $olderEvents = $scopedId ? $projectEvents->slice(1)->values() : collect();
 @endphp
+@if(!$scopedId || $this->emailTrackingEvents->isNotEmpty())
 
 <x-island-card :separator="false" wire:loading.class="opacity-50 text-opacity-50" wire:transition x-data="{ expanded: false }">
     <div class="flex w-full items-center justify-between">
         <button type="button" @click="expanded = !expanded" class="flex items-center gap-2">
             <flux:heading size="lg" class="mb-0">Email Tracking</flux:heading>
         </button>
-        @if($projectId && $olderEvents->isNotEmpty())
+        @if($scopedId && $olderEvents->isNotEmpty())
             <button type="button" @click="expanded = !expanded" class="flex items-center gap-2 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200">
                 <flux:badge color="zinc" size="sm">{{ $olderEvents->count() }}</flux:badge>
                 <flux:icon.chevron-down variant="mini" class="transition-transform duration-200" ::class="expanded && 'rotate-180'" />
@@ -20,7 +21,7 @@
     </div>
 
     <div class="space-y-2">
-        @if($projectId)
+        @if($scopedId)
             @if($latestEvent)
                 <flux:table :paginate="$this->emailTrackingEvents->hasPages() ? $this->emailTrackingEvents : null">
                     <flux:table.columns>
@@ -33,14 +34,14 @@
                     <flux:table.rows>
                         @include('livewire.projects.partials.email-tracking-row', [
                             'event' => $latestEvent,
-                            'projectId' => $projectId,
+                            'projectId' => $scopedId,
                         ])
 
                         @if($olderEvents->isNotEmpty())
                             @foreach($olderEvents as $event)
                                 @include('livewire.projects.partials.email-tracking-row', [
                                     'event' => $event,
-                                    'projectId' => $projectId,
+                                    'projectId' => $scopedId,
                                     'attributes' => new \Illuminate\View\ComponentAttributeBag(['x-show' => 'expanded', 'x-cloak' => true]),
                                 ])
                             @endforeach

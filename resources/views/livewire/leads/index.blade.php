@@ -25,6 +25,7 @@
         </x-slot:actions>
 
         <div class="space-y-2">
+            @island(name: 'leads-table', always: true)
             <flux:table :paginate="$this->leads->hasPages() ? $this->leads : null">
                 <flux:table.columns>
                     <flux:table.column sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')">Date</flux:table.column>
@@ -65,7 +66,7 @@
                             <flux:table.cell>
                                 @if($lead->last_status)
                                     @php
-                                        $color = $lead->last_status->title === 'New' ? 'yellow' : (in_array($lead->last_status->title, ['Message 1', 'Message 2', 'Message 3']) ? 'sky' : ($lead->last_status->title === 'Won' ? 'green' : (in_array($lead->last_status->title, ['Lost', "Not a Fit"]) ? 'red' : 'red')));
+                                        $color = $lead->last_status->title === 'New' ? 'yellow' : ($lead->last_status->title === 'Won' ? 'green' : (in_array($lead->last_status->title, ['Lost', "Not a Fit"]) ? 'red' : 'red'));
                                     @endphp
                                     <flux:badge color="{{$color}}">{{ $lead->last_status->title }}</flux:badge>
                                 @endif
@@ -99,6 +100,7 @@
                     @endforeach
                 </flux:table.rows>
             </flux:table>
+            @endisland
         </div>
     </x-island-card>
     <livewire:leads.lead-create />

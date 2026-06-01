@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Lead;
+use App\Services\LeadContactProvisioner;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -105,6 +106,14 @@ class LeadsController extends Controller
             'belongs_to_vendor_id' => $vendorId,
             'created_by_user_id' => $user->id,
         ]);
+
+        $lead->statuses()->create([
+            'title' => 'New',
+            'belongs_to_vendor_id' => $vendorId,
+            'created_at' => $date,
+        ]);
+
+        app(LeadContactProvisioner::class)->provision($lead->fresh());
 
         return response()->json([
             'data' => ['id' => $lead->id],

@@ -14,7 +14,7 @@ class EmailTemplateIndex extends Component
 {
     use AuthorizesRequests, WithPagination;
 
-    public $type = 'email';
+    public $type = 'estimate';
     public $showForm = false;
     public $editingTemplateId = null;
 
@@ -58,9 +58,8 @@ class EmailTemplateIndex extends Component
     #[Computed]
     public function templates()
     {
-        // For email type, show estimate and invoice templates
-        // For contract type, show contract templates
-        if ($this->type === 'email') {
+        // The Estimates tab also surfaces invoice templates
+        if ($this->type === 'estimate') {
             return EmailTemplate::whereIn('type', ['estimate', 'invoice'])
                 ->orderBy('name')
                 ->paginate(20);

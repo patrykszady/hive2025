@@ -17,9 +17,9 @@ class EmailTemplateForm extends Component
     public $body = '';
     public $type = 'estimate';
 
-    public function mount($templateId = null, $type = 'email')
+    public function mount($templateId = null, $type = 'estimate')
     {
-        // If 'email' is passed as type, default to 'estimate' for new templates
+        // Legacy callers may still pass 'email'; map to estimate.
         $this->type = $type === 'email' ? 'estimate' : $type;
 
         if ($templateId) {
@@ -40,7 +40,7 @@ class EmailTemplateForm extends Component
         $rules = [
             'name' => 'required|string|max:255',
             'body' => 'required|string',
-            'type' => 'required|string|in:estimate,invoice,contract',
+            'type' => 'required|string|in:estimate,invoice,contract,lead',
         ];
 
         // Subject is only required for email templates (estimate/invoice)
@@ -125,6 +125,22 @@ class EmailTemplateForm extends Component
                 'estimate_total_words',
                 'payment_schedule',
                 'current_year',
+            ];
+        }
+
+        if ($this->type === 'lead') {
+            return [
+                'client_name',
+                'client_first_names',
+                'client_last_names',
+                'lead_message',
+                'lead_address',
+                'lead_origin',
+                'lead_availability',
+                'vendor_name',
+                'short_vendor_name',
+                'sender_first_name',
+                'sender_last_name',
             ];
         }
 

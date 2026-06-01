@@ -165,6 +165,14 @@ class MailtrapWebhookController extends Controller
                 $projectId = (int) $sent->project_id;
             }
 
+            $leadId = Arr::get($metadata, 'lead_id');
+            if ($leadId !== null) {
+                $leadId = (int) $leadId ?: null;
+            }
+            if (! $leadId && $sent?->lead_id) {
+                $leadId = (int) $sent->lead_id;
+            }
+
             $belongsToVendorId = Arr::get($metadata, 'belongs_to_vendor_id') ?: ($sent?->belongs_to_vendor_id ?? null);
             if (! $belongsToVendorId && $projectId) {
                 if (! array_key_exists($projectId, $projectVendorCache)) {
@@ -237,6 +245,7 @@ class MailtrapWebhookController extends Controller
                 $record = EmailTracking::create([
                     'belongs_to_vendor_id' => $belongsToVendorId,
                     'project_id' => $projectId,
+                    'lead_id' => $leadId,
                     'message_id' => $correlationId,
                     'thread_id' => $threadId,
                     'email_template_name' => $emailTemplateName,

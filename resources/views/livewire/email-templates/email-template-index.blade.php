@@ -4,10 +4,10 @@
             <flux:button size="sm" wire:click="createTemplate" icon="plus">New Template</flux:button>
         </x-slot:actions>
 
-        {{-- Type Tabs (Email vs Contract) --}}
         <flux:tabs wire:model.live="type">
-            <flux:tab name="email">Email Templates</flux:tab>
-            <flux:tab name="contract">Contract Templates</flux:tab>
+            <flux:tab name="estimate">Estimates</flux:tab>
+            <flux:tab name="lead">Leads</flux:tab>
+            <flux:tab name="contract">Contract</flux:tab>
         </flux:tabs>
 
         {{-- Templates Table --}}

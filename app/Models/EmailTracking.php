@@ -13,6 +13,7 @@ class EmailTracking extends Model
     protected $fillable = [
         'belongs_to_vendor_id',
         'project_id',
+        'lead_id',
         'message_id',
         'thread_id',
         'email_template_name',
@@ -44,6 +45,11 @@ class EmailTracking extends Model
     public function project(): BelongsTo
     {
         return $this->belongsTo(Project::class);
+    }
+
+    public function lead(): BelongsTo
+    {
+        return $this->belongsTo(Lead::class);
     }
 }
 

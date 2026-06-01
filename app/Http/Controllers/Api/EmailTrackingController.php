@@ -123,6 +123,7 @@ class EmailTrackingController extends Controller
         $canonicalMessageId = $sentContext['message_id'] ?? (string) $messageId;
         $canonicalThreadId = $sentContext['thread_id'] ?? $threadId;
         $belongsToVendorId = $sentContext['belongs_to_vendor_id'] ?? null;
+        $leadId = $sentContext['lead_id'] ?? null;
 
         if (! $projectId && isset($sentContext['project_id'])) {
             $projectId = $sentContext['project_id'];
@@ -183,6 +184,7 @@ class EmailTrackingController extends Controller
         EmailTracking::create([
             'belongs_to_vendor_id' => $belongsToVendorId,
             'project_id' => $projectId,
+            'lead_id' => $leadId,
             'message_id' => $canonicalMessageId,
             'thread_id' => $canonicalThreadId,
             'email_template_name' => $emailTemplateName,
@@ -240,6 +242,7 @@ class EmailTrackingController extends Controller
             'message_id' => (string) ($sent->message_id ?? ''),
             'thread_id' => $sent->thread_id ? (string) $sent->thread_id : null,
             'project_id' => $sent->project_id ? (int) $sent->project_id : null,
+            'lead_id' => $sent->lead_id ? (int) $sent->lead_id : null,
             'email_template_name' => $sent->email_template_name ? (string) $sent->email_template_name : null,
             'belongs_to_vendor_id' => $sent->belongs_to_vendor_id ? (int) $sent->belongs_to_vendor_id : null,
         ];
