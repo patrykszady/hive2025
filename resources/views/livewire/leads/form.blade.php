@@ -32,7 +32,7 @@
                 @if ($client)
                     <flux:field>
                         <flux:label>Client</flux:label>
-                        <flux:card class="space-y-1">
+                        <a href="{{ route('clients.show', $client) }}" wire:navigate class="block rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-1 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition">
                             <flux:heading size="sm">{{ $client->name }}</flux:heading>
                             @if ($client->address)
                                 <flux:text class="text-zinc-500">
@@ -47,20 +47,33 @@
                                     <flux:text class="text-zinc-500">{{ $clientUser->cell_phone }}</flux:text>
                                 @endif
                             @endforeach
-                        </flux:card>
+                        </a>
                     </flux:field>
                 @elseif ($user)
+                    @php($linkedClient = $user->clients->first())
                     <flux:field>
                         <flux:label>User</flux:label>
-                        <flux:card class="space-y-1">
-                            <flux:heading size="sm">{{ $user->full_name }}</flux:heading>
-                            @if ($user->email)
-                                <flux:text class="text-zinc-500">{{ $user->email }}</flux:text>
-                            @endif
-                            @if ($user->cell_phone)
-                                <flux:text class="text-zinc-500">{{ $user->cell_phone }}</flux:text>
-                            @endif
-                        </flux:card>
+                        @if ($linkedClient)
+                            <a href="{{ route('clients.show', $linkedClient) }}" wire:navigate class="block rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-1 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition">
+                                <flux:heading size="sm">{{ $user->full_name }}</flux:heading>
+                                @if ($user->email)
+                                    <flux:text class="text-zinc-500">{{ $user->email }}</flux:text>
+                                @endif
+                                @if ($user->cell_phone)
+                                    <flux:text class="text-zinc-500">{{ $user->cell_phone }}</flux:text>
+                                @endif
+                            </a>
+                        @else
+                            <div class="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-1">
+                                <flux:heading size="sm">{{ $user->full_name }}</flux:heading>
+                                @if ($user->email)
+                                    <flux:text class="text-zinc-500">{{ $user->email }}</flux:text>
+                                @endif
+                                @if ($user->cell_phone)
+                                    <flux:text class="text-zinc-500">{{ $user->cell_phone }}</flux:text>
+                                @endif
+                            </div>
+                        @endif
                     </flux:field>
                 @else
                     <flux:input.group label="User">
