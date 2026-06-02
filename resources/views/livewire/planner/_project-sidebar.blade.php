@@ -46,7 +46,7 @@
 @if ($undatedCount > 0)
     <button
         type="button"
-        wire:click="openUndatedTasksModal({{ $projectId }})"
+        x-on:click="window.dispatchEvent(new CustomEvent('open-undated-tasks', { detail: { projectId: {{ (int) $projectId }} } }))"
         class="self-start inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50 transition-colors"
     >
         {{ $undatedCount }} pending

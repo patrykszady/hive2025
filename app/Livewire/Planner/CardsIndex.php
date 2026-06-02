@@ -64,10 +64,6 @@ class CardsIndex extends Component
         $this->futureDaysLoaded += self::DAYS_PER_LOAD;
     }
 
-    public array $undatedTasksModalTasks = [];
-    public ?string $undatedTasksModalProjectTitle = null;
-    public ?int $undatedTasksModalProjectId = null;
-
     private const PLANNER_PROJECT_STATUS_CODES = [4, 5, 6, 8]; // Prep, Scheduled, Active, Service Call
     private const PLANNER_STATUS_PRIORITY = [8 => 1, 6 => 2, 4 => 3, 5 => 4]; // Service Call, Active, Prep, Scheduled
 
@@ -446,6 +442,19 @@ class CardsIndex extends Component
             $entries = array_fill(0, $dayCount, null);
             foreach ($lane['segments'] as $seg) {
                 $startCell = $dayCells[$seg['start']];
+
+                // Capture weekend/today flags for every day the segment covers so
+                // the table view can paint the correct background per column even
+                // though the segment renders as a single td with colspan.
+                $dayFlags = [];
+                for ($i = $seg['start']; $i < $seg['start'] + $seg['span']; $i++) {
+                    $cell = $dayCells[$i];
+                    $dayFlags[] = (object) [
+                        'is_weekend' => $cell->isWeekend,
+                        'is_today'   => $cell->isToday,
+                    ];
+                }
+
                 $entries[$seg['start']] = (object) [
                     'type'             => 'segment',
                     'task'             => $seg['task'],
@@ -453,6 +462,7 @@ class CardsIndex extends Component
                     'first_day_format' => $startCell->dayFormat,
                     'is_weekend'       => $startCell->isWeekend,
                     'is_today'         => $startCell->isToday,
+                    'day_flags'        => $dayFlags,
                 ];
                 for ($i = $seg['start'] + 1; $i < $seg['start'] + $seg['span']; $i++) {
                     $entries[$i] = 'covered';
@@ -1533,60 +1543,35 @@ class CardsIndex extends Component
         return $options;
     }
 
-    public function openUndatedTasksModal(int $projectId): void
+    /**
+     * Build a per-project map of undated Task models, keyed by project id,
+     * for the "Pending tasks" modal. The view renders these server-side
+     * once so the modal can be opened instantly from the client.
+     *
+     * @return array<int, array{title: string, tasks: \Illuminate\Support\Collection<int, \App\Models\Task>}>
+     */
+    protected function buildUndatedTasksByProject(): array
     {
-        /** @var \App\Models\Project|null $project */
-        $project = $this->activeProjects->firstWhere('id', $projectId);
+        $map = [];
 
-        if (!$project) {
-            return;
-        }
-
-        $tasks = $project->tasks
-            ->filter(function ($task) {
+        foreach ($this->activeProjects as $project) {
+            $tasks = $project->tasks->filter(function ($task) {
                 $selectedDates = $task->options->dates ?? [];
 
                 return empty($selectedDates) && !$task->start_date && !$task->end_date;
-            })
-            ->values();
+            })->values();
 
-        $this->undatedTasksModalProjectId = $project->id;
-        $this->undatedTasksModalProjectTitle = $project->short_address;
-        $this->undatedTasksModalTasks = $tasks
-            ->map(function (Task $task): array {
-                $taskUsers = $task->users;
+            if ($tasks->isEmpty()) {
+                continue;
+            }
 
-                return [
-                    'id' => $task->id,
-                    'title' => $task->title,
-                    'type_text_class' => (string) data_get($task->type_ui, 'text', ''),
-                    'users' => $taskUsers
-                        ->take(3)
-                        ->map(fn (\App\Models\User $user): array => [
-                            'id' => $user->id,
-                            'full_name' => $user->full_name,
-                        ])
-                        ->values()
-                        ->all(),
-                    'users_count' => $taskUsers->count(),
-                    'vendor' => $task->vendor
-                        ? [
-                            'id' => $task->vendor->id,
-                            'name' => $task->vendor->name,
-                        ]
-                        : null,
-                ];
-            })
-            ->all();
+            $map[$project->id] = [
+                'title' => (string) $project->short_address,
+                'tasks' => $tasks,
+            ];
+        }
 
-        $this->modal('planner_undated_tasks_modal')->show();
-    }
-
-    public function editUndatedTask(int $taskId): void
-    {
-        $this->modal('planner_undated_tasks_modal')->close();
-
-        $this->editTask($taskId);
+        return $map;
     }
 
     public function render()
@@ -1602,6 +1587,7 @@ class CardsIndex extends Component
             'ganttLinks'       => $isGantt ? $this->ganttDependencyLinks : [],
             'ganttArrowPaths'  => $isGantt ? $this->ganttArrowPaths : [],
             'pxPerDay'         => $this->ganttPxPerDay,
+            'undatedTasksByProject' => $this->buildUndatedTasksByProject(),
         ])->layout('components.layouts.app', [
             'title' => 'Planner',
             'fullscreenClasses' => 'h-full overflow-hidden flex flex-col',

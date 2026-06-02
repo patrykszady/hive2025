@@ -6,7 +6,7 @@
 @if($task)
     <flux:kanban.card
         as="button"
-        class="min-w-0 w-full {{ $task->trashed() ? 'opacity-50' : '' }}"
+        class="min-w-0 w-full {{ $task->trashed() ? 'opacity-50' : '' }} {{ $this->isToday ? 'bg-white/70! dark:bg-zinc-700/70!' : '' }}"
         wire:click="editTask"
         wire:loading.attr="disabled"
         wire:loading.class="opacity-60 cursor-wait"

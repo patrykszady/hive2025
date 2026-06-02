@@ -4,14 +4,14 @@ namespace App\Observers;
 
 use App\Models\User;
 use App\Services\NylasContactSyncService;
+use App\Services\SmsThreadLinker;
 
 class UserObserver
 {
-    protected NylasContactSyncService $contactSyncService;
-
-    public function __construct(NylasContactSyncService $contactSyncService)
-    {
-        $this->contactSyncService = $contactSyncService;
+    public function __construct(
+        protected NylasContactSyncService $contactSyncService,
+        protected SmsThreadLinker $smsThreadLinker,
+    ) {
     }
 
     /**
@@ -23,6 +23,8 @@ class UserObserver
         $user->notificationSetting()->create([
             'realtime_sms' => true,
         ]);
+
+        $this->smsThreadLinker->linkThreadsForUser($user);
     }
 
     /**
@@ -34,6 +36,10 @@ class UserObserver
         // Only sync if relevant fields changed
         if ($user->wasChanged(['first_name', 'last_name', 'email', 'cell_phone'])) {
             $this->contactSyncService->updateContactsForUser($user);
+        }
+
+        if ($user->wasChanged('cell_phone')) {
+            $this->smsThreadLinker->linkThreadsForUser($user);
         }
     }
 }

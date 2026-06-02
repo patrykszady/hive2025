@@ -19,10 +19,7 @@
         as="button"
         class="min-w-0 w-full {{ $hasDayIndex ? '[x-cloak]' : '' }}"
         wire:key="{{ $wireKey }}"
-        wire:click="openUndatedTasksModal({{ $projectId }})"
-        wire:target="openUndatedTasksModal({{ $projectId }})"
-        wire:loading.attr="disabled"
-        wire:loading.class="opacity-60 cursor-wait"
+        x-on:click="window.dispatchEvent(new CustomEvent('open-undated-tasks', { detail: { projectId: {{ (int) $projectId }} } }))"
     >
         <div class="flex items-center justify-between gap-2 min-w-0">
             <flux:heading size="sm" class="min-w-0 truncate text-orange-600 dark:text-orange-400">

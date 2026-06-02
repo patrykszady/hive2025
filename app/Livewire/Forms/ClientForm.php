@@ -86,7 +86,7 @@ class ClientForm extends Form
 
         //ADD USER TO CLIENT
         $user->clients()->attach($client->id);
-        
+
         //Add new Client to the logged-in-vendor
         //with pivot Source
         auth()->user()->vendor->clients()->attach($client->id);
@@ -95,6 +95,9 @@ class ClientForm extends Form
 
         // Sync to Nylas contacts (after vendor is attached)
         app(\App\Services\NylasContactSyncService::class)->syncUserContactsForClient($user, $client);
+
+        // Backfill any unmatched inbound SMS threads now that we have a phone-to-client link.
+        app(\App\Services\SmsThreadLinker::class)->linkThreadsForClient($client->refresh());
 
         $this->reset();
 

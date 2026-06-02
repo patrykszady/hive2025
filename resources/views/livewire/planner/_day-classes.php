@@ -21,7 +21,7 @@ $dayWeekendTextClass = 'text-zinc-400 dark:text-zinc-500';
 $dayWeekdayTextClass = 'text-zinc-600 dark:text-zinc-300';
 
 /** Background tint for the today column/cell. */
-$dayTodayBgClass = 'bg-indigo-50/50 dark:bg-indigo-900/10';
+$dayTodayBgClass = 'bg-indigo-100/70 dark:bg-indigo-900/25';
 
 /** Highlight text color for the today day header. */
 $dayTodayTextClass = '!text-indigo-600 dark:!text-indigo-400 font-bold';

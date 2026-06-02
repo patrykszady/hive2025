@@ -451,7 +451,7 @@
                     @endphp
                     <div
                         wire:key="project-{{ $projectColumn->id }}-{{ $dayData->day->format('Y-m-d') }}"
-                        class="min-w-0 pb-2 relative z-10 group/cell {{ $isWeekend ? 'w-52' : 'w-80' }}"
+                        class="min-w-0 pb-2 relative z-10 group/cell {{ $isWeekend ? 'w-52' : 'w-80' }} {{ $dayData->isToday ? 'bg-indigo-100/70 dark:bg-indigo-900/25' : '' }}"
                         style="grid-column: {{ $dayColIndex }}; grid-row: {{ $projectRowIndex }};"
                     >
                         @php
@@ -462,7 +462,7 @@
                             class="w-full [&>div]:w-full [&>div]:min-w-0 [&>div]:flex-1"
                             x-bind:class="getOpacityClass({{ $isWeekend ? 'true' : 'false' }}, {{ $hasTasks ? 'true' : 'false' }}, {{ $hasUndatedTasks ? 'true' : 'false' }}, {{ $dayIndex }})"
                         >
-                            <flux:kanban.column class="!w-full !max-w-full bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700">
+                            <flux:kanban.column class="!w-full !max-w-full {{ $dayData->isToday ? 'bg-transparent!' : 'bg-white dark:bg-zinc-900' }} rounded-lg border border-zinc-200 dark:border-zinc-700">
                                             <flux:kanban.column.header
                                                 class="min-w-0 w-full [&>div:first-child>div:first-child]:!min-w-0 [&>div:first-child>div:first-child]:!flex-1 [&>div:first-child>div:first-child]:truncate [&>div:first-child>div:last-child]:!shrink-0 [&_[data-flux-subheading]]:!min-w-0 [&_[data-flux-subheading]]:truncate"
                                             >
@@ -669,16 +669,25 @@
                                 @if ($entry === 'covered')
                                     {{-- absorbed by an earlier colspan in this lane --}}
                                 @elseif ($entry->type === 'segment')
-                                    @php $task = $entry->task; @endphp
+                                    @php
+                                        $task = $entry->task;
+                                        $segmentHasToday = collect($entry->day_flags)->contains(fn ($f) => $f->is_today);
+                                    @endphp
                                     <td
                                         colspan="{{ $entry->span }}"
                                         wire:key="table-seg-{{ $row->id }}-{{ $laneIdx }}-{{ $task->id }}-{{ $entry->first_day_format }}"
-                                        class="px-2 py-1.5 border-b border-r {{ $dayBorderClass }} align-top
-                                            {{ $entry->is_weekend ? $dayWeekendBgClass : '' }}
-                                            {{ $entry->is_today ? $dayTodayBgClass : '' }}"
+                                        class="relative isolate px-2 py-1.5 border-b border-r {{ $dayBorderClass }} align-top"
                                         style="overflow: visible;"
                                         wire:click.stop
                                     >
+                                        {{-- Per-day background layer: a single segment td spans multiple
+                                             columns via colspan, so we paint the weekend/today background
+                                             for each underlying day column ourselves. --}}
+                                        <div aria-hidden="true" class="absolute inset-0 -z-10 grid pointer-events-none" style="grid-template-columns: repeat({{ $entry->span }}, minmax(0, 1fr));">
+                                            @foreach ($entry->day_flags as $flag)
+                                                <div class="{{ $flag->is_weekend ? $dayWeekendBgClass : '' }} {{ $flag->is_today ? $dayTodayBgClass : '' }}"></div>
+                                            @endforeach
+                                        </div>
                                         {{-- Spanning bar: the kanban-card fills the colspan (the visible bar).
                                              Inside it, an inner wrapper uses position:sticky so the title/time/
                                              avatars stay pinned to the right edge of the sticky project sidebar
@@ -686,7 +695,7 @@
                                              eventually slides past, at which point the text scrolls off with it. --}}
                                         <flux:kanban.card
                                             as="button"
-                                            class="min-w-0 w-full p-2! {{ $task->trashed() ? 'opacity-50' : '' }}"
+                                            class="min-w-0 w-full p-2! {{ $task->trashed() ? 'opacity-50' : '' }} {{ $segmentHasToday ? 'bg-white/70! dark:bg-zinc-700/70!' : '' }}"
                                             style="overflow: visible;"
                                             wire:click="editTask({{ $task->id }}, '{{ $entry->first_day_format }}', {{ $row->id }})"
                                             wire:loading.attr="disabled"
@@ -754,92 +763,77 @@
     {{-- Task Create Modal --}}
     <livewire:tasks.task-create :projects="$projects" :employees="$employees" :vendors="$vendors"/>
 
-    <flux:modal name="planner_undated_tasks_modal" class="space-y-4 min-w-[22rem]">
-        <div class="space-y-1">
-            <flux:heading size="lg">Pending tasks</flux:heading>
-            @if ($undatedTasksModalProjectTitle)
-                <flux:subheading class="truncate">{{ $undatedTasksModalProjectTitle }}</flux:subheading>
-            @endif
-        </div>
-
-        <flux:separator variant="subtle" />
-
-        @if (!empty($undatedTasksModalTasks))
-            <div class="space-y-2">
-                @foreach ($undatedTasksModalTasks as $task)
-                    <flux:kanban.card
-                        as="button"
-                        class="min-w-0 w-full"
-                        wire:key="undated-task-{{ $task['id'] }}"
-                        wire:click="editUndatedTask({{ $task['id'] }})"
-                        wire:target="editUndatedTask({{ $task['id'] }})"
-                        wire:loading.attr="disabled"
-                        wire:loading.class="opacity-60 cursor-wait"
-                    >
-                        <div class="flex items-start justify-between gap-2 min-w-0">
-                            <flux:heading size="sm" class="min-w-0 truncate {{ $task['type_text_class'] ?? '' }}">
-                                {{ $task['title'] }}
-                            </flux:heading>
-                        </div>
-
-                        @if (($task['users_count'] ?? 0) > 0 || !empty($task['vendor']))
-                            <div class="flex items-center gap-2 mt-2 min-w-0">
-                                @if (($task['users_count'] ?? 0) > 0)
-                                    <flux:avatar.group>
-                                        @foreach(($task['users'] ?? []) as $user)
-                                            <flux:avatar
-                                                circle
-                                                size="xs"
-                                                name="{{ $user['full_name'] }}"
-                                                color="auto"
-                                                color:seed="{{ $user['id'] }}"
-                                                title="{{ $user['full_name'] }}"
-                                            />
-                                        @endforeach
-                                        @if(($task['users_count'] ?? 0) > 3)
-                                            <flux:avatar circle size="xs">{{ ($task['users_count'] ?? 0) - 3 }}+</flux:avatar>
-                                        @endif
-                                    </flux:avatar.group>
-                                @endif
-
-                                @if (!empty($task['vendor']))
-                                    <flux:avatar
-                                        circle
-                                        size="xs"
-                                        name="{{ $task['vendor']['name'] }}"
-                                        color="auto"
-                                        color:seed="{{ $task['vendor']['id'] }}"
-                                        title="{{ $task['vendor']['name'] }}"
-                                    />
-                                    <span class="flex-1 min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-400">{{ $task['vendor']['name'] }}</span>
-                                    
-                                    @if (!empty($task['vendor_status']))
-                                        @php 
-                                            $statusUi = \App\Models\Task::VENDOR_STATUS_UI[$task['vendor_status']] ?? null;
-                                        @endphp
-                                        @if($statusUi)
-                                            <flux:badge 
-                                                size="sm" 
-                                                :color="$statusUi['flux'] ?? 'zinc'"
-                                                :icon="$statusUi['icon'] ?? null"
-                                            >
-                                                {{ $statusUi['label'] ?? ucfirst($task['vendor_status']) }}
-                                            </flux:badge>
-                                        @endif
-                                    @endif
-                                @endif
-                            </div>
-                        @endif
-                    </flux:kanban.card>
-                @endforeach
+    <div
+        x-data="plannerUndatedTasksModal()"
+        x-on:open-undated-tasks.window="open($event.detail.projectId)"
+    >
+        <flux:modal name="planner_undated_tasks_modal" class="min-w-[22rem]">
+            <div class="space-y-1">
+                <flux:heading size="lg">Pending tasks</flux:heading>
+                <flux:subheading class="truncate" x-show="title" x-text="title"></flux:subheading>
             </div>
-        @endif
-    </flux:modal>
+
+            <flux:separator variant="subtle" class="my-3" />
+
+            @foreach ($undatedTasksByProject as $projectId => $entry)
+                <div
+                    data-undated-project="{{ $projectId }}"
+                    data-project-title="{{ $entry['title'] }}"
+                    x-show="selectedProjectId === {{ (int) $projectId }}"
+                    style="display: none;"
+                    class="space-y-2"
+                >
+                    @foreach ($entry['tasks'] as $task)
+                        <flux:kanban.card
+                            as="button"
+                            class="min-w-0 w-full"
+                            wire:key="undated-task-{{ $task->id }}"
+                            x-on:click="edit({{ (int) $task->id }})"
+                        >
+                            @include('components.upcoming-tasks-list-card-content', [
+                                'task' => $task,
+                                'date' => null,
+                                'taskUsers' => $task->users,
+                                'arrivalTimeLabel' => null,
+                                'previousArrivalTimeLabel' => null,
+                                'isWeekend' => false,
+                            ])
+                        </flux:kanban.card>
+                    @endforeach
+                </div>
+            @endforeach
+        </flux:modal>
+    </div>
     </div>
 </div>
 
 @script
 <script>
+Alpine.data('plannerUndatedTasksModal', () => ({
+    title: '',
+    selectedProjectId: null,
+
+    open(projectId) {
+        const id = parseInt(projectId, 10);
+        const section = this.$root.querySelector(`[data-undated-project="${id}"]`);
+        if (! section) return;
+        this.title = section.dataset.projectTitle || '';
+        this.selectedProjectId = id;
+        if (typeof Flux !== 'undefined' && Flux.modal) {
+            Flux.modal('planner_undated_tasks_modal').show();
+        }
+    },
+
+    edit(taskId) {
+        if (typeof Flux !== 'undefined' && Flux.modal) {
+            Flux.modal('planner_undated_tasks_modal').close();
+        }
+        if (typeof Livewire !== 'undefined') {
+            Livewire.dispatchTo('tasks.task-create', 'editTask', { task: taskId });
+        }
+    },
+}));
+
 Alpine.data('plannerTableScroll', () => ({
     ...window.plannerInfiniteScroll('tableScrollContainer'),
 
