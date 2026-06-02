@@ -90,16 +90,30 @@ class SmsIndex extends Component
             return;
         }
 
-        // Authorization is performed inside SmsConversation::loadThread, which runs in
-        // the same response triggered by the dispatch below — no need to re-query here.
-        // Auto-select callers (autoSelectLatestForFilter / autoSelectLatestDesktopThread /
-        // autoSelectSingleThreadIfOnlyOne) only pass IDs from accessibleThreadsQuery, and
-        // a malicious client-supplied ID would still be rejected by the conversation
-        // before any thread data is exposed.
+        // Client users may only view threads belonging to their client
+        if ($this->isClientUser && $threadId !== null) {
+            $clientIds = auth()->user()->clients()->pluck('clients.id');
+            $allowed = SmsGroupThread::where('id', $threadId)
+                ->whereIn('client_id', $clientIds)
+                ->exists();
+
+            if (! $allowed) {
+                return;
+            }
+        } elseif (! $this->isClientUser && $threadId !== null) {
+            $vendorId = auth()->user()->vendor?->id;
+            $allowed = $vendorId && SmsGroupThread::where('id', $threadId)
+                ->visibleToVendor($vendorId)
+                ->exists();
+
+            if (! $allowed) {
+                return;
+            }
+        }
 
         $this->threadId = $threadId;
 
-        // Notify conversation directly so it can swap threads without re-mounting.
+        // Notify conversation directly so it can swap threads without re-mounting
         $this->dispatch('loadThread', threadId: $threadId)->to(SmsConversation::class);
 
         // Browser event for Alpine-driven thread highlighting (avoids full child re-render)
