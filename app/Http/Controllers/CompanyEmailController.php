@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\ForwardCompanyEmailReceipts;
 use App\Jobs\ProcessAutoReceiptMailboxJob;
 use App\Models\Client;
 use App\Models\AutoReceiptEmailBatch;
@@ -3807,29 +3808,23 @@ class CompanyEmailController extends Controller
      */
     public function forwardRecentReceiptEmailsToCentral()
     {
-        $companyEmails = CompanyEmail::withoutGlobalScopes()
-            ->with(['receipts' => function($query) {
-                // Only load receipts we'll actually use
-                $query->whereNotNull('from_address')->where('from_address', '!=', '');
-            }, 'vendor'])
+        // Dispatch a per-mailbox job so one slow Nylas grant cannot starve the rest
+        // and exceed the parent scheduled-task timeout.
+        CompanyEmail::withoutGlobalScopes()
             ->whereNotNull('grant_id')
-            ->get();
-
-        if ($companyEmails->isEmpty()) {
-            return;
-        }
-
-        // Pre-calculate global date filter once
-        $messageLimitDate = Carbon::now()->subDays(config('nylas.message_limit_days', 30));
-        foreach ($companyEmails as $companyEmail) {
-            $this->processCompanyEmailForwarding($companyEmail, $messageLimitDate);
-        }
+            ->whereHas('receipts', function ($query) {
+                $query->whereNotNull('from_address')->where('from_address', '!=', '');
+            })
+            ->pluck('id')
+            ->each(function (int $companyEmailId) {
+                ForwardCompanyEmailReceipts::dispatch($companyEmailId);
+            });
     }
 
     /**
      * Process forwarding for a single company email
      */
-    protected function processCompanyEmailForwarding(CompanyEmail $companyEmail, Carbon $messageLimitDate): void
+    public function processCompanyEmailForwarding(CompanyEmail $companyEmail, Carbon $messageLimitDate): void
     {
         if ($companyEmail->receipts->isEmpty()) {
             return;
@@ -3895,9 +3890,14 @@ class CompanyEmailController extends Controller
         if ($receipt !== null) {
             return true;
         }
-        
-        // If no match with direct sender, try extracting original sender from body
-        // This handles forwarded emails regardless of whether they have Fw:/Fwd: prefix
+
+        // Only fetch the full message body for likely-forwarded emails. Issuing a
+        // getMessage(full body) call for every candidate caused the scheduled
+        // forwarder to exceed its queue timeout in production.
+        if (! preg_match('/^(fw:|fwd:)\s*/i', $subject)) {
+            return false;
+        }
+
         $fullMessage = $this->nylasService->getMessage($grantId, $message['id'], true);
         $bodyHtml = $fullMessage['data']['body'] ?? '';
         
@@ -3962,13 +3962,17 @@ class CompanyEmailController extends Controller
      */
     protected function findMatchingReceipt(string $messageFromEmail, string $messageSubject): ?Receipt
     {
-        // Get all receipts with non-null receipt_type and non-null from_address
-        $receipts = Receipt::whereNotNull('receipt_type')
-            ->where('receipt_type', '!=', 0)
-            ->whereNotNull('from_address')
-            ->where('from_address', '!=', '')
-            ->get();
-        
+        // Cache receipts for the lifetime of this request/job to avoid an
+        // expensive full-table scan per candidate message.
+        static $receipts = null;
+        if ($receipts === null) {
+            $receipts = Receipt::whereNotNull('receipt_type')
+                ->where('receipt_type', '!=', 0)
+                ->whereNotNull('from_address')
+                ->where('from_address', '!=', '')
+                ->get();
+        }
+
         foreach ($receipts as $receipt) {
             $receiptFromAddress = $receipt->from_address ?? '';
             $receiptFromSubjects = $receipt->from_subject ?? [];
