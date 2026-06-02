@@ -28,7 +28,7 @@ class SmsIndex extends Component
 
     protected $listeners = [
         'threadCreated' => 'selectThread',
-        'threadSelected' => 'handleThreadSelectedFromClient',
+        'threadSelected' => 'selectThread',
         'threadDeleted' => 'handleThreadDeleted',
         'switchToThread' => 'switchToThread',
     ];
@@ -90,10 +90,12 @@ class SmsIndex extends Component
             return;
         }
 
-        // Auto-select / threadCreated paths only pass IDs we already vetted server-side
-        // (accessibleThreadsQuery / new thread the user just created). SmsConversation
-        // re-authorizes inside loadThread() before exposing data, so an attacker spoofing
-        // this event still cannot view a thread they don't own.
+        // Authorization is performed inside SmsConversation::loadThread, which runs in
+        // the same response triggered by the dispatch below — no need to re-query here.
+        // Auto-select callers (autoSelectLatestForFilter / autoSelectLatestDesktopThread /
+        // autoSelectSingleThreadIfOnlyOne) only pass IDs from accessibleThreadsQuery, and
+        // a malicious client-supplied ID would still be rejected by the conversation
+        // before any thread data is exposed.
 
         $this->threadId = $threadId;
 
@@ -101,22 +103,6 @@ class SmsIndex extends Component
         $this->dispatch('loadThread', threadId: $threadId)->to(SmsConversation::class);
 
         // Browser event for Alpine-driven thread highlighting (avoids full child re-render)
-        $this->js("window.dispatchEvent(new CustomEvent('thread-selected', { detail: { threadId: ".json_encode($threadId)." } }))");
-    }
-
-    /**
-     * Client-initiated thread selection. The thread-list click handler also dispatches
-     * `loadThread` directly to SmsConversation in the same JS tick, so Livewire batches
-     * both component updates into a single HTTP request — no second roundtrip needed.
-     */
-    public function handleThreadSelectedFromClient(int|null $threadId): void
-    {
-        if ($threadId !== null && $threadId === $this->threadId) {
-            return;
-        }
-
-        $this->threadId = $threadId;
-
         $this->js("window.dispatchEvent(new CustomEvent('thread-selected', { detail: { threadId: ".json_encode($threadId)." } }))");
     }
 

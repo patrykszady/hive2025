@@ -65,13 +65,10 @@
             wire:key="thread-{{ $thread->id }}"
             x-on:click="
                 /* Optimistic UI: flip the mobile panels immediately so the conversation
-                   becomes visible with a skeleton while the server processes selectThread.
-                   Dispatching to both components in the same tick lets Livewire batch
-                   them into a single HTTP request instead of two sequential round-trips. */
+                   becomes visible with a skeleton while the server processes selectThread. */
                 $store.sms.threadId = {{ $thread->id }};
                 window.dispatchEvent(new CustomEvent('thread-switching', { detail: { threadId: {{ $thread->id }} } }));
                 Livewire.dispatch('threadSelected', { threadId: {{ $thread->id }} });
-                Livewire.dispatchTo('sms.sms-conversation', 'loadThread', { threadId: {{ $thread->id }} });
             "
             class="w-full text-left px-3 py-2.5 rounded-lg"
             x-bind:class="$store.sms.threadId === {{ $thread->id }}
