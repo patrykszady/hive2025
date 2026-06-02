@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Leads;
 
+use App\Models\Client;
 use App\Models\Lead;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
@@ -29,7 +30,7 @@ class LeadsIndex extends Component
     public function leads()
     {
         $leads =
-            Lead::with(['user', 'last_status'])->when($this->origin, function ($query) {
+            Lead::with(['user.clients', 'last_status'])->when($this->origin, function ($query) {
                 return $query->where('origin', $this->origin);
             })
                 ->orderBy($this->sortBy, $this->sortDirection)
@@ -46,6 +47,31 @@ class LeadsIndex extends Component
             $this->sortBy = $column;
             $this->sortDirection = 'asc';
         }
+    }
+
+    public function clientForLead(Lead $lead): ?Client
+    {
+        $client = $lead->user?->clients->first();
+        if ($client) {
+            return $client;
+        }
+
+        $address = $lead->lead_data['address'] ?? null;
+        $vendorId = $lead->belongs_to_vendor_id;
+
+        if (! $address || ! $vendorId) {
+            return null;
+        }
+
+        $street = trim(explode(',', $address)[0] ?? '');
+        if ($street === '') {
+            return null;
+        }
+
+        return Client::query()
+            ->whereHas('vendors', fn ($q) => $q->where('vendors.id', $vendorId))
+            ->where('address', 'like', $street.'%')
+            ->first();
     }
 
     #[Title('Leads')]

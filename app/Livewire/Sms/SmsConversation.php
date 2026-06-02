@@ -1260,30 +1260,6 @@ class SmsConversation extends Component
 
     public function render()
     {
-        // Snapshot the visible conversation to localStorage so the next time the
-        // user navigates back to this thread we can paint it instantly while
-        // Livewire re-hydrates in the background.
-        if ($this->threadId) {
-            $snapshot = collect($this->processedMessages)
-                ->take(-30)
-                ->map(fn ($m) => [
-                    'id' => $m['id'] ?? null,
-                    'direction' => $m['direction'] ?? null,
-                    'from_number' => $m['from_number'] ?? null,
-                    'text' => mb_substr((string) ($m['text'] ?? $m['display_text'] ?? ''), 0, 500),
-                    'created_at' => isset($m['created_at']) ? (string) $m['created_at'] : null,
-                    'media_urls' => $m['media_urls'] ?? [],
-                ])
-                ->values()
-                ->all();
-
-            $this->js(sprintf(
-                "(function(){ try { localStorage.setItem('hive-sms-thread-%d', JSON.stringify(%s)); } catch(e) {} })()",
-                $this->threadId,
-                json_encode($snapshot, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
-            ));
-        }
-
         return view('livewire.sms.conversation');
     }
 
@@ -1345,25 +1321,34 @@ class SmsConversation extends Component
             return;
         }
 
-        $latestMessageId = SmsMessage::where('thread_id', $this->threadId)->max('id');
+        $threadId = $this->threadId;
+        $userId = auth()->id();
+        $lastMarked = $this->lastMarkedMessageId;
 
-        if (! $latestMessageId || $latestMessageId === $this->lastMarkedMessageId) {
-            return;
-        }
+        // Defer the SELECT MAX(id) + UPDATE until after the response is sent so
+        // thread switching feels instant. The unread badge updates on the next
+        // poll/echo event rather than blocking the conversation render.
+        defer(function () use ($threadId, $userId, $lastMarked): void {
+            $latestMessageId = SmsMessage::where('thread_id', $threadId)->max('id');
 
-        SmsThreadRead::updateOrCreate(
-            [
-                'thread_id' => $this->threadId,
-                'user_id' => auth()->id(),
-            ],
-            [
-                'last_read_message_id' => $latestMessageId,
-            ]
-        );
+            if (! $latestMessageId || $latestMessageId === $lastMarked) {
+                return;
+            }
 
-        $this->lastMarkedMessageId = $latestMessageId;
+            SmsThreadRead::updateOrCreate(
+                [
+                    'thread_id' => $threadId,
+                    'user_id' => $userId,
+                ],
+                [
+                    'last_read_message_id' => $latestMessageId,
+                ]
+            );
+        });
 
-        // Notify thread list to update unread indicators
+        // Notify thread list to update unread indicators. The badge query reads
+        // SmsThreadRead, which the deferred write will update before the next
+        // page load / poll, so eventual consistency here is fine.
         $this->dispatch('sms-thread-read');
     }
 }

@@ -29,7 +29,7 @@
             <flux:table :paginate="$this->leads->hasPages() ? $this->leads : null">
                 <flux:table.columns>
                     <flux:table.column sortable :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')">Date</flux:table.column>
-                    <flux:table.column>User</flux:table.column>
+                    <flux:table.column>Client</flux:table.column>
                     <flux:table.column>Status</flux:table.column>
                     <flux:table.column>Last Contact</flux:table.column>
                     <flux:table.column>Origin</flux:table.column>
@@ -60,7 +60,13 @@
                             </flux:table.cell>
 
                             <flux:table.cell>
-                                {{ $lead->lead_data['name'] }}
+                                @if ($leadClient = $this->clientForLead($lead))
+                                    <a href="{{ route('clients.show', $leadClient) }}" wire:navigate class="text-zinc-900 dark:text-white hover:text-indigo-600 dark:hover:text-indigo-400 hover:font-bold no-underline">
+                                        {{ $lead->lead_data['name'] }}
+                                    </a>
+                                @else
+                                    {{ $lead->lead_data['name'] }}
+                                @endif
                             </flux:table.cell>
 
                             <flux:table.cell>

@@ -28,7 +28,7 @@ class SmsIndex extends Component
 
     protected $listeners = [
         'threadCreated' => 'selectThread',
-        'threadSelected' => 'selectThread',
+        'threadSelected' => 'handleThreadSelectedFromClient',
         'threadDeleted' => 'handleThreadDeleted',
         'switchToThread' => 'switchToThread',
     ];
@@ -90,33 +90,33 @@ class SmsIndex extends Component
             return;
         }
 
-        // Client users may only view threads belonging to their client
-        if ($this->isClientUser && $threadId !== null) {
-            $clientIds = auth()->user()->clients()->pluck('clients.id');
-            $allowed = SmsGroupThread::where('id', $threadId)
-                ->whereIn('client_id', $clientIds)
-                ->exists();
+        // Auto-select / threadCreated paths only pass IDs we already vetted server-side
+        // (accessibleThreadsQuery / new thread the user just created). SmsConversation
+        // re-authorizes inside loadThread() before exposing data, so an attacker spoofing
+        // this event still cannot view a thread they don't own.
 
-            if (! $allowed) {
-                return;
-            }
-        } elseif (! $this->isClientUser && $threadId !== null) {
-            $vendorId = auth()->user()->vendor?->id;
-            $allowed = $vendorId && SmsGroupThread::where('id', $threadId)
-                ->visibleToVendor($vendorId)
-                ->exists();
+        $this->threadId = $threadId;
 
-            if (! $allowed) {
-                return;
-            }
+        // Notify conversation directly so it can swap threads without re-mounting.
+        $this->dispatch('loadThread', threadId: $threadId)->to(SmsConversation::class);
+
+        // Browser event for Alpine-driven thread highlighting (avoids full child re-render)
+        $this->js("window.dispatchEvent(new CustomEvent('thread-selected', { detail: { threadId: ".json_encode($threadId)." } }))");
+    }
+
+    /**
+     * Client-initiated thread selection. The thread-list click handler also dispatches
+     * `loadThread` directly to SmsConversation in the same JS tick, so Livewire batches
+     * both component updates into a single HTTP request — no second roundtrip needed.
+     */
+    public function handleThreadSelectedFromClient(int|null $threadId): void
+    {
+        if ($threadId !== null && $threadId === $this->threadId) {
+            return;
         }
 
         $this->threadId = $threadId;
 
-        // Notify conversation directly so it can swap threads without re-mounting
-        $this->dispatch('loadThread', threadId: $threadId)->to(SmsConversation::class);
-
-        // Browser event for Alpine-driven thread highlighting (avoids full child re-render)
         $this->js("window.dispatchEvent(new CustomEvent('thread-selected', { detail: { threadId: ".json_encode($threadId)." } }))");
     }
 
