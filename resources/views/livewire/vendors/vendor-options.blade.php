@@ -216,6 +216,24 @@
                         </div>
                     </div>
 
+                    {{-- Recording Disclosure (prepended to every welcome message) --}}
+                    <div class="space-y-2">
+                        <div class="flex items-center justify-between gap-4">
+                            <div>
+                                <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                                    Recording Disclosure
+                                    <flux:badge size="sm" color="amber" class="ml-1">Required</flux:badge>
+                                </div>
+                                <div class="text-xs text-zinc-500">Spoken at the start of every recorded call before the welcome message. Required for two-party-consent jurisdictions (e.g. Illinois). Keep it short and unambiguous.</div>
+                            </div>
+                            <flux:button size="xs" variant="ghost" icon="play" wire:click="previewTts('recording_disclosure')" wire:loading.attr="disabled" wire:target="previewTts" title="Preview recording disclosure" />
+                        </div>
+                        <div>
+                            <flux:textarea wire:model="recording_disclosure_message" rows="2" placeholder="{{ \App\Livewire\Vendors\VendorOptions::DEFAULT_RECORDING_DISCLOSURE }}" resize="vertical" />
+                            <div class="text-xs text-zinc-400 mt-1">No placeholders. Captured inside the recording as audit trail of consent.</div>
+                        </div>
+                    </div>
+
                     {{-- Screening Prompt (played to the answering recipient) --}}
                     <div class="space-y-2">
                         <div class="flex items-center justify-between gap-4">

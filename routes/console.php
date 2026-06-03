@@ -2,10 +2,25 @@
 
 use App\Jobs\DispatchIncompleteReceiptImageScrapesJob;
 use App\Jobs\PruneFailedJobsJob;
+use App\Jobs\PurgeOldCallRecordings;
 use App\Jobs\RunScheduledTask;
 use Illuminate\Support\Facades\Schedule;
 
 Schedule::timezone('America/Chicago');
+
+Schedule::job(new PurgeOldCallRecordings())
+    ->dailyAt('03:15')
+    ->name('purge-old-call-recordings')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer();
+
+Schedule::command('calls:process-recordings --retry-failed')
+    ->everyFiveMinutes()
+    ->name('process-call-recordings')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer();
 
 // Schedule::call(function () {
 //     app(\App\Http\Controllers\LeadController::class)->leads_in_email();

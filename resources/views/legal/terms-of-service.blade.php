@@ -125,7 +125,26 @@
             <a href="https://policies.google.com/terms" target="_blank" rel="noopener">Google's Terms of Service</a>.
         </p>
 
-        <h3>6.4 Third-Party Disclaimer</h3>
+        <h3>6.4 Voice Calls, Recording & AI Processing (Telnyx, Azure OpenAI)</h3>
+        <p>
+            Voice calls placed to or received from {{ config('app.name') }} phone numbers are routed through Telnyx and may be
+            <strong>recorded, transcribed, and summarized using artificial intelligence</strong> for quality assurance,
+            training, recordkeeping, and service-improvement purposes. An audible announcement and/or beep is played
+            at the start of each recorded call.
+        </p>
+        <p>
+            <strong>By remaining on the call after the announcement, you consent to the recording, transcription,
+            and AI-assisted summarization of the conversation.</strong> If you do not consent, you may end the call
+            at any time. Calls in languages other than English may be transcribed and summarized in English.
+        </p>
+        <p>
+            Audio recordings, transcripts, and AI summaries are retained for up to <strong>180 days</strong> and then
+            automatically deleted, unless a longer retention is required by law or to resolve a dispute. Voice data is
+            processed by Telnyx and Azure OpenAI under their respective terms and privacy policies; Azure OpenAI does
+            not use call content to train its models.
+        </p>
+
+        <h3>6.5 Third-Party Disclaimer</h3>
         <p>
             We are not responsible for the availability, accuracy, or practices of third-party services.
             Your use of third-party integrations is at your own risk.

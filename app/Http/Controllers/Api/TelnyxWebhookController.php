@@ -11,6 +11,7 @@ use App\Jobs\SendVoicemailBrowserNotifications;
 use App\Jobs\StoreCallRecording;
 use App\Jobs\StoreSmsMedia;
 use App\Models\CallLog;
+use App\Models\CallTranscript;
 use App\Models\Client;
 use App\Models\SmsGroupThread;
 use App\Models\SmsLog;
@@ -89,6 +90,7 @@ class TelnyxWebhookController extends Controller
                 'call.gather.ended' => $this->handleCallGatherEnded($data),
                 'call.dtmf.received' => $this->handleCallDtmfReceived($data),
                 'call.recording.saved' => $this->handleCallRecordingSaved($data),
+                'call.recording.transcription.saved' => $this->handleCallRecordingTranscriptionSaved($data),
                 'call.machine.detection.ended' => $this->handleAmdEnded($data),
                 'call.machine.premium.detection.ended' => $this->handleAmdEnded($data),
                 'call.machine.premium.greeting.ended' => $this->handleAmdGreetingEnded($data),
@@ -537,6 +539,13 @@ class TelnyxWebhookController extends Controller
             'call_log_id' => $callLogId,
         ]);
 
+        // Start recording on the target leg before the bridge so a beep is
+        // played to the target as audible recording disclosure (IL two-party
+        // consent). Dual-channel captures target audio + bridged-in user audio.
+        if (config('call_recording.mode') === 'auto' && $callLog) {
+            $this->startCallRecording($callControlId, $callLog);
+        }
+
         // Set the bridged flag IMMEDIATELY so any in-flight `call.playback.ended`
         // webhooks for the user's ringback don't re-loop the ringback audio
         // over the conference. Without this, ringback would keep restarting
@@ -837,6 +846,10 @@ class TelnyxWebhookController extends Controller
             'answered_at' => now(),
         ]);
 
+        // Recording starts AFTER welcome+disclosure TTS finishes (see handleCallSpeakEnded
+        // welcome_done branch) so the system prompt isn't captured in the audio.
+        // Compliance audit trail is preserved via the recording_disclosure_played flag.
+
         // Get vendor options for phone system settings
         // TODO: Multi-vendor support — look up vendor by connection_id
         $vendor = Vendor::find(1);
@@ -870,6 +883,18 @@ class TelnyxWebhookController extends Controller
             '{company}' => $shortName,
             '{greeting}' => $greeting,
         ]);
+
+        // Append recording disclosure after the welcome (kept short to satisfy
+        // IL two-party consent). The phrase is captured in the recording
+        // itself, providing a defensible audit trail.
+        if (config('call_recording.mode') === 'auto' && config('call_recording.disclosure.enabled')) {
+            $disclosure = trim((string) (data_get($vendorOptions, 'recording_disclosure_message')
+                ?: config('call_recording.disclosure.phrase')));
+            if ($disclosure !== '') {
+                $ttsPayload = rtrim($ttsPayload) . ' ' . $disclosure;
+                $callLog?->update(['recording_disclosure_played' => true]);
+            }
+        }
 
         Log::channel('telnyx')->info('Playing welcome TTS and dialing admins simultaneously', [
             'call_control_id' => $callControlId,
@@ -1944,6 +1969,13 @@ class TelnyxWebhookController extends Controller
             $callLogId = $clientState['call_log_id'] ?? null;
             $originalCaller = $clientState['original_caller'] ?? null;
             $callLog = $callLogId ? CallLog::find($callLogId) : null;
+
+            // Start recording now that welcome+disclosure TTS has finished — keeps
+            // the system prompt out of the audio file while preserving the
+            // recording_disclosure_played audit trail set when TTS was queued.
+            if ($callLog && config('call_recording.mode') === 'auto' && empty($callLog->recording_started_at)) {
+                $this->startCallRecording($callControlId, $callLog);
+            }
 
             // Mark TTS as complete via cache (race-safe — can't be clobbered by metadata writes)
             if ($callLogId) {
@@ -3609,11 +3641,122 @@ class TelnyxWebhookController extends Controller
     }
 
     /**
-     * Bridge two call legs together (1-on-1 connection).
-     * This replaces conference-based routing with a simple direct bridge.
-     *
-     * @return bool Whether the bridge was successful.
+     * Start dual-channel MP3 recording on a call leg with Telnyx-hosted
+     * transcription. Stamps the CallLog with the recording metadata.
      */
+    protected function startCallRecording(string $callControlId, CallLog $callLog): bool
+    {
+        $params = [
+            'channels' => config('call_recording.channels', 'dual'),
+            'format' => config('call_recording.format', 'mp3'),
+            'play_beep' => (bool) config('call_recording.play_beep', true),
+            'client_state' => base64_encode(json_encode([
+                'action' => 'call_recording',
+                'call_log_id' => $callLog->id,
+            ])),
+        ];
+
+        // Transcription is handled by OpenAI Whisper after the recording is
+        // stored locally — see App\Jobs\TranscribeCallRecording. Telnyx STT
+        // is skipped because it costs $0.015/min and returned empty text in
+        // testing; OpenAI Whisper is $0.006/min and supports Polish.
+
+        $ok = $this->sendCallCommand($callControlId, 'record_start', $params);
+
+        if ($ok) {
+            $callLog->update([
+                'recording_started_at' => now(),
+                'purge_after' => now()->addDays((int) config('call_recording.retention_days', 180)),
+            ]);
+        }
+
+        return $ok;
+    }
+
+    /**
+     * Handle call.recording.transcription.saved — Telnyx finished STT.
+     *
+     * Disabled: transcription is now done locally by OpenAI Whisper via the
+     * `calls:process-recordings` artisan command. We still log the event for
+     * diagnostics but no longer persist Telnyx's (frequently empty) text.
+     */
+    protected function handleCallRecordingTranscriptionSaved(array $data): JsonResponse
+    {
+        $payload = $data['payload'] ?? [];
+        Log::channel('telnyx')->info('Ignoring Telnyx call.recording.transcription.saved (Whisper handles STT)', [
+            'call_control_id' => $payload['call_control_id'] ?? null,
+            'transcription_id' => $payload['transcription_id'] ?? null,
+        ]);
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * @deprecated Kept for reference; no longer reachable.
+     */
+    protected function handleCallRecordingTranscriptionSavedLegacy(array $data): JsonResponse
+    {
+        $payload = $data['payload'] ?? [];
+        $callControlId = $payload['call_control_id'] ?? null;
+        $clientStateRaw = $payload['client_state'] ?? null;
+        $clientState = $clientStateRaw
+            ? json_decode(base64_decode($clientStateRaw), true)
+            : null;
+
+        $callLogId = $clientState['call_log_id'] ?? null;
+        $callLog = $callLogId
+            ? CallLog::find($callLogId)
+            : CallLog::findByCallControlId($callControlId);
+
+        if (! $callLog) {
+            Log::channel('telnyx')->warning('Recording transcription saved but no CallLog found', [
+                'call_control_id' => $callControlId,
+                'transcription_id' => $payload['transcription_id'] ?? null,
+            ]);
+            return response()->json(['status' => 'ok']);
+        }
+
+        $text = $payload['transcription_data']['text']
+            ?? $payload['transcription']['text']
+            ?? null;
+        $language = $payload['transcription_data']['language']
+            ?? $payload['transcription']['language']
+            ?? null;
+        $segments = $payload['transcription_data']['segments']
+            ?? $payload['transcription']['segments']
+            ?? null;
+
+        $transcript = CallTranscript::updateOrCreate(
+            ['call_log_id' => $callLog->id],
+            [
+                'telnyx_recording_id' => $payload['recording_id'] ?? null,
+                'telnyx_transcription_id' => $payload['transcription_id'] ?? null,
+                'engine' => 'telnyx',
+                'language' => $language,
+                'text' => $text,
+                'segments' => $segments,
+                'status' => $text ? CallTranscript::STATUS_READY : CallTranscript::STATUS_FAILED,
+                'failure_reason' => $text ? null : 'empty_transcript',
+            ],
+        );
+
+        if ($language) {
+            $callLog->update(['language' => $language]);
+        }
+
+        Log::channel('telnyx')->info('Call transcription saved', [
+            'call_log_id' => $callLog->id,
+            'transcript_id' => $transcript->id,
+            'language' => $language,
+            'has_text' => (bool) $text,
+        ]);
+
+        // Summarization runs via the `calls:process-recordings` artisan command, not here.
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
     protected function bridgeCalls(string $callControlIdA, string $callControlIdB): bool
     {
         $apiKey = config('services.telnyx.api_key');

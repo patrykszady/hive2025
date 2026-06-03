@@ -39,6 +39,19 @@
     x-on:touchstart.passive="onTouchStart($event)"
     x-on:touchmove="onTouchMove($event)"
     x-on:touchend="onTouchEnd()"
+    x-init="
+        $nextTick(() => {
+            if (! $store.sms.callId
+                && window.matchMedia('(min-width: 1024px)').matches
+                && $el.dataset.firstCallId
+            ) {
+                const id = parseInt($el.dataset.firstCallId, 10);
+                $store.sms.callId = id;
+                Livewire.dispatch('call-selected', { callId: id });
+            }
+        })
+    "
+    data-first-call-id="{{ optional($this->calls->first())['call']?->id }}"
     class="space-y-2 h-full overflow-y-auto scrollbar-gutter overscroll-contain"
     style="-webkit-overflow-scrolling: touch"
 >
@@ -123,9 +136,9 @@
 
         <div
             wire:key="call-{{ $call->id }}"
-            x-on:click="selectedCallId = selectedCallId === {{ $call->id }} ? null : {{ $call->id }}"
+            x-on:click="$store.sms.callId = {{ $call->id }}; Livewire.dispatch('call-selected', { callId: {{ $call->id }} })"
             class="flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors"
-            :class="selectedCallId === {{ $call->id }} ? 'bg-zinc-100 dark:bg-zinc-700' : 'hover:bg-zinc-50 dark:hover:bg-zinc-800'"
+            :class="$store.sms.callId === {{ $call->id }} ? 'bg-zinc-100 dark:bg-zinc-700' : 'hover:bg-zinc-50 dark:hover:bg-zinc-800'"
         >
             {{-- Status icon --}}
             <div class="shrink-0">
@@ -195,48 +208,7 @@
                     @endif
                 </div>
 
-                {{-- Expanded details --}}
-                <div x-show="selectedCallId === {{ $call->id }}" x-cloak class="mt-2 pt-2 border-t border-zinc-200 dark:border-zinc-600 space-y-2">
-                        <div class="text-sm lg:text-xs text-zinc-500">
-                            {{ $call->created_at->copy()->setTimezone(browser_timezone())->format('M j, Y g:i A') }}
-                        </div>
-
-                        @if ($otherNumber)
-                            <div class="flex flex-col gap-1">
-                                <flux:button size="xs" variant="primary" icon="phone" wire:click.stop="callBack('{{ $otherNumber }}')">
-                                    Call Back
-                                </flux:button>
-                                <flux:button size="xs" variant="ghost" icon="chat-bubble-left" wire:click.stop="textBack('{{ $otherNumber }}')">
-                                    Text
-                                </flux:button>
-                                @if ($effectiveStatus === 'blocked' && in_array($otherNumber, $this->blockedNumbers))
-                                    <flux:button size="xs" variant="primary" color="green" icon="shield-check" class="justify-center" wire:click.stop="unblockNumber('{{ $otherNumber }}')">
-                                        Unblock
-                                    </flux:button>
-                                @elseif ($otherNumber && ! $this->isKnownContact($otherNumber) && $effectiveStatus !== 'blocked' && ! in_array($otherNumber, $this->blockedNumbers))
-                                    <flux:button size="xs" variant="primary" color="amber" icon="shield-exclamation" class="justify-center" wire:click.stop="markAsSpam({{ $call->id }})">
-                                        Mark as Spam
-                                    </flux:button>
-                                @endif
-                            </div>
-                        @endif
-
-                        @if ($call->has_voicemail && $call->recording_url)
-                            <div class="mt-1">
-                                <div class="text-sm lg:text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Voicemail</div>
-                                <audio controls preload="none" class="w-full h-8">
-                                    <source src="{{ $call->recording_url }}" type="audio/mpeg">
-                                </audio>
-                            </div>
-                        @elseif ($call->recording_url)
-                            <div class="mt-1">
-                                <div class="text-sm lg:text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Recording</div>
-                                <audio controls preload="none" class="w-full h-8">
-                                    <source src="{{ $call->recording_url }}" type="audio/mpeg">
-                                </audio>
-                            </div>
-                        @endif
-                </div>
+                {{-- Detail pane lives in the right column; the inline expansion has been removed. --}}
             </div>
         </div>
     @empty

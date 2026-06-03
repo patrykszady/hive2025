@@ -65,12 +65,21 @@ class StoreCallRecording implements ShouldQueue
 
             Storage::disk('local')->put('public/' . $filename, $response->body());
 
-            $callLog->update(['recording_url' => '/storage/' . $filename]);
+            $callLog->update([
+                'recording_url' => '/storage/' . $filename,
+                'recording_disk' => 'local',
+                'recording_path' => 'public/' . $filename,
+                'purge_after' => $callLog->purge_after
+                    ?? now()->addDays((int) config('call_recording.retention_days', 180)),
+            ]);
 
             Log::channel('telnyx')->info('Call recording stored locally', [
                 'call_log_id' => $this->callLogId,
                 'path' => $filename,
             ]);
+
+            // Transcription + summarization run via the `calls:process-recordings` artisan command
+            // (scheduled / manual), not auto-dispatched here.
         } catch (\Exception $e) {
             Log::channel('telnyx')->error('Exception downloading call recording', [
                 'call_log_id' => $this->callLogId,

@@ -153,7 +153,42 @@
             Nylas's use of your data is governed by <a href="https://www.nylas.com/legal/privacy-policy/" target="_blank" rel="noopener">Nylas's Privacy Policy</a>.
         </p>
 
-        <h2>6. Data Sharing</h2>
+        <h2>6. Voice Calls, Recordings, Transcripts & AI Summaries</h2>
+        <p>
+            Phone calls placed to or received from {{ config('app.name') }} phone numbers are routed through Telnyx and may be
+            recorded, transcribed, and summarized using artificial intelligence (Azure OpenAI). We collect and store:
+        </p>
+        <ul>
+            <li>Caller and called phone numbers, call direction, duration, and timestamps</li>
+            <li>Audio recordings of the call (typically MP3, dual-channel)</li>
+            <li>Text transcripts of the call, including detected language</li>
+            <li>AI-generated summaries, action items, sentiment, and topic tags derived from the transcript</li>
+            <li>Call metadata associated with the project, client, or vendor on the platform</li>
+        </ul>
+        <p>
+            <strong>Consent.</strong> An audible announcement and/or beep is played at the start of each recorded call.
+            By remaining on the call after the announcement, all parties consent to the call being recorded, transcribed,
+            and summarized. You may end the call at any time if you do not consent.
+        </p>
+        <p>
+            <strong>Use.</strong> We use call recordings, transcripts, and summaries to provide service continuity, resolve
+            disputes, train staff, improve product quality, and surface action items in your account. We do not sell call
+            content. Calls in languages other than English may be transcribed and summarized into English by Azure OpenAI.
+        </p>
+        <p>
+            <strong>Retention.</strong> Audio recordings, transcripts, and AI summaries are automatically deleted after
+            <strong>180 days</strong>, unless a longer retention is required by law, to resolve a dispute, or at your
+            written request.
+        </p>
+        <p>
+            <strong>Subprocessors.</strong> Telnyx provides voice transport and speech-to-text. Azure OpenAI generates
+            summaries; per Microsoft's terms, Azure OpenAI does not use customer call content to train its foundation
+            models. Their handling of data is governed by
+            <a href="https://telnyx.com/data-privacy" target="_blank" rel="noopener">Telnyx's Data &amp; Privacy</a> and
+            <a href="https://www.microsoft.com/en-us/trust-center/privacy" target="_blank" rel="noopener">Microsoft's Privacy Statement</a>.
+        </p>
+
+        <h2>7. Data Sharing</h2>
         <p>We do not sell your personal information. We may share information with:</p>
         <ul>
             <li><strong>Service Providers:</strong> Third parties who help us operate the Service (hosting, SMS delivery, payment processing, email integration).</li>
@@ -162,7 +197,7 @@
             <li><strong>Business Transfers:</strong> In connection with a merger, acquisition, or sale of assets.</li>
         </ul>
 
-        <h2>7. Data Security</h2>
+        <h2>8. Data Security</h2>
         <p>
             We implement industry-standard security measures to protect your data, including:
         </p>
@@ -177,7 +212,7 @@
             the confidentiality of your account credentials.
         </p>
 
-        <h2>8. Data Retention</h2>
+        <h2>9. Data Retention</h2>
         <p>
             We retain your data for as long as your account is active or as needed to provide the Service.
             We may retain certain information as required by law or for legitimate business purposes
@@ -188,7 +223,7 @@
             be retained in backups for a limited period.
         </p>
 
-        <h2>9. Your Rights</h2>
+        <h2>10. Your Rights</h2>
         <p>Depending on your location, you may have the right to:</p>
         <ul>
             <li>Access the personal information we hold about you</li>
@@ -200,19 +235,19 @@
         </ul>
         <p>To exercise these rights, contact us using the information below.</p>
 
-        <h2>10. Children's Privacy</h2>
+        <h2>11. Children's Privacy</h2>
         <p>
             The Service is not intended for children under 18. We do not knowingly collect personal information
             from children. If you believe we have collected information from a child, please contact us.
         </p>
 
-        <h2>11. Changes to This Policy</h2>
+        <h2>12. Changes to This Policy</h2>
         <p>
             We may update this Privacy Policy from time to time. We will notify you of material changes by
             posting the new policy on this page and updating the "Last Updated" date.
         </p>
 
-        <h2>12. Contact Us</h2>
+        <h2>13. Contact Us</h2>
         <p>
             If you have questions about this Privacy Policy, our data practices, or wish to exercise your rights,
             please contact us:

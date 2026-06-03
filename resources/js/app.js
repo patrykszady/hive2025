@@ -8,8 +8,12 @@ document.addEventListener('alpine:init', () => {
     window.Alpine.store('sms', {
         tab: 'messages',
         threadId: null,
+        callId: null,
         setTab(value) {
             this.tab = value;
+        },
+        setCallId(value) {
+            this.callId = value;
         },
     });
 });

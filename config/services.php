@@ -13,6 +13,10 @@ return [
         'api_key' => env('OPENAI_API_KEY'),
     ],
 
+    'assemblyai' => [
+        'api_key' => env('ASSEMBLYAI_API_KEY'),
+    ],
+
     'brightdata' => [
         'api_token' => env('BRIGHTDATA_API_TOKEN'),
         // SERP API zone name (e.g. "hive_serp_api"). Synchronous Google search via /request.

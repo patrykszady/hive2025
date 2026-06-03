@@ -132,7 +132,7 @@
             }
         "
         class="w-full lg:w-80 shrink-0 min-w-0 min-h-0 max-w-md mx-auto lg:mx-0 lg:max-w-none lg:flex lg:flex-col {{ $threadId && $activeTab === 'messages' ? 'hidden lg:flex' : '' }}"
-        x-bind:class="($store.sms.threadId && $store.sms.tab === 'messages') ? 'hidden lg:flex' : ''"
+        x-bind:class="(($store.sms.threadId && $store.sms.tab === 'messages') || ($store.sms.callId && $store.sms.tab === 'calls')) ? 'hidden lg:flex' : ''"
     >
         <x-island-card class="relative flex flex-col h-full min-h-0 overflow-hidden">
             {{-- Tabs --}}
@@ -264,6 +264,16 @@
         class="relative flex-1 min-w-0 flex flex-col min-h-0 max-w-md mx-auto lg:mx-0 lg:max-w-none">
         <div class="flex-1 min-h-0 flex flex-col">
             <livewire:sms.sms-conversation :thread-id="$threadId" :is-client-user="$isClientUser" />
+        </div>
+    </div>
+
+    {{-- Call detail pane (mirrors conversation pane on the calls tab) --}}
+    <div id="sms-call-detail-wrap"
+        x-show="$store.sms.tab === 'calls' && ($store.sms.callId || window.matchMedia('(min-width: 1024px)').matches)"
+        x-cloak
+        class="relative flex-1 min-w-0 flex flex-col min-h-0 max-w-md mx-auto lg:mx-0 lg:max-w-none">
+        <div class="flex-1 min-h-0 flex flex-col">
+            <livewire:sms.call-detail />
         </div>
     </div>
 

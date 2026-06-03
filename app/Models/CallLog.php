@@ -39,6 +39,13 @@ class CallLog extends Model
         'hangup_cause',
         'notes',
         'recording_url',
+        'recording_disk',
+        'recording_path',
+        'recording_telnyx_id',
+        'recording_started_at',
+        'recording_disclosure_played',
+        'language',
+        'purge_after',
         'has_voicemail',
         'project_id',
         'user_id',
@@ -54,6 +61,9 @@ class CallLog extends Model
         return [
             'metadata' => 'array',
             'has_voicemail' => 'boolean',
+            'recording_disclosure_played' => 'boolean',
+            'recording_started_at' => 'datetime',
+            'purge_after' => 'datetime',
             'answered_at' => 'datetime',
             'ended_at' => 'datetime',
         ];
@@ -62,6 +72,11 @@ class CallLog extends Model
     public function project(): BelongsTo
     {
         return $this->belongsTo(Project::class);
+    }
+
+    public function transcript(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(CallTranscript::class);
     }
 
     public function user(): BelongsTo
