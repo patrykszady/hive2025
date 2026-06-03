@@ -128,7 +128,9 @@ class Transaction extends Model
         $array = $this->toArray();
         $array['transaction_date'] = $this->transaction_date->timestamp;
         $array['posted_date'] = $this->posted_date ? $this->posted_date->timestamp : null;
-        $array['deposit'] = $this->deposit ? ($this->payments->isEmpty() ? 'NO_PAYMENTS' : 'HAS_PAYMENTS') : 'NOT_DEPOSIT';
+        $array['deposit'] = $this->payments->isNotEmpty()
+            ? 'HAS_PAYMENTS'
+            : ($this->deposit ? 'NO_PAYMENTS' : 'NOT_DEPOSIT');
         $array['expenses_count'] = $this->expenses()->count();
         
         // Ensure amount is consistently cast to float like Expense model

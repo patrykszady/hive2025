@@ -11,7 +11,7 @@
     
     // Only show merchant descriptions if at least one transaction has one
     $hasMerchantDescriptions = $transactions->contains(function($transaction) {
-        return !empty($transaction->plaid_merchant_description);
+        return !empty($transaction->plaid_merchant_description) || !empty($transaction->plaid_merchant_name);
     });
 @endphp
 
@@ -38,7 +38,7 @@
                     </flux:table.row>
                     
                     {{-- Only show this row if there's vendor info or merchant descriptions to display --}}
-                    @if(($hasVendorInfo && $transaction->vendor && $transaction->vendor->name != 'No Vendor') || !empty($transaction->plaid_merchant_description))
+                    @if(($hasVendorInfo && $transaction->vendor && $transaction->vendor->name != 'No Vendor') || !empty($transaction->plaid_merchant_description) || !empty($transaction->plaid_merchant_name))
                         <flux:table.row>
                             <flux:table.cell colspan="4" class="whitespace-normal break-words">
                                 @if($hasVendorInfo && $transaction->vendor && $transaction->vendor->name != 'No Vendor')
@@ -46,8 +46,15 @@
                                         {{ $transaction->vendor->name }}
                                     </span>
                                 @endif
-                                @if($transaction->plaid_merchant_description && 
-                                    (!$transaction->vendor || $transaction->plaid_merchant_description !== $transaction->vendor->name))
+                                @if($transaction->plaid_merchant_name &&
+                                    (!$transaction->vendor || $transaction->plaid_merchant_name !== $transaction->vendor->name))
+                                    <span class="block text-sm">
+                                        {{ $transaction->plaid_merchant_name }}
+                                    </span>
+                                @endif
+                                @if($transaction->plaid_merchant_description &&
+                                    (!$transaction->vendor || $transaction->plaid_merchant_description !== $transaction->vendor->name) &&
+                                    $transaction->plaid_merchant_description !== $transaction->plaid_merchant_name)
                                     <span class="block italic text-sm text-gray-500">
                                         {{ $transaction->plaid_merchant_description }}
                                     </span>

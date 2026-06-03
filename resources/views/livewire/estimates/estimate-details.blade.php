@@ -21,7 +21,7 @@
                         @else
                             <flux:menu.item icon="pencil-square" wire:click="$dispatchTo('estimates.estimate-accept', 'signSetup')">Sign Contract</flux:menu.item>
                         @endif
-                        @if($estimate->client?->users?->contains(fn ($u) => !($u->registration['registered'] ?? false)))
+                        @if($estimate->client?->users?->isNotEmpty())
                             <flux:menu.item icon="paper-airplane" wire:click="sendInvite" wire:loading.attr="disabled" wire:target="sendInvite">Send Invite</flux:menu.item>
                         @endif
 

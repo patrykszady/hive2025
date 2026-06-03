@@ -418,16 +418,18 @@ class EstimateShow extends Component
         $vendorId = $this->estimate->belongs_to_vendor_id;
         $allUsers = $client?->users ?? collect();
 
-        // Only send to users who haven't completed registration
-        $users = $allUsers->filter(fn ($u) => !($u->registration['registered'] ?? false));
+        // The registration.registered flag is unreliable on legacy/imported users,
+        // so send to every client user with an email and let recipients ignore it
+        // if they're already signed up.
+        $users = $allUsers->filter(fn ($u) => filled($u->email));
 
         if ($users->isEmpty()) {
             Flux::toast(
                 duration: 5000,
                 position: 'top right',
                 variant: 'warning',
-                heading: 'No Unregistered Users',
-                text: 'All client users have already registered.',
+                heading: 'No Recipients',
+                text: 'No client users with an email address.',
             );
 
             return;

@@ -1,5 +1,6 @@
 @php
-    $isLocked = $edit_line_item && $estimate->isFullySigned();
+    $section = $section_id ? $estimate->estimate_sections->find($section_id) : null;
+    $isLocked = $edit_line_item && $section?->isLocked();
 @endphp
 <x-form-modal name="estimate_line_item_form_modal" :title="$view_text['card_title']">
     <form id="estimate_line_item_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="space-y-4">

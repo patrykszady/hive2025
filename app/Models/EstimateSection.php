@@ -37,6 +37,28 @@ class EstimateSection extends Model
         return $this->belongsTo(Bid::class);
     }
 
+    /**
+     * A section is locked from editing only if the estimate is fully signed
+     * AND the section already existed at the time of the earliest signature.
+     * Sections added after signing (e.g. change orders) remain editable.
+     */
+    public function isLocked(): bool
+    {
+        $estimate = $this->estimate;
+
+        if (! $estimate || ! $estimate->isFullySigned()) {
+            return false;
+        }
+
+        $earliestSignature = $estimate->signatures()->min('signed_at');
+
+        if (! $earliestSignature) {
+            return false;
+        }
+
+        return $this->created_at && $this->created_at->lessThanOrEqualTo($earliestSignature);
+    }
+
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
