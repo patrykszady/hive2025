@@ -152,7 +152,11 @@ class CallLog extends Model
             return null;
         }
 
-        return User::where('cell_phone', 'LIKE', "%{$digits}%")->first();
+        try {
+            return User::where('cell_phone', 'LIKE', "%{$digits}%")->first();
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**

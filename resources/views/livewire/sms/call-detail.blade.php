@@ -179,11 +179,28 @@
                     @if ($call->transcript->text)
                         @php
                             $cleanSegments = $this->cleanedTranscriptSegments($call);
+                            $speakers = $this->transcriptSpeakers($call);
                         @endphp
                         <div class="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3">
                             <details>
                                 <summary class="cursor-pointer text-sm font-medium text-zinc-700 dark:text-zinc-200 hover:text-zinc-900 dark:hover:text-zinc-100">
-                                    Full transcript
+                                    <span class="inline-flex items-center gap-2 flex-wrap">
+                                        <span>Full transcript</span>
+                                        @foreach ($speakers as $i => $sp)
+                                            @php
+                                                $badgePalette = [
+                                                    'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200',
+                                                    'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200',
+                                                    'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200',
+                                                    'bg-fuchsia-100 text-fuchsia-800 dark:bg-fuchsia-900/40 dark:text-fuchsia-200',
+                                                    'bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-200',
+                                                    'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-200',
+                                                ];
+                                                $cls = $badgePalette[$i % count($badgePalette)];
+                                            @endphp
+                                            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium {{ $cls }}">{{ $sp }}</span>
+                                        @endforeach
+                                    </span>
                                 </summary>
                                 <div class="mt-3 space-y-2 text-sm text-zinc-700 dark:text-zinc-200 leading-relaxed">
                                     @php

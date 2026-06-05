@@ -110,34 +110,96 @@ class TranscribeCallRecording implements ShouldQueue
             'format_text' => true,
         ];
 
-        // Hint to the diarizer how many distinct speakers to expect. Most of
-        // our calls are 2-party (caller + agent); without this hint Universal-2
-        // sometimes collapses two similar-sounding voices (e.g. two adult
-        // males) into one speaker. Set to null to let the model decide.
-        $expectedSpeakers = config('call_recording.transcription.speakers_expected');
-        if ($expectedSpeakers !== null && $payload['speaker_labels']) {
-            $payload['speakers_expected'] = (int) $expectedSpeakers;
+        // Pin the speech model priority. Universal-3 Pro is the best
+        // multilingual model and supports keyterms_prompt + custom_spelling;
+        // Universal-2 is the documented fallback if U-3 Pro is unavailable.
+        $speechModels = (array) config('call_recording.transcription.speech_models', ['universal-3-pro', 'universal-2']);
+        if ($speechModels !== []) {
+            $payload['speech_models'] = array_values($speechModels);
         }
 
+        // Hint to the diarizer how many distinct speakers to expect. Per
+        // AssemblyAI's guidance, `speakers_expected` should only be used when
+        // the exact count is certain; otherwise a min/max range
+        // (`speaker_options`) produces better separation. Our call volume mixes
+        // 2-party calls, voicemails (IVR + caller), and the odd 3-party call,
+        // so we default to the range and only pin an exact count when
+        // explicitly configured.
+        if ($payload['speaker_labels']) {
+            $expectedSpeakers = config('call_recording.transcription.speakers_expected');
+            if ($expectedSpeakers !== null && $expectedSpeakers !== '') {
+                $payload['speakers_expected'] = (int) $expectedSpeakers;
+            } else {
+                $options = (array) config('call_recording.transcription.speaker_options', []);
+                $min = isset($options['min_speakers_expected']) ? (int) $options['min_speakers_expected'] : null;
+                $max = isset($options['max_speakers_expected']) ? (int) $options['max_speakers_expected'] : null;
+                $speakerOptions = [];
+                if ($min !== null && $min > 0) {
+                    $speakerOptions['min_speakers_expected'] = $min;
+                }
+                if ($max !== null && $max > 0) {
+                    $speakerOptions['max_speakers_expected'] = $max;
+                }
+                if ($speakerOptions !== []) {
+                    $payload['speaker_options'] = $speakerOptions;
+                }
+            }
+        }
+
+
         $forcedLanguage = config('call_recording.transcription.language');
-        $boostWords = $this->buildWordBoost($callLog);
+        $allowedCodes = $this->parseAllowedLanguageCodes(
+            (string) config('call_recording.transcription.language_codes', 'en,pl')
+        );
 
         if ($forcedLanguage) {
             $payload['language_code'] = $forcedLanguage;
-        } elseif ($boostWords !== []) {
-            // word_boost requires a fixed language_code; default to English
-            // (US calls) when we have proper nouns to bias toward.
-            $payload['language_code'] = 'en';
+        } elseif (count($allowedCodes) >= 2 && in_array('en', $allowedCodes, true)) {
+            // Code-switching: handle a single call that mixes languages
+            // (e.g. English + Polish). `language_codes` is AssemblyAI's
+            // multilingual path and is mutually exclusive with
+            // `language_detection` / `language_detection_options`.
+            $payload['language_codes'] = $allowedCodes;
+        } elseif (count($allowedCodes) === 1) {
+            $payload['language_code'] = $allowedCodes[0];
         } else {
+            // No usable allow-list: fall back to single-language auto-detection.
             $payload['language_detection'] = true;
         }
 
-        // Bias recognition toward known proper nouns (caller name) so non-English
-        // names like "Grzegorz Szady" aren't transcribed phonetically as
-        // "Gregory Vady".
-        if ($boostWords !== [] && isset($payload['language_code'])) {
-            $payload['word_boost'] = $boostWords;
-            $payload['boost_param'] = 'high';
+        // Bias recognition toward known proper nouns (caller name, Hive staff,
+        // contractors) so non-English names like "Grzegorz Szady" aren't
+        // transcribed phonetically. keyterms_prompt is the Universal-2/3 Pro
+        // replacement for the legacy word_boost and supports multi-word
+        // phrases (max 6 words, up to 200/1000 entries).
+        $keyterms = $this->buildKeytermsPrompt($callLog);
+        if ($keyterms !== []) {
+            $payload['keyterms_prompt'] = array_slice($keyterms, 0, 200);
+        }
+
+        // Hard rewrites for proper nouns AAI consistently mishears (e.g.
+        // "Vady" → "Szady"). Combines a per-call set built from the caller +
+        // agent names with a global config table maintained in
+        // config/call_recording.php → name_corrections.
+        $customSpelling = $this->buildCustomSpelling($callLog);
+        if ($customSpelling !== []) {
+            $payload['custom_spelling'] = $customSpelling;
+        }
+
+        // AssemblyAI Audio Intelligence add-ons. These run inline with the
+        // transcription and surface structured data we'd otherwise have to
+        // ask an LLM to infer: named entities (addresses, dates, dollar
+        // amounts), key highlights, auto chapters, IAB topics, and per-
+        // utterance sentiment. Stored on the transcript's `intelligence`
+        // column. Note: sentiment_analysis / entity_detection are not
+        // available alongside non-English code-switching on every model, so
+        // AssemblyAI simply omits them from the response when unsupported —
+        // we defensively read whatever comes back.
+        $intelligence = (array) config('call_recording.transcription.intelligence', []);
+        foreach (['entity_detection', 'auto_highlights', 'auto_chapters', 'iab_categories', 'sentiment_analysis'] as $feature) {
+            if (! empty($intelligence[$feature])) {
+                $payload[$feature] = true;
+            }
         }
 
         $createResp = Http::withHeaders(['authorization' => $apiKey])
@@ -189,11 +251,33 @@ class TranscribeCallRecording implements ShouldQueue
             ? trim(implode("\n", array_map(fn ($s) => $s['speaker'] . ': ' . $s['text'], $segments)))
             : trim((string) ($body['text'] ?? ''));
 
+        // Collect any Audio Intelligence outputs AssemblyAI returned.
+        $intelligence = $this->extractIntelligence($body);
+
+        // Decide which diarized speaker is the Hive agent vs. the external
+        // party from the conversation content (see identifySpeakersWithOpenAI).
+        // Enrichment only — a failure here must not fail the transcription, so
+        // it's wrapped and best-effort.
+        $speakerMap = [];
+        if (config('call_recording.transcription.speaker_identification', true) && $segments !== []) {
+            try {
+                $speakerMap = $this->identifySpeakersWithOpenAI($segments, $callLog);
+            } catch (\Throwable $e) {
+                Log::channel('telnyx')->warning('Speaker identification failed', [
+                    'call_log_id' => $callLog->id,
+                    'assemblyai_id' => $transcriptId,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         $transcript->update([
             'engine' => 'assemblyai',
             'language' => $detectedLanguage,
             'text' => $text !== '' ? $text : null,
             'segments' => $segments ?: null,
+            'speaker_map' => $speakerMap ?: null,
+            'intelligence' => $intelligence ?: null,
             'status' => $text !== '' ? CallTranscript::STATUS_READY : CallTranscript::STATUS_FAILED,
             'failure_reason' => $text !== '' ? null : 'empty_transcript',
         ]);
@@ -209,74 +293,374 @@ class TranscribeCallRecording implements ShouldQueue
             'language' => $detectedLanguage,
             'utterances' => count($segments),
             'chars' => strlen($text),
+            'speaker_map' => $speakerMap ?: null,
+            'intelligence' => array_keys($intelligence),
         ]);
     }
 
     /**
-     * Build a list of proper nouns to boost during transcription, based on
-     * what we already know about the call (caller name, contact name).
-     * Returns deduped, non-empty tokens.
+     * Pull AssemblyAI Audio Intelligence outputs out of the transcript
+     * response body. Only includes features that actually returned data so
+     * the stored blob stays compact.
+     *
+     * @param  array<string, mixed>  $body
+     * @return array<string, mixed>
+     */
+    protected function extractIntelligence(array $body): array
+    {
+        $intelligence = [];
+
+        if (! empty($body['entities']) && is_array($body['entities'])) {
+            $intelligence['entities'] = $body['entities'];
+        }
+        if (! empty($body['chapters']) && is_array($body['chapters'])) {
+            $intelligence['chapters'] = $body['chapters'];
+        }
+        if (
+            isset($body['auto_highlights_result']['results'])
+            && is_array($body['auto_highlights_result']['results'])
+            && $body['auto_highlights_result']['results'] !== []
+        ) {
+            $intelligence['highlights'] = $body['auto_highlights_result']['results'];
+        }
+        if (
+            isset($body['iab_categories_result']['summary'])
+            && is_array($body['iab_categories_result']['summary'])
+            && $body['iab_categories_result']['summary'] !== []
+        ) {
+            $intelligence['iab_categories'] = $body['iab_categories_result']['summary'];
+        }
+        if (! empty($body['sentiment_analysis_results']) && is_array($body['sentiment_analysis_results'])) {
+            $intelligence['sentiment'] = $body['sentiment_analysis_results'];
+        }
+
+        return $intelligence;
+    }
+
+    /**
+     * Identify which diarized speaker is the Hive agent and which is the
+     * external party by asking an LLM to classify each speaker's ROLE from the
+     * conversation content. The model only decides role (agent vs. other) —
+     * the actual names come from our own call records, so it can neither
+     * hallucinate nor swap names. Returns the raw-label => name mapping, e.g.
+     * ["A" => "Richard Egger", "B" => "Patryk Szady"].
+     *
+     * Diarization on our mono recordings makes "who picks up first" unreliable
+     * (the agent is sometimes the first labelled speaker, sometimes the
+     * second), and being addressed by name ("Patryk?") is easily mistaken for
+     * being that person — so a content-based role decision is the only robust
+     * signal we have.
+     *
+     * @param  array<int, array<string, mixed>>  $segments
+     * @return array<string, string>
+     */
+    protected function identifySpeakersWithOpenAI(array $segments, CallLog $callLog): array
+    {
+        $apiKey = config('services.openai.api_key');
+        if (! $apiKey || $segments === []) {
+            return [];
+        }
+
+        $agent = $callLog->agentUser();
+        $agentName = $agent ? trim(($agent->first_name ?? '') . ' ' . ($agent->last_name ?? '')) : '';
+
+        $other = $callLog->otherPartyUser();
+        $otherName = $other
+            ? trim(($other->first_name ?? '') . ' ' . ($other->last_name ?? ''))
+            : trim((string) $callLog->caller_name);
+
+        // Need at least one known name to map a role onto.
+        if ($agentName === '' && $otherName === '') {
+            return [];
+        }
+
+        $labels = [];
+        $lines = [];
+        foreach ($segments as $seg) {
+            $label = (string) ($seg['speaker_id'] ?? '');
+            $text = trim((string) ($seg['text'] ?? ''));
+            if ($label === '' || $text === '') {
+                continue;
+            }
+            $labels[$label] = true;
+            $lines[] = '[' . $label . '] ' . $text;
+        }
+        $labels = array_keys($labels);
+        if (count($labels) < 2) {
+            // Single speaker — nothing to disambiguate.
+            return [];
+        }
+
+        $direction = $callLog->direction === 'incoming'
+            ? 'INBOUND — the external party called Hive; a Hive staff member answered.'
+            : 'OUTBOUND — a Hive staff member dialled the external party.';
+
+        $system = 'You label speakers in a recorded phone call for Hive, a construction-management '
+            . 'company (also branded "GS Construction" / "GS Crew"). For every speaker label, decide '
+            . 'whether that speaker is the Hive AGENT (company staff) or the OTHER party (an external '
+            . 'customer, contractor, or vendor). Respond with strict JSON only.';
+
+        $guidance = [
+            'The Hive AGENT represents the company: quotes prices, sends invoices/estimates, talks '
+                . 'about "our price", "we/us", scheduling crews, permits, contractor discounts.',
+            'The OTHER party is the customer/contractor: asks about their project, timeline, cost, and '
+                . 'reacts to what the agent proposes.',
+            'CRITICAL: being ADDRESSED by a name does NOT mean the speaker has that name. If a speaker '
+                . 'says "Patryk?" or "is Patryk there", they are talking TO Patryk and are NOT Patryk.',
+            'A speaker who INTRODUCES themselves ("good afternoon, this is X") IS that person.',
+        ];
+
+        $user = "Call direction: {$direction}\n"
+            . 'Hive agent (company staff): ' . ($agentName !== '' ? $agentName : '(name unknown)') . "\n"
+            . 'External party: ' . ($otherName !== '' ? $otherName : '(name unknown)') . "\n\n"
+            . "How to tell them apart:\n- " . implode("\n- ", $guidance) . "\n\n"
+            . "Transcript (each line prefixed with its speaker label):\n"
+            . implode("\n", $lines);
+
+        $response = Http::withToken($apiKey)
+            ->timeout(60)
+            ->post('https://api.openai.com/v1/chat/completions', [
+                'model' => config('call_recording.summarization.model', 'gpt-4o'),
+                'messages' => [
+                    ['role' => 'system', 'content' => $system],
+                    ['role' => 'user', 'content' => $user],
+                ],
+                'response_format' => [
+                    'type' => 'json_schema',
+                    'json_schema' => [
+                        'name' => 'speaker_roles',
+                        'strict' => true,
+                        'schema' => [
+                            'type' => 'object',
+                            'additionalProperties' => false,
+                            'properties' => [
+                                'speakers' => [
+                                    'type' => 'array',
+                                    'items' => [
+                                        'type' => 'object',
+                                        'additionalProperties' => false,
+                                        'properties' => [
+                                            'label' => ['type' => 'string'],
+                                            'role' => ['type' => 'string', 'enum' => ['agent', 'other']],
+                                        ],
+                                        'required' => ['label', 'role'],
+                                    ],
+                                ],
+                            ],
+                            'required' => ['speakers'],
+                        ],
+                    ],
+                ],
+            ]);
+
+        if (! $response->successful()) {
+            throw new \RuntimeException('openai_speaker_id_http_' . $response->status() . ': ' . $response->body());
+        }
+
+        $content = data_get($response->json(), 'choices.0.message.content');
+        $parsed = is_string($content) ? json_decode($content, true) : null;
+        $speakers = is_array($parsed) ? ($parsed['speakers'] ?? []) : [];
+
+        $map = [];
+        foreach ($speakers as $entry) {
+            $label = trim((string) ($entry['label'] ?? ''));
+            $role = (string) ($entry['role'] ?? '');
+            if ($label === '') {
+                continue;
+            }
+            $name = $role === 'agent' ? $agentName : $otherName;
+            if ($name !== '') {
+                $map[$label] = $name;
+            }
+        }
+
+        return $map;
+    }
+
+    /**
+     * Build a keyterms_prompt list (Universal-2/3 Pro replacement for the
+     * legacy word_boost) of proper nouns to bias transcription toward, based
+     * on what we already know about the call. Multi-word phrases are kept
+     * intact (up to 6 words per AssemblyAI's limit).
      *
      * @return array<int, string>
      */
-    protected function buildWordBoost(CallLog $callLog): array
+    protected function buildKeytermsPrompt(CallLog $callLog): array
     {
-        $sources = [];
+        $phrases = [];
+        $tokens = [];
+
+        $register = function (?string $value) use (&$phrases, &$tokens): void {
+            $value = trim((string) $value);
+            if ($value === '') {
+                return;
+            }
+            // Phrase (full name): only keep ≤6 words, AssemblyAI's max.
+            $wordCount = count(preg_split('/\s+/', $value) ?: []);
+            if ($wordCount >= 1 && $wordCount <= 6) {
+                $phrases[$value] = true;
+            }
+            foreach (preg_split('/\s+/', $value) as $token) {
+                $token = trim((string) $token);
+                if ($token !== '' && mb_strlen($token) >= 2) {
+                    $tokens[$token] = true;
+                    foreach ($this->nicknameAliases($token) as $alias) {
+                        $tokens[$alias] = true;
+                    }
+                }
+            }
+        };
+
         if ($callLog->caller_name) {
-            $sources[] = (string) $callLog->caller_name;
+            $register($callLog->caller_name);
         }
         if ($callLog->contact_user_id) {
             $contact = \App\Models\User::find($callLog->contact_user_id);
             if ($contact) {
-                $sources[] = (string) $contact->name;
+                $register((string) $contact->name);
             }
         }
 
         // Resolve the external party + the Hive agent by phone number so we
         // bias AssemblyAI toward their names (fixes mishears like
-        // "Dick" → "Nick" or "Patryk" → "Patrick / Peter").
+        // "Patryk" → "Patrick" or "Grzegorz" → "Gregor").
         $other = $callLog->otherPartyUser();
         if ($other) {
-            $sources[] = trim(($other->first_name ?? '') . ' ' . ($other->last_name ?? ''));
+            $register(trim(($other->first_name ?? '') . ' ' . ($other->last_name ?? '')));
         }
         $agent = $callLog->agentUser();
         if ($agent) {
-            $sources[] = trim(($agent->first_name ?? '') . ' ' . ($agent->last_name ?? ''));
+            $register(trim(($agent->first_name ?? '') . ' ' . ($agent->last_name ?? '')));
         }
 
-        // Also bias toward all Hive staff first names so cross-references
-        // ("ask Greg", "talk to Andzelina") transcribe correctly. Cached so
-        // we don't query for every transcription.
-        $staffNames = \Illuminate\Support\Facades\Cache::remember(
+        // Bias toward all Hive staff names so cross-references ("ask Greg",
+        // "talk to Andzelina") transcribe correctly. Cached so we don't query
+        // for every transcription.
+        $staff = \Illuminate\Support\Facades\Cache::remember(
             'call_transcription.staff_names',
             now()->addHours(6),
             fn () => \App\Models\User::whereNotNull('primary_vendor_id')
                 ->get(['first_name', 'last_name'])
-                ->flatMap(fn ($u) => array_filter([$u->first_name, $u->last_name]))
-                ->unique()
-                ->values()
                 ->all()
         );
-        foreach ($staffNames as $n) {
-            $sources[] = (string) $n;
+        foreach ($staff as $u) {
+            $register(trim(($u->first_name ?? '') . ' ' . ($u->last_name ?? '')));
         }
 
-        $words = [];
-        foreach ($sources as $src) {
-            foreach (preg_split('/\s+/', trim($src)) as $token) {
-                $token = trim((string) $token);
-                if ($token === '' || mb_strlen($token) < 2) {
+        // Also pull in canonical names from the global custom_spelling
+        // config (e.g. "Grzegorz", "Szady") so even calls without a known
+        // caller still benefit from bias toward Hive's typical proper nouns.
+        foreach ((array) config('call_recording.transcription.name_corrections', []) as $canonical => $_aliases) {
+            $register((string) $canonical);
+        }
+
+        return array_values(array_unique(array_merge(
+            array_keys($phrases),
+            array_keys($tokens),
+        )));
+    }
+
+    /**
+     * Build the AssemblyAI `custom_spelling` payload (hard rewrites). Uses
+     * the curated `name_corrections` table from config plus per-call
+     * derivations: any nicknameAliases('Patryk') become rewrites for the
+     * canonical "Patryk", etc.
+     *
+     * @return array<int, array{from: array<int, string>, to: string}>
+     */
+    protected function buildCustomSpelling(CallLog $callLog): array
+    {
+        $rules = [];
+
+        $add = function (string $canonical, array $aliases) use (&$rules): void {
+            $canonical = trim($canonical);
+            if ($canonical === '') {
+                return;
+            }
+            $froms = [];
+            foreach ($aliases as $a) {
+                $a = trim((string) $a);
+                if ($a === '' || strcasecmp($a, $canonical) === 0) {
                     continue;
                 }
-                $words[$token] = true;
-                $words[mb_convert_case($token, MB_CASE_TITLE)] = true;
-                foreach ($this->nicknameAliases($token) as $alias) {
-                    $words[$alias] = true;
-                }
+                $froms[$a] = true;
+            }
+            if ($froms === []) {
+                return;
+            }
+            $rules[$canonical] = array_values(array_unique(array_merge(
+                $rules[$canonical] ?? [],
+                array_keys($froms),
+            )));
+        };
+
+        // 1) Curated config table — the place we add new mishears as we
+        //    encounter them in production.
+        foreach ((array) config('call_recording.transcription.name_corrections', []) as $canonical => $aliases) {
+            if (is_array($aliases)) {
+                $add((string) $canonical, $aliases);
             }
         }
 
-        return array_values(array_keys($words));
+        // 2) Per-call: if the caller / agent has a name with known phonetic
+        //    confusions (e.g. "Patryk" mishearable as "Patrick"), enforce the
+        //    correct spelling for this call. This is in addition to the
+        //    config — contributes when the staff member's name isn't yet in
+        //    the curated table.
+        $registerName = function (?string $name) use ($add): void {
+            $name = trim((string) $name);
+            if ($name === '') {
+                return;
+            }
+            foreach (preg_split('/\s+/', $name) as $token) {
+                $token = trim((string) $token);
+                if ($token === '' || mb_strlen($token) < 3) {
+                    continue;
+                }
+                $aliases = array_merge(
+                    $this->nicknameAliases($token),
+                    $this->vocativeMishears($token),
+                );
+                if ($aliases !== []) {
+                    $add($token, $aliases);
+                }
+            }
+        };
+
+        $other = $callLog->otherPartyUser();
+        if ($other) {
+            $registerName(trim(($other->first_name ?? '') . ' ' . ($other->last_name ?? '')));
+        }
+        $agent = $callLog->agentUser();
+        if ($agent) {
+            $registerName(trim(($agent->first_name ?? '') . ' ' . ($agent->last_name ?? '')));
+        }
+        if ($callLog->caller_name) {
+            $registerName((string) $callLog->caller_name);
+        }
+
+        $payload = [];
+        foreach ($rules as $to => $from) {
+            $payload[] = ['from' => $from, 'to' => $to];
+        }
+
+        return $payload;
+    }
+
+    /**
+     * Parse a CSV of language codes and validate AssemblyAI's constraint
+     * that the list (when used for code-switching) must include `en`.
+     *
+     * @return array<int, string>
+     */
+    protected function parseAllowedLanguageCodes(string $csv): array
+    {
+        $codes = array_values(array_filter(array_map(
+            fn ($c) => strtolower(trim((string) $c)),
+            explode(',', $csv),
+        )));
+
+        return array_values(array_unique($codes));
     }
 
     /**

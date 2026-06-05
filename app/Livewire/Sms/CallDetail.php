@@ -75,7 +75,8 @@ class CallDetail extends Component
      */
     public function cleanedTranscriptSegments(CallLog $call): array
     {
-        $segments = $call->transcript?->segments;
+        $transcript = $call->transcript;
+        $segments = $transcript?->segments;
         if (! is_array($segments) || empty($segments)) {
             return [];
         }
@@ -87,43 +88,37 @@ class CallDetail extends Component
             'thanks for calling',
             'good morning', 'good afternoon', 'good evening',
         ];
+        $voicemailMarkers = [
+            'leave a voicemail',
+            'leave gs crew a message',
+            'press 1 to redial',
+            'press 2 to send a text',
+            'is not available right now',
+        ];
 
-        // First pass: identify which raw speaker label belongs to the agent
-        // (the one who said any of the welcome/disclosure markers).
-        $agentSpeaker = null;
-        foreach ($segments as $seg) {
-            $text = strtolower(trim((string) ($seg['text'] ?? '')));
-            $speaker = $seg['speaker'] ?? null;
-            if ($speaker === null || $text === '') {
-                continue;
-            }
-            foreach ($markers as $m) {
-                if ($m !== '' && str_contains($text, $m)) {
-                    $agentSpeaker = $speaker;
-                    break 2;
+        $labelMap = $transcript->speakerLabelMap($call);
+
+        // In a voicemail there is only ever one human — the caller. The IVR
+        // greeting is the "Voicemail" system. AssemblyAI's diarization
+        // sometimes lumps a short caller backchannel ("okay, thank you") into
+        // the IVR's speaker cluster, which the per-label map would then
+        // mislabel as "Voicemail". For voicemails we therefore resolve each
+        // segment individually: anything matching an IVR marker is the
+        // Voicemail system, everything else is the caller.
+        $isVoicemail = (bool) ($call->has_voicemail ?? false);
+        $callerName = null;
+        if ($isVoicemail) {
+            foreach ($labelMap as $name) {
+                if ($name !== 'Voicemail') {
+                    $callerName = $name;
+                    break;
                 }
             }
-        }
-
-        // Fallback: if marker detection failed, assume the second distinct
-        // speaker is the Hive agent. On both inbound (caller speaks first
-        // after disclosure) and outbound (recipient answers "Hello" first)
-        // calls, the agent is consistently the second voice we hear.
-        if ($agentSpeaker === null) {
-            $order = [];
-            foreach ($segments as $seg) {
-                $sp = $seg['speaker'] ?? null;
-                if ($sp !== null && ! in_array($sp, $order, true)) {
-                    $order[] = $sp;
-                }
+            if (! $callerName && $call->caller_name) {
+                $callerName = ucfirst(strtolower(explode(' ', trim((string) $call->caller_name))[0]));
             }
-            if (isset($order[1])) {
-                $agentSpeaker = $order[1];
-            }
+            $callerName ??= 'Caller';
         }
-
-        $callerName = $this->callerDisplayName($call);
-        $agentName = $this->agentDisplayName($call);
 
         $cleaned = [];
         $skippingPreamble = true;
@@ -144,25 +139,43 @@ class CallDetail extends Component
                     break;
                 }
             }
+            $matchesVoicemail = false;
+            foreach ($voicemailMarkers as $m) {
+                if ($m !== '' && str_contains($lower, $m)) {
+                    $matchesVoicemail = true;
+                    break;
+                }
+            }
+
+            // Voicemail calls: drop the IVR greeting entirely and attribute
+            // every remaining segment to the single caller, regardless of the
+            // diarization label.
+            if ($isVoicemail) {
+                if ($matchesVoicemail) {
+                    continue;
+                }
+                $cleaned[] = [
+                    'text' => $text,
+                    'speaker' => $callerName,
+                    'start' => $seg['start'] ?? null,
+                    'end' => $seg['end'] ?? null,
+                ];
+                continue;
+            }
 
             if ($skippingPreamble) {
-                if ($matchesMarker) {
+                if ($matchesMarker || $matchesVoicemail) {
                     continue;
                 }
                 $skippingPreamble = false;
             }
 
-            // Map raw "Speaker A/B/C" to friendly labels.
-            $friendly = $rawSpeaker;
-            if ($rawSpeaker !== null) {
-                if ($agentSpeaker !== null && $rawSpeaker === $agentSpeaker) {
-                    $friendly = $agentName ?? 'Agent';
-                } elseif ($callerName !== null) {
-                    $friendly = $callerName;
-                } else {
-                    $friendly = 'Caller';
-                }
+            // Drop any later voicemail-IVR segments too — they're noise.
+            if ($matchesVoicemail) {
+                continue;
             }
+
+            $friendly = $rawSpeaker !== null ? ($labelMap[$rawSpeaker] ?? $rawSpeaker) : null;
 
             $cleaned[] = [
                 'text' => $text,
@@ -173,6 +186,25 @@ class CallDetail extends Component
         }
 
         return $cleaned;
+    }
+
+    /**
+     * Distinct speaker names that appear in the cleaned transcript. Used
+     * for the participant badges next to the "Full transcript" header.
+     *
+     * @return array<int, string>
+     */
+    public function transcriptSpeakers(CallLog $call): array
+    {
+        $names = [];
+        foreach ($this->cleanedTranscriptSegments($call) as $seg) {
+            $name = trim((string) ($seg['speaker'] ?? ''));
+            if ($name !== '' && $name !== 'Voicemail' && ! in_array($name, $names, true)) {
+                $names[] = $name;
+            }
+        }
+
+        return $names;
     }
 
     /**
