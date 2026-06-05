@@ -18,6 +18,38 @@ document.addEventListener('alpine:init', () => {
     });
 });
 
+// On the /messages page, never let `threadId` linger on the calls tab and
+// never let `callId` linger on the messages tab. Livewire's #[Url] sync can
+// re-push stale params after morph; this listener strips them after every
+// history change and after every Livewire commit.
+(() => {
+    const cleanMessagesUrl = () => {
+        if (! window.location.pathname.startsWith('/messages')) return;
+        const url = new URL(window.location.href);
+        const tab = url.searchParams.get('activeTab');
+        let changed = false;
+        if (tab === 'calls' && url.searchParams.has('threadId')) {
+            url.searchParams.delete('threadId'); changed = true;
+        }
+        if (tab !== 'calls' && url.searchParams.has('callId')) {
+            url.searchParams.delete('callId'); changed = true;
+        }
+        if (changed) window.history.replaceState({}, '', url);
+    };
+
+    // Run on initial load.
+    document.addEventListener('DOMContentLoaded', cleanMessagesUrl);
+    // Run after every Livewire request settles (covers all morph-time URL pushes).
+    document.addEventListener('livewire:init', () => {
+        if (window.Livewire) {
+            window.Livewire.hook('morph.updated', cleanMessagesUrl);
+            window.Livewire.hook('commit', ({ succeed }) => {
+                succeed(() => queueMicrotask(cleanMessagesUrl));
+            });
+        }
+    });
+})();
+
 import Pusher from 'pusher-js';
 import { Html5Qrcode } from 'html5-qrcode';
 

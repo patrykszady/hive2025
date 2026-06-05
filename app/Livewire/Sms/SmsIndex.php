@@ -47,6 +47,17 @@ class SmsIndex extends Component
         if (! request()->has('activeTab')) {
             $this->activeTab = session('sms_active_tab', 'messages');
         }
+
+        // Strip query params that don't belong to the active tab so the URL
+        // stays clean on initial load. The view's x-init also strips the
+        // browser URL via replaceState.
+        if ($this->activeTab === 'calls' && $this->threadId !== null) {
+            $this->threadId = null;
+        }
+        if ($this->activeTab !== 'calls') {
+            // CallList holds selectedCallId; nothing to clear here. The view
+            // strips ?callId= client-side on initial load.
+        }
     }
 
     public function updatedActiveTab(string $value): void
@@ -54,7 +65,12 @@ class SmsIndex extends Component
         session(['sms_active_tab' => $value]);
 
         if ($value === 'calls') {
+            // Drop ?threadId=... from the URL when leaving the messages tab.
+            $this->threadId = null;
             $this->dispatch('calls-tab-opened')->to(CallList::class);
+        } else {
+            // Drop ?callId=... from the URL when leaving the calls tab.
+            $this->dispatch('messages-tab-opened')->to(CallList::class);
         }
     }
 

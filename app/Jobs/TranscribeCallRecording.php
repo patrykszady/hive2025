@@ -110,6 +110,15 @@ class TranscribeCallRecording implements ShouldQueue
             'format_text' => true,
         ];
 
+        // Hint to the diarizer how many distinct speakers to expect. Most of
+        // our calls are 2-party (caller + agent); without this hint Universal-2
+        // sometimes collapses two similar-sounding voices (e.g. two adult
+        // males) into one speaker. Set to null to let the model decide.
+        $expectedSpeakers = config('call_recording.transcription.speakers_expected');
+        if ($expectedSpeakers !== null && $payload['speaker_labels']) {
+            $payload['speakers_expected'] = (int) $expectedSpeakers;
+        }
+
         $forcedLanguage = config('call_recording.transcription.language');
         $boostWords = $this->buildWordBoost($callLog);
 
@@ -223,6 +232,35 @@ class TranscribeCallRecording implements ShouldQueue
             }
         }
 
+        // Resolve the external party + the Hive agent by phone number so we
+        // bias AssemblyAI toward their names (fixes mishears like
+        // "Dick" → "Nick" or "Patryk" → "Patrick / Peter").
+        $other = $callLog->otherPartyUser();
+        if ($other) {
+            $sources[] = trim(($other->first_name ?? '') . ' ' . ($other->last_name ?? ''));
+        }
+        $agent = $callLog->agentUser();
+        if ($agent) {
+            $sources[] = trim(($agent->first_name ?? '') . ' ' . ($agent->last_name ?? ''));
+        }
+
+        // Also bias toward all Hive staff first names so cross-references
+        // ("ask Greg", "talk to Andzelina") transcribe correctly. Cached so
+        // we don't query for every transcription.
+        $staffNames = \Illuminate\Support\Facades\Cache::remember(
+            'call_transcription.staff_names',
+            now()->addHours(6),
+            fn () => \App\Models\User::whereNotNull('primary_vendor_id')
+                ->get(['first_name', 'last_name'])
+                ->flatMap(fn ($u) => array_filter([$u->first_name, $u->last_name]))
+                ->unique()
+                ->values()
+                ->all()
+        );
+        foreach ($staffNames as $n) {
+            $sources[] = (string) $n;
+        }
+
         $words = [];
         foreach ($sources as $src) {
             foreach (preg_split('/\s+/', trim($src)) as $token) {
@@ -232,10 +270,52 @@ class TranscribeCallRecording implements ShouldQueue
                 }
                 $words[$token] = true;
                 $words[mb_convert_case($token, MB_CASE_TITLE)] = true;
+                foreach ($this->nicknameAliases($token) as $alias) {
+                    $words[$alias] = true;
+                }
             }
         }
 
         return array_values(array_keys($words));
+    }
+
+    /**
+     * Common English first-name nicknames so word_boost catches both forms
+     * (e.g. caller listed as "Richard" but addressed as "Dick").
+     *
+     * @return array<int, string>
+     */
+    protected function nicknameAliases(string $name): array
+    {
+        static $map = [
+            'Richard' => ['Rick', 'Dick', 'Rich', 'Richie'],
+            'Robert' => ['Rob', 'Bob', 'Bobby', 'Robbie'],
+            'William' => ['Will', 'Bill', 'Billy', 'Willy'],
+            'James' => ['Jim', 'Jimmy', 'Jamie'],
+            'John' => ['Johnny', 'Jack', 'Jon'],
+            'Michael' => ['Mike', 'Mick', 'Mikey'],
+            'Christopher' => ['Chris', 'Topher'],
+            'Joseph' => ['Joe', 'Joey'],
+            'Charles' => ['Charlie', 'Chuck'],
+            'Thomas' => ['Tom', 'Tommy'],
+            'Daniel' => ['Dan', 'Danny'],
+            'Anthony' => ['Tony'],
+            'Edward' => ['Ed', 'Eddie', 'Ted'],
+            'Nicholas' => ['Nick', 'Nico'],
+            'Andrew' => ['Andy', 'Drew'],
+            'Matthew' => ['Matt', 'Matty'],
+            'David' => ['Dave', 'Davey'],
+            'Patrick' => ['Pat', 'Paddy'],
+            'Patryk' => ['Patrick', 'Pat'],
+            'Grzegorz' => ['Greg', 'Gregory'],
+            'Elizabeth' => ['Liz', 'Beth', 'Lizzie', 'Betty'],
+            'Katherine' => ['Kate', 'Katie', 'Kathy', 'Kat'],
+            'Margaret' => ['Maggie', 'Meg', 'Peggy'],
+        ];
+
+        $key = mb_convert_case($name, MB_CASE_TITLE);
+
+        return $map[$key] ?? [];
     }
 
     /**
@@ -249,20 +329,49 @@ class TranscribeCallRecording implements ShouldQueue
      */
     protected function applyKnownNameSubstitutions(CallLog $callLog, array $segments): array
     {
-        $name = trim((string) $callLog->caller_name);
-        if ($name === '' || $segments === []) {
+        $callerName = trim((string) $callLog->caller_name);
+        if ($callerName === '') {
+            $other = $callLog->otherPartyUser();
+            if ($other) {
+                $callerName = trim(($other->first_name ?? '') . ' ' . ($other->last_name ?? ''));
+            }
+        }
+
+        $agentName = '';
+        $agent = $callLog->agentUser();
+        if ($agent) {
+            $agentName = trim(($agent->first_name ?? '') . ' ' . ($agent->last_name ?? ''));
+        }
+
+        if (($callerName === '' && $agentName === '') || $segments === []) {
             return $segments;
         }
 
-        // Capture 1-3 capitalized tokens after the cue phrase. We deliberately
-        // do not require the captured words to match the known name — the
-        // whole point is to fix mishears.
+        $callerFirst = $callerName !== '' ? explode(' ', $callerName)[0] : '';
+        $agentFirst = $agentName !== '' ? explode(' ', $agentName)[0] : '';
+
+        // Identify which raw speaker label is the Hive agent. We assume the
+        // second distinct speaker is the agent (recipient/inbound caller
+        // speaks first), matching the heuristic used in the UI.
+        $order = [];
+        foreach ($segments as $seg) {
+            $sp = $seg['speaker'] ?? null;
+            if ($sp !== null && ! in_array($sp, $order, true)) {
+                $order[] = $sp;
+            }
+        }
+        $agentSpeaker = $order[1] ?? null;
+
         $namePattern = '([A-Z][\p{L}\'\-]+(?:\s+[A-Z][\p{L}\'\-]+){0,2})';
-        $patterns = [
+        $selfIntroPatterns = [
             '/\b(this is)\s+' . $namePattern . '/u',
             '/\b(my name is)\s+' . $namePattern . '/u',
             '/\b(it\'s|its)\s+' . $namePattern . '\s+(calling|here)\b/iu',
             '/\b' . $namePattern . '\s+(calling|here)\b/u',
+        ];
+        $greetingPatterns = [
+            '/\b(hello,?\s+|hi,?\s+|hey,?\s+)([A-Z][\p{L}\'\-]+)/iu',
+            '/\b(good\s+(?:morning|afternoon|evening),?\s+)([A-Z][\p{L}\'\-]+)/iu',
         ];
 
         foreach ($segments as &$seg) {
@@ -270,21 +379,55 @@ class TranscribeCallRecording implements ShouldQueue
             if ($text === '') {
                 continue;
             }
+            $rawSpeaker = $seg['speaker'] ?? null;
+            $isAgentSpeaking = $agentSpeaker !== null && $rawSpeaker === $agentSpeaker;
+
+            // Self-intro: speaker is referring to themselves.
+            $selfName = $isAgentSpeaking ? $agentName : $callerName;
+            // Greeting: speaker is addressing the OTHER party.
+            $otherFirst = $isAgentSpeaking ? $callerFirst : $agentFirst;
+
             $original = $text;
-            foreach ($patterns as $i => $pattern) {
-                $text = preg_replace_callback($pattern, function ($m) use ($name, $i) {
-                    if ($i === 3) {
-                        // Pattern: "Name calling" — keep the trailing word.
-                        return $name . ' ' . $m[2];
-                    }
-                    if ($i === 2) {
-                        // Pattern: "it's Name calling" — keep cue + trailing.
-                        return $m[1] . ' ' . $name . ' ' . $m[3];
-                    }
-                    // Patterns 0/1: "this is Name" / "my name is Name".
-                    return $m[1] . ' ' . $name;
-                }, $text) ?? $text;
+
+            if ($selfName !== '') {
+                foreach ($selfIntroPatterns as $i => $pattern) {
+                    $text = preg_replace_callback($pattern, function ($m) use ($selfName, $i) {
+                        if ($i === 3) {
+                            return $selfName . ' ' . $m[2];
+                        }
+                        if ($i === 2) {
+                            return $m[1] . ' ' . $selfName . ' ' . $m[3];
+                        }
+                        return $m[1] . ' ' . $selfName;
+                    }, $text) ?? $text;
+                }
             }
+
+            if ($otherFirst !== '') {
+                foreach ($greetingPatterns as $pattern) {
+                    $text = preg_replace_callback($pattern, function ($m) use ($otherFirst) {
+                        return $m[1] . $otherFirst;
+                    }, $text) ?? $text;
+                }
+            }
+
+            // Vocative use: speaker addresses the OTHER party by name mid-
+            // sentence (e.g. "Nick, last thing..."). Replace any known
+            // nickname/mishear of the other party's name with their canonical
+            // first name.
+            $targetFirst = $isAgentSpeaking ? $callerFirst : $agentFirst;
+            if ($targetFirst !== '') {
+                $vocativeTokens = $this->vocativeMishears($targetFirst);
+                if ($vocativeTokens !== []) {
+                    $alt = implode('|', array_map('preg_quote', $vocativeTokens));
+                    $text = preg_replace_callback(
+                        '/\b(' . $alt . ')(?=[,.!?\s])/iu',
+                        fn ($m) => $targetFirst,
+                        $text
+                    ) ?? $text;
+                }
+            }
+
             if ($text !== $original) {
                 $seg['text'] = $text;
             }
@@ -292,6 +435,48 @@ class TranscribeCallRecording implements ShouldQueue
         unset($seg);
 
         return $segments;
+    }
+
+    /**
+     * Tokens that AssemblyAI commonly hears in place of the given first
+     * name — used to repair mid-sentence vocative addresses. Combines our
+     * nickname list with a small phonetic-confusion table.
+     *
+     * @return array<int, string>
+     */
+    protected function vocativeMishears(string $first): array
+    {
+        $first = mb_convert_case($first, MB_CASE_TITLE);
+
+        // Phonetic confusions observed in real call transcripts. Conservative
+        // by design — only add when the mishear is highly distinctive of the
+        // target name (avoid common English words).
+        static $confusions = [
+            'Dick' => ['Nick', 'Mick', 'Pick'],
+            'Rick' => ['Nick', 'Mick'],
+            'Bob' => ['Bop', 'Bub'],
+            'Bill' => ['Phil'],
+            'Jim' => ['Gym'],
+            'Tom' => ['Tum'],
+            'Pat' => ['Pack'],
+        ];
+
+        $aliases = $this->nicknameAliases($first);
+        $candidates = $aliases;
+
+        // Pull confusions for the canonical first name AND for any of its
+        // aliases (e.g. Richard → also include confusions of "Dick"/"Rick").
+        foreach (array_merge([$first], $aliases) as $form) {
+            foreach ($confusions[$form] ?? [] as $c) {
+                $candidates[] = $c;
+            }
+        }
+
+        // Don't substitute the canonical name with itself.
+        return array_values(array_unique(array_filter(
+            $candidates,
+            fn ($c) => strcasecmp($c, $first) !== 0
+        )));
     }
 
     protected function assemblyAIUpload(string $apiKey, string $absolutePath): string

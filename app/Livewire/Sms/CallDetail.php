@@ -105,7 +105,25 @@ class CallDetail extends Component
             }
         }
 
+        // Fallback: if marker detection failed, assume the second distinct
+        // speaker is the Hive agent. On both inbound (caller speaks first
+        // after disclosure) and outbound (recipient answers "Hello" first)
+        // calls, the agent is consistently the second voice we hear.
+        if ($agentSpeaker === null) {
+            $order = [];
+            foreach ($segments as $seg) {
+                $sp = $seg['speaker'] ?? null;
+                if ($sp !== null && ! in_array($sp, $order, true)) {
+                    $order[] = $sp;
+                }
+            }
+            if (isset($order[1])) {
+                $agentSpeaker = $order[1];
+            }
+        }
+
         $callerName = $this->callerDisplayName($call);
+        $agentName = $this->agentDisplayName($call);
 
         $cleaned = [];
         $skippingPreamble = true;
@@ -138,7 +156,7 @@ class CallDetail extends Component
             $friendly = $rawSpeaker;
             if ($rawSpeaker !== null) {
                 if ($agentSpeaker !== null && $rawSpeaker === $agentSpeaker) {
-                    $friendly = 'Agent';
+                    $friendly = $agentName ?? 'Agent';
                 } elseif ($callerName !== null) {
                     $friendly = $callerName;
                 } else {
@@ -158,18 +176,34 @@ class CallDetail extends Component
     }
 
     /**
-     * Pick the friendliest available display name for the caller on an
-     * inbound call: contact user's first name, then client name, then
-     * the stored caller_name from CNAM. Returns null on outbound calls
-     * or when nothing is known.
+     * Friendly first name for the Hive agent on the call (the person who
+     * answered for inbound, or initiated click-to-call for outbound).
+     */
+    protected function agentDisplayName(CallLog $call): ?string
+    {
+        $agent = $call->agentUser();
+        if ($agent && trim((string) $agent->first_name) !== '') {
+            return (string) $agent->first_name;
+        }
+        if ($agent && trim((string) $agent->name) !== '') {
+            return explode(' ', trim((string) $agent->name))[0];
+        }
+
+        return null;
+    }
+
+    /**
+     * Pick the friendliest available display name for the "other party" on
+     * the call — the inbound caller, or the outbound recipient. Falls back
+     * through contact_user_id, phone-number lookup, then stored caller_name.
      */
     protected function callerDisplayName(CallLog $call): ?string
     {
-        if ($call->direction !== 'incoming') {
-            return null;
+        $contact = $call->contact_user_id ? \App\Models\User::find($call->contact_user_id) : null;
+        if (! $contact) {
+            $contact = $call->otherPartyUser();
         }
 
-        $contact = $call->contact_user_id ? \App\Models\User::find($call->contact_user_id) : null;
         if ($contact && trim((string) $contact->first_name) !== '') {
             return (string) $contact->first_name;
         }
@@ -178,7 +212,6 @@ class CallDetail extends Component
         }
 
         if ($call->caller_name) {
-            // caller_name is often "First Last" or ALL CAPS — return the first token.
             $first = explode(' ', trim((string) $call->caller_name))[0] ?? null;
             if ($first) {
                 return ucfirst(strtolower($first));

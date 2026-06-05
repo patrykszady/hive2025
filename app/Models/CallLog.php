@@ -107,10 +107,49 @@ class CallLog extends Model
      */
     public function lookUpCaller(): ?User
     {
-        $digits = preg_replace('/\D/', '', $this->from_number);
+        return $this->lookupUserByPhone($this->from_number);
+    }
 
+    /**
+     * The external party on the call (not the Hive agent).
+     * For outgoing calls this is the recipient; for incoming this is the caller.
+     */
+    public function otherPartyUser(): ?User
+    {
+        $phone = $this->direction === 'incoming' ? $this->from_number : $this->to_number;
+
+        return $this->lookupUserByPhone($phone);
+    }
+
+    /**
+     * The Hive user on the call (the agent / staff member).
+     * For outgoing calls we use the `user_phone` from metadata (the caller
+     * who initiated click-to-call); for incoming we use the answering leg.
+     */
+    public function agentUser(): ?User
+    {
+        $meta = is_array($this->metadata) ? $this->metadata : [];
+        $phone = $meta['user_phone'] ?? null;
+
+        if (! $phone && $this->direction !== 'incoming') {
+            $phone = $this->from_number;
+        }
+
+        return $phone ? $this->lookupUserByPhone($phone) : null;
+    }
+
+    protected function lookupUserByPhone(?string $phone): ?User
+    {
+        if (! $phone) {
+            return null;
+        }
+
+        $digits = preg_replace('/\D/', '', $phone);
         if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
             $digits = substr($digits, 1);
+        }
+        if (strlen($digits) < 7) {
+            return null;
         }
 
         return User::where('cell_phone', 'LIKE', "%{$digits}%")->first();

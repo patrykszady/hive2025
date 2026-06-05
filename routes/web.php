@@ -437,6 +437,22 @@ Route::middleware(['auth', 'registered', 'vendor.access'])->group(function () {
     Route::get('/messages', SmsIndex::class)
         ->name('sms.index');
 
+    // Call recording stream — uses BinaryFileResponse which natively supports
+    // HTTP Range requests so <audio> can show real duration and seek (the
+    // built-in `php artisan serve` dev server does not support Range on
+    // /storage/* static files, so the browser shows 0:00 there).
+    Route::get('/calls/{call}/recording', function (\App\Models\CallLog $call) {
+        abort_unless($call->recording_path && $call->recording_disk, 404);
+        $disk = \Illuminate\Support\Facades\Storage::disk($call->recording_disk);
+        abort_unless($disk->exists($call->recording_path), 404);
+
+        return response()->file($disk->path($call->recording_path), [
+            'Content-Type' => 'audio/mpeg',
+            'Accept-Ranges' => 'bytes',
+            'Cache-Control' => 'private, max-age=3600',
+        ]);
+    })->name('calls.recording');
+
     //LINE ITEMS
     Route::get('/line_items', LineItemsIndex::class)->name('line_items.index');
 

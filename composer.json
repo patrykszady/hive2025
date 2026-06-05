@@ -98,7 +98,9 @@
         ],
         "post-create-project-cmd": [
             "@php artisan key:generate --ansi"
-        ]
+        ],
+        "storage:pull": "bash scripts/pull-prod-storage.sh",
+        "storage:pull-gsc": "bash scripts/pull-prod-storage.sh gsc"
     },
     "extra": {
         "laravel": {

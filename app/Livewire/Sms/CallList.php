@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Isolate;
 use Livewire\Attributes\On;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 use Flux;
 
@@ -27,6 +28,7 @@ class CallList extends Component
 
     public string $callFilter = 'all';
 
+    #[Url(as: 'callId', except: null)]
     public ?int $selectedCallId = null;
 
     public bool $showNewCallModal = false;
@@ -38,6 +40,37 @@ class CallList extends Component
     public function mount(): void
     {
         $this->normalizeCallFilter();
+
+        // If we landed on this page with ?callId=... in the URL, propagate the
+        // selection to the CallDetail right pane and the Alpine store so the
+        // call is auto-opened on first paint.
+        if ($this->selectedCallId) {
+            $this->dispatch('call-selected', callId: $this->selectedCallId);
+            $this->js("window.dispatchEvent(new CustomEvent('call-deep-linked', { detail: { callId: " . (int) $this->selectedCallId . " } }))");
+
+            return;
+        }
+
+        // Auto-select the most recent call on desktop so the calls tab feels
+        // the same as the messages tab (which auto-opens the latest thread).
+        // We can't detect viewport width server-side, so dispatch a JS hook
+        // that selects on >=lg only.
+        $firstId = $this->firstCallId();
+        if ($firstId !== null) {
+            $this->js(<<<JS
+                if (window.matchMedia('(min-width: 1024px)').matches) {
+                    Alpine.store('sms').callId = {$firstId};
+                    Livewire.dispatch('call-selected', { callId: {$firstId} });
+                }
+            JS);
+        }
+    }
+
+    private function firstCallId(): ?int
+    {
+        $first = $this->calls->first();
+
+        return $first['call']?->id ?? null;
     }
 
     public function rendered(): void
@@ -75,6 +108,30 @@ class CallList extends Component
     {
         $this->callFilter = 'all';
         $this->limit = 25;
+        // Don't reset selectedCallId here — it may have just been hydrated
+        // from the URL (?callId=...) during the same request.
+    }
+
+    #[On('messages-tab-opened')]
+    public function messagesTabOpened(): void
+    {
+        $this->selectedCallId = null;
+    }
+
+    /**
+     * Keep the URL (?callId=...) in sync when a call row is clicked. The
+     * Alpine store is updated client-side; this listener mirrors that into
+     * the Livewire property so the URL reflects the selection.
+     */
+    #[On('call-selected')]
+    public function onCallSelected(int $callId): void
+    {
+        $this->selectedCallId = $callId;
+    }
+
+    #[On('call-deselected')]
+    public function onCallDeselected(): void
+    {
         $this->selectedCallId = null;
     }
 

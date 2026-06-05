@@ -12,6 +12,8 @@ class ProcessCallRecordings extends Command
 {
     protected $signature = 'calls:process-recordings
         {--limit=25 : Max number of recordings to process per run}
+        {--all : Process every matching call (ignores --limit)}
+        {--queue : Dispatch jobs to the queue instead of running inline}
         {--call= : Process a specific call_log id only}
         {--retry-failed : Re-attempt transcripts previously marked failed}
         {--force : Re-transcribe and re-summarize even if already completed}';
@@ -30,6 +32,8 @@ class ProcessCallRecordings extends Command
         }
 
         $limit = (int) $this->option('limit');
+        $all = (bool) $this->option('all');
+        $useQueue = (bool) $this->option('queue');
         $specificId = $this->option('call');
         $retryFailed = (bool) $this->option('retry-failed');
         $force = (bool) $this->option('force');
@@ -55,11 +59,17 @@ class ProcessCallRecordings extends Command
                 $query->where('id', $specificId);
             }
 
-            $callLogs = $query->orderBy('id', 'desc')->limit($limit)->get();
+            $query->orderBy('id', 'desc');
+            if (! $all) {
+                $query->limit($limit);
+            }
+
+            $callLogs = $query->get();
+
+            $this->info('Found ' . $callLogs->count() . ' call(s) needing transcription.');
 
             foreach ($callLogs as $callLog) {
                 if ($force && $callLog->transcript) {
-                    // Reset existing transcript so the job re-runs cleanly.
                     $callLog->transcript->update([
                         'status' => CallTranscript::STATUS_TRANSCRIBING,
                         'text' => null,
@@ -72,6 +82,14 @@ class ProcessCallRecordings extends Command
                         'caller_intent' => null,
                         'failure_reason' => null,
                     ]);
+                }
+
+                if ($useQueue) {
+                    TranscribeCallRecording::dispatch($callLog->id);
+                    $this->line("  queued transcribe for call {$callLog->id}");
+                    $transcribed++;
+
+                    continue;
                 }
 
                 $this->info("Transcribing call {$callLog->id}...");
@@ -97,9 +115,24 @@ class ProcessCallRecordings extends Command
                 $query->where('call_log_id', $specificId);
             }
 
-            $transcripts = $query->orderBy('id', 'desc')->limit($limit)->get();
+            $query->orderBy('id', 'desc');
+            if (! $all) {
+                $query->limit($limit);
+            }
+
+            $transcripts = $query->get();
+
+            $this->info('Found ' . $transcripts->count() . ' transcript(s) needing summarization.');
 
             foreach ($transcripts as $transcript) {
+                if ($useQueue) {
+                    SummarizeCallTranscript::dispatch($transcript->id);
+                    $this->line("  queued summarize for transcript {$transcript->id}");
+                    $summarized++;
+
+                    continue;
+                }
+
                 $this->info("Summarizing transcript {$transcript->id} (call {$transcript->call_log_id})...");
                 try {
                     (new SummarizeCallTranscript($transcript->id))->handle();
@@ -110,7 +143,12 @@ class ProcessCallRecordings extends Command
             }
         }
 
-        $this->info("Done. Transcribed: {$transcribed}, summarized: {$summarized}.");
+        $verb = $useQueue ? 'Queued' : 'Done';
+        $this->info("{$verb}. Transcribed: {$transcribed}, summarized: {$summarized}.");
+
+        if ($useQueue && $force && $transcribed > 0) {
+            $this->warn('Note: with --queue --force, transcripts were reset and re-queued. Re-run this command (without --force) after the queue drains to summarize them.');
+        }
 
         return self::SUCCESS;
     }

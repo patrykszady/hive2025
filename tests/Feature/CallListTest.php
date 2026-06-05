@@ -69,9 +69,11 @@ it('resets to all when calls tab is opened', function () {
 
     $component->callsTabOpened();
 
+    // selectedCallId is preserved so URL hydration (?callId=…) survives
+    // tab switches.
     expect($component->callFilter)->toBe('all')
         ->and($component->limit)->toBe(25)
-        ->and($component->selectedCallId)->toBeNull();
+        ->and($component->selectedCallId)->toBe(999);
 });
 
 it('does not use WithPagination trait', function () {

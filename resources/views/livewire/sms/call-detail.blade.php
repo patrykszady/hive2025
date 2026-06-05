@@ -37,11 +37,11 @@
 
         <x-island-card class="flex-1 flex flex-col min-h-0 overflow-hidden">
             {{-- Header --}}
-            <div class="flex items-start justify-between gap-3 pb-3 border-b border-zinc-200 dark:border-zinc-700">
+            <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 pb-3 border-b border-zinc-200 dark:border-zinc-700">
                 <div class="flex items-center gap-3 min-w-0">
                     <button
                         type="button"
-                        x-on:click="$store.sms.callId = null; $wire.clear()"
+                        x-on:click="$store.sms.callId = null; $wire.clear(); Livewire.dispatch('call-deselected')"
                         class="lg:hidden p-1 -ml-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 shrink-0"
                         aria-label="Back"
                     >
@@ -64,12 +64,12 @@
                             <flux:icon icon="phone-arrow-down-left" class="size-6 text-green-500" />
                         @endif
                     </div>
-                    <div class="min-w-0">
+                    <div class="min-w-0 flex-1">
                         <div class="text-base font-semibold text-zinc-900 dark:text-zinc-100 truncate">{{ $displayName }}</div>
                         @if ($formattedOther && $formattedOther !== $displayName)
-                            <div class="text-sm text-zinc-500">{{ $formattedOther }}</div>
+                            <div class="text-sm text-zinc-500 truncate">{{ $formattedOther }}</div>
                         @endif
-                        <div class="text-xs text-zinc-400 mt-0.5">
+                        <div class="text-xs text-zinc-400 mt-0.5 truncate">
                             {{ $call->created_at->copy()->setTimezone(browser_timezone())->format('M j, Y g:i A') }}
                             @if ($dur > 0)
                                 · {{ $dur < 60 ? $dur.'s' : floor($dur/60).'m '.($dur%60).'s' }}
@@ -88,7 +88,7 @@
                 </div>
 
                 @if ($otherNumber)
-                    <div class="flex items-center gap-2 shrink-0">
+                    <div class="flex items-center gap-2 sm:shrink-0 flex-wrap">
                         <flux:button size="sm" variant="primary" icon="phone" wire:click="callBack('{{ $otherNumber }}')">Call Back</flux:button>
                         <flux:button size="sm" variant="ghost" icon="chat-bubble-left" wire:click="textBack('{{ $otherNumber }}')">Text</flux:button>
                         @if ($effectiveStatus === 'blocked' && in_array($otherNumber, $this->blockedNumbers))
@@ -107,7 +107,7 @@
                         <div class="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1.5">
                             {{ $call->has_voicemail ? 'Voicemail' : 'Recording' }}
                         </div>
-                        <audio controls preload="metadata" class="w-full h-10" src="{{ $call->recording_url }}"></audio>
+                        <audio controls preload="metadata" class="w-full h-10" src="{{ $call->recording_path && $call->recording_disk ? route('calls.recording', $call) : $call->recording_url }}"></audio>
                     </div>
                 @endif
 

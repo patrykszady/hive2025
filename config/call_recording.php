@@ -53,6 +53,11 @@ return [
         'model' => env('CALL_TRANSCRIPTION_MODEL', 'whisper-1'),    // openai fallback
         'language' => env('CALL_TRANSCRIPTION_LANGUAGE', null),
         'speaker_labels' => (bool) env('CALL_TRANSCRIPTION_SPEAKER_LABELS', true),
+        // Most calls are 2-party (caller + agent). Telling AssemblyAI to
+        // expect 2 speakers significantly improves diarization when both
+        // voices have similar pitch/timbre. Set to null to let the model
+        // auto-detect (better for conference calls).
+        'speakers_expected' => env('CALL_TRANSCRIPTION_SPEAKERS_EXPECTED', 2),
         'poll_interval_seconds' => (int) env('CALL_TRANSCRIPTION_POLL_INTERVAL', 3),
         'poll_timeout_seconds' => (int) env('CALL_TRANSCRIPTION_POLL_TIMEOUT', 600),
     ],

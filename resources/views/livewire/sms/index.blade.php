@@ -8,7 +8,7 @@
         isFlashing: false,
         lastNotifyTime: 0,
         callsMounted: @js($activeTab === 'calls'),
-        callsLoading: @js($activeTab === 'calls'),
+        callsLoading: false,
         threadFilter: $wire.entangle('subjectFilter').live,
         audioCtx: null,
         ensureAudioContext() {
@@ -68,6 +68,26 @@
                 Notification.requestPermission();
             }
         },
+        switchTab(name) {
+            // Strip the off-tab query param from the URL immediately so it
+            // never lingers while we wait for Livewire to round-trip.
+            const url = new URL(window.location.href);
+            if (name === 'calls') {
+                url.searchParams.delete('threadId');
+                this.callsMounted = true;
+                this.callsLoading = true;
+            } else {
+                url.searchParams.delete('callId');
+            }
+            if (name === 'messages') {
+                url.searchParams.delete('activeTab');
+            } else {
+                url.searchParams.set('activeTab', name);
+            }
+            window.history.replaceState({}, '', url);
+            Alpine.store('sms').setTab(name);
+            $wire.$set('activeTab', name);
+        },
     }"
     x-on:click.window.once="ensureAudioContext()"
     x-on:keydown.window.once="ensureAudioContext()"
@@ -79,11 +99,27 @@
             originalTitle = document.title;
             requestNotificationPermission();
 
+            // Strip query params that don't belong to the current tab so the
+            // URL stays clean on initial load and after refresh.
+            (() => {
+                const url = new URL(window.location.href);
+                const tab = @js($activeTab);
+                let changed = false;
+                if (tab === 'calls' && url.searchParams.has('threadId')) {
+                    url.searchParams.delete('threadId'); changed = true;
+                }
+                if (tab !== 'calls' && url.searchParams.has('callId')) {
+                    url.searchParams.delete('callId'); changed = true;
+                }
+                if (changed) window.history.replaceState({}, '', url);
+            })();
+
             // Seed the global SMS store from server values (only on first mount).
             const store = Alpine.store('sms');
             store.threadId = @js($threadId);
             store.setTab(@js($activeTab));
-            if (store.tab === 'calls') callsLoading = true;
+            // Don't set callsLoading on initial render — the CallList is
+            // rendered synchronously, so there is no async load to wait for.
 
             window.addEventListener('sms-incoming', () => notifyIncoming());
             window.addEventListener('focus', () => stopFlashing());
@@ -117,14 +153,7 @@
 
     {{-- Thread List - Hidden on mobile when thread is selected --}}
     <div
-        x-on:sms-set-tab.window="
-            $store.sms.setTab($event.detail);
-            if ($event.detail === 'calls') {
-                callsMounted = true;
-                callsLoading = true;
-            }
-            $wire.$set('activeTab', $event.detail, false)
-        "
+        x-on:sms-set-tab.window="switchTab($event.detail)"
         x-on:thread-selected.window="$store.sms.threadId = $event.detail.threadId"
         x-on:sms-subject-filter-changed.window="
             if (window.matchMedia('(min-width: 1024px)').matches) {
@@ -141,13 +170,13 @@
                     {{-- Alpine-driven tab switching: instant, no server roundtrip --}}
                     <div class="inline-flex rounded-lg bg-zinc-100 dark:bg-zinc-800 p-0.5">
                         <button type="button"
-                            x-on:click="$store.sms.setTab('messages'); $wire.$set('activeTab', 'messages', false)"
+                            x-on:click="switchTab('messages')"
                             x-bind:class="$store.sms.tab === 'messages' ? 'bg-white dark:bg-zinc-700 shadow text-zinc-900 dark:text-zinc-100 hover:text-zinc-900 dark:hover:text-zinc-100' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-500 dark:hover:text-zinc-400'"
                             class="px-3 py-1 text-sm font-medium rounded-md">
                             Messages
                         </button>
                         <button type="button"
-                            x-on:click="callsMounted = true; callsLoading = true; $store.sms.setTab('calls'); $wire.$set('activeTab', 'calls', false)"
+                            x-on:click="switchTab('calls')"
                             x-bind:class="$store.sms.tab === 'calls' ? 'bg-white dark:bg-zinc-700 shadow text-zinc-900 dark:text-zinc-100 hover:text-zinc-900 dark:hover:text-zinc-100' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-500 dark:hover:text-zinc-400'"
                             class="px-3 py-1 text-sm font-medium rounded-md">
                             Calls
