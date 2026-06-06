@@ -81,7 +81,61 @@
                     <p class="text-base lg:text-sm font-medium truncate text-zinc-900 dark:text-zinc-100 flex items-center gap-1">
                         <span class="truncate">
                         @if ($isClientUser)
-                            GS Construciton
+                            @php
+                                $participantLabels = collect();
+
+                                $vendorLabel = trim((string) (
+                                    $thread->ownerVendor?->short_name
+                                    ?: $thread->ownerVendor?->business_name
+                                    ?: $thread->subjectVendor?->short_name
+                                    ?: $thread->subjectVendor?->business_name
+                                    ?: ''
+                                ));
+
+                                if ($vendorLabel !== '') {
+                                    $participantLabels->push($vendorLabel);
+                                }
+
+                                if ($thread->client) {
+                                    $clientLabel = trim((string) $thread->client->name);
+                                    if ($clientLabel !== '' && ! $participantLabels->contains($clientLabel)) {
+                                        $participantLabels->push($clientLabel);
+                                    }
+
+                                    $clientUserPhones = $thread->client->users
+                                        ->map(fn ($u) => $u->routeNotificationForTelnyx())
+                                        ->filter()
+                                        ->values();
+
+                                    $extraParticipantLabels = $thread->threadParticipants
+                                        ->pluck('phone_number')
+                                        ->filter()
+                                        ->diff($clientUserPhones)
+                                        ->map(fn ($phone) => $this->resolvePhoneDisplay($phone))
+                                        ->filter()
+                                        ->values();
+
+                                    foreach ($extraParticipantLabels as $label) {
+                                        if (! $participantLabels->contains($label)) {
+                                            $participantLabels->push($label);
+                                        }
+                                    }
+                                } else {
+                                    $fallbackParticipants = $thread->threadParticipants
+                                        ->pluck('phone_number')
+                                        ->filter()
+                                        ->map(fn ($phone) => $this->resolvePhoneDisplay($phone))
+                                        ->filter()
+                                        ->values();
+
+                                    foreach ($fallbackParticipants as $label) {
+                                        if (! $participantLabels->contains($label)) {
+                                            $participantLabels->push($label);
+                                        }
+                                    }
+                                }
+                            @endphp
+                            {{ $participantLabels->implode(', ') }}
                         @elseif ($thread->name)
                             {{ $thread->name }}
                         @elseif ($thread->client)

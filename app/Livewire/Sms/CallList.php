@@ -167,10 +167,12 @@ class CallList extends Component
     #[Computed]
     public function calls(): mixed
     {
+        $user = auth()->user();
         $ourNumbers = config('services.telnyx.numbers', []);
 
         $rawCalls = CallLog::query()
             ->with('transcript')
+            ->visibleToMessagesUser($user)
             ->when($this->callFilter === 'missed', fn ($q) => $q->where('status', CallLog::STATUS_MISSED))
             ->when($this->callFilter === 'voicemail', fn ($q) => $q->where('has_voicemail', true))
             ->when($this->callFilter === 'blocked', fn ($q) => $q->where('status', CallLog::STATUS_BLOCKED))

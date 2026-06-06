@@ -54,6 +54,14 @@ class SmsGroupThread extends Model
     }
 
     /**
+     * Owning vendor without global scopes for cross-context participant labels.
+     */
+    public function ownerVendor(): BelongsTo
+    {
+        return $this->belongsTo(Vendor::class, 'vendor_id')->withoutGlobalScopes();
+    }
+
+    /**
      * The vendor (sub) this thread is communicating WITH.
      * Distinct from $this->vendor, which is the owning tenant.
      */

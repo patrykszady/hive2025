@@ -108,9 +108,12 @@ class SmsIndex extends Component
 
         // Client users may only view threads belonging to their client
         if ($this->isClientUser && $threadId !== null) {
-            $clientIds = auth()->user()->clients()->pluck('clients.id');
+            $user = auth()->user();
+            $clientIds = $user->clients()->pluck('clients.id');
+            $participantPhones = $this->clientUserParticipantPhones($user);
             $allowed = SmsGroupThread::where('id', $threadId)
                 ->whereIn('client_id', $clientIds)
+                ->whereHas('threadParticipants', fn ($participantQuery) => $participantQuery->whereIn('phone_number', $participantPhones))
                 ->exists();
 
             if (! $allowed) {
@@ -196,9 +199,12 @@ class SmsIndex extends Component
     {
         return SmsGroupThread::query()
             ->when($this->isClientUser, function ($query) {
-                $clientIds = auth()->user()->clients()->pluck('clients.id');
+                $user = auth()->user();
+                $clientIds = $user->clients()->pluck('clients.id');
+                $participantPhones = $this->clientUserParticipantPhones($user);
 
-                $query->whereIn('client_id', $clientIds);
+                $query->whereIn('client_id', $clientIds)
+                    ->whereHas('threadParticipants', fn ($participantQuery) => $participantQuery->whereIn('phone_number', $participantPhones));
             })
             ->when(! $this->isClientUser, function ($query) {
                 $vendorId = auth()->user()->vendor?->id;
@@ -209,6 +215,35 @@ class SmsIndex extends Component
             })
             ->when($this->subjectFilter === 'client', fn ($q) => $q->whereNotNull('client_id'))
             ->when($this->subjectFilter === 'vendor', fn ($q) => $q->whereNotNull('subject_vendor_id'));
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function clientUserParticipantPhones($user): array
+    {
+        $rawPhone = $user->routeNotificationForTelnyx();
+
+        if (! is_string($rawPhone) || $rawPhone === '') {
+            return [];
+        }
+
+        $digits = preg_replace('/\D/', '', $rawPhone);
+        if (! is_string($digits) || $digits === '') {
+            return [];
+        }
+
+        if (strlen($digits) === 10) {
+            return array_values(array_unique([$rawPhone, '+1' . $digits, '1' . $digits, $digits]));
+        }
+
+        if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+            $tenDigit = substr($digits, 1);
+
+            return array_values(array_unique([$rawPhone, '+' . $digits, $digits, '+1' . $tenDigit, $tenDigit]));
+        }
+
+        return array_values(array_unique([$rawPhone, '+' . $digits, $digits]));
     }
 
     #[Title('Messages')]

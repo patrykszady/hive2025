@@ -89,6 +89,7 @@ class SmsThreadList extends Component
                         'project:id,address',
                         'client',
                         'client.users:id,first_name,last_name,cell_phone',
+                        'ownerVendor:id,business_name,options',
                         'subjectVendor',
                         'latestMessage.sentByUser:id,first_name',
                         'threadParticipants:id,thread_id,phone_number',
@@ -97,7 +98,10 @@ class SmsThreadList extends Component
                     ->whereIn('id', $ids)
                     ->when($user->is_browsing_as_client, function ($query) use ($user) {
                         $clientIds = $user->clients()->pluck('clients.id');
-                        $query->whereIn('client_id', $clientIds);
+                        $participantPhones = $this->clientUserParticipantPhones($user);
+
+                        $query->whereIn('client_id', $clientIds)
+                            ->whereHas('threadParticipants', fn ($participantQuery) => $participantQuery->whereIn('phone_number', $participantPhones));
                     })
                     ->when(! $user->is_browsing_as_client, function ($query) use ($user) {
                         $vendorId = $user->vendor?->id;
@@ -126,6 +130,7 @@ class SmsThreadList extends Component
                 'project:id,address',
                 'client',
                 'client.users:id,first_name,last_name,cell_phone',
+                'ownerVendor:id,business_name,options',
                 'subjectVendor',
                 'latestMessage.sentByUser:id,first_name',
                 'threadParticipants:id,thread_id,phone_number',
@@ -133,7 +138,10 @@ class SmsThreadList extends Component
             ->withCount(['messages as scheduled_messages_count' => fn ($q) => $q->where('status', 'scheduled')])
             ->when($user->is_browsing_as_client, function ($query) use ($user) {
                 $clientIds = $user->clients()->pluck('clients.id');
-                $query->whereIn('client_id', $clientIds);
+                $participantPhones = $this->clientUserParticipantPhones($user);
+
+                $query->whereIn('client_id', $clientIds)
+                    ->whereHas('threadParticipants', fn ($participantQuery) => $participantQuery->whereIn('phone_number', $participantPhones));
             })
             ->when(! $user->is_browsing_as_client, function ($query) use ($user) {
                 $vendorId = $user->vendor?->id;
@@ -161,6 +169,35 @@ class SmsThreadList extends Component
             ->orderByDesc('last_activity_at')
             ->limit($this->limit)
             ->get();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function clientUserParticipantPhones(User $user): array
+    {
+        $rawPhone = $user->routeNotificationForTelnyx();
+
+        if (! is_string($rawPhone) || $rawPhone === '') {
+            return [];
+        }
+
+        $digits = preg_replace('/\D/', '', $rawPhone);
+        if (! is_string($digits) || $digits === '') {
+            return [];
+        }
+
+        if (strlen($digits) === 10) {
+            return array_values(array_unique([$rawPhone, '+1' . $digits, '1' . $digits, $digits]));
+        }
+
+        if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+            $tenDigit = substr($digits, 1);
+
+            return array_values(array_unique([$rawPhone, '+' . $digits, $digits, '+1' . $tenDigit, $tenDigit]));
+        }
+
+        return array_values(array_unique([$rawPhone, '+' . $digits, $digits]));
     }
 
     #[Computed]

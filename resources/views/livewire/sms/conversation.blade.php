@@ -69,6 +69,13 @@
         {{-- Header --}}
         @php
             $participantPhones = $this->thread->threadParticipants->pluck('phone_number')->filter()->values();
+            $vendorLabel = trim((string) (
+                $this->thread->ownerVendor?->short_name
+                ?: $this->thread->ownerVendor?->business_name
+                ?: $this->thread->subjectVendor?->short_name
+                ?: $this->thread->subjectVendor?->business_name
+                ?: ''
+            ));
             $headerTitle = 'Group Message';
             // When set, the header renders these parts individually so only the
             // client-user portions are wrapped in the client link.
@@ -94,6 +101,17 @@
                             'linkToClient' => (bool) $user,
                         ];
                     })->values()->all();
+
+                    if ($vendorLabel !== '' && collect($headerParts)->where('label', $vendorLabel)->isEmpty()) {
+                        $headerParts[] = [
+                            'label' => $vendorLabel,
+                            'linkToClient' => false,
+                        ];
+                    }
+                }
+
+                if ($vendorLabel !== '' && is_string($headerTitle) && ! str_contains($headerTitle, $vendorLabel)) {
+                    $headerTitle .= ', ' . $vendorLabel;
                 }
             } elseif ($this->thread->subjectVendor) {
                 $headerTitle = $this->thread->subjectVendor->short_name ?: $this->thread->subjectVendor->name;

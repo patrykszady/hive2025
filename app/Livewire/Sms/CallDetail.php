@@ -36,7 +36,12 @@ class CallDetail extends Component
             return null;
         }
 
-        return CallLog::with('transcript')->find($this->callId);
+        $user = auth()->user();
+
+        return CallLog::query()
+            ->with('transcript')
+            ->visibleToMessagesUser($user)
+            ->find($this->callId);
     }
 
     /**

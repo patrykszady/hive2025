@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -82,6 +83,66 @@ class CallLog extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function scopeVisibleToMessagesUser(Builder $query, User $user): Builder
+    {
+        if (! $user->is_browsing_as_client) {
+            return $query;
+        }
+
+        $phoneVariants = static::phoneVariantsForMatch($user->cell_phone);
+
+        if ($phoneVariants === []) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->where(function (Builder $visibility) use ($user, $phoneVariants): void {
+            $visibility->where('contact_user_id', $user->id)
+                ->orWhere('user_id', $user->id)
+                ->orWhereIn('from_number', $phoneVariants)
+                ->orWhereIn('to_number', $phoneVariants);
+        });
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected static function phoneVariantsForMatch(?string $phone): array
+    {
+        if (! is_string($phone) || trim($phone) === '') {
+            return [];
+        }
+
+        $digits = preg_replace('/\D/', '', $phone);
+
+        if (! is_string($digits) || $digits === '') {
+            return [];
+        }
+
+        if (strlen($digits) === 11 && str_starts_with($digits, '1')) {
+            $tenDigit = substr($digits, 1);
+
+            return array_values(array_unique([
+                '+' . $digits,
+                $digits,
+                $tenDigit,
+                '+1' . $tenDigit,
+            ]));
+        }
+
+        if (strlen($digits) === 10) {
+            return array_values(array_unique([
+                $digits,
+                '1' . $digits,
+                '+1' . $digits,
+            ]));
+        }
+
+        return array_values(array_unique([
+            $digits,
+            '+' . $digits,
+        ]));
     }
 
     /**

@@ -1,6 +1,7 @@
 <?php
 
 use App\Livewire\Sms\CallList;
+use App\Models\Client;
 use App\Models\BlockedCaller;
 use App\Models\CallLog;
 use App\Models\User;
@@ -185,4 +186,40 @@ it('unblocks a blocked number', function () {
         ->call('unblockNumber', $blockedNumber);
 
     expect(BlockedCaller::where('phone_number', $blockedNumber)->exists())->toBeFalse();
+});
+
+it('shows only calls related to the current client user phone number', function () {
+    $clientUser = User::query()->create([
+        'first_name' => 'Mark',
+        'last_name' => 'Brodson',
+        'email' => 'mark.calls.' . Str::random(6) . '@example.test',
+        'cell_phone' => '3128230569',
+        'primary_vendor_id' => null,
+    ]);
+
+    $client = Client::factory()->create([
+        'business_name' => 'Brodson Family',
+    ]);
+    $client->users()->attach($clientUser->id);
+
+    CallLog::factory()->create([
+        'direction' => 'incoming',
+        'from_number' => '+13128230569',
+        'to_number' => '+12249993880',
+        'caller_name' => 'Mark Personal Call',
+        'status' => CallLog::STATUS_COMPLETED,
+    ]);
+
+    CallLog::factory()->create([
+        'direction' => 'incoming',
+        'from_number' => '+18475551212',
+        'to_number' => '+12249993880',
+        'caller_name' => 'Other Contractor Call',
+        'status' => CallLog::STATUS_COMPLETED,
+    ]);
+
+    Livewire::actingAs($clientUser)
+        ->test(CallList::class)
+        ->assertSee('Mark Personal Call')
+        ->assertDontSee('Other Contractor Call');
 });

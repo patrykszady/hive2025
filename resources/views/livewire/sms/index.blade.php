@@ -165,36 +165,32 @@
     >
         <x-island-card class="relative flex flex-col h-full min-h-0 overflow-hidden">
             {{-- Tabs --}}
-            @if (! $isClientUser)
-                <div class="flex items-center justify-between">
-                    {{-- Alpine-driven tab switching: instant, no server roundtrip --}}
-                    <div class="inline-flex rounded-lg bg-zinc-100 dark:bg-zinc-800 p-0.5">
-                        <button type="button"
-                            x-on:click="switchTab('messages')"
-                            x-bind:class="$store.sms.tab === 'messages' ? 'bg-white dark:bg-zinc-700 shadow text-zinc-900 dark:text-zinc-100 hover:text-zinc-900 dark:hover:text-zinc-100' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-500 dark:hover:text-zinc-400'"
-                            class="px-3 py-1 text-sm font-medium rounded-md">
-                            Messages
-                        </button>
-                        <button type="button"
-                            x-on:click="switchTab('calls')"
-                            x-bind:class="$store.sms.tab === 'calls' ? 'bg-white dark:bg-zinc-700 shadow text-zinc-900 dark:text-zinc-100 hover:text-zinc-900 dark:hover:text-zinc-100' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-500 dark:hover:text-zinc-400'"
-                            class="px-3 py-1 text-sm font-medium rounded-md">
-                            Calls
-                        </button>
-                    </div>
+            <div class="flex items-center justify-between">
+                {{-- Alpine-driven tab switching: instant, no server roundtrip --}}
+                <div class="inline-flex rounded-lg bg-zinc-100 dark:bg-zinc-800 p-0.5">
+                    <button type="button"
+                        x-on:click="switchTab('messages')"
+                        x-bind:class="$store.sms.tab === 'messages' ? 'bg-white dark:bg-zinc-700 shadow text-zinc-900 dark:text-zinc-100 hover:text-zinc-900 dark:hover:text-zinc-100' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-500 dark:hover:text-zinc-400'"
+                        class="px-3 py-1 text-sm font-medium rounded-md">
+                        Messages
+                    </button>
+                    <button type="button"
+                        x-on:click="switchTab('calls')"
+                        x-bind:class="$store.sms.tab === 'calls' ? 'bg-white dark:bg-zinc-700 shadow text-zinc-900 dark:text-zinc-100 hover:text-zinc-900 dark:hover:text-zinc-100' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-500 dark:hover:text-zinc-400'"
+                        class="px-3 py-1 text-sm font-medium rounded-md">
+                        Calls
+                    </button>
+                </div>
 
+                @if (! $isClientUser)
                     <flux:button x-show="$store.sms.tab === 'messages'" size="sm" wire:click="$dispatchTo('sms.sms-new-thread', 'openNewThread')" icon="plus">
                         New
                     </flux:button>
                     <flux:button x-show="$store.sms.tab === 'calls'" x-cloak size="sm" wire:click="$dispatchTo('sms.call-list', 'openNewCall')" icon="phone">
                         Call
                     </flux:button>
-                </div>
-            @else
-                <div class="flex items-center justify-between mb-3 pl-8 lg:pl-0">
-                    <flux:heading size="lg">Conversations</flux:heading>
-                </div>
-            @endif
+                @endif
+            </div>
 
             <div x-show="$store.sms.tab === 'messages'" x-cloak class="flex flex-col flex-1 min-h-0">
                 @if (! $isClientUser)
