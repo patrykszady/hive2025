@@ -63,6 +63,19 @@ fi
 if [ "$FORCE" = false ] && [ -f "$LOCK_FILE" ]; then
   # Check if the main Hive server (port 8000) is actually running
   if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1; then
+    # If the app server is already up, still ensure Horizon is running.
+    if ! pgrep -f "artisan horizon" >/dev/null 2>&1; then
+      echo "🔄 Horizon not running, starting it now..."
+      nohup php artisan horizon --no-interaction >"$LOG_DIR/horizon.log" 2>&1 &
+      HORIZON_PID=$!
+      sleep 0.7
+      if ps -p "$HORIZON_PID" >/dev/null 2>&1; then
+        echo "✅ Horizon started (pid: $HORIZON_PID)"
+      else
+        echo "❌ Horizon failed → check logs: $LOG_DIR/horizon.log"
+      fi
+    fi
+
     echo "════════════════════════════════════════════════════════════════"
     echo "ℹ️  Dev environment already running"
     echo "════════════════════════════════════════════════════════════════"

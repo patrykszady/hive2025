@@ -6,12 +6,10 @@ use App\Models\EstimateLineItemAllowance;
 use App\Models\LineItem;
 use App\Services\AllowanceAggregator;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
-use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
-use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
 
@@ -19,30 +17,20 @@ class LineItemsIndex extends Component
 {
     use AuthorizesRequests, WithPagination;
 
-    #[Url(except: '')]
     public string $search = '';
-
-    #[Url(except: 'items')]
-    public string $tab = 'items';
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 
     public function updatedSearch(): void
     {
         $this->resetPage();
-        $this->resetPage('allowancesPage');
-    }
-
-    public function updatedTab(): void
-    {
-        $this->resetPage();
-        $this->resetPage('allowancesPage');
     }
 
     #[Computed]
     public function line_items()
     {
         return LineItem::query()
+            ->with(['allowances' => fn ($query) => $query->orderBy('id')])
             ->when($this->search !== '', function ($query) {
                 $term = '%'.$this->search.'%';
 
@@ -57,50 +45,66 @@ class LineItemsIndex extends Component
     }
 
     /**
-     * All allowances ever used on estimate line items, collapsed into canonical
-     * "like" allowances (one row per global line item + concept) with the
-     * dominant per-unit price. Totals are intentionally omitted.
+     * Inline allowances to render beneath each visible line item.
+     * Prefer the curated global catalog, and fall back to historical
+     * estimate-derived canonical allowances when globals are empty.
+     *
+     * @return Collection<int, Collection<int, array{description: string, pricing_mode: string, unit_amount: ?float, amount: ?float, unit_type: ?string}>>
      */
     #[Computed]
-    public function allowances(): LengthAwarePaginator
+    public function inlineAllowances(): Collection
     {
-        $allowances = EstimateLineItemAllowance::query()
+        $lineItems = $this->line_items->getCollection();
+
+        if ($lineItems->isEmpty()) {
+            return collect();
+        }
+
+        $globalByLineItemId = $lineItems->mapWithKeys(function (LineItem $lineItem) {
+            return [
+                $lineItem->id => $lineItem->allowances
+                    ->map(fn ($allowance) => [
+                        'description' => $allowance->description,
+                        'pricing_mode' => ($allowance->pricing_mode ?? 'per_unit') === 'lump_sum' ? 'lump_sum' : 'per_unit',
+                        'unit_amount' => $allowance->unit_amount !== null ? (float) $allowance->unit_amount : null,
+                        'amount' => $allowance->amount !== null ? (float) $allowance->amount : null,
+                        'unit_type' => $lineItem->unit_type,
+                    ])
+                    ->values(),
+            ];
+        });
+
+        $missingIds = $lineItems
+            ->filter(fn (LineItem $lineItem) => $lineItem->allowances->isEmpty())
+            ->pluck('id')
+            ->values();
+
+        if ($missingIds->isEmpty()) {
+            return $globalByLineItemId;
+        }
+
+        $historicalAllowances = EstimateLineItemAllowance::query()
             ->with(['estimateLineItem:id,line_item_id,name,unit_type,quantity', 'estimateLineItem.line_item:id,name'])
-            ->whereHas('estimateLineItem', fn ($query) => $query->whereNotNull('line_item_id'))
+            ->whereHas('estimateLineItem', fn ($query) => $query->whereIn('line_item_id', $missingIds))
             ->orderByDesc('id')
             ->get();
 
-        $rows = app(AllowanceAggregator::class)->aggregate($allowances);
+        $fallbackByLineItemId = app(AllowanceAggregator::class)
+            ->aggregate($historicalAllowances)
+            ->groupBy('line_item_id')
+            ->map(fn (Collection $rows) => $rows->map(fn (array $row) => [
+                'description' => $row['description'],
+                'pricing_mode' => $row['unit_amount'] !== null ? 'per_unit' : 'lump_sum',
+                'unit_amount' => $row['unit_amount'] !== null ? (float) $row['unit_amount'] : null,
+                'amount' => null,
+                'unit_type' => $row['unit_type'] ?? null,
+            ])->values());
 
-        if ($this->search !== '') {
-            $term = Str::lower($this->search);
-
-            $rows = $rows->filter(fn (array $row) => str_contains(Str::lower($row['description']), $term)
-                || str_contains(Str::lower((string) $row['line_item_name']), $term))->values();
+        foreach ($missingIds as $lineItemId) {
+            $globalByLineItemId[$lineItemId] = $fallbackByLineItemId->get($lineItemId, collect());
         }
 
-        $rows = $rows->sortBy(fn (array $row) => [$row['line_item_name'], $row['description']])->values();
-
-        return $this->paginateCollection($rows, 15, 'allowancesPage');
-    }
-
-    /**
-     * Build a length-aware paginator from an in-memory collection.
-     */
-    protected function paginateCollection(Collection $items, int $perPage, string $pageName): LengthAwarePaginator
-    {
-        $page = LengthAwarePaginator::resolveCurrentPage($pageName);
-
-        return new LengthAwarePaginator(
-            $items->forPage($page, $perPage)->values(),
-            $items->count(),
-            $perPage,
-            $page,
-            [
-                'path' => LengthAwarePaginator::resolveCurrentPath(),
-                'pageName' => $pageName,
-            ],
-        );
+        return $globalByLineItemId;
     }
 
     #[Title('Line Items')]

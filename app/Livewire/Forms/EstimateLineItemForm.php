@@ -8,6 +8,7 @@ use App\Models\LineItem;
 use App\Models\LineItemAllowance;
 use App\Services\AllowanceReconciler;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\Collection;
 use Livewire\Attributes\Rule;
 use Livewire\Form;
 
@@ -72,9 +73,7 @@ class EstimateLineItemForm extends Form
         $this->quantity = $estimate_line_item->quantity;
         $this->total = $estimate_line_item->total;
 
-        $globals = $estimate_line_item->line_item_id
-            ? LineItemAllowance::query()->where('line_item_id', $estimate_line_item->line_item_id)->get()
-            : collect();
+        $globals = $this->globalAllowancesFor($estimate_line_item);
 
         $reconciler = app(AllowanceReconciler::class);
 
@@ -216,18 +215,75 @@ class EstimateLineItemForm extends Form
             return null;
         }
 
-        $globalAllowance = LineItemAllowance::firstOrNew([
-            'line_item_id' => $lineItem->line_item_id,
-            'description' => $description,
-        ]);
+        $reconciler = app(AllowanceReconciler::class);
+        $sameLineItemGlobals = LineItemAllowance::query()
+            ->where('line_item_id', $lineItem->line_item_id)
+            ->orderBy('id')
+            ->get();
 
-        $globalAllowance->pricing_mode = $pricingMode;
-        $globalAllowance->unit_amount = $unitAmount;
-        $globalAllowance->amount = $amount;
-        $globalAllowance->belongs_to_vendor_id = $lineItem->line_item?->belongs_to_vendor_id
-            ?? $globalAllowance->belongs_to_vendor_id;
-        $globalAllowance->save();
+        $globalAllowance = $reconciler->matchGlobal($description, null, $sameLineItemGlobals);
+
+        if (! $globalAllowance && $sameLineItemGlobals->isEmpty()) {
+            $globalAllowance = $reconciler->matchGlobal($description, null, $this->vendorAllowancesFor($lineItem));
+        }
+
+        if (! $globalAllowance) {
+            $globalAllowance = LineItemAllowance::firstOrNew([
+                'line_item_id' => $lineItem->line_item_id,
+                'description' => $description,
+            ]);
+        }
+
+        if ((int) $globalAllowance->line_item_id === (int) $lineItem->line_item_id) {
+            $globalAllowance->pricing_mode = $pricingMode;
+            $globalAllowance->unit_amount = $unitAmount;
+            $globalAllowance->amount = $amount;
+            $globalAllowance->belongs_to_vendor_id = $lineItem->line_item?->belongs_to_vendor_id
+                ?? $globalAllowance->belongs_to_vendor_id;
+            $globalAllowance->save();
+        }
 
         return $globalAllowance;
+    }
+
+    /**
+     * Get the canonical allowance catalog for an estimate line item, falling
+     * back to the vendor-wide catalog when the selected line item has no own
+     * curated allowances yet.
+     */
+    protected function globalAllowancesFor(EstimateLineItem $lineItem): Collection
+    {
+        $sameLineItemGlobals = $lineItem->line_item_id
+            ? LineItemAllowance::query()
+                ->where('line_item_id', $lineItem->line_item_id)
+                ->orderBy('id')
+                ->get()
+            : collect();
+
+        if ($sameLineItemGlobals->isNotEmpty()) {
+            return $sameLineItemGlobals;
+        }
+
+        return $this->vendorAllowancesFor($lineItem);
+    }
+
+    /**
+     * Get the vendor-wide allowance catalog for the estimate line item.
+     */
+    protected function vendorAllowancesFor(EstimateLineItem $lineItem): Collection
+    {
+        $vendorId = $lineItem->line_item?->belongs_to_vendor_id
+            ?? LineItem::query()->whereKey($lineItem->line_item_id)->value('belongs_to_vendor_id')
+            ?? $lineItem->estimate?->belongs_to_vendor_id;
+
+        if (! $vendorId) {
+            return collect();
+        }
+
+        return LineItemAllowance::query()
+            ->where('belongs_to_vendor_id', $vendorId)
+            ->orderBy('line_item_id')
+            ->orderBy('id')
+            ->get();
     }
 }

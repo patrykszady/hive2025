@@ -32,7 +32,7 @@ class EstimateLineItem extends Pivot
 
     public function estimate(): BelongsTo
     {
-        return $this->belongsTo(Estimate::class)->withTimestamps();
+        return $this->belongsTo(Estimate::class);
     }
 
     public function section(): BelongsTo

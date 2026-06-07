@@ -215,6 +215,86 @@ it('collapses a legacy free-text allowance onto the global catalog when editing'
     expect((float) $legacy->amount)->toBe(150.0);
 });
 
+it('reconciles a legacy wall tile allowance to a vendor-wide global tile catalog entry', function () {
+    $user = actingAsVendorUser();
+    $vendorId = $user->primary_vendor_id;
+
+    $floorTile = LineItem::create([
+        'name' => 'Floor Tile',
+        'category' => 'Flooring',
+        'unit_type' => 'sq.ft.',
+        'cost' => 10,
+        'desc' => 'Floor tile material',
+        'belongs_to_vendor_id' => $vendorId,
+    ]);
+
+    $global = LineItemAllowance::create([
+        'line_item_id' => $floorTile->id,
+        'description' => 'Tile',
+        'pricing_mode' => 'per_unit',
+        'unit_amount' => 5,
+        'amount' => 105,
+        'belongs_to_vendor_id' => $vendorId,
+    ]);
+
+    $wallTile = LineItem::create([
+        'name' => 'Wall Tile',
+        'category' => 'Tile',
+        'unit_type' => 'sq.ft.',
+        'cost' => 10,
+        'desc' => 'Wall tile material',
+        'belongs_to_vendor_id' => $vendorId,
+    ]);
+
+    $estimate = Estimate::create(['belongs_to_vendor_id' => $vendorId]);
+    $section = EstimateSection::create(['estimate_id' => $estimate->id, 'name' => 'Main', 'order' => 0, 'total' => 0]);
+    $estimateLineItem = EstimateLineItem::create([
+        'estimate_id' => $estimate->id,
+        'line_item_id' => $wallTile->id,
+        'section_id' => $section->id,
+        'name' => $wallTile->name,
+        'category' => $wallTile->category,
+        'unit_type' => $wallTile->unit_type,
+        'quantity' => 88,
+        'cost' => $wallTile->cost,
+        'total' => 880,
+        'desc' => $wallTile->desc,
+    ]);
+    $legacy = $estimateLineItem->allowances()->create([
+        'line_item_allowance_id' => null,
+        'description' => 'Tile: $5/sqft',
+        'pricing_mode' => 'per_unit',
+        'unit_amount' => null,
+        'amount' => 400,
+    ]);
+
+    Livewire::test(EstimateLineItemCreate::class, ['estimate' => $estimate])
+        ->tap(function ($component) use ($estimateLineItem) {
+            $reflection = new ReflectionClass($component->instance()->form);
+            $method = $reflection->getMethod('globalAllowancesFor');
+            $method->setAccessible(true);
+
+            $globals = $method->invoke($component->instance()->form, $estimateLineItem->fresh(['allowances']));
+
+            expect($globals->pluck('description')->all())->toContain('Tile');
+        })
+        ->call('editOnEstimate', $estimateLineItem->id)
+        ->assertSet('form.allowances.0.description', 'Tile')
+        ->assertSet('form.allowances.0.pricing_mode', 'per_unit')
+        ->assertSet('form.allowances.0.unit_amount', '5.00')
+        ->assertSet('form.allowances.0.amount', '440.00')
+        ->call('edit')
+        ->assertHasNoErrors();
+
+    $legacy->refresh();
+    expect($legacy->description)->toBe('Tile');
+    expect($legacy->line_item_allowance_id)->toBe($global->id);
+    expect($legacy->pricing_mode)->toBe('per_unit');
+    expect((float) $legacy->unit_amount)->toBe(5.0);
+    expect((float) $legacy->amount)->toBe(440.0);
+    expect(LineItemAllowance::where('line_item_id', $wallTile->id)->count())->toBe(0);
+});
+
 it('creates and links a global allowance when an estimate line item is saved', function () {
     actingAsVendorUser();
 
@@ -408,19 +488,60 @@ it('saves a lump-sum allowance with no per-unit amount', function () {
     expect($global->unit_amount)->toBeNull();
 });
 
-it('does not show a per-unit price for lump-sum allowances in the catalog', function () {
+it('renders allowances inline beneath line items in the index table', function () {
     actingAsVendorUser();
 
-    $floorTile = LineItem::create(['name' => 'Floor Tile', 'category' => 'Flooring', 'unit_type' => 'sq.ft.', 'cost' => 10]);
+    $floorTile = LineItem::create([
+        'name' => 'Floor Tile',
+        'category' => 'Flooring',
+        'unit_type' => 'sq.ft.',
+        'cost' => 10,
+    ]);
 
-    makeEstimateAllowanceFor($floorTile, 'Grout', null, 36.30, 'lump_sum');
+    LineItemAllowance::create([
+        'line_item_id' => $floorTile->id,
+        'description' => 'Tile Material Budget',
+        'pricing_mode' => 'per_unit',
+        'unit_amount' => 30,
+        'amount' => 600,
+    ]);
 
-    $rows = (new LineItemsIndex())->allowances()->getCollection();
+    LineItemAllowance::create([
+        'line_item_id' => $floorTile->id,
+        'description' => 'Grout Upgrade',
+        'pricing_mode' => 'lump_sum',
+        'amount' => 75,
+    ]);
 
-    $grout = $rows->firstWhere('description', 'Grout');
+    Livewire::test(LineItemsIndex::class)
+        ->assertSee('Floor Tile')
+        ->assertSee('Allowance')
+        ->assertSee('Tile Material Budget')
+        ->assertSee('Grout Upgrade')
+        ->assertSee('600.00')
+        ->assertSee('75.00');
+});
 
-    expect($grout)->not->toBeNull();
-    expect($grout['unit_amount'])->toBeNull();
+it('renders historical estimate allowances inline when no global allowance catalog exists', function () {
+    actingAsVendorUser();
+
+    $wallTile = LineItem::create([
+        'name' => 'Wall Tile',
+        'category' => 'Tile',
+        'unit_type' => 'sq.ft.',
+        'cost' => 10,
+    ]);
+
+    // Historical estimate allowance only (no line_item_allowances rows).
+    makeEstimateAllowanceFor($wallTile, 'Tile: $5/sqft', null, 400);
+
+    expect(LineItemAllowance::where('line_item_id', $wallTile->id)->count())->toBe(0);
+
+    Livewire::test(LineItemsIndex::class)
+        ->assertSee('Wall Tile')
+        ->assertSee('Allowance')
+        ->assertSee('Tile')
+        ->assertSee('/ sq.ft.');
 });
 
 it('returns no previous allowances when no line item is selected', function () {
@@ -432,56 +553,12 @@ it('returns no previous allowances when no line item is selected', function () {
         });
 });
 
-it('lists allowances grouped per line item in the index allowances tab', function () {
+it('does not render a separate allowances tab on the line items index', function () {
     actingAsVendorUser();
 
-    $floorTile = LineItem::create(['name' => 'Floor Tile', 'category' => 'Flooring', 'unit_type' => 'sq.ft.', 'cost' => 10]);
-
-    // Same allowance used on two different estimates collapses to one row.
-    makeEstimateAllowanceFor($floorTile, 'Tile material budget', 25, 500);
-    makeEstimateAllowanceFor($floorTile, 'Tile material budget', 30, 600);
-    makeEstimateAllowanceFor($floorTile, 'Grout upgrade', null, 75);
-
-    $index = new LineItemsIndex();
-    $allowances = $index->allowances();
-
-    $descriptions = $allowances->pluck('description');
-
-    expect($descriptions)->toContain('Tile Material Budget');
-    expect($descriptions)->toContain('Grout Upgrade');
-    expect($descriptions->filter(fn ($description) => $description === 'Tile Material Budget'))->toHaveCount(1);
-    expect($allowances->first()['line_item_name'])->toBe('Floor Tile');
-});
-
-it('merges like allowances into one canonical row with the dominant per-unit and no total', function () {
-    actingAsVendorUser();
-
-    $wallTile = LineItem::create(['name' => 'Wall Tile', 'category' => 'Tile', 'unit_type' => 'sq.ft.', 'cost' => 10]);
-
-    // Fuzzy "tile" variants embed the per-unit price in the description text and
-    // carry noisy totals. They should collapse into a single "Tile" row priced
-    // at the dominant $5/unit, with no total exposed.
-    makeEstimateAllowanceFor($wallTile, 'Tile: $5/sqft', null, 400);
-    makeEstimateAllowanceFor($wallTile, 'Tile: $5/sqft', null, 600);
-    makeEstimateAllowanceFor($wallTile, 'Wall tile $5/sqft', null, 500);
-    makeEstimateAllowanceFor($wallTile, 'Tile allowance. $7/sqft', null, 1250);
-    makeEstimateAllowanceFor($wallTile, 'Grout', null, 40);
-
-    $index = new LineItemsIndex();
-    $rows = $index->allowances()->getCollection();
-
-    $tileRows = $rows->filter(fn (array $row) => str_contains(Str::lower($row['description']), 'tile'));
-
-    expect($tileRows)->toHaveCount(1);
-
-    $tile = $tileRows->first();
-    expect((float) $tile['unit_amount'])->toBe(5.0);
-    expect($tile)->not->toHaveKey('amount');
-    expect($tile)->not->toHaveKey('total');
-
-    // Grout is a distinct concept and must remain its own row.
-    $grout = $rows->firstWhere('description', 'Grout');
-    expect($grout)->not->toBeNull();
+    Livewire::test(LineItemsIndex::class)
+        ->assertDontSee('name="allowances"')
+        ->assertSee('Line Items');
 });
 
 it('seeds the editable allowance catalog from past estimates in the line item modal', function () {
