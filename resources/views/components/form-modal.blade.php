@@ -93,6 +93,7 @@
                 </div>
             </div>
         @endif
+        </div>
     </div>
 </flux:modal>
 </div>

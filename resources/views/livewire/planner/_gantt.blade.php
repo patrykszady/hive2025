@@ -262,7 +262,7 @@
                                                 overflow: visible;
                                             "
                                             @pointerdown.self="startDrag($event)"
-                                            @click="if (!justDragged) $wire.editTask({{ $task->id }})"
+                                            @click="if (!justDragged && typeof Livewire !== 'undefined') Livewire.dispatchTo('tasks.task-create', 'editTask', { task: {{ $task->id }} })"
                                             title="{{ $task->title }}{{ $vendor ? ' · ' . $vendor->name : '' }} · {{ $bar['start_date'] }} → {{ $bar['end_date'] }}"
                                         >
                                             {{-- Colored left rail (type color) — rounded-l-md so it matches bar corners --}}

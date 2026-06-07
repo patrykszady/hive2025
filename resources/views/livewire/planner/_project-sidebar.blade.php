@@ -34,7 +34,7 @@
         size="xs"
         class="shrink-0"
         wire:key="planner-add-task-{{ $projectId }}"
-        wire:click="addTask({{ $projectId }})"
+        wire:click="$dispatchTo('tasks.task-create', 'addTask', { project_id: {{ $projectId }} })"
         aria-label="Add task"
     />
 </div>

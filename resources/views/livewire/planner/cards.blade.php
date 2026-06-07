@@ -488,8 +488,7 @@
                                                         size="sm"
                                                         class="shrink-0 opacity-0 group-hover/cell:opacity-100 transition-opacity"
                                                         wire:key="add-task-{{ $projectColumn->id }}-{{ $dayData->day->format('Y-m-d') }}"
-                                                        wire:click="addTask({{ $projectColumn->id }}, '{{ $dayData->day->format('Y-m-d') }}')"
-                                                        wire:target="addTask({{ $projectColumn->id }}, '{{ $dayData->day->format('Y-m-d') }}')"
+                                                        wire:click="$dispatchTo('tasks.task-create', 'addTask', { project_id: {{ $projectColumn->id }}, date: '{{ $dayData->day->format('Y-m-d') }}' })"
                                                     />
                                                 </x-slot>
 
@@ -697,7 +696,7 @@
                                             as="button"
                                             class="min-w-0 w-full p-2! {{ $task->trashed() ? 'opacity-50' : '' }} {{ $segmentHasToday ? 'bg-white/70! dark:bg-zinc-700/70!' : '' }}"
                                             style="overflow: visible;"
-                                            wire:click="editTask({{ $task->id }}, '{{ $entry->first_day_format }}', {{ $row->id }})"
+                                            wire:click="$dispatchTo('tasks.task-create', 'editTask', { task: {{ $task->id }} })"
                                             wire:loading.attr="disabled"
                                             wire:loading.class="opacity-60 cursor-wait"
                                         >
@@ -721,7 +720,7 @@
                                         class="px-2 py-1.5 border-b border-r {{ $dayBorderClass }} align-top cursor-pointer
                                             {{ $cell->isWeekend ? $dayWeekendBgClass : '' }}
                                             {{ $cell->isToday ? $dayTodayBgClass : '' }}"
-                                        wire:click="addTask({{ $row->id }}, '{{ $cell->dayFormat }}')"
+                                        wire:click="$dispatchTo('tasks.task-create', 'addTask', { project_id: {{ $row->id }}, date: '{{ $cell->dayFormat }}' })"
                                     >
                                         <div
                                             x-show="hover"
