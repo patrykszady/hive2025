@@ -2,7 +2,10 @@
 
 namespace App\Livewire\Forms;
 
+use App\Models\EstimateLineItemAllowance;
 use App\Models\LineItem;
+use App\Models\LineItemAllowance;
+use App\Services\AllowanceAggregator;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Rule;
 use Livewire\Form;
@@ -34,6 +37,9 @@ class LineItemForm extends Form
     #[Rule('required|numeric|regex:/^-?\d+(\.\d{1,2})?$/', as: 'amount')]
     public $cost = null;
 
+    /** @var array<int, array{id: ?int, description: string, pricing_mode: string, unit_amount: string, amount: string}> */
+    public array $allowances = [];
+
     // #[Rule('required|min:0.01')]
     // public $quantity = '';
 
@@ -55,6 +61,52 @@ class LineItemForm extends Form
         $this->sub_category = $line_item->sub_category;
         $this->unit_type = $line_item->unit_type;
         $this->cost = $line_item->cost;
+
+        $this->loadAllowances($line_item);
+    }
+
+    /**
+     * Populate the editable allowance catalog for the line item, preferring
+     * curated global allowances and falling back to the canonical allowances
+     * derived from past estimates so the catalog can be seeded.
+     */
+    protected function loadAllowances(LineItem $line_item): void
+    {
+        $globals = $line_item->allowances()->orderBy('id')->get();
+
+        if ($globals->isNotEmpty()) {
+            $this->allowances = $globals
+                ->map(fn (LineItemAllowance $a) => [
+                    'id' => $a->id,
+                    'description' => $a->description,
+                    'pricing_mode' => $a->pricing_mode ?? ($a->unit_amount !== null ? 'per_unit' : 'lump_sum'),
+                    'unit_amount' => $a->unit_amount !== null ? number_format((float) $a->unit_amount, 2, '.', '') : '',
+                    'amount' => $a->amount !== null ? number_format((float) $a->amount, 2, '.', '') : '',
+                ])
+                ->values()
+                ->toArray();
+
+            return;
+        }
+
+        $derived = app(AllowanceAggregator::class)->aggregate(
+            EstimateLineItemAllowance::query()
+                ->whereHas('estimateLineItem', fn ($query) => $query->where('line_item_id', $line_item->id))
+                ->with('estimateLineItem:id,line_item_id,name,unit_type,quantity')
+                ->orderByDesc('id')
+                ->get()
+        );
+
+        $this->allowances = $derived
+            ->map(fn (array $a) => [
+                'id' => null,
+                'description' => $a['description'],
+                'pricing_mode' => $a['unit_amount'] !== null ? 'per_unit' : 'lump_sum',
+                'unit_amount' => $a['unit_amount'] !== null ? number_format((float) $a['unit_amount'], 2, '.', '') : '',
+                'amount' => '',
+            ])
+            ->values()
+            ->toArray();
     }
 
     public function store()
@@ -62,7 +114,10 @@ class LineItemForm extends Form
         $this->authorize('create', LineItem::class);
         $this->validate();
 
-        LineItem::create($this->all());
+        $lineItem = LineItem::create($this->except('allowances', 'line_item'));
+
+        $this->syncAllowances($lineItem);
+
         $this->reset();
     }
 
@@ -71,7 +126,55 @@ class LineItemForm extends Form
         $this->authorize('create', LineItem::class);
         $this->validate();
 
-        $this->line_item->update($this->all());
+        $this->line_item->update($this->except('allowances', 'line_item'));
+
+        $this->syncAllowances($this->line_item);
+
         $this->reset();
+    }
+
+    /**
+     * Sync the editable allowance rows into the line item's global allowance
+     * catalog, removing any rows that were deleted in the modal.
+     */
+    protected function syncAllowances(LineItem $lineItem): void
+    {
+        $keepIds = [];
+
+        foreach ($this->allowances as $entry) {
+            $description = trim($entry['description'] ?? '');
+
+            if ($description === '') {
+                continue;
+            }
+
+            $pricingMode = ($entry['pricing_mode'] ?? 'per_unit') === 'lump_sum' ? 'lump_sum' : 'per_unit';
+            $unitAmount = $pricingMode === 'lump_sum' || ($entry['unit_amount'] ?? '') === ''
+                ? null
+                : (float) $entry['unit_amount'];
+            $amount = $pricingMode === 'lump_sum' && ($entry['amount'] ?? '') !== ''
+                ? (float) $entry['amount']
+                : null;
+
+            $attributes = [
+                'description' => $description,
+                'pricing_mode' => $pricingMode,
+                'unit_amount' => $unitAmount,
+                'amount' => $amount,
+                'belongs_to_vendor_id' => $lineItem->belongs_to_vendor_id,
+            ];
+
+            $allowance = ! empty($entry['id']) ? LineItemAllowance::find($entry['id']) : null;
+
+            if ($allowance) {
+                $allowance->update($attributes);
+            } else {
+                $allowance = $lineItem->allowances()->create($attributes);
+            }
+
+            $keepIds[] = $allowance->id;
+        }
+
+        $lineItem->allowances()->whereNotIn('id', $keepIds)->delete();
     }
 }

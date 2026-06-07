@@ -5,19 +5,20 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-class EstimateLineItemAllowance extends Model
+class LineItemAllowance extends Model
 {
     use HasFactory, SoftDeletes;
 
     protected $fillable = [
-        'estimate_line_item_id',
-        'line_item_allowance_id',
+        'line_item_id',
         'description',
         'pricing_mode',
         'unit_amount',
         'amount',
+        'belongs_to_vendor_id',
     ];
 
     protected function casts(): array
@@ -28,13 +29,13 @@ class EstimateLineItemAllowance extends Model
         ];
     }
 
-    public function estimateLineItem(): BelongsTo
+    public function lineItem(): BelongsTo
     {
-        return $this->belongsTo(EstimateLineItem::class, 'estimate_line_item_id');
+        return $this->belongsTo(LineItem::class);
     }
 
-    public function lineItemAllowance(): BelongsTo
+    public function estimateLineItemAllowances(): HasMany
     {
-        return $this->belongsTo(LineItemAllowance::class, 'line_item_allowance_id');
+        return $this->hasMany(EstimateLineItemAllowance::class, 'line_item_allowance_id');
     }
 }

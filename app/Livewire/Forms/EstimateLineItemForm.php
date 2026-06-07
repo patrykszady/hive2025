@@ -5,6 +5,8 @@ namespace App\Livewire\Forms;
 use App\Models\EstimateLineItem;
 use App\Models\EstimateLineItemAllowance;
 use App\Models\LineItem;
+use App\Models\LineItemAllowance;
+use App\Services\AllowanceReconciler;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Rule;
 use Livewire\Form;
@@ -41,7 +43,7 @@ class EstimateLineItemForm extends Form
     #[Rule('required')]
     public $total = '';
 
-    /** @var array<int, array{description: string, amount: string}> */
+    /** @var array<int, array{id: ?int, description: string, pricing_mode: string, unit_amount: string, amount: string}> */
     public array $allowances = [];
 
     public function setLineItem(LineItem $line_item)
@@ -70,12 +72,34 @@ class EstimateLineItemForm extends Form
         $this->quantity = $estimate_line_item->quantity;
         $this->total = $estimate_line_item->total;
 
+        $globals = $estimate_line_item->line_item_id
+            ? LineItemAllowance::query()->where('line_item_id', $estimate_line_item->line_item_id)->get()
+            : collect();
+
+        $reconciler = app(AllowanceReconciler::class);
+
         $this->allowances = $estimate_line_item->allowances
-            ->map(fn (EstimateLineItemAllowance $a) => [
-                'id' => $a->id,
-                'description' => $a->description,
-                'amount' => $a->amount,
-            ])
+            ->map(function (EstimateLineItemAllowance $a) use ($estimate_line_item, $globals, $reconciler) {
+                $reconciled = $reconciler->reconcile($a, $estimate_line_item, $globals);
+
+                if ($reconciled) {
+                    return [
+                        'id' => $a->id,
+                        'description' => $reconciled['description'],
+                        'pricing_mode' => $reconciled['pricing_mode'],
+                        'unit_amount' => $reconciled['unit_amount'],
+                        'amount' => $reconciled['amount'],
+                    ];
+                }
+
+                return [
+                    'id' => $a->id,
+                    'description' => $a->description,
+                    'pricing_mode' => $a->pricing_mode ?? ($a->unit_amount !== null ? 'per_unit' : 'lump_sum'),
+                    'unit_amount' => $a->unit_amount,
+                    'amount' => $a->amount,
+                ];
+            })
             ->values()
             ->toArray();
     }
@@ -141,15 +165,27 @@ class EstimateLineItemForm extends Form
         foreach ($this->allowances as $entry) {
             $description = trim($entry['description'] ?? '');
             $amount = (float) ($entry['amount'] ?? 0);
+            $pricingMode = ($entry['pricing_mode'] ?? 'per_unit') === 'lump_sum' ? 'lump_sum' : 'per_unit';
+            $unitAmount = $pricingMode === 'lump_sum' || ($entry['unit_amount'] ?? '') === ''
+                ? null
+                : (float) $entry['unit_amount'];
 
             if ($description === '' && $amount <= 0) {
                 continue;
             }
 
+            $globalAllowance = $this->resolveGlobalAllowance($lineItem, $description, $pricingMode, $unitAmount, $amount);
+
             if (! empty($entry['id'])) {
                 $allowance = EstimateLineItemAllowance::find($entry['id']);
                 if ($allowance) {
-                    $allowance->update(['description' => $description, 'amount' => $amount]);
+                    $allowance->update([
+                        'line_item_allowance_id' => $globalAllowance?->id,
+                        'description' => $description,
+                        'pricing_mode' => $pricingMode,
+                        'unit_amount' => $unitAmount,
+                        'amount' => $amount,
+                    ]);
                     $keepIds[] = $allowance->id;
 
                     continue;
@@ -157,7 +193,10 @@ class EstimateLineItemForm extends Form
             }
 
             $allowance = $lineItem->allowances()->create([
+                'line_item_allowance_id' => $globalAllowance?->id,
                 'description' => $description,
+                'pricing_mode' => $pricingMode,
+                'unit_amount' => $unitAmount,
                 'amount' => $amount,
             ]);
             $keepIds[] = $allowance->id;
@@ -165,5 +204,30 @@ class EstimateLineItemForm extends Form
 
         // Soft-delete removed allowances
         $lineItem->allowances()->whereNotIn('id', $keepIds)->delete();
+    }
+
+    /**
+     * Find or create the global allowance for this line item's catalog entry,
+     * mirroring how an estimate line item references a global line item.
+     */
+    protected function resolveGlobalAllowance(EstimateLineItem $lineItem, string $description, string $pricingMode, ?float $unitAmount, float $amount): ?LineItemAllowance
+    {
+        if ($description === '' || ! $lineItem->line_item_id) {
+            return null;
+        }
+
+        $globalAllowance = LineItemAllowance::firstOrNew([
+            'line_item_id' => $lineItem->line_item_id,
+            'description' => $description,
+        ]);
+
+        $globalAllowance->pricing_mode = $pricingMode;
+        $globalAllowance->unit_amount = $unitAmount;
+        $globalAllowance->amount = $amount;
+        $globalAllowance->belongs_to_vendor_id = $lineItem->line_item?->belongs_to_vendor_id
+            ?? $globalAllowance->belongs_to_vendor_id;
+        $globalAllowance->save();
+
+        return $globalAllowance;
     }
 }

@@ -92,7 +92,7 @@
             </div>
 
             {{-- ALLOWANCES --}}
-            <div class="space-y-2">
+            <div class="space-y-2" x-data x-on:allowance-added.window="requestAnimationFrame(() => requestAnimationFrame(() => { const c = $el.closest('.overflow-y-auto'); if (c) { c.scrollTo({ top: c.scrollHeight, behavior: 'smooth' }); } }))">
                 <div class="flex items-center justify-between">
                     <flux:heading size="sm">Allowances</flux:heading>
                     @unless($isLocked)
@@ -100,25 +100,115 @@
                     @endunless
                 </div>
 
+                @php($unitTypeAvailable = $form->unit_type && $form->unit_type !== 'no_unit')
+
                 @foreach($form->allowances as $aIndex => $allowance)
-                    <div class="flex flex-col sm:flex-row gap-2 items-start" wire:key="allowance-{{ $aIndex }}">
+                    @php($rowPerUnit = $unitTypeAvailable && ($allowance['pricing_mode'] ?? 'per_unit') !== 'lump_sum')
+                    @php($rowSuggestions = $this->previousAllowancesForRow($aIndex))
+                    <div
+                        class="flex flex-col sm:flex-row gap-2 sm:items-center"
+                        wire:key="allowance-{{ $aIndex }}"
+                        x-data="{
+                            desc: @js($allowance['description'] ?? ''),
+                            mode: @js($rowPerUnit ? 'per_unit' : 'lump_sum'),
+                            suggestions: @js($rowSuggestions->mapWithKeys(fn (array $suggestion) => [
+                                $suggestion['description'] => [
+                                    'pricing_mode' => $suggestion['pricing_mode'],
+                                    'unit_amount' => $suggestion['unit_amount'],
+                                    'amount' => $suggestion['amount'],
+                                ],
+                            ])),
+                            syncAllowance() {
+                                const match = this.suggestions[this.desc.trim()];
+
+                                if (!match) {
+                                    return;
+                                }
+
+                                const isLumpSum = match.pricing_mode === 'lump_sum';
+                                this.mode = match.pricing_mode;
+                                const unitAmount = isLumpSum ? '' : (match.unit_amount ?? '');
+                                const amount = isLumpSum ? (match.amount ?? '') : (unitAmount ? (Number(unitAmount) * {{ $form->quantity ?: 1 }}).toFixed(2) : '');
+
+                                if (this.$refs.unitAmount) {
+                                    this.$refs.unitAmount.value = unitAmount === null ? '' : String(unitAmount);
+                                    this.$refs.unitAmount.dispatchEvent(new Event('input', { bubbles: true }));
+                                }
+
+                                if (this.$refs.amount) {
+                                    this.$refs.amount.value = amount === null ? '' : String(amount);
+                                    this.$refs.amount.dispatchEvent(new Event('input', { bubbles: true }));
+                                }
+                            }
+                        }"
+                    >
                         <div class="flex-1 min-w-0">
-                            <flux:input
-                                wire:model="form.allowances.{{ $aIndex }}.description"
+                            <flux:autocomplete
+                                wire:model.live="form.allowances.{{ $aIndex }}.description"
+                                x-on:input="desc = $event.target.value; syncAllowance()"
                                 placeholder="Allowance description"
                                 size="sm"
                                 :disabled="$isLocked"
-                            />
+                            >
+                                @foreach($rowSuggestions as $previousAllowance)
+                                    <flux:autocomplete.item x-on:pointerdown.prevent="desc = @js($previousAllowance['description']); syncAllowance()">{{ $previousAllowance['description'] }}</flux:autocomplete.item>
+                                @endforeach
+                            </flux:autocomplete>
                         </div>
-                        <div class="w-32">
+                        @if($unitTypeAvailable)
+                            <div class="w-32 shrink-0">
+                                <flux:input
+                                    x-ref="unitAmount"
+                                    wire:model.live.debounce.500ms="form.allowances.{{ $aIndex }}.unit_amount"
+                                    x-bind:placeholder="desc.trim() !== '' && mode === 'per_unit' ? '0.00' : ''"
+                                    type="number"
+                                    inputmode="decimal"
+                                    step="0.01"
+                                    size="sm"
+                                    x-bind:disabled="{{ $isLocked ? 'true' : 'false' }} || mode !== 'per_unit'"
+                                >
+                                    <x-slot name="iconLeading">
+                                        <div x-show="desc.trim() !== ''" x-cloak class="contents">
+                                            <div x-show="mode === 'per_unit'" class="contents">
+                                                <flux:checkbox
+                                                    wire:key="allowance-{{ $aIndex }}-perunit-on"
+                                                    wire:click="toggleAllowancePerUnit({{ $aIndex }})"
+                                                    x-on:click="mode = 'lump_sum'"
+                                                    :checked="true"
+                                                    :disabled="$isLocked"
+                                                    tooltip="Price per {{ $form->unit_type }}"
+                                                    class="ml-2.5"
+                                                />
+                                            </div>
+                                            <div x-show="mode === 'lump_sum'" class="contents">
+                                                <flux:checkbox
+                                                    wire:key="allowance-{{ $aIndex }}-perunit-off"
+                                                    wire:click="toggleAllowancePerUnit({{ $aIndex }})"
+                                                    x-on:click="mode = 'per_unit'"
+                                                    :checked="false"
+                                                    :disabled="$isLocked"
+                                                    tooltip="Price per {{ $form->unit_type }}"
+                                                    class="ml-2.5"
+                                                />
+                                            </div>
+                                        </div>
+                                    </x-slot>
+                                    <x-slot name="iconTrailing">
+                                        <span x-show="desc.trim() !== '' && mode === 'per_unit'" x-cloak class="text-xs text-zinc-400 pr-2">/ {{ $form->unit_type }}</span>
+                                    </x-slot>
+                                </flux:input>
+                            </div>
+                        @endif
+                        <div class="w-32 shrink-0">
                             <flux:input
+                                x-ref="amount"
                                 wire:model="form.allowances.{{ $aIndex }}.amount"
-                                placeholder="0.00"
+                                x-bind:placeholder="desc.trim() !== '' ? '0.00' : ''"
                                 type="number"
                                 inputmode="decimal"
                                 step="0.01"
                                 size="sm"
-                                :disabled="$isLocked"
+                                x-bind:disabled="{{ $isLocked ? 'true' : 'false' }} || mode === 'per_unit'"
                             />
                         </div>
                         @unless($isLocked)

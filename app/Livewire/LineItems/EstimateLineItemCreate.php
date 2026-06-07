@@ -5,7 +5,10 @@ namespace App\Livewire\LineItems;
 use App\Livewire\Forms\EstimateLineItemForm;
 use App\Livewire\Projects\ProjectFinances;
 use App\Models\Estimate;
+use App\Models\EstimateLineItemAllowance;
 use App\Models\LineItem;
+use App\Models\LineItemAllowance;
+use App\Services\AllowanceAggregator;
 use Flux;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Livewire\Attributes\Computed;
@@ -54,12 +57,235 @@ class EstimateLineItemCreate extends Component
         if (in_array($field, ['form.quantity', 'form.cost'])) {
             $this->form->total = $this->getTotalLineItemProperty();
         }
+
+        if ($field === 'form.quantity') {
+            $this->recalculateAllowanceAmounts();
+        }
+
+        if (preg_match('/^form\.allowances\.(\d+)\.(description|unit_amount|pricing_mode)$/', $field, $matches)) {
+            $index = (int) $matches[1];
+
+            if ($matches[2] === 'description') {
+                $this->fillAllowanceFromHistory($index);
+            } elseif ($matches[2] === 'pricing_mode') {
+                $this->applyAllowancePricingMode($index);
+            } elseif ($matches[2] === 'unit_amount') {
+                $unitAmount = $this->form->allowances[$index]['unit_amount'] ?? '';
+
+                if ($unitAmount !== '') {
+                    $this->form->allowances[$index]['amount'] = $this->calculateAllowanceAmount($unitAmount);
+                }
+            }
+        }
     }
 
     #[Computed]
     public function line_items()
     {
         return LineItem::orderBy('created_at', 'DESC')->get()->keyBy('id');
+    }
+
+    /**
+     * Canonical "like" allowances previously used for the selected line item,
+     * with the dominant per-unit price filled in. Selecting one fills the
+     * per-unit amount and computes the total from the line item quantity.
+     *
+     * @return \Illuminate\Support\Collection<int, array{description: string, unit_amount: ?float}>
+     */
+    #[Computed]
+    public function previousAllowances()
+    {
+        if (! $this->line_item_id) {
+            return collect();
+        }
+
+        $globalAllowances = LineItemAllowance::query()
+            ->where('line_item_id', $this->line_item_id)
+            ->orderBy('id')
+            ->get();
+
+        if ($globalAllowances->isNotEmpty()) {
+            return $globalAllowances
+                ->map(fn (LineItemAllowance $allowance) => [
+                    'description' => $allowance->description,
+                    'pricing_mode' => $allowance->pricing_mode ?? ($allowance->unit_amount !== null ? 'per_unit' : 'lump_sum'),
+                    'unit_amount' => $allowance->unit_amount !== null ? (float) $allowance->unit_amount : null,
+                    'amount' => $allowance->amount !== null ? (float) $allowance->amount : null,
+                ])
+                ->filter(fn (array $allowance) => $allowance['description'] !== '')
+                ->values();
+        }
+
+        $allowances = EstimateLineItemAllowance::query()
+            ->whereHas('estimateLineItem', fn ($query) => $query->where('line_item_id', $this->line_item_id))
+            ->with('estimateLineItem:id,line_item_id,name,unit_type,quantity')
+            ->orderByDesc('id')
+            ->get();
+
+        return app(AllowanceAggregator::class)->aggregate($allowances)
+            ->map(fn (array $allowance) => [
+                'description' => $allowance['description'],
+                'pricing_mode' => $allowance['unit_amount'] !== null ? 'per_unit' : 'lump_sum',
+                'unit_amount' => $allowance['unit_amount'],
+                'amount' => null,
+            ])
+            ->filter(fn (array $allowance) => $allowance['description'] !== '')
+            ->values();
+    }
+
+    /**
+     * Get allowance suggestions for a specific row, excluding descriptions that
+     * are already selected anywhere in the form.
+     *
+     * @return \Illuminate\Support\Collection<int, array{description: string, pricing_mode: string, unit_amount: ?float, amount: ?float}>
+     */
+    public function previousAllowancesForRow(int $index)
+    {
+        $selectedDescriptions = collect($this->form->allowances ?? [])
+            ->pluck('description')
+            ->map(fn ($description) => trim((string) $description))
+            ->filter()
+            ->unique()
+            ->values();
+
+        if ($selectedDescriptions->isEmpty()) {
+            return $this->previousAllowances;
+        }
+
+        return $this->previousAllowances
+            ->reject(fn (array $allowance) => $selectedDescriptions->contains($allowance['description']))
+            ->values();
+    }
+
+    /**
+     * Fill the per-unit amount (and computed total) for an allowance row when
+     * its description matches a previously used canonical allowance.
+     */
+    protected function fillAllowanceFromHistory(int $index): void
+    {
+        $description = trim($this->form->allowances[$index]['description'] ?? '');
+
+        if ($description === '') {
+            return;
+        }
+
+        $match = $this->previousAllowances()
+            ->first(fn (array $allowance) => $allowance['description'] === $description);
+
+        if (! $match) {
+            return;
+        }
+
+        $mode = ($match['pricing_mode'] ?? 'per_unit') === 'lump_sum' ? 'lump_sum' : 'per_unit';
+
+        if ($mode === 'lump_sum') {
+            $this->form->allowances[$index]['pricing_mode'] = 'lump_sum';
+            $this->form->allowances[$index]['unit_amount'] = '';
+
+            if (($match['amount'] ?? null) !== null) {
+                $this->form->allowances[$index]['amount'] = number_format((float) $match['amount'], 2, '.', '');
+            }
+
+            return;
+        }
+
+        $unitAmount = $match['unit_amount'];
+
+        if ($unitAmount === null) {
+            return;
+        }
+
+        $this->form->allowances[$index]['pricing_mode'] = 'per_unit';
+        $this->form->allowances[$index]['unit_amount'] = number_format((float) $unitAmount, 2, '.', '');
+        $this->form->allowances[$index]['amount'] = $this->calculateAllowanceAmount($unitAmount);
+    }
+
+    /**
+     * Calculate an allowance total from a per-unit amount, borrowing the
+     * quantity from the line item (unless the line item has no unit type).
+     */
+    protected function calculateAllowanceAmount($unitAmount): string
+    {
+        $quantity = $this->form->unit_type === 'no_unit' ? 1 : (float) ($this->form->quantity ?: 1);
+        $amount = (float) $unitAmount * $quantity;
+
+        return number_format($amount, 2, '.', '');
+    }
+
+    /**
+     * Toggle an allowance between per-unit and lump-sum pricing.
+     */
+    public function toggleAllowancePerUnit(int $index): void
+    {
+        $current = $this->form->allowances[$index]['pricing_mode'] ?? 'per_unit';
+
+        $this->form->allowances[$index]['pricing_mode'] = $current === 'lump_sum' ? 'per_unit' : 'lump_sum';
+
+        $this->applyAllowancePricingMode($index);
+    }
+
+    /**
+     * React to a per-allowance pricing mode change: lump sum clears the
+     * per-unit amount (the total is edited directly), while per-unit recomputes
+     * the total from the per-unit amount and the line item quantity.
+     */
+    protected function applyAllowancePricingMode(int $index): void
+    {
+        $mode = ($this->form->allowances[$index]['pricing_mode'] ?? 'per_unit') === 'lump_sum' ? 'lump_sum' : 'per_unit';
+
+        if ($mode === 'lump_sum') {
+            $this->form->allowances[$index]['unit_amount'] = '';
+
+            return;
+        }
+
+        $unitAmount = $this->form->allowances[$index]['unit_amount'] ?? '';
+
+        if ($unitAmount === '') {
+            $unitAmount = $this->deriveUnitAmountFromTotal($index);
+            $this->form->allowances[$index]['unit_amount'] = $unitAmount;
+        }
+
+        if ($unitAmount !== '') {
+            $this->form->allowances[$index]['amount'] = $this->calculateAllowanceAmount($unitAmount);
+        }
+    }
+
+    /**
+     * Back out a per-unit amount from an allowance's existing total and the
+     * line item quantity (e.g. a $105 total over 21 sq.ft. yields $5.00).
+     */
+    protected function deriveUnitAmountFromTotal(int $index): string
+    {
+        $amount = (float) ($this->form->allowances[$index]['amount'] ?? 0);
+        $quantity = $this->form->unit_type === 'no_unit' ? 1 : (float) ($this->form->quantity ?: 1);
+
+        if ($amount <= 0 || $quantity <= 0) {
+            return '';
+        }
+
+        return number_format($amount / $quantity, 2, '.', '');
+    }
+
+    /**
+     * Recalculate every per-unit allowance total when the line item quantity
+     * changes. Lump-sum allowances keep their directly-entered total.
+     */
+    protected function recalculateAllowanceAmounts(): void
+    {
+        foreach ($this->form->allowances as $index => $allowance) {
+            if (($allowance['pricing_mode'] ?? 'per_unit') === 'lump_sum') {
+                continue;
+            }
+
+            $unitAmount = $allowance['unit_amount'] ?? null;
+
+            if ($unitAmount === null || $unitAmount === '') {
+                continue;
+            }
+
+            $this->form->allowances[$index]['amount'] = $this->calculateAllowanceAmount($unitAmount);
+        }
     }
 
     public function selected_line_item($line_item_id)
@@ -196,7 +422,11 @@ class EstimateLineItemCreate extends Component
 
     public function addAllowance(): void
     {
-        $this->form->allowances[] = ['id' => null, 'description' => '', 'amount' => ''];
+        $mode = $this->form->unit_type && $this->form->unit_type !== 'no_unit' ? 'per_unit' : 'lump_sum';
+
+        $this->form->allowances[] = ['id' => null, 'description' => '', 'pricing_mode' => $mode, 'unit_amount' => '', 'amount' => ''];
+
+        $this->dispatch('allowance-added');
     }
 
     public function removeAllowance(int $index): void

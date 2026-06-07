@@ -36,6 +36,10 @@ class LineItemCreate extends Component
         if ($field === 'form.name') {
             $this->existing_line_item_id = null;
         }
+
+        if (preg_match('/^form\.allowances\.(\d+)\.pricing_mode$/', $field, $matches)) {
+            $this->applyAllowancePricingMode((int) $matches[1]);
+        }
     }
 
     public function resetModal()
@@ -53,6 +57,48 @@ class LineItemCreate extends Component
             ->orWhere('desc', 'like', '%'.$this->form->name.'%')
             ->orWhere('notes', 'like', '%'.$this->form->name.'%')
             ->get();
+    }
+
+    public function addAllowance(): void
+    {
+        $mode = $this->form->unit_type && $this->form->unit_type !== 'no_unit' ? 'per_unit' : 'lump_sum';
+
+        $this->form->allowances[] = ['id' => null, 'description' => '', 'pricing_mode' => $mode, 'unit_amount' => '', 'amount' => ''];
+
+        $this->dispatch('allowance-added');
+    }
+
+    public function removeAllowance(int $index): void
+    {
+        unset($this->form->allowances[$index]);
+        $this->form->allowances = array_values($this->form->allowances);
+    }
+
+    /**
+     * Toggle an allowance between per-unit and lump-sum pricing, clearing the
+     * value that no longer applies.
+     */
+    public function toggleAllowancePerUnit(int $index): void
+    {
+        $current = $this->form->allowances[$index]['pricing_mode'] ?? 'per_unit';
+
+        $this->form->allowances[$index]['pricing_mode'] = $current === 'lump_sum' ? 'per_unit' : 'lump_sum';
+
+        $this->applyAllowancePricingMode($index);
+    }
+
+    /**
+     * Clear the amount that does not apply to the row's pricing mode.
+     */
+    protected function applyAllowancePricingMode(int $index): void
+    {
+        $mode = ($this->form->allowances[$index]['pricing_mode'] ?? 'per_unit') === 'lump_sum' ? 'lump_sum' : 'per_unit';
+
+        if ($mode === 'lump_sum') {
+            $this->form->allowances[$index]['unit_amount'] = '';
+        } else {
+            $this->form->allowances[$index]['amount'] = '';
+        }
     }
 
     public function addItem()

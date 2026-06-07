@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class LineItem extends Model
@@ -30,10 +31,11 @@ class LineItem extends Model
         return $this->belongsToMany(Estimate::class)->withTimestamps();
     }
 
-    // public function setUnitTypeAttribute($value)
-    // {
-    //     if($value == 'NULL'){
-    //         $this->attributes['unit_type'] = NULL;
-    //     }
-    // }
+    /**
+     * The global allowances catalog for this line item.
+     */
+    public function allowances(): HasMany
+    {
+        return $this->hasMany(LineItemAllowance::class, 'line_item_id');
+    }
 }
