@@ -1,3 +1,4 @@
+<div>
 <x-form-modal name="user_form_modal" :title="$view_text['card_title']">
     <form id="user_form_modal_form" wire:submit="{{$view_text['form_submit']}}" class="space-y-4">
         {{-- PHONE - Use form.cell_phone for client_member edit, user_cell for other flows --}}
@@ -169,3 +170,4 @@
         </flux:button>
     </x-slot>
 </x-form-modal>
+</div>

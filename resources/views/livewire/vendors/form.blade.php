@@ -1,3 +1,4 @@
+<div>
 <x-form-modal name="vendors_form_modal" :title="$view_text['card_title']">
     <div x-data="{ 
         activeTab: 'details',
@@ -259,3 +260,4 @@
         </flux:button>
     </x-slot>
 </x-form-modal>
+</div>
