@@ -12,6 +12,7 @@ use App\Models\Bid;
 use App\Livewire\Estimates\EstimatesIndex;
 use App\Support\ProjectDocumentGenerator;
 use Symfony\Component\HttpFoundation\StreamedResponse;
+use App\Mail\EstimateSigningInvite;
 
 use Flux;
 
@@ -413,6 +414,59 @@ class EstimateShow extends Component
     public function sendInvite(): void
     {
         $this->authorize('update', $this->estimate);
+
+        $estimate = Estimate::withoutGlobalScopes()
+            ->with(['signatures', 'project.client.users'])
+            ->find($this->estimate->id);
+
+        if (! $estimate) {
+            Flux::toast(
+                duration: 5000,
+                position: 'top right',
+                variant: 'warning',
+                heading: 'Estimate Not Found',
+                text: 'Unable to send invites for this estimate.',
+            );
+
+            return;
+        }
+
+        if ($estimate->isVendorSigned() && ! $estimate->isFullySigned()) {
+            $clientUsers = $estimate->project?->client?->users ?? collect();
+            $signedUserIds = $estimate->signatures->pluck('user_id')->all();
+            $pendingRecipients = $clientUsers
+                ->filter(fn ($user) => filled($user->email) && ! in_array($user->id, $signedUserIds));
+
+            if ($pendingRecipients->isEmpty()) {
+                Flux::toast(
+                    duration: 5000,
+                    position: 'top right',
+                    variant: 'warning',
+                    heading: 'No Pending Signers',
+                    text: 'All client users have signed or are missing an email address.',
+                );
+
+                return;
+            }
+
+            $sent = 0;
+            foreach ($pendingRecipients as $user) {
+                Mail::mailer('mailtrap-sdk')->to($user->email)->send(
+                    new EstimateSigningInvite($estimate, $user->first_name ?? '')
+                );
+                $sent++;
+            }
+
+            Flux::toast(
+                duration: 5000,
+                position: 'top right',
+                variant: 'success',
+                heading: 'Signing Invites Sent',
+                text: "Sent {$sent} contract signing invite" . ($sent !== 1 ? 's' : '') . '.',
+            );
+
+            return;
+        }
 
         $client = $this->estimate->client;
         $vendorId = $this->estimate->belongs_to_vendor_id;

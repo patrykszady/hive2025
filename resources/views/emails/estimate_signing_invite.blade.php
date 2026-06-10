@@ -27,6 +27,8 @@
 		Registering is easy — just confirm your number, email, and set a password.
 	</p>
 	<div style="height: 8px; line-height: 8px;">&nbsp;</div>
-	<a href="{{ $signingUrl }}" style="display: inline-block; padding: 10px 28px; background-color: #4f46e5; color: #ffffff; font-size: 14px; font-weight: 600; text-decoration: none; border-radius: 6px;">Sign Contract</a>
+	<x-mail::button :url="$signingUrl">
+	Sign Contract
+	</x-mail::button>
 </div>
 </x-mail::message>
