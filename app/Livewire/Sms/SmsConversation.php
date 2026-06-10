@@ -688,7 +688,7 @@ class SmsConversation extends Component
         // Clear memoized computed properties so the re-render fetches fresh data
         unset($this->smsMessages, $this->processedMessages, $this->phoneNameMap);
 
-        $this->js("(function(){ localStorage.removeItem('sms-draft-' + {$this->threadId}); const ta = document.querySelector('ui-composer textarea'); if (ta) { ta.value = ''; ta.dispatchEvent(new Event('input', { bubbles: true })); } })()");
+        $this->js("(function(){ localStorage.removeItem('sms-draft-' + {$this->threadId}); const ta = $wire.$el.querySelector('ui-composer textarea'); if (ta) { ta.value = ''; ta.dispatchEvent(new Event('input', { bubbles: true })); } })()");
         $this->dispatch('messageSent');
     }
 
@@ -743,7 +743,7 @@ class SmsConversation extends Component
             position: 'top right'
         );
 
-        $this->js("(function(){ localStorage.removeItem('sms-draft-' + {$this->threadId}); const ta = document.querySelector('ui-composer textarea'); if (ta) { ta.value = ''; ta.dispatchEvent(new Event('input', { bubbles: true })); } })()");
+        $this->js("(function(){ localStorage.removeItem('sms-draft-' + {$this->threadId}); const ta = $wire.$el.querySelector('ui-composer textarea'); if (ta) { ta.value = ''; ta.dispatchEvent(new Event('input', { bubbles: true })); } })()");
         $this->dispatch('messageSent');
         $this->dispatch('sms-schedule-changed');
     }

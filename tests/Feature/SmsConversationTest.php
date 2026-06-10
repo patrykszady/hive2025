@@ -134,6 +134,14 @@ describe('forwarding messages', function (): void {
         return compact('user', 'source', 'target', 'msg1', 'msg2');
     }
 
+    it('renders the composer with a stable thread key', function (): void {
+        ['user' => $user, 'source' => $source] = makeForwardingFixture();
+        $this->actingAs($user);
+
+        Livewire::test(SmsConversation::class, ['threadId' => $source->id])
+            ->assertSeeHtml('wire:key="sms-composer-' . $source->id . '"');
+    });
+
     it('blocks client users from entering selection mode', function (): void {
         ['source' => $source] = makeForwardingFixture();
 

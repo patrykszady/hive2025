@@ -1286,7 +1286,7 @@
             $pendingOptIn = $this->thread ? $this->thread->hasPendingOptIn() : false;
             $composerDisabled = ! $this->thread || $pendingOptIn;
         @endphp
-        <div class="shrink-0 px-1 pb-1">
+        <div class="shrink-0 px-1 pb-1" wire:key="sms-composer-{{ $threadId ?? 'none' }}">
             <form wire:submit="sendMessage">
                 @if ($attachment && method_exists($attachment, 'temporaryUrl') && $attachment->getRealPath())
                     <div class="mb-2 px-1">
@@ -1310,7 +1310,7 @@
                 @endif
 
                 <flux:composer
-                    wire:model="newMessage"
+                    wire:model.live.debounce.250ms="newMessage"
                     placeholder="Type a message..."
                     label="Message"
                     label:sr-only
