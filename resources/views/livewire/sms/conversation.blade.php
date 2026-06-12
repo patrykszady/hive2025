@@ -1310,7 +1310,7 @@
                 @endif
 
                 <flux:composer
-                    wire:model.live.debounce.250ms="newMessage"
+                    wire:model="newMessage"
                     placeholder="Type a message..."
                     label="Message"
                     label:sr-only

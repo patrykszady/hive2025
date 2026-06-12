@@ -68,7 +68,11 @@
                    becomes visible with a skeleton while the server processes selectThread. */
                 $store.sms.threadId = {{ $thread->id }};
                 window.dispatchEvent(new CustomEvent('thread-switching', { detail: { threadId: {{ $thread->id }} } }));
-                Livewire.dispatch('threadSelected', { threadId: {{ $thread->id }} });
+                /* Load the conversation directly (isolated component) IN PARALLEL with the
+                   index URL update, instead of waiting for selectThread to round-trip and
+                   then re-dispatch loadThread. `skipConversationLoad` prevents a duplicate. */
+                Livewire.dispatch('loadThread', { threadId: {{ $thread->id }} });
+                Livewire.dispatch('threadSelected', { threadId: {{ $thread->id }}, skipConversationLoad: true });
             "
             class="w-full text-left px-3 py-2.5 rounded-lg"
             x-bind:class="$store.sms.threadId === {{ $thread->id }}

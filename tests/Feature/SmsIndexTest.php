@@ -87,3 +87,59 @@ it('prevents selecting another client users thread by id', function (): void {
         ->call('selectThread', $marksThread->id)
         ->assertSet('threadId', $marksThread->id);
 });
+
+it('dispatches loadThread by default but skips it when requested', function (): void {
+    $mark = User::query()->create([
+        'first_name' => 'Mark',
+        'last_name' => 'Skipload',
+        'email' => 'mark.skipload@example.com',
+        'cell_phone' => '3128230569',
+        'primary_vendor_id' => null,
+    ]);
+
+    $client = Client::factory()->create([
+        'business_name' => 'Skipload Family',
+    ]);
+
+    $client->users()->attach($mark->id);
+
+    $thread = SmsGroupThread::query()->create([
+        'from_number' => '+12245554444',
+        'participants' => ['+13128230569'],
+        'client_id' => $client->id,
+        'last_activity_at' => now(),
+    ]);
+
+    $otherThread = SmsGroupThread::query()->create([
+        'from_number' => '+12245554444',
+        'participants' => ['+13128230569'],
+        'client_id' => $client->id,
+        'last_activity_at' => now()->subMinute(),
+    ]);
+
+    SmsThreadParticipant::query()->create([
+        'thread_id' => $thread->id,
+        'phone_number' => '+13128230569',
+    ]);
+
+    SmsThreadParticipant::query()->create([
+        'thread_id' => $otherThread->id,
+        'phone_number' => '+13128230569',
+    ]);
+
+    $this->actingAs($mark);
+
+    // Default: selectThread re-dispatches loadThread to the conversation.
+    Livewire::test(SmsIndex::class)
+        ->call('selectThread', $thread->id)
+        ->assertSet('threadId', $thread->id)
+        ->assertDispatched('loadThread');
+
+    // Click path: the browser already dispatched loadThread in parallel, so the
+    // server must skip the redundant re-dispatch while still updating threadId.
+    Livewire::test(SmsIndex::class)
+        ->call('selectThread', $thread->id, true)
+        ->assertSet('threadId', $thread->id)
+        ->assertNotDispatched('loadThread');
+});
+

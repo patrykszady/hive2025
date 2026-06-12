@@ -99,7 +99,7 @@ class SmsIndex extends Component
         }
     }
 
-    public function selectThread(int|null $threadId): void
+    public function selectThread(int|null $threadId, bool $skipConversationLoad = false): void
     {
         // Tapping the already-open thread is a no-op (avoids a wasted roundtrip + re-render).
         if ($threadId !== null && $threadId === $this->threadId) {
@@ -132,8 +132,13 @@ class SmsIndex extends Component
 
         $this->threadId = $threadId;
 
-        // Notify conversation directly so it can swap threads without re-mounting
-        $this->dispatch('loadThread', threadId: $threadId)->to(SmsConversation::class);
+        // Notify conversation directly so it can swap threads without re-mounting.
+        // When the thread row is tapped, the browser already dispatches `loadThread`
+        // to the (isolated) SmsConversation in parallel with this request, so we skip
+        // the redundant server-side re-dispatch to avoid an extra roundtrip.
+        if (! $skipConversationLoad) {
+            $this->dispatch('loadThread', threadId: $threadId)->to(SmsConversation::class);
+        }
 
         // Browser event for Alpine-driven thread highlighting (avoids full child re-render)
         $this->js("window.dispatchEvent(new CustomEvent('thread-selected', { detail: { threadId: ".json_encode($threadId)." } }))");
