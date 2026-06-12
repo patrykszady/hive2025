@@ -221,8 +221,8 @@
     </form>
 
     <x-slot name="footer">
-        @unless($isLocked)
-            <div x-data="{ edit_line_item: @entangle('edit_line_item') }" x-show="edit_line_item">
+        <div x-data="{ edit_line_item: @entangle('edit_line_item') }" x-show="edit_line_item">
+            @unless($isLocked)
                 @can('create', App\Models\LineItem::class)
                     <flux:button
                         type="button"
@@ -232,13 +232,16 @@
                         tooltip="Update main"
                     />
                 @endcan
-            </div>
+            @endunless
+        </div>
 
-            <flux:spacer />
+        <flux:spacer />
 
-            <div x-data="{ edit_line_item: @entangle('edit_line_item') }" x-show="edit_line_item">
-                <flux:button wire:click="removeFromEstimate" variant="danger">Remove</flux:button>
-            </div>
+        <div x-data="{ edit_line_item: @entangle('edit_line_item') }" x-show="edit_line_item">
+            <flux:button wire:click="removeFromEstimate" variant="danger">{{ $isLocked ? 'Hide' : 'Remove' }}</flux:button>
+        </div>
+
+        @unless($isLocked)
             <flux:button type="submit" form="estimate_line_item_form_modal_form" variant="primary">{{$view_text['button_text']}}</flux:button>
         @endunless
     </x-slot>

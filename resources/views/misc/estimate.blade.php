@@ -182,9 +182,11 @@
                                                         @endif
                                                     </div>
                                                     <div class="text-xs font-bold text-indigo-900">{{$estimate_line_item->category}}/{{$estimate_line_item->sub_category}}</div>
+                                                    @if($showAllowances ?? true)
                                                     @foreach($estimate_line_item->allowances as $allowance)
                                                         <div class="text-xs italic text-gray-400">Allowance: {{ $allowance->description }}</div>
                                                     @endforeach
+                                                    @endif
                                                 </div>
                                             </td>
 
@@ -195,7 +197,7 @@
                                                 <td class="hidden px-3 py-5 text-right text-gray-500 align-text-top text-md sm:table-cell">{{$estimate_line_item->unit_type !== 'no_unit' ? money($estimate_line_item->cost) : ''}}</td>
                                                 {{-- last td --}}
                                                 <td class="py-5 pl-3 pr-4 text-right text-gray-800 align-top text-md sm:pr-6">
-                                                    @if($estimate_line_item->allowances->isNotEmpty())
+                                                    @if(($showAllowances ?? true) && $estimate_line_item->allowances->isNotEmpty())
                                                         <div class="flex flex-col leading-5">
                                                             <div class="text-lg font-medium">{{money($estimate_line_item->total)}}</div>
                                                             <div class="text-xs">&nbsp;</div>
@@ -241,7 +243,7 @@
                                     <button></button>
                                     <div class="text-right">
                                         <h3>Total: {{money($section->total)}}</h3>
-                                        @if($pdfSectionAllowanceTotal > 0)
+                                        @if(($showAllowances ?? true) && $pdfSectionAllowanceTotal > 0)
                                             <div class="text-xs italic text-gray-400">Allowances: {{ money($pdfSectionAllowanceTotal) }}</div>
                                             <div class="text-xs font-semibold text-gray-500 border-t border-gray-200 pt-1 mt-1">Total + Allowances: {{ money($section->total + $pdfSectionAllowanceTotal) }}</div>
                                         @endif
@@ -270,7 +272,7 @@
                                     :line_data="money($estimate_total + ($reimbursements ?? 0))"
                                     >
                                 </x-lists.search_li>
-                                @if($pdfEstimateAllowanceTotal > 0)
+                                @if(($showAllowances ?? true) && $pdfEstimateAllowanceTotal > 0)
                                     <x-lists.search_li
                                         :basic=true
                                         :line_title="'ALLOWANCES'"

@@ -43,6 +43,8 @@ class EstimateShow extends Component
 
     public bool $showChanges = false;
 
+    public bool $showAllowances = true;
+
     public array $recentChanges = ['line_items' => [], 'sections' => [], 'since' => null];
 
     protected $listeners = ['refreshComponent' => 'handleExternalRefresh'];
@@ -123,6 +125,12 @@ class EstimateShow extends Component
         $this->forceRender();
     }
 
+    public function toggleAllowances(): void
+    {
+        $this->showAllowances = ! $this->showAllowances;
+        $this->forceRender();
+    }
+
     public function updatedShowChanges(): void
     {
         if ($this->showChanges) {
@@ -190,15 +198,34 @@ class EstimateShow extends Component
         $lineItem = EstimateLineItem::onlyTrashed()->findOrFail($lineItemId);
         $section = EstimateSection::findOrFail($lineItem->section_id);
 
-        // Restore the line item
+        // Look up the original order from the activity log recorded on deletion.
+        // displace() logs this FIRST (before LogsActivity fires its own 'deleted' entry),
+        // so we use orderBy('id') ASC to get the displace log which carries the order.
+        $deletedActivity = \Spatie\Activitylog\Models\Activity::query()
+            ->where('subject_type', EstimateLineItem::class)
+            ->where('subject_id', $lineItemId)
+            ->where('event', 'deleted')
+            ->orderBy('id')
+            ->first();
+
+        $originalOrder = isset($deletedActivity->properties['old']['order'])
+            ? (int) $deletedActivity->properties['old']['order']
+            : null;
+
+        // Restore the line item (order remains 999999 until moved below)
         $lineItem->restore();
 
-        // Place it at the end of the section's line items
-        $currentMaxOrder = EstimateLineItem::where('section_id', $section->id)
-            ->where('order', '<', 999999)
-            ->max('order');
-        $lineItem->order = is_null($currentMaxOrder) ? 0 : $currentMaxOrder + 1;
-        $lineItem->save();
+        // Re-insert at the original position so numbering is preserved.
+        // Falls back to end-of-list when no activity record exists.
+        if ($originalOrder !== null) {
+            $lineItem->move($originalOrder);
+        } else {
+            $currentMaxOrder = EstimateLineItem::where('section_id', $section->id)
+                ->where('order', '<', 999999)
+                ->max('order');
+            $lineItem->order = is_null($currentMaxOrder) ? 0 : $currentMaxOrder + 1;
+            $lineItem->save();
+        }
 
         // Update section total
         $section->total = $section->estimate_line_items()->sum('total');
@@ -611,7 +638,7 @@ class EstimateShow extends Component
     //$type = [estimate, invoice, work order]
     public function create_pdf($type)
     {
-        $document = EstimateDocumentGenerator::generate($this->estimate, $type, showChanges: $this->showChanges);
+        $document = EstimateDocumentGenerator::generate($this->estimate, $type, showChanges: $this->showChanges, showAllowances: $this->showAllowances);
 
         // Force immediate component state preservation before download
         $this->skipRender();
@@ -713,7 +740,7 @@ class EstimateShow extends Component
 
     public function export_csv()
     {
-        $document = EstimateDocumentGenerator::generateXlsx($this->estimate);
+        $document = EstimateDocumentGenerator::generateXlsx($this->estimate, $this->showAllowances);
 
         $this->skipRender();
 

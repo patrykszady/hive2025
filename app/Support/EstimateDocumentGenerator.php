@@ -25,7 +25,7 @@ class EstimateDocumentGenerator
      *
      * @return array{binary:string, filename:string, title:string, path?:string, relative_path?:string}
      */
-    public static function generate(Estimate $estimate, string $type = 'Estimate', bool $store = false, ?string $timezone = null, bool $showChanges = false): array
+    public static function generate(Estimate $estimate, string $type = 'Estimate', bool $store = false, ?string $timezone = null, bool $showChanges = false, bool $showAllowances = true): array
     {
         // PDFs should use the vendor's timezone, not browser timezone.
         // Don't rely on vendor_timezone() which needs an authenticated vendor user;
@@ -126,7 +126,7 @@ class EstimateDocumentGenerator
             ? static::collectRecentChanges($estimate)
             : ['line_items' => [], 'sections' => [], 'since' => null];
 
-        $view = view('misc.estimate', compact('estimate', 'vendor', 'client', 'clientContacts', 'project', 'sections', 'payments', 'title', 'estimate_total', 'estimate_total_words', 'type', 'reimbursements', 'contractBody', 'vendorLogoDataUrl', 'projectStatusTitle', 'projectFinances', 'signatureData', 'signatureName', 'signatureDate', 'allSignatures', 'recentChanges'))->render();
+        $view = view('misc.estimate', compact('estimate', 'vendor', 'client', 'clientContacts', 'project', 'sections', 'payments', 'title', 'estimate_total', 'estimate_total_words', 'type', 'reimbursements', 'contractBody', 'vendorLogoDataUrl', 'projectStatusTitle', 'projectFinances', 'signatureData', 'signatureName', 'signatureDate', 'allSignatures', 'recentChanges', 'showAllowances'))->render();
 
         // Browsershot's setHtml() has aggressive SSRF protection that rejects HTML
         // containing file://, 127.x, localhost, etc. In queue-worker context (Horizon),
@@ -227,7 +227,7 @@ class EstimateDocumentGenerator
      *
      * @return array{binary:string, filename:string, title:string}
      */
-    public static function generateXlsx(Estimate $estimate): array
+    public static function generateXlsx(Estimate $estimate, bool $showAllowances = true): array
     {
         $estimate = Estimate::withoutGlobalScopes()
             ->with([
@@ -297,6 +297,10 @@ class EstimateDocumentGenerator
                 ]);
 
                 foreach ($lineItem->allowances as $allowance) {
+                    if (! $showAllowances) {
+                        continue;
+                    }
+
                     $writer->addRow([
                         '' => '',
                         'title' => 'Allowance: ' . $allowance->description,
@@ -309,7 +313,7 @@ class EstimateDocumentGenerator
                     ], (new Style)->setFontItalic());
                 }
 
-                if ($lineItem->allowances->isNotEmpty()) {
+                if ($showAllowances && $lineItem->allowances->isNotEmpty()) {
                     $writer->addRow([
                         '' => '',
                         'title' => 'Total + Allowances',
@@ -326,7 +330,7 @@ class EstimateDocumentGenerator
             $sectionAllowanceTotal = $section->estimate_line_items
                 ->sum(fn ($li) => $li->allowances->sum('amount'));
 
-            if ($sectionAllowanceTotal > 0) {
+            if ($showAllowances && $sectionAllowanceTotal > 0) {
                 $writer->addRow([
                     '' => '',
                     'title' => 'Allowances',
