@@ -17,6 +17,18 @@ return [
         'api_key' => env('ASSEMBLYAI_API_KEY'),
     ],
 
+    'amazon' => [
+        'client_id' => env('AMAZON_CLIENT_ID'),
+        'client_secret' => env('AMAZON_CLIENT_SECRET'),
+        'aws_access_key_id' => env('AMAZON_AWS_ACCESS_TOKEN'),
+        'aws_secret_access_key' => env('AMAZON_AWS_SECRET_TOKEN'),
+        'aws_region' => env('AMAZON_AWS_REGION', 'us-east-1'),
+        'sp_api_endpoint' => env('AMAZON_SP_API_ENDPOINT', 'https://sellingpartnerapi-na.amazon.com'),
+        'rotation_scope' => env('AMAZON_SPAPI_ROTATION_SCOPE', 'sellingpartnerapi::client_credential:rotation'),
+        'rotation_queue_url' => env('AMAZON_SPAPI_ROTATION_QUEUE_URL'),
+        'rotation_queue_region' => env('AMAZON_SPAPI_ROTATION_QUEUE_REGION', env('AMAZON_AWS_REGION', 'us-east-1')),
+    ],
+
     'brightdata' => [
         'api_token' => env('BRIGHTDATA_API_TOKEN'),
         // SERP API zone name (e.g. "hive_serp_api"). Synchronous Google search via /request.

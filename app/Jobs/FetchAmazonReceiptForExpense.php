@@ -6,6 +6,8 @@ use App\Models\Expense;
 use App\Models\ExpenseReceipts;
 use App\Models\ReceiptAccount;
 use App\Support\ApiErrorFormatter;
+use App\Support\AmazonOAuthPayload;
+use App\Support\AmazonTokenRefreshRecovery;
 use Carbon\Carbon;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
@@ -60,19 +62,19 @@ class FetchAmazonReceiptForExpense implements ShouldQueue
             try {
                 $guzzle = new Client;
                 $tokens = json_decode($guzzle->post('https://api.amazon.com/auth/O2/token', [
-                    'form_params' => [
-                        'client_id' => env('AMAZON_CLIENT_ID'),
-                        'client_secret' => env('AMAZON_CLIENT_SECRET'),
-                        'refresh_token' => $receiptAccount->options['refresh_token'],
-                        'access_token' => $receiptAccount->options['access_token'],
-                        'grant_type' => 'refresh_token',
-                    ],
+                    'form_params' => AmazonOAuthPayload::refreshToken((string) $receiptAccount->options['refresh_token']),
                 ])->getBody()->getContents());
             } catch (RequestException $e) {
                 Log::channel('amazon_orders')->error('Amazon token refresh failed during restore fetch', ApiErrorFormatter::format($e, [
                     'receipt_account_id' => $receiptAccount->id,
                     'expense_id' => $expense->id,
                 ]));
+
+                AmazonTokenRefreshRecovery::maybeRotateOnInvalidRequest($e, [
+                    'receipt_account_id' => $receiptAccount->id,
+                    'expense_id' => $expense->id,
+                    'source' => 'FetchAmazonReceiptForExpense',
+                ]);
                 return;
             }
 

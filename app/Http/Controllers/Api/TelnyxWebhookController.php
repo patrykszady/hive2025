@@ -2213,7 +2213,9 @@ class TelnyxWebhookController extends Controller
             ? CallLog::find($callLogId)
             : CallLog::findByCallControlId($callControlId);
 
-        $recordingUrl = $recordingUrls['mp3'] ?? $recordingUrls['wav'] ?? null;
+        $preferredFormat = strtolower((string) config('call_recording.format', 'wav'));
+        $fallbackFormat = $preferredFormat === 'wav' ? 'mp3' : 'wav';
+        $recordingUrl = $recordingUrls[$preferredFormat] ?? $recordingUrls[$fallbackFormat] ?? null;
 
         if ($callLog && $recordingUrl) {
             $isVoicemail = ($clientState['action'] ?? null) === 'voicemail_recording';
@@ -3641,20 +3643,33 @@ class TelnyxWebhookController extends Controller
     }
 
     /**
-     * Start dual-channel MP3 recording on a call leg with Telnyx-hosted
-     * transcription. Stamps the CallLog with the recording metadata.
+     * Start call recording on a call leg using configured channels/format.
+     * Stamps the CallLog with the recording metadata.
      */
     protected function startCallRecording(string $callControlId, CallLog $callLog): bool
     {
+        $channels = (string) config('call_recording.channels', 'single');
+        $format = strtolower((string) config('call_recording.format', 'wav'));
+        $playBeep = (bool) config('call_recording.play_beep', true);
+
         $params = [
-            'channels' => config('call_recording.channels', 'dual'),
-            'format' => config('call_recording.format', 'mp3'),
-            'play_beep' => (bool) config('call_recording.play_beep', true),
+            'channels' => $channels,
+            'format' => $format,
+            'play_beep' => $playBeep,
             'client_state' => base64_encode(json_encode([
                 'action' => 'call_recording',
                 'call_log_id' => $callLog->id,
             ])),
         ];
+
+        Log::channel('telnyx')->info('Starting call recording with configured quality settings', [
+            'call_log_id' => $callLog->id,
+            'call_control_id' => $callControlId,
+            'mode' => config('call_recording.mode', 'auto'),
+            'channels' => $channels,
+            'format' => $format,
+            'play_beep' => $playBeep,
+        ]);
 
         // Transcription is handled by OpenAI Whisper after the recording is
         // stored locally — see App\Jobs\TranscribeCallRecording. Telnyx STT

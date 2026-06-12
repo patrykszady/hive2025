@@ -27,7 +27,7 @@ return [
     | https://developers.telnyx.com/api/call-control/start-recording
     */
     'channels' => env('CALL_RECORDING_CHANNELS', 'single'), // single|dual
-    'format' => env('CALL_RECORDING_FORMAT', 'mp3'),       // mp3|wav
+    'format' => env('CALL_RECORDING_FORMAT', 'wav'),       // mp3|wav
     'play_beep' => (bool) env('CALL_RECORDING_PLAY_BEEP', true),
 
     /*
@@ -155,7 +155,7 @@ return [
     */
     'summarization' => [
         'enabled' => (bool) env('CALL_SUMMARIZATION_ENABLED', true),
-        'driver' => env('CALL_SUMMARIZATION_DRIVER', 'assemblyai'), // assemblyai|openai
+        'driver' => env('CALL_SUMMARIZATION_DRIVER', 'openai'), // assemblyai|openai
         // OpenAI model (used when driver = openai).
         'model' => env('CALL_SUMMARIZATION_MODEL', 'gpt-4o'),
         // AssemblyAI LLM Gateway model (used when driver = assemblyai). Must

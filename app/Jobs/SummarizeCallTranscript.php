@@ -158,7 +158,7 @@ PROMPT;
             // (401/403) fall back to OpenAI so summaries still generate instead
             // of silently producing empty output.
             if (in_array($response->status(), [401, 403], true) && config('services.openai.api_key')) {
-                Log::warning('SummarizeCallTranscript: AssemblyAI LLM Gateway unavailable, falling back to OpenAI', [
+                Log::info('SummarizeCallTranscript: AssemblyAI LLM Gateway unavailable, falling back to OpenAI', [
                     'transcript_id' => $transcript->id,
                     'status' => $response->status(),
                 ]);

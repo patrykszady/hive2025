@@ -5,6 +5,8 @@ namespace App\Console\Commands;
 use App\Models\Expense;
 use App\Models\ExpenseReceipts;
 use App\Models\ReceiptAccount;
+use App\Support\AmazonOAuthPayload;
+use App\Support\AmazonTokenRefreshRecovery;
 use Carbon\Carbon;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
@@ -76,13 +78,7 @@ class DownloadAmazonReceipts extends Command
                 try {
                     $guzzle = new Client;
                     $tokenResponse = json_decode($guzzle->post('https://api.amazon.com/auth/O2/token', [
-                        'form_params' => [
-                            'client_id' => env('AMAZON_CLIENT_ID'),
-                            'client_secret' => env('AMAZON_CLIENT_SECRET'),
-                            'refresh_token' => $receiptAccount->options['refresh_token'],
-                            'access_token' => $receiptAccount->options['access_token'],
-                            'grant_type' => 'refresh_token',
-                        ],
+                        'form_params' => AmazonOAuthPayload::refreshToken((string) $receiptAccount->options['refresh_token']),
                     ])->getBody()->getContents());
 
                     $receiptAccount->update([
@@ -91,6 +87,12 @@ class DownloadAmazonReceipts extends Command
                     ]);
                     $receiptAccount->fresh();
                 } catch (RequestException $e) {
+                    AmazonTokenRefreshRecovery::maybeRotateOnInvalidRequest($e, [
+                        'receipt_account_id' => $receiptAccount->id,
+                        'belongs_to_vendor_id' => $vendorId,
+                        'source' => 'DownloadAmazonReceipts',
+                    ]);
+
                     $this->error("Failed to refresh token for vendor_id {$vendorId}: " . $e->getMessage());
                     $failed += $vendorReceipts->count();
                     continue;

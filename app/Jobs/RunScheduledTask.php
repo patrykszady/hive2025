@@ -42,7 +42,22 @@ class RunScheduledTask implements ShouldQueue, ShouldBeUnique
         public string $method,
         public array $arguments = [],
         public ?string $label = null,
+        public ?int $configuredTries = null,
+        public ?int $configuredTimeout = null,
+        public ?int $configuredUniqueFor = null,
     ) {
+        if ($this->configuredTries !== null) {
+            $this->tries = $this->configuredTries;
+        }
+
+        if ($this->configuredTimeout !== null) {
+            $this->timeout = $this->configuredTimeout;
+        }
+
+        if ($this->configuredUniqueFor !== null) {
+            $this->uniqueFor = $this->configuredUniqueFor;
+        }
+
         $this->onQueue('background');
     }
 

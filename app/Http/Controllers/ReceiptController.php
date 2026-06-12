@@ -35,6 +35,8 @@ use Nesk\Puphpeteer\Puppeteer;
 use setasign\Fpdi\Fpdi;
 use Symfony\Component\DomCrawler\Crawler;
 use App\Support\ApiErrorFormatter;
+use App\Support\AmazonOAuthPayload;
+use App\Support\AmazonTokenRefreshRecovery;
 
 class ReceiptController extends Controller
 {
@@ -123,6 +125,7 @@ class ReceiptController extends Controller
         //access token and secret from AWS
         $credentials = new \Aws\Credentials\Credentials(env('AMAZON_AWS_ACCESS_TOKEN'), env('AMAZON_AWS_SECRET_TOKEN'));
         foreach ($receipt_accounts as $receipt_account) {
+            try {
             //if NOW  is greater than > expires_in ... get new access_token
             //get new access_token valid for 1 hour and change 'expires_in' to 55 minutes from when submitted
             //ONLY if access token is expired....
@@ -131,13 +134,7 @@ class ReceiptController extends Controller
                     $guzzle = new Client;
                     $url = 'https://api.amazon.com/auth/O2/token';
                     $amazon_account_tokens = json_decode($guzzle->post($url, [
-                        'form_params' => [
-                            'client_id' => env('AMAZON_CLIENT_ID'),
-                            'client_secret' => env('AMAZON_CLIENT_SECRET'),
-                            'refresh_token' => $receipt_account->options['refresh_token'],
-                            'access_token' => $receipt_account->options['access_token'],
-                            'grant_type' => 'refresh_token',
-                        ],
+                        'form_params' => AmazonOAuthPayload::refreshToken((string) $receipt_account->options['refresh_token']),
                     ])->getBody()->getContents());
                 } catch (RequestException $e) {
                     if ($e->hasResponse()) {
@@ -156,6 +153,12 @@ class ReceiptController extends Controller
                         'belongs_to_vendor_id' => $receipt_account->belongs_to_vendor_id,
                         'has_response' => $e->hasResponse(),
                     ]));
+
+                    AmazonTokenRefreshRecovery::maybeRotateOnInvalidRequest($e, [
+                        'receipt_account_id' => $receipt_account->id,
+                        'belongs_to_vendor_id' => $receipt_account->belongs_to_vendor_id,
+                        'source' => 'ReceiptController@amazon_orders_api',
+                    ]);
                     continue;
                 }
 
@@ -596,6 +599,15 @@ class ReceiptController extends Controller
             ]);
 
             sleep(1);
+            } catch (\Throwable $e) {
+                Log::channel('amazon_orders')->error('amazon_orders_api failed for receipt account; continuing with next account', [
+                    'receipt_account_id' => $receipt_account->id,
+                    'belongs_to_vendor_id' => $receipt_account->belongs_to_vendor_id,
+                    'error' => $e->getMessage(),
+                    'exception' => get_class($e),
+                ]);
+                continue;
+            }
         }
 
         // Queue bulk match job to immediately process any new expenses with matching rules

@@ -60,7 +60,8 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
-        //
+        // Stale Livewire snapshots after deployment — expected, not actionable
+        $exceptions->dontReport(\Livewire\Mechanisms\HandleComponents\CorruptComponentPayloadException::class);
     })->create();
 
 // Register mail event listeners

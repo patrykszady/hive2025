@@ -498,6 +498,7 @@ class SmsMessage extends Model
             ["\u{201e}", "\u{201c}"],  // \u{201e}\u{201c} German low-high
             ["\u{201e}", "\u{201d}"],  // \u{201e}\u{201d} Polish low-right
             ["\u{300c}", "\u{300d}"],  // \u{300c}\u{300d} CJK corner brackets
+            ["\u{05f4}", "\u{05f4}"],  // ״ Hebrew Punctuation Gershayim (U+05F4)
         ];
 
         // Extract all quoted segments

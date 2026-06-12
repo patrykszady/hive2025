@@ -3852,18 +3852,31 @@ class CompanyEmailController extends Controller
 
         // Forward each matching message (only if it would match a receipt in central processing)
         foreach ($matchingMessages as $message) {
-            // Validate that this message would actually match a receipt before forwarding
-            // This prevents forwarding emails that pass the loose criteria but fail findMatchingReceipt
-            if (!$this->validateMessageWouldMatchReceipt($grantId, $message)) {
+            if (empty($message['id'])) {
                 continue;
             }
 
-            $this->nylasService->sendForwardCopy(
-                $grantId,
-                $message['id'],
-                true,
-                $companyEmail->id
-            );
+            try {
+                // Validate that this message would actually match a receipt before forwarding
+                // This prevents forwarding emails that pass the loose criteria but fail findMatchingReceipt
+                if (! $this->validateMessageWouldMatchReceipt($grantId, $message)) {
+                    continue;
+                }
+
+                $this->nylasService->sendForwardCopy(
+                    $grantId,
+                    (string) $message['id'],
+                    true,
+                    $companyEmail->id
+                );
+            } catch (\Throwable $e) {
+                Log::channel('nylas')->warning('Skipping message during forwarding due to processing error', [
+                    'company_email_id' => $companyEmail->id,
+                    'grant_id' => $grantId,
+                    'message_id' => $message['id'] ?? null,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
     }
 
@@ -3928,7 +3941,7 @@ class CompanyEmailController extends Controller
      */
     protected function calculateReceivedAfterDate(CompanyEmail $companyEmail, Carbon $messageLimitDate): Carbon
     {
-        $vendorRegistrationDate = $companyEmail->vendor->registrationDate;
+        $vendorRegistrationDate = $companyEmail->vendor?->registrationDate;
         
         // Maximum lookback is 7 days to prevent API timeouts
         $maxLookback = Carbon::now()->subDays(7);

@@ -11,6 +11,8 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class ForwardCompanyEmailReceipts implements ShouldQueue, ShouldBeUnique
 {
@@ -32,19 +34,27 @@ class ForwardCompanyEmailReceipts implements ShouldQueue, ShouldBeUnique
 
     public function handle(CompanyEmailController $controller): void
     {
-        $companyEmail = CompanyEmail::withoutGlobalScopes()
-            ->with(['receipts' => function ($query) {
-                $query->whereNotNull('from_address')->where('from_address', '!=', '');
-            }, 'vendor'])
-            ->whereNotNull('grant_id')
-            ->find($this->companyEmailId);
+        try {
+            $companyEmail = CompanyEmail::withoutGlobalScopes()
+                ->with(['receipts' => function ($query) {
+                    $query->whereNotNull('from_address')->where('from_address', '!=', '');
+                }, 'vendor'])
+                ->whereNotNull('grant_id')
+                ->find($this->companyEmailId);
 
-        if (! $companyEmail) {
-            return;
+            if (! $companyEmail) {
+                return;
+            }
+
+            $messageLimitDate = Carbon::now()->subDays(config('nylas.message_limit_days', 30));
+            $controller->processCompanyEmailForwarding($companyEmail, $messageLimitDate);
+        } catch (Throwable $e) {
+            Log::channel('nylas')->error('ForwardCompanyEmailReceipts failed for mailbox', [
+                'company_email_id' => $this->companyEmailId,
+                'error' => $e->getMessage(),
+                'exception' => get_class($e),
+            ]);
         }
-
-        $messageLimitDate = Carbon::now()->subDays(config('nylas.message_limit_days', 30));
-        $controller->processCompanyEmailForwarding($companyEmail, $messageLimitDate);
     }
 
     public function uniqueId(): string

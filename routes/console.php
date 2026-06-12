@@ -207,7 +207,7 @@ Schedule::job(new RunScheduledTask(
     ->onOneServer();
 
 // External API tasks
-Schedule::job(new RunScheduledTask(\App\Http\Controllers\ReceiptController::class, 'amazon_orders_api'))
+Schedule::job(new RunScheduledTask(\App\Http\Controllers\ReceiptController::class, 'amazon_orders_api', [], null, 1, 5400, 7200))
     ->everyTwoHours()
     ->between('6:00', '22:00')
     ->name('amazon-orders-api')
@@ -216,7 +216,7 @@ Schedule::job(new RunScheduledTask(\App\Http\Controllers\ReceiptController::clas
     ->onOneServer();
 
 // Nightly full sync for Amazon orders (catches cancellations/returns)
-Schedule::job(new RunScheduledTask(\App\Http\Controllers\ReceiptController::class, 'amazon_orders_api'))
+Schedule::job(new RunScheduledTask(\App\Http\Controllers\ReceiptController::class, 'amazon_orders_api', [], null, 1, 5400, 7200))
     ->dailyAt('2:00')
     ->timezone('America/Chicago')
     ->name('amazon-orders-api-full-sync')

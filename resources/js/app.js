@@ -46,6 +46,26 @@ document.addEventListener('alpine:init', () => {
             window.Livewire.hook('commit', ({ succeed }) => {
                 succeed(() => queueMicrotask(cleanMessagesUrl));
             });
+
+			// Recover from stale component snapshots (common right after deploy).
+			// Reload only once to avoid request loops from an invalid payload.
+			let reloadedAfterCorruptSnapshot = false;
+			window.Livewire.hook('request', ({ fail }) => {
+				fail(({ status, content }) => {
+					if (reloadedAfterCorruptSnapshot) {
+						return;
+					}
+
+					const isCorruptSnapshot = status === 500
+						&& typeof content === 'string'
+						&& content.includes('Livewire encountered corrupt data when trying to hydrate a component');
+
+					if (isCorruptSnapshot) {
+						reloadedAfterCorruptSnapshot = true;
+						window.location.reload();
+					}
+				});
+			});
         }
     });
 })();
