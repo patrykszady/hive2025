@@ -19,9 +19,12 @@ trait HasNumericSearch
         if (is_string($searchQuery)) {
             $candidate = trim($searchQuery);
             
-            // Complete amounts ending with .00 or .0 - use exact filter for precision
-            // Include both positive and negative amounts
-            if ($candidate !== '' && preg_match('/^-?\d+\.(00|0)$/', $candidate)) {
+            // Complete amounts with two decimals (e.g. "6.30", "95.57") or a single
+            // trailing zero (e.g. "6.0") - use an exact filter for precision. Text
+            // searching these against a numeric field fails when the stored value
+            // drops a trailing zero ("6.30" is indexed as 6.3), so they must be
+            // matched numerically. Include both positive and negative amounts.
+            if ($candidate !== '' && preg_match('/^-?\d+\.(\d{2}|0)$/', $candidate)) {
                 $amountValue = abs((float) $candidate);
                 $negativeValue = -$amountValue;
                 $augmentedFilters[] = "(amount = {$amountValue} OR amount = {$negativeValue})";

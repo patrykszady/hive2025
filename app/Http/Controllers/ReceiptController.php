@@ -1186,7 +1186,7 @@ class ReceiptController extends Controller
             $subtotal,
             $totalTax,
             $amount,
-            $formattedItems,
+            $formattedItems ?? [],
             $tip,
             $shipping
         );

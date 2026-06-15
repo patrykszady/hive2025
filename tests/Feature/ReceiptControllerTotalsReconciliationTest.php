@@ -123,6 +123,47 @@ function fakeCuMismatchedItemsResult(): array
     ];
 }
 
+/**
+ * Regression: National Construction Rental "Payment Confirmation" emails are a
+ * payment summary with NO itemized line items, so Azure CU returns no Items
+ * array. $formattedItems stayed null and was passed to reconcileReceiptTotals()
+ * (which type-hints array), throwing a TypeError that moved the email to the
+ * HIVE RECEIPTS ERROR folder instead of creating the expense.
+ */
+function fakeCuNoLineItemsResult(): array
+{
+    return [
+        'analyzeResult' => [
+            'documents' => [[
+                'fields' => [
+                    'MerchantName' => ['valueString' => 'National Construction Rentals'],
+                    'Total'        => ['valueNumber' => 1930.32],
+                    'InvoiceId'    => ['valueString' => '1904466', 'confidence' => 0.95],
+                    // No Items / LineItems key at all.
+                ],
+            ]],
+            'content' => "National Construction Rentals\nPayment Number: WEBPMT0001156282\nCapture Amount:\n\$1,930.32\nPaid Invoice List\n1904466\t\$1,930.32\n",
+            'styles'  => [],
+        ],
+    ];
+}
+
+it('extracts totals without crashing when the document has no line items', function () {
+    $mock = Mockery::mock(ContentUnderstandingService::class);
+    $mock->shouldReceive('analyze')->once()->andReturn(fakeCuNoLineItemsResult());
+    app()->instance(ContentUnderstandingService::class, $mock);
+
+    $result = app(ReceiptController::class)
+        ->extractReceipt('/tmp/fake.pdf', 'pdf', expenseAmount: 1930.32);
+
+    $fields = $result['fields'];
+
+    expect($result['error'] ?? null)->toBeNull()
+        ->and($fields['items'])->toBeNull()
+        ->and($fields['total'])->toEqualWithDelta(1930.32, 0.001)
+        ->and($fields['invoice_number'])->toBe('1904466');
+});
+
 it('fills missing subtotal from line items when total - tax matches items sum', function () {
     $mock = Mockery::mock(ContentUnderstandingService::class);
     $mock->shouldReceive('analyze')->once()->andReturn(fakeCuMissingSubtotalResult());
