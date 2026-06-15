@@ -983,6 +983,36 @@ class TransactionController extends Controller
             ->with('vendor')
             ->get();
 
+        // Load explicit VendorTransaction alias rules so PART 2 can recognise
+        // intentional mappings (e.g. "ParkChicago" → vendor "chicago parking").
+        // Without this, PART 2 clears such a vendor because the names don't
+        // overlap, and PART 3 re-applies it on the next run — an infinite
+        // oscillation that spams "Cleared mismatched vendor" every 10 minutes.
+        $vendorTransactionAliases = VendorTransaction::whereNull('deposit_check')->get();
+        $isAssignedByAliasRule = function (Transaction $transaction) use ($vendorTransactionAliases): bool {
+            $desc = $transaction->plaid_merchant_description ?? '';
+            if ($desc === '') {
+                return false;
+            }
+            foreach ($vendorTransactionAliases as $alias) {
+                if ((int) $alias->vendor_id !== (int) $transaction->vendor_id) {
+                    continue;
+                }
+                if ($alias->amount_sign === 1 && $transaction->amount <= 0) {
+                    continue;
+                }
+                if ($alias->amount_sign === 2 && $transaction->amount >= 0) {
+                    continue;
+                }
+                $flags = json_decode($alias->options);
+                $matched = @preg_match('/'.$alias->desc.$flags, $desc, $aliasMatches, PREG_UNMATCHED_AS_NULL);
+                if ($matched === 1 && ! empty($aliasMatches)) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
         foreach ($transactionsWithVendor as $transaction) {
             // Skip if plaid_merchant_name is empty
             if (empty($transaction->plaid_merchant_name)) {
@@ -1014,6 +1044,15 @@ class TransactionController extends Controller
                 stripos($vendorName, $plaidMerchantName) === false &&
                 stripos($plaidMerchantDescription, $vendorName) === false
             ) {
+                // Respect explicit VendorTransaction alias rules: if the current
+                // vendor was assigned by a matching alias (e.g. "ParkChicago" →
+                // "chicago parking"), the assignment is intentional even though
+                // the names don't overlap. Leave it alone to break the PART 2 ↔
+                // PART 3 oscillation that spammed "Cleared mismatched vendor".
+                if ($isAssignedByAliasRule($transaction)) {
+                    continue;
+                }
+
                 // Try to find correct vendor using fuzzy match
                 $correctVendor = app(\App\Http\Controllers\CompanyEmailController::class)->fuzzyMatchVendor($transaction->plaid_merchant_name, $vendors);
 
