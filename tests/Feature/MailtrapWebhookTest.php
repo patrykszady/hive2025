@@ -14,6 +14,7 @@ beforeEach(function () {
         $table->id();
         $table->unsignedBigInteger('belongs_to_vendor_id')->nullable();
         $table->unsignedBigInteger('project_id')->nullable();
+        $table->unsignedBigInteger('lead_id')->nullable();
         $table->string('message_id')->nullable();
         $table->string('thread_id')->nullable();
         $table->string('email_template_name')->nullable();
@@ -449,3 +450,64 @@ it('allows delivered events from vendor team members but ignores their opens', f
     expect(EmailTracking::query()->where('message_id', $trackingId)->where('event_type', 'opened')->count())
         ->toBe(0, 'Opened events from team members should be ignored');
 });
+
+it('ignores opened events from the sender IPv6 network for an external recipient', function () {
+    config(['email_tracking.mailtrap_webhook_token' => 'test-token']);
+    config(['email_tracking.mailtrap_filter_sender_opens' => true]);
+    config(['email_tracking.filter_sender_ip_opens' => true]);
+    config(['email_tracking.internal_ip_networks' => []]);
+
+    $trackingId = (string) Str::uuid();
+
+    EmailTracking::create([
+        'message_id' => $trackingId,
+        'event_type' => 'sent',
+        'recipient_emails' => ['client@example.com'],
+        'metadata' => [
+            'sender_email' => 'patryk@gs.construction',
+            'from_email' => 'support@hive.contractors',
+            'sender_ip' => '2601:281:985:a50:2c11:20a9:1175:dfb',
+            'tracking_id' => $trackingId,
+        ],
+        'event_at' => now()->subMinute(),
+    ]);
+
+    // Sender opens their own sent copy: same /64 but rotated host bits (IPv6 privacy).
+    $payload = [
+        'events' => [[
+            'event_type' => 'opened',
+            'recipient_email' => 'client@example.com',
+            'tracking_id' => $trackingId,
+            'message_id' => 'provider-msg-ip1',
+            'event_id' => 'provider-evt-ip1',
+            'ip' => '2601:281:985:a50:4d00:e248:f0ab:724c',
+            'timestamp' => now()->addSeconds(60)->toIso8601String(),
+            'user_agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        ]],
+    ];
+
+    $this->postJson('/webhooks/mailtrap/test-token', $payload)->assertSuccessful();
+
+    expect(EmailTracking::query()->where('message_id', $trackingId)->where('event_type', 'opened')->count())
+        ->toBe(0, 'Open from the sender /64 network should be ignored');
+
+    // A genuine open from a different network should still be tracked.
+    $realPayload = [
+        'events' => [[
+            'event_type' => 'opened',
+            'recipient_email' => 'client@example.com',
+            'tracking_id' => $trackingId,
+            'message_id' => 'provider-msg-ip2',
+            'event_id' => 'provider-evt-ip2',
+            'ip' => '2603:8000:1234:abcd:1:2:3:4',
+            'timestamp' => now()->addSeconds(120)->toIso8601String(),
+            'user_agent' => 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X)',
+        ]],
+    ];
+
+    $this->postJson('/webhooks/mailtrap/test-token', $realPayload)->assertSuccessful();
+
+    expect(EmailTracking::query()->where('message_id', $trackingId)->where('event_type', 'opened')->count())
+        ->toBe(1, 'Open from a genuine recipient network should be tracked');
+});
+

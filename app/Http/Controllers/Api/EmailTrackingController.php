@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\CompanyEmail;
 use App\Models\EmailTracking;
 use App\Models\Project;
+use App\Support\IpNetworkMatcher;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Arr;
@@ -265,7 +266,7 @@ class EmailTrackingController extends Controller
 
         if ($sentRecord) {
             $senderIp = $sentRecord->metadata['sender_ip'] ?? null;
-            if ($senderIp && $senderIp === $ipAddress) {
+            if (is_string($senderIp) && $senderIp !== '' && IpNetworkMatcher::sameSenderNetwork($ipAddress, $senderIp)) {
                 return ['is_sender' => true, 'reason' => 'ip_matches_sender'];
             }
         }

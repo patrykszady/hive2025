@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\EmailTracking;
+use App\Support\IpNetworkMatcher;
 use Illuminate\Console\Command;
 use Illuminate\Support\Arr;
 
@@ -82,19 +83,35 @@ class PurgeSenderEmailTrackingOpens extends Command
             ->get(['id', 'message_id', 'metadata'])
             ->keyBy('message_id');
 
+        $internalNetworks = $this->internalSenderNetworks();
+
         $toDeleteIds = [];
         foreach ($opened as $open) {
+            $ip = (string) $open->ip_address;
+            $matched = false;
+
             $sent = $sentByMessageId->get($open->message_id);
-            if (! $sent) {
-                continue;
+            $senderIp = Arr::get($sent?->metadata ?? [], 'sender_ip');
+
+            if (is_string($senderIp) && $senderIp !== '' && IpNetworkMatcher::sameSenderNetwork($ip, $senderIp)) {
+                $matched = true;
             }
 
-            $senderIp = Arr::get($sent->metadata ?? [], 'sender_ip');
-            if (! is_string($senderIp) || $senderIp === '') {
-                continue;
+            if (! $matched) {
+                foreach ($internalNetworks as $network) {
+                    if (str_contains($network, '/')) {
+                        if (IpNetworkMatcher::inCidr($ip, $network)) {
+                            $matched = true;
+                            break;
+                        }
+                    } elseif (IpNetworkMatcher::sameSenderNetwork($ip, $network)) {
+                        $matched = true;
+                        break;
+                    }
+                }
             }
 
-            if ((string) $open->ip_address !== $senderIp) {
+            if (! $matched) {
                 continue;
             }
 
@@ -123,6 +140,33 @@ class PurgeSenderEmailTrackingOpens extends Command
         $this->info("Deleted {$deleted} opened rows.");
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Internal/sender networks: explicit config CIDRs plus distinct sender_ip
+     * values recorded on tracked 'sent' events.
+     *
+     * @return list<string>
+     */
+    protected function internalSenderNetworks(): array
+    {
+        $networks = array_values(array_filter(
+            (array) config('email_tracking.internal_ip_networks', []),
+            static fn ($value): bool => is_string($value) && trim($value) !== ''
+        ));
+
+        $recordedSenderIps = EmailTracking::query()
+            ->where('event_type', 'sent')
+            ->whereNotNull('metadata->sender_ip')
+            ->orderByDesc('id')
+            ->limit(2000)
+            ->pluck('metadata')
+            ->map(static fn ($metadata) => Arr::get((array) $metadata, 'sender_ip'))
+            ->filter(static fn ($value): bool => is_string($value) && trim($value) !== '')
+            ->map(static fn (string $value): string => trim($value))
+            ->all();
+
+        return array_values(array_unique(array_merge($networks, $recordedSenderIps)));
     }
 
     protected function handleDeleteByIds(string $deleteIdOption, bool $execute, bool $force): int
@@ -181,7 +225,7 @@ class PurgeSenderEmailTrackingOpens extends Command
             if ($messageId && $ip) {
                 $sent = $sentByMessageId->get($messageId);
                 $senderIp = Arr::get($sent?->metadata ?? [], 'sender_ip');
-                $matchesSenderIp = is_string($senderIp) && $senderIp !== '' && $senderIp === $ip;
+                $matchesSenderIp = is_string($senderIp) && $senderIp !== '' && IpNetworkMatcher::sameSenderNetwork($ip, $senderIp);
             }
 
             if (! $force && ! $matchesSenderIp) {

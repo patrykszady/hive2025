@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\EmailTracking;
 use App\Models\Project;
 use App\Models\User;
+use App\Support\IpNetworkMatcher;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -22,6 +23,13 @@ class MailtrapWebhookController extends Controller
      * @var array<int, list<string>>
      */
     protected array $vendorTeamEmailCache = [];
+
+    /**
+     * Cached list of internal/sender networks (config CIDRs + recorded sender IPs).
+     *
+     * @var list<string>|null
+     */
+    protected ?array $internalSenderNetworks = null;
 
     /**
      * Handle Mailtrap webhook payloads.
@@ -95,6 +103,7 @@ class MailtrapWebhookController extends Controller
             $trackingId = Arr::get($metadata, 'tracking_id');
             $providerUserAgent = $this->getString($event, ['user_agent', 'userAgent']);
             $providerEventId = $this->getString($event, ['event_id', 'eventId']);
+            $eventIp = $this->getString($event, ['ip', 'client_ip', 'clientIp']);
 
             // Match to our tracked 'sent' event first; Mailtrap webhooks do not always include custom_variables.
             $sent = $this->findBestSentMatch(
@@ -144,6 +153,11 @@ class MailtrapWebhookController extends Controller
             }
 
             if ($this->shouldIgnoreAsSenderOpen($eventType, $recipientEmail, $sent)) {
+                $stats['events_ignored_sender']++;
+                continue;
+            }
+
+            if ($this->shouldIgnoreAsSenderIpOpen($eventType, $eventIp, $sent)) {
                 $stats['events_ignored_sender']++;
                 continue;
             }
@@ -240,8 +254,6 @@ class MailtrapWebhookController extends Controller
             }
 
             try {
-                $eventIp = $this->getString($event, ['ip', 'client_ip', 'clientIp']);
-
                 $record = EmailTracking::create([
                     'belongs_to_vendor_id' => $belongsToVendorId,
                     'project_id' => $projectId,
@@ -365,6 +377,86 @@ class MailtrapWebhookController extends Controller
         }
 
         return false;
+    }
+
+    /**
+     * Ignore opens/clicks whose originating IP belongs to a staff/sender network.
+     *
+     * Mailtrap attributes an open to the original recipient, but reports the IP of
+     * whoever actually loaded the tracking pixel. When a sender views their own
+     * "sent" copy, the recipient's pixel fires from the staff network, producing a
+     * false "opened" event. We compare the event IP against the per-message
+     * sender_ip and any known internal networks (config + recorded sender IPs).
+     */
+    protected function shouldIgnoreAsSenderIpOpen(string $eventType, ?string $eventIp, ?EmailTracking $sent): bool
+    {
+        if (! (bool) config('email_tracking.filter_sender_ip_opens', true)) {
+            return false;
+        }
+
+        if (! (bool) config('email_tracking.mailtrap_filter_sender_opens', true)) {
+            return false;
+        }
+
+        if (! in_array($eventType, ['opened', 'link_clicked'], true)) {
+            return false;
+        }
+
+        if (! is_string($eventIp) || trim($eventIp) === '') {
+            return false;
+        }
+
+        $eventIp = trim($eventIp);
+
+        $senderIp = Arr::get($sent?->metadata ?? [], 'sender_ip');
+        if (is_string($senderIp) && $senderIp !== '' && IpNetworkMatcher::sameSenderNetwork($eventIp, $senderIp)) {
+            return true;
+        }
+
+        foreach ($this->internalSenderNetworks() as $network) {
+            if (str_contains($network, '/')) {
+                if (IpNetworkMatcher::inCidr($eventIp, $network)) {
+                    return true;
+                }
+            } elseif (IpNetworkMatcher::sameSenderNetwork($eventIp, $network)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Build the set of known internal/sender networks: explicit CIDRs from config
+     * plus distinct sender_ip values recorded on tracked 'sent' events.
+     *
+     * @return list<string>
+     */
+    protected function internalSenderNetworks(): array
+    {
+        if ($this->internalSenderNetworks !== null) {
+            return $this->internalSenderNetworks;
+        }
+
+        $networks = array_values(array_filter(
+            (array) config('email_tracking.internal_ip_networks', []),
+            static fn ($value): bool => is_string($value) && trim($value) !== ''
+        ));
+
+        $recordedSenderIps = EmailTracking::query()
+            ->where('event_type', 'sent')
+            ->whereNotNull('metadata->sender_ip')
+            ->orderByDesc('id')
+            ->limit(1000)
+            ->pluck('metadata')
+            ->map(static fn ($metadata) => Arr::get((array) $metadata, 'sender_ip'))
+            ->filter(static fn ($value): bool => is_string($value) && trim($value) !== '')
+            ->map(static fn (string $value): string => trim($value))
+            ->all();
+
+        $this->internalSenderNetworks = array_values(array_unique(array_merge($networks, $recordedSenderIps)));
+
+        return $this->internalSenderNetworks;
     }
 
     /**
