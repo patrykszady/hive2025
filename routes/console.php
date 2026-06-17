@@ -22,6 +22,13 @@ Schedule::command('calls:process-recordings --retry-failed')
     ->withoutOverlapping()
     ->onOneServer();
 
+Schedule::command('calls:reconcile-stale --execute')
+    ->everyFiveMinutes()
+    ->name('reconcile-stale-active-calls')
+    ->environments(['production'])
+    ->withoutOverlapping()
+    ->onOneServer();
+
 // Schedule::call(function () {
 //     app(\App\Http\Controllers\LeadController::class)->leads_in_email();
 // })->everyTenMinutes()

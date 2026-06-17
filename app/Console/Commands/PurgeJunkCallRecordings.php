@@ -23,7 +23,7 @@ class PurgeJunkCallRecordings extends Command
      */
     private const JUNK_CALL_IDS = [
         // Outbound reached target voicemail / nonsense / IVR (reviewed individually)
-        1455, 1450, 1444,
+        1455, 1450, 1446, 1445, 1444,
         // Empty transcripts
         1430, 1403, 1372, 1349, 1324,
         // Outbound voicemail-greeting only (no message left)
@@ -36,6 +36,9 @@ class PurgeJunkCallRecordings extends Command
         1454, 1333, 1318,
         // Spam robocalls
         1332, 1328,
+        // Greeting/IVR-only recordings (caller hung up during our greeting,
+        // or outbound reached the target's voicemail greeting/IVR menu)
+        1457, 1434, 1405, 1428, 1407, 1398, 1396, 1362, 1360, 1347, 1346, 1343, 1330,
     ];
 
     public function handle(): int

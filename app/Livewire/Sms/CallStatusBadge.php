@@ -107,14 +107,15 @@ class CallStatusBadge extends Component
             return;
         }
 
-        // Find the most recent non-completed call for the authenticated user
+        // Find the most recent live call for the authenticated user. A call is
+        // only "live" while it has no terminating timestamp and was started
+        // recently — this guards against calls that never received a hangup
+        // webhook and would otherwise keep the badge lit indefinitely.
         $activeCall = CallLog::query()
             ->where('user_id', $user->id)
-            ->whereIn('status', [
-                CallLog::STATUS_INITIATED,
-                CallLog::STATUS_ANSWERED,
-                CallLog::STATUS_TRANSFERRED,
-            ])
+            ->whereIn('status', CallLog::ACTIVE_STATUSES)
+            ->whereNull('ended_at')
+            ->where('created_at', '>=', now()->subMinutes(CallLog::STALE_ACTIVE_MINUTES))
             ->orderByDesc('created_at')
             ->first();
 

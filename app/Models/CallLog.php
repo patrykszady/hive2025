@@ -23,6 +23,23 @@ class CallLog extends Model
     public const STATUS_FAILED = 'failed';
     public const STATUS_BLOCKED = 'blocked';
 
+    /**
+     * Statuses that represent a call still in progress.
+     *
+     * @var array<int, string>
+     */
+    public const ACTIVE_STATUSES = [
+        self::STATUS_INITIATED,
+        self::STATUS_ANSWERED,
+        self::STATUS_TRANSFERRED,
+    ];
+
+    /**
+     * A call still flagged active but older than this (and with no terminating
+     * timestamp) is considered stale — it never received its hangup webhook.
+     */
+    public const STALE_ACTIVE_MINUTES = 240;
+
     protected $fillable = [
         'call_id',
         'call_control_id',
