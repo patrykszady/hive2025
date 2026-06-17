@@ -129,6 +129,114 @@ it('summarizes a transcript via OpenAI and stores structured fields', function (
     expect($transcript->summarized_at)->not->toBeNull();
 });
 
+it('purges the recording when the AI flags it as a voicemail with no message left', function () {
+    config()->set('call_recording.summarization.driver', 'openai');
+    config()->set('services.openai.api_key', 'test-key');
+
+    Storage::fake('local');
+    Storage::disk('local')->put('public/call-recordings/no-message.mp3', 'fake-audio');
+
+    $callLog = CallLog::create([
+        'call_control_id' => 'cc-vm',
+        'direction' => 'outgoing',
+        'from_number' => '+12247354200',
+        'to_number' => '+17732513666',
+        'status' => 'completed',
+        'recording_url' => '/storage/call-recordings/no-message.mp3',
+        'recording_disk' => 'local',
+        'recording_path' => 'public/call-recordings/no-message.mp3',
+    ]);
+
+    $transcript = CallTranscript::create([
+        'call_log_id' => $callLog->id,
+        'engine' => 'assemblyai',
+        'language' => 'en',
+        'text' => "Speaker A: You've reached my voicemail, please leave a message after the tone. Speaker B: I couldn't hear you, please try again.",
+        'status' => CallTranscript::STATUS_READY,
+    ]);
+
+    $summary = [
+        'summary' => 'Reached the target voicemail; no message was left.',
+        'action_items' => [],
+        'topics' => ['voicemail'],
+        'next_steps' => [],
+        'sentiment' => 'neutral',
+        'caller_intent' => 'unknown',
+        'recording_has_no_message' => true,
+    ];
+
+    Http::fake([
+        'api.openai.com/*' => Http::response([
+            'choices' => [[
+                'message' => ['content' => json_encode($summary)],
+            ]],
+        ], 200),
+    ]);
+
+    (new SummarizeCallTranscript($transcript->id))->handle();
+
+    // Recording fields cleared, audio file deleted, transcript removed.
+    $callLog->refresh();
+    expect($callLog->recording_url)->toBeNull();
+    expect($callLog->recording_path)->toBeNull();
+    expect($callLog->recording_disk)->toBeNull();
+    expect($callLog->has_voicemail)->toBeFalse();
+    expect(Storage::disk('local')->exists('public/call-recordings/no-message.mp3'))->toBeFalse();
+    expect(CallTranscript::find($transcript->id))->toBeNull();
+});
+
+it('keeps the recording when the AI reports a real message was left', function () {
+    config()->set('call_recording.summarization.driver', 'openai');
+    config()->set('services.openai.api_key', 'test-key');
+
+    Storage::fake('local');
+    Storage::disk('local')->put('public/call-recordings/has-message.mp3', 'fake-audio');
+
+    $callLog = CallLog::create([
+        'call_control_id' => 'cc-real',
+        'direction' => 'outgoing',
+        'from_number' => '+12247354200',
+        'to_number' => '+17732513666',
+        'status' => 'completed',
+        'recording_url' => '/storage/call-recordings/has-message.mp3',
+        'recording_disk' => 'local',
+        'recording_path' => 'public/call-recordings/has-message.mp3',
+    ]);
+
+    $transcript = CallTranscript::create([
+        'call_log_id' => $callLog->id,
+        'engine' => 'assemblyai',
+        'language' => 'en',
+        'text' => 'Speaker A: Hi Mark, this is Patryk following up on the roof estimate. Please call me back at your convenience.',
+        'status' => CallTranscript::STATUS_READY,
+    ]);
+
+    $summary = [
+        'summary' => 'Patryk left a message about the roof estimate.',
+        'action_items' => ['Mark to call Patryk back'],
+        'topics' => ['roof', 'estimate'],
+        'next_steps' => ['Await callback'],
+        'sentiment' => 'neutral',
+        'caller_intent' => 'follow_up',
+        'recording_has_no_message' => false,
+    ];
+
+    Http::fake([
+        'api.openai.com/*' => Http::response([
+            'choices' => [[
+                'message' => ['content' => json_encode($summary)],
+            ]],
+        ], 200),
+    ]);
+
+    (new SummarizeCallTranscript($transcript->id))->handle();
+
+    $callLog->refresh();
+    expect($callLog->recording_url)->toBe('/storage/call-recordings/has-message.mp3');
+    expect(Storage::disk('local')->exists('public/call-recordings/has-message.mp3'))->toBeTrue();
+    expect(CallTranscript::find($transcript->id))->not->toBeNull();
+});
+
 it('summarizes a transcript via the AssemblyAI LLM Gateway by default', function () {
     config()->set('call_recording.summarization.driver', 'assemblyai');
     config()->set('call_recording.summarization.assemblyai_model', 'claude-sonnet-4-6');
@@ -355,3 +463,99 @@ it('labels voicemail and the caller from speaker_map on an inbound voicemail', f
     expect($map['Speaker A'])->toBe('Voicemail');
     expect($map['Speaker B'])->toBe('Zora');
 });
+
+it('purges only the given recordings and their transcripts via the command', function () {
+    Storage::fake('local');
+    Storage::disk('local')->put('public/call-recordings/junk.mp3', 'fake-audio');
+    Storage::disk('local')->put('public/call-recordings/keep.mp3', 'real-audio');
+
+    $junk = CallLog::create([
+        'call_control_id' => 'cc-junk',
+        'direction' => 'incoming',
+        'status' => 'completed',
+        'has_voicemail' => true,
+        'recording_url' => '/storage/call-recordings/junk.mp3',
+        'recording_disk' => 'local',
+        'recording_path' => 'public/call-recordings/junk.mp3',
+    ]);
+    CallTranscript::create([
+        'call_log_id' => $junk->id,
+        'engine' => 'assemblyai',
+        'text' => 'Speaker A: Ram.',
+        'status' => CallTranscript::STATUS_READY,
+    ]);
+
+    $keep = CallLog::create([
+        'call_control_id' => 'cc-keep',
+        'direction' => 'incoming',
+        'status' => 'completed',
+        'recording_url' => '/storage/call-recordings/keep.mp3',
+        'recording_disk' => 'local',
+        'recording_path' => 'public/call-recordings/keep.mp3',
+    ]);
+    CallTranscript::create([
+        'call_log_id' => $keep->id,
+        'engine' => 'assemblyai',
+        'text' => 'Speaker A: Hi, this is a real conversation about the roof.',
+        'status' => CallTranscript::STATUS_READY,
+    ]);
+
+    $this->artisan('calls:purge-junk-recordings', ['--ids' => (string) $junk->id, '--execute' => true])
+        ->assertSuccessful();
+
+    $junk->refresh();
+    expect($junk->recording_url)->toBeNull();
+    expect($junk->recording_path)->toBeNull();
+    expect($junk->recording_disk)->toBeNull();
+    expect($junk->has_voicemail)->toBeFalse();
+    expect(Storage::disk('local')->exists('public/call-recordings/junk.mp3'))->toBeFalse();
+    expect(CallTranscript::where('call_log_id', $junk->id)->exists())->toBeFalse();
+
+    // The untargeted call is untouched.
+    $keep->refresh();
+    expect($keep->recording_url)->toBe('/storage/call-recordings/keep.mp3');
+    expect(Storage::disk('local')->exists('public/call-recordings/keep.mp3'))->toBeTrue();
+    expect(CallTranscript::where('call_log_id', $keep->id)->exists())->toBeTrue();
+});
+
+it('makes no changes in dry-run mode', function () {
+    Storage::fake('local');
+    Storage::disk('local')->put('public/call-recordings/dry.mp3', 'fake-audio');
+
+    $call = CallLog::create([
+        'call_control_id' => 'cc-dry',
+        'direction' => 'incoming',
+        'status' => 'completed',
+        'has_voicemail' => true,
+        'recording_url' => '/storage/call-recordings/dry.mp3',
+        'recording_disk' => 'local',
+        'recording_path' => 'public/call-recordings/dry.mp3',
+    ]);
+    CallTranscript::create([
+        'call_log_id' => $call->id,
+        'engine' => 'assemblyai',
+        'text' => 'Speaker A: Ram.',
+        'status' => CallTranscript::STATUS_READY,
+    ]);
+
+    $this->artisan('calls:purge-junk-recordings', ['--ids' => (string) $call->id])
+        ->assertSuccessful();
+
+    $call->refresh();
+    expect($call->recording_path)->toBe('public/call-recordings/dry.mp3');
+    expect(Storage::disk('local')->exists('public/call-recordings/dry.mp3'))->toBeTrue();
+    expect(CallTranscript::where('call_log_id', $call->id)->exists())->toBeTrue();
+});
+
+it('is idempotent and skips calls that are already clean', function () {
+    $clean = CallLog::create([
+        'call_control_id' => 'cc-clean',
+        'direction' => 'incoming',
+        'status' => 'completed',
+    ]);
+
+    $this->artisan('calls:purge-junk-recordings', ['--ids' => (string) $clean->id, '--execute' => true])
+        ->expectsOutputToContain('already clean: 1')
+        ->assertSuccessful();
+});
+

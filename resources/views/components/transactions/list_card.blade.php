@@ -28,6 +28,36 @@
 
             <flux:table.rows>
                 @foreach ($transactions as $transaction)
+                    @php
+                        $displayLines = [];
+                        $seenNormalized = [];
+
+                        $pushLine = function (?string $value, string $variant = 'default') use (&$displayLines, &$seenNormalized) {
+                            $text = trim((string) $value);
+                            if ($text === '') {
+                                return;
+                            }
+
+                            $normalized = strtolower(preg_replace('/\s+/', ' ', $text));
+                            if ($normalized === '' || isset($seenNormalized[$normalized])) {
+                                return;
+                            }
+
+                            $seenNormalized[$normalized] = true;
+                            $displayLines[] = [
+                                'text' => $text,
+                                'variant' => $variant,
+                            ];
+                        };
+
+                        if ($hasVendorInfo && $transaction->vendor && $transaction->vendor->name != 'No Vendor') {
+                            $pushLine($transaction->vendor->name, 'vendor');
+                        }
+
+                        $pushLine($transaction->plaid_merchant_name, 'merchant');
+                        $pushLine($transaction->plaid_merchant_description, 'description');
+                    @endphp
+
                     <flux:table.row :key="$transaction->id">
                         <flux:table.cell variant="strong">
                             {{ money($transaction->amount) }}
@@ -38,27 +68,17 @@
                     </flux:table.row>
                     
                     {{-- Only show this row if there's vendor info or merchant descriptions to display --}}
-                    @if(($hasVendorInfo && $transaction->vendor && $transaction->vendor->name != 'No Vendor') || !empty($transaction->plaid_merchant_description) || !empty($transaction->plaid_merchant_name))
+                    @if(!empty($displayLines))
                         <flux:table.row>
                             <flux:table.cell colspan="4" class="whitespace-normal break-words">
-                                @if($hasVendorInfo && $transaction->vendor && $transaction->vendor->name != 'No Vendor')
-                                    <span class="font-medium block">
-                                        {{ $transaction->vendor->name }}
-                                    </span>
-                                @endif
-                                @if($transaction->plaid_merchant_name &&
-                                    (!$transaction->vendor || $transaction->plaid_merchant_name !== $transaction->vendor->name))
-                                    <span class="block text-sm">
-                                        {{ $transaction->plaid_merchant_name }}
-                                    </span>
-                                @endif
-                                @if($transaction->plaid_merchant_description &&
-                                    (!$transaction->vendor || $transaction->plaid_merchant_description !== $transaction->vendor->name) &&
-                                    $transaction->plaid_merchant_description !== $transaction->plaid_merchant_name)
-                                    <span class="block italic text-sm text-gray-500">
-                                        {{ $transaction->plaid_merchant_description }}
-                                    </span>
-                                @endif
+                                @foreach($displayLines as $line)
+                                    <span class="block
+                                        @if($line['variant'] === 'vendor') font-medium
+                                        @elseif($line['variant'] === 'description') italic text-sm text-gray-500
+                                        @else text-sm
+                                        @endif
+                                    ">{{ $line['text'] }}</span>
+                                @endforeach
                             </flux:table.cell>
                         </flux:table.row>
                     @endif

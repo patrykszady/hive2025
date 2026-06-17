@@ -59,6 +59,13 @@ beforeEach(function () {
             $table->string('hangup_cause')->nullable();
             $table->text('notes')->nullable();
             $table->string('recording_url')->nullable();
+            $table->string('recording_disk')->nullable();
+            $table->string('recording_path')->nullable();
+            $table->string('recording_telnyx_id')->nullable();
+            $table->timestamp('recording_started_at')->nullable();
+            $table->boolean('recording_disclosure_played')->default(false);
+            $table->string('language', 8)->nullable();
+            $table->timestamp('purge_after')->nullable();
             $table->boolean('has_voicemail')->default(false);
             $table->unsignedBigInteger('project_id')->nullable();
             $table->unsignedBigInteger('user_id')->nullable();
@@ -75,6 +82,15 @@ beforeEach(function () {
         Schema::create('clients', function (Blueprint $table): void {
             $table->id();
             $table->string('home_phone')->nullable();
+            $table->timestamps();
+        });
+    }
+
+    if (! Schema::hasTable('client_user')) {
+        Schema::create('client_user', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('client_id')->index();
+            $table->unsignedBigInteger('user_id')->index();
             $table->timestamps();
         });
     }
@@ -1803,6 +1819,7 @@ it('dispatches voicemail browser notification job when recording is saved as voi
         'from_number' => '+15551112222',
         'caller_name' => 'John Doe',
         'status' => CallLog::STATUS_INITIATED,
+        'duration_seconds' => 12,
     ]);
 
     $clientState = base64_encode(json_encode([
@@ -1850,6 +1867,87 @@ it('does not dispatch voicemail notification job for non-voicemail recordings', 
     ])->assertSuccessful();
 
     \Illuminate\Support\Facades\Bus::assertNotDispatched(\App\Jobs\SendVoicemailBrowserNotifications::class);
+});
+
+it('discards the recording for a missed call that left no voicemail and never bridged', function () {
+    \Illuminate\Support\Facades\Bus::fake();
+
+    // Auto-recording starts at the welcome and keeps rolling through ringback
+    // while admins are dialed. This caller hung up before any admin bridged and
+    // without leaving a voicemail (status missed, has_voicemail false), so the
+    // audio is just TTS + hold music — it must not be saved, transcribed, or
+    // AI-analyzed.
+    $callLog = CallLog::create([
+        'call_control_id' => 'ringing-only-cc',
+        'direction' => 'incoming',
+        'from_number' => '+15551112222',
+        'status' => CallLog::STATUS_MISSED,
+        'duration_seconds' => 30,
+    ]);
+
+    $clientState = base64_encode(json_encode([
+        'action' => 'call_recording',
+        'call_log_id' => $callLog->id,
+    ]));
+
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.recording.saved',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'ringing-only-cc',
+                'recording_urls' => ['mp3' => 'https://example.com/rec.mp3'],
+                'client_state' => $clientState,
+            ],
+        ],
+    ])->assertSuccessful();
+
+    // No download/transcription pipeline should be kicked off.
+    \Illuminate\Support\Facades\Bus::assertNotDispatched(\App\Jobs\StoreCallRecording::class);
+    \Illuminate\Support\Facades\Bus::assertNotDispatched(\App\Jobs\SendVoicemailBrowserNotifications::class);
+
+    // The recording fields must be cleared so the transcription/AI command,
+    // which selects on recording_path + recording_disk, never picks it up.
+    $fresh = $callLog->fresh();
+    expect($fresh->recording_url)->toBeNull();
+    expect($fresh->recording_path)->toBeNull();
+    expect($fresh->recording_disk)->toBeNull();
+    expect($fresh->has_voicemail)->toBeFalse();
+});
+
+it('keeps the recording for a completed call that had a real conversation', function () {
+    \Illuminate\Support\Facades\Bus::fake();
+
+    $callLog = CallLog::create([
+        'call_control_id' => 'connected-cc',
+        'direction' => 'incoming',
+        'from_number' => '+15551112222',
+        'status' => CallLog::STATUS_COMPLETED,
+        'duration_seconds' => 45,
+    ]);
+
+    $clientState = base64_encode(json_encode([
+        'action' => 'call_recording',
+        'call_log_id' => $callLog->id,
+    ]));
+
+    $this->postJson('/webhooks/telnyx/voice', [
+        'data' => [
+            'event_type' => 'call.recording.saved',
+            'record_type' => 'event',
+            'payload' => [
+                'call_control_id' => 'connected-cc',
+                'recording_urls' => ['mp3' => 'https://example.com/rec.mp3'],
+                'client_state' => $clientState,
+            ],
+        ],
+    ])->assertSuccessful();
+
+    \Illuminate\Support\Facades\Bus::assertDispatched(\App\Jobs\StoreCallRecording::class);
+
+    $fresh = $callLog->fresh();
+    expect($fresh->recording_url)->toBe('https://example.com/rec.mp3');
+    expect($fresh->has_voicemail)->toBeFalse();
 });
 
 it('CallLogObserver creates AppNotifications for admin recipients on missed status', function () {
@@ -1939,6 +2037,24 @@ it('skips welcome and routes straight to voicemail when call answered outside bu
     // Voicemail menu (gather_using_speak) should have been invoked
     Http::assertSent(function ($request) {
         return str_contains($request->url(), 'after-hours-cc/actions/gather_using_speak') && $request->method() === 'POST';
+    });
+
+    // The after-hours greeting should be spoken first, prepended to the menu
+    // prompt inside a single SSML envelope (one <speak> block, greeting before
+    // the menu copy). The apostrophe is XML-escaped by the SSML renderer.
+    Http::assertSent(function ($request) {
+        if (! str_contains($request->url(), 'after-hours-cc/actions/gather_using_speak') || $request->method() !== 'POST') {
+            return false;
+        }
+
+        $payload = (string) ($request['payload'] ?? '');
+        $greetingPos = strpos($payload, 'reached GS Construction after hours.');
+        $menuPos = strpos($payload, 'is not available');
+
+        return $greetingPos !== false
+            && $menuPos !== false
+            && $greetingPos < $menuPos
+            && substr_count($payload, '<speak') === 1;
     });
 
     \Carbon\Carbon::setTestNow();

@@ -15,6 +15,16 @@ class CallTranscript extends Model
     public const STATUS_READY = 'ready';
     public const STATUS_FAILED = 'failed';
 
+    /**
+     * Terminal status for recordings that transcribed successfully but
+     * contained no speech (silent/very short calls). Unlike STATUS_FAILED,
+     * these are NOT retried by `calls:process-recordings --retry-failed`,
+     * because re-running AssemblyAI on the same silent audio will always
+     * return empty — previously this caused an endless re-transcription
+     * loop every 5 minutes that burned API spend and flooded the logs.
+     */
+    public const STATUS_EMPTY = 'empty';
+
     protected $fillable = [
         'call_log_id',
         'telnyx_recording_id',

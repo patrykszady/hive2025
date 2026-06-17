@@ -264,6 +264,21 @@
                         </div>
                     </div>
 
+                    {{-- After-Hours Prompt --}}
+                    <div class="space-y-2">
+                        <div class="flex items-center justify-between gap-4">
+                            <div>
+                                <div class="text-sm font-medium text-zinc-900 dark:text-zinc-100">After-Hours Prompt</div>
+                                <div class="text-xs text-zinc-500">Played to callers who reach you outside your Business Hours (set above). Spoken first, then the call goes straight to the Voicemail Menu — the welcome message and team ring are skipped.</div>
+                            </div>
+                            <flux:button size="xs" variant="ghost" icon="play" wire:click="previewTts('after_hours')" wire:loading.attr="disabled" wire:target="previewTts" title="Preview after-hours prompt" />
+                        </div>
+                        <div>
+                            <flux:textarea wire:model="after_hours_message" rows="2" placeholder="{{ \App\Livewire\Vendors\VendorOptions::DEFAULT_AFTER_HOURS }}" resize="vertical" />
+                            <div class="text-xs text-zinc-400 mt-1">Placeholders: <code class="text-zinc-500">{company}</code> <code class="text-zinc-500">{greeting}</code></div>
+                        </div>
+                    </div>
+
                     {{-- Voicemail Menu --}}
                     <div class="space-y-2">
                         <div>

@@ -69,6 +69,8 @@ Action items are concrete commitments or tasks someone agreed to do (e.g. "Send 
 
 Next steps are the expected upcoming sequence of events (which may overlap with action items). Topics are short noun phrases.
 
+Set "recording_has_no_message" to true when the transcript contains NO substantive message and NO meaningful two-way human conversation. This includes: (a) the entire transcript is an automated voicemail/IVR greeting and/or system prompts (e.g. "You've reached my voicemail", "Please record your message after the tone", "I couldn't hear you, please try again"); OR (b) the recording is effectively empty, silent, just background noise, or only a stray word or two / unintelligible fragments with no discernible purpose or request (e.g. a single word like "Ram" or "Hello?" with nothing else). Set it to false whenever a participant actually left a coherent message or a real back-and-forth conversation occurred — even a short one — that conveys any request, information, or intent.
+
 Do not invent information that is not in the transcript. Return JSON only, matching the provided schema.
 PROMPT;
 
@@ -85,7 +87,7 @@ PROMPT;
         $schema = [
             'type' => 'object',
             'additionalProperties' => false,
-            'required' => ['summary', 'action_items', 'topics', 'next_steps', 'sentiment', 'caller_intent'],
+            'required' => ['summary', 'action_items', 'topics', 'next_steps', 'sentiment', 'caller_intent', 'recording_has_no_message'],
             'properties' => [
                 'summary' => ['type' => 'string'],
                 'action_items' => ['type' => 'array', 'items' => ['type' => 'string']],
@@ -93,6 +95,7 @@ PROMPT;
                 'next_steps' => ['type' => 'array', 'items' => ['type' => 'string']],
                 'sentiment' => ['type' => 'string', 'enum' => ['positive', 'neutral', 'negative', 'mixed']],
                 'caller_intent' => ['type' => 'string'],
+                'recording_has_no_message' => ['type' => 'boolean'],
             ],
         ];
 
@@ -114,6 +117,20 @@ PROMPT;
             'caller_intent' => $parsed['caller_intent'] ?? null,
             'summarized_at' => now(),
         ]);
+
+        // If the recording turned out to contain no real message or conversation
+        // (e.g. an outbound call that only reached the target's voicemail
+        // greeting), discard the audio + transcript so it doesn't clutter the
+        // call list with a meaningless "voicemail".
+        if (($parsed['recording_has_no_message'] ?? false) === true && $callLog) {
+            Log::channel('telnyx')->info('Discarding recording flagged as no-message voicemail after summarization', [
+                'call_log_id' => $callLog->id,
+                'direction' => $callLog->direction,
+                'transcript_id' => $transcript->id,
+            ]);
+
+            $callLog->purgeRecording();
+        }
     }
 
     /**

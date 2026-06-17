@@ -262,6 +262,27 @@
                     <flux:description>Or enter a number manually.</flux:description>
                 </flux:field>
 
+                {{-- Multi-recipient Selection --}}
+                @if($this->callRecipients->isNotEmpty())
+                    <flux:field>
+                        <flux:label>Ring These Team Members</flux:label>
+                        <flux:description class="text-xs">Leave blank to use default settings from your vendor options.</flux:description>
+                        <div class="mt-2 flex flex-col gap-2 max-h-48 overflow-y-auto">
+                            @foreach($this->callRecipients as $recipient)
+                                <label class="flex items-center gap-3 cursor-pointer">
+                                    <flux:checkbox wire:model="selectedCallRecipients" value="{{ $recipient->id }}" />
+                                    <div class="text-sm">
+                                        <span class="font-medium text-zinc-900 dark:text-zinc-100">{{ $recipient->full_name }}</span>
+                                        @if($recipient->cell_phone)
+                                            <span class="text-xs text-zinc-500 ml-1">{{ $this->formatPhone($recipient->cell_phone) }}</span>
+                                        @endif
+                                    </div>
+                                </label>
+                            @endforeach
+                        </div>
+                    </flux:field>
+                @endif
+
                 <div class="flex justify-end gap-2">
                     <flux:button variant="ghost" wire:click="$set('showNewCallModal', false)">Cancel</flux:button>
                     <flux:button type="submit" variant="primary" icon="phone">Call</flux:button>

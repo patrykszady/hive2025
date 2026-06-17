@@ -37,6 +37,9 @@ class CallList extends Component
 
     public ?int $selectedUserId = null;
 
+    /** @var array<int> Admin user IDs to ring when call is answered (multi-recipient click-to-call) */
+    public array $selectedCallRecipients = [];
+
     public function mount(): void
     {
         $this->normalizeCallFilter();
@@ -83,6 +86,7 @@ class CallList extends Component
     {
         $this->newCallNumber = '';
         $this->selectedUserId = null;
+        $this->selectedCallRecipients = [];
         $this->showNewCallModal = true;
     }
 
@@ -150,6 +154,21 @@ class CallList extends Component
             ->where('cell_phone', '!=', '')
             ->orderBy('first_name')
             ->get();
+    }
+
+    /**
+     * @return \Illuminate\Support\Collection<User>
+     */
+    #[Computed]
+    public function callRecipients(): mixed
+    {
+        $vendor = auth()->user()->vendor;
+        if (! $vendor) {
+            return collect();
+        }
+
+        return $vendor->getAdminUsersWithCellPhones()
+            ->sortBy('first_name');
     }
 
     /**
@@ -354,7 +373,9 @@ class CallList extends Component
 
         $this->showNewCallModal = false;
         $this->newCallNumber = '';
-        $this->callBack($phone);
+        // Pass selected recipients to the click-to-call handler
+        $this->callBack($phone, $this->selectedCallRecipients);
+        $this->selectedCallRecipients = [];
     }
 
     /**

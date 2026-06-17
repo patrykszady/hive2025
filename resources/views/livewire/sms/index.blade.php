@@ -118,6 +118,13 @@
             const store = Alpine.store('sms');
             store.threadId = @js($threadId);
             store.setTab(@js($activeTab));
+            // Seed the selected call from the URL so a deep-linked ?callId= is
+            // highlighted in the list. Without this the store starts null and
+            // the call list auto-selects the first row instead of the linked call.
+            if (@js($activeTab) === 'calls') {
+                const callIdParam = new URL(window.location.href).searchParams.get('callId');
+                store.callId = callIdParam ? parseInt(callIdParam, 10) : null;
+            }
             // Don't set callsLoading on initial render — the CallList is
             // rendered synchronously, so there is no async load to wait for.
 
@@ -193,6 +200,10 @@
             </div>
 
             <div x-show="$store.sms.tab === 'messages'" x-cloak class="flex flex-col flex-1 min-h-0">
+                {{-- Call Status Badge --}}
+                <div class="px-5 py-2 border-b border-zinc-200 dark:border-zinc-700">
+                    <livewire:sms.call-status-badge wire:key="call-status-badge" />
+                </div>
                 @if (! $isClientUser)
                     <div class="mb-2">
                         <div class="inline-flex w-full rounded-lg bg-zinc-100 dark:bg-zinc-800 p-0.5">

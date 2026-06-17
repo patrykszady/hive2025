@@ -57,6 +57,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'vendor.access' => \App\Http\Middleware\VendorAccessControl::class,
             'vendor.own-redirect' => \App\Http\Middleware\RedirectOwnVendorToDashboard::class,
             'registered' => \App\Http\Middleware\EnsureUserRegistered::class,
+            'telnyx.signature' => \App\Http\Middleware\VerifyTelnyxSignature::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

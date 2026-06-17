@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Log;
 
 trait HasCallActions
 {
-    public function callBack(string $phone): void
+    public function callBack(string $phone, array $recipientIds = []): void
     {
         $user = auth()->user();
         $userPhone = $user->routeNotificationForTelnyx();
@@ -41,17 +41,30 @@ trait HasCallActions
             return;
         }
 
+        // Store selected call recipients in metadata for the webhook to use
+        $metadata = [
+            'type' => 'click_to_call',
+            'target_phone' => $phone,
+            'user_phone' => $userPhone,
+        ];
+
+        if (! empty($recipientIds)) {
+            // Validate that all recipient IDs belong to users with phones
+            $validRecipients = User::whereIn('id', $recipientIds)
+                ->whereNotNull('cell_phone')
+                ->where('cell_phone', '!=', '')
+                ->pluck('id')
+                ->all();
+            $metadata['click_to_call_recipient_ids'] = $validRecipients;
+        }
+
         $callLog = CallLog::create([
             'direction' => 'outgoing',
             'from_number' => $from,
             'to_number' => $phone,
             'status' => CallLog::STATUS_INITIATED,
             'user_id' => $user->id,
-            'metadata' => [
-                'type' => 'click_to_call',
-                'target_phone' => $phone,
-                'user_phone' => $userPhone,
-            ],
+            'metadata' => $metadata,
         ]);
 
         try {
@@ -62,6 +75,7 @@ trait HasCallActions
                     'from' => $from,
                     'from_display_name' => 'GS Construction',
                     'timeout_secs' => (int) config('services.telnyx.voice_timeout', 30),
+                    'preferred_codecs' => config('services.telnyx.preferred_codecs'),
                     'client_state' => base64_encode(json_encode([
                         'action' => 'click_to_call',
                         'target_phone' => $phone,
@@ -236,5 +250,88 @@ trait HasCallActions
         }
 
         return $phone;
+    }
+
+    public function inviteParticipantToCall(int $callLogId, int $participantId, string $participantPhone, string $participantName): void
+    {
+        $user = auth()->user();
+        if (!$user) {
+            Flux::toast(variant: 'danger', heading: 'Not Authenticated', text: 'You must be logged in to add participants.', duration: 5000, position: 'top right');
+            return;
+        }
+
+        $callLog = CallLog::find($callLogId);
+        if (!$callLog || $callLog->user_id !== $user->id) {
+            Flux::toast(variant: 'danger', heading: 'Invalid Call', text: 'Call not found or does not belong to you.', duration: 5000, position: 'top right');
+            return;
+        }
+
+        // Ensure call is in a conference (TRANSFERRED status with conference_id in metadata)
+        $metadata = $callLog->metadata ?? [];
+        $conferenceId = $metadata['conference_id'] ?? null;
+
+        if (!$conferenceId) {
+            Flux::toast(variant: 'danger', heading: 'No Conference', text: 'This call is not currently in a conference.', duration: 5000, position: 'top right');
+            return;
+        }
+
+        $apiKey = config('services.telnyx.api_key');
+        $connectionId = config('services.telnyx.connection_id');
+        $from = config('services.telnyx.from');
+
+        if (!$apiKey || !$connectionId) {
+            Flux::toast(variant: 'danger', heading: 'Not Configured', text: 'Voice calling is not configured.', duration: 5000, position: 'top right');
+            return;
+        }
+
+        try {
+            $response = Http::withHeaders([
+                'Authorization' => "Bearer {$apiKey}",
+                'Accept' => 'application/json',
+            ])->post('https://api.telnyx.com/v2/calls', [
+                'connection_id' => $connectionId,
+                'to' => $participantPhone,
+                'from' => $from,
+                'from_display_name' => 'GS Construction',
+                'timeout_secs' => 30,
+                'preferred_codecs' => config('services.telnyx.preferred_codecs'),
+                'client_state' => base64_encode(json_encode([
+                    'action' => 'conference_invite',
+                    'call_log_id' => $callLogId,
+                    'conference_name' => $metadata['conference_name'] ?? null,
+                    'caller_name' => $user->first_name ?? 'Someone',
+                ])),
+                'webhook_url' => config('app.url') . '/webhooks/telnyx/voice',
+            ]);
+
+            if ($response->successful()) {
+                Log::channel('telnyx')->info('Conference invite: participant call initiated', [
+                    'call_log_id' => $callLogId,
+                    'participant_id' => $participantId,
+                    'participant_phone' => $participantPhone,
+                    'participant_name' => $participantName,
+                    'conference_id' => $conferenceId,
+                ]);
+
+                Flux::toast(variant: 'success', heading: 'Invited', text: "Calling {$participantName}...", duration: 5000, position: 'top right');
+            } else {
+                Log::channel('telnyx')->error('Conference invite: API call failed', [
+                    'call_log_id' => $callLogId,
+                    'participant_id' => $participantId,
+                    'status' => $response->status(),
+                    'error' => $response->json(),
+                ]);
+
+                Flux::toast(variant: 'danger', heading: 'Failed', text: 'Unable to invite participant. Please try again.', duration: 5000, position: 'top right');
+            }
+        } catch (\Exception $e) {
+            Log::channel('telnyx')->error('Conference invite: exception', [
+                'call_log_id' => $callLogId,
+                'participant_id' => $participantId,
+                'error' => $e->getMessage(),
+            ]);
+
+            Flux::toast(variant: 'danger', heading: 'Error', text: 'Something went wrong inviting the participant.', duration: 5000, position: 'top right');
+        }
     }
 }

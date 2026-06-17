@@ -102,7 +102,7 @@
 
             {{-- Scrollable body --}}
             <div class="flex-1 min-h-0 overflow-y-auto py-4 space-y-4">
-                @if ($call->recording_url)
+                @if ($call->recording_url && $dur > 0)
                     <div wire:key="recording-{{ $call->id }}">
                         <div class="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1.5">
                             {{ $call->has_voicemail ? 'Voicemail' : 'Recording' }}
@@ -245,7 +245,12 @@
                         </div>
                     @endif
                 @endif
-                @if (! $hasTranscript && $call->recording_url && ! $call->has_voicemail && $call->recording_started_at)
+                @if (! $hasTranscript
+                    && $call->recording_url
+                    && $dur > 0
+                    && ! $call->has_voicemail
+                    && $call->recording_started_at
+                    && (! $call->transcript || in_array($call->transcript->status, [\App\Models\CallTranscript::STATUS_PENDING, \App\Models\CallTranscript::STATUS_TRANSCRIBING], true)))
                     <div class="text-sm text-zinc-500 italic flex items-center gap-2">
                         <flux:icon name="ellipsis-horizontal" class="size-4 animate-pulse" />
                         Transcript and AI summary processing…

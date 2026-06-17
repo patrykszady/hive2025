@@ -43,12 +43,12 @@ class TranscribeCallRecording implements ShouldQueue
 
         $absolutePath = $disk->path($callLog->recording_path);
 
-        // Re-mux the MP3 once so browsers can show its duration without
-        // downloading the whole file (Telnyx MP3s often lack a Xing header).
-        // Also down-mix to mono — Telnyx's stereo recordings bleed audio
-        // between channels which breaks dual-channel diarization, so we
-        // always feed AssemblyAI a single mixed track and rely on
-        // content-based speaker_labels diarization.
+        // WAV recordings (the configured default) are uploaded to AssemblyAI
+        // byte-for-byte — lossless, full fidelity, no re-encode. The call below
+        // only touches legacy MP3 recordings: it re-muxes them so browsers can
+        // read duration (Telnyx MP3s often lack a Xing header) and down-mixes
+        // to mono because Telnyx's stereo MP3s bleed audio between channels,
+        // which breaks dual-channel diarization. For WAV this is a no-op.
         $this->ensureMp3HasDurationHeader($callLog, $absolutePath);
 
         $driver = config('call_recording.transcription.driver', 'assemblyai');
@@ -251,6 +251,11 @@ class TranscribeCallRecording implements ShouldQueue
             ? trim(implode("\n", array_map(fn ($s) => $s['speaker'] . ': ' . $s['text'], $segments)))
             : trim((string) ($body['text'] ?? ''));
 
+        if ($this->containsOnlyVoicemailGreeting($segments, $text)) {
+            $segments = [];
+            $text = '';
+        }
+
         // Collect any Audio Intelligence outputs AssemblyAI returned.
         $intelligence = $this->extractIntelligence($body);
 
@@ -278,9 +283,13 @@ class TranscribeCallRecording implements ShouldQueue
             'segments' => $segments ?: null,
             'speaker_map' => $speakerMap ?: null,
             'intelligence' => $intelligence ?: null,
-            'status' => $text !== '' ? CallTranscript::STATUS_READY : CallTranscript::STATUS_FAILED,
+            'status' => $text !== '' ? CallTranscript::STATUS_READY : CallTranscript::STATUS_EMPTY,
             'failure_reason' => $text !== '' ? null : 'empty_transcript',
         ]);
+
+        if ($text === '') {
+            $this->removeSilentRecordingArtifacts($callLog);
+        }
 
         if ($detectedLanguage) {
             $callLog->update(['language' => $detectedLanguage]);
@@ -1028,14 +1037,23 @@ class TranscribeCallRecording implements ShouldQueue
         $text = trim((string) ($body['text'] ?? ''));
         $detectedLanguage = $body['language'] ?? null;
 
+        if ($this->containsOnlyVoicemailGreeting(is_array($body['segments'] ?? null) ? $body['segments'] : [], $text)) {
+            $text = '';
+            $body['segments'] = [];
+        }
+
         $transcript->update([
             'engine' => 'openai-whisper',
             'language' => $detectedLanguage,
             'text' => $text !== '' ? $text : null,
             'segments' => $body['segments'] ?? null,
-            'status' => $text !== '' ? CallTranscript::STATUS_READY : CallTranscript::STATUS_FAILED,
+            'status' => $text !== '' ? CallTranscript::STATUS_READY : CallTranscript::STATUS_EMPTY,
             'failure_reason' => $text !== '' ? null : 'empty_transcript',
         ]);
+
+        if ($text === '') {
+            $this->removeSilentRecordingArtifacts($callLog);
+        }
 
         if ($detectedLanguage) {
             $callLog->update(['language' => $detectedLanguage]);
@@ -1046,6 +1064,87 @@ class TranscribeCallRecording implements ShouldQueue
             'transcript_id' => $transcript->id,
             'language' => $detectedLanguage,
             'chars' => strlen($text),
+        ]);
+    }
+
+    /**
+     * Detect voicemail-greeting-only audio (no caller speech).
+     *
+     * @param  array<int, array<string, mixed>>  $segments
+     */
+    protected function containsOnlyVoicemailGreeting(array $segments, string $text): bool
+    {
+        $normalizedFull = strtolower(trim($text));
+        if ($normalizedFull === '') {
+            return false;
+        }
+
+        $phrases = [
+            'you have reached my voicemail',
+            'you\'ve reached my voicemail',
+            'unable to take your call',
+            'leave a message',
+            'at the tone',
+            'get back to you as soon as i can',
+            'thanks and have a great day',
+        ];
+
+        $voicemailHitCount = 0;
+        foreach ($phrases as $phrase) {
+            if (str_contains($normalizedFull, $phrase)) {
+                $voicemailHitCount++;
+            }
+        }
+
+        // Must strongly look like a voicemail greeting before suppressing.
+        if ($voicemailHitCount < 2) {
+            return false;
+        }
+
+        // If there are diarized segments, require exactly one speaking segment
+        // to avoid suppressing real conversations that mention voicemail.
+        $nonEmptySegmentCount = 0;
+        foreach ($segments as $segment) {
+            $segmentText = trim((string) ($segment['text'] ?? ''));
+            if ($segmentText !== '') {
+                $nonEmptySegmentCount++;
+            }
+        }
+
+        return $nonEmptySegmentCount <= 1;
+    }
+
+    /**
+     * Silent recordings should not be retained in UI/storage.
+     */
+    protected function removeSilentRecordingArtifacts(CallLog $callLog): void
+    {
+        if ($callLog->recording_disk && $callLog->recording_path) {
+            try {
+                $disk = Storage::disk($callLog->recording_disk);
+                if ($disk->exists($callLog->recording_path)) {
+                    $disk->delete($callLog->recording_path);
+                }
+            } catch (\Throwable $e) {
+                Log::channel('telnyx')->warning('Failed deleting silent recording file', [
+                    'call_log_id' => $callLog->id,
+                    'recording_disk' => $callLog->recording_disk,
+                    'recording_path' => $callLog->recording_path,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        $callLog->update([
+            'recording_url' => null,
+            'recording_disk' => null,
+            'recording_path' => null,
+            'recording_telnyx_id' => null,
+            'has_voicemail' => false,
+        ]);
+
+        Log::channel('telnyx')->info('Removed silent recording from call log', [
+            'call_log_id' => $callLog->id,
         ]);
     }
 }

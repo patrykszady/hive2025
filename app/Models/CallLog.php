@@ -80,6 +80,33 @@ class CallLog extends Model
         return $this->hasOne(CallTranscript::class);
     }
 
+    /**
+     * Discard a saved recording that has no usable content (e.g. an outbound
+     * call that only reached the target's voicemail greeting with no message
+     * left, or inbound ringback with no conversation). Deletes the stored
+     * audio file, clears the recording columns, and optionally removes the
+     * transcript so the call no longer surfaces a recording or AI analysis.
+     */
+    public function purgeRecording(bool $deleteTranscript = true): void
+    {
+        if ($this->recording_disk && $this->recording_path
+            && \Illuminate\Support\Facades\Storage::disk($this->recording_disk)->exists($this->recording_path)) {
+            \Illuminate\Support\Facades\Storage::disk($this->recording_disk)->delete($this->recording_path);
+        }
+
+        if ($deleteTranscript) {
+            $this->transcript()->delete();
+        }
+
+        $this->forceFill([
+            'recording_url' => null,
+            'recording_disk' => null,
+            'recording_path' => null,
+            'recording_telnyx_id' => null,
+            'has_voicemail' => false,
+        ])->save();
+    }
+
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);

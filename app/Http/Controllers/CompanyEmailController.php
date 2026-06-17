@@ -1274,17 +1274,19 @@ class CompanyEmailController extends Controller
                     }
                 }
 
-                // receipt number / invoice — trust the CU API extraction
-                $invoice = $ocr_receipt_data['fields']['invoice_number'] ?? null;
-                if (is_string($invoice) && in_array(strtolower(trim($invoice)), ['null', 'n/a', 'na', 'none', ''], true)) {
-                    $invoice = null;
+                // receipt number / invoice — prefer structured OCR extraction, then
+                // fallback to OCR raw content when invoice_number is missing.
+                $invoice = $this->normalizeInvoiceValue($ocr_receipt_data['fields']['invoice_number'] ?? null);
+                if ($invoice === null) {
+                    $rawInvoiceSource = (string) ($ocr_receipt_data['fields']['raw_content'] ?? $ocr_receipt_data['content'] ?? '');
+                    $invoice = $this->extractInvoiceFromOcrRawContent($rawInvoiceSource);
                 }
 
                 // invoice override via subject regex (useful when OCR picks the wrong field,
                 // e.g. account number instead of order number)
                 if (!empty($receipt->options['invoice_from_subject_regex'])) {
                     if (preg_match($receipt->options['invoice_from_subject_regex'], $subject, $invoiceMatch)) {
-                        $invoice = trim($invoiceMatch[1] ?? $invoiceMatch[0]);
+                        $invoice = $this->normalizeInvoiceValue($invoiceMatch[1] ?? $invoiceMatch[0]);
                     }
                 }
 
@@ -2084,6 +2086,12 @@ class CompanyEmailController extends Controller
                         // Normalize stored value so downstream logic uses the corrected date.
                         $ocr_receipt_data['fields']['transaction_date'] = $resolvedTransactionDate->toDateString();
 
+                        $resolvedInvoice = $this->normalizeInvoiceValue($ocr_receipt_data['fields']['invoice_number'] ?? null);
+                        if ($resolvedInvoice === null) {
+                            $invoiceRawSource = (string) ($ocr_receipt_data['fields']['raw_content'] ?? $ocr_receipt_data['content'] ?? '');
+                            $resolvedInvoice = $this->extractInvoiceFromOcrRawContent($invoiceRawSource);
+                        }
+
                         if ($this->shouldAttachToPreviousExpenseInSameMessage(
                             $ocr_receipt_data,
                             $lastExpenseForMessage,
@@ -2139,13 +2147,31 @@ class CompanyEmailController extends Controller
                             ->addDays(5)
                             ->format('Y-m-d');
 
+                        $incomingMerchantName = trim((string) ($ocr_receipt_data['fields']['merchant_name'] ?? ''));
+
                         $duplicates = Expense::where('belongs_to_vendor_id', $email_vendor->id)
                             ->with('receipts')
                             ->whereNull('deleted_at')
                             ->where('amount', $ocr_receipt_data['fields']['total'])
                             ->where('amount', '!=', '0.00')
                             ->whereBetween('date', [$duplicate_start_date, $duplicate_end_date])
-                            ->get();
+                            ->get()
+                            ->filter(function (Expense $candidate) use ($incomingMerchantName): bool {
+                                if ($incomingMerchantName === '') {
+                                    return true;
+                                }
+
+                                $candidateVendorName = (string) ($candidate->vendor?->business_name ?? '');
+                                if ($this->merchantsLikelySame($incomingMerchantName, $candidateVendorName)) {
+                                    return true;
+                                }
+
+                                $latestReceipt = $candidate->receipts->sortByDesc('id')->first();
+                                $candidateReceiptMerchant = trim((string) (($latestReceipt?->receipt_items ?? [])['merchant_name'] ?? ''));
+
+                                return $this->merchantsLikelySame($incomingMerchantName, $candidateReceiptMerchant);
+                            })
+                            ->values();
 
                         $didAttachReceipt = false;
 
@@ -2171,7 +2197,7 @@ class CompanyEmailController extends Controller
                                 if ($expense->date !== $newDate) {
                                     $expense->date = $newDate;
                                 }
-                                $incomingInvoice = trim((string)($ocr_receipt_data['fields']['invoice_number'] ?? ''));
+                                $incomingInvoice = $resolvedInvoice ?? '';
                                 if ($incomingInvoice !== '') {
                                     // Only set invoice if it's empty to avoid clobbering a known value
                                     if (empty($expense->invoice)) {
@@ -2193,7 +2219,7 @@ class CompanyEmailController extends Controller
                                 if ($expense->date !== $newDate) {
                                     $expense->date = $newDate;
                                 }
-                                $incomingInvoice = trim((string)($ocr_receipt_data['fields']['invoice_number'] ?? ''));
+                                $incomingInvoice = $resolvedInvoice ?? '';
                                 if ($incomingInvoice !== '') {
                                     if (empty($expense->invoice)) {
                                         $expense->invoice = $incomingInvoice;
@@ -2234,7 +2260,7 @@ class CompanyEmailController extends Controller
                                 $expense_vendor_id ?? 0,
                                 $ocr_receipt_data['fields']['total'],
                                 $ocr_receipt_data['fields']['transaction_date'],
-                                $ocr_receipt_data['fields']['invoice_number'] ?? null
+                                    $resolvedInvoice
                             );
 
                             if ($partialExpenses->isNotEmpty()) {
@@ -2265,7 +2291,7 @@ class CompanyEmailController extends Controller
                                     'paid_by'              => null,
                                     'belongs_to_vendor_id' => $email_vendor->id,
                                     'created_by_user_id'   => 0,
-                                    'invoice'              => $ocr_receipt_data['fields']['invoice_number'] ?: null,
+                                    'invoice'              => $resolvedInvoice,
                                 ]);
 
                                 // Transfer transactions and checks from partial expenses using shared method
@@ -2293,7 +2319,7 @@ class CompanyEmailController extends Controller
                                     'paid_by'              => null,
                                     'belongs_to_vendor_id' => $email_vendor->id,
                                     'created_by_user_id'   => 0,
-                                    'invoice'              => $ocr_receipt_data['fields']['invoice_number'] ?: null,
+                                    'invoice'              => $resolvedInvoice,
                                 ]);
 
                                 // If exactly one bank transaction matched earlier, link it now
@@ -2329,7 +2355,7 @@ class CompanyEmailController extends Controller
                                 'paid_by'              => null,
                                 'belongs_to_vendor_id' => $email_vendor->id,
                                 'created_by_user_id'   => 0,
-                                'invoice'              => $ocr_receipt_data['fields']['invoice_number'] ?: null,
+                                'invoice'              => $resolvedInvoice,
                             ]);
                         }
 
@@ -4374,6 +4400,105 @@ class CompanyEmailController extends Controller
         }
 
         return 'unknown';
+    }
+
+    protected function normalizeInvoiceValue(mixed $invoice): ?string
+    {
+        if (!is_scalar($invoice)) {
+            return null;
+        }
+
+        $normalized = trim((string) $invoice);
+        if ($normalized === '' || in_array(strtolower($normalized), ['null', 'n/a', 'na', 'none'], true)) {
+            return null;
+        }
+
+        return $normalized;
+    }
+
+    protected function extractInvoiceFromOcrRawContent(string $rawContent): ?string
+    {
+        if (trim($rawContent) === '') {
+            return null;
+        }
+
+        $patterns = [
+            '/Invoice\s*Number\s*:\s*\R+\s*([^\r\n,]+)/i',
+            '/Invoice\s*Number\s*:\s*([^\r\n,]+)/i',
+            '/Invoice\s*#\s*([A-Za-z0-9\-]+)/i',
+            '/\bINV(?:OICE)?\s*#?\s*([A-Za-z0-9\-]+)/i',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (!preg_match($pattern, $rawContent, $matches)) {
+                continue;
+            }
+
+            $candidate = $this->normalizeInvoiceValue($matches[1] ?? $matches[0] ?? null);
+            if ($candidate !== null) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    protected function merchantsLikelySame(string $incomingMerchant, string $candidateMerchant): bool
+    {
+        $incoming = $this->normalizeMerchantName($incomingMerchant);
+        $candidate = $this->normalizeMerchantName($candidateMerchant);
+
+        if ($incoming === '' || $candidate === '') {
+            return false;
+        }
+
+        if ($incoming === $candidate) {
+            return true;
+        }
+
+        $incomingCompact = str_replace(' ', '', $incoming);
+        $candidateCompact = str_replace(' ', '', $candidate);
+        if ((strlen($incomingCompact) >= 5 && str_contains($candidateCompact, $incomingCompact))
+            || (strlen($candidateCompact) >= 5 && str_contains($incomingCompact, $candidateCompact))) {
+            return true;
+        }
+
+        $incomingTokens = $this->merchantNameTokens($incoming);
+        $candidateTokens = $this->merchantNameTokens($candidate);
+        if ($incomingTokens === [] || $candidateTokens === []) {
+            return false;
+        }
+
+        return count(array_intersect($incomingTokens, $candidateTokens)) > 0;
+    }
+
+    protected function normalizeMerchantName(string $merchantName): string
+    {
+        $normalized = strtolower($merchantName);
+        $normalized = preg_replace('/[^a-z0-9\s]/', ' ', $normalized);
+        $normalized = preg_replace('/\s+/', ' ', trim($normalized));
+
+        return $normalized;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function merchantNameTokens(string $normalizedMerchant): array
+    {
+        $withBoundaries = preg_replace('/([a-z])([0-9])/', '$1 $2', $normalizedMerchant) ?? '';
+        $withBoundaries = preg_replace('/([0-9])([a-z])/', '$1 $2', $withBoundaries) ?? '';
+        $tokens = preg_split('/\s+/', $withBoundaries) ?: [];
+        $tokenSet = [];
+        foreach ($tokens as $token) {
+            $value = trim((string) $token);
+            if (strlen($value) < 4) {
+                continue;
+            }
+            $tokenSet[$value] = true;
+        }
+
+        return array_keys($tokenSet);
     }
 
     /**

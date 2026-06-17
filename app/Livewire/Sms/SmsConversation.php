@@ -1050,6 +1050,7 @@ class SmsConversation extends Component
                     'from' => $from,
                     'from_display_name' => 'GS Construction',
                     'timeout_secs' => (int) config('services.telnyx.voice_timeout', 30),
+                    'preferred_codecs' => config('services.telnyx.preferred_codecs'),
                     'client_state' => base64_encode(json_encode([
                         'action' => 'click_to_call',
                         'target_phone' => $primaryTarget,

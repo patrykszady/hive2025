@@ -64,11 +64,41 @@ return [
         'connection_id' => env('TELNYX_CONNECTION_ID'),
         'voice_forward_to' => env('TELNYX_VOICE_FORWARD_TO'),
         'voice_timeout' => env('TELNYX_VOICE_TIMEOUT', 30),
+        // Comma-separated codec preference (highest fidelity first). Wideband
+        // codecs (OPUS ≤48kHz, AMR-WB/G722 16kHz "HD Voice") double the audio
+        // bandwidth of legacy 8kHz G.711, giving clearer recordings and better
+        // transcription — but ONLY on legs where every hop supports them.
+        // PSTN/mobile endpoints commonly fall back to PCMU/PCMA (8kHz); Telnyx
+        // downgrades gracefully when a preferred codec can't be negotiated.
+        'preferred_codecs' => env('TELNYX_PREFERRED_CODECS', 'OPUS,AMR-WB,G722,PCMU,PCMA'),
         'hold_audio_url' => env('TELNYX_HOLD_AUDIO_URL'),
         'tts_voice' => env('TELNYX_TTS_VOICE', 'Azure.en-US-AvaMultilingualNeural'),
         'tts_voice_type' => env('TELNYX_TTS_VOICE_TYPE', 'azure'),
         'tts_rate' => env('TELNYX_TTS_RATE', '+10%'),
         'public_url' => env('TELNYX_PUBLIC_URL'),
+
+        // Call-control HTTP hardening. Without an explicit timeout a slow
+        // Telnyx API response blocks the webhook handler (and its worker)
+        // indefinitely, leaving calls silent/stuck. Transient connection
+        // errors are retried with the same idempotent command_id so a retry
+        // never double-speaks or double-dials.
+        'command_timeout' => (int) env('TELNYX_COMMAND_TIMEOUT', 10),
+        'command_connect_timeout' => (int) env('TELNYX_COMMAND_CONNECT_TIMEOUT', 5),
+        'command_retries' => (int) env('TELNYX_COMMAND_RETRIES', 2),
+
+        // Ed25519 public key (base64) from the Telnyx Mission Control portal
+        // used to verify inbound webhook signatures. When empty, signature
+        // verification is skipped (e.g. local dev) — set it in production to
+        // reject forged webhooks.
+        'public_key' => env('TELNYX_PUBLIC_KEY'),
+        // Max age (seconds) of a webhook timestamp before it is rejected as a
+        // replay. Telnyx recommends a small tolerance for clock skew.
+        'webhook_tolerance' => (int) env('TELNYX_WEBHOOK_TOLERANCE', 300),
+
+        // Optional pre-recorded audio (publicly reachable URL) played as a
+        // safety net when a TTS `speak` command fails outright, so the caller
+        // hears something instead of dead silence.
+        'tts_fallback_audio_url' => env('TELNYX_TTS_FALLBACK_AUDIO_URL'),
     ],
 
     'ipqualityscore' => [

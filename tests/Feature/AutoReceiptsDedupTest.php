@@ -500,3 +500,158 @@ it('dedups exact-duplicate attachments delivered in separate Epson emails but li
     expect($rendered[0])->toBe([$receiptId]);
     expect($rendered[1])->toBe([$receiptId]);
 });
+
+it('stores invoice from OCR raw content when invoice_number field is missing', function () {
+    Storage::fake('files');
+
+    $vendor = Vendor::factory()->create([
+        'business_name' => "MUNCH'S SUPPLY",
+        'business_type' => 'Retail',
+    ]);
+
+    CompanyEmail::create([
+        'vendor_id' => $vendor->id,
+        'email' => 'patryk@gs.construction',
+        'grant_id' => 'grant-test',
+        'api_json' => [
+            'INBOX_FOLDER' => 'inbox-fld',
+            'HIVE_RECEIPTS_FOLDER' => 'hive-fld',
+        ],
+    ]);
+
+    $nylasMock = Mockery::mock(NylasService::class);
+    $nylasMock->shouldReceive('syncMessages')->andReturn([
+        'messages' => [
+            [
+                'id' => 'msg-1',
+                'from' => [['email' => 'noreply@print.epsonconnect.com']],
+                'subject' => 'Receipt Scans',
+                'attachments' => [
+                    ['id' => 'att-0', 'filename' => 'scan-0.pdf'],
+                ],
+            ],
+        ],
+    ]);
+    $nylasMock->shouldReceive('downloadAttachment')->andReturn(fakePdfBytes('Oak Park invoice test'));
+    $nylasMock->shouldReceive('moveOriginalMessageToHiveFolder')->andReturnNull();
+    app()->instance(NylasService::class, $nylasMock);
+
+    $rcMock = Mockery::mock(ReceiptController::class)->makePartial();
+    $rcMock->shouldReceive('extractReceipt')
+        ->once()
+        ->andReturn([
+            'fields' => [
+                'invoice_number' => null,
+                'merchant_name' => "MUNCH'S SUPPLY",
+                'transaction_date' => '2026-06-10',
+                'total' => 100.00,
+                'raw_content' => "Invoice Number:\nPRRCA202602421 - 359894,Residential Permit Deposit\n\nPayment Amount:\n$100.00",
+            ],
+            'content' => "Invoice Number:\nPRRCA202602421 - 359894,Residential Permit Deposit\n\nPayment Amount:\n$100.00",
+        ]);
+    app()->instance(ReceiptController::class, $rcMock);
+
+    $controller = new CompanyEmailController($nylasMock);
+    $controller->fetchAutoReceipts();
+
+    expect(Expense::withoutGlobalScopes()->count())->toBe(1);
+
+    $expense = Expense::withoutGlobalScopes()->first();
+    expect($expense)->not->toBeNull();
+    expect($expense->invoice)->toBe('PRRCA202602421 - 359894');
+});
+
+it('does not merge different merchants solely by same amount and date', function () {
+    Storage::fake('files');
+
+    $lakeBluffVendor = Vendor::factory()->create([
+        'business_name' => 'Village of Lake Bluff',
+        'business_type' => 'Retail',
+    ]);
+
+    $redLightVendor = Vendor::factory()->create([
+        'business_name' => 'Redlightviolations.com',
+        'business_type' => 'Retail',
+    ]);
+
+    CompanyEmail::create([
+        'vendor_id' => $lakeBluffVendor->id,
+        'email' => 'patryk@gs.construction',
+        'grant_id' => 'grant-test',
+        'api_json' => [
+            'INBOX_FOLDER' => 'inbox-fld',
+            'HIVE_RECEIPTS_FOLDER' => 'hive-fld',
+        ],
+    ]);
+
+    $nylasMock = Mockery::mock(NylasService::class);
+    $nylasMock->shouldReceive('syncMessages')->andReturn([
+        'messages' => [[
+            'id' => 'msg-1',
+            'from' => [['email' => 'noreply@print.epsonconnect.com']],
+            'subject' => 'Receipt Scans',
+            'attachments' => [
+                ['id' => 'att-0', 'filename' => 'lake-bluff.pdf'],
+                ['id' => 'att-1', 'filename' => 'red-light.pdf'],
+            ],
+        ]],
+    ]);
+    $nylasMock->shouldReceive('downloadAttachment')->andReturnUsing(function () {
+        static $i = 0;
+        $i++;
+
+        return fakePdfBytes('merchant split test page '.$i);
+    });
+    $nylasMock->shouldReceive('moveOriginalMessageToHiveFolder')->andReturnNull();
+    app()->instance(NylasService::class, $nylasMock);
+
+    $callIndex = 0;
+    $rcMock = Mockery::mock(ReceiptController::class)->makePartial();
+    $rcMock->shouldReceive('extractReceipt')
+        ->times(2)
+        ->andReturnUsing(function () use (&$callIndex) {
+            $callIndex++;
+
+            if ($callIndex === 1) {
+                return [
+                    'fields' => [
+                        'invoice_number' => null,
+                        'merchant_name' => 'LAKE BLUFF VILLAGE',
+                        'transaction_date' => '2026-02-12',
+                        'total' => 100.00,
+                        'items' => [
+                            ['Description' => 'Building permit invoice'],
+                        ],
+                    ],
+                    'content' => 'Lake Bluff payment confirmation',
+                ];
+            }
+
+            return [
+                'fields' => [
+                    'invoice_number' => null,
+                    'merchant_name' => 'GregRedLightViolations',
+                    'transaction_date' => '2026-02-12',
+                    'total' => 100.00,
+                    'items' => [
+                        ['Description' => 'Red light ticket payment'],
+                    ],
+                ],
+                'content' => 'Red light violations payment confirmation',
+            ];
+        });
+    app()->instance(ReceiptController::class, $rcMock);
+
+    $controller = new CompanyEmailController($nylasMock);
+    $controller->fetchAutoReceipts();
+
+    expect(Expense::withoutGlobalScopes()->count())->toBe(2);
+
+    $expenses = Expense::withoutGlobalScopes()->orderBy('id')->get();
+    expect($expenses->pluck('vendor_id')->all())->toContain($lakeBluffVendor->id);
+    expect($expenses->pluck('id')->unique()->count())->toBe(2);
+
+    $receiptRows = ExpenseReceipts::query()->orderBy('id')->get();
+    expect($receiptRows)->toHaveCount(2);
+    expect($receiptRows[0]->expense_id)->not->toBe($receiptRows[1]->expense_id);
+});

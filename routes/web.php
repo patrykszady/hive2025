@@ -322,10 +322,18 @@ Route::get('receipts/amazon_orders_api', [ReceiptController::class, 'amazon_orde
 Route::post('webhooks/plaid', [PlaidWebhookController::class, 'handle'])->name('webhooks.plaid');
 
 // Telnyx webhooks (SMS delivery status, inbound messages)
-Route::post('webhooks/telnyx/messaging', [TelnyxWebhookController::class, 'handle'])->name('webhooks.telnyx.messaging');
+Route::post('webhooks/telnyx/messaging', [TelnyxWebhookController::class, 'handle'])
+    ->middleware('telnyx.signature')
+    ->name('webhooks.telnyx.messaging');
 
 // Telnyx voice webhooks (call control - incoming calls, transfers, hangups)
-Route::post('webhooks/telnyx/voice', [TelnyxWebhookController::class, 'handleVoice'])->name('webhooks.telnyx.voice');
+Route::post('webhooks/telnyx/voice', [TelnyxWebhookController::class, 'handleVoice'])
+    ->middleware('telnyx.signature')
+    ->name('webhooks.telnyx.voice');
+
+// Telnyx webhook health check (for monitoring receiver availability)
+Route::get('webhooks/telnyx/health', [TelnyxWebhookController::class, 'health'])
+    ->name('webhooks.telnyx.health');
 
 // Mailtrap webhooks (no auth required - token is validated in the URL)
 Route::post('webhooks/mailtrap/{token}', [MailtrapWebhookController::class, 'handle'])->name('webhooks.mailtrap');

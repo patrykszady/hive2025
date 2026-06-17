@@ -25,10 +25,21 @@ return [
     /*
     | Telnyx record-start parameters.
     | https://developers.telnyx.com/api/call-control/start-recording
+    |
+    | Best practices for quality:
+    | - channels: dual recommended (captures both caller & agent separately for easier transcription)
+    | - format: wav (lossless PCM, best for transcription; mp3 is lossy)
+    | - play_beep: true (audible compliance marker, especially important for two-party consent)
+    |
+    | NOTE: record_start has NO sample-rate parameter. The recording's sample
+    | rate is fixed by the call's negotiated audio codec, not by record_start.
+    | To raise fidelity, prefer wideband ("HD Voice") codecs on the call itself
+    | via services.telnyx.preferred_codecs (G722/OPUS/AMR-WB). wav simply stores
+    | whatever the codec delivers without further loss.
     */
-    'channels' => env('CALL_RECORDING_CHANNELS', 'single'), // single|dual
-    'format' => env('CALL_RECORDING_FORMAT', 'wav'),       // mp3|wav
-    'play_beep' => (bool) env('CALL_RECORDING_PLAY_BEEP', true),
+    'channels' => env('CALL_RECORDING_CHANNELS', 'dual'),  // single|dual (dual captures each party separately)
+    'format' => env('CALL_RECORDING_FORMAT', 'wav'),       // mp3|wav (wav is lossless, better for transcription)
+    'play_beep' => (bool) env('CALL_RECORDING_PLAY_BEEP', false),
 
     /*
     | Disclosure announcement played to the called party at the very start of
@@ -39,6 +50,17 @@ return [
         'phrase' => env('CALL_RECORDING_DISCLOSURE_PHRASE', 'This call is recorded.'),
         'voice' => env('CALL_RECORDING_DISCLOSURE_VOICE', 'Azure.en-US-AvaMultilingualNeural'),
         'voice_type' => env('CALL_RECORDING_DISCLOSURE_VOICE_TYPE', 'azure'),
+    ],
+
+    /*
+    | Outbound click-to-call disclosure played to the target (recipient) when
+    | GS Construction initiates the call. Immediately after target answers.
+    */
+    'outbound_disclosure' => [
+        'enabled' => (bool) env('CALL_RECORDING_OUTBOUND_DISCLOSURE_ENABLED', true),
+        'phrase' => env('CALL_RECORDING_OUTBOUND_DISCLOSURE_PHRASE', 'GS Construction is calling you. This call is being recorded.'),
+        'voice' => env('CALL_RECORDING_OUTBOUND_DISCLOSURE_VOICE', 'Azure.en-US-AvaMultilingualNeural'),
+        'voice_type' => env('CALL_RECORDING_OUTBOUND_DISCLOSURE_VOICE_TYPE', 'azure'),
     ],
 
     /*
