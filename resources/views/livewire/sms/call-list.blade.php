@@ -167,9 +167,14 @@
                     <span class="text-base lg:text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
                         {{ $displayName }}
                     </span>
-                    <span class="text-sm lg:text-xs text-zinc-400 whitespace-nowrap">
-                        {{ $call->created_at->diffForHumans(short: true) }}
-                    </span>
+                    <div class="flex items-center gap-1.5 whitespace-nowrap">
+                        @if ($call->transcript && ($call->transcript->summary || $call->transcript->text))
+                            <flux:icon icon="sparkles" variant="micro" class="size-3.5 text-indigo-500" title="AI summary available" />
+                        @endif
+                        <span class="text-sm lg:text-xs text-zinc-400">
+                            {{ $call->created_at->diffForHumans(short: true) }}
+                        </span>
+                    </div>
                 </div>
 
                 <div class="flex items-center justify-between gap-2 mt-0.5">
