@@ -97,20 +97,19 @@ return [
     |
     */
 
-    'hosts' => [
+    'hosts' => array_filter([
         'local' => [
             'name' => ucfirst(env('APP_ENV', 'local')),
         ],
 
-        // Uncomment to view remote production logs (requires connection to production server)
-        // 'production' => [
-        //     'name' => 'Production',
-        //     'host' => env('APP_URL', 'https://hub.hive.contractors') . '/log-viewer',
-        //     'auth' => [
-        //         'token' => env('LOG_VIEWER_PRODUCTION_TOKEN'),
-        //     ],
-        // ],
-    ],
+        'production' => env('LOG_VIEWER_PRODUCTION_URL') ? [
+            'name' => env('LOG_VIEWER_PRODUCTION_NAME', 'Production'),
+            'host' => rtrim((string) env('LOG_VIEWER_PRODUCTION_URL'), '/'),
+            'auth' => [
+                'token' => env('LOG_VIEWER_PRODUCTION_TOKEN'),
+            ],
+        ] : null,
+    ]),
 
     /*
     |--------------------------------------------------------------------------
