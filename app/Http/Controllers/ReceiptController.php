@@ -71,30 +71,66 @@ class ReceiptController extends Controller
             'redirect_uri' => env('AMAZON_REDIRECT_URI'),
             'applicationId' => env('AMAZON_APPLICATION_ID'),
         ];
-        header('Location: '.$url.'?'.http_build_query($params));
+
+        Log::channel('company_emails_login_error')->info('Amazon OAuth login initiated', [
+            'redirect_uri' => $params['redirect_uri'],
+            'application_id' => $params['applicationId'],
+            'state' => $params['state'],
+            'app_url' => config('app.url'),
+            'request_host' => request()->getSchemeAndHttpHost(),
+            'oauth_url' => $url.'?'.http_build_query($params),
+        ]);
+
+        return redirect()->away($url.'?'.http_build_query($params));
     }
 
     public function amazon_auth_response()
     {
-        if (isset(request()->query()['code'])) {
-            $code = request()->query()['code'];
+        $query = request()->query();
+
+        Log::channel('company_emails_login_error')->info('Amazon OAuth callback received', [
+            'has_code' => isset($query['code']),
+            'query_keys' => array_keys($query),
+            'error' => $query['error'] ?? null,
+            'error_description' => $query['error_description'] ?? null,
+            'state' => $query['state'] ?? null,
+            'request_host' => request()->getSchemeAndHttpHost(),
+        ]);
+
+        if (isset($query['code'])) {
+            $code = $query['code'];
         } else {
             ///6-16-2023 return with error ... no code
+            Log::channel('company_emails_login_error')->warning('Amazon OAuth callback missing code', [
+                'query' => Arr::except($query, ['code']),
+                'configured_redirect_uri' => env('AMAZON_REDIRECT_URI'),
+            ]);
+
             return redirect(route('company_emails.index'));
         }
 
         $guzzle = new Client;
 
         $url = 'https://api.amazon.com/auth/O2/token';
-        $amazon_account_tokens = json_decode($guzzle->post($url, [
-            'form_params' => [
-                'client_id' => env('AMAZON_CLIENT_ID'),
-                'client_secret' => env('AMAZON_CLIENT_SECRET'),
-                'code' => $code,
-                'redirect_uri' => env('AMAZON_REDIRECT_URI'),
-                'grant_type' => 'authorization_code',
-            ],
-        ])->getBody()->getContents());
+
+        try {
+            $amazon_account_tokens = json_decode($guzzle->post($url, [
+                'form_params' => [
+                    'client_id' => env('AMAZON_CLIENT_ID'),
+                    'client_secret' => env('AMAZON_CLIENT_SECRET'),
+                    'code' => $code,
+                    'redirect_uri' => env('AMAZON_REDIRECT_URI'),
+                    'grant_type' => 'authorization_code',
+                ],
+            ])->getBody()->getContents());
+        } catch (RequestException $e) {
+            Log::channel('company_emails_login_error')->error('Amazon OAuth token exchange failed', ApiErrorFormatter::format($e, [
+                'configured_redirect_uri' => env('AMAZON_REDIRECT_URI'),
+                'has_response' => $e->hasResponse(),
+            ]));
+
+            return redirect(route('company_emails.index'));
+        }
 
         $receipt_account = ReceiptAccount::where('vendor_id', 54)->first();
 
