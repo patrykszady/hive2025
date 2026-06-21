@@ -149,6 +149,13 @@ return [
             'days' => 30
         ],
 
+        'receipt_errors' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/receipt_errors.log'),
+            'level' => 'debug',
+            'replace_placeholders' => true,
+        ],
+
         'mailtrap' => [
             'driver' => 'daily',
             'path' => storage_path('logs/mailtrap.log'),

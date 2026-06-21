@@ -48,3 +48,13 @@ it('does not auto-mark transactions ready for embedded non-index views', functio
 
     expect($component->transactionsReady)->toBeFalse();
 });
+
+it('exposes the transactions search as a URL-bound query string property', function (): void {
+    $reflection = new ReflectionClass(ExpenseIndex::class);
+
+    $searchAttrs = $reflection->getProperty('transaction_search')
+        ->getAttributes(\Livewire\Attributes\Url::class);
+
+    expect($searchAttrs)->not->toBeEmpty()
+        ->and($searchAttrs[0]->getArguments())->toMatchArray(['except' => '']);
+});

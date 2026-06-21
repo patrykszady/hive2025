@@ -46,6 +46,9 @@ class ExpenseIndex extends Component
     public string $receipt_search = '';
 
     #[Url(except: '')]
+    public string $transaction_search = '';
+
+    #[Url(except: '')]
     public $reimbursement_filter = '';
 
     public ?DateRange $date_range = null;
@@ -61,7 +64,6 @@ class ExpenseIndex extends Component
     public $paginate_number = 8;
     public $sortBy = 'date';
     public $sortDirection = 'desc';
-    public string $transaction_search = '';
     public bool $transactionsReady = false;
     public array $removedTransactionIds = [];
     public array $matchedReceiptItems = [];

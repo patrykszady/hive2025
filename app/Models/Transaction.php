@@ -136,7 +136,13 @@ class Transaction extends Model
         // Ensure amount is consistently cast to float like Expense model
         $array['amount'] = (float) $this->amount;
 
-        $array['vendor_name'] = $this->vendor?->business_name;
+        // Only index a real vendor name. The `vendor` relationship returns a
+        // "No Vendor" default model when none is attached, which pollutes text
+        // search (e.g. typo tolerance fuzzy-matches "Venmo" against "Vendor").
+        $array['vendor_name'] = $this->vendor_id ? $this->vendor?->business_name : null;
+
+        // The default vendor stub must never leak into the index via toArray().
+        unset($array['vendor']);
 
         return $array;
     }

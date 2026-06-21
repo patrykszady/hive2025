@@ -460,6 +460,12 @@ class CompanyEmailController extends Controller
             $messageId = $message['id'] ?? null;
 
             try {
+            // Tracks which pipeline step we're on so the catch-all can report exactly
+            // where a failure occurred. The nylas daily channel has historically been
+            // empty on production, so receipt failures are also mirrored to the
+            // dedicated, append-only `receipt_errors` channel below.
+            $processingStage = 'fetch_message';
+
             // Display message structure without rendering HTML body
             $messageDisplay = $message;
             if (isset($messageDisplay['body'])) {
@@ -607,6 +613,7 @@ class CompanyEmailController extends Controller
             // Used later to detect the belongs-to vendor (e.g. jenn@jpeterson-design.com → vendor 60).
             $metadataFromEmail = $fromEmail;
 
+            $processingStage = 'match_receipt';
             $receipt = $this->findMatchingReceipt($fromEmail, $cleanSubject);
 
             // Fallback: if no match and body contains a "From:" line, try extracting the original sender.
@@ -950,6 +957,7 @@ class CompanyEmailController extends Controller
                     
                     $location = Storage::disk('files')->path($ocr_path);
 
+                    $processingStage = 'render_html_to_pdf';
                     Browsershot::html($view)
                         ->newHeadless()
                         ->addChromiumArguments([
@@ -1069,7 +1077,9 @@ class CompanyEmailController extends Controller
                 $effectiveDocType = $isMaterialOrder ? 'material_order' : $doc_type;
 
                 //ocr the file via unified extractReceipt()
+                $processingStage = 'ocr_extract';
                 $ocr_receipt_data = app(\App\Http\Controllers\ReceiptController::class)->extractReceipt($ocr_path, $effectiveDocType, null, 'email', $receipt, $document_model);
+                $processingStage = 'process_ocr_result';
 
                 // DEBUG: log OCR results
                 Log::channel('nylas')->info('Receipt OCR result', [
@@ -1086,12 +1096,18 @@ class CompanyEmailController extends Controller
                     if (! empty($folderMap['Error'])) {
                         $this->nylasService->moveEmailToFolder($messageId, $folderMap['Error'], $grantId, $companyEmail->id);
                     }
-                    Log::channel('nylas')->warning('OCR extract returned error or non-array payload — moved to Error folder', [
+                    $ocrFailureContext = [
+                        'stage' => $processingStage,
                         'receipt_id' => $receipt->id,
                         'company_email_id' => $companyEmail->id,
                         'message_id' => $messageId,
+                        'from_email' => $fromEmail ?? null,
+                        'subject' => $subject ?? null,
                         'ocr_error' => is_array($ocr_receipt_data) ? ($ocr_receipt_data['error'] ?? null) : null,
-                    ]);
+                        'ocr_message' => is_array($ocr_receipt_data) ? ($ocr_receipt_data['message'] ?? null) : null,
+                    ];
+                    Log::channel('nylas')->warning('OCR extract returned error or non-array payload — moved to Error folder', $ocrFailureContext);
+                    Log::channel('receipt_errors')->warning('OCR extract returned error or non-array payload — moved to Error folder', $ocrFailureContext);
                     continue;
                 }
 
@@ -1835,10 +1851,21 @@ class CompanyEmailController extends Controller
                 continue;
             }
             } catch (\Throwable $e) {
-                Log::channel('nylas')->error('Failed to process receipt message', ApiErrorFormatter::format($e, [
+                $failureContext = ApiErrorFormatter::format($e, [
+                    'stage' => $processingStage ?? 'unknown',
                     'grant_id' => $grantId,
+                    'company_email_id' => $companyEmail->id ?? null,
                     'message_id' => $messageId,
-                ]));
+                    'from_email' => $fromEmail ?? null,
+                    'subject' => $subject ?? null,
+                    'receipt_id' => ($receipt ?? null)?->id,
+                    'exception_class' => get_class($e),
+                    'exception_file' => $e->getFile() . ':' . $e->getLine(),
+                ]);
+                Log::channel('nylas')->error('Failed to process receipt message', $failureContext);
+                // Mirror to a dedicated, append-only channel because the nylas daily log
+                // has historically been empty on production, hiding the failure reason.
+                Log::channel('receipt_errors')->error('Failed to process receipt message', $failureContext);
 
                 // Move failed message to error folder so it doesn't retry every cycle
                 try {
