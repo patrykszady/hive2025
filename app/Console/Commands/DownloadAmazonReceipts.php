@@ -64,8 +64,8 @@ class DownloadAmazonReceipts extends Command
             $receiptAccount = ReceiptAccount::withoutGlobalScopes()
                 ->where('vendor_id', 54)
                 ->where('belongs_to_vendor_id', $vendorId)
-                ->whereNotNull('options->refresh_token')
-                ->first();
+                ->get()
+                ->first(fn (ReceiptAccount $account) => $account->hasAmazonRefreshToken());
 
             if (! $receiptAccount) {
                 $this->warn("No receipt account found for vendor_id {$vendorId}, skipping {$vendorReceipts->count()} receipts");
@@ -73,19 +73,23 @@ class DownloadAmazonReceipts extends Command
                 continue;
             }
 
+            $refreshToken = $receiptAccount->amazonRefreshToken();
+            $accessToken = $receiptAccount->amazonAccessToken();
+            $expiresAt = $receiptAccount->amazonExpiresAt();
+
             // Refresh token if expired
-            if (Carbon::now()->gt(Carbon::parse($receiptAccount->options['expires_in']))) {
+            if (! $accessToken || ! $expiresAt || Carbon::now()->gte($expiresAt)) {
                 try {
                     $guzzle = new Client;
                     $tokenResponse = json_decode($guzzle->post('https://api.amazon.com/auth/O2/token', [
-                        'form_params' => AmazonOAuthPayload::refreshToken((string) $receiptAccount->options['refresh_token']),
+                        'form_params' => AmazonOAuthPayload::refreshToken((string) $refreshToken),
                     ])->getBody()->getContents());
 
-                    $receiptAccount->update([
-                        'options->expires_in' => Carbon::now()->addMinutes(55)->toIso8601String(),
-                        'options->access_token' => $tokenResponse->access_token,
+                    $receiptAccount->mergeOptions([
+                        'expires_in' => Carbon::now()->addMinutes(55)->toIso8601String(),
+                        'access_token' => $tokenResponse->access_token,
                     ]);
-                    $receiptAccount->fresh();
+                    $accessToken = $receiptAccount->amazonAccessToken();
                 } catch (RequestException $e) {
                     AmazonTokenRefreshRecovery::maybeRotateOnInvalidRequest($e, [
                         'receipt_account_id' => $receiptAccount->id,
@@ -99,10 +103,16 @@ class DownloadAmazonReceipts extends Command
                 }
             }
 
+            if (! $accessToken) {
+                $this->warn("No access token available for vendor_id {$vendorId}, skipping {$vendorReceipts->count()} receipts");
+                $failed += $vendorReceipts->count();
+                continue;
+            }
+
             $client = new Client([
                 'headers' => [
                     'host' => 'api.business.amazon.com',
-                    'x-amz-access-token' => $receiptAccount->options['access_token'],
+                    'x-amz-access-token' => $accessToken,
                     'x-amz-date' => Carbon::now()->toIso8601String(),
                     'user-agent' => 'Hive Production/0.2 (Language=PHP;Platform=Linux)',
                 ],

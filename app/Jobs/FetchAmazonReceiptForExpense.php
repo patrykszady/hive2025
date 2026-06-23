@@ -46,8 +46,8 @@ class FetchAmazonReceiptForExpense implements ShouldQueue
         $receiptAccount = ReceiptAccount::withoutGlobalScopes()
             ->where('vendor_id', 54)
             ->where('belongs_to_vendor_id', $expense->belongs_to_vendor_id)
-            ->whereNotNull('options->refresh_token')
-            ->first();
+            ->get()
+            ->first(fn (ReceiptAccount $account) => $account->hasAmazonRefreshToken());
 
         if (! $receiptAccount) {
             Log::channel('amazon_orders')->warning('No Amazon receipt account found for vendor', [
@@ -57,12 +57,16 @@ class FetchAmazonReceiptForExpense implements ShouldQueue
             return;
         }
 
+        $refreshToken = $receiptAccount->amazonRefreshToken();
+        $accessToken = $receiptAccount->amazonAccessToken();
+        $expiresAt = $receiptAccount->amazonExpiresAt();
+
         // Refresh OAuth token if expired
-        if (Carbon::now()->gt(Carbon::parse($receiptAccount->options['expires_in']))) {
+        if (! $accessToken || ! $expiresAt || Carbon::now()->gte($expiresAt)) {
             try {
                 $guzzle = new Client;
                 $tokens = json_decode($guzzle->post('https://api.amazon.com/auth/O2/token', [
-                    'form_params' => AmazonOAuthPayload::refreshToken((string) $receiptAccount->options['refresh_token']),
+                    'form_params' => AmazonOAuthPayload::refreshToken((string) $refreshToken),
                 ])->getBody()->getContents());
             } catch (RequestException $e) {
                 Log::channel('amazon_orders')->error('Amazon token refresh failed during restore fetch', ApiErrorFormatter::format($e, [
@@ -78,12 +82,19 @@ class FetchAmazonReceiptForExpense implements ShouldQueue
                 return;
             }
 
-            $receiptAccount->update([
-                'options->expires_in' => Carbon::now()->addMinutes(55)->toIso8601String(),
-                'options->access_token' => $tokens->access_token,
+            $receiptAccount->mergeOptions([
+                'expires_in' => Carbon::now()->addMinutes(55)->toIso8601String(),
+                'access_token' => $tokens->access_token,
             ]);
+            $accessToken = $receiptAccount->amazonAccessToken();
+        }
 
-            $receiptAccount->refresh();
+        if (! $accessToken) {
+            Log::channel('amazon_orders')->warning('Skipping restore fetch due to missing Amazon access token', [
+                'expense_id' => $expense->id,
+                'receipt_account_id' => $receiptAccount->id,
+            ]);
+            return;
         }
 
         $credentials = new \Aws\Credentials\Credentials(env('AMAZON_AWS_ACCESS_TOKEN'), env('AMAZON_AWS_SECRET_TOKEN'));
@@ -92,7 +103,7 @@ class FetchAmazonReceiptForExpense implements ShouldQueue
         $client = new \GuzzleHttp\Client([
             'headers' => [
                 'host' => 'api.business.amazon.com',
-                'x-amz-access-token' => $receiptAccount->options['access_token'],
+                'x-amz-access-token' => $accessToken,
                 'x-amz-date' => Carbon::now()->toIso8601String(),
                 'user-agent' => 'Hive Production/0.2 (Language=PHP;Platform=Linux)',
             ],

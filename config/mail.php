@@ -12,6 +12,20 @@ return [
     // Where to redirect all outgoing mail in local/development/testing.
     'dev_email' => env('MAIL_DEV_TO_ADDRESS', env('MAIL_DEV_EMAIL')),
 
+    // Addresses that should never receive outgoing mail. Any matching recipient is
+    // stripped from To/Cc/Bcc before sending; if nothing remains, the send is cancelled.
+    // Add more via MAIL_SUPPRESSED_RECIPIENTS (comma-separated).
+    'suppressed_recipients' => array_values(array_unique(array_filter(
+        array_map(
+            static fn (string $value): string => strtolower(trim($value)),
+            array_merge(
+                ['support@hive.contractors'],
+                explode(',', (string) env('MAIL_SUPPRESSED_RECIPIENTS', '')),
+            )
+        ),
+        static fn (string $value): bool => $value !== ''
+    ))),
+
     'mailers' => [
         'nylas' => [
             'transport' => 'nylas',

@@ -151,26 +151,49 @@ class ReceiptController extends Controller
         return redirect(route('company_emails.index'));
     }
 
-    public function amazon_orders_api()
+    public function amazon_orders_api(bool $forceFullSync = false, ?int $onlyBelongsToVendorId = null)
     {
         ini_set('max_execution_time', '4800');
 
-        $receipt_accounts = ReceiptAccount::withoutGlobalScopes()->where('vendor_id', 54)->whereNotNull('options->refresh_token')->get();
+        $receipt_accounts = ReceiptAccount::withoutGlobalScopes()
+            ->where('vendor_id', 54)
+            ->get()
+            ->filter(fn (ReceiptAccount $account) => $account->hasAmazonRefreshToken())
+            ->filter(function (ReceiptAccount $account) use ($onlyBelongsToVendorId): bool {
+                if ($onlyBelongsToVendorId === null) {
+                    return true;
+                }
+
+                return (int) $account->belongs_to_vendor_id === $onlyBelongsToVendorId;
+            })
+            ->values();
 
         //Initialize the Credentials object.
         //access token and secret from AWS
         $credentials = new \Aws\Credentials\Credentials(env('AMAZON_AWS_ACCESS_TOKEN'), env('AMAZON_AWS_SECRET_TOKEN'));
         foreach ($receipt_accounts as $receipt_account) {
             try {
+            $refreshToken = $receipt_account->amazonRefreshToken();
+            $accessToken = $receipt_account->amazonAccessToken();
+            $expiresAt = $receipt_account->amazonExpiresAt();
+
+            if (! $refreshToken) {
+                Log::channel('amazon_orders')->warning('Skipping Amazon account without refresh token', [
+                    'receipt_account_id' => $receipt_account->id,
+                    'belongs_to_vendor_id' => $receipt_account->belongs_to_vendor_id,
+                ]);
+                continue;
+            }
+
             //if NOW  is greater than > expires_in ... get new access_token
             //get new access_token valid for 1 hour and change 'expires_in' to 55 minutes from when submitted
             //ONLY if access token is expired....
-            if (Carbon::now() > Carbon::parse($receipt_account->options['expires_in'])) {
+            if (! $accessToken || ! $expiresAt || Carbon::now()->gte($expiresAt)) {
                 try {
                     $guzzle = new Client;
                     $url = 'https://api.amazon.com/auth/O2/token';
                     $amazon_account_tokens = json_decode($guzzle->post($url, [
-                        'form_params' => AmazonOAuthPayload::refreshToken((string) $receipt_account->options['refresh_token']),
+                        'form_params' => AmazonOAuthPayload::refreshToken($refreshToken),
                     ])->getBody()->getContents());
                 } catch (RequestException $e) {
                     if ($e->hasResponse()) {
@@ -181,8 +204,9 @@ class ReceiptController extends Controller
                         $error = $e->getMessage();
                     }
 
-                    $receipt_account->options += ['errors' => json_decode($error, true)];
-                    $receipt_account->save();
+                    $receipt_account->mergeOptions([
+                        'errors' => json_decode($error, true),
+                    ]);
 
                     Log::channel('company_emails_login_error')->error('Amazon token refresh failed', ApiErrorFormatter::format($e, [
                         'receipt_account_id' => $receipt_account->id,
@@ -198,19 +222,27 @@ class ReceiptController extends Controller
                     continue;
                 }
 
-                $receipt_account->update([
-                    'options->expires_in' => Carbon::now()->addMinutes(55)->toIso8601String(),
-                    'options->access_token' => $amazon_account_tokens->access_token,
+                $receipt_account->mergeOptions([
+                    'expires_in' => Carbon::now()->addMinutes(55)->toIso8601String(),
+                    'access_token' => $amazon_account_tokens->access_token,
                 ]);
 
-                $receipt_account->fresh();
+                $accessToken = $receipt_account->amazonAccessToken();
+            }
+
+            if (! $accessToken) {
+                Log::channel('amazon_orders')->warning('Skipping Amazon account without access token after refresh attempt', [
+                    'receipt_account_id' => $receipt_account->id,
+                    'belongs_to_vendor_id' => $receipt_account->belongs_to_vendor_id,
+                ]);
+                continue;
             }
 
             // Instantiate Client object with api key header.
             $client = new \GuzzleHttp\Client([
                 'headers' => [
                     'host' => 'api.business.amazon.com',
-                    'x-amz-access-token' => $receipt_account->options['access_token'],
+                    'x-amz-access-token' => $accessToken,
                     'x-amz-date' => Carbon::now()->toIso8601String(),
                     'user-agent' => 'Hive Production/0.2 (Language=PHP;Platform=Linux)',
                 ],
@@ -222,11 +254,13 @@ class ReceiptController extends Controller
 
             // Incremental sync: fetch from last sync or default to 2 days ago.
             // Full sync is clamped to Amazon's rolling 30-day window.
-            $lastFullSync = isset($receipt_account->options['amazon_orders_full_synced_at'])
-                ? Carbon::parse($receipt_account->options['amazon_orders_full_synced_at'])
+            $accountOptions = $receipt_account->normalizedOptions();
+
+            $lastFullSync = isset($accountOptions['amazon_orders_full_synced_at'])
+                ? Carbon::parse($accountOptions['amazon_orders_full_synced_at'])
                 : null;
-            
-            $needsFullSync = !$lastFullSync || $lastFullSync->lt(Carbon::today());
+
+            $needsFullSync = $forceFullSync || ! $lastFullSync || $lastFullSync->lt(Carbon::today());
             $nowUtc = Carbon::now('UTC');
             $maxLookbackStart = $nowUtc->copy()->subDays(29)->startOfDay();
             
@@ -473,18 +507,18 @@ class ReceiptController extends Controller
             }
 
             //Update orders sync timestamp after successful processing
-            $updates = ['options->amazon_orders_synced_at' => Carbon::now()->toIso8601String()];
+            $updates = ['amazon_orders_synced_at' => Carbon::now()->toIso8601String()];
             
             //If this was a full sync, update the full sync timestamp
             if ($needsFullSync) {
-                $updates['options->amazon_orders_full_synced_at'] = Carbon::now()->toIso8601String();
+                $updates['amazon_orders_full_synced_at'] = Carbon::now()->toIso8601String();
             }
-            
-            $receipt_account->update($updates);
+
+            $receipt_account->mergeOptions($updates);
 
             //Incremental sync: fetch transactions from last sync or default to 7 days ago
-            $transactionStartDate = isset($receipt_account->options['amazon_transactions_synced_at'])
-                ? Carbon::parse($receipt_account->options['amazon_transactions_synced_at'])
+            $transactionStartDate = isset($accountOptions['amazon_transactions_synced_at'])
+                ? Carbon::parse($accountOptions['amazon_transactions_synced_at'])
                 : Carbon::now()->subDays(7);
 
             $path = '/reconciliation/2021-01-08/transactions';
@@ -630,8 +664,8 @@ class ReceiptController extends Controller
             }
 
             //Update transactions sync timestamp after successful processing
-            $receipt_account->update([
-                'options->amazon_transactions_synced_at' => Carbon::now()->toIso8601String(),
+            $receipt_account->mergeOptions([
+                'amazon_transactions_synced_at' => Carbon::now()->toIso8601String(),
             ]);
 
             sleep(1);

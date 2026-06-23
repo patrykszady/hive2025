@@ -27,9 +27,11 @@ use App\Services\NylasService;
 use Carbon\Carbon;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Mail\Events\MessageSending;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
@@ -191,7 +193,46 @@ class AppServiceProvider extends ServiceProvider
         Project::observe(ProjectObserver::class);
         Vendor::observe(VendorObserver::class);
         VendorDoc::observe(VendorDocObserver::class);
+
+        $this->bootSuppressedRecipients();
     }
+
+    /**
+     * Strip globally suppressed addresses from every outgoing message. If no
+     * recipients remain after filtering, the send is cancelled entirely.
+     */
+    protected function bootSuppressedRecipients(): void
+    {
+        Event::listen(MessageSending::class, function (MessageSending $event): ?bool {
+            $suppressed = config('mail.suppressed_recipients', []);
+
+            if (empty($suppressed)) {
+                return null;
+            }
+
+            $message = $event->message;
+
+            $filter = static fn (array $addresses): array => array_values(array_filter(
+                $addresses,
+                static fn ($address): bool => ! in_array(strtolower($address->getAddress()), $suppressed, true)
+            ));
+
+            $to = $filter($message->getTo());
+            $cc = $filter($message->getCc());
+            $bcc = $filter($message->getBcc());
+
+            $message->to(...$to);
+            $message->cc(...$cc);
+            $message->bcc(...$bcc);
+
+            if (empty($to) && empty($cc) && empty($bcc)) {
+                return false;
+            }
+
+            return null;
+        });
+    }
+
 
     public function bootRoute()
     {
