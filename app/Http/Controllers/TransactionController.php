@@ -2360,6 +2360,13 @@ class TransactionController extends Controller
                 if (!isset($result['transactions'])) {
                     return false;
                 }
+                // Subset-sum is for combining MULTIPLE transactions. A single transaction
+                // equal to the check amount is handled by the dedicated single-exact-match
+                // path; allowing it here lets a lone transaction win over the correct group
+                // purely because its summed date-distance is smaller (fewer terms).
+                if (count($result['transactions']) < 2) {
+                    return false;
+                }
                 return number_format($result['sum'], 2, '.', '') == $check->amount;
             })
             ->sortBy(function ($result) use ($check, $transactionDatesById) {
