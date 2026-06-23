@@ -151,7 +151,12 @@ class ReceiptController extends Controller
         return redirect(route('company_emails.index'));
     }
 
-    public function amazon_orders_api(bool $forceFullSync = false, ?int $onlyBelongsToVendorId = null)
+    public function amazon_orders_api(
+        bool $forceFullSync = false,
+        ?int $onlyBelongsToVendorId = null,
+        ?string $startDateOverride = null,
+        ?string $endDateOverride = null,
+    )
     {
         ini_set('max_execution_time', '4800');
 
@@ -263,12 +268,28 @@ class ReceiptController extends Controller
             $needsFullSync = $forceFullSync || ! $lastFullSync || $lastFullSync->lt(Carbon::today());
             $nowUtc = Carbon::now('UTC');
             $maxLookbackStart = $nowUtc->copy()->subDays(29)->startOfDay();
+            $explicitStartDate = $startDateOverride !== null
+                ? Carbon::parse($startDateOverride, 'UTC')->startOfDay()
+                : null;
+            $explicitEndDate = $endDateOverride !== null
+                ? Carbon::parse($endDateOverride, 'UTC')->endOfDay()
+                : null;
+
+            if ($explicitStartDate && ! $explicitEndDate) {
+                $explicitEndDate = $explicitStartDate->copy()->endOfDay();
+            }
+
+            if ($explicitEndDate && ! $explicitStartDate) {
+                $explicitStartDate = $explicitEndDate->copy()->startOfDay();
+            }
             
-            if ($needsFullSync) {
+            if ($explicitStartDate && $explicitEndDate) {
+                $startDate = $explicitStartDate->copy();
+            } elseif ($needsFullSync) {
                 $startDate = $maxLookbackStart->copy();
             } else {
-                $startDate = isset($receipt_account->options['amazon_orders_synced_at'])
-                    ? Carbon::parse($receipt_account->options['amazon_orders_synced_at'])->setTimezone('UTC')
+                $startDate = isset($accountOptions['amazon_orders_synced_at'])
+                    ? Carbon::parse($accountOptions['amazon_orders_synced_at'])->setTimezone('UTC')
                     : $nowUtc->copy()->subDays(2);
             }
 
@@ -281,7 +302,7 @@ class ReceiptController extends Controller
                 $startDate = $maxLookbackStart->copy();
             }
             
-            $endDate = $nowUtc->copy();
+            $endDate = $explicitEndDate?->copy() ?? $nowUtc->copy();
 
             // Chunk date ranges into 1-day windows (Amazon API max range is 24 hours)
             $chunkStart = $startDate->copy();
@@ -516,15 +537,24 @@ class ReceiptController extends Controller
 
             $receipt_account->mergeOptions($updates);
 
-            //Incremental sync: fetch transactions from last sync or default to 7 days ago
-            $transactionStartDate = isset($accountOptions['amazon_transactions_synced_at'])
-                ? Carbon::parse($accountOptions['amazon_transactions_synced_at'])
-                : Carbon::now()->subDays(7);
+            // Transaction feed should follow the same explicit/full-sync window when requested.
+            if ($explicitStartDate && $explicitEndDate) {
+                $transactionStartDate = $explicitStartDate->copy();
+                $transactionEndDate = $explicitEndDate->copy();
+            } elseif ($needsFullSync) {
+                $transactionStartDate = $maxLookbackStart->copy();
+                $transactionEndDate = $endDate->copy();
+            } else {
+                $transactionStartDate = isset($accountOptions['amazon_transactions_synced_at'])
+                    ? Carbon::parse($accountOptions['amazon_transactions_synced_at'])
+                    : Carbon::now()->subDays(7);
+                $transactionEndDate = Carbon::now();
+            }
 
             $path = '/reconciliation/2021-01-08/transactions';
             $params = [
                 'feedStartDate' => $transactionStartDate->toIso8601String(),
-                'feedEndDate' => Carbon::now()->toIso8601String(),
+                'feedEndDate' => $transactionEndDate->toIso8601String(),
             ];
 
             $full_url = $url.$path.'?'.http_build_query($params);
@@ -564,19 +594,20 @@ class ReceiptController extends Controller
             foreach ($nonChargeTransactions as $transaction) {
                 $order_date = Carbon::create($transaction['transactionDate'])->format('Y-m-d');
                 $order_id = $transaction['transactionLineItems'][0]['orderId'];
+                $refundAmount = (float) $transaction['amount']['amount'];
+                $negativeRefundAmount = -1 * $refundAmount;
 
                 $existingRefund = Expense::where('belongs_to_vendor_id', $receipt_account->belongs_to_vendor_id)
                     ->where('vendor_id', 54)
                     ->whereNull('deleted_at')
                     ->where('invoice', $order_id)
-                    ->where('amount', 'LIKE', '-%')
+                    ->where('amount', $negativeRefundAmount)
                     ->where('date', $order_date)
                     ->exists();
 
                 if (! $existingRefund) {
                     //create expense Model
                     //CREATE expense
-                    $refundAmount = (float) $transaction['amount']['amount'];
                     $bulkMatch = TransactionBulkMatch::findMatchForAmount(54, $refundAmount);
 
                     // Inherit distribution from the original order expense, or match PO

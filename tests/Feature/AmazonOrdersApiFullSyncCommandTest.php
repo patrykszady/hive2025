@@ -6,7 +6,7 @@ it('runs amazon full sync for all accounts', function () {
     $controller = Mockery::mock(ReceiptController::class);
     $controller->shouldReceive('amazon_orders_api')
         ->once()
-        ->with(true, null)
+        ->with(true, null, null, null)
         ->andReturnNull();
 
     app()->instance(ReceiptController::class, $controller);
@@ -21,7 +21,7 @@ it('runs amazon full sync for a specific vendor id', function () {
     $controller = Mockery::mock(ReceiptController::class);
     $controller->shouldReceive('amazon_orders_api')
         ->once()
-        ->with(true, 1)
+        ->with(true, 1, null, null)
         ->andReturnNull();
 
     app()->instance(ReceiptController::class, $controller);
@@ -40,5 +40,20 @@ it('supports dry run without executing sync', function () {
 
     $this->artisan('amazon:orders-api-full-sync --vendor-id=1 --dry-run')
         ->expectsOutput('Dry run: would run Amazon full sync for belongs_to_vendor_id 1.')
+        ->assertSuccessful();
+});
+
+it('passes through an explicit date window', function () {
+    $controller = Mockery::mock(ReceiptController::class);
+    $controller->shouldReceive('amazon_orders_api')
+        ->once()
+        ->with(true, 1, '2026-05-26', '2026-05-27')
+        ->andReturnNull();
+
+    app()->instance(ReceiptController::class, $controller);
+
+    $this->artisan('amazon:orders-api-full-sync --vendor-id=1 --start-date=2026-05-26 --end-date=2026-05-27')
+        ->expectsOutput('Running Amazon full sync for belongs_to_vendor_id 1 from 2026-05-26 to 2026-05-27...')
+        ->expectsOutput('Amazon full sync completed.')
         ->assertSuccessful();
 });
