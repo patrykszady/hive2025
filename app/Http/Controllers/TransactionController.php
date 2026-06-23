@@ -2371,12 +2371,27 @@ class TransactionController extends Controller
             })
             ->sortBy(function ($result) use ($check, $transactionDatesById) {
                 $totalDistance = 0;
+                $hasAfterCheckDate = false;
                 foreach ($result['transactions'] as $t) {
                     $txDate = $transactionDatesById[$t['transaction_id']] ?? null;
                     if ($txDate) {
                         $totalDistance += abs($txDate->diffInDays($check->date, true));
+                        if ($txDate->gt($check->date)) {
+                            $hasAfterCheckDate = true;
+                        }
                     }
                 }
+
+                // A Transfer check is recorded AFTER the money was actually sent, so the
+                // real match is the group of transactions dated on/before the check date
+                // (the transfers that happened that week). Rank any combo containing a
+                // post-check-date transaction below every all-before combo, then break ties
+                // by total date proximity. Paper checks clear after being written, so this
+                // preference is intentionally limited to Transfer checks.
+                if ($check->check_type === 'Transfer' && $hasAfterCheckDate) {
+                    $totalDistance += 1000000;
+                }
+
                 return $totalDistance;
             })
             ->values();

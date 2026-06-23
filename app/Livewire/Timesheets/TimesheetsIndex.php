@@ -60,6 +60,7 @@ class TimesheetsIndex extends Component
                         $group->date = $group->first()->date->format('m/d/Y');
                         $group->sum_amount = $group->sum('amount');
                         $group->sum_hours = $group->sum('hours');
+                        $group->is_paid = $group->every(fn ($timesheet) => ! is_null($timesheet->check_id));
                     });
                 })->paginate(8);
 

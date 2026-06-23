@@ -71,7 +71,11 @@
                                 <flux:table.cell>{{ $timesheet->sum_hours }}</flux:table.cell>
                                 <flux:table.cell>{{ money($timesheet->sum_amount) }}</flux:table.cell>
                                 <flux:table.cell>
-                                    <flux:badge size="sm" :color="'green'" inset="top bottom">Confirmed</flux:badge>
+                                    @if($timesheet->is_paid)
+                                        <flux:badge size="sm" :color="'green'" inset="top bottom">Confirmed</flux:badge>
+                                    @else
+                                        <flux:badge size="sm" :color="'amber'" inset="top bottom">Unpaid</flux:badge>
+                                    @endif
                                 </flux:table.cell>
                             </flux:table.row>
                         @endforeach
