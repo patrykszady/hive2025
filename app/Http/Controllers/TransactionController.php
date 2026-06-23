@@ -915,6 +915,7 @@ class TransactionController extends Controller
         // These are typically bank transfers, not purchases
         $skipPatterns = [
             '/\bZELLE\b/i',
+            '/\bVENMO\b/i',
             '/\bTRANSFER\b/i',
             '/\bWIRE\b/i',
             '/\bACH\b/i',
@@ -1209,6 +1210,46 @@ class TransactionController extends Controller
                         continue;
                     }
 
+                    $transaction->save();
+                }
+            }
+        }
+
+        $globalTransferRules = VendorTransaction::query()
+            ->whereNull('plaid_inst_id')
+            ->where('deposit_check', 3)
+            ->orderByRaw('LENGTH(`desc`) ASC')
+            ->get();
+
+        if ($globalTransferRules->isNotEmpty()) {
+            $allBankAccountIds = BankAccount::query()->pluck('id')->toArray();
+
+            $transactions = Transaction::where('expense_id', null)
+                ->where('check_number', null)
+                ->where('deposit', null)
+                ->whereNotNull('transaction_date')
+                ->whereIn('bank_account_id', $allBankAccountIds)
+                ->get();
+
+            foreach ($globalTransferRules as $vendor_transaction) {
+                foreach ($transactions as $transaction) {
+                    $preg = json_decode($vendor_transaction->options);
+
+                    if (! preg_match('/'.$vendor_transaction->desc.$preg, $transaction->plaid_merchant_description ?? '', $matches, PREG_UNMATCHED_AS_NULL)) {
+                        continue;
+                    }
+
+                    if ($vendor_transaction->amount_sign !== null) {
+                        if ($vendor_transaction->amount_sign === 1 && $transaction->amount <= 0) {
+                            continue;
+                        }
+                        if ($vendor_transaction->amount_sign === 2 && $transaction->amount >= 0) {
+                            continue;
+                        }
+                    }
+
+                    $transaction->check_number = '1010101';
+                    $transaction->vendor_id = null;
                     $transaction->save();
                 }
             }

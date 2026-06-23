@@ -1,8 +1,11 @@
 <?php
 
+use App\Http\Controllers\TransactionController;
 use App\Livewire\Transactions\VendorTransactionEditModal;
 use App\Livewire\Transactions\VendorTransactionsPanel;
 use App\Models\Bank;
+use App\Models\BankAccount;
+use App\Models\Transaction;
 use App\Models\Vendor;
 use App\Models\VendorTransaction;
 use App\Models\User;
@@ -243,6 +246,53 @@ it('deletes a vendor transaction from the edit modal', function () {
         ->call('delete');
 
     expect(VendorTransaction::query()->whereKey($vendorTransaction->id)->exists())->toBeFalse();
+});
+
+it('categorizes venmo transfers as deposit check 3 without assigning the retail vendor', function () {
+    $vendor = Vendor::factory()->create([
+        'business_name' => 'Venmo',
+        'business_type' => 'Retail',
+    ]);
+
+    $bank = Bank::create([
+        'name' => 'Citibank',
+        'vendor_id' => $vendor->id,
+        'plaid_ins_id' => 'ins_5',
+    ]);
+
+    $bankAccount = BankAccount::create([
+        'vendor_id' => $vendor->id,
+        'bank_id' => $bank->id,
+        'account_number' => '4903',
+        'plaid_account_id' => 'acc_venmo_'.uniqid(),
+        'type' => 'checking',
+    ]);
+
+    $transaction = Transaction::create([
+        'transaction_date' => now()->subDay(),
+        'amount' => 100.00,
+        'bank_account_id' => $bankAccount->id,
+        'plaid_merchant_name' => null,
+        'plaid_merchant_description' => 'Venmo',
+    ]);
+
+    VendorTransaction::create([
+        'vendor_id' => null,
+        'deposit_check' => 3,
+        'amount_sign' => 1,
+        'plaid_inst_id' => null,
+        'desc' => 'Venmo',
+        'options' => json_encode('/i'),
+    ]);
+
+    app(TransactionController::class)->add_vendor_to_transactions();
+
+    expect($transaction->refresh()->vendor_id)->toBeNull();
+
+    app(TransactionController::class)->add_check_deposit_to_transactions();
+
+    expect($transaction->refresh()->check_number)->toBe('1010101')
+        ->and($transaction->vendor_id)->toBeNull();
 });
 
 it('renders the match vendor page with a deferred vendor transactions panel', function () {
