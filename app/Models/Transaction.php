@@ -258,6 +258,9 @@ class Transaction extends Model
             ->whereNull('expense_id')
             ->whereNull('deposit')
             ->whereNull('check_number')
-            ->whereNull('deleted_at');
+            ->whereNull('deleted_at')
+            ->whereDoesntHave('payments', function ($query): void {
+                $query->withoutGlobalScopes();
+            });
     }
 }
