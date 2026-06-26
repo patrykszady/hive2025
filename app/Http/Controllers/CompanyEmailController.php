@@ -788,6 +788,37 @@ class CompanyEmailController extends Controller
                     ]);
                 continue;
             } elseif ($receipt) {
+                // Some receipt configs (e.g. BS&A / bsaonline.com municipal payments)
+                // do not map to a single fixed vendor — the issuing municipality differs
+                // per message. Detect the vendor from the email body and resolve it to a
+                // known Vendor by name. Clone first so the static receipt cache in
+                // findMatchingReceipt() is never mutated across messages.
+                if (!empty($receipt->options['vendor_from_body_regex'])) {
+                    $receipt = clone $receipt;
+                    $detectedFromBodyVendorId = $this->detectVendorFromBody(
+                        (string) ($message['body'] ?? ''),
+                        $receipt->options['vendor_from_body_regex']
+                    );
+
+                    if (!$detectedFromBodyVendorId) {
+                        Log::channel('nylas')->info('Vendor not resolved from email body — moved to Add folder', [
+                            'message_id' => $messageId,
+                            'receipt_id' => $receipt->id,
+                            'from_email' => $fromEmail,
+                            'subject' => $subject,
+                        ]);
+                        $this->nylasService->moveEmailToFolder($messageId, $folderMap['Add'], $grantId, $companyEmail->id);
+                        continue;
+                    }
+
+                    $receipt->vendor_id = $detectedFromBodyVendorId;
+                    Log::channel('nylas')->info('Vendor resolved from email body', [
+                        'message_id' => $messageId,
+                        'receipt_id' => $receipt->id,
+                        'vendor_id' => $detectedFromBodyVendorId,
+                    ]);
+                }
+
                 $string = $message['body'];
               
                 // Check if the body contains HTML
@@ -908,6 +939,67 @@ class CompanyEmailController extends Controller
                     // Matched via PDF attachment vendor detection — PDF already downloaded
                     $ocr_filename = $attachmentPdfFilename;
                     $ocr_path = $attachmentPdfPath;
+                } elseif (!empty($receipt->options['receipt_url_regex'])) {
+                    // Hosted-receipt link: the email body contains a link to the actual
+                    // receipt (e.g. BS&A "Click here for your receipt." → SendGrid tracking
+                    // URL → Stripe receipt page). Open that URL in a headless browser —
+                    // redirects are followed automatically — and capture the rendered page
+                    // as a PDF for OCR, the same idea as our Floor & Decor URL receipts.
+                    $doc_type = 'pdf';
+                    $ocr_filename .= '.' . $doc_type;
+                    $ocr_path = '_temp_ocr/' . $ocr_filename;
+
+                    if (!Storage::disk('files')->exists('_temp_ocr')) {
+                        Storage::disk('files')->makeDirectory('_temp_ocr');
+                    }
+
+                    $pattern = (string) $receipt->options['receipt_url_regex'];
+                    $receiptUrl = null;
+                    if (@preg_match($pattern, (string) ($message['body'] ?? ''), $urlMatches) === 1) {
+                        $receiptUrl = isset($urlMatches[1]) ? html_entity_decode($urlMatches[1]) : null;
+                    }
+
+                    if (empty($receiptUrl) || !filter_var($receiptUrl, FILTER_VALIDATE_URL)) {
+                        Log::channel('nylas')->warning('Receipt URL not found in body — moved to Error folder', [
+                            'receipt_id' => $receipt->id,
+                            'message_id' => $messageId,
+                            'from_email' => $fromEmail,
+                            'subject' => $subject,
+                            'receipt_url_regex' => $receipt->options['receipt_url_regex'],
+                        ]);
+                        if (!empty($folderMap['Error'])) {
+                            $this->nylasService->moveEmailToFolder($messageId, $folderMap['Error'], $grantId, $companyEmail->id);
+                        }
+                        continue;
+                    }
+
+                    $location = Storage::disk('files')->path($ocr_path);
+
+                    $processingStage = 'render_url_to_pdf';
+                    try {
+                        Browsershot::url($receiptUrl)
+                            ->newHeadless()
+                            ->addChromiumArguments([
+                                'no-sandbox',
+                                'disable-setuid-sandbox',
+                                'disable-dev-shm-usage',
+                                'disable-gpu',
+                                'single-process',
+                            ])
+                            ->format('A4')
+                            ->margins(20, 0, 20, 20)
+                            ->save($location);
+                    } catch (\Throwable $e) {
+                        Log::channel('nylas')->error('Failed to render receipt URL to PDF', ApiErrorFormatter::format($e, [
+                            'receipt_id' => $receipt->id,
+                            'message_id' => $messageId,
+                            'receipt_url' => $receiptUrl,
+                        ]));
+                        if (!empty($folderMap['Error'])) {
+                            $this->nylasService->moveEmailToFolder($messageId, $folderMap['Error'], $grantId, $companyEmail->id);
+                        }
+                        continue;
+                    }
                 } elseif (
                     !isset($receipt->options['receipt_image_regex'])
                     && !isset($receipt->options['pdf_html'])
@@ -4589,6 +4681,59 @@ class CompanyEmailController extends Controller
                 if (str_contains($normalizedVendor, $normalizedBillTo) || str_contains($normalizedBillTo, $normalizedVendor)) {
                     return $vendor->id;
                 }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Resolve the issuing vendor from the email body for receipt configs that
+     * are not tied to a single fixed vendor (e.g. BS&A / bsaonline.com municipal
+     * payment confirmations where the paying municipality differs per message).
+     *
+     * The configured regex captures the vendor's name from the body
+     * (e.g. "Village of Northbrook" after "Sincerely,"); the captured name is
+     * normalized and matched against a known Vendor business_name.
+     *
+     * @return int|null The matched vendor_id, or null when no exact match exists
+     */
+    protected function detectVendorFromBody(string $body, string $regex): ?int
+    {
+        if ($body === '') {
+            return null;
+        }
+
+        if (@preg_match($regex, $body, $matches) !== 1 || empty($matches[1])) {
+            return null;
+        }
+
+        $name = trim(strip_tags(html_entity_decode($matches[1])));
+        if ($name === '') {
+            return null;
+        }
+
+        $normalize = static function (string $value): string {
+            $value = strtolower($value);
+            $value = preg_replace('/\b(inc|llc|corp|co|ltd|company)\b\.?/i', '', $value);
+            $value = str_replace(['.', ',', "'"], '', $value);
+
+            return trim(preg_replace('/\s+/', ' ', $value));
+        };
+
+        $normalizedName = $normalize($name);
+        if ($normalizedName === '') {
+            return null;
+        }
+
+        $vendors = Vendor::withoutGlobalScopes()
+            ->whereNotNull('business_name')
+            ->where('business_name', '!=', '')
+            ->get(['id', 'business_name']);
+
+        foreach ($vendors as $vendor) {
+            if ($normalize((string) $vendor->business_name) === $normalizedName) {
+                return $vendor->id;
             }
         }
 

@@ -441,7 +441,14 @@ class NylasService
         }
 
         if ($withHeaders) {
-            $query['fields'] = 'include_headers';
+            if (array_key_exists('search_query_native', $query)) {
+                Log::channel('nylas')->info('Skipping include_headers with search_query_native query', [
+                    'grant_id' => $grantId,
+                    'search_query_native' => $query['search_query_native'] ?? null,
+                ]);
+            } else {
+                $query['fields'] = 'include_headers';
+            }
         }
 
         $configuredLimit = (int) config('nylas.message_limit', 15);

@@ -54,12 +54,25 @@ class ContentUnderstandingService
           ->post($submitUrl);
 
         if ($submitResponse->status() !== 202) {
-            Log::channel($logChannel)->error('CU: Submit returned unexpected status', [
+            $status = $submitResponse->status();
+            $commonContext = [
                 'file_path' => $filePath,
-                'status'    => $submitResponse->status(),
-                'body'      => substr($submitResponse->body(), 0, 2000),
-            ]);
-            throw new \RuntimeException("ContentUnderstanding: submit returned HTTP {$submitResponse->status()}");
+                'status' => $status,
+                'endpoint' => $this->endpoint,
+                'api_version' => $this->apiVersion,
+                'analyzer_id' => $analyzerId,
+                'body' => substr($submitResponse->body(), 0, 2000),
+            ];
+
+            if (in_array($status, [401, 403], true)) {
+                Log::channel($logChannel)->error('CU: Submit auth/authorization failure', $commonContext + [
+                    'hint' => 'Check AZURE_CU_ENDPOINT/AZURE_CU_API_KEY permissions and restart queue workers after key rotation.',
+                ]);
+            } else {
+                Log::channel($logChannel)->error('CU: Submit returned unexpected status', $commonContext);
+            }
+
+            throw new \RuntimeException("ContentUnderstanding: submit returned HTTP {$status}");
         }
 
         // The operation URL is in the Operation-Location header
