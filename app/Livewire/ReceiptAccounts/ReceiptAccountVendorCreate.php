@@ -47,7 +47,7 @@ class ReceiptAccountVendorCreate extends Component
             'transactions_bulk_matches.*.amount' => [
                 'required_unless:transactions_bulk_matches.*.options.amount_type,ANY',
             ],
-            'transactions_bulk_matches.*.distribution_id' => 'required_unless:transactions_bulk_matches.*.split,true',
+            'transactions_bulk_matches.*.distribution_id' => 'nullable',
             'transactions_bulk_matches.*.split' => 'nullable',
             'transactions_bulk_matches.*.splits.*.amount' => 'nullable',
             'transactions_bulk_matches.*.splits.*.amount_type' => 'nullable',
@@ -308,7 +308,7 @@ class ReceiptAccountVendorCreate extends Component
 
             $bulk_match->vendor_id = $this->vendor->id;
             $bulk_match->amount = $bulk_match_data['amount'];
-            $bulk_match->distribution_id = $bulk_match_data['distribution_id'];
+            $bulk_match->distribution_id = $bulk_match_data['distribution_id'] ?: null;
             $bulk_match->options = array_merge(
                 $bulk_match_data['options'] ?? [],
                 ['splits' => $bulk_match_data['splits'] ?? []]
