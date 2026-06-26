@@ -100,6 +100,25 @@ it('still re-queues transcription for genuinely failed recordings', function () 
     );
 });
 
+it('does not re-queue transcription for unsupported (untranscodable) recordings', function () {
+    $unsupportedCall = makeRecordedCall();
+    CallTranscript::create([
+        'call_log_id' => $unsupportedCall->id,
+        'engine' => 'assemblyai',
+        'status' => CallTranscript::STATUS_UNSUPPORTED,
+        'failure_reason' => 'exception: assemblyai_error: Transcoding failed.',
+    ]);
+
+    Queue::fake();
+
+    Artisan::call('calls:process-recordings', ['--retry-failed' => true, '--queue' => true]);
+
+    Queue::assertNotPushed(
+        TranscribeCallRecording::class,
+        fn (TranscribeCallRecording $job) => $job->callLogId === $unsupportedCall->id,
+    );
+});
+
 it('attaches an idempotent command_id to Telnyx call control commands', function () {
     config()->set('services.telnyx.api_key', 'test-telnyx-key');
 

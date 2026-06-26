@@ -25,6 +25,16 @@ class CallTranscript extends Model
      */
     public const STATUS_EMPTY = 'empty';
 
+    /**
+     * Terminal status for recordings AssemblyAI cannot transcode (e.g. an
+     * unusual/low-bitrate MPEG the API rejects with "Transcoding failed").
+     * Like STATUS_EMPTY, these are NOT retried by
+     * `calls:process-recordings --retry-failed`, because re-uploading the same
+     * unsupported file always fails — previously this looped every 5 minutes,
+     * burning API spend and flooding the logs.
+     */
+    public const STATUS_UNSUPPORTED = 'unsupported';
+
     protected $fillable = [
         'call_log_id',
         'telnyx_recording_id',

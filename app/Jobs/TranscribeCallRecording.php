@@ -70,17 +70,41 @@ class TranscribeCallRecording implements ShouldQueue
 
             $this->runWhisper($callLog, $transcript, $absolutePath);
         } catch (\Throwable $e) {
+            $message = $e->getMessage();
+            $isUnsupportedAudio = $this->isUnsupportedAudioError($message);
+
             Log::channel('telnyx')->error('Transcription exception', [
                 'call_log_id' => $callLog->id,
                 'driver' => $driver,
-                'error' => $e->getMessage(),
+                'error' => $message,
             ]);
             $transcript->update([
-                'status' => CallTranscript::STATUS_FAILED,
-                'failure_reason' => 'exception: ' . substr($e->getMessage(), 0, 200),
+                'status' => $isUnsupportedAudio
+                    ? CallTranscript::STATUS_UNSUPPORTED
+                    : CallTranscript::STATUS_FAILED,
+                'failure_reason' => 'exception: ' . substr($message, 0, 200),
             ]);
+
+            // A file AssemblyAI cannot transcode is a permanent, terminal
+            // failure. Re-throwing would burn the job's retries and the
+            // `--retry-failed` scheduler would re-dispatch it every 5 minutes
+            // forever. Swallow it — STATUS_UNSUPPORTED keeps it out of retries.
+            if ($isUnsupportedAudio) {
+                return;
+            }
+
             throw $e;
         }
+    }
+
+    /**
+     * Whether a transcription error represents audio AssemblyAI can never
+     * transcode (vs. a transient network/API hiccup worth retrying).
+     */
+    protected function isUnsupportedAudioError(string $message): bool
+    {
+        return stripos($message, 'Transcoding failed') !== false
+            || stripos($message, 'may be unsupported') !== false;
     }
 
     /* =========================
@@ -563,9 +587,14 @@ class TranscribeCallRecording implements ShouldQueue
             $register((string) $canonical);
         }
 
-        return array_values(array_unique(array_merge(
-            array_keys($phrases),
-            array_keys($tokens),
+        // Cast every entry to a string. PHP silently coerces numeric-string
+        // array keys to integers, so a purely numeric token (e.g. a caller
+        // name that is actually a phone number) would otherwise be emitted as
+        // a JSON number — which AssemblyAI rejects with
+        // "`keyterms_prompt` list must contain strings".
+        return array_values(array_unique(array_map(
+            'strval',
+            array_merge(array_keys($phrases), array_keys($tokens)),
         )));
     }
 
