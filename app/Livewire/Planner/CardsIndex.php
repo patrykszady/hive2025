@@ -7,6 +7,7 @@ use App\Models\Task;
 use App\Models\TaskDependency;
 use App\Models\User;
 use App\Models\Project;
+use App\Models\ProjectStatus;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Flux;
@@ -41,7 +42,15 @@ class CardsIndex extends Component
     public array $filterProjectIds = [];
     public ?int $filterVendorId = null;
     public array $filterUserIds = [];
-    public array $filterStatusCodes = [];
+
+    /** Default Status filter: only "Active" projects. */
+    public const DEFAULT_STATUS_CODES = [6];
+    public array $filterStatusCodes = self::DEFAULT_STATUS_CODES;
+
+    /** List view time window: 'upcoming' (today + future, default), 'past', or 'all'. */
+    #[Url(as: 'when')]
+    public string $filterDateRange = 'upcoming';
+
     public bool $showMobileFilters = false;
 
     public int $previousDaysLoaded = 30;
@@ -128,12 +137,7 @@ class CardsIndex extends Component
     #[Computed]
     public function statusOptions()
     {
-        return collect([
-            ['code' => 4, 'label' => 'Prep', 'color' => 'amber'],
-            ['code' => 5, 'label' => 'Scheduled', 'color' => 'lime'],
-            ['code' => 6, 'label' => 'Active', 'color' => 'green'],
-            ['code' => 8, 'label' => 'Service Call', 'color' => 'orange'],
-        ]);
+        return collect(ProjectStatus::selectableStatuses());
     }
 
     /**
@@ -144,7 +148,8 @@ class CardsIndex extends Component
         $this->filterProjectIds = [];
         $this->filterVendorId = null;
         $this->filterUserIds = [];
-        $this->filterStatusCodes = [];
+        $this->filterStatusCodes = self::DEFAULT_STATUS_CODES;
+        $this->filterDateRange = 'upcoming';
     }
 
     /**
@@ -153,10 +158,96 @@ class CardsIndex extends Component
     #[Computed]
     public function hasActiveFilters()
     {
+        $statusCodes = $this->filterStatusCodes;
+        sort($statusCodes);
+
         return !empty($this->filterProjectIds)
             || $this->filterVendorId !== null
             || !empty($this->filterUserIds)
-            || !empty($this->filterStatusCodes);
+            || $statusCodes !== self::DEFAULT_STATUS_CODES
+            || $this->filterDateRange !== 'upcoming';
+    }
+
+    /**
+     * Resolve the first and last planner dates for a task.
+     *
+     * Prefers the `options.dates` array (the current way tasks store the days
+     * they appear on) and falls back to the legacy start/end date columns.
+     *
+     * @return array{0: ?string, 1: ?string} [firstDate, lastDate] as Y-m-d strings, or [null, null] when undated.
+     */
+    private function taskPlannerDates(Task $task): array
+    {
+        $dates = collect($task->options->dates ?? [])
+            ->filter()
+            ->map(fn ($date): string => (string) $date)
+            ->sort()
+            ->values();
+
+        if ($dates->isNotEmpty()) {
+            return [$dates->first(), $dates->last()];
+        }
+
+        $start = $task->start_date?->format('Y-m-d');
+        $end = $task->end_date?->format('Y-m-d');
+
+        if ($start || $end) {
+            return [$start ?? $end, $end ?? $start];
+        }
+
+        return [null, null];
+    }
+
+    /**
+     * Flat list of tasks (across the filtered projects) for the "list" view.
+     *
+     * Reuses the same filtering as the other planner views via `activeProjects`,
+     * then flattens every project's tasks into a single sortable collection with
+     * pre-resolved dates and assignees (assignees are batch-loaded to avoid N+1).
+     *
+     * @return \Illuminate\Support\Collection<int, object>
+     */
+    #[Computed]
+    public function taskList()
+    {
+        $tasks = $this->activeProjects
+            ->flatMap(fn (Project $project) => $project->tasks->map(fn (Task $task) => [$project, $task]))
+            ->reject(fn (array $pair) => $pair[1]->trashed());
+
+        $userMap = User::whereIn('id', $tasks->flatMap(fn (array $pair) => $pair[1]->user_ids ?? [])->unique()->values())
+            ->get()
+            ->keyBy('id');
+
+        $today = browser_today()->format('Y-m-d');
+
+        return $tasks
+            ->map(function (array $pair) use ($userMap): object {
+                [$project, $task] = $pair;
+                [$firstDate, $lastDate] = $this->taskPlannerDates($task);
+
+                return (object) [
+                    'task' => $task,
+                    'project' => $project,
+                    'first_date' => $firstDate,
+                    'last_date' => $lastDate,
+                    'users' => collect($task->user_ids ?? [])
+                        ->map(fn ($id) => $userMap->get((int) $id))
+                        ->filter()
+                        ->values(),
+                ];
+            })
+            ->filter(function (object $row) use ($today): bool {
+                return match ($this->filterDateRange) {
+                    // Tasks that fully ended before today (undated tasks are excluded).
+                    'past' => $row->last_date !== null && $row->last_date < $today,
+                    // Today + future, plus undated tasks that still need scheduling.
+                    'upcoming' => $row->last_date === null || $row->last_date >= $today,
+                    default => true,
+                };
+            })
+            ->sortBy(fn (object $row): string => ($row->first_date ?? '9999-12-31')
+                .'-'.str_pad((string) $row->task->id, 10, '0', STR_PAD_LEFT))
+            ->values();
     }
 
     /**

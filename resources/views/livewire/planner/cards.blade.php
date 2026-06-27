@@ -4,9 +4,12 @@
 
 <div class="flex flex-col h-full min-h-0">
     <div class="flex-1 flex flex-col min-h-0 overflow-hidden bg-zinc-100 dark:bg-zinc-800">
-        {{-- Filter Bar - Desktop (horizontal) --}}
-        <div class="hidden shrink-0 px-4 py-3 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-700">
-        <div class="flex items-center gap-3">
+        {{-- Top toolbar: filters (left) + view controls (right) --}}
+        <div class="shrink-0 flex items-center gap-3 px-4 py-2.5 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-700">
+        {{-- Desktop filters (horizontal) --}}
+        <div class="hidden lg:flex items-center gap-3 flex-1 min-w-0 overflow-x-auto">
+            {{-- Filters (hidden in list view — they live inside the table column headers) --}}
+            @if($viewMode !== 'list')
             {{-- Project Filter (Multi-select) --}}
             <flux:select
                 wire:model.live.debounce.400ms="filterProjectIds"
@@ -88,6 +91,7 @@
                     </flux:select.option>
                 @endforeach
             </flux:select>
+            @endif
 
             {{-- Clear Filters Button --}}
             @if($this->hasActiveFilters)
@@ -101,17 +105,18 @@
                 </flux:button>
             @endif
         </div>
-    </div>
 
-    {{-- Floating Filter Button --}}
-    <div class="fixed top-3 right-3 z-60 flex items-center gap-1">
+        {{-- Spacer pushes the view controls to the right edge on mobile --}}
+        <div class="flex-1 lg:hidden"></div>
+
+        {{-- View controls --}}
+        <div class="flex items-center gap-1 shrink-0">
         {{-- View Toggle --}}
-        <div class="flex bg-white/60 dark:bg-zinc-900/50 backdrop-blur-[2px] border border-zinc-200/60 dark:border-zinc-700/60 shadow-sm rounded-lg overflow-hidden">
+        <div class="flex items-center gap-1 p-1 bg-white/60 dark:bg-zinc-900/50 backdrop-blur-[2px] border border-zinc-200/60 dark:border-zinc-700/60 shadow-sm rounded-lg">
             <flux:button
                 wire:click="$set('viewMode', 'cards')"
                 variant="subtle"
                 square
-                inset
                 icon="view-columns"
                 :class="$viewMode === 'cards' ? 'bg-zinc-200/80 dark:bg-zinc-700/80' : ''"
                 aria-label="Card view"
@@ -120,16 +125,22 @@
                 wire:click="$set('viewMode', 'table')"
                 variant="subtle"
                 square
-                inset
                 icon="table-cells"
                 :class="$viewMode === 'table' ? 'bg-zinc-200/80 dark:bg-zinc-700/80' : ''"
                 aria-label="Table view"
             />
             <flux:button
+                wire:click="$set('viewMode', 'list')"
+                variant="subtle"
+                square
+                icon="list-bullet"
+                :class="$viewMode === 'list' ? 'bg-zinc-200/80 dark:bg-zinc-700/80' : ''"
+                aria-label="List view"
+            />
+            <flux:button
                 wire:click="$set('viewMode', 'gantt')"
                 variant="subtle"
                 square
-                inset
                 icon="chart-bar"
                 :class="$viewMode === 'gantt' ? 'bg-zinc-200/80 dark:bg-zinc-700/80' : ''"
                 aria-label="Gantt view"
@@ -159,15 +170,31 @@
             square
             inset="right"
             icon="funnel"
-            class="bg-white/60 dark:bg-zinc-900/50 backdrop-blur-[2px] border border-zinc-200/60 dark:border-zinc-700/60 shadow-sm rounded-lg"
+            class="lg:hidden bg-white/60 dark:bg-zinc-900/50 backdrop-blur-[2px] border border-zinc-200/60 dark:border-zinc-700/60 shadow-sm rounded-lg"
             aria-label="Filters"
         />
+        </div>
     </div>
 
     {{-- Filters Modal --}}
     <flux:modal wire:model="showMobileFilters" name="mobile-filters" class="max-w-sm">
         <div class="space-y-6">
             <flux:heading size="lg">Filters</flux:heading>
+
+            {{-- Time Window Filter (list view only) --}}
+            @if($viewMode === 'list')
+                <flux:field>
+                    <flux:label>Time</flux:label>
+                    <flux:select
+                        wire:model.live="filterDateRange"
+                        variant="listbox"
+                    >
+                        <flux:select.option value="upcoming">Today &amp; upcoming</flux:select.option>
+                        <flux:select.option value="past">Past</flux:select.option>
+                        <flux:select.option value="all">All dates</flux:select.option>
+                    </flux:select>
+                </flux:field>
+            @endif
 
             {{-- Project Filter --}}
             <flux:field>
@@ -745,6 +772,246 @@
             </tbody>
         </table>
     </div>
+    </div>
+    @endif
+
+    {{-- List View (flat task table, similar to Microsoft Planner "My Tasks") --}}
+    @if ($viewMode === 'list')
+    @php
+        $listToday = browser_today()->format('Y-m-d');
+        $vline = 'border-r border-zinc-200 dark:border-zinc-700';
+    @endphp
+    <div class="flex-1 min-h-0 overflow-auto bg-white dark:bg-zinc-900">
+        <flux:table>
+            <flux:table.columns>
+                <flux:table.column class="{{ $vline }} align-top">Task</flux:table.column>
+
+                <flux:table.column class="{{ $vline }} align-top min-w-56">
+                    <div class="space-y-1.5">
+                        <span>Project</span>
+                        <flux:select
+                            wire:model.live.debounce.400ms="filterProjectIds"
+                            placeholder="All Projects"
+                            variant="listbox"
+                            searchable
+                            multiple
+                            size="sm"
+                            class="w-full font-normal"
+                        >
+                            @foreach($projects as $project)
+                                <flux:select.option value="{{ $project->id }}">
+                                    <div class="flex items-center gap-2 w-full">
+                                        <span class="flex-1 min-w-0 truncate">{{ $project->short_address }}</span>
+                                        @if($project->latestStatus)
+                                            <flux:badge size="sm" :color="$project->latestStatus->badge_color" inset="top bottom" class="shrink-0">
+                                                {{ $project->latestStatus->title }}
+                                            </flux:badge>
+                                        @endif
+                                    </div>
+                                </flux:select.option>
+                            @endforeach
+                        </flux:select>
+                    </div>
+                </flux:table.column>
+
+                <flux:table.column class="{{ $vline }} align-top min-w-44">
+                    <div class="space-y-1.5">
+                        <span>Status</span>
+                        <flux:select
+                            wire:model.live.debounce.400ms="filterStatusCodes"
+                            placeholder="All Statuses"
+                            variant="listbox"
+                            multiple
+                            size="sm"
+                            class="w-full font-normal"
+                        >
+                            @foreach($this->statusOptions as $status)
+                                <flux:select.option value="{{ $status['code'] }}">
+                                    <flux:badge size="sm" inset="top bottom" :color="$status['color']">
+                                        {{ $status['label'] }}
+                                    </flux:badge>
+                                </flux:select.option>
+                            @endforeach
+                        </flux:select>
+                    </div>
+                </flux:table.column>
+
+                <flux:table.column class="{{ $vline }} align-top min-w-44">
+                    <div class="space-y-1.5">
+                        <span>Due</span>
+                        <flux:select
+                            wire:model.live="filterDateRange"
+                            variant="listbox"
+                            size="sm"
+                            class="w-full font-normal"
+                        >
+                            <flux:select.option value="upcoming">Today &amp; upcoming</flux:select.option>
+                            <flux:select.option value="past">Past</flux:select.option>
+                            <flux:select.option value="all">All dates</flux:select.option>
+                        </flux:select>
+                    </div>
+                </flux:table.column>
+
+                <flux:table.column class="{{ $vline }} align-top">Type</flux:table.column>
+
+                <flux:table.column class="{{ $vline }} align-top min-w-52">
+                    <div class="space-y-1.5">
+                        <span>Assigned</span>
+                        <flux:select
+                            wire:model.live.debounce.400ms="filterUserIds"
+                            placeholder="All Team Members"
+                            variant="listbox"
+                            searchable
+                            multiple
+                            clearable
+                            size="sm"
+                            class="w-full font-normal"
+                        >
+                            @foreach($employees as $employee)
+                                <flux:select.option value="{{ $employee->id }}">
+                                    <div class="flex items-center gap-2 whitespace-nowrap">
+                                        <flux:avatar size="xs" name="{{ $employee->full_name }}" color="auto" color:seed="{{ $employee->id }}" />
+                                        {{ $employee->full_name }}
+                                    </div>
+                                </flux:select.option>
+                            @endforeach
+                        </flux:select>
+                    </div>
+                </flux:table.column>
+
+                <flux:table.column class="{{ $vline }} align-top min-w-52">
+                    <div class="space-y-1.5">
+                        <span>Vendor</span>
+                        <flux:select
+                            wire:model.live.debounce.400ms="filterVendorId"
+                            placeholder="All Vendors"
+                            variant="listbox"
+                            searchable
+                            clearable
+                            size="sm"
+                            class="w-full font-normal"
+                        >
+                            @foreach($vendors as $vendor)
+                                <flux:select.option value="{{ $vendor->id }}">
+                                    <div class="flex items-center gap-2 whitespace-nowrap">
+                                        <flux:avatar size="xs" name="{{ $vendor->name }}" color="auto" color:seed="{{ $vendor->id }}" />
+                                        {{ $vendor->name }}
+                                    </div>
+                                </flux:select.option>
+                            @endforeach
+                        </flux:select>
+                    </div>
+                </flux:table.column>
+
+                <flux:table.column class="align-top">Task Status</flux:table.column>
+            </flux:table.columns>
+            <flux:table.rows>
+                @forelse ($this->taskList as $row)
+                    @php
+                        $task = $row->task;
+                        $isOverdue = $row->last_date && $row->last_date < $listToday && (int) ($task->progress ?? 0) < 100;
+                    @endphp
+                    <flux:table.row
+                        wire:key="list-task-{{ $task->id }}"
+                        class="cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+                        wire:click="$dispatchTo('tasks.task-create', 'editTask', { task: {{ $task->id }} })"
+                    >
+                        {{-- Task name --}}
+                        <flux:table.cell variant="strong" class="whitespace-normal {{ $vline }}">
+                            <span class="font-medium text-zinc-800 dark:text-zinc-200">{{ $task->title }}</span>
+                        </flux:table.cell>
+
+                        {{-- Project (address) --}}
+                        <flux:table.cell class="whitespace-normal {{ $vline }}">
+                            <span class="truncate text-zinc-700 dark:text-zinc-300">{{ $row->project->short_address }}</span>
+                        </flux:table.cell>
+
+                        {{-- Status (project status) --}}
+                        <flux:table.cell class="{{ $vline }}">
+                            @if($row->project->latestStatus)
+                                <flux:badge size="sm" :color="$row->project->latestStatus->badge_color" inset="top bottom">
+                                    {{ $row->project->latestStatus->title }}
+                                </flux:badge>
+                            @else
+                                <span class="text-sm text-zinc-400">&mdash;</span>
+                            @endif
+                        </flux:table.cell>
+
+                        {{-- Due date --}}
+                        <flux:table.cell class="{{ $vline }}">
+                            @if ($row->first_date)
+                                @php
+                                    $start = \Carbon\Carbon::parse($row->first_date);
+                                    $end = $row->last_date ? \Carbon\Carbon::parse($row->last_date) : $start;
+                                @endphp
+                                <span class="tabular-nums {{ $isOverdue ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-zinc-600 dark:text-zinc-400' }}">
+                                    {{ $start->format('M j, Y') }}@if (! $start->isSameDay($end)) <span class="text-zinc-400">&ndash;</span> {{ $end->format('M j, Y') }}@endif
+                                </span>
+                            @else
+                                <flux:badge size="sm" color="zinc" inset="top bottom">No date</flux:badge>
+                            @endif
+                        </flux:table.cell>
+
+                        {{-- Type --}}
+                        <flux:table.cell class="{{ $vline }}">
+                            <flux:badge size="sm" :color="$task->type_ui['flux'] ?? 'zinc'" inset="top bottom">
+                                {{ $task->type }}
+                            </flux:badge>
+                        </flux:table.cell>
+
+                        {{-- Assigned --}}
+                        <flux:table.cell class="{{ $vline }}">
+                            @if ($row->users->isNotEmpty())
+                                <flux:avatar.group>
+                                    @foreach ($row->users as $user)
+                                        <flux:avatar
+                                            size="xs"
+                                            name="{{ $user->full_name }}"
+                                            color="auto"
+                                            color:seed="{{ $user->id }}"
+                                            tooltip
+                                        />
+                                    @endforeach
+                                </flux:avatar.group>
+                            @else
+                                <span class="text-sm text-zinc-400">&mdash;</span>
+                            @endif
+                        </flux:table.cell>
+
+                        {{-- Vendor --}}
+                        <flux:table.cell class="whitespace-normal {{ $vline }}">
+                            @if ($task->vendor)
+                                <div class="flex items-center gap-2">
+                                    <flux:avatar size="xs" name="{{ $task->vendor->name }}" color="auto" color:seed="{{ $task->vendor->id }}" />
+                                    <span class="truncate text-sm text-zinc-700 dark:text-zinc-300">{{ $task->vendor->name }}</span>
+                                </div>
+                            @else
+                                <span class="text-sm text-zinc-400">&mdash;</span>
+                            @endif
+                        </flux:table.cell>
+
+                        {{-- Task status (vendor status) --}}
+                        <flux:table.cell>
+                            @if ($task->vendor_status)
+                                <flux:badge size="sm" :color="$task->vendor_status_ui['flux'] ?? 'zinc'" :icon="$task->vendor_status_ui['icon'] ?? null" inset="top bottom">
+                                    {{ $task->vendor_status_ui['label'] ?? $task->vendor_status }}
+                                </flux:badge>
+                            @elseif ((int) ($task->progress ?? 0) >= 100)
+                                <flux:badge size="sm" color="green" icon="check-circle" inset="top bottom">Completed</flux:badge>
+                            @else
+                                <flux:badge size="sm" color="zinc" inset="top bottom">Not started</flux:badge>
+                            @endif
+                        </flux:table.cell>
+                    </flux:table.row>
+                @empty
+                    <flux:table.row>
+                        <flux:table.cell colspan="8" class="text-center text-sm text-zinc-500 dark:text-zinc-400 py-8">
+                            No tasks found
+                        </flux:table.cell>
+                    </flux:table.row>
+                @endforelse
+            </flux:table.rows>
+        </flux:table>
     </div>
     @endif
 
