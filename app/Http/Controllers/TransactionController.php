@@ -892,6 +892,67 @@ class TransactionController extends Controller
             ->delete();
     }
 
+    /**
+     * Build a map of distinctive vendor-name tokens to the vendor ids that use them.
+     * Generic corporate words and short tokens are excluded so only meaningful,
+     * identifying tokens (e.g. "northbrook", "menards") are considered.
+     *
+     * @param  iterable<\App\Models\Vendor>  $vendors
+     * @return array<string, array<int, int>>
+     */
+    protected function buildVendorTokenOwners(iterable $vendors): array
+    {
+        $generic = [
+            'village', 'company', 'limited', 'holding', 'holdings', 'services', 'service',
+            'medical', 'dental', 'capital', 'financial', 'property', 'properties', 'management',
+            'solutions', 'systems', 'national', 'international', 'american', 'general', 'center',
+            'centre', 'supply', 'rental', 'rentals', 'market', 'markets', 'store', 'stores',
+        ];
+
+        $owners = [];
+        foreach ($vendors as $vendor) {
+            $name = preg_replace('/[^\p{L}\p{N}\s]+/u', ' ', mb_strtolower((string) $vendor->business_name, 'UTF-8')) ?? '';
+            foreach (array_filter(preg_split('/\s+/', trim($name)) ?: []) as $token) {
+                if (mb_strlen($token) < 6 || in_array($token, $generic, true)) {
+                    continue;
+                }
+                $owners[$token][(int) $vendor->id] = (int) $vendor->id;
+            }
+        }
+
+        return $owners;
+    }
+
+    /**
+     * Determine whether a transaction description distinctly names a vendor OTHER than the
+     * one matched from plaid_merchant_name. Returns true only when the description shares a
+     * distinctive token with a different vendor and shares none with the matched vendor.
+     *
+     * @param  array<string, array<int, int>>  $vendorTokenOwners
+     */
+    protected function descriptionNamesDifferentVendor(string $description, int $matchedVendorId, array $vendorTokenOwners): bool
+    {
+        if ($description === '' || $vendorTokenOwners === []) {
+            return false;
+        }
+
+        $normalized = preg_replace('/[^\p{L}\p{N}\s]+/u', ' ', mb_strtolower($description, 'UTF-8')) ?? '';
+        $hasDifferentVendor = false;
+
+        foreach (array_filter(preg_split('/\s+/', trim($normalized)) ?: []) as $token) {
+            if (mb_strlen($token) < 6 || !isset($vendorTokenOwners[$token])) {
+                continue;
+            }
+            if (isset($vendorTokenOwners[$token][$matchedVendorId])) {
+                // Description shares a distinctive token with the matched vendor -> consistent.
+                return false;
+            }
+            $hasDifferentVendor = true;
+        }
+
+        return $hasDifferentVendor;
+    }
+
     public function add_vendor_to_transactions()
     {
         // Query BankAccount once and load the related Bank
@@ -906,6 +967,12 @@ class TransactionController extends Controller
         $bankInsIds = $bankAccounts->pluck('bank.plaid_ins_id')->unique()->toArray();
 
         $vendors = Vendor::withoutGlobalScopes()->where('business_type', 'Retail')->get();
+
+        // Map of distinctive vendor-name tokens to the vendor ids that use them. Used to
+        // detect when a transaction's description clearly names a DIFFERENT vendor than the
+        // one fuzzy-matched from plaid_merchant_name (Plaid occasionally reports a clean
+        // merchant_name that contradicts the raw description).
+        $vendorTokenOwners = $this->buildVendorTokenOwners($vendors);
 
         // PART 1: Process transactions WITHOUT vendors
         // First try matching on plaid_merchant_description (more specific), then fall back to plaid_merchant_name
@@ -944,6 +1011,7 @@ class TransactionController extends Controller
             }
 
             // First try matching the more specific plaid_merchant_description
+            $matchedViaName = false;
             if (!empty($transaction->plaid_merchant_description)) {
                 $vendor_match = app(\App\Http\Controllers\CompanyEmailController::class)->fuzzyMatchVendor($transaction->plaid_merchant_description, $vendors);
             }
@@ -951,6 +1019,7 @@ class TransactionController extends Controller
             // Fall back to plaid_merchant_name if no match found
             if (!$vendor_match && !empty($transaction->plaid_merchant_name)) {
                 $vendor_match = app(\App\Http\Controllers\CompanyEmailController::class)->fuzzyMatchVendor($transaction->plaid_merchant_name, $vendors);
+                $matchedViaName = (bool) $vendor_match;
             }
 
             if ($vendor_match) {
@@ -964,7 +1033,17 @@ class TransactionController extends Controller
                 $namesOverlap = ($vName !== '' && $pName !== '' && (stripos($pName, $vName) !== false || stripos($vName, $pName) !== false))
                     || ($vName !== '' && $pDesc !== '' && stripos($pDesc, $vName) !== false);
 
-                if ($namesOverlap) {
+                // Conflict guard: when the vendor was matched ONLY via plaid_merchant_name,
+                // refuse the assignment if the description distinctly names a different
+                // vendor. Plaid sometimes reports a contradictory merchant_name (e.g.
+                // name "GitHub" on a transaction whose description is "NORTHBROOK VLG MISC");
+                // without this, the ANY-amount bulk match would later sweep the transaction
+                // into the wrong vendor's expense. Biases toward leaving it for manual review
+                // rather than producing a cross-vendor match.
+                $descNamesDifferentVendor = $matchedViaName
+                    && $this->descriptionNamesDifferentVendor($pDesc, (int) $vendor_match->id, $vendorTokenOwners);
+
+                if ($namesOverlap && !$descNamesDifferentVendor) {
                     $transaction->vendor_id = $vendor_match->id;
                     $transaction->save();
                 }
