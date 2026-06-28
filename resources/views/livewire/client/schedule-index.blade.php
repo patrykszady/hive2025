@@ -52,7 +52,7 @@
             @guest
                 <div class="mt-6 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20 p-5 text-center">
                     <div class="mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-indigo-100 dark:bg-indigo-900/40">
-                        <img src="{{ asset('favicon.svg') }}" alt="Hive" class="size-7" />
+                        <x-hive-logo class="size-7" />
                     </div>
                     <flux:heading size="sm" class="text-indigo-900 dark:text-indigo-100">Join your Project Hive</flux:heading>
                     <flux:text class="mt-1 text-sm text-indigo-700 dark:text-indigo-300">Register a Hive account to get schedule updates, notifications, and project details.</flux:text>

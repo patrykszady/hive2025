@@ -10,7 +10,7 @@
             <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="flex justify-between items-center h-16">
                     <div class="flex items-center gap-3">
-                        <img src="{{ asset('favicon.svg') }}" alt="Logo" class="size-8" />
+                        <x-hive-logo class="size-8" />
                         <flux:heading size="lg">My Projects</flux:heading>
                     </div>
                     
@@ -39,7 +39,7 @@
             <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
                 <div class="text-center text-sm text-zinc-400">
                     <a href="{{ url('/') }}" class="inline-flex items-center gap-1.5 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">
-                        <img src="{{ asset('favicon.svg') }}" alt="Hive" class="size-4" />
+                        <x-hive-logo class="size-4" />
                         <span>Powered by Hive Contractors</span>
                     </a>
                 </div>

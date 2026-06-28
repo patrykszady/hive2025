@@ -18,17 +18,18 @@
                     $isVendorRoute = Route::is(['vendor_registration']);
                     $isVendorSelection = Route::is(['account_selection']);
                     $href = ($isVendorRoute || $isVendorSelection) ? null : route('dashboard');
-                    $logo = asset('favicon.svg');
                     $name = $isVendorRoute || $isVendorSelection || !auth()->user()?->vendor
                         ? config('app.name')
                         : auth()->user()->vendor->shortName;
                 @endphp
                 <flux:sidebar.brand
                     href="{{ $href }}"
-                    logo="{{ $logo }}"
-                    logo:dark="{{ $logo }}"
                     :name="$name"
-                />
+                >
+                    <x-slot name="logo" class="!bg-transparent">
+                        <x-hive-logo class="size-6" />
+                    </x-slot>
+                </flux:sidebar.brand>
                 <flux:sidebar.collapse class="in-data-flux-sidebar-on-desktop:not-in-data-flux-sidebar-collapsed-desktop:-mr-2" />
             </flux:sidebar.header>
             @endpersist

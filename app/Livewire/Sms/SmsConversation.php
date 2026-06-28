@@ -314,6 +314,26 @@ class SmsConversation extends Component
     }
 
     /**
+     * Whether a message is substantial enough to attempt task extraction from.
+     * Hides the "Create Task" action for automated schedule blasts and for very
+     * short messages (1-3 words) that never contain a schedulable task.
+     */
+    public function messageAllowsTaskCreation(SmsMessage $message): bool
+    {
+        $text = trim((string) ($message->translated_display_text ?? $message->display_text));
+
+        if ($text === '') {
+            return false;
+        }
+
+        if (Str::contains($text, 'View Schedule:') || preg_match('#/s/[A-Za-z0-9]+#', $text)) {
+            return false;
+        }
+
+        return str_word_count($text) > 3;
+    }
+
+    /**
      * Use AI to extract a schedulable Hive task from a single message, then open
      * the create-task modal pre-filled for review. Runs only on explicit user
      * action (the per-message 3-dot menu) — never automatically.

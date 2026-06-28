@@ -437,4 +437,19 @@ it('anchors the AI sent date on the vendor timezone, not UTC', function (): void
         ->and($capturedSentAt->toDateString())->toBe('2026-06-26');
 });
 
+it('hides the create-task action for schedule blasts and short messages', function (string $text, bool $allowed): void {
+    $message = new SmsMessage(['text' => $text]);
+
+    expect((new SmsConversation)->messageAllowsTaskCreation($message))->toBe($allowed);
+})->with([
+    'schedule blast' => ["Hi Carri, Debra & Alan,\nUpcoming tasks:\n\nNext up Tue 6/30:\n- Demo @ 8AM\n\nView Schedule: https://hive.contractors/s/20b1bbbb8c56cba4", false],
+    'schedule link only' => ['Check it out https://hive.contractors/s/20b1bbbb8c56cba4', false],
+    'one word' => ['Thanks', false],
+    'two words' => ['Sounds good', false],
+    'three words' => ['See you soon', false],
+    'empty' => ['', false],
+    'four words' => ['Can we meet tomorrow', true],
+    'real task message' => ['Would Tuesday work for the tile repair in hall bath at 7am?', true],
+]);
+
 

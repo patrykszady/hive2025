@@ -13,6 +13,8 @@
         
         <flux:toast />
 
+        @stack('scripts')
+
         @fluxScripts
     </body>
 </html>

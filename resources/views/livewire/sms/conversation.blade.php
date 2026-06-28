@@ -624,9 +624,11 @@
                             <flux:dropdown position="bottom" align="{{ $msg->isOutbound() ? 'start' : 'end' }}">
                                 <flux:button variant="ghost" size="xs" square icon="ellipsis-vertical" aria-label="Message actions" />
                                 <flux:menu>
-                                    <flux:menu.item icon="calendar-date-range" wire:click="createTaskFromMessage({{ $msg->id }})">
-                                        Create Task
-                                    </flux:menu.item>
+                                    @if ($this->messageAllowsTaskCreation($msg))
+                                        <flux:menu.item icon="calendar-date-range" wire:click="createTaskFromMessage({{ $msg->id }})">
+                                            Create Task
+                                        </flux:menu.item>
+                                    @endif
                                     <flux:menu.item icon="arrow-right-circle" wire:click="forwardSingleMessage({{ $msg->id }})">
                                         Forward
                                     </flux:menu.item>

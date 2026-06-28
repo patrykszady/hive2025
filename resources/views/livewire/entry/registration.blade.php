@@ -5,7 +5,7 @@
             @persist('auth-logo')
             <div class="flex justify-center opacity-90">
                 <a href="{{ route('welcome') }}" wire:navigate class="group">
-                    <img class="w-auto h-24 mx-auto" src="{{ asset('favicon.svg') }}" alt="{{ config('app.name') }}">
+                    <x-hive-logo class="h-24 w-24 mx-auto" />
                 </a>
             </div>
             @endpersist

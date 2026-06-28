@@ -168,6 +168,46 @@ Route::middleware('guest')->group(function () {
     Route::get('registration', Registration::class)->name('registration');
 });
 
+// Public marketing feature pages (no auth required)
+Route::prefix('welcome')->name('welcome.')->group(function () {
+    Route::view('finances', 'welcome.finances')->name('finances');
+    Route::view('estimates', 'welcome.estimates')->name('estimates');
+    Route::view('clients', 'welcome.clients')->name('clients');
+    Route::view('vendors', 'welcome.vendors')->name('vendors');
+    Route::view('planning', 'welcome.planning')->name('planning');
+    Route::view('team', 'welcome.team')->name('team');
+    Route::view('communication', 'welcome.communication')->name('communication');
+    Route::view('automation', 'welcome.automation')->name('automation');
+    Route::view('homeowners', 'welcome.homeowners')->name('homeowners');
+
+    Route::prefix('homeowners')->name('homeowners.')->group(function () {
+        Route::view('status', 'welcome.homeowners.status')->name('status');
+        Route::view('schedule', 'welcome.homeowners.schedule')->name('schedule');
+        Route::view('messaging', 'welcome.homeowners.messaging')->name('messaging');
+        Route::view('photos', 'welcome.homeowners.photos')->name('photos');
+        Route::view('documents', 'welcome.homeowners.documents')->name('documents');
+        Route::view('payments', 'welcome.homeowners.payments')->name('payments');
+        Route::view('selections', 'welcome.homeowners.selections')->name('selections');
+        Route::view('notifications', 'welcome.homeowners.notifications')->name('notifications');
+        Route::view('access', 'welcome.homeowners.access')->name('access');
+    });
+
+    Route::get('{area}/{card}', function (string $area, string $card) {
+        $areaConfig = config("marketing.areas.$area");
+        abort_unless($areaConfig && isset($areaConfig['cards'][$card]), 404);
+
+        return view('welcome.feature', [
+            'areaKey' => $area,
+            'cardKey' => $card,
+            'area' => $areaConfig,
+            'card' => $areaConfig['cards'][$card],
+        ]);
+    })->whereIn('area', array_keys(config('marketing.areas')))->name('feature');
+});
+
+// Standalone FAQ page
+Route::view('welcome/faq', 'welcome.faq')->name('welcome.faq');
+
 // Legal pages (public, no auth required)
 Route::prefix('welcome/legal')->name('legal.')->group(function () {
     Route::view('privacy', 'legal.privacy-policy')->name('privacy');

@@ -22,7 +22,7 @@
         <div class="w-96 max-w-96 space-y-6 p-4">
             <div class="flex justify-center opacity-90">
                 <a href="{{ route('welcome') }}" class="group">
-                    <img class="w-auto h-24 mx-auto" src="{{ asset('favicon.svg') }}" alt="{{ config('app.name') }}">
+                    <x-hive-logo class="h-24 w-24 mx-auto" />
                 </a>
             </div>
 
